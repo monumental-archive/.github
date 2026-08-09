@@ -30,4 +30,7 @@ shellcheck = "0.11.0"
 description = "Lint GitHub Actions workflows (actionlint)"
 # {{cwd}}: global-layer tasks otherwise run from the config root (~ locally)
 dir = "{{cwd}}"
+# actionlint calls shellcheck with --norc, so rc files are ignored; the env
+# var is the only way to raise shellcheck to max (all optional checks on).
+env = { SHELLCHECK_OPTS = "--enable=all" }
 run = "actionlint -color"
