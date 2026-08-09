@@ -218,6 +218,58 @@ output is signed, and the evidence bundle — one checksum filename, one SBOM
 format, Sigstore bundles — attached to the release in the shape Scorecard's
 Signed-Releases check recognises.
 
+### Images build on native hardware
+
+Every architecture is built on a runner of that architecture. No QEMU, and
+therefore no single `platforms: linux/amd64,linux/arm64` build: emulation
+tests the image on the wrong machine, and an image that passes under
+emulation has not been shown to work where it will run.
+
+**Build and push are separate steps**, for a reason that is easy to miss:
+a combined build-and-push has no moment at which a testable image exists
+un-published. The image is built and loaded, proved to boot and to do the
+one thing it exists to do, and only then pushed. The manifest list is
+assembled from the per-architecture images afterwards, and the published
+bytes are pulled back **by digest** and proved again before anything is
+signed — a signature must assert something demonstrated of the artifact a
+stranger will pull, never of a local twin.
+
+Both rules were arrived at independently in three repositories before
+being promoted here.
+
+### Scanning never blocks a publish, and never writes to nowhere
+
+The CVE gate lives on pull requests, where it blocks. The scan in the
+publish path is **report-only**, deliberately: a publish — above all a
+scheduled remediation rebuild whose entire purpose is refreshing a layer
+that nothing can pin — must not die because a scanner had a bad day.
+Blocking a rebuild leaves the older, at-least-as-vulnerable image live,
+so it preserves *more* exposure, not less.
+
+That split is what makes the rule safe. Content changes are gated, because
+they introduce something new; remediation is never gated, because it only
+removes. The residual case — a rebuild introducing a regression the live
+image lacked — is real, and the answer to it is still not to block, since
+that trades a rare regression for a guaranteed weekly failure to
+remediate.
+
+**But a report-only scan must go somewhere a human or a machine will see
+it.** A scan whose output lands in the log of a scheduled job that
+succeeded is write-only: green cron runs are invisible, and a check nobody
+reads is worse than no check because it manufactures the impression of
+coverage. So report-only carries an obligation:
+
+- findings into the job summary, and SARIF into code scanning, so a new
+  critical raises an alert on its own without touching the publish
+- and, properly, **attested against the digest** — `actions/attest` takes
+  an arbitrary `predicate-type`, so the vulnerability state becomes part
+  of the evidence bundle travelling with the artifact rather than
+  something only the maintainer can look up. That is also what OSPS
+  VM-04.02 asks for, in OpenVEX.
+
+A scan that does neither comes out. Half a control is not half as good;
+it is worse than none.
+
 ### No runner-hardening agent
 
 Earlier drafts of this document and of issue #28 prescribed harden-runner
