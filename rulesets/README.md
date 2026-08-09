@@ -44,10 +44,11 @@ together and are worth four points.
 
 ## What is deliberately absent
 
-**`required_status_checks`.** Contexts are per-repository — edtf's include
-`pgrx extension tests (Postgres 14)`, which exists nowhere else — so an
-org-wide ruleset cannot name them. Status checks stay in a repo-level ruleset
-alongside these.
+**`required_status_checks` requires `ci / ci`** — the shared gate's one
+standard check name (caller job `ci` calling the reusable workflow's job
+`ci`). Repo-specific checks stay repo-level, but the org gate is nameable
+org-wide precisely because every repo funnels through one summary job.
+Strict policy: the branch must be current before merging.
 
 **`bypass_actors` is empty, deliberately.** Scorecard's
 `branchProtectionAppliesToAdmins` probe checks exactly this, and an
