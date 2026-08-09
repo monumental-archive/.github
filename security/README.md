@@ -15,11 +15,15 @@ Then (using the returned `id`) make it the default for new repos and attach
 it to everything that already exists:
 
 ```bash
-gh api -X PUT "orgs/monumental-archive/code-security/configurations/<id>/defaults" -f default_for_new_repos=all
+gh api -X PUT \
+  "orgs/monumental-archive/code-security/configurations/<id>/defaults" \
+  -f default_for_new_repos=all
 ```
 
 ```bash
-gh api -X POST "orgs/monumental-archive/code-security/configurations/<id>/attach" -f scope=all
+gh api -X POST \
+  "orgs/monumental-archive/code-security/configurations/<id>/attach" \
+  -f scope=all
 ```
 
 ## Notes
