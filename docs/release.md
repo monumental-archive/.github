@@ -165,6 +165,41 @@ Three things, and only three:
 Every step, every ordering constraint and every permission lives here or in
 `signer`.
 
+### A shared workflow's permissions are a public contract
+
+Changing what a shared workflow requires is a **breaking change for every
+repository that calls it**, and it breaks in the least debuggable way
+GitHub offers: `startup_failure`, no jobs, no annotation, no log.
+
+The mechanism is the one recorded above — a `uses:` job with no
+`permissions:` block takes the *workflow-level* default of the file it is
+written in, never the caller's grant. So the moment a shared workflow asks
+for one scope more than a silent caller's default provides, the callee is
+requesting an elevation and the run dies before anything starts.
+
+This is the exact inverse of the toolbelt property, and the contrast is
+worth holding onto. Adding a `lint:*` task to the belt enforces a tool in
+every repository with **no repository change at all**. Adding a
+*permission* to a shared workflow requires editing **every** repository,
+and breaks all of them until each one is edited by hand. Same
+architecture, opposite blast radius — and it cannot be fixed centrally,
+because a shared workflow cannot grant itself anything.
+
+Observed: adding `contents: read` to `release.yml`, so that git-cliff
+could authenticate its GitHub API calls, took the release lab down within
+a minute of merging.
+
+So:
+
+- **Decide a shared workflow's permission set once, deliberately.** Treat
+  an addition as a breaking change, not a fix.
+- **Prefer a design that needs no caller grant** where the cost is
+  acceptable. Every grant is a coupling.
+- **Every `uses:` job states its own permissions**, in callers as well as
+  in reusable workflows, so the contract is visible in a diff rather than
+  discovered in an unlogged failure. `lint:nested-permissions` enforces
+  it.
+
 ### The capability split
 
 The boundary is between **jobs that run caller-supplied code and jobs that
