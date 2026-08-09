@@ -93,7 +93,10 @@ jobs:
         # allowed to build. `cargo package` extracts the tarball and
         # compiles it, which catches the crate that builds in-workspace and
         # fails from its packaged form.
-        run: cargo package --workspace --locked --allow-dirty=false
+        # No --allow-dirty: it is a flag, not a boolean option, and
+        # omitting it is what refuses a dirty tree. `--allow-dirty=false`
+        # is rejected outright by cargo.
+        run: cargo package --workspace --locked
 
       - name: Compute the subject manifest
         id: hash
@@ -172,4 +175,28 @@ jobs:
         # jti and rejects a replay — so each invocation mints its own.
         run: |
           set -euo pipefail
-          cargo publish --workspace --locked --no-verify
+          # Trusted publishing, by hand rather than through an action.
+          # This is the one job in the organisation holding `id-token:
+          # write` beside a checkout of caller source, and third-party
+          # code belongs there least of all — the same reasoning that
+          # kept the runner-hardening agent out of `signer`.
+          #
+          # Contract read from crates.io's own exchange handler:
+          #   POST /api/v1/trusted_publishing/tokens  {"jwt": "<oidc>"}
+          #   -> {"token": "<short-lived crates.io token>"}
+          # The audience is `crates.io`. Neither token is ever printed,
+          # and the exchanged one is masked before it can reach a log.
+          oidc=$(curl -sSf \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=crates.io" | jq -r '.value')
+          body=$(jq -nc --arg jwt "${oidc}" '{jwt: $jwt}')
+          token=$(curl -sSf -X POST \
+            https://crates.io/api/v1/trusted_publishing/tokens \
+            -H 'content-type: application/json' \
+            --data "${body}" | jq -r '.token')
+          echo "::add-mask::${token}"
+          # The exchanged token is single-use: crates.io records the JWT's
+          # jti and rejects a replay, so a resumed release mints its own
+          # rather than reusing one.
+          CARGO_REGISTRY_TOKEN="${token}" \
+            cargo publish --workspace --locked --no-verify

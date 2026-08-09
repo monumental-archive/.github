@@ -42,11 +42,22 @@ name: publish
 on:
   workflow_call:
     inputs:
-      class:
+      classes:
         description: >
-          Artifact class. One shared build workflow per class; callers
-          declare inputs, not steps. A class that is not implemented fails
-          the guard below rather than silently publishing nothing.
+          Artifact classes, comma-separated. One shared build workflow per
+          class; callers declare inputs, not steps.
+
+          A repository may need several in one release and most do:
+          iiif-server ships an OCI image AND musl/macOS binaries while
+          publishing no crates at all, and edtf publishes crates, a
+          binary, an image and a wasm package. A scalar here would have
+          forced such a repository back into writing its own steps, which
+          is the thing this design exists to prevent.
+
+          `workflow_call` inputs are only string, boolean or number — there
+          is no list type — so this is a string and the jobs below gate on
+          `contains()`. A class that is not implemented fails the guard
+          rather than silently publishing nothing.
         required: true
         type: string
       dry-run:
@@ -97,7 +108,7 @@ jobs:
       - name: Check the ref and the class
         id: check
         env:
-          UNTRUSTED_CLASS: ${{ inputs.class }}
+          UNTRUSTED_CLASSES: ${{ inputs.classes }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
@@ -105,26 +116,42 @@ jobs:
             echo "::error::dispatching from a branch would attest a moving pointer"
             exit 1
           fi
-          case "${UNTRUSTED_CLASS}" in
-            rust-crate) ;;
-            rust-binary | oci-image | wasm-npm)
-              echo "::error::class '${UNTRUSTED_CLASS}' is declared but not yet built"
-              exit 1
-              ;;
-            *)
-              echo "::error::unknown class"
-              exit 1
-              ;;
-          esac
+          IFS=',' read -ra requested <<< "${UNTRUSTED_CLASSES// /}"
+          if ((${#requested[@]} == 0)); then
+            echo "::error::no classes requested — a release that builds nothing is not a release"
+            exit 1
+          fi
+          for c in "${requested[@]}"; do
+            case "${c}" in
+              rust-crate) ;;
+              rust-binary | oci-image | wasm-npm)
+                echo "::error::class is declared but not yet built"
+                exit 1
+                ;;
+              *)
+                echo "::error::unknown class requested"
+                exit 1
+                ;;
+            esac
+          done
           version="${GITHUB_REF#refs/tags/v}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "::notice::publishing ${UNTRUSTED_CLASS} version ${version}"
+          echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
 
   build:
     name: Build
     needs: guard
-    if: inputs.class == 'rust-crate'
+    if: contains(inputs.classes, 'rust-crate')
     uses: ./.github/workflows/build-rust-crate.yml
+    permissions:
+      # Restated, not inherited. A `uses:` job with no `permissions:` block
+      # takes the WORKFLOW-level default — which is `permissions: {}` above
+      # — and not the caller's grant. The callee then requests more than
+      # its calling job holds, which is an elevation, and the whole run
+      # dies as startup_failure with no jobs and no log. Measured; every
+      # `uses:` job below therefore restates exactly what its callee needs.
+      contents: read # checkout of the caller
+      id-token: write # crates.io trusted publishing, in the publish job
     with:
       version: ${{ needs.guard.outputs.version }}
       dry-run: ${{ inputs.dry-run }}
@@ -136,6 +163,8 @@ jobs:
     name: Verify published bytes
     needs: [guard, build]
     uses: ./.github/workflows/verify-published.yml
+    permissions:
+      contents: read # the verifier holds no more than this
     with:
       subjects: ${{ needs.build.outputs.subjects }}
       dry-run: ${{ inputs.dry-run }}
@@ -159,6 +188,7 @@ jobs:
     name: Attach evidence and publish
     needs: [guard, build, sign]
     uses: ./.github/workflows/attach-release.yml
+    permissions: {} # it publishes with the App token, not GITHUB_TOKEN
     with:
       version: ${{ needs.guard.outputs.version }}
       artifact-name: ${{ needs.build.outputs.artifact-name }}
