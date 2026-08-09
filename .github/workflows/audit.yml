@@ -38,6 +38,34 @@ jobs:
       - name: Check links
         run: mise run audit:links
 
+  actions:
+    name: audit / actions (online)
+    runs-on: ubuntu-latest
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+
+      - name: Audit workflows online
+        env:
+          # zizmor's API-backed audits — impostor-commit,
+          # known-vulnerable-actions, ref-confusion, typosquat-uses,
+          # stale-action-refs — are skipped by the gate's --offline run and
+          # would otherwise execute nowhere. The default token is enough:
+          # they read public advisory and commit data.
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:actions
+
   baseline-drift:
     name: audit / repo settings drift
     runs-on: ubuntu-latest

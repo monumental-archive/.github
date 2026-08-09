@@ -9,3 +9,21 @@ subject_length = 72
 # Classic git imperative mood: "if applied, this commit will <subject>".
 # The default, restated here so nobody softens it quietly again.
 imperative_subject = true
+# committed's default list omits build, ci and revert, but the canonical
+# cliff.toml groups all three in the changelog and its no_increment_regex
+# names `ci` explicitly. Left unstated, a `ci:` commit is rejected by the
+# gate while the release machinery expects it. Keep these two lists in
+# step: every type cliff.toml parses must be allowed here.
+allowed_types = [
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "docs",
+  "test",
+  "build",
+  "ci",
+  "chore",
+  "style",
+  "revert",
+]

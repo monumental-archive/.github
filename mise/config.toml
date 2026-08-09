@@ -144,9 +144,20 @@ dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
 
 [tasks."audit:actions"]
-description = "Full zizmor auditor persona — everything, incl. probable noise"
+description = "zizmor online + auditor persona — the audits the gate cannot run"
 dir = "{{cwd}}"
-run = "zizmor --persona=auditor .github/workflows/"
+# The gate runs zizmor --offline, which necessarily skips every audit that
+# needs the GitHub API: impostor-commit, known-vulnerable-actions,
+# ref-confusion, typosquat-uses, stale-action-refs. Those are exactly the
+# checks that catch a compromised or impersonated action, so they run here
+# on a schedule instead of nowhere. Auditor persona adds secrets-outside-env
+# and misfeature. Needs GH_TOKEN.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "audit:actions: no workflows, skipped"; exit 0
+}
+zizmor --persona=auditor .github/workflows/
+'''
 
 [tasks."lint:trivy"]
 description = "Misconfiguration + committed-secret scan (trivy)"
@@ -176,3 +187,70 @@ dir = "{{cwd}}"
 # locally: next version and unreleased changelog. Guarded: repos without a
 # cliff.toml (the continuous archetype, this repo) skip clean.
 run = 'if [[ -f cliff.toml ]]; then echo "next: $(git cliff --bumped-version)"; git cliff --bump --unreleased --strip all; else echo "release:preview: no cliff.toml, skipped"; fi'
+
+[tasks."lint:capability-boundary"]
+description = "No caller-code workflow may hold a signing identity (SLSA L3 boundary)"
+dir = "{{cwd}}"
+# The org's L3 boundary, made mechanical. A job holding `id-token: write`
+# must not also execute caller-supplied code, or a certificate bearing this
+# repo's identity gets minted while running someone else's steps — and
+# nothing goes red. `workflow_call` is the machine-checkable proxy for
+# "runs caller code".
+#
+# The escape hatch is deliberate and visible: a signer legitimately IS a
+# workflow_call workflow holding id-token, and must say so with a
+# `capability-boundary:` comment explaining why it runs none. An exception
+# you have to write down is an exception somebody reviews.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "lint:capability-boundary: no workflows, skipped"; exit 0
+}
+bad=""
+for f in .github/workflows/*.y*ml; do
+  grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
+  grep -qE "id-token:[[:space:]]*write" "${f}" || continue
+  grep -q "capability-boundary:" "${f}" && continue
+  bad="${bad} ${f}"
+done
+if [[ -n "${bad}" ]]; then
+  echo "lint:capability-boundary: workflow_call workflow holds id-token" >&2
+  echo "  without a capability-boundary marker:${bad}" >&2
+  exit 1
+fi
+echo "lint:capability-boundary: ok"
+'''
+
+[tasks."lint:toolbelt-lock"]
+description = "Every pinned tool has a locked entry (mise config vs mise.lock)"
+dir = "{{cwd}}"
+# Renovate can bump a version line but cannot always refresh the lock:
+# `mise lock` is an unsafe execution, and `allowedUnsafeExecutions` is a
+# self-hosted-only setting we do not control on the hosted App. A pin that
+# moves while its checksums stay behind is what this catches, and it fails
+# the pull request rather than installing something unverified.
+run = '''
+cfg=""
+for c in mise/config.toml mise.toml .mise.toml; do
+  [[ -f "${c}" ]] && { cfg="${c}"; break; }
+done
+[[ -n "${cfg}" ]] || { echo "lint:toolbelt-lock: no mise config, skipped"; exit 0; }
+lock="mise.lock"
+[[ "${cfg}" == */* ]] && lock="${cfg%/*}/mise.lock"
+[[ -f "${lock}" ]] || { echo "lint:toolbelt-lock: no ${lock}, skipped"; exit 0; }
+keys=$(sed -n "/^\\[tools\\]/,/^\\[/p" "${cfg}" | grep -vE "^(#|\\[|$)" | grep "=" | cut -d= -f1 | tr -d " \"")
+# A verification loop that processes zero items and reports success is the
+# check announcing that it checked nothing. Fail instead.
+[[ -n "${keys}" ]] || { echo "lint:toolbelt-lock: no tools parsed from ${cfg}" >&2; exit 1; }
+missing=""
+while IFS= read -r k; do
+  [[ -n "${k}" ]] || continue
+  grep -qxF "[[tools.\"${k}\"]]" "${lock}" && continue
+  grep -qxF "[[tools.${k}]]" "${lock}" && continue
+  missing="${missing} ${k}"
+done <<< "${keys}"
+if [[ -n "${missing}" ]]; then
+  echo "lint:toolbelt-lock: ${cfg} pins tools absent from ${lock}:${missing}" >&2
+  exit 1
+fi
+echo "lint:toolbelt-lock: $(wc -w <<< "${keys}" | tr -d " ") tools locked in ${lock}"
+'''
