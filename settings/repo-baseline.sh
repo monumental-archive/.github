@@ -19,15 +19,15 @@ drift=0
 for repo in ${repos}; do
   case "${mode}" in
     apply)
-      gh api -X PATCH "repos/${org}/${repo}" --input "${baseline}" >/dev/null
+      gh api -X PATCH "repos/${org}/${repo}" --input "${baseline}" > /dev/null
       echo "applied: ${repo}"
       ;;
     check)
       actual="$(gh api "repos/${org}/${repo}")"
       for key in ${keys}; do
         want="$(jq -r --arg k "${key}" '.[$k]' "${baseline}")"
-        have="$(jq -r --arg k "${key}" '.[$k]' <<<"${actual}")"
-        if [[ "${want}" != "${have}" ]]; then
+        have="$(jq -r --arg k "${key}" '.[$k]' <<< "${actual}")"
+        if [[ ${want} != "${have}" ]]; then
           echo "drift: ${repo}.${key} = ${have} (baseline: ${want})"
           drift=1
         fi
