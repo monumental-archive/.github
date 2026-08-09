@@ -3,34 +3,36 @@
 The intended org-level rulesets, kept here so they are reviewable and
 reproducible rather than clicked into a settings UI and hoped to match.
 
-Apply and drift-check them with `rulesets/apply.sh`:
+Org rulesets require **GitHub Team**. Apply each file once at org level,
+targeting all repositories; `~ALL` is dynamic, so repos transferring in
+later are covered without a further step.
 
 ```bash
-rulesets/apply.sh check    # report drift, exit 1 if any
-rulesets/apply.sh apply    # create or update every ruleset on every repo
+gh api -X POST orgs/monumental-archive/rulesets --input rulesets/org-default-branch.json
 ```
 
-It is idempotent, strips the `repository_name` condition (meaningful only
-org-wide), and compares semantically — GitHub returns rules in its own order
-and fills in parameter defaults the canon never declares, so a byte
-comparison reports drift on a conforming repo.
+The same JSON also applies per repository (drop the `repository_name`
+condition — the repo-level API rejects it), which is how the release lab
+ran its lock before the org upgrade.
 
-Org rulesets require **GitHub Team**; until then the identical JSON applies
-at repository level, which works on Free for public repositories. That is a
-**uniformity gap, not a capability gap** — nothing here waits on the plan.
-When Team lands, apply each file once at org level and delete the script.
+**A ruleset lands with its enabler, never before it.**
 
-**A ruleset lands with its enabler, never before it.** The tag rules need
-the minting App; the branch ruleset needs the shared gate, because
-`required_status_checks` naming a context the repo never reports leaves
-every pull request at *"Expected — waiting for status to be reported"*
-forever. `apply.sh` refuses that case and names it as a conformance gap: the
-fix is always to adopt the gate in that repo, never to soften the rule.
+The `v*` creation lock's enabler is the minting App, and it **exists**:
+`monumental-archive-tag-mint`, App id 4534781, installed org-wide, the sole
+`Integration` bypass actor in `org-release-tag.json`. Both halves are proven
+(see below), so that ruleset ships `active` — there is nothing left to wait
+for.
 
-Note the trap it guards: a repo can run perfectly good CI and still fail
-this, because the **check name is the contract**. `trusted-builder` lints
-harder than the shared gate does, but reports as `Lint`, so `ci / ci` never
-arrives.
+The branch ruleset's enabler is the shared gate, and that one is **not yet
+satisfied everywhere**: `required_status_checks` naming a context a repo
+never reports leaves its pull requests at *"Expected — waiting for status to
+be reported"* forever. The fix is always to adopt the gate in that repo,
+never to soften the rule.
+
+The trap there: a repo can run perfectly good CI and still fail, because the
+**check name is the contract**. `trusted-builder` lints harder than the
+shared gate does, but reports as `Lint`, so `ci / ci` never arrives. Repos
+not yet reporting it: `trusted-builder`, `edtf-release-lab`.
 
 ## Why these rules and not more
 
