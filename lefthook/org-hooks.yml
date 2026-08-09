@@ -12,6 +12,10 @@
 # Then once per clone: lefthook install
 
 pre-commit:
+  # Mid-merge/rebase trees are legitimately inconsistent; don't fail there.
+  skip:
+    - merge
+    - rebase
   parallel: true
   jobs:
     - name: typos
