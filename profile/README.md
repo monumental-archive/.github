@@ -22,7 +22,10 @@ standards, implemented exactly:
   Image API, 3.0 and 2.1 with the complete feature table, as one static
   pure-Rust binary serving the photographic record.
 - **The archive database** — PostGIS, schema as code, with an anchored
-  checkpoint ledger keeping the record of the record tamper-evident.
+  checkpoint ledger keeping the record of the record tamper-evident, on
+  [monumental-archive-db](https://github.com/CarlAllenn/monumental-archive-db):
+  the official Postgres image plus PostGIS, pgaudit, and `edtf_postgres` —
+  multi-arch, tested before publish, cosign-signed.
 
 Everything is built the same way: toolchains pinned and checksummed,
 every linter at maximum, releases signed with verifiable provenance, and
