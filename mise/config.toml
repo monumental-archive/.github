@@ -39,6 +39,11 @@ shfmt = "3.13.1"
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.52"
 lychee = "0.24.2"
+# The release phase-1 version decision and changelog (docs/release.md).
+# In the belt rather than a per-repo install: the shared release workflow
+# runs it in every versioned repo, and `release:preview` should answer
+# locally with the same pinned binary CI uses.
+"aqua:orhun/git-cliff" = "2.13.1"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -163,3 +168,11 @@ env = { SHELLCHECK_OPTS = "--enable=all" }
 # Guard: actionlint exits 3 when a repo has no workflow YAML (including an
 # existing-but-empty workflows directory).
 run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color; else echo "lint:actions: no workflows, skipped"; fi'
+
+[tasks."release:preview"]
+description = "What the next release would be (git-cliff — read-only, not in ci)"
+dir = "{{cwd}}"
+# The same pinned binary the shared release workflow runs, answering
+# locally: next version and unreleased changelog. Guarded: repos without a
+# cliff.toml (the continuous archetype, this repo) skip clean.
+run = 'if [[ -f cliff.toml ]]; then echo "next: $(git cliff --bumped-version)"; git cliff --bump --unreleased --strip all; else echo "release:preview: no cliff.toml, skipped"; fi'
