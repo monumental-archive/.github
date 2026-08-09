@@ -82,6 +82,10 @@ defect.
 ## Related
 
 - `trusted-builder` — signing only, the other half of the split
-- `renovate-config` — stays a separate repo. Renovate's own docs recommend
-  shared presets (explicit `extends`) over inherited config, and the
-  inherited-config convention is a repo named `renovate-config` anyway.
+- `renovate-config` — **being absorbed into this repo**. Anything shared
+  lives here and nowhere else. Renovate shared presets can be hosted in any
+  repo (`extends: ["github>monumental-archive/.github"]`), so the separate
+  repo has no technical justification. Verify the preset filename: a repo's
+  own config is `renovate.json`, and `github>org/repo` preset resolution
+  looks for `default.json`, so the shared preset probably wants to be
+  `default.json` to avoid colliding with this repo's own config.

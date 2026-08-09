@@ -10,6 +10,8 @@ Shared infrastructure for the Monumental Archive organization.
 | **Org profile** | `profile/README.md` |
 | **Workflow templates** | `workflow-templates/` — the starters offered in the Actions UI |
 | **Shared reusable workflows** | the CI lint gate, the Rust gate, and the release half |
+| **Renovate preset** | the shared policy every repo `extends` |
+| **lefthook universal config** | consumed live over git by every repo's `lefthook.yml` |
 
 ## What does not live here
 
@@ -21,10 +23,6 @@ This repository is the opposite: it runs caller code and **never** holds a
 signing identity. That separation is the SLSA v1.0 Build L3 boundary, and
 keeping it structural — one repo per side — is what lets consumers pin
 `--signer-repo` safely instead of having to name an individual workflow file.
-
-**Renovate config.** That stays in
-[renovate-config](https://github.com/CarlAllenn/renovate-config); Renovate's
-documentation recommends shared presets over org-inherited config.
 
 **Licences.** GitHub cannot default a `LICENSE`; every repo carries its own.
 
