@@ -1,0 +1,50 @@
+# The org CI gate. Callers pin by full SHA:
+#
+#   jobs:
+#     ci:
+#       uses: monumental-archive/.github/.github/workflows/ci.yml@<sha> # vX.Y.Z
+#
+# One SHA pins this file, the toolbelt, and its lockfile atomically: the
+# toolbelt checkout below rides github.workflow_sha, the exact ref the
+# caller pinned. No inputs, by design — zero caller-controlled expansion.
+name: ci
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    env:
+      # Both checkouts are trusted mise config roots; nothing else is.
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      # The lock is law: no network resolution at run time.
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: lint:commits checks the origin/main..HEAD range.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+
+      - name: Run the gate
+        run: mise run ci
