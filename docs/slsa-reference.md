@@ -271,6 +271,46 @@ The same run confirmed the claim split by measurement rather than by
 source reading: `workflow_ref` named the caller's entry file, and
 `job_workflow_ref` named the reusable at its pinned SHA.
 
+**Environment *secrets* do not cross the boundary, and the documentation
+is wrong about this.** A second run put junk markers in a caller's
+`publish` environment and asked the reusable job which arrived:
+
+| Case | Result |
+| --- | --- |
+| environment secret, undeclared in `workflow_call` | **unreachable** — empty |
+| name shared with a declared, passed secret | **the passed value wins** |
+
+The second row contradicts the documented behaviour, which states that
+with `environment` at the job level "the environment secret will be used,
+and not the secret passed from the caller workflow". It was not. The log
+corroborates the mechanism: the passed marker appeared masked as `***`,
+proving it was registered as a secret, while the environment marker
+appeared in plain text — so the environment's secrets were never loaded
+into the job at all.
+
+So a reusable workflow's job inherits three things from the caller's
+environment — protection rules, **variables**, and the OIDC `environment`
+claim — and **not** its secrets. The split between variables and secrets
+is sharp and is documented nowhere.
+
+Two consequences, in opposite directions:
+
+- **Environment-scoped trusted publishing is unaffected**, because it
+  needs the `environment` claim and no secret at all. Registry publishing
+  from a shared reusable can be pinned to `environment: publish`.
+- **A secret cannot be protected by an environment through a shared
+  workflow.** Repository scoping (`visibility: selected` on an
+  organisation secret) is the only mechanism that restricts *who can read*
+  one; an environment restricts only *when a job runs*. Anything asserting
+  that a key "lives behind" an environment while being consumed by a
+  reusable workflow is asserting something the platform does not do.
+
+Note also that `actionlint` models the reusable `secrets` context as
+closed over the declared `workflow_call` secrets and rejects both the
+dotted and indexed forms of an undeclared name. Its model turned out to
+match the runtime, so the org's own gate would have prevented writing the
+unreachable form in the first place.
+
 ## Distribution and evidence
 
 SLSA `distributing-provenance` gives a normative naming SHOULD: provenance
