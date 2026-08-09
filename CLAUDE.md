@@ -36,12 +36,17 @@ shared lives here and nowhere else. Five layers:
 
 ## Rules that must not be broken
 
-- **No workflow here may ever declare `id-token: write`.** Signing lives
-  in `trusted-builder`, which runs no caller code; this repo runs caller
-  code and holds no signing identity. That split is the SLSA Build L3
-  boundary: a certificate minted here would bear this repo's identity
-  while executing caller-supplied code. Adding the scope silently drops
-  every consumer to Build L2 and nothing goes red.
+- **No workflow that runs caller-supplied code may declare `id-token:
+  write`** — concretely, no `workflow_call` workflow, here or anywhere in
+  the org, without an explicit `capability-boundary:` marker stating why it
+  is safe. That split is the SLSA Build L3 boundary: a certificate minted
+  in a job that also executes caller-supplied code would bear this repo's
+  identity, and nothing would go red. `lint:capability-boundary` enforces
+  it. The rule was previously an absolute ban on `id-token` in this repo;
+  it was narrowed because the ban also blocked standalone scheduled
+  workflows that run no caller code (Scorecard publishing, Rekor identity
+  monitoring) — and declining to monitor the log for forged signer
+  identities in order to protect the signer was self-defeating.
 - **This repo must stay public.** Private `.github` repos serve no default
   community health files. Everything here is world-readable; write
   accordingly.
