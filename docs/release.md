@@ -277,6 +277,68 @@ stranger will pull, never of a local twin.
 Both rules were arrived at independently in three repositories before
 being promoted here.
 
+### Binaries build on native hardware too
+
+`rust-binary` ships statically linked musl binaries for Linux and native
+binaries for macOS, each built **and tested** on a runner of its own
+architecture — `cargo test --target` runs on the release target, so the
+musl legs prove the statically linked binaries actually execute, which is
+the property the shipped artifact claims. The target list is validated
+against canon by a plan job that *emits* the build matrix: a typo in a
+target name fails the release rather than silently building three
+platforms instead of four, and the collect job refuses a partial set.
+
+**Why a C toolchain, and why apt.** Rust's `*-musl` targets bundle their
+own musl libc, so a pure-Rust binary self-links with no external
+toolchain. The moment any dependency compiles C through `build.rs` — and
+`ring` and `mimalloc` in iiif-server's lock both do — a musl-targeting C
+compiler must exist. `musl-tools` is installed unconditionally on the
+Linux legs: identical environments beat conditional ones, the packages are
+distro-signed through Ubuntu's own mirrors, and Scorecard's
+Pinned-Dependencies check does not examine apt (read from
+`checks/raw/shell_download_validate.go`, not from the docs). It is the one
+unpinned install in the pipeline, accepted deliberately; the pinnable
+upgrade path, should it ever matter, is zig/cargo-zigbuild.
+
+**Reproducible by construction** (Best Practices Silver
+`build_repeatable`): `SOURCE_DATE_EPOCH` from the released commit's own
+timestamp, `CARGO_INCREMENTAL=0`, `--remap-path-prefix`, stripping
+disabled (it would destroy the section cargo-auditable lives in), and
+normalised archives — sorted members, zeroed ownership, clamped mtimes,
+`gzip -n`.
+
+Binaries have no registry to pull back from, so there is no
+verify-published leg: they ship as release assets, GitHub's own release
+attestation binds tag, commit and asset digests at publish, and the
+subjects `signer` attests are the same archives the attach job uploads.
+
+### wasm-npm and the second provenance
+
+The wasm package is built by **wasm-pack** and packed once — `npm pack` in
+the build job produces the tarball that is hashed, signed, verified and
+then published as those exact bytes, with no re-pack to drift. wasm-pack
+and node/npm are **caller build inputs**, pinned in the releasing repo's
+own mise config exactly like its rust toolchain — not belt tools, because
+the belt is the universal layer and this class is not universal. The jobs
+assert their presence and fail with the remedy; nothing is installed
+unpinned, and an npm too old for trusted publishing (< 11.5.1) is a
+failed release with a message saying "bump the pin", never a runner
+mutation.
+
+npm trusted publishing needs no manual token exchange, and it mints
+**npm's own** provenance and publish attestations, naming the caller's
+workflow — so a wasm-npm release carries two independent evidence paths:
+`npm audit signatures` checks npm's, `gh attestation verify` checks the
+org's ([`slsa-reference.md`](slsa-reference.md): the two are documented,
+not unified). The verifier pulls the published tarball back from
+`registry.npmjs.org` by the declared package name — declared, because a
+scoped package's tarball filename mangles the scope and cannot be trusted
+to reconstruct the registry path.
+
+First publish of a new package is manual, then trusted publishing is
+configured against `publish.yml` and the `publish` environment and token
+access disabled — the same sequence as crates.io.
+
 ### Scanning never blocks a publish, and never writes to nowhere
 
 The CVE gate lives on pull requests, where it blocks. The scan in the

@@ -14,6 +14,16 @@ on:
         description: sha256sum manifest produced by the build.
         required: true
         type: string
+      npm-package:
+        description: >
+          For .tgz subjects: the npm package as name@version. Required
+          because a scoped package's tarball filename mangles the scope
+          (`@org/pkg` packs as `org-pkg-<v>.tgz`), so the registry path
+          cannot be reconstructed from the file. Empty is fine when no
+          subject is a tarball; a .tgz subject with no package name fails.
+        required: false
+        type: string
+        default: ""
       dry-run:
         description: >
           Rehearsal. Nothing was published, so there are no registry bytes
@@ -45,6 +55,7 @@ jobs:
         id: prove
         env:
           UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
+          UNTRUSTED_NPM_PACKAGE: ${{ inputs.npm-package }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
@@ -67,12 +78,38 @@ jobs:
               echo "::warning::rehearsal: ${name} was NOT proved against a registry"
               continue
             fi
-            # crates.io serves the exact bytes it stored, under a stable
-            # path. Anything else here would be proving the artifact
-            # against itself.
-            crate="${name%-*}"
-            ver="${name##*-}"; ver="${ver%.crate}"
-            url="https://static.crates.io/crates/${crate}/${crate}-${ver}.crate"
+            # Each registry serves the exact bytes it stored, under a
+            # stable path. Anything else here would be proving the
+            # artifact against itself. The registry is dispatched on the
+            # subject's extension; an extension nothing claims is a
+            # failure, never a skip.
+            case "${name}" in
+              *.crate)
+                crate="${name%-*}"
+                ver="${name##*-}"; ver="${ver%.crate}"
+                url="https://static.crates.io/crates/${crate}/${crate}-${ver}.crate"
+                ;;
+              *.tgz)
+                if [[ -z "${UNTRUSTED_NPM_PACKAGE}" ]]; then
+                  echo "::error::${name} is an npm tarball but no npm-package was declared"
+                  exit 1
+                fi
+                # name@version, scope included; the version splits off the
+                # LAST @ so scoped names survive.
+                pkg="${UNTRUSTED_NPM_PACKAGE%@*}"
+                ver="${UNTRUSTED_NPM_PACKAGE##*@}"
+                if [[ -z "${pkg}" || -z "${ver}" || "${pkg}" == "${UNTRUSTED_NPM_PACKAGE}" ]]; then
+                  echo "::error::npm-package must be name@version, got ${UNTRUSTED_NPM_PACKAGE}"
+                  exit 1
+                fi
+                # The tarball path always uses the unscoped basename.
+                url="https://registry.npmjs.org/${pkg}/-/${pkg##*/}-${ver}.tgz"
+                ;;
+              *)
+                echo "::error::${name}: no registry claims this subject type"
+                exit 1
+                ;;
+            esac
             echo "::group::${name}"
             curl -sSfL --retry 5 --retry-connrefused -o "${RUNNER_TEMP}/${name}" "${url}"
             actual=$(sha256sum "${RUNNER_TEMP}/${name}" | cut -d' ' -f1)
