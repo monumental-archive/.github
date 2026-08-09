@@ -1,14 +1,14 @@
 {
   "name": "org-default",
-  "description": "Everything on, enforced. Free features on public repos; GHAS-billed features simply fail to attach on private repos under the free plan.",
+  "description": "Everything the free plan lets a config govern, enforced. GHAS-gated fields are not_set: the config API rejects them without GHAS billing, even though public repos get several per-repo for free.",
   "dependency_graph": "enabled",
   "dependabot_alerts": "enabled",
   "dependabot_security_updates": "enabled",
-  "code_scanning_default_setup": "enabled",
+  "code_scanning_default_setup": "not_set",
   "secret_scanning": "enabled",
   "secret_scanning_push_protection": "enabled",
-  "secret_scanning_non_provider_patterns": "enabled",
-  "secret_scanning_validity_checks": "enabled",
+  "secret_scanning_non_provider_patterns": "not_set",
+  "secret_scanning_validity_checks": "not_set",
   "private_vulnerability_reporting": "enabled",
   "enforcement": "enforced"
 }
