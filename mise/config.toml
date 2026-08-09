@@ -324,3 +324,52 @@ if [[ -n "${missing}" ]]; then
 fi
 echo "lint:toolbelt-lock: $(wc -w <<< "${keys}" | tr -d " ") tools locked in ${lock}"
 '''
+
+[tasks."lint:nested-permissions"]
+description = "Every nested `uses:` job states its permissions (startup_failure trap)"
+dir = "{{cwd}}"
+# The trap, measured rather than read: a `uses:` job with no `permissions:`
+# block inherits the WORKFLOW-level default of the file it is written in —
+# not the grant its caller made. So `permissions: {}` at the top of a shared
+# workflow, which is correct practice and which this org applies everywhere,
+# silently starves every nested call beneath it. The callee then requests
+# more than its calling job holds, which is an elevation, and the run dies as
+# `startup_failure` with no jobs, no annotations and no log.
+#
+# Nothing else catches it. actionlint, zizmor --persona=pedantic and
+# lint:capability-boundary all pass on the broken file, because each is
+# correct in isolation and the contract spans two workflows.
+#
+# Scoped to workflow_call files: in an ordinary workflow the caller IS the
+# top level, so omitting permissions there is merely the usual default.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "lint:nested-permissions: no workflows, skipped"; exit 0
+}
+bad=""
+checked=0
+for f in .github/workflows/*.y*ml; do
+  grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
+  checked=$((checked + 1))
+  offenders=$(awk '
+    /^jobs:[[:space:]]*$/ { injobs = 1; next }
+    injobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+      if (job != "" && uses && !perms) print job
+      job = $1; sub(/:$/, "", job); uses = 0; perms = 0; next
+    }
+    injobs && /^    uses:/ { uses = 1 }
+    injobs && /^    permissions:/ { perms = 1 }
+    END { if (job != "" && uses && !perms) print job }
+  ' "${f}")
+  for j in ${offenders}; do bad="${bad} ${f}:${j}"; done
+done
+if [[ -n "${bad}" ]]; then
+  echo "lint:nested-permissions: nested uses: job with no permissions block:" >&2
+  for b in ${bad}; do echo "  ${b}" >&2; done
+  echo "  it inherits the workflow-level default, not the caller grant —" >&2
+  echo "  state exactly what the called workflow needs, or the run dies as" >&2
+  echo "  startup_failure with no jobs and no log." >&2
+  exit 1
+fi
+echo "lint:nested-permissions: ${checked} reusable workflow(s) clean"
+'''

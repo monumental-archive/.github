@@ -1,0 +1,5 @@
+{
+  "name": "Org release phase 2",
+  "description": "Tag-triggered build, proof, signing and publication via the shared orchestrator. One uses: line, no steps. The filename publish.yml is canon — both registries pin it.",
+  "categories": ["deployment"]
+}
