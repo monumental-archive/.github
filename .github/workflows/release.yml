@@ -150,6 +150,10 @@ jobs:
         if: steps.prepare.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          # The App's own slug, so the release commit can sign itself off as
+          # the identity that authors it. `gh api user` cannot be used: an
+          # installation token has no user context and answers 403.
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
           VERSION: ${{ steps.prepare.outputs.version }}
           FILES: ${{ steps.prepare.outputs.files }}
         run: .org-canon/release/open-release-pr.sh
