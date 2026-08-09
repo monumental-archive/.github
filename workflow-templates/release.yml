@@ -1,0 +1,28 @@
+# Release phase 1. This stub is a versioned repo's entire release-PR
+# obligation: version decision, changelog, Release PR, and — on merge —
+# the App-minted v* tag and draft release, all via the shared workflow.
+# Phase 2 (this repository's own publish workflow, triggered by the tag)
+# builds, proves and signs. See docs/release.md in monumental-archive/.github.
+name: release
+
+on:
+  push:
+    branches: [$default-branch]
+  # Recovery path: re-run the tag step against a release commit whose first
+  # attempt failed. The shared workflow refuses anything else.
+  workflow_dispatch: {}
+
+permissions: {}
+
+# Never cancel a release mid-flight; queue instead. Keyed per commit.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: monumental-archive/.github/.github/workflows/release.yml@d8becab1b53b6ce62ec81496ce1ba2024e836a53 # main 2026-08-09
+    with:
+      app-id: ${{ vars.TAG_MINT_APP_ID }}
+    secrets:
+      app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
