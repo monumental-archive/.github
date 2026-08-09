@@ -26,6 +26,28 @@ shellcheck = "0.11.0"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
+#
+# The task contract, in full:
+#   - `mise run ci` must pass in every repo. Repos do NOT define `ci`; the
+#     global task below assembles it.
+#   - `lint:*` is claimed by the belt and wildcard-collected into `ci`, so a
+#     linter added here is enforced in every repo with no repo change. Repos
+#     may add their own `lint:<thing>` tasks; same collection applies.
+#   - `test` and `build` are reserved names: define them and `ci` runs them,
+#     omit them and `ci` skips them (optional depends).
+#   - Belt linters guard for applicability and exit 0 when a repo has
+#     nothing for them to check. A linter that can't skip can't be universal.
+#   - Write-mode siblings live under `fix:*`, never run by `ci`.
+[tasks.ci]
+description = "The gate: everything the org enforces, plus this repo's tasks"
+dir = "{{cwd}}"
+depends = [
+  "lint:*",
+  { task = "test", optional = true },
+  { task = "build", optional = true },
+]
+run = "echo 'ci: all gates green'"
+
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows (actionlint)"
 # {{cwd}}: global-layer tasks otherwise run from the config root (~ locally)
@@ -33,4 +55,6 @@ dir = "{{cwd}}"
 # actionlint calls shellcheck with --norc, so rc files are ignored; the env
 # var is the only way to raise shellcheck to max (all optional checks on).
 env = { SHELLCHECK_OPTS = "--enable=all" }
-run = "actionlint -color"
+# Guard: actionlint exits 3 when a repo has no workflow YAML (including an
+# existing-but-empty workflows directory).
+run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color; else echo "lint:actions: no workflows, skipped"; fi'
