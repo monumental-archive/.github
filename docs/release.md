@@ -77,16 +77,21 @@ job holding a `contents: write` token scoped by
 `actions/create-github-app-token`; the release-PR bot never holds tag-push
 power.
 
-The App's key does **not** currently live behind the protected `publish`
-environment, as an earlier draft of this document asserted. It is an
-organisation secret with `visibility: all`, which any workflow in any
-repository in the organisation can read — including a repository added
-tomorrow. The measurement recorded in
-[`slsa-reference.md`](slsa-reference.md) is what makes closing this
-possible: a reusable workflow's job may declare `environment:`, and it
-resolves against the caller. Whether such a job can then read the
-*caller's* environment secret is the next question for the lab, and until
-it is answered this gap is stated rather than papered over.
+The App's key does **not** live behind the protected `publish`
+environment, as an earlier draft of this document asserted, and — measured
+in the lab — **it cannot**. A reusable workflow's job inherits the
+caller's environment protection rules, variables and OIDC `environment`
+claim, but not its secrets ([`slsa-reference.md`](slsa-reference.md)). An
+environment governs *when a job runs*, never *who can read a secret*.
+
+What the key actually has today is `visibility: all` on an organisation
+secret, readable by any workflow in any repository in the organisation,
+including one added tomorrow — `signer` and the release lab among them.
+The only mechanism that narrows that is repository scoping,
+`visibility: selected`, which cannot be set without re-supplying the
+encrypted value and therefore means rotating the App key first. That is
+deferred deliberately, not overlooked, and is recorded here so the
+deferral is visible rather than implied.
 
 The default `GITHUB_TOKEN` is never used to push a tag: tags it pushes
 trigger no workflows, and a release that silently triggers nothing looks
