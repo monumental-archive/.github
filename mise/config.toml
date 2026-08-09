@@ -26,6 +26,7 @@ shellcheck = "0.11.0"
 typos = "1.49.0"
 lefthook = "2.1.10"
 trivy = "0.73.0"
+zizmor = "1.29.0"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -63,6 +64,21 @@ dir = "{{cwd}}"
 # is en-US in code and en-GB in prose, which no per-file locale can split.
 # Repo-specific jargon goes in that repo's own _typos.toml (extend-words).
 run = "typos"
+
+[tasks."lint:zizmor"]
+description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"
+dir = "{{cwd}}"
+# --offline: with a token present zizmor auto-enables online audits, whose
+# results change with remote state — the gate checks the diff, not the
+# internet. Pedantic, no severity floor: every actionable finding fails.
+# The auditor persona (includes likely false positives) lives in
+# audit:actions for human-run reviews, not the gate.
+run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then zizmor --offline --persona=pedantic .github/workflows/; else echo "lint:zizmor: no workflows, skipped"; fi'
+
+[tasks."audit:actions"]
+description = "Full zizmor auditor persona — everything, incl. probable noise"
+dir = "{{cwd}}"
+run = "zizmor --persona=auditor .github/workflows/"
 
 [tasks."lint:trivy"]
 description = "Misconfiguration + committed-secret scan (trivy)"
