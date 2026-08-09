@@ -12,7 +12,9 @@ org="monumental-archive"
 baseline="$(dirname "$0")/repo-baseline.json"
 mode="${1:?usage: repo-baseline.sh check|apply}"
 
-repos="$(gh repo list "${org}" --limit 200 --json name --jq '.[].name')"
+# REST, not `gh repo list`: that is GraphQL under the hood, and the
+# fine-grained PAT the audit runs with supports only the REST API.
+repos="$(gh api "orgs/${org}/repos?per_page=100" --paginate --jq '.[].name')"
 keys="$(jq -r 'keys[]' "${baseline}")"
 drift=0
 
