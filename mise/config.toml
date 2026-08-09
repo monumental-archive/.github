@@ -33,6 +33,7 @@ shfmt = "3.13.1"
 # rumdl over markdownlint-cli2: same rule family, aqua-backed instead of
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.52"
+lychee = "0.24.2"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -122,6 +123,13 @@ dir = "{{cwd}}"
 # The auditor persona (includes likely false positives) lives in
 # audit:actions for human-run reviews, not the gate.
 run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then zizmor --offline --persona=pedantic .github/workflows/; else echo "lint:zizmor: no workflows, skipped"; fi'
+
+[tasks."audit:links"]
+description = "Check links in tracked markdown (lychee — network, not in ci)"
+dir = "{{cwd}}"
+# audit:*, not lint:*: link liveness is a property of the internet, not the
+# diff. Runs on demand locally and on a schedule in CI (step-3 workflow).
+run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
 
 [tasks."audit:actions"]
 description = "Full zizmor auditor persona — everything, incl. probable noise"
