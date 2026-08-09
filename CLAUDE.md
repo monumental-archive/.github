@@ -87,7 +87,7 @@ are referenced as
 `mise run ci` locally is exactly what CI runs — same tools, same
 versions, same order, from the same lockfile. Shared-workflow changes are
 exercised by this repo's own `gate.yml` on every PR; the release half is
-exercised from `edtf-release-lab` before any production repo moves its
+exercised from `release-lab` before any production repo moves its
 pin.
 
 ## Open items

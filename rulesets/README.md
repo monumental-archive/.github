@@ -32,7 +32,7 @@ never to soften the rule.
 The trap there: a repo can run perfectly good CI and still fail, because the
 **check name is the contract**. `trusted-builder` lints harder than the
 shared gate does, but reports as `Lint`, so `ci / ci` never arrives. Repos
-not yet reporting it: `trusted-builder`, `edtf-release-lab`.
+not yet reporting it: `trusted-builder`, `release-lab`.
 
 ## Why these rules and not more
 

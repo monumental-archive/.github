@@ -389,6 +389,30 @@ Anything asserting on the subject claim must be re-checked before a
 transfer. crates.io validates discrete claims rather than the raw subject,
 so it may be unaffected — verify rather than assume.
 
+**Measured 2026-08-09, and it does not match the changelog.** Renaming
+`edtf-release-lab` to `release-lab` — a rename well after the cutover date —
+left the repository reporting:
+
+```json
+{"use_default": true,
+ "use_immutable_subject": false,
+ "sub_claim_prefix": "repo:monumental-archive@314831567/release-lab@1327949748"}
+```
+
+from `GET /repos/{owner}/{repo}/actions/oidc/customization/sub`. So the
+rename did **not** flip `use_immutable_subject`, though the endpoint does
+preview the prefix the new format would produce.
+
+Two readings are possible — the flag may reflect only a deliberate opt-in
+while the issued token differs, or automatic adoption may not behave as the
+changelog describes. Settling it requires reading the `sub` claim of an
+actual OIDC token, not an API field.
+
+Operationally: **do not assume a rename or transfer flips the format, and
+do not assume it does not.** Query this endpoint before and after every
+transfer, and confirm against a real token before relying on either
+answer.
+
 ## Questions that require an experiment
 
 Documentation does not answer these; the release lab does.
