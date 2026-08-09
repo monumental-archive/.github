@@ -1,0 +1,127 @@
+# The last step, and the first moment anything becomes public. Attaches the
+# evidence bundle to the draft release and publishes it.
+#
+# Runs no caller code, which is the whole reason it is a separate job: the
+# canon's "attestation happens last, and only on proof" is enforceable only
+# while the job that publishes cannot be reached from a build step.
+#
+# The bundle shape is dictated by what the scoring checks actually match,
+# read from Scorecard's source rather than its documentation:
+#
+#   <name>.spdx.json   Scorecard's SBOM check matches
+#                      `.+\.(cdx.json|…|spdx.json|…)`, and awards the full
+#                      10 only for an SBOM that is a RELEASE ASSET — 5 if
+#                      it exists solely in the repo or the pipeline. Only
+#                      the five most recent releases are examined, so this
+#                      is a standing obligation, not a one-off.
+#   <artifact>.intoto.jsonl
+#                      Signed-Releases awards 8 for a signature and 10 only
+#                      when provenance is present; `*.intoto.jsonl` is one
+#                      of the recognised patterns, and it is also the
+#                      filename SLSA's distributing-provenance SHOULD asks
+#                      for. One convention satisfies both.
+#   checksums.txt      so a consumer can check bytes without tooling.
+name: attach-release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+      artifact-name:
+        description: Actions artifact holding the built files.
+        required: true
+        type: string
+      bundle-artifact:
+        description: Actions artifact holding the Sigstore bundle.
+        required: true
+        type: string
+      sbom-basename:
+        description: Basename for the SBOM asset; defaults to the repo name.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      app-private-key:
+        description: Tag-mint App private key
+        required: true
+
+permissions: {}
+
+jobs:
+  attach:
+    name: Attach the evidence bundle and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.bundle-artifact }}
+          path: bundle
+
+      - name: Name the provenance after what it describes
+        run: |
+          set -euo pipefail
+          # SLSA distributing-provenance: provenance "SHOULD have a
+          # filename that is directly related to the build artifact
+          # filename". One bundle covers every subject, so it is named
+          # after the release rather than after one artifact.
+          src=$(find bundle -type f | head -n 1)
+          [[ -n "${src}" ]] || { echo "::error::no Sigstore bundle"; exit 1; }
+          mv "${src}" "dist/attestations.intoto.jsonl"
+
+      - name: Generate the SPDX SBOM
+        env:
+          UNTRUSTED_BASENAME: ${{ inputs.sbom-basename }}
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="${UNTRUSTED_BASENAME:-${GITHUB_REPOSITORY##*/}}"
+          # GitHub natively produces SPDX; CycloneDX is third-party here.
+          # The dependency-graph export is the platform's own view of what
+          # this repository depends on, so it needs no extra tooling in a
+          # job that must run none.
+          gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" \
+            --jq '.sbom' > "dist/${base}-${UNTRUSTED_VERSION}.spdx.json"
+          # A zero-byte or null SBOM would satisfy the filename pattern and
+          # assert nothing. Fail instead.
+          if [[ ! -s "dist/${base}-${UNTRUSTED_VERSION}.spdx.json" ]]; then
+            echo "::error::SBOM export produced nothing"
+            exit 1
+          fi
+
+      - name: Checksum everything that ships
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./* | sed 's| \./| |' > checksums.txt
+
+      - name: Mint the publishing token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.TAG_MINT_APP_ID }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+
+      - name: Attach and publish
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
+          # Publishing is the commitment point. Immutable releases apply at
+          # publish, and GitHub mints its own release attestation binding
+          # tag, commit and asset digests at the same moment.
+          gh release edit "${TAG}" --draft=false --repo "${GITHUB_REPOSITORY}"
+          echo "::notice::published ${TAG}"

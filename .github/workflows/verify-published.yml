@@ -1,0 +1,82 @@
+# Pull the published bytes back and prove they are what was built.
+#
+# This job exists because a digest computed before publishing proves
+# nothing about what a consumer will download. It runs no caller code, so
+# the proof itself cannot be influenced by the repository being released,
+# and it emits the manifest the signer then attests — so the attested
+# subject is what shipped.
+name: verify-published
+
+on:
+  workflow_call:
+    inputs:
+      subjects:
+        description: sha256sum manifest produced by the build.
+        required: true
+        type: string
+    outputs:
+      subjects:
+        description: The manifest, re-derived from the published bytes.
+        value: ${{ jobs.verify.outputs.subjects }}
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Prove the registry bytes match the built bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Read-only, and no id-token: this job handles artifact bytes, so it
+      # must not be able to sign them.
+      contents: read
+    outputs:
+      subjects: ${{ steps.prove.outputs.subjects }}
+    steps:
+      - name: Prove each declared subject against the registry
+        id: prove
+        env:
+          UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
+        run: |
+          set -euo pipefail
+          record='^[0-9a-f]{64}  [^[:space:]]'
+          out="${RUNNER_TEMP}/verified.sha256"
+          : > "${out}"
+          count=0
+          while IFS= read -r line; do
+            line="${line%$'\r'}"
+            [[ -n "${line}" ]] || continue
+            count=$((count + 1))
+            if [[ ! "${line}" =~ ${record} ]]; then
+              echo "::error::subject line ${count} is not a sha256sum record"
+              exit 1
+            fi
+            digest="${line%% *}"
+            name="${line##*  }"
+            # crates.io serves the exact bytes it stored, under a stable
+            # path. Anything else here would be proving the artifact
+            # against itself.
+            crate="${name%-*}"
+            ver="${name##*-}"; ver="${ver%.crate}"
+            url="https://static.crates.io/crates/${crate}/${crate}-${ver}.crate"
+            echo "::group::${name}"
+            curl -sSfL --retry 5 --retry-connrefused -o "${RUNNER_TEMP}/${name}" "${url}"
+            actual=$(sha256sum "${RUNNER_TEMP}/${name}" | cut -d' ' -f1)
+            if [[ "${actual}" != "${digest}" ]]; then
+              echo "::error::${name}: built ${digest}, registry served ${actual}"
+              exit 1
+            fi
+            echo "${actual}  ${name}" >> "${out}"
+            echo "verified ${name}"
+            echo "::endgroup::"
+          done <<< "${UNTRUSTED_SUBJECTS}"
+          if ((count == 0)); then
+            echo "::error::nothing to verify — an empty proof is not a proof"
+            exit 1
+          fi
+          {
+            echo "subjects<<SUBJECTS_EOF"
+            cat "${out}"
+            echo "SUBJECTS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice::${count} subjects proved against the registry"

@@ -1,0 +1,166 @@
+# Artifact class: rust-crate. Two jobs, split on the only line that
+# matters — whether the job runs caller-supplied code. The capability split
+# is per job, not per file (docs/release.md).
+#
+#   build   runs cargo, so it runs caller code (build.rs, proc macros).
+#           It gets `contents: read` and nothing else.
+#   publish runs `cargo publish --no-verify`, which packages and uploads
+#           but does not build: "Don't verify the contents by building
+#           them", and building is the only thing that runs build.rs. So it
+#           executes no user-defined build step and may hold the registry
+#           identity.
+name: build-rust-crate
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+    outputs:
+      subjects:
+        description: sha256sum manifest of the packaged crates.
+        value: ${{ jobs.build.outputs.subjects }}
+      artifact-name:
+        description: Actions artifact holding the packaged crates.
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+permissions: {}
+
+jobs:
+  build:
+    name: Package and prove the crates build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    outputs:
+      subjects: ${{ steps.hash.outputs.subjects }}
+      artifact-name: packaged-crates
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          # No tool cache anywhere downstream of a signature: a poisoned
+          # cache would be signed along with everything else.
+          cache: false
+
+      - name: Refuse a tag whose version disagrees with the manifest
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --no-deps --format-version 1)
+          manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
+          versions=$(wc -l <<< "${manifest}")
+          if [[ "${versions}" -ne 1 ]]; then
+            echo "::error::workspace members disagree on version; canon is [workspace.package] inheritance"
+            exit 1
+          fi
+          if [[ "${manifest}" != "${UNTRUSTED_VERSION}" ]]; then
+            echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Package
+        # Verification is ON here, deliberately: this is the job that is
+        # allowed to build. `cargo package` extracts the tarball and
+        # compiles it, which catches the crate that builds in-workspace and
+        # fails from its packaged form.
+        run: cargo package --workspace --locked --allow-dirty=false
+
+      - name: Compute the subject manifest
+        id: hash
+        run: |
+          set -euo pipefail
+          cd target/package
+          manifest=$(sha256sum ./*.crate | sed 's| \./| |')
+          {
+            echo "subjects<<SUBJECTS_EOF"
+            printf '%s\n' "${manifest}"
+            echo "SUBJECTS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+          printf '%s\n' "${manifest}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packaged-crates
+          path: target/package/*.crate
+          if-no-files-found: error
+
+  publish:
+    name: Publish to crates.io
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Resolves against the CALLER's repository — measured. That is what
+    # sets the OIDC `environment` claim, which crates.io can pin in the
+    # trusted-publisher configuration alongside owner, repo and the
+    # caller's entry filename.
+    environment: publish
+    # capability-boundary: this job holds `id-token: write` and runs no
+    # user-defined build step. It checks out caller source because
+    # `cargo publish` packages from a directory and cannot upload a
+    # pre-built .crate, but `--no-verify` skips the build — "Don't verify
+    # the contents by building them" — so no build.rs, proc macro or test
+    # executes here. The identity it can mint is a registry token scoped to
+    # crates the caller already owns; the org's Sigstore identity lives in
+    # `signer` under a different job_workflow_ref and is unreachable from
+    # this job.
+    permissions:
+      contents: read
+      id-token: write # crates.io trusted publishing, no token secret
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          cache: false
+
+      - name: Publish
+        # Resumable: a crate already at this version is a completed step,
+        # not a failure. crates.io is yank-only, so re-running a partly
+        # finished release must converge rather than abort.
+        #
+        # The exchanged token is single-use — crates.io records the JWT's
+        # jti and rejects a replay — so each invocation mints its own.
+        run: |
+          set -euo pipefail
+          cargo publish --workspace --locked --no-verify

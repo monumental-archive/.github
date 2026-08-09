@@ -1,0 +1,154 @@
+# Release phase 2, org canon: the orchestrator. A versioned repository's
+# entire phase-2 obligation is one file holding one `uses:` line:
+#
+#   # .github/workflows/publish.yml — the filename is canon, see below
+#   jobs:
+#     publish:
+#       uses: monumental-archive/.github/.github/workflows/publish.yml@<sha> # vX.Y.Z
+#       with:
+#         class: rust-crate
+#
+# THE FILENAME IS LOAD-BEARING. Both crates.io and npm pin the *caller's*
+# entry workflow filename, taken from the `workflow_ref` claim — never
+# `job_workflow_ref`. Renaming a caller's publish.yml breaks trusted
+# publishing with nothing local going red. See docs/slsa-reference.md.
+#
+# The step order below is not rearrangeable, and it lives here rather than
+# in each caller precisely so that it cannot be rearranged:
+#
+#   build -> smoke test -> push -> pull the published bytes back and prove
+#   them -> attest -> verify as a stranger would -> publish the release
+#
+# The reusable workflows below are referenced relatively (`./`). Measured
+# in the lab: a relative reference resolves against THIS repository, at the
+# SAME COMMIT the caller pinned — not against the caller, and not against
+# this repository's default branch. So one caller SHA pins the orchestrator,
+# every build workflow, the verifier and the attach step atomically. That
+# property is why there is no self-referential SHA to bootstrap.
+#
+# capability-boundary: the `sign` job below declares `id-token: write`,
+# but this file runs no steps of its own — every job here is a `uses:`.
+# The grant exists solely to be passed down to `signer`, which is the only
+# place it is spent, and no job in this file that runs caller code holds
+# it: `build` gets `contents: read` and nothing more. The belt lint is
+# file-scoped rather than job-scoped, so this exception is written down
+# rather than assumed.
+#
+# `uses:` accepts no expressions — GitHub's context-availability table lists
+# no contexts for `jobs.<job_id>.uses` — so classes are dispatched by an
+# `if:` per job rather than by interpolating the input into a path.
+name: publish
+
+on:
+  workflow_call:
+    inputs:
+      class:
+        description: >
+          Artifact class. One shared build workflow per class; callers
+          declare inputs, not steps. A class that is not implemented fails
+          the guard below rather than silently publishing nothing.
+        required: true
+        type: string
+      sbom-basename:
+        description: >
+          Basename for the SPDX SBOM release asset. The asset must be named
+          `<something>.spdx.json`: Scorecard's SBOM check matches
+          `.+\.(…|spdx.json|…)`, so a bare `spdx.json` scores nothing and
+          an SBOM that never reaches a release asset caps the check at 5.
+          Defaults to the caller's repository name.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      app-private-key:
+        description: Tag-mint App private key, for publishing the release
+        required: true
+    outputs:
+      version:
+        description: The version published, without the leading v.
+        value: ${{ jobs.guard.outputs.version }}
+
+permissions: {}
+
+jobs:
+  # Nothing runs until the ref is proven to be a tag. A publish dispatched
+  # from a branch would attest a moving pointer, and Sigstore is
+  # append-only: that mistake is permanent, and it has already happened
+  # once in this organisation's history.
+  guard:
+    name: Refuse anything that is not a release tag
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Check the ref and the class
+        id: check
+        env:
+          UNTRUSTED_CLASS: ${{ inputs.class }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            echo "::error::publish runs on v* tags only, got ${GITHUB_REF}"
+            echo "::error::dispatching from a branch would attest a moving pointer"
+            exit 1
+          fi
+          case "${UNTRUSTED_CLASS}" in
+            rust-crate) ;;
+            rust-binary | oci-image | wasm-npm)
+              echo "::error::class '${UNTRUSTED_CLASS}' is declared but not yet built"
+              exit 1
+              ;;
+            *)
+              echo "::error::unknown class"
+              exit 1
+              ;;
+          esac
+          version="${GITHUB_REF#refs/tags/v}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::publishing ${UNTRUSTED_CLASS} version ${version}"
+
+  build:
+    name: Build
+    needs: guard
+    if: inputs.class == 'rust-crate'
+    uses: ./.github/workflows/build-rust-crate.yml
+    with:
+      version: ${{ needs.guard.outputs.version }}
+
+  # Runs no caller code, so it can hold the writes the build job must not.
+  # It pulls the published bytes back and hashes them: the attested subject
+  # is what shipped, not what we hoped shipped.
+  verify:
+    name: Verify published bytes
+    needs: [guard, build]
+    uses: ./.github/workflows/verify-published.yml
+    with:
+      subjects: ${{ needs.build.outputs.subjects }}
+
+  # The signer never sees artifact bytes, only digests, and holds the only
+  # `id-token: write` in the release path.
+  sign:
+    name: Sign
+    needs: verify
+    uses: monumental-archive/signer/.github/workflows/sign.yml@3c30fc243b42b95a7fb09934b3ab19292e051ba2 # main
+    with:
+      subjects: ${{ needs.verify.outputs.subjects }}
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+
+  # Last, and only on proof. Attaches the evidence bundle and publishes the
+  # draft — the first moment anything becomes public.
+  attach:
+    name: Attach evidence and publish
+    needs: [guard, build, sign]
+    uses: ./.github/workflows/attach-release.yml
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      artifact-name: ${{ needs.build.outputs.artifact-name }}
+      bundle-artifact: ${{ needs.sign.outputs.bundle-artifact }}
+      sbom-basename: ${{ inputs.sbom-basename }}
+    secrets:
+      app-private-key: ${{ secrets.app-private-key }}
