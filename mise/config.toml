@@ -25,6 +25,7 @@ actionlint = "1.7.12"
 shellcheck = "0.11.0"
 typos = "1.49.0"
 lefthook = "2.1.10"
+trivy = "0.73.0"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -62,6 +63,16 @@ dir = "{{cwd}}"
 # is en-US in code and en-GB in prose, which no per-file locale can split.
 # Repo-specific jargon goes in that repo's own _typos.toml (extend-words).
 run = "typos"
+
+[tasks."lint:trivy"]
+description = "Misconfiguration + committed-secret scan (trivy)"
+dir = "{{cwd}}"
+# Deterministic scanners only: misconfig and secrets are properties of the
+# diff. Vulnerability scanning is deliberately absent from the gate — it is
+# non-deterministic CI (a new CVE fails unrelated PRs) and already enforced
+# org-wide via Dependabot alerts/security updates + Renovate.
+# --exit-code 1: trivy exits 0 on findings by default.
+run = "trivy fs --scanners misconfig,secret --exit-code 1 ."
 
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows (actionlint)"
