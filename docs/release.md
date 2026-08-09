@@ -119,7 +119,10 @@ The step order is not rearrangeable:
 - Registries use trusted publishing (OIDC) only; token publishing is
   disabled per crate/package once flows are proven. A crate's first publish
   is manual (crates.io limitation).
-- Signing goes through **trusted-builder**: callers build their own quirky
+- Signing goes through **`signer`** — named for what it does, not for
+  SLSA's `builder.id` field, which means "whoever generated the
+  provenance" and has misled this project more than once. Callers build
+  their own quirky
   artifacts, pass hashes, and the caller-code-free reusable workflow signs.
   One certificate identity for every org artifact; `id-token: write` lives
   there and never here.
@@ -160,9 +163,9 @@ check recognises.
 
 | Repository | Gaps to close |
 | --- | --- |
-| edtf | drop release-plz + per-crate tags; adopt `[workspace.package]` inheritance; App-minted tag; re-anchor attestation to trusted-builder |
-| iiif-server | adopt canonical `cliff.toml`/scripts (it is their source, but canon now lives here); App-minted tag replaces `RELEASE_TOKEN`; re-anchor to trusted-builder |
-| monumental-archive-db | re-anchor cosign identity to trusted-builder; everything else exempt (continuous archetype) |
+| edtf | drop release-plz + per-crate tags; adopt `[workspace.package]` inheritance; App-minted tag; re-anchor attestation to `signer` |
+| iiif-server | adopt canonical `cliff.toml`/scripts (it is their source, but canon now lives here); App-minted tag replaces `RELEASE_TOKEN`; re-anchor to `signer` |
+| monumental-archive-db | re-anchor cosign identity to `signer`; everything else exempt (continuous archetype) |
 
 Risky release-machinery changes are proven in the **release lab**
 (`release-lab`) before any production repository
