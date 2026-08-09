@@ -93,7 +93,10 @@ jobs:
         # allowed to build. `cargo package` extracts the tarball and
         # compiles it, which catches the crate that builds in-workspace and
         # fails from its packaged form.
-        run: cargo package --workspace --locked --allow-dirty=false
+        # No --allow-dirty: it is a flag, not a boolean option, and
+        # omitting it is what refuses a dirty tree. `--allow-dirty=false`
+        # is rejected outright by cargo.
+        run: cargo package --workspace --locked
 
       - name: Compute the subject manifest
         id: hash

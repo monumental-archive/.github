@@ -42,11 +42,22 @@ name: publish
 on:
   workflow_call:
     inputs:
-      class:
+      classes:
         description: >
-          Artifact class. One shared build workflow per class; callers
-          declare inputs, not steps. A class that is not implemented fails
-          the guard below rather than silently publishing nothing.
+          Artifact classes, comma-separated. One shared build workflow per
+          class; callers declare inputs, not steps.
+
+          A repository may need several in one release and most do:
+          iiif-server ships an OCI image AND musl/macOS binaries while
+          publishing no crates at all, and edtf publishes crates, a
+          binary, an image and a wasm package. A scalar here would have
+          forced such a repository back into writing its own steps, which
+          is the thing this design exists to prevent.
+
+          `workflow_call` inputs are only string, boolean or number — there
+          is no list type — so this is a string and the jobs below gate on
+          `contains()`. A class that is not implemented fails the guard
+          rather than silently publishing nothing.
         required: true
         type: string
       dry-run:
@@ -97,7 +108,7 @@ jobs:
       - name: Check the ref and the class
         id: check
         env:
-          UNTRUSTED_CLASS: ${{ inputs.class }}
+          UNTRUSTED_CLASSES: ${{ inputs.classes }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
@@ -105,17 +116,24 @@ jobs:
             echo "::error::dispatching from a branch would attest a moving pointer"
             exit 1
           fi
-          case "${UNTRUSTED_CLASS}" in
-            rust-crate) ;;
-            rust-binary | oci-image | wasm-npm)
-              echo "::error::class '${UNTRUSTED_CLASS}' is declared but not yet built"
-              exit 1
-              ;;
-            *)
-              echo "::error::unknown class"
-              exit 1
-              ;;
-          esac
+          IFS=',' read -ra requested <<< "${UNTRUSTED_CLASSES// /}"
+          if ((${#requested[@]} == 0)); then
+            echo "::error::no classes requested — a release that builds nothing is not a release"
+            exit 1
+          fi
+          for c in "${requested[@]}"; do
+            case "${c}" in
+              rust-crate) ;;
+              rust-binary | oci-image | wasm-npm)
+                echo "::error::class is declared but not yet built"
+                exit 1
+                ;;
+              *)
+                echo "::error::unknown class requested"
+                exit 1
+                ;;
+            esac
+          done
           version="${GITHUB_REF#refs/tags/v}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "::notice::publishing ${UNTRUSTED_CLASS} version ${version}"
@@ -123,7 +141,7 @@ jobs:
   build:
     name: Build
     needs: guard
-    if: inputs.class == 'rust-crate'
+    if: contains(inputs.classes, 'rust-crate')
     uses: ./.github/workflows/build-rust-crate.yml
     permissions:
       # Restated, not inherited. A `uses:` job with no `permissions:` block
