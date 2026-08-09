@@ -3,9 +3,11 @@
 The intended org-level rulesets, kept here so they are reviewable and
 reproducible rather than clicked into a settings UI and hoped to match.
 
-Org rulesets require **GitHub Team**. Apply each file once at org level,
-targeting all repositories; `~ALL` is dynamic, so repos transferring in
-later are covered without a further step.
+Org rulesets require **GitHub Team**. **Applied 2026-08-09**: all three are
+live at org level, `enforcement: active`, scoped `~ALL` — which is dynamic,
+so repositories transferring in later are covered with no further step. The
+per-repository copies that stood in beforehand have been removed, so there
+is one source of truth rather than two to reconcile.
 
 ```bash
 gh api -X POST orgs/monumental-archive/rulesets --input rulesets/org-default-branch.json
@@ -23,28 +25,22 @@ The `v*` creation lock's enabler is the minting App, and it **exists**:
 (see below), so that ruleset ships `active` — there is nothing left to wait
 for.
 
-The branch ruleset's enabler is the shared gate, and that one is **not yet
-satisfied everywhere**: `required_status_checks` naming a context a repo
-never reports leaves its pull requests at *"Expected — waiting for status to
-be reported"* forever. The fix is always to adopt the gate in that repo,
-never to soften the rule.
+The branch ruleset's enabler is the shared gate: `required_status_checks`
+naming a context a repository never reports leaves its pull requests at
+*"Expected — waiting for status to be reported"* forever. The fix is always
+to adopt the gate in that repository, never to soften the rule.
 
 The trap there: a repo can run perfectly good CI and still fail, because the
 **check name is the contract**. A repo can lint harder than the shared gate
 does and still never report `ci / ci`, which leaves its pull requests
 waiting forever.
 
-**As of 2026-08-09 that blocker is cleared.** `signer` and `release-lab`
-both adopted the shared gate and both report `ci / ci` — observed on
-monumental-archive/signer#11 and monumental-archive/release-lab#11. All
-three org repositories now satisfy the enabler, so the org-level branch
-ruleset can be applied at `enforcement: "active"` immediately on the Team
-upgrade, with no repository left waiting.
-
-Until that upgrade, `signer` and `release-lab` have **no branch ruleset**.
-Per-repo application was considered and deliberately rejected: one org
-ruleset everyone adopts is the target shape, and per-repo copies would be a
-second source of truth to reconcile and delete hours later.
+**Cleared 2026-08-09.** `signer` and `release-lab` both adopted the shared
+gate and both report `ci / ci` — observed on monumental-archive/signer#11
+and monumental-archive/release-lab#11 — so the org ruleset went straight to
+`enforcement: "active"` with no repository left waiting. A repository that
+transfers in later must adopt the gate *before* it can merge anything,
+which is the intended order rather than a hazard.
 
 ## Why these rules and not more
 
@@ -54,19 +50,46 @@ weights are in `checks/evaluation/branch_protection.go`:
 | Tier | Points | Requires |
 | --- | --- | --- |
 | 1 | 3 | block deletion + block force push |
-| 2 | 3 | required approving reviews ≥ 1, protection applies to admins |
+| 2 | 3 | required approving reviews ≥ 1 **and** up-to-date branches + last-push approval + PRs required to change code |
 | 3 | 2 | required status checks |
 | 4 | 1 | `minReviews = 2` **and** code-owner review |
-| 5 | 1 | admin thorough review |
+| 5 | 1 | dismiss stale reviews **and** protection applies to admins |
 
-Tiers 1 and 3 are fully claimed. **Tiers 2, 4 and 5 are unreachable for a
-solo maintainer** and no setting substitutes: GitHub will not let you approve
-your own pull request, so `required_approving_review_count: 1` would stop you
-merging anything, and tier 4 hard-codes two reviewers. The count is therefore
-deliberately `0` — raising it buys no score and costs the ability to ship.
+**The tiers are sequentially gated, and this is the part that matters.**
+`computeFinalScore` adds a tier's points and then *returns early* if that
+tier was not scored at its maximum:
 
-Revisit the moment a second maintainer exists; tiers 2 and 4 become available
-together and are worth four points.
+```go
+score += normalizeScore(basicScore, maxBasicScore, basicLevel)
+if basicScore < maxBasicScore { return int(score), nil }
+score += normalizeScore(adminNonAdminReviewScore, …)
+if adminNonAdminReviewScore < … { return int(score), nil }
+score += normalizeScore(contextScore, …)   // never reached unless tier 2 maxed
+```
+
+So a tier cannot be claimed out of order. Required status checks are tier 3
+and score **nothing** while tier 2 is unmet, no matter how strictly they are
+configured.
+
+Tier 2 needs `required_approving_review_count > 0`, and GitHub will not let
+you approve your own pull request. So for a solo maintainer the check stops
+after tier 1: **3/10, and no configuration changes that.** Two earlier
+statements were wrong and are corrected here — this file previously claimed
+tiers 1 and 3 were "fully claimed" (tier 3 is unreachable without tier 2),
+and put "protection applies to admins" in tier 2 when the source puts
+`branchProtectionAppliesToAdmins` in tier 5.
+
+Being an organisation does not change this. What the Team plan buys is
+org-level application, which is governance rather than score.
+
+**Everything above tier 1 is therefore configured for its own sake, not for
+points**, and that is the right reason: required status checks, linear
+history, required signatures and an empty bypass list each prevent a real
+failure. The badge effort belongs on the other nineteen checks, which are
+not gated and where sixteen can reach 10/10.
+
+Revisit the moment a second maintainer exists: tiers 2, 3 and 4 unlock
+together and are worth six points, not four.
 
 ## What is deliberately absent
 
@@ -85,13 +108,12 @@ Merge methods are `squash` and `rebase` only: `required_linear_history`
 blocks merge commits, so allowing the merge-commit button would offer a
 method that always fails at merge time.
 
-## The release-tag lock (proven; staged for the org)
+## The release-tag lock (proven, and live)
 
 `org-release-tag.json` restricts `v*` tag **creation** so release tags cannot
-exist except via the pipeline (docs/release.md). It still ships with
-`enforcement: "disabled"` in this repo because org-level application waits on
-the Team plan — but the rule itself is proven, and activation has a hard
-order, since doing it early locks releasing out entirely:
+exist except via the pipeline (docs/release.md). It is **live org-wide at
+`active`**. Activation had a hard order, since doing it early locks
+releasing out entirely, and every step is now done:
 
 1. ~~The tag-minting GitHub App exists and its installation is org-wide.~~
    Done: `monumental-archive-tag-mint`, App id 4534781, installed org-wide.
@@ -104,8 +126,9 @@ order, since doing it early locks releasing out entirely:
    - **Positive**: merging a release PR mints an annotated tag and a draft
      release through the App's bypass.
    - `current_user_can_bypass: "never"` confirms the org owner is bound too.
-4. Apply org-wide and flip to `active`, together with the pipeline. Blocked
-   on the Team plan (org rulesets are a Team feature).
+4. ~~Apply org-wide and flip to `active`, together with the pipeline.~~
+   Done 2026-08-09, on the Team upgrade, alongside a phase-2 pipeline
+   proven end to end in the lab.
 
 **`evaluate` mode proves neither half.** It enforces nothing, so a human
 push is not rejected; and a bypass actor records no evaluation, so the App's
@@ -115,11 +138,6 @@ throwaway repository, never at `evaluate`.
 
 Break-glass for a dead App is an org admin disabling this ruleset — recorded
 here as a change, not clicked and forgotten.
-
-## Planned
-
-- **Org-wide required status check** on a standard summary job name (e.g.
-  `ci-gate`) once the shared CI workflow reports under one name everywhere.
 
 ## Beyond Scorecard
 
