@@ -30,6 +30,9 @@ zizmor = "1.29.0"
 committed = "1.1.11"
 taplo = "0.10.0"
 shfmt = "3.13.1"
+# rumdl over markdownlint-cli2: same rule family, aqua-backed instead of
+# npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
+rumdl = "0.2.52"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -80,6 +83,16 @@ run = 'files=$(git ls-files "*.toml"); if [[ -n "${files}" ]]; then xargs taplo 
 description = "Rewrite TOML to canonical format (taplo)"
 dir = "{{cwd}}"
 run = 'git ls-files "*.toml" | xargs taplo fmt'
+
+[tasks."lint:markdown"]
+description = "Markdown lint (rumdl, full rule set)"
+dir = "{{cwd}}"
+run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."fix:markdown"]
+description = "Auto-fix markdown (rumdl)"
+dir = "{{cwd}}"
+run = 'git ls-files "*.md" "*.markdown" | xargs rumdl check --fix'
 
 [tasks."lint:shell"]
 description = "Shell format check (shfmt: 2-space, simplify, strict layout)"
