@@ -1,0 +1,19 @@
+# This repo eats its own gate: every PR runs the reusable workflow at the
+# PR's own ref (local uses: needs no pin — it is the code under review).
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
