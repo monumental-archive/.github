@@ -229,6 +229,34 @@ For images: `subject-name` must be the fully-qualified image name with
 referrer, linked by the `subject` field of the attestation manifest.
 GitHub's guidance does **not** cover multi-arch manifest lists.
 
+**Measured 2026-08-09.** A two-architecture image was pushed to GHCR and
+**only its index digest** attested. Verification then resolved as:
+
+| Verified by | Result |
+| --- | --- |
+| tag — `oci://<image>:<tag>` | **passes** |
+| index digest — `oci://<image>@sha256:<index>` | **passes** |
+| per-architecture digest | **fails** |
+
+So `gh attestation verify oci://…:<tag>` resolves the **index**, and
+attesting the index is what covers the ordinary `docker pull <image>:<tag>`
+path. Per-architecture digests are not covered by an index attestation: a
+consumer who pins one architecture by digest gets a verification failure
+unless those digests are attested too. Attest the index always, and the
+per-arch digests as well only if consumers are expected to pin an
+architecture.
+
+Incidental, and worth knowing before reading a manifest list: `docker
+buildx` adds its own `unknown/unknown` entries to the list — BuildKit's
+provenance and SBOM attestations, which are a different mechanism from
+GitHub's and are not what `gh attestation verify` reads. Filter on
+`.platform.architecture` when extracting per-arch digests, or they appear
+as phantom platforms.
+
+The push itself used **preinstalled `docker buildx` and `docker login`**,
+no `docker/*` actions, so the organisation's Actions allowlist does not
+need to grow to build images.
+
 ## Reusable workflows
 
 - Permissions "can only be maintained or reduced—not elevated". Docs say an
@@ -568,9 +596,10 @@ Documentation does not answer these; the release lab does.
 1. ~~Can a shared signing reusable workflow be environment-scoped, and
    whose repository's environment applies?~~ **Answered** — yes, and the
    caller's; see "Environment scoping, measured".
-2. For a multi-arch image, should the attestation subject be the index
+2. ~~For a multi-arch image, should the attestation subject be the index
    digest or the per-arch digests, and what does
-   `gh attestation verify oci://…:tag` resolve?
+   `gh attestation verify oci://…:tag` resolve?~~ **Answered** — the
+   index; see "Measured 2026-08-09" under `actions/attest`.
 3. What predicate type does GitHub's automatic release attestation use?
 4. Does the OIDC subject-claim format change break either registry's
    trusted publishing configuration on transfer? **Answered for
