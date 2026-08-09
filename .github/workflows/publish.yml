@@ -6,7 +6,7 @@
 #     publish:
 #       uses: monumental-archive/.github/.github/workflows/publish.yml@<sha> # vX.Y.Z
 #       with:
-#         class: rust-crate
+#         classes: rust-crate
 #
 # THE FILENAME IS LOAD-BEARING. Both crates.io and npm pin the *caller's*
 # entry workflow filename, taken from the `workflow_ref` claim — never
@@ -90,6 +90,26 @@ on:
         required: false
         type: string
         default: ""
+      binary-targets:
+        description: >
+          Target subset for the rust-binary class; defaults to the canon
+          four. The build's plan job refuses anything outside canon.
+        required: false
+        type: string
+        default: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin
+      binary-smoke-test:
+        description: >
+          Executable proving a built binary does its one job, for the
+          rust-binary class. Receives the staged-binaries directory and the
+          target triple; runs on every leg, on that leg's own hardware.
+        required: false
+        type: string
+        default: ""
+      crate-dir:
+        description: Directory of the wasm crate, for the wasm-npm class.
+        required: false
+        type: string
+        default: "."
       sbom-basename:
         description: >
           Basename for the SPDX SBOM release asset. The asset must be named
@@ -141,11 +161,7 @@ jobs:
           fi
           for c in "${requested[@]}"; do
             case "${c}" in
-              rust-crate | oci-image) ;;
-              rust-binary | wasm-npm)
-                echo "::error::class is declared but not yet built"
-                exit 1
-                ;;
+              rust-crate | oci-image | rust-binary | wasm-npm) ;;
               *)
                 echo "::error::unknown class requested"
                 exit 1
@@ -231,6 +247,77 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@40ada01b4f6cdce65fe8e1edcacac83bea4473a4 # main
     with:
       subjects: ${{ needs.verify.outputs.subjects }}
+      bundle-artifact: attestation-bundle-crates
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+
+  build-binary:
+    name: Build binaries
+    needs: guard
+    if: contains(inputs.classes, 'rust-binary')
+    uses: ./.github/workflows/build-rust-binary.yml
+    permissions:
+      # Restated, not inherited — see the note on `build` above.
+      contents: read # checkout of the caller; binaries touch no registry
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      targets: ${{ inputs.binary-targets }}
+      smoke-test: ${{ inputs.binary-smoke-test }}
+
+  # Binaries have no registry to pull back from: they become release
+  # assets, and GitHub's own release attestation binds tag, commit and
+  # asset digests at publish. The subjects signed are the archives the
+  # attach job uploads — the same bytes, proven by the collect job's
+  # refuse-a-partial-set guard.
+  sign-binaries:
+    name: Sign binaries
+    needs: build-binary
+    if: contains(inputs.classes, 'rust-binary')
+    uses: monumental-archive/signer/.github/workflows/sign.yml@40ada01b4f6cdce65fe8e1edcacac83bea4473a4 # main
+    with:
+      subjects: ${{ needs.build-binary.outputs.subjects }}
+      bundle-artifact: attestation-bundle-binaries
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+
+  build-wasm:
+    name: Build wasm package
+    needs: guard
+    if: contains(inputs.classes, 'wasm-npm')
+    uses: ./.github/workflows/build-wasm-npm.yml
+    permissions:
+      # Restated, not inherited — see the note on `build` above.
+      contents: read # checkout of the caller
+      id-token: write # npm trusted publishing, in the publish job
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      crate-dir: ${{ inputs.crate-dir }}
+      dry-run: ${{ inputs.dry-run }}
+
+  verify-wasm:
+    name: Verify published wasm bytes
+    needs: build-wasm
+    if: contains(inputs.classes, 'wasm-npm')
+    uses: ./.github/workflows/verify-published.yml
+    permissions:
+      contents: read # the verifier holds no more than this
+    with:
+      subjects: ${{ needs.build-wasm.outputs.subjects }}
+      npm-package: ${{ needs.build-wasm.outputs.package }}
+      dry-run: ${{ inputs.dry-run }}
+
+  sign-wasm:
+    name: Sign wasm package
+    needs: verify-wasm
+    if: contains(inputs.classes, 'wasm-npm')
+    uses: monumental-archive/signer/.github/workflows/sign.yml@40ada01b4f6cdce65fe8e1edcacac83bea4473a4 # main
+    with:
+      subjects: ${{ needs.verify-wasm.outputs.subjects }}
+      bundle-artifact: attestation-bundle-npm
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -238,15 +325,30 @@ jobs:
 
   # Last, and only on proof. Attaches the evidence bundle and publishes the
   # draft — the first moment anything becomes public.
+  #
+  # Fan-in, by construction: `needs` names every sign job, the `if` demands
+  # that nothing upstream failed AND that every REQUESTED class delivered
+  # its signature (dry-run excuses the classes whose signer legitimately
+  # skipped). A skipped class never blocks; a failed or missing one always
+  # does. Assets and bundles travel as `release-*` / `attestation-bundle-*`
+  # artifacts, so attach needs no per-class inputs and a fifth class is one
+  # more job above, not a contract change here.
   attach:
     name: Attach evidence and publish
-    needs: [guard, build, sign]
+    needs: [guard, sign, sign-image, sign-binaries, sign-wasm]
+    if: >-
+      ${{
+        !cancelled() && needs.guard.result == 'success'
+        && !contains(join(needs.*.result, ','), 'failure')
+        && (!contains(inputs.classes, 'rust-crate') || needs.sign.result == 'success')
+        && (!contains(inputs.classes, 'oci-image') || needs.sign-image.result == 'success' || inputs.dry-run)
+        && (!contains(inputs.classes, 'rust-binary') || needs.sign-binaries.result == 'success')
+        && (!contains(inputs.classes, 'wasm-npm') || needs.sign-wasm.result == 'success')
+      }}
     uses: ./.github/workflows/attach-release.yml
     permissions: {} # it publishes with the App token, not GITHUB_TOKEN
     with:
       version: ${{ needs.guard.outputs.version }}
-      artifact-name: ${{ needs.build.outputs.artifact-name }}
-      bundle-artifact: ${{ needs.sign.outputs.bundle-artifact }}
       sbom-basename: ${{ inputs.sbom-basename }}
       dry-run: ${{ inputs.dry-run }}
     secrets:

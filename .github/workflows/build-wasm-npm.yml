@@ -1,0 +1,264 @@
+# Artifact class: wasm-npm. Two jobs, split on the only line that matters —
+# whether the job runs caller-supplied code (docs/release.md).
+#
+#   build   runs cargo and wasm-pack, so it runs caller code (build.rs,
+#           proc macros, tests). It gets `contents: read` and nothing else,
+#           and it is the job that hashes the exact tarball bytes.
+#   publish uploads the already-packed tarball. `npm publish <tarball>`
+#           runs no build and no scripts of the package being published —
+#           prepack/prepare ran at pack time, in the build job — so it
+#           executes no user-defined build step and may hold the registry
+#           identity.
+#
+# wasm-pack and node/npm are CALLER BUILD INPUTS, pinned in the caller's own
+# mise config exactly like its rust toolchain — not belt tools, because the
+# belt is the universal layer and this class is not universal. The jobs
+# assert their presence and fail with the remedy rather than installing
+# anything unpinned.
+#
+# npm mints its own provenance and publish attestations under trusted
+# publishing, naming the CALLER's workflow — a second, independent evidence
+# path beside the org's Sigstore identity (docs/slsa-reference.md: the two
+# are documented, not unified).
+name: build-wasm-npm
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+      crate-dir:
+        description: Directory of the wasm crate, relative to the repo root.
+        required: false
+        type: string
+        default: "."
+      dry-run:
+        description: Rehearsal — build, pack and prove, but publish nothing.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      subjects:
+        description: sha256sum manifest of the packed npm tarball.
+        value: ${{ jobs.build.outputs.subjects }}
+      artifact-name:
+        description: Actions artifact holding the packed tarball.
+        value: ${{ jobs.build.outputs.artifact-name }}
+      package:
+        description: >
+          The npm package as name@version, read from the generated
+          package.json. The verifier needs the real name: a scoped
+          package's tarball filename mangles the scope, so the name cannot
+          be reconstructed from the file.
+        value: ${{ jobs.build.outputs.package }}
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build, test and pack the wasm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    outputs:
+      subjects: ${{ steps.pack.outputs.subjects }}
+      artifact-name: npm-package
+      package: ${{ steps.pack.outputs.package }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          # No tool cache anywhere downstream of a signature.
+          cache: false
+
+      - name: Assert the caller pinned its build inputs
+        run: |
+          set -euo pipefail
+          # Build inputs live in the caller's mise config, like its rust
+          # toolchain. Nothing is installed ad hoc here: an unpinned tool in
+          # a signing pipeline is the thing the whole toolbelt design
+          # exists to prevent.
+          for tool in wasm-pack node npm; do
+            command -v "${tool}" > /dev/null || {
+              echo "::error::${tool} not found — pin it in this repository's mise config; it is a build input of the wasm-npm class"
+              exit 1
+            }
+          done
+          rustup target add wasm32-unknown-unknown
+
+      - name: Refuse a tag whose version disagrees with the manifest
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --no-deps --format-version 1 \
+            --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
+          manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
+          versions=$(wc -l <<< "${manifest}")
+          if [[ "${versions}" -ne 1 ]]; then
+            echo "::error::workspace members disagree on version; canon is [workspace.package] inheritance"
+            exit 1
+          fi
+          if [[ "${manifest}" != "${UNTRUSTED_VERSION}" ]]; then
+            echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+            exit 1
+          fi
+
+      - name: Test
+        env:
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml"
+
+      - name: Build the package
+        env:
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          wasm-pack build --release "${UNTRUSTED_CRATE_DIR}"
+
+      - name: Pack and hash the exact bytes that will publish
+        id: pack
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          # npm pack here, npm publish <tarball> there: the bytes that are
+          # hashed, signed and verified are the bytes that ship, with no
+          # re-pack in between to drift.
+          mkdir -p dist
+          pkg="${UNTRUSTED_CRATE_DIR}/pkg"
+          name=$(jq -r '.name' "${pkg}/package.json")
+          version=$(jq -r '.version' "${pkg}/package.json")
+          if [[ "${version}" != "${UNTRUSTED_VERSION}" ]]; then
+            echo "::error::package.json says ${version}, tag says ${UNTRUSTED_VERSION}"
+            exit 1
+          fi
+          pkg_abs=$(realpath "${pkg}")
+          cd dist
+          tarball=$(npm pack "${pkg_abs}" --silent)
+          if [[ ! -s "${tarball}" ]]; then
+            echo "::error::npm pack produced nothing"
+            exit 1
+          fi
+          manifest=$(sha256sum "${tarball}")
+          {
+            echo "subjects<<SUBJECTS_EOF"
+            printf '%s\n' "${manifest}"
+            echo "SUBJECTS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+          echo "package=${name}@${version}" >> "${GITHUB_OUTPUT}"
+          printf '%s\n' "${manifest}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: build
+    # The only irreversible step in the class (npm unpublish closes after
+    # 72 hours). A rehearsal skips exactly this and nothing else.
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Resolves against the CALLER's repository — measured. Sets the OIDC
+    # `environment` claim npm can pin beside the caller's entry filename.
+    environment: publish
+    # capability-boundary: this job holds `id-token: write` and runs no
+    # user-defined build step. It publishes a tarball packed and hashed in
+    # the build job — `npm publish <tarball>` runs no lifecycle script of
+    # the published package — and it checks out only enough to read the
+    # caller's pinned npm from mise. The identity it can mint is a registry
+    # token scoped to packages the caller already owns; the org's Sigstore
+    # identity lives in `signer` under a different job_workflow_ref and is
+    # unreachable from this job.
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing, no token secret
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: dist
+
+      - name: Publish
+        env:
+          PACKAGE: ${{ needs.build.outputs.package }}
+        run: |
+          set -euo pipefail
+          # Trusted publishing needs npm >= 11.5.1, which detects the OIDC
+          # environment itself — no token is exchanged by hand and none is
+          # ever printed. The pinned npm comes from the caller's mise
+          # config; if it is too old the answer is to bump the pin, never
+          # to mutate the runner with an unpinned global install.
+          need="11.5.1"
+          have=$(npm --version)
+          lowest=$(printf '%s\n' "${need}" "${have}" | sort -V | head -1)
+          if [[ "${lowest}" != "${need}" ]]; then
+            echo "::error::npm ${have} < ${need}; trusted publishing needs ${need}+ — bump the pin in this repository's mise config"
+            exit 1
+          fi
+          # Resumable: a version already on the registry is a completed
+          # step, not a failure. The unpublish window makes re-runs real.
+          if npm view "${PACKAGE}" version > /dev/null 2>&1; then
+            echo "::notice::${PACKAGE} already on the registry; publish is complete"
+            exit 0
+          fi
+          tarball=$(compgen -G "dist/*.tgz")
+          count=$(wc -l <<< "${tarball}")
+          if [[ "${count}" -ne 1 ]]; then
+            echo "::error::expected exactly one tarball, found ${count}"
+            exit 1
+          fi
+          # npm generates provenance automatically under trusted
+          # publishing; --provenance is asserted anyway so a silent fallback
+          # to a weaker auth path fails instead of publishing unattested.
+          npm publish "${tarball}" --provenance --access public

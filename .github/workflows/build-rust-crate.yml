@@ -46,7 +46,7 @@ jobs:
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
     outputs:
       subjects: ${{ steps.hash.outputs.subjects }}
-      artifact-name: packaged-crates
+      artifact-name: release-crates
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,7 +113,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: packaged-crates
+          name: release-crates
           path: target/package/*.crate
           if-no-files-found: error
 
