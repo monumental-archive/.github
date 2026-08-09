@@ -29,6 +29,7 @@ trivy = "0.73.0"
 zizmor = "1.29.0"
 committed = "1.1.11"
 taplo = "0.10.0"
+shfmt = "3.13.1"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -79,6 +80,16 @@ run = 'files=$(git ls-files "*.toml"); if [[ -n "${files}" ]]; then xargs taplo 
 description = "Rewrite TOML to canonical format (taplo)"
 dir = "{{cwd}}"
 run = 'git ls-files "*.toml" | xargs taplo fmt'
+
+[tasks."lint:shell"]
+description = "Shell format check (shfmt: 2-space, simplify, strict layout)"
+dir = "{{cwd}}"
+run = 'files=$(git ls-files "*.sh" "*.bash"); if [[ -n "${files}" ]]; then xargs shfmt -i 2 -bn -ci -sr -s -d <<<"${files}"; else echo "lint:shell: no shell tracked, skipped"; fi'
+
+[tasks."fix:shell"]
+description = "Rewrite shell to canonical format (shfmt)"
+dir = "{{cwd}}"
+run = 'git ls-files "*.sh" "*.bash" | xargs shfmt -i 2 -bn -ci -sr -s -w'
 
 [tasks."lint:commits"]
 description = "Conventional-commit check for the branch (committed)"
