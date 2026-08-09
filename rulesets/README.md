@@ -25,28 +25,22 @@ The `v*` creation lock's enabler is the minting App, and it **exists**:
 (see below), so that ruleset ships `active` — there is nothing left to wait
 for.
 
-The branch ruleset's enabler is the shared gate, and that one is **not yet
-satisfied everywhere**: `required_status_checks` naming a context a repo
-never reports leaves its pull requests at *"Expected — waiting for status to
-be reported"* forever. The fix is always to adopt the gate in that repo,
-never to soften the rule.
+The branch ruleset's enabler is the shared gate: `required_status_checks`
+naming a context a repository never reports leaves its pull requests at
+*"Expected — waiting for status to be reported"* forever. The fix is always
+to adopt the gate in that repository, never to soften the rule.
 
 The trap there: a repo can run perfectly good CI and still fail, because the
 **check name is the contract**. A repo can lint harder than the shared gate
 does and still never report `ci / ci`, which leaves its pull requests
 waiting forever.
 
-**As of 2026-08-09 that blocker is cleared.** `signer` and `release-lab`
-both adopted the shared gate and both report `ci / ci` — observed on
-monumental-archive/signer#11 and monumental-archive/release-lab#11. All
-three org repositories now satisfy the enabler, so the org-level branch
-ruleset can be applied at `enforcement: "active"` immediately on the Team
-upgrade, with no repository left waiting.
-
-Until that upgrade, `signer` and `release-lab` have **no branch ruleset**.
-Per-repo application was considered and deliberately rejected: one org
-ruleset everyone adopts is the target shape, and per-repo copies would be a
-second source of truth to reconcile and delete hours later.
+**Cleared 2026-08-09.** `signer` and `release-lab` both adopted the shared
+gate and both report `ci / ci` — observed on monumental-archive/signer#11
+and monumental-archive/release-lab#11 — so the org ruleset went straight to
+`enforcement: "active"` with no repository left waiting. A repository that
+transfers in later must adopt the gate *before* it can merge anything,
+which is the intended order rather than a hazard.
 
 ## Why these rules and not more
 
@@ -114,13 +108,12 @@ Merge methods are `squash` and `rebase` only: `required_linear_history`
 blocks merge commits, so allowing the merge-commit button would offer a
 method that always fails at merge time.
 
-## The release-tag lock (proven; staged for the org)
+## The release-tag lock (proven, and live)
 
 `org-release-tag.json` restricts `v*` tag **creation** so release tags cannot
-exist except via the pipeline (docs/release.md). It still ships with
-`enforcement: "disabled"` in this repo because org-level application waits on
-the Team plan — but the rule itself is proven, and activation has a hard
-order, since doing it early locks releasing out entirely:
+exist except via the pipeline (docs/release.md). It is **live org-wide at
+`active`**. Activation had a hard order, since doing it early locks
+releasing out entirely, and every step is now done:
 
 1. ~~The tag-minting GitHub App exists and its installation is org-wide.~~
    Done: `monumental-archive-tag-mint`, App id 4534781, installed org-wide.
@@ -133,8 +126,9 @@ order, since doing it early locks releasing out entirely:
    - **Positive**: merging a release PR mints an annotated tag and a draft
      release through the App's bypass.
    - `current_user_can_bypass: "never"` confirms the org owner is bound too.
-4. Apply org-wide and flip to `active`, together with the pipeline. Blocked
-   on the Team plan (org rulesets are a Team feature).
+4. ~~Apply org-wide and flip to `active`, together with the pipeline.~~
+   Done 2026-08-09, on the Team upgrade, alongside a phase-2 pipeline
+   proven end to end in the lab.
 
 **`evaluate` mode proves neither half.** It enforces nothing, so a human
 push is not rejected; and a bypass actor records no evaluation, so the App's
@@ -144,11 +138,6 @@ throwaway repository, never at `evaluate`.
 
 Break-glass for a dead App is an org admin disabling this ruleset — recorded
 here as a change, not clicked and forgotten.
-
-## Planned
-
-- **Org-wide required status check** on a standard summary job name (e.g.
-  `ci-gate`) once the shared CI workflow reports under one name everywhere.
 
 ## Beyond Scorecard
 
