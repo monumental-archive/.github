@@ -16,4 +16,12 @@ concurrency:
 
 jobs:
   ci:
+    permissions:
+      # Stated, not inherited. A `uses:` job takes the WORKFLOW-level
+      # default rather than any ambient grant, so when a shared workflow
+      # gains a permission every caller that stayed silent dies as
+      # startup_failure with no jobs and no log — which is exactly how
+      # adding `contents: read` to release.yml broke the release lab.
+      # Saying it here makes the contract a diff rather than a mystery.
+      contents: read # checkout of this repo and of the toolbelt
     uses: ./.github/workflows/ci.yml

@@ -349,7 +349,13 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 bad=""
 checked=0
 for f in .github/workflows/*.y*ml; do
-  grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
+  # Any file with a `uses:` job — reusable workflows AND caller stubs.
+  # The trap is identical in both: a `uses:` job with no `permissions:`
+  # block takes the WORKFLOW-level default, never the caller's grant.
+  # Scoping this to workflow_call files missed every caller stub, which
+  # is exactly where the grant has to be written — and a shared workflow
+  # that gains a permission breaks all of its callers at once, silently.
+  grep -qE "^    uses:" "${f}" || continue
   checked=$((checked + 1))
   offenders=$(awk '
     /^jobs:[[:space:]]*$/ { injobs = 1; next }
@@ -371,7 +377,7 @@ if [[ -n "${bad}" ]]; then
   echo "  startup_failure with no jobs and no log." >&2
   exit 1
 fi
-echo "lint:nested-permissions: ${checked} reusable workflow(s) clean"
+echo "lint:nested-permissions: ${checked} workflow(s) with uses: jobs clean"
 '''
 
 [tasks."lint:bash-portability"]
