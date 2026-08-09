@@ -1,15 +1,15 @@
 # The org toolbelt: universal tools every repo gets, locally and in CI.
 #
 # Local: symlink into the global fragment directory —
-#   ln -s ~/Projects/org-github/mise/toolbelt.toml ~/.config/mise/conf.d/toolbelt.toml
+#   ln -s ~/Projects/org-github/mise/config.toml ~/.config/mise/conf.d/toolbelt.toml
 # CI: the shared workflow checks out this repo (SHA-pinned) and sets
 #   MISE_GLOBAL_CONFIG_FILE to this file, so the layering is identical to local.
 #
 # Every tool enters this file only after its own docs-first standup, pinned
 # exact. mise.lock alongside carries checksums; CI runs MISE_LOCKED=1.
-# Regenerate the lock from this directory with:
-#   MISE_DEFAULT_CONFIG_FILENAME=toolbelt.toml mise lock
-# (`mise lock` only considers project configs, hence the filename override.)
+# Regenerate the lock with `mise lock` from this directory.
+# The mise/config.toml name is deliberate: both mise and Renovate's mise
+# manager recognise it natively — do not rename.
 #
 # Layering caveat: a repo's mise.toml can override a task or tool version from
 # this file — that is mise working as designed. Enforcement lives in the shared
