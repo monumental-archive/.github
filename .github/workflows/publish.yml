@@ -136,7 +136,7 @@ jobs:
           done
           version="${GITHUB_REF#refs/tags/v}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "::notice::publishing ${UNTRUSTED_CLASS} version ${version}"
+          echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
 
   build:
     name: Build
