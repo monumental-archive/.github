@@ -125,6 +125,15 @@ jobs:
     needs: guard
     if: inputs.class == 'rust-crate'
     uses: ./.github/workflows/build-rust-crate.yml
+    permissions:
+      # Restated, not inherited. A `uses:` job with no `permissions:` block
+      # takes the WORKFLOW-level default — which is `permissions: {}` above
+      # — and not the caller's grant. The callee then requests more than
+      # its calling job holds, which is an elevation, and the whole run
+      # dies as startup_failure with no jobs and no log. Measured; every
+      # `uses:` job below therefore restates exactly what its callee needs.
+      contents: read # checkout of the caller
+      id-token: write # crates.io trusted publishing, in the publish job
     with:
       version: ${{ needs.guard.outputs.version }}
       dry-run: ${{ inputs.dry-run }}
@@ -136,6 +145,8 @@ jobs:
     name: Verify published bytes
     needs: [guard, build]
     uses: ./.github/workflows/verify-published.yml
+    permissions:
+      contents: read # the verifier holds no more than this
     with:
       subjects: ${{ needs.build.outputs.subjects }}
       dry-run: ${{ inputs.dry-run }}
@@ -159,6 +170,7 @@ jobs:
     name: Attach evidence and publish
     needs: [guard, build, sign]
     uses: ./.github/workflows/attach-release.yml
+    permissions: {} # it publishes with the App token, not GITHUB_TOKEN
     with:
       version: ${{ needs.guard.outputs.version }}
       artifact-name: ${{ needs.build.outputs.artifact-name }}
