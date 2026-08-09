@@ -49,6 +49,18 @@ on:
           the guard below rather than silently publishing nothing.
         required: true
         type: string
+      dry-run:
+        description: >
+          Rehearsal. Build, package, sign and attach, but exchange no
+          registry token, upload nothing to a registry, and leave the
+          release a draft. The verifier proves the packaged bytes against
+          themselves rather than against the registry, so the shape of the
+          run is identical and only the irreversible steps are absent.
+          This is how the release lab exercises the chain, and how a
+          production repository rehearses before its first real release.
+        required: false
+        type: boolean
+        default: false
       sbom-basename:
         description: >
           Basename for the SPDX SBOM release asset. The asset must be named
@@ -115,6 +127,7 @@ jobs:
     uses: ./.github/workflows/build-rust-crate.yml
     with:
       version: ${{ needs.guard.outputs.version }}
+      dry-run: ${{ inputs.dry-run }}
 
   # Runs no caller code, so it can hold the writes the build job must not.
   # It pulls the published bytes back and hashes them: the attested subject
@@ -125,6 +138,7 @@ jobs:
     uses: ./.github/workflows/verify-published.yml
     with:
       subjects: ${{ needs.build.outputs.subjects }}
+      dry-run: ${{ inputs.dry-run }}
 
   # The signer never sees artifact bytes, only digests, and holds the only
   # `id-token: write` in the release path.
@@ -150,5 +164,6 @@ jobs:
       artifact-name: ${{ needs.build.outputs.artifact-name }}
       bundle-artifact: ${{ needs.sign.outputs.bundle-artifact }}
       sbom-basename: ${{ inputs.sbom-basename }}
+      dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}

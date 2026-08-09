@@ -14,6 +14,14 @@ on:
         description: sha256sum manifest produced by the build.
         required: true
         type: string
+      dry-run:
+        description: >
+          Rehearsal. Nothing was published, so there are no registry bytes
+          to pull back. The manifest passes through unchanged and the run
+          says so loudly — a rehearsal must never be mistaken for proof.
+        required: false
+        type: boolean
+        default: false
     outputs:
       subjects:
         description: The manifest, re-derived from the published bytes.
@@ -37,6 +45,7 @@ jobs:
         id: prove
         env:
           UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
           record='^[0-9a-f]{64}  [^[:space:]]'
@@ -53,6 +62,11 @@ jobs:
             fi
             digest="${line%% *}"
             name="${line##*  }"
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              echo "${digest}  ${name}" >> "${out}"
+              echo "::warning::rehearsal: ${name} was NOT proved against a registry"
+              continue
+            fi
             # crates.io serves the exact bytes it stored, under a stable
             # path. Anything else here would be proving the artifact
             # against itself.
