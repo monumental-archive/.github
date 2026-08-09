@@ -1,91 +1,92 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with
-code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working
+with code in this repository.
 
 ## What this is
 
-`monumental-archive/.github` — the org's shared, **untrusted** infrastructure
-repo. Two jobs:
+`monumental-archive/.github` — the org's governance repository. Everything
+shared lives here and nowhere else. Five layers:
 
-1. **GitHub-magic content** that only works from a repo with this exact name:
-   community health files, issue/PR templates, `profile/README.md`, and
+1. **GitHub-magic content** that only works from a repo with this name:
+   community health files (SECURITY, CONTRIBUTING, CODE_OF_CONDUCT,
+   SUPPORT, issue forms, PR template), `profile/README.md`, and
    `workflow-templates/`.
-2. **Shared reusable workflows** that run caller code: the CI lint gate, the
-   Rust gate, and the release half (asset attachment, publishing drafts).
+2. **The toolbelt** (`mise/config.toml` + `mise.lock`): the universal tool
+   layer every repo and every machine consumes — exact pins, per-platform
+   checksums, GitHub attestations. Consumed locally via a
+   `~/.config/mise/conf.d` symlink and in CI via `MISE_GLOBAL_CONFIG_FILE`.
+   The filename is load-bearing: both mise and Renovate's mise manager
+   recognise `mise/config.toml` natively — do not rename.
+3. **The task contract**: the global `ci` task wildcard-collects `lint:*`
+   and optionally runs `test`/`build`. Repos never define `ci`; adding a
+   `lint:<tool>` task here enforces that tool in every repo with no repo
+   change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
+   are network-bound or noisy checks, structurally outside the gate.
+4. **Shared workflows**: `ci.yml` (the reusable gate — callers pin one SHA
+   which also pins the toolbelt via `github.workflow_sha`), `gate.yml`
+   (this repo self-applies it), `audit.yml` (Monday cron: link check +
+   repo-settings drift).
+5. **Settings as code**: `rulesets/` (branch + tag canon; applied per-repo
+   now, org-level on the Team plan), `security/` (the enforced org
+   security configuration), `settings/` (repo baseline + check/apply
+   script), `scaffold/` (the four stubs a new repo copies), and
+   `default.json` (the org Renovate preset; this repo's own config is
+   `renovate.json`).
 
-## The rule that must not be broken
+## Rules that must not be broken
 
-**No workflow in this repository may ever declare `id-token: write`.**
-
-Signing lives in
-[monumental-archive/trusted-builder](https://github.com/monumental-archive/trusted-builder),
-which holds `id-token` and runs *no* caller code. This repository is the
-mirror image: it runs caller code and holds no signing identity.
-
-That split is the SLSA v1.0 Build L3 boundary. A certificate minted here
-would bear this repository's identity while executing code supplied by the
-calling repo — exactly the property the boundary exists to remove. It is
-also what lets consumers pin `--signer-repo monumental-archive/trusted-builder`
-safely, because that repo contains nothing but signing workflows.
-
-Adding `id-token: write` to anything here silently drops every consumer from
-Build L3 to Build L2, and nothing goes red.
-
-## This repository must stay public
-
-GitHub does not support default community health files from a private
-`.github` repo — "Private `.github` repositories are not supported." A public
-`.github` serves **all** repos in the org, including private ones, so this is
-not a limitation in practice. But everything here is world-readable; do not
-put anything in it that shouldn't be.
-
-(`.github-private` is unrelated — it exists solely for a member-only org
-profile README.)
-
-## The path wart
-
-Reusable workflows must live in `.github/workflows/`, so from here they are
-referenced as:
-
-```yaml
-uses: monumental-archive/.github/.github/workflows/lint.yml@<commit-sha>
-```
-
-The doubled `.github` is correct and unavoidable. It looks like a typo
-forever.
+- **No workflow here may ever declare `id-token: write`.** Signing lives
+  in `trusted-builder`, which runs no caller code; this repo runs caller
+  code and holds no signing identity. That split is the SLSA Build L3
+  boundary: a certificate minted here would bear this repo's identity
+  while executing caller-supplied code. Adding the scope silently drops
+  every consumer to Build L2 and nothing goes red.
+- **This repo must stay public.** Private `.github` repos serve no default
+  community health files. Everything here is world-readable; write
+  accordingly.
+- **The gate is deterministic.** Nothing network-dependent (vulnerability
+  feeds, link liveness, schema catalogs, zizmor online audits) belongs in
+  `ci` — those are `audit:*` tasks or the scheduled workflow.
 
 ## Conventions
 
-- Every `uses:` pinned to a full commit SHA with a trailing `# vX.Y.Z`
-  comment. Callers pin *this* repo by SHA too — `uses:` accepts no contexts
-  or expressions.
-- Caller-supplied values routed through `env:` with an `UNTRUSTED_` prefix,
-  never expanded into `run:` code (zizmor template-injection).
-- **Grant exactly the scopes a called workflow declares.** A called workflow
-  may only downgrade the caller's grant; requesting a scope the caller
-  withheld kills the run as `startup_failure` — no jobs, no annotations, no
-  log. `actionlint` cannot catch it, because the contract spans two repos.
-- Spelling registers match the edtf canon: **en-US in code and identifiers**,
-  **en-GB in prose**.
-- Commits are SSH-signed; conventional commits.
+- Every `uses:` pinned to a full commit SHA with a trailing version
+  comment. Reusable-workflow callers pin this repo by SHA too.
+- Belt linters lint **tracked files only** (`git ls-files`), never a
+  tool's own directory walker — lefthook caches remote configs inside
+  `.git/`, and walkers find them.
+- Belt linters guard for applicability and skip clean: a linter that
+  cannot skip cannot be universal.
+- Tasks are written in bash; `[task_config] shell` pins it (Ubuntu's `sh`
+  is dash).
+- Commits: conventional, **imperative**, lowercase subjects, 72-column
+  ceiling — enforced by `committed` at commit-msg, pre-push, and in CI.
+  PRs are squash-merged; the PR title and body become the permanent
+  commit.
+- Spelling registers: en-US in code and identifiers, en-GB in prose
+  (typos runs locale `en`, which accepts both).
+- New tools enter the belt only after a docs-first standup, at maximum
+  defensible enforcement, verified against this repo before any other.
+  Prefer aqua-backed tools (checksums, attestations, no install scripts).
+
+## The path wart
+
+Reusable workflows must live in `.github/workflows/`, so from here they
+are referenced as
+`monumental-archive/.github/.github/workflows/ci.yml@<sha>`. The doubled
+`.github` is correct and unavoidable.
 
 ## Testing
 
-Changes are exercised from
-[monumental-archive/edtf-release-lab](https://github.com/monumental-archive/edtf-release-lab)
-— dummy crates, real GitHub APIs, no registry publishes — before any
-production repo moves its pin. The release half of a pipeline is covered by
-nothing except live releases, which is the most expensive place to find a
-defect.
+`mise run ci` locally is exactly what CI runs — same tools, same
+versions, same order, from the same lockfile. Shared-workflow changes are
+exercised by this repo's own `gate.yml` on every PR; the release half is
+exercised from `edtf-release-lab` before any production repo moves its
+pin.
 
-## Related
+## Open items
 
-- `trusted-builder` — signing only, the other half of the split
-- `renovate-config` — **being absorbed into this repo**. Anything shared
-  lives here and nowhere else. Renovate shared presets can be hosted in any
-  repo (`extends: ["github>monumental-archive/.github"]`), so the separate
-  repo has no technical justification. Verify the preset filename: a repo's
-  own config is `renovate.json`, and `github>org/repo` preset resolution
-  looks for `default.json`, so the shared preset probably wants to be
-  `default.json` to avoid colliding with this repo's own config.
+Tracked as issues: the release pass (#28 — release-PR flow, tag-minting
+App, `v*` creation lock, first tags for this repo) and sponsorship (#27).
+Deferred decisions and their reasons live in the standup PRs (#5–#26).
