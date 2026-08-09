@@ -9,7 +9,7 @@
 #         app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
 #
 # One SHA pins this file, the canonical release scripts, and the toolbelt
-# atomically via github.workflow_sha.
+# atomically via github.job_workflow_sha.
 #
 # This workflow decides the version, maintains the Release PR, and — when
 # that PR is merged — tags and cuts a DRAFT GitHub release. It builds
@@ -69,7 +69,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ github.job_workflow_sha }}
           path: .org-canon
           persist-credentials: false
 
@@ -120,7 +120,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ github.job_workflow_sha }}
           path: .org-canon
           persist-credentials: false
 

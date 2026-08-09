@@ -5,7 +5,7 @@
 #       uses: monumental-archive/.github/.github/workflows/ci.yml@<sha> # vX.Y.Z
 #
 # One SHA pins this file, the toolbelt, and its lockfile atomically: the
-# toolbelt checkout below rides github.workflow_sha, the exact ref the
+# toolbelt checkout below rides github.job_workflow_sha, the exact ref the
 # caller pinned. No inputs, by design — zero caller-controlled expansion.
 name: ci
 
@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ github.job_workflow_sha }}
           path: .org-toolbelt
           persist-credentials: false
 
