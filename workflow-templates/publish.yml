@@ -38,5 +38,6 @@ jobs:
       id-token: write # crates.io trusted publishing, and the signer
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
+      packages: write # oci-image pushes to GHCR; harmless if unused
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
