@@ -24,9 +24,16 @@ gh api -X POST "orgs/monumental-archive/code-security/configurations/<id>/attach
 
 ## Notes
 
-- All enabled features are free on **public** repos. On private repos the
-  GHAS-billed ones (secret scanning extras, code scanning) fail to attach on
-  the free plan — visible as per-repo `failed` status, not silent.
+- **Applied 2026-08-09 via the settings UI** as configuration id `265775`
+  (`monumental-archive-org-config-1`): enforced, attached to all repos,
+  default for all new repos. The REST API refuses GHAS-marked fields
+  without GHAS billing (HTTP 400) — but the **UI wizard creates the same
+  configuration fine**, running those features in their free-for-public
+  mode ("private repositories will only have free features enabled").
+  On the free plan, apply through the UI; the JSON here is the reviewable
+  record of what the UI should be set to.
+- All enabled features are free on **public** repos; nothing is purchased
+  and nothing can bill — private repos just get the free subset.
 - New repos inherit the default automatically; **transferred** repos do not.
   Attaching is a required step of every repo migration.
 - Dependabot **version updates** are deliberately absent: they are per-repo
