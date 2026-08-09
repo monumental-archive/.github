@@ -23,6 +23,11 @@ pre-commit:
     - name: actionlint
       run: mise run lint:actions
 
+commit-msg:
+  jobs:
+    - name: committed
+      run: committed --commit-file {1}
+
 pre-push:
   jobs:
     - name: ci
