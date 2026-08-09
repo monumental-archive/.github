@@ -30,7 +30,12 @@ commit-msg:
     # Catch a missing DCO sign-off here rather than at push, where the fix
     # is an amend or a rebase instead of just redoing the commit.
     - name: dco
-      run: grep -qiE "^Signed-off-by: .+ <.+@.+>" {1} || { echo "missing DCO sign-off — commit with: git commit -s" >&2; exit 1; }
+      # Quoted: the message contains a colon-space, which YAML reads as a
+      # mapping inside an unquoted scalar and rejects the whole file — and a
+      # broken shared config breaks hooks in every repo that pulls it.
+      run: >-
+        grep -qiE "^Signed-off-by: .+ <.+@.+>" {1}
+        || { echo "missing DCO sign-off, commit with -s" >&2; exit 1; }
 
 pre-push:
   jobs:
