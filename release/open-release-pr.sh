@@ -44,10 +44,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The release commit signs itself off like any other (OSPS-LE-01.01, and
+# `lint:dco` admits no exemption list). The identity is derived from the
+# token rather than hardcoded, because it is the App's bot user and differs
+# per installation — and because a sign-off naming the wrong identity is
+# worse than none.
+bot=$(gh api user --jq '"\(.login) <\(.id)+\(.login)@users.noreply.github.com>"')
+signoff="Signed-off-by: ${bot}"
+
 # prepare-release.sh has already exited early when there was nothing to bump,
 # so every file in FILES differs from the base commit by the time we get here.
 request=$(
-  STAGING="${staging}" TITLE="${title}" python3 - << 'PY'
+  STAGING="${staging}" TITLE="${title}" SIGNOFF="${signoff}" python3 - << 'PY'
 import base64, json, os
 
 additions = []
@@ -69,7 +77,10 @@ print(json.dumps({
                 "repositoryNameWithOwner": os.environ["GITHUB_REPOSITORY"],
                 "branchName": os.environ["STAGING"],
             },
-            "message": {"headline": os.environ["TITLE"]},
+            "message": {
+                "headline": os.environ["TITLE"],
+                "body": os.environ["SIGNOFF"],
+            },
             "fileChanges": {"additions": additions},
             "expectedHeadOid": os.environ["GITHUB_SHA"],
         }

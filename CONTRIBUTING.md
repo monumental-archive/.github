@@ -34,3 +34,25 @@ executable form:
 
 By contributing, you agree that your contributions are licensed under the
 repository's existing license.
+
+### Developer Certificate of Origin
+
+Every commit must carry a sign-off asserting you have the right to submit
+it under that license — the [Developer Certificate of Origin
+1.1](https://developercertificate.org/):
+
+```bash
+git commit -s
+```
+
+That appends a `Signed-off-by:` trailer using your git identity, which must
+match the commit author. The gate rejects commits without one, and the
+commit-msg hook catches it locally first, where redoing the commit is
+cheaper than rebasing. To sign off a branch you already wrote:
+
+```bash
+git rebase --signoff origin/main
+```
+
+Automation signs off too — the release commit and Renovate both add the
+trailer — so there is no exemption list to fall out of date.

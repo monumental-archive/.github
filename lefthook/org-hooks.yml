@@ -27,6 +27,10 @@ commit-msg:
   jobs:
     - name: committed
       run: committed --commit-file {1}
+    # Catch a missing DCO sign-off here rather than at push, where the fix
+    # is an amend or a rebase instead of just redoing the commit.
+    - name: dco
+      run: grep -qiE "^Signed-off-by: .+ <.+@.+>" {1} || { echo "missing DCO sign-off — commit with: git commit -s" >&2; exit 1; }
 
 pre-push:
   jobs:
