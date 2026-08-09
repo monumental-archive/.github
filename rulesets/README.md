@@ -59,20 +59,33 @@ Merge methods are `squash` and `rebase` only: `required_linear_history`
 blocks merge commits, so allowing the merge-commit button would offer a
 method that always fails at merge time.
 
-## The release-tag lock (staged, deliberately disabled)
+## The release-tag lock (proven; staged for the org)
 
 `org-release-tag.json` restricts `v*` tag **creation** so release tags cannot
-exist except via the pipeline (docs/release.md). It ships with
-`enforcement: "disabled"` because activation has a hard order — doing it
-early locks releasing out entirely:
+exist except via the pipeline (docs/release.md). It still ships with
+`enforcement: "disabled"` in this repo because org-level application waits on
+the Team plan — but the rule itself is proven, and activation has a hard
+order, since doing it early locks releasing out entirely:
 
 1. ~~The tag-minting GitHub App exists and its installation is org-wide.~~
    Done: `monumental-archive-tag-mint`, App id 4534781, installed org-wide.
 2. ~~Its integration id is inserted as the sole bypass actor.~~ Done — it is
    the JSON's one `Integration` bypass entry.
-3. A release is proven end-to-end in the release lab with the ruleset in
-   `evaluate` mode.
-4. Enforcement flips to `active`, in the same change that lands the pipeline.
+3. ~~Both halves proven in the release lab.~~ Done, 2026-08-09, at repo
+   level with `enforcement: "active"`:
+   - **Negative**: a human pushing `v9.9.9-negative-test` is rejected —
+     `GH013 ... Cannot create ref due to creations being restricted.`
+   - **Positive**: merging a release PR mints an annotated tag and a draft
+     release through the App's bypass.
+   - `current_user_can_bypass: "never"` confirms the org owner is bound too.
+4. Apply org-wide and flip to `active`, together with the pipeline. Blocked
+   on the Team plan (org rulesets are a Team feature).
+
+**`evaluate` mode proves neither half.** It enforces nothing, so a human
+push is not rejected; and a bypass actor records no evaluation, so the App's
+bypass leaves no evidence either — `rulesets/rule-suites` stays empty and
+looks indistinguishable from a working lock. Prove the rule at `active` on a
+throwaway repository, never at `evaluate`.
 
 Break-glass for a dead App is an org admin disabling this ruleset — recorded
 here as a change, not clicked and forgotten.
