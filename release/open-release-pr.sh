@@ -28,12 +28,23 @@ set -euo pipefail
 # parser never closes, and shfmt then misreads the rest of the file.
 : "${APP_SLUG:?APP_SLUG must be set (the create-github-app-token app-slug output)}"
 
-branch="release/v${VERSION}"
+# ONE branch, not one per version. Keying the branch on the computed
+# version looks tidier and is a bug: when new commits change the bump, a
+# version-keyed branch opens a SECOND pull request and abandons the first,
+# which is exactly what "keep exactly one Release PR open" forbids. The
+# orphan then sits there forever, showing a version that will never ship.
+# Observed in the lab: a v0.7.1 PR stranded when the range grew a feat and
+# the bump moved to v0.8.0.
+#
+# A fixed name makes that structurally impossible rather than relying on
+# cleanup that can itself fail. The version lives in the title, the body
+# and the commit, where it is read.
+branch="release/next"
 title="chore: release v${VERSION}"
 
 # The staging ref is where the commit is built. It is disposable and no pull
 # request ever points at it, so it is free to sit at main's head.
-staging="release-staging/v${VERSION}"
+staging="release-staging/next"
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method PATCH -f sha="${GITHUB_SHA}" -F force=true > /dev/null

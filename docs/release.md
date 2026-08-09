@@ -55,6 +55,11 @@ Phase-1 rules, all proven in iiif-server:
 
 - An ordinary push to `main` only refreshes the release PR. **Merging the
   release PR is the only commitment point.**
+- **There is exactly one release branch, `release/next`, and one open
+  release PR.** The branch is deliberately not keyed on the version:
+  a version-keyed branch opens a second pull request whenever new commits
+  change the bump, abandoning the first at a version that will never ship.
+  The version belongs in the title, body and commit, not the ref.
 - The release PR's commit is created through the GitHub API
   (`createCommitOnBranch`), so it is signed by GitHub and satisfies
   `required_signatures`; the script asserts the commit is `verified` rather
