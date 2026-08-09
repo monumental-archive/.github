@@ -1,0 +1,5 @@
+{
+  "name": "Org CI gate",
+  "description": "The monumental-archive gate: mise toolbelt, full lint suite, and the repo's own test/build tasks, via the shared reusable workflow.",
+  "categories": ["ci"]
+}
