@@ -44,10 +44,12 @@ jobs:
     permissions:
       contents: read
     env:
-      # The default token sees only the public view of repo metadata; the
-      # merge-settings fields need admin read. AUDIT_TOKEN is a
-      # fine-grained PAT (all org repos, Administration: read-only) stored
-      # as an org Actions secret.
+      # The default token sees only the public view of repo metadata.
+      # AUDIT_TOKEN is a fine-grained PAT (all org repos, Administration:
+      # read AND write — the merge-settings fields in GET /repos are only
+      # returned to push/admin-capable identities, and the fine-grained
+      # read-only grant does not qualify; verified empirically 2026-08-09).
+      # Write also enables a future self-healing `apply` job.
       GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
     steps:
       - name: Check out repository
