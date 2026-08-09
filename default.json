@@ -9,12 +9,19 @@
   "packageRules": [
     {
       "description": "Routine updates merge themselves once aged and green; majors always get a human.",
-      "matchUpdateTypes": ["patch", "minor", "pin", "digest", "pinDigest"],
+      "matchUpdateTypes": [
+        "patch",
+        "minor",
+        "pin",
+        "digest",
+        "pinDigest"
+      ],
       "automerge": true
     }
   ],
   "lockFileMaintenance": {
     "enabled": true,
     "automerge": true
-  }
+  },
+  "commitBody": "Signed-off-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>"
 }

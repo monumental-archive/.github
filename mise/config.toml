@@ -136,6 +136,44 @@ dir = "{{cwd}}"
 # audit:actions for human-run reviews, not the gate.
 run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then zizmor --offline --persona=pedantic .github/workflows/; else echo "lint:zizmor: no workflows, skipped"; fi'
 
+[tasks."lint:dco"]
+description = "Every commit carries a Developer Certificate of Origin sign-off"
+dir = "{{cwd}}"
+# OSPS-LE-01.01: contributors must assert legal authorisation for their
+# contributions. `git commit -s` adds the trailer; the sign-off email must
+# match the commit author, so a sign-off asserts something about the person
+# who wrote the change rather than whoever happened to run git.
+#
+# Bots sign off too — the release commit and Renovate both add the trailer —
+# so there is no exemption list to drift out of date.
+run = '''
+git rev-parse --verify -q origin/main > /dev/null || {
+  echo "lint:dco: no origin/main, skipped"; exit 0
+}
+tip=HEAD
+[[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]] && tip="HEAD^2"
+range="origin/main..${tip}"
+count=0
+bad=""
+while read -r sha; do
+  [[ -n "${sha}" ]] || continue
+  count=$((count + 1))
+  email=$(git log -1 --format=%ae "${sha}")
+  # Fixed-string match on the address: a real email contains regex
+  # metacharacters (the + in a GitHub noreply address is the common one),
+  # and interpolating it into a pattern silently matches the wrong thing.
+  git log -1 --format=%B "${sha}" | grep -i "^Signed-off-by:" \
+    | grep -qF "<${email}>" \
+    || bad="${bad} ${sha:0:8}"
+done < <(git rev-list "${range}")
+if [[ -n "${bad}" ]]; then
+  echo "lint:dco: commits missing a sign-off matching their author:${bad}" >&2
+  echo "  fix with: git commit -s   (or: git rebase --signoff origin/main)" >&2
+  exit 1
+fi
+echo "lint:dco: ${count} commits signed off"
+'''
+
 [tasks."audit:links"]
 description = "Check links in tracked markdown (lychee — network, not in ci)"
 dir = "{{cwd}}"
