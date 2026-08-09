@@ -43,11 +43,6 @@ on:
         required: false
         type: string
         default: ""
-      dry-run:
-        description: Rehearsal — attach the bundle, leave the release a draft.
-        required: false
-        type: boolean
-        default: false
     secrets:
       app-private-key:
         description: Tag-mint App private key
@@ -122,14 +117,9 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           TAG: ${{ github.ref_name }}
-          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
           gh release upload "${TAG}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
-          if [[ "${DRY_RUN}" == "true" ]]; then
-            echo "::warning::rehearsal: ${TAG} left as a draft, nothing published"
-            exit 0
-          fi
           # Publishing is the commitment point. Immutable releases apply at
           # publish, and GitHub mints its own release attestation binding
           # tag, commit and asset digests at the same moment.
