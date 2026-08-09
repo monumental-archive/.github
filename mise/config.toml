@@ -27,6 +27,7 @@ typos = "1.49.0"
 lefthook = "2.1.10"
 trivy = "0.73.0"
 zizmor = "1.29.0"
+committed = "1.1.11"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -64,6 +65,13 @@ dir = "{{cwd}}"
 # is en-US in code and en-GB in prose, which no per-file locale can split.
 # Repo-specific jargon goes in that repo's own _typos.toml (extend-words).
 run = "typos"
+
+[tasks."lint:commits"]
+description = "Conventional-commit check for the branch (committed)"
+dir = "{{cwd}}"
+# Only meaningful on a branch with an origin/main to diverge from; the
+# range check needs committed.toml in the repo (canon: this repo's copy).
+run = 'if git rev-parse --verify -q origin/main > /dev/null && [[ -f committed.toml ]]; then committed origin/main..HEAD; else echo "lint:commits: no origin/main or no committed.toml, skipped"; fi'
 
 [tasks."lint:zizmor"]
 description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"
