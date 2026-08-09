@@ -109,6 +109,60 @@ The step order is not rearrangeable:
 > build → smoke test → push → pull the published bytes back and prove them →
 > attest → verify the attestation as a stranger would → publish the release
 
+**That order is owned by this repository, not by the repositories that
+release.** A caller's entire phase-2 obligation is one file holding one
+`uses:` line and no `run:` step:
+
+```yaml
+# .github/workflows/publish.yml, in every versioned repository
+jobs:
+  publish:
+    uses: monumental-archive/.github/.github/workflows/publish.yml@<sha> # vX.Y.Z
+    with:
+      class: rust-crate
+```
+
+An order written into each caller is an order each caller can rearrange,
+and a repository that signed before it verified would go green while
+asserting something false. Reusable workflows nest ten levels deep, so the
+shared orchestrator calls the per-class build, the verifier, the signer and
+the publisher itself, and the order exists in exactly one place.
+
+### What stays in the calling repository
+
+Three things, and only three:
+
+- **The entry workflow file.** GitHub runs workflows from the repository
+  they trigger in; nothing moves that. Its **filename is canon** —
+  `publish.yml`, exactly, everywhere — because both registries pin the
+  *caller's* entry filename rather than the reusable's
+  ([`slsa-reference.md`](slsa-reference.md)). Renaming it breaks trusted
+  publishing in a way no local check catches.
+- **The `publish` environment.** Environments are repository objects.
+- **Build inputs**: `Cargo.toml`, `Dockerfile`, `cliff.toml`.
+
+Every step, every ordering constraint and every permission lives here or in
+`signer`.
+
+### The capability split
+
+The boundary is between **jobs that run caller-supplied code and jobs that
+do not**, and it falls inside this repository rather than between
+repositories:
+
+| Job | Caller code | Holds |
+| --- | --- | --- |
+| `build-*`, per artifact class | yes | `contents: read` |
+| verify, publish, attach | no | `contents: write`, `packages: write` |
+| `sign.yml` in `signer` | no | `id-token` + attestation writes |
+
+Keeping `contents: write` out of a build job is not about token scope: that
+token is the caller's own, over the caller's own repository, which the
+caller could grant itself regardless. It is about **ordering**. "Attestation
+happens last, and only on proof" is enforceable only while the job that
+publishes cannot be reached from caller code — the SLSA L3 *unforgeable*
+requirement doing real work rather than ceremony.
+
 - Every phase-2 job refuses non-tag refs and refuses a tag whose version
   disagrees with the manifest (tag must point at the release-PR merge
   commit).
@@ -121,20 +175,33 @@ The step order is not rearrangeable:
   is manual (crates.io limitation).
 - Signing goes through **`signer`** — named for what it does, not for
   SLSA's `builder.id` field, which means "whoever generated the
-  provenance" and has misled this project more than once. Callers build
-  their own quirky
-  artifacts, pass hashes, and the caller-code-free reusable workflow signs.
+  provenance" and has misled this project more than once. The shared build
+  workflow hashes what it produced, the orchestrator passes the subject
+  manifest on, and the caller-code-free workflow in `signer` signs it —
+  never the artifacts themselves, and never a checkout of anyone.
   One certificate identity for every org artifact; `id-token: write` lives
   there and never here.
 - The Zenodo webhook mints the version DOI when the immutable release is
   published — after proof, like everything else.
 
-Publish workflows are per-repo (pgrx matrices, musl statics are legitimate
-quirks) but share the hardening skeleton: harden-runner with audit-derived
-egress allowlists, tool caches disabled in any job whose output is signed,
-and the evidence bundle — one checksum filename, one SBOM format, Sigstore
-bundles — attached to the release in the shape Scorecard's Signed-Releases
-check recognises.
+There is one shared build workflow per **artifact class** — `rust-crate`,
+`rust-binary`, `oci-image`, `wasm-npm` — and callers declare inputs, not
+steps. An earlier draft of this document kept publish workflows per-repo,
+on the grounds that pgrx matrices and musl statics were legitimate quirks.
+They are class-shaped, not repo-shaped: a matrix belongs to the class that
+needs one, and a repository that wants a different one is a design question
+for this document. Keeping them per-repo also forfeited Build L3, since the
+route to it is precisely that the signing identity sits behind a workflow
+no caller controls.
+
+Hardening is therefore a property of the shared workflows rather than a
+skeleton every repository copies and drifts from: harden-runner with
+audit-derived egress allowlists, tool caches disabled in any job whose
+output is signed, and the evidence bundle — one checksum filename, one SBOM
+format, Sigstore bundles — attached to the release in the shape Scorecard's
+Signed-Releases check recognises. Egress is a property of the workflow and
+the artifact class, so it is derived once, in the lab, against
+class-representative fixtures — never written by construction.
 
 ## Version policy
 
