@@ -1,0 +1,308 @@
+# Artifact class: oci-image. Every rule below was arrived at in three
+# repositories before it was written down here (docs/release.md).
+#
+#   Native hardware per architecture. No QEMU, and therefore no single
+#   `--platform linux/amd64,linux/arm64` build: emulation tests the image
+#   on the wrong machine, and an image that passes under emulation has not
+#   been shown to work where it runs.
+#
+#   Build and push are separate. A combined build-and-push has no moment at
+#   which a testable image exists un-published, so it is built, loaded,
+#   smoke-tested, and only then pushed. The manifest list is assembled from
+#   the per-architecture images afterwards.
+#
+#   The published bytes are pulled back BY DIGEST and proved again before
+#   anything is signed. A signature must assert something demonstrated of
+#   the artifact a stranger will pull, never of a local twin.
+#
+# No `docker/*` actions: `docker buildx` and `docker login` are preinstalled
+# on the runners, proven in the lab, and using them keeps the organisation's
+# Actions allowlist at four patterns instead of eight.
+#
+# No cache of any kind. A workflow that publishes carries none — everything
+# downstream of it gets signed.
+name: build-oci-image
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+      dockerfile:
+        description: Path to the Dockerfile, relative to the context.
+        required: false
+        type: string
+        default: Dockerfile
+      context:
+        description: Build context directory.
+        required: false
+        type: string
+        default: "."
+      smoke-test:
+        description: >
+          Script proving the image does the one thing it exists to do —
+          booted, extensions loaded, server answering. Receives the image
+          reference as $1. Run twice: once on the loaded image before
+          anything is published, and again on the bytes pulled back from
+          the registry. Empty means no smoke test, which is permitted and
+          unwise.
+        required: false
+        type: string
+        default: ""
+      dry-run:
+        description: Rehearsal — build and prove, push nothing.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      image:
+        description: Fully-qualified image name, lowercased.
+        value: ${{ jobs.manifest.outputs.image }}
+      digest:
+        description: >
+          Index digest of the manifest list. This is the attestation
+          subject: measured in the lab, `gh attestation verify
+          oci://<image>:<tag>` resolves the index.
+        value: ${{ jobs.manifest.outputs.digest }}
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build and smoke ${{ matrix.arch }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write # push the per-architecture image by digest
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the image name
+        id: name
+        run: |
+          set -euo pipefail
+          # ghcr.io rejects an owner with capitals and the failure lands at
+          # push time, so it is lowercased here rather than discovered
+          # three minutes into a release.
+          image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create a container-driver builder
+        run: |
+          set -euo pipefail
+          # The runner's default buildx builder uses the `docker` driver,
+          # which cannot push by digest — "push-by-digest is currently not
+          # implemented for docker driver". The docker-container driver
+          # can, and it still supports --load for the smoke test, so one
+          # builder serves both halves.
+          #
+          # No --driver-opt cache settings and no registry mirror: this
+          # workflow publishes, so it carries no cache of any kind.
+          docker buildx create --use --name org-oci --driver docker-container
+
+      - name: Build for testing, loaded and unpublished
+        env:
+          ARCH: ${{ matrix.arch }}
+          UNTRUSTED_CONTEXT: ${{ inputs.context }}
+          UNTRUSTED_DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          # No --platform: the runner IS the target architecture, so the
+          # default native build is the guarantee that no emulation crept
+          # in. --load puts it in the local daemon, where it can be tested
+          # and cannot be pulled by anyone.
+          docker buildx build \
+            --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
+            --load --tag "oci-under-test:${ARCH}" \
+            "${UNTRUSTED_CONTEXT}"
+
+      - name: Smoke the loaded image
+        if: inputs.smoke-test != ''
+        env:
+          ARCH: ${{ matrix.arch }}
+          UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
+        run: |
+          set -euo pipefail
+          if [[ ! -x "${UNTRUSTED_SMOKE}" ]]; then
+            echo "::error::smoke-test ${UNTRUSTED_SMOKE} is not executable"
+            exit 1
+          fi
+          "${UNTRUSTED_SMOKE}" "oci-under-test:${ARCH}"
+
+      - name: Push by digest
+        id: push
+        if: ${{ !inputs.dry-run }}
+        env:
+          ARCH: ${{ matrix.arch }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.name.outputs.image }}
+          UNTRUSTED_CONTEXT: ${{ inputs.context }}
+          UNTRUSTED_DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          # push-by-digest: no tag yet. A tag would make the untested
+          # per-architecture image pullable by name before the manifest
+          # exists and before anything has been proved.
+          #
+          # This rebuilds, but from the same builder in the same job, so
+          # every layer is already resolved. That is builder state, not a
+          # cache anyone else can poison.
+          # Build as its own statement, then read the metadata. Sequencing
+          # the two inside one command substitution would hand the exit
+          # status to jq and mask a failed build entirely, and silencing
+          # the build would throw away the log needed to explain it.
+          docker buildx build \
+            --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file /tmp/meta.json \
+            "${UNTRUSTED_CONTEXT}"
+          digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
+          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::no digest from the push"
+            exit 1
+          fi
+          # Written to a file, not to a job output. Outputs of a MATRIX
+          # job overwrite one another — the legs share one output map — so
+          # a digest passed that way is a race that surfaces later as a
+          # manifest silently missing an architecture.
+          mkdir -p /tmp/digests
+          printf '%s' "${digest}" > "/tmp/digests/${ARCH}"
+          echo "::notice::${ARCH} pushed as ${digest}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.dry-run }}
+        with:
+          name: oci-digest-${{ matrix.arch }}
+          path: /tmp/digests/
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Assemble and prove the manifest list
+    needs: build
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # create the manifest list
+    outputs:
+      image: ${{ steps.assemble.outputs.image }}
+      digest: ${{ steps.assemble.outputs.digest }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        # trivy comes from the belt. Without this the scan step dies as
+        # `trivy: command not found` — exit 127, after the image is already
+        # pushed and the manifest assembled, which is the worst place to
+        # discover a missing tool.
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: oci-digest-*
+          merge-multiple: true
+          path: digests
+
+      - name: Assemble the manifest list
+        id: assemble
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          AMD=$(cat digests/amd64 2>/dev/null || echo "")
+          ARM=$(cat digests/arm64 2>/dev/null || echo "")
+          for d in "${AMD}" "${ARM}"; do
+            if [[ ! "${d}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::a per-architecture digest is missing; refusing to tag a partial image"
+              exit 1
+            fi
+          done
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          docker buildx imagetools create \
+            --tag "${image}:${UNTRUSTED_VERSION}" \
+            "${image}@${AMD}" "${image}@${ARM}"
+          index=$(docker buildx imagetools inspect "${image}:${UNTRUSTED_VERSION}" \
+            --format '{{json .Manifest}}' | jq -r '.digest')
+          if [[ ! "${index}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::no index digest"
+            exit 1
+          fi
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${index}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::index ${index}"
+
+      - name: Pull the published bytes back and smoke them
+        if: inputs.smoke-test != ''
+        env:
+          IMAGE: ${{ steps.assemble.outputs.image }}
+          INDEX: ${{ steps.assemble.outputs.digest }}
+          UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
+        run: |
+          set -euo pipefail
+          # By digest, never by tag: a tag is a moving pointer, and the
+          # point is to prove the exact bytes that were published.
+          docker pull "${IMAGE}@${INDEX}"
+          "${UNTRUSTED_SMOKE}" "${IMAGE}@${INDEX}"
+
+      - name: Scan the published image, report-only
+        env:
+          IMAGE: ${{ steps.assemble.outputs.image }}
+          INDEX: ${{ steps.assemble.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Report-only, deliberately: the CVE gate lives on pull requests,
+          # where it blocks a change that introduces something new. A
+          # publish — above all a scheduled remediation rebuild — must not
+          # die because a scanner had a bad day, because blocking a rebuild
+          # leaves the older and at-least-as-vulnerable image live.
+          #
+          # But it goes to the job summary, not only to the log. A scan
+          # whose output lands in a green scheduled run is write-only, and
+          # a check nobody reads is worse than no check.
+          {
+            echo "### Vulnerability scan (report-only)"
+            echo
+            echo "\`${IMAGE}@${INDEX}\`"
+            echo
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          trivy image --config /dev/null --scanners vuln --exit-code 0 \
+            --severity HIGH,CRITICAL --format table "${IMAGE}@${INDEX}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
