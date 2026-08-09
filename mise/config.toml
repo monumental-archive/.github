@@ -23,6 +23,7 @@ actionlint = "1.7.12"
 # actionlint shells out to shellcheck for `run:` script analysis; without it
 # that entire check class silently vanishes.
 shellcheck = "0.11.0"
+typos = "1.49.0"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -47,6 +48,14 @@ depends = [
   { task = "build", optional = true },
 ]
 run = "echo 'ci: all gates green'"
+
+[tasks."lint:typos"]
+description = "Spell-check contents and filenames (typos)"
+dir = "{{cwd}}"
+# Locale stays `en` (accepts en-US and en-GB): the org register convention
+# is en-US in code and en-GB in prose, which no per-file locale can split.
+# Repo-specific jargon goes in that repo's own _typos.toml (extend-words).
+run = "typos"
 
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows (actionlint)"
