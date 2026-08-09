@@ -44,7 +44,11 @@ jobs:
     permissions:
       contents: read
     env:
-      GH_TOKEN: ${{ github.token }}
+      # The default token sees only the public view of repo metadata; the
+      # merge-settings fields need admin read. AUDIT_TOKEN is a
+      # fine-grained PAT (all org repos, Administration: read-only) stored
+      # as an org Actions secret.
+      GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
