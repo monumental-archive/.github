@@ -165,5 +165,5 @@ check recognises.
 | monumental-archive-db | re-anchor cosign identity to trusted-builder; everything else exempt (continuous archetype) |
 
 Risky release-machinery changes are proven in the **release lab**
-(edtf-release-lab, promoted to org-generic) before any production repository
+(`release-lab`) before any production repository
 moves.
