@@ -416,6 +416,24 @@ protection; its tiers are 3/6/8/9/10 with tiers 4–5 requiring two reviewers.
 CII-Best-Practices scores 10 only at Gold, 7 at Silver. Webhooks is
 Critical risk and requires token authentication.
 
+**Fuzzing credits Rust `cargo-fuzz` natively, and the published check
+documentation is wrong about this.** The docs list Go, Haskell,
+JavaScript/TypeScript, Erlang, C# and F#, and omit Rust — but
+`checks/raw/fuzzing.go` carries a `clients.Rust` entry matching the
+function pattern `libfuzzer_sys` across `*.rs`, and `internal/fuzzers`
+names the result `RustCargoFuzzer`. The check is binary: any recognised
+fuzzer scores the full 10.
+
+Consequence, and it removes a planned cost rather than adding one: a Rust
+repository with `cargo-fuzz` targets already scores Fuzzing 10/10, so
+**ClusterFuzzLite is unnecessary** for that score. Its cost — a
+`.clusterfuzzlite/` directory, a Dockerfile on `gcr.io/oss-fuzz-base/
+base-builder:v1` (a floating tag, against this org's pinning rule), new
+`gcr.io` egress and a Docker dependency — buys nothing here. A repository
+with no code to fuzz, such as the continuous-archetype image repo, has no
+route to this score and is capped at 0 by subject matter rather than by
+engineering.
+
 **OpenSSF Best Practices** — Silver MUSTs include `signed_releases`,
 **`build_repeatable`** ("exactly the same bit-for-bit result"),
 `test_statement_coverage80`, `regression_tests_added50`,

@@ -30,9 +30,21 @@ be reported"* forever. The fix is always to adopt the gate in that repo,
 never to soften the rule.
 
 The trap there: a repo can run perfectly good CI and still fail, because the
-**check name is the contract**. `signer` lints harder than the
-shared gate does, but reports as `Lint`, so `ci / ci` never arrives. Repos
-not yet reporting it: `signer`.
+**check name is the contract**. A repo can lint harder than the shared gate
+does and still never report `ci / ci`, which leaves its pull requests
+waiting forever.
+
+**As of 2026-08-09 that blocker is cleared.** `signer` and `release-lab`
+both adopted the shared gate and both report `ci / ci` — observed on
+monumental-archive/signer#11 and monumental-archive/release-lab#11. All
+three org repositories now satisfy the enabler, so the org-level branch
+ruleset can be applied at `enforcement: "active"` immediately on the Team
+upgrade, with no repository left waiting.
+
+Until that upgrade, `signer` and `release-lab` have **no branch ruleset**.
+Per-repo application was considered and deliberately rejected: one org
+ruleset everyone adopts is the target shape, and per-repo copies would be a
+second source of truth to reconcile and delete hours later.
 
 ## Why these rules and not more
 
