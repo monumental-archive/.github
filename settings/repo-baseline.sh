@@ -22,6 +22,19 @@ for repo in ${repos}; do
   case "${mode}" in
     apply)
       gh api -X PATCH "repos/${org}/${repo}" --input "${baseline}" > /dev/null
+      # Immutable OIDC subject claims: the sub claim carries the numeric
+      # repository and owner ids alongside the names, so a token still
+      # identifies its origin after a rename or transfer. GitHub says new
+      # repos get this from 2026-07-15 and that renames adopt it too, but a
+      # rename measured on 2026-08-09 left the flag false — so set it
+      # explicitly rather than trusting it to happen.
+      #
+      # Safe to change at any point: the format appears in Fulcio OID .24
+      # (Token Subject), while --signer-workflow and --signer-digest pin
+      # OIDs .9 and .10, which are unaffected.
+      gh api "repos/${org}/${repo}/actions/oidc/customization/sub" \
+        --method PUT -F use_default=true -F use_immutable_subject=true \
+        > /dev/null
       echo "applied: ${repo}"
       ;;
     check)
@@ -34,6 +47,12 @@ for repo in ${repos}; do
           drift=1
         fi
       done
+      immutable="$(gh api "repos/${org}/${repo}/actions/oidc/customization/sub" \
+        --jq '.use_immutable_subject')"
+      if [[ ${immutable} != "true" ]]; then
+        echo "drift: ${repo} OIDC sub claim is not immutable (${immutable})"
+        drift=1
+      fi
       ;;
     *)
       echo "unknown mode: ${mode}" >&2
