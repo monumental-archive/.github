@@ -6,7 +6,13 @@
     "ref_name": { "include": ["refs/tags/v*"], "exclude": [] },
     "repository_name": { "include": ["~ALL"], "exclude": [] }
   },
-  "bypass_actors": [],
+  "bypass_actors": [
+    {
+      "actor_id": 4534781,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ],
   "rules": [
     { "type": "creation" }
   ]

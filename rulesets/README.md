@@ -63,13 +63,13 @@ method that always fails at merge time.
 
 `org-release-tag.json` restricts `v*` tag **creation** so release tags cannot
 exist except via the pipeline (docs/release.md). It ships with
-`enforcement: "disabled"` and no bypass actors because activation has a hard
-order — doing it early locks releasing out entirely:
+`enforcement: "disabled"` because activation has a hard order — doing it
+early locks releasing out entirely:
 
-1. The tag-minting GitHub App exists and its installation is org-wide.
-2. Its integration id is inserted as the sole bypass actor:
-   `{ "actor_id": <app-id>, "actor_type": "Integration",
-   "bypass_mode": "always" }`.
+1. ~~The tag-minting GitHub App exists and its installation is org-wide.~~
+   Done: `monumental-archive-tag-mint`, App id 4534781, installed org-wide.
+2. ~~Its integration id is inserted as the sole bypass actor.~~ Done — it is
+   the JSON's one `Integration` bypass entry.
 3. A release is proven end-to-end in the release lab with the ruleset in
    `evaluate` mode.
 4. Enforcement flips to `active`, in the same change that lands the pipeline.
