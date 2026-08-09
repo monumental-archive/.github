@@ -3,22 +3,34 @@
 The intended org-level rulesets, kept here so they are reviewable and
 reproducible rather than clicked into a settings UI and hoped to match.
 
-**These files are not applied by anything.** Org rulesets are org settings,
-not repository content. Apply with:
+Apply and drift-check them with `rulesets/apply.sh`:
 
 ```bash
-gh api -X POST orgs/monumental-archive/rulesets --input rulesets/org-default-branch.json
+rulesets/apply.sh check    # report drift, exit 1 if any
+rulesets/apply.sh apply    # create or update every ruleset on every repo
 ```
 
-Org rulesets require **GitHub Team**. Until then the same JSON applies at
-repository level, which works on Free for public repositories:
+It is idempotent, strips the `repository_name` condition (meaningful only
+org-wide), and compares semantically — GitHub returns rules in its own order
+and fills in parameter defaults the canon never declares, so a byte
+comparison reports drift on a conforming repo.
 
-```bash
-gh api -X POST repos/monumental-archive/<repo>/rulesets --input rulesets/org-default-branch.json
-```
+Org rulesets require **GitHub Team**; until then the identical JSON applies
+at repository level, which works on Free for public repositories. That is a
+**uniformity gap, not a capability gap** — nothing here waits on the plan.
+When Team lands, apply each file once at org level and delete the script.
 
-(Strip the `repository_name` condition for the repo-level call — it is only
-meaningful org-wide.)
+**A ruleset lands with its enabler, never before it.** The tag rules need
+the minting App; the branch ruleset needs the shared gate, because
+`required_status_checks` naming a context the repo never reports leaves
+every pull request at *"Expected — waiting for status to be reported"*
+forever. `apply.sh` refuses that case and names it as a conformance gap: the
+fix is always to adopt the gate in that repo, never to soften the rule.
+
+Note the trap it guards: a repo can run perfectly good CI and still fail
+this, because the **check name is the contract**. `trusted-builder` lints
+harder than the shared gate does, but reports as `Lint`, so `ci / ci` never
+arrives.
 
 ## Why these rules and not more
 
