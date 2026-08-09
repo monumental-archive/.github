@@ -271,13 +271,53 @@ this release", ours says "these bytes came from this build".
 
 ## Registries
 
+### Which workflow a registry pins
+
+Both registries match the **caller's entry workflow**, never the reusable
+workflow that contains the publish step. The distinguishing claim is
+`workflow_ref` — "the ref path to the workflow" — as against
+`job_workflow_ref`, "for jobs using a reusable workflow, the ref path to
+the reusable workflow". The first names the file the run started from; the
+second names the file the job's steps came from, and is what Fulcio records
+in OID .9.
+
+crates.io's `GitHubClaims` deserialises exactly seven claims —
+`repository_owner_id`, `repository`, `workflow_ref`, `environment`,
+`event_name`, `run_id`, `sha` — and derives the configured filename by
+regex over `workflow_ref`. `job_workflow_ref` is not among them and is
+never read. npm documents the same behaviour, as a hazard: validation
+"checks the calling workflow's name" rather than the one holding the
+publish command.
+
+Consequence for this org, and it is structural: **a registry publish step
+may live in a shared reusable workflow.** What a registry pins is the
+caller's repository plus the caller's entry filename, so that filename is
+canon — `publish.yml`, exactly, in every repository, permanently — while
+the steps behind it are free to be shared and to move.
+
+An earlier draft of issue #28 concluded the opposite, and on that basis
+placed registry OIDC in each caller's own publish job, accepting
+`id-token: write` alongside caller-supplied code. That concession was
+unnecessary; see `docs/release.md`.
+
+### The registries themselves
+
 **crates.io** — trusted publishing validates `owner`, `repo`, `workflow`
 (filename, in `.github/workflows/`) and optional `environment`. First
 publish of a crate must be manual. Tokens are short-lived (<1h). As of
 January 2026, owners **can enforce trusted publishing and disable API-token
 publishing per crate**, and `pull_request_target` / `workflow_run` triggers
-are **blocked** from trusted publishing. Provenance display is not a
-shipped surface.
+are **blocked** from trusted publishing — rejected by name in the exchange
+handler, with `push`, `release` and `workflow_dispatch` named as the
+supported alternatives. That set is a subset of the four the GitHub Actions
+buildType permits, so a trigger legal for provenance is not automatically
+legal for publishing. Provenance display is not a shipped surface.
+
+The exchanged token is **single-use**: the JWT's `jti` is recorded on
+exchange and a replay is rejected, and the record is deliberately kept
+alive past the JWT's `exp` for the full validation leeway so cleanup cannot
+reopen the window. A resumed or retried publish must therefore mint a fresh
+OIDC token; caching one across steps or runs fails on the second use.
 
 **npm** — registers the exact workflow filename (case-sensitive), optional
 environment, requires `id-token: write`. Token publishing can be disabled
@@ -285,7 +325,9 @@ via "Require two-factor authentication and disallow tokens". npm generates
 **its own** provenance and publish attestations automatically under trusted
 publishing, associated with the **caller's** workflow, and
 `npm audit signatures` checks those. A single org-wide identity is therefore
-not achievable on npm; document both verification paths.
+not achievable on npm; document both verification paths. npm provenance also
+requires a public repository — it is not generated from a private one even
+when the package itself is public.
 
 ## Scoring frameworks
 
