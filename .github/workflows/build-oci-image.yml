@@ -101,6 +101,19 @@ jobs:
           image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           echo "image=${image}" >> "${GITHUB_OUTPUT}"
 
+      - name: Create a container-driver builder
+        run: |
+          set -euo pipefail
+          # The runner's default buildx builder uses the `docker` driver,
+          # which cannot push by digest — "push-by-digest is currently not
+          # implemented for docker driver". The docker-container driver
+          # can, and it still supports --load for the smoke test, so one
+          # builder serves both halves.
+          #
+          # No --driver-opt cache settings and no registry mirror: this
+          # workflow publishes, so it carries no cache of any kind.
+          docker buildx create --use --name org-oci --driver docker-container
+
       - name: Build for testing, loaded and unpublished
         env:
           ARCH: ${{ matrix.arch }}
