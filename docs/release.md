@@ -87,6 +87,16 @@ The lock and the pipeline land together — either alone is a lockout or a
 hole. Break-glass for a dead App: an org admin disables the ruleset, in a
 change that is itself recorded here.
 
+Phase 1 and the lock are **proven end to end** in the release lab
+(2026-08-09): two consecutive clean release cycles, a human tag push
+rejected with `GH013`, and the App minting through its bypass under
+`enforcement: "active"`. Proving it caught four defects first — three in the
+shared machinery, one in the App's grant — none of which any local linter
+could have found. The general lesson, recorded because it will recur: **a
+shared workflow whose only exerciser lives in its own repository is
+untested for the cross-repository case**, which is precisely the case every
+consumer runs.
+
 ## Phase 2: publish, prove, sign
 
 Triggered by the `v*` tag, so `github.ref` *is* the tag and provenance names
