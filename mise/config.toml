@@ -18,11 +18,11 @@
 [settings]
 # mise.lock records resolved versions, per-platform URLs and checksums.
 lockfile = true
-# Install ONLY from pre-resolved lockfile URLs: no registry or API
-# resolution at install time, and an ad-hoc `mise x tool@ver` for something
-# unpinned fails rather than quietly fetching it. This is what makes the
-# lockfile the authority rather than a record.
-locked = true
+# `locked` is set by the shared workflow as MISE_LOCKED=1, not here. In the
+# config it also applies to local task runs, where mise re-resolves per task
+# directory and cannot find this file's lock through the conf.d symlink —
+# every task then warns that every tool "is not in the lockfile". The
+# enforcement belongs where the lock is guaranteed reachable: CI.
 # Re-verify each tool's provenance attestation on install, even when the
 # lockfile already has an entry. A checksum proves the bytes did not change;
 # this proves who produced them.
@@ -41,9 +41,11 @@ minimum_release_age = "168h"
 # upstream in favour of the github backend. Neither belongs under a
 # checksum-and-attestation policy.
 disable_backends = ["asdf", "ubi"]
-# Dev machines plus the runners we actually target. The default would also
-# lock musl and windows, which nothing here builds for.
-lockfile_platforms = ["macos-arm64", "linux-x64", "linux-arm64"]
+# lockfile_platforms is deliberately NOT set. The lock currently covers
+# seven platforms including linux-*-musl and macos-x64, and repos in this
+# org build musl statics and Intel macOS binaries. Narrowing the list is a
+# decision that needs evidence about what actually runs where, and getting
+# it wrong drops a platform silently — the lock simply stops carrying it.
 
 [task_config]
 # Tasks are written in bash (guards use [[ ]] and <<<); the default task
