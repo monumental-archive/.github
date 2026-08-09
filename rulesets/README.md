@@ -3,9 +3,11 @@
 The intended org-level rulesets, kept here so they are reviewable and
 reproducible rather than clicked into a settings UI and hoped to match.
 
-Org rulesets require **GitHub Team**. Apply each file once at org level,
-targeting all repositories; `~ALL` is dynamic, so repos transferring in
-later are covered without a further step.
+Org rulesets require **GitHub Team**. **Applied 2026-08-09**: all three are
+live at org level, `enforcement: active`, scoped `~ALL` — which is dynamic,
+so repositories transferring in later are covered with no further step. The
+per-repository copies that stood in beforehand have been removed, so there
+is one source of truth rather than two to reconcile.
 
 ```bash
 gh api -X POST orgs/monumental-archive/rulesets --input rulesets/org-default-branch.json
@@ -54,19 +56,46 @@ weights are in `checks/evaluation/branch_protection.go`:
 | Tier | Points | Requires |
 | --- | --- | --- |
 | 1 | 3 | block deletion + block force push |
-| 2 | 3 | required approving reviews ≥ 1, protection applies to admins |
+| 2 | 3 | required approving reviews ≥ 1 **and** up-to-date branches + last-push approval + PRs required to change code |
 | 3 | 2 | required status checks |
 | 4 | 1 | `minReviews = 2` **and** code-owner review |
-| 5 | 1 | admin thorough review |
+| 5 | 1 | dismiss stale reviews **and** protection applies to admins |
 
-Tiers 1 and 3 are fully claimed. **Tiers 2, 4 and 5 are unreachable for a
-solo maintainer** and no setting substitutes: GitHub will not let you approve
-your own pull request, so `required_approving_review_count: 1` would stop you
-merging anything, and tier 4 hard-codes two reviewers. The count is therefore
-deliberately `0` — raising it buys no score and costs the ability to ship.
+**The tiers are sequentially gated, and this is the part that matters.**
+`computeFinalScore` adds a tier's points and then *returns early* if that
+tier was not scored at its maximum:
 
-Revisit the moment a second maintainer exists; tiers 2 and 4 become available
-together and are worth four points.
+```go
+score += normalizeScore(basicScore, maxBasicScore, basicLevel)
+if basicScore < maxBasicScore { return int(score), nil }
+score += normalizeScore(adminNonAdminReviewScore, …)
+if adminNonAdminReviewScore < … { return int(score), nil }
+score += normalizeScore(contextScore, …)   // never reached unless tier 2 maxed
+```
+
+So a tier cannot be claimed out of order. Required status checks are tier 3
+and score **nothing** while tier 2 is unmet, no matter how strictly they are
+configured.
+
+Tier 2 needs `required_approving_review_count > 0`, and GitHub will not let
+you approve your own pull request. So for a solo maintainer the check stops
+after tier 1: **3/10, and no configuration changes that.** Two earlier
+statements were wrong and are corrected here — this file previously claimed
+tiers 1 and 3 were "fully claimed" (tier 3 is unreachable without tier 2),
+and put "protection applies to admins" in tier 2 when the source puts
+`branchProtectionAppliesToAdmins` in tier 5.
+
+Being an organisation does not change this. What the Team plan buys is
+org-level application, which is governance rather than score.
+
+**Everything above tier 1 is therefore configured for its own sake, not for
+points**, and that is the right reason: required status checks, linear
+history, required signatures and an empty bypass list each prevent a real
+failure. The badge effort belongs on the other nineteen checks, which are
+not gated and where sixteen can reach 10/10.
+
+Revisit the moment a second maintainer exists: tiers 2, 3 and 4 unlock
+together and are worth six points, not four.
 
 ## What is deliberately absent
 
