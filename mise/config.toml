@@ -246,7 +246,10 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 bad=""
 for f in .github/workflows/*.y*ml; do
   grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
-  grep -qE "id-token:[[:space:]]*write" "${f}" || continue
+  # Only a real grant counts. A workflow that says "no id-token, ever" in
+  # a comment is documenting the boundary, not breaching it — matching
+  # comment text flagged exactly the files that get this right.
+  grep -qE "^[^#]*id-token:[[:space:]]*write" "${f}" || continue
   grep -q "capability-boundary:" "${f}" && continue
   bad="${bad} ${f}"
 done
