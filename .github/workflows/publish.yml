@@ -72,6 +72,24 @@ on:
         required: false
         type: boolean
         default: false
+      dockerfile:
+        description: Dockerfile path, for the oci-image class.
+        required: false
+        type: string
+        default: Dockerfile
+      context:
+        description: Build context, for the oci-image class.
+        required: false
+        type: string
+        default: "."
+      smoke-test:
+        description: >
+          Executable proving the image does its one job, for the oci-image
+          class. Run on the loaded image before anything is published, and
+          again on the bytes pulled back from the registry.
+        required: false
+        type: string
+        default: ""
       sbom-basename:
         description: >
           Basename for the SPDX SBOM release asset. The asset must be named
@@ -123,8 +141,8 @@ jobs:
           fi
           for c in "${requested[@]}"; do
             case "${c}" in
-              rust-crate) ;;
-              rust-binary | oci-image | wasm-npm)
+              rust-crate | oci-image) ;;
+              rust-binary | wasm-npm)
                 echo "::error::class is declared but not yet built"
                 exit 1
                 ;;
@@ -156,12 +174,47 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
       dry-run: ${{ inputs.dry-run }}
 
+  build-oci:
+    name: Build image
+    needs: guard
+    if: contains(inputs.classes, 'oci-image')
+    uses: ./.github/workflows/build-oci-image.yml
+    permissions:
+      # Restated, not inherited — see the note on `build` above.
+      contents: read # checkout of the caller
+      packages: write # push per-arch images and the manifest list
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      dockerfile: ${{ inputs.dockerfile }}
+      context: ${{ inputs.context }}
+      smoke-test: ${{ inputs.smoke-test }}
+      dry-run: ${{ inputs.dry-run }}
+
+  # An image subject is a different shape from a file one, and sign.yml
+  # takes exactly one — so a repository shipping both classes signs twice,
+  # under the same identity, rather than mixing unrelated subjects into one
+  # certificate.
+  sign-image:
+    name: Sign image
+    needs: build-oci
+    if: ${{ contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+    uses: monumental-archive/signer/.github/workflows/sign.yml@40ada01b4f6cdce65fe8e1edcacac83bea4473a4 # main
+    with:
+      image-name: ${{ needs.build-oci.outputs.image }}
+      image-digest: ${{ needs.build-oci.outputs.digest }}
+      bundle-artifact: attestation-bundle-image
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+
   # Runs no caller code, so it can hold the writes the build job must not.
   # It pulls the published bytes back and hashes them: the attested subject
   # is what shipped, not what we hoped shipped.
   verify:
     name: Verify published bytes
     needs: [guard, build]
+    if: contains(inputs.classes, 'rust-crate')
     uses: ./.github/workflows/verify-published.yml
     permissions:
       contents: read # the verifier holds no more than this
@@ -174,7 +227,8 @@ jobs:
   sign:
     name: Sign
     needs: verify
-    uses: monumental-archive/signer/.github/workflows/sign.yml@3c30fc243b42b95a7fb09934b3ab19292e051ba2 # main
+    if: contains(inputs.classes, 'rust-crate')
+    uses: monumental-archive/signer/.github/workflows/sign.yml@40ada01b4f6cdce65fe8e1edcacac83bea4473a4 # main
     with:
       subjects: ${{ needs.verify.outputs.subjects }}
     permissions:
