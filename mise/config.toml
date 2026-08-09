@@ -16,7 +16,34 @@
 # workflow, not here.
 
 [settings]
+# mise.lock records resolved versions, per-platform URLs and checksums.
 lockfile = true
+# Install ONLY from pre-resolved lockfile URLs: no registry or API
+# resolution at install time, and an ad-hoc `mise x tool@ver` for something
+# unpinned fails rather than quietly fetching it. This is what makes the
+# lockfile the authority rather than a record.
+locked = true
+# Re-verify each tool's provenance attestation on install, even when the
+# lockfile already has an entry. A checksum proves the bytes did not change;
+# this proves who produced them.
+locked_verify_provenance = true
+# `mise use` writes exact versions, never ranges.
+pin = true
+# Pinned tools go to the FRONT of PATH, so a system install can never shadow
+# the pinned one — the failure where CI and a laptop run different binaries
+# while both look correct.
+activate_aggressive = true
+# Never install a release younger than seven days: the same number as
+# Renovate's minimumReleaseAge, so the two layers agree instead of one
+# quietly undercutting the other.
+minimum_release_age = "168h"
+# asdf plugins are unsigned single-maintainer bash; ubi is deprecated
+# upstream in favour of the github backend. Neither belongs under a
+# checksum-and-attestation policy.
+disable_backends = ["asdf", "ubi"]
+# Dev machines plus the runners we actually target. The default would also
+# lock musl and windows, which nothing here builds for.
+lockfile_platforms = ["macos-arm64", "linux-x64", "linux-arm64"]
 
 [task_config]
 # Tasks are written in bash (guards use [[ ]] and <<<); the default task
