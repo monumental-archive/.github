@@ -8,6 +8,7 @@ footprint of the governance stack:
 - `lefthook.yml` — pulls the org git hooks by remote
 - `committed.toml` — conventional-commit canon (add repo `allowed_scopes`)
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
+- `.rumdl.toml` — markdown canon (MD013 exempts code blocks)
 
 Plus, from the Actions tab, the **Org CI gate** workflow template (or copy
 `workflow-templates/ci.yml` and replace `$default-branch` with `main`).
