@@ -105,7 +105,20 @@ jobs:
       github.event_name == 'push' &&
       !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      # git-cliff calls the GitHub API. The canonical cliff.toml renders
+      # `commit.remote.pr_number`, so every changelog entry is linked to
+      # its pull request — which means the API is consulted on every run.
+      #
+      # Unauthenticated that is 60 requests an hour, shared across every
+      # runner on the same address, so it 403s intermittently and takes
+      # the release with it: `panicked at changelog.rs: Could not get
+      # github metadata: Status(403)`. Observed exactly that way, after
+      # several runs had passed on quota luck alone.
+      #
+      # Authenticated it is 1000 an hour. `contents: read` is the whole
+      # grant that buys, and it is read-only on a public repository.
+      contents: read
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
@@ -131,6 +144,10 @@ jobs:
 
       - name: Prepare the release
         id: prepare
+        env:
+          # git-cliff reads this for its GitHub integration; without it the
+          # API calls are anonymous and rate-limited to 60 an hour.
+          GITHUB_TOKEN: ${{ github.token }}
         run: .org-canon/release/prepare-release.sh
 
       - name: Mint the Release-PR token
