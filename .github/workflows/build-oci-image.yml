@@ -204,11 +204,32 @@ jobs:
     outputs:
       image: ${{ steps.assemble.outputs.image }}
       digest: ${{ steps.assemble.outputs.digest }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        # trivy comes from the belt. Without this the scan step dies as
+        # `trivy: command not found` — exit 127, after the image is already
+        # pushed and the manifest assembled, which is the worst place to
+        # discover a missing tool.
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          cache: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
