@@ -1,0 +1,11 @@
+# Repo-specific tools and tasks only; the org belt arrives globally.
+# ci is assembled by the toolbelt: define test/build/lint:* tasks here
+# and they are collected automatically.
+
+[settings]
+lockfile = true
+
+[tools]
+
+[tasks.test]
+run = "echo TODO: this repo has no tests yet && exit 1"

@@ -1,0 +1,11 @@
+# Conventional-commit enforcement (committed). Canon example for org repos;
+# copy at scaffold time, add repo-specific allowed_scopes as needed.
+style = "conventional"
+# Conventional descriptions are lowercase by convention ("feat: the belt…").
+subject_capitalized = false
+# 50 is the classic git norm; conventional prefixes eat into it, and the
+# org's house style favours sentence-length subjects. 72 is the hard ceiling.
+subject_length = 72
+# Classic git imperative mood: "if applied, this commit will <subject>".
+# The default, restated here so nobody softens it quietly again.
+imperative_subject = true
