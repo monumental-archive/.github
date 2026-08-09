@@ -24,6 +24,7 @@ actionlint = "1.7.12"
 # that entire check class silently vanishes.
 shellcheck = "0.11.0"
 typos = "1.49.0"
+lefthook = "2.1.10"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -48,6 +49,11 @@ depends = [
   { task = "build", optional = true },
 ]
 run = "echo 'ci: all gates green'"
+
+[tasks."hooks:install"]
+description = "Wire this clone's git hooks to lefthook (run once per clone)"
+dir = "{{cwd}}"
+run = "lefthook install"
 
 [tasks."lint:typos"]
 description = "Spell-check contents and filenames (typos)"

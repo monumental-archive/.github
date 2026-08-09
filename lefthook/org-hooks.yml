@@ -1,0 +1,25 @@
+# The org's shared git hooks, consumed by every repo via lefthook remotes.
+# Hooks are developer convenience — enforcement is `ci` in the shared
+# workflow. A lefthook-local.yml can override these; CI cannot be overridden.
+#
+# Repo stub (lefthook.yml):
+#   remotes:
+#     - git_url: https://github.com/monumental-archive/.github
+#       ref: main            # pin to a tag once this repo cuts releases
+#       refetch_frequency: 24h
+#       configs:
+#         - lefthook/org-hooks.yml
+# Then once per clone: lefthook install
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: typos
+      run: mise run lint:typos
+    - name: actionlint
+      run: mise run lint:actions
+
+pre-push:
+  jobs:
+    - name: ci
+      run: mise run ci
