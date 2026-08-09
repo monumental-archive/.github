@@ -18,6 +18,11 @@
 [settings]
 lockfile = true
 
+[task_config]
+# Tasks are written in bash (guards use [[ ]] and <<<); the default task
+# shell is sh, which is dash on Ubuntu runners and chokes on both.
+shell = "bash -c"
+
 [tools]
 actionlint = "1.7.12"
 # actionlint shells out to shellcheck for `run:` script analysis; without it
