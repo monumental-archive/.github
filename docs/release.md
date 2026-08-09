@@ -45,6 +45,12 @@ from the container image. Meanwhile the tags-only job a release tool would do
 iiif-server's git-cliff phase 1 already does in three small scripts. One
 flow, no structural bugs, no tool that wants to own the pipeline.
 
+The machinery is shared: callers pin
+[`release.yml`](../.github/workflows/release.yml) by SHA (the usual doubled
+`.github` path), which runs the canonical scripts in
+[`release/`](../release/) at that same SHA. The caller stub is
+[`workflow-templates/release.yml`](../workflow-templates/release.yml).
+
 Phase-1 rules, all proven in iiif-server:
 
 - An ordinary push to `main` only refreshes the release PR. **Merging the

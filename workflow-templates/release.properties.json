@@ -1,0 +1,5 @@
+{
+  "name": "Org release phase 1",
+  "description": "The monumental-archive release-PR flow: git-cliff version decision, API-signed Release PR, and App-minted v* tag on merge, via the shared reusable workflow.",
+  "categories": ["deployment"]
+}
