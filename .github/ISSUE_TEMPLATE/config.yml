@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/monumental-archive/.github/security/policy
+    about: Report privately via the Security tab — never a public issue.
