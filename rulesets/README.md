@@ -54,6 +54,18 @@ alongside these.
 exemption for yourself is the common way to score zero on it while believing
 the branch is protected.
 
+Merge methods are `squash` and `rebase` only: `required_linear_history`
+blocks merge commits, so allowing the merge-commit button would offer a
+method that always fails at merge time.
+
+## Planned (blocked on step-3 workflow design)
+
+- **Restrict `v*` tag creation** to the release workflow's GitHub App as the
+  sole bypass actor, so release tags cannot exist except via the pipeline.
+  Must land together with the release workflow or releasing locks out.
+- **Org-wide required status check** on a standard summary job name (e.g.
+  `ci-gate`) once the shared CI workflow reports under one name everywhere.
+
 ## Beyond Scorecard
 
 `required_signatures` and the tag rules earn no Scorecard points — there is
