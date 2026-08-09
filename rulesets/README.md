@@ -3,22 +3,36 @@
 The intended org-level rulesets, kept here so they are reviewable and
 reproducible rather than clicked into a settings UI and hoped to match.
 
-**These files are not applied by anything.** Org rulesets are org settings,
-not repository content. Apply with:
+Org rulesets require **GitHub Team**. Apply each file once at org level,
+targeting all repositories; `~ALL` is dynamic, so repos transferring in
+later are covered without a further step.
 
 ```bash
 gh api -X POST orgs/monumental-archive/rulesets --input rulesets/org-default-branch.json
 ```
 
-Org rulesets require **GitHub Team**. Until then the same JSON applies at
-repository level, which works on Free for public repositories:
+The same JSON also applies per repository (drop the `repository_name`
+condition — the repo-level API rejects it), which is how the release lab
+ran its lock before the org upgrade.
 
-```bash
-gh api -X POST repos/monumental-archive/<repo>/rulesets --input rulesets/org-default-branch.json
-```
+**A ruleset lands with its enabler, never before it.**
 
-(Strip the `repository_name` condition for the repo-level call — it is only
-meaningful org-wide.)
+The `v*` creation lock's enabler is the minting App, and it **exists**:
+`monumental-archive-tag-mint`, App id 4534781, installed org-wide, the sole
+`Integration` bypass actor in `org-release-tag.json`. Both halves are proven
+(see below), so that ruleset ships `active` — there is nothing left to wait
+for.
+
+The branch ruleset's enabler is the shared gate, and that one is **not yet
+satisfied everywhere**: `required_status_checks` naming a context a repo
+never reports leaves its pull requests at *"Expected — waiting for status to
+be reported"* forever. The fix is always to adopt the gate in that repo,
+never to soften the rule.
+
+The trap there: a repo can run perfectly good CI and still fail, because the
+**check name is the contract**. `trusted-builder` lints harder than the
+shared gate does, but reports as `Lint`, so `ci / ci` never arrives. Repos
+not yet reporting it: `trusted-builder`, `edtf-release-lab`.
 
 ## Why these rules and not more
 

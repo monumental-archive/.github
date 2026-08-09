@@ -1,7 +1,7 @@
 {
   "name": "org-release-tag",
   "target": "tag",
-  "enforcement": "disabled",
+  "enforcement": "active",
   "conditions": {
     "ref_name": { "include": ["refs/tags/v*"], "exclude": [] },
     "repository_name": { "include": ["~ALL"], "exclude": [] }
