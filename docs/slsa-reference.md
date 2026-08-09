@@ -239,6 +239,38 @@ GitHub's guidance does **not** cover multi-arch manifest lists.
   workflows: "Environment secrets cannot be passed from the caller
   workflow", and an environment's own secret wins over one passed in.
 
+### Environment scoping, measured
+
+The documentation does not say whose environment applies when a reusable
+workflow's job declares one, and gives no exhaustive list of the keywords
+a calling job may carry. Both were measured in the lab on 2026-08-09, with
+`release-lab` calling a probe in `signer`, a `publish` environment in each
+repository, and a different variable value in each.
+
+**A reusable workflow's job may declare `environment:`, and it resolves
+against the caller.** The probe printed the *caller's* value, and the
+minted OIDC token carried `"environment": "publish"`. So the environment
+reaches the identity, not merely the job — environment-scoped trusted
+publishing works from a shared workflow.
+
+**A job that calls a reusable workflow may not declare `environment:`.**
+Adding it produced an immediate run failure with zero jobs and no
+annotation — "This run likely failed because of a workflow file issue" —
+the same shape as the permissions `startup_failure` recorded above.
+
+Together these are one conclusion, and it is the opposite of what "not
+recommended" suggests: **declaring `environment:` inside the reusable is
+the only way to environment-scope a reusable workflow at all**, and it
+already resolves in the right place. A signing or publishing workflow
+therefore declares the environment itself, and every caller supplies the
+`publish` environment that gates it. A `publish` environment in the shared
+repository would never resolve and should not exist there, because its
+presence would imply a protection it does not provide.
+
+The same run confirmed the claim split by measurement rather than by
+source reading: `workflow_ref` named the caller's entry file, and
+`job_workflow_ref` named the reusable at its pinned SHA.
+
 ## Distribution and evidence
 
 SLSA `distributing-provenance` gives a normative naming SHOULD: provenance
@@ -445,27 +477,42 @@ from `GET /repos/{owner}/{repo}/actions/oidc/customization/sub`. So the
 rename did **not** flip `use_immutable_subject`, though the endpoint does
 preview the prefix the new format would produce.
 
-Two readings are possible — the flag may reflect only a deliberate opt-in
+Two readings were possible — the flag may reflect only a deliberate opt-in
 while the issued token differs, or automatic adoption may not behave as the
-changelog describes. Settling it requires reading the `sub` claim of an
-actual OIDC token, not an API field.
+changelog describes.
 
-Operationally: **do not assume a rename or transfer flips the format, and
-do not assume it does not.** Query this endpoint before and after every
-transfer, and confirm against a real token before relying on either
-answer.
+**Settled 2026-08-09 by reading a real token.** The environment probe
+minted one in `release-lab` and its subject was:
+
+```text
+repo:monumental-archive@314831567/release-lab@1327949748:environment:publish
+```
+
+That is the **new immutable format**, while the API went on reporting
+`use_immutable_subject: false`. The first reading is therefore the correct
+one: the flag tracks deliberate opt-in only, and automatic adoption on
+rename has already happened irrespective of what it says. **Trust the
+token, not the field.**
+
+The consequence is milder than feared, at least for crates.io: its
+`GitHubClaims` never deserialises `sub` at all, matching on `repository`,
+`repository_owner_id` and `workflow_ref` instead, so no change to the
+subject format can break its trusted publishing. npm is unverified and
+must not be assumed to behave the same way.
 
 ## Questions that require an experiment
 
 Documentation does not answer these; the release lab does.
 
-1. Can a shared signing reusable workflow be environment-scoped, and whose
-   repository's environment applies?
+1. ~~Can a shared signing reusable workflow be environment-scoped, and
+   whose repository's environment applies?~~ **Answered** — yes, and the
+   caller's; see "Environment scoping, measured".
 2. For a multi-arch image, should the attestation subject be the index
    digest or the per-arch digests, and what does
    `gh attestation verify oci://…:tag` resolve?
 3. What predicate type does GitHub's automatic release attestation use?
 4. Does the OIDC subject-claim format change break either registry's
-   trusted publishing configuration on transfer?
+   trusted publishing configuration on transfer? **Answered for
+   crates.io** — no, it never reads `sub`. npm still open.
 5. Does the hosted Renovate bot permit the `mise` unsafe execution, i.e.
    can it refresh `mise.lock`?

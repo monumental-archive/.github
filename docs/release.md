@@ -75,7 +75,18 @@ never push release tags, and the two historical PAT secrets
 (`RELEASE_PLZ_TOKEN`, `RELEASE_TOKEN`) are retired. The mint is its own tiny
 job holding a `contents: write` token scoped by
 `actions/create-github-app-token`; the release-PR bot never holds tag-push
-power. The App's key lives behind the protected `publish` environment.
+power.
+
+The App's key does **not** currently live behind the protected `publish`
+environment, as an earlier draft of this document asserted. It is an
+organisation secret with `visibility: all`, which any workflow in any
+repository in the organisation can read — including a repository added
+tomorrow. The measurement recorded in
+[`slsa-reference.md`](slsa-reference.md) is what makes closing this
+possible: a reusable workflow's job may declare `environment:`, and it
+resolves against the caller. Whether such a job can then read the
+*caller's* environment secret is the next question for the lab, and until
+it is answered this gap is stated rather than papered over.
 
 The default `GITHUB_TOKEN` is never used to push a tag: tags it pushes
 trigger no workflows, and a release that silently triggers nothing looks
