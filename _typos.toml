@@ -1,0 +1,12 @@
+# Repo-specific vocabulary for `typos` (belt task `lint:typos`).
+#
+# The belt runs locale `en`, which accepts en-US and en-GB. This file is
+# only for jargon the dictionary cannot know about — not for spelling
+# preferences.
+
+[default.extend-words]
+# in-toto's attestation bundles are named `<artifact>.intoto.jsonl`. That
+# filename is fixed by the in-toto spec and is what OpenSSF Scorecard's
+# Signed-Releases check looks for, so it appears verbatim in prose and in
+# the evidence bundle. `typos` reads it as a misspelling of "into".
+intoto = "intoto"
