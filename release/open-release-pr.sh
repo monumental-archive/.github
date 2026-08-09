@@ -24,6 +24,9 @@ set -euo pipefail
 : "${GH_TOKEN:?GH_TOKEN must be set (the tag-mint App token, not GITHUB_TOKEN)}"
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_SHA:?}"
+# No apostrophe in this message: inside ${VAR:?...} it opens a quote the
+# parser never closes, and shfmt then misreads the rest of the file.
+: "${APP_SLUG:?APP_SLUG must be set (the create-github-app-token app-slug output)}"
 
 branch="release/v${VERSION}"
 title="chore: release v${VERSION}"
@@ -45,11 +48,20 @@ cleanup() {
 trap cleanup EXIT
 
 # The release commit signs itself off like any other (OSPS-LE-01.01, and
-# `lint:dco` admits no exemption list). The identity is derived from the
-# token rather than hardcoded, because it is the App's bot user and differs
-# per installation — and because a sign-off naming the wrong identity is
-# worse than none.
-bot=$(gh api user --jq '"\(.login) <\(.id)+\(.login)@users.noreply.github.com>"')
+# `lint:dco` admits no exemption list). The identity is derived rather than
+# hardcoded, because it is the App's bot user and differs per installation
+# — and because a sign-off naming the wrong identity is worse than none.
+#
+# NOT via `gh api user`: an App installation token has no user context, so
+# that endpoint answers 403 "Resource not accessible by integration". The
+# slug comes from the token action's own output, and the numeric id from
+# the public users endpoint, which an installation token may read. The
+# bracketed `[bot]` suffix is part of the login and part of the address —
+# `lint:dco` matches the sign-off against the commit author verbatim, and
+# GitHub authors API-created commits as exactly this identity.
+bot_login="${APP_SLUG}[bot]"
+bot_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq '.id')
+bot="${bot_login} <${bot_id}+${bot_login}@users.noreply.github.com>"
 signoff="Signed-off-by: ${bot}"
 
 # prepare-release.sh has already exited early when there was nothing to bump,
