@@ -373,3 +373,42 @@ if [[ -n "${bad}" ]]; then
 fi
 echo "lint:nested-permissions: ${checked} reusable workflow(s) clean"
 '''
+
+[tasks."lint:bash-portability"]
+description = "No bash 4+ syntax: it runs on the runner and not on a Mac"
+dir = "{{cwd}}"
+# GitHub runners ship bash 5; macOS ships bash 3.2.57 and always will,
+# because bash 4 changed licence. The toolbelt sets `shell = "bash -c"`, so
+# every task and every release script is expected to run in both places.
+#
+# A bash-4-ism therefore passes CI and fails on the machine the code is
+# written on — which is worse than failing everywhere, because it silently
+# removes the ability to test a script before spending an irreversible
+# release on it. Found exactly that way: `${name,,}` in the signer, green
+# in CI, "bad substitution" locally.
+#
+# Comment lines are skipped so that documenting a forbidden form (as the
+# signer now does) is not itself a violation.
+run = '''
+files=$(git ls-files | xargs shfmt --find 2>/dev/null; git ls-files ".github/workflows/*.y*ml")
+[[ -n "${files}" ]] || { echo "lint:bash-portability: nothing to check, skipped"; exit 0; }
+# ${v,,} ${v^^} ${v,} ${v^} — case modification, bash 4.0
+# declare -A / typeset -A — associative arrays, bash 4.0
+# mapfile / readarray     — bash 4.0
+# &>>                     — append-both redirection, bash 4.0
+bad4='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^|,|\^)\}|(declare|typeset)[[:space:]]+-[A-Za-z]*A|(^|[^A-Za-z_])(mapfile|readarray)[[:space:]]|&>>'
+found=""
+while IFS= read -r f; do
+  [[ -f "${f}" ]] || continue
+  hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
+  [[ -n "${hit}" ]] && found="${found}\n  ${f}: ${hit}"
+done <<< "${files}"
+if [[ -n "${found}" ]]; then
+  echo "lint:bash-portability: bash 4+ syntax found (macOS ships 3.2):" >&2
+  printf "%b\n" "${found}" >&2
+  echo "  these pass in CI and fail locally, which is how a script reaches" >&2
+  echo "  a release untested. Use tr, case, or an explicit loop instead." >&2
+  exit 1
+fi
+echo "lint:bash-portability: $(wc -l <<< "${files}" | tr -d " ") files clean"
+'''
