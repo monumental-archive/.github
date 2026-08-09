@@ -1,0 +1,107 @@
+# git-cliff: the version decision and the changelog for release phase 1.
+# Org canon — see docs/release.md in monumental-archive/.github. The [bump]
+# settings are load-bearing and not repo-tunable; the changelog body is
+# repo-local only in its OWNER/REPO substitutions.
+#
+# Why git-cliff rather than a release tool: neither release-plz nor
+# release-please can drive a workspace whose interdependent crates are
+# unpublished (release-plz#2595; release-please has no model for
+# [workspace.package] inheritance). The full reasoning is docs/release.md.
+
+[bump]
+# 0.x with a feature commit bumps the minor: 0.1.0 -> 0.2.0.
+features_always_bump_minor = true
+
+# THE IMPORTANT ONE. git-cliff's default sends a breaking change on 0.x
+# straight to 1.0.0 — and in this org 1.0 is not a version number, it is a
+# deliberate scope commitment. Reaching it by accident, because someone wrote
+# `feat!:` before launch, would publish a promise nobody made. Breaking
+# changes bump the minor while pre-1.0, which is also what plain semver says
+# 0.x means. 1.0.0 gets set deliberately, by hand, once.
+breaking_always_bump_major = false
+
+# The first Release PR opens at 0.1.0 rather than 0.0.1; 1.0.0 is reserved
+# as above.
+initial_tag = "v0.1.0"
+
+# Housekeeping commits do not justify a release on their own. A run where
+# everything since the last tag is chore/ci/docs produces no version bump
+# and therefore no Release PR.
+no_increment_regex = "^(chore|ci|docs|style|test)"
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are recorded here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
+"""
+body = """\
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}]\
+{% if previous.version %}\
+(https://github.com/OWNER/REPO/compare/{{ previous.version }}...{{ version }})\
+{% else %}\
+(https://github.com/OWNER/REPO/releases/tag/{{ version }})\
+{% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+
+{% for commit in commits %}\
+{% if commit.remote.pr_number %}\
+- {{ commit.message | trim_end_matches(pat=" (#" ~ commit.remote.pr_number ~ ")") }} ([#{{ commit.remote.pr_number }}](https://github.com/OWNER/REPO/pull/{{ commit.remote.pr_number }}))
+{% else %}\
+- {{ commit.message }}
+{% endif %}\
+{% endfor %}\
+{% endfor %}
+"""
+# trim = false is load-bearing, and the whitespace here is exact. git-cliff
+# renders each release independently and joins them with a single newline.
+# Under trim = true each section was stripped back to end at its last bullet,
+# so that lone join-newline was all that separated the bullet from the next
+# release's `## [x.y.z]` heading — no blank line, i.e. MD032 and MD022, both
+# fatal under this org's markdownlint. It stays invisible until the second
+# release, then fails every one from there onward.
+#
+# With trim = false the last bullet keeps its own trailing newline, and
+# git-cliff's join newline then makes the blank line. So the body must add no
+# trailing newline of its own (two blanks is MD012), and must start with `\`
+# to eat the newline after `"""` — the header supplies that side.
+trim = false
+footer = ""
+
+[git]
+conventional_commits = true
+# A commit that is not conventional is a bug in the commit-msg hook, not
+# something to quietly drop from the release notes.
+filter_unconventional = false
+protect_breaking_commits = true
+split_commits = false
+filter_commits = false
+topo_order = false
+sort_commits = "oldest"
+tag_pattern = "v[0-9]*"
+
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", group = "Testing" },
+  { message = "^build", group = "Build" },
+  { message = "^ci", group = "CI" },
+  # Release commits are the mechanism, not the news.
+  { message = "^chore: release", skip = true },
+  { message = "^chore\\(deps\\)", group = "Dependencies" },
+  { message = "^chore", group = "Miscellaneous" },
+  { message = "^revert", group = "Reverted" },
+  { body = ".*security", group = "Security" },
+]

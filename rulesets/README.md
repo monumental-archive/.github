@@ -59,11 +59,26 @@ Merge methods are `squash` and `rebase` only: `required_linear_history`
 blocks merge commits, so allowing the merge-commit button would offer a
 method that always fails at merge time.
 
-## Planned (blocked on step-3 workflow design)
+## The release-tag lock (staged, deliberately disabled)
 
-- **Restrict `v*` tag creation** to the release workflow's GitHub App as the
-  sole bypass actor, so release tags cannot exist except via the pipeline.
-  Must land together with the release workflow or releasing locks out.
+`org-release-tag.json` restricts `v*` tag **creation** so release tags cannot
+exist except via the pipeline (docs/release.md). It ships with
+`enforcement: "disabled"` and no bypass actors because activation has a hard
+order — doing it early locks releasing out entirely:
+
+1. The tag-minting GitHub App exists and its installation is org-wide.
+2. Its integration id is inserted as the sole bypass actor:
+   `{ "actor_id": <app-id>, "actor_type": "Integration",
+   "bypass_mode": "always" }`.
+3. A release is proven end-to-end in the release lab with the ruleset in
+   `evaluate` mode.
+4. Enforcement flips to `active`, in the same change that lands the pipeline.
+
+Break-glass for a dead App is an org admin disabling this ruleset — recorded
+here as a change, not clicked and forgotten.
+
+## Planned
+
 - **Org-wide required status check** on a standard summary job name (e.g.
   `ci-gate`) once the shared CI workflow reports under one name everywhere.
 

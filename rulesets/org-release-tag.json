@@ -1,0 +1,13 @@
+{
+  "name": "org-release-tag",
+  "target": "tag",
+  "enforcement": "disabled",
+  "conditions": {
+    "ref_name": { "include": ["refs/tags/v*"], "exclude": [] },
+    "repository_name": { "include": ["~ALL"], "exclude": [] }
+  },
+  "bypass_actors": [],
+  "rules": [
+    { "type": "creation" }
+  ]
+}
