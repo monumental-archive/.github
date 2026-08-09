@@ -18,6 +18,11 @@
 [settings]
 lockfile = true
 
+[task_config]
+# Tasks are written in bash (guards use [[ ]] and <<<); the default task
+# shell is sh, which is dash on Ubuntu runners and chokes on both.
+shell = "bash -c"
+
 [tools]
 actionlint = "1.7.12"
 # actionlint shells out to shellcheck for `run:` script analysis; without it
@@ -112,7 +117,9 @@ description = "Conventional-commit check for the branch (committed)"
 dir = "{{cwd}}"
 # Only meaningful on a branch with an origin/main to diverge from; the
 # range check needs committed.toml in the repo (canon: this repo's copy).
-run = 'if git rev-parse --verify -q origin/main > /dev/null && [[ -f committed.toml ]]; then committed origin/main..HEAD; else echo "lint:commits: no origin/main or no committed.toml, skipped"; fi'
+# On pull_request events CI sits on GitHub's synthetic merge commit; the
+# PR's real commits are its second parent.
+run = 'if git rev-parse --verify -q origin/main > /dev/null && [[ -f committed.toml ]]; then tip=HEAD; if [[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]]; then tip="HEAD^2"; fi; committed "origin/main..${tip}"; else echo "lint:commits: no origin/main or no committed.toml, skipped"; fi'
 
 [tasks."lint:zizmor"]
 description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"
