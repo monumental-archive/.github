@@ -211,13 +211,46 @@ route to it is precisely that the signing identity sits behind a workflow
 no caller controls.
 
 Hardening is therefore a property of the shared workflows rather than a
-skeleton every repository copies and drifts from: harden-runner with
-audit-derived egress allowlists, tool caches disabled in any job whose
+skeleton every repository copies and drifts from: `permissions: {}` with
+job-scoped grants, every `uses:` SHA-pinned under the organisation's
+`sha_pinning_required` policy, tool caches disabled in any job whose
 output is signed, and the evidence bundle — one checksum filename, one SBOM
 format, Sigstore bundles — attached to the release in the shape Scorecard's
-Signed-Releases check recognises. Egress is a property of the workflow and
-the artifact class, so it is derived once, in the lab, against
-class-representative fixtures — never written by construction.
+Signed-Releases check recognises.
+
+### No runner-hardening agent
+
+Earlier drafts of this document and of issue #28 prescribed harden-runner
+with audit-derived egress allowlists. That is retracted, deliberately.
+
+It is required by nothing this organisation targets. SLSA Build L1–L3 does
+not ask for it — the "Isolated" requirement explicitly "does not prohibit a
+build from calling out to a remote execution service", and it is a
+requirement on the build *platform* rather than on us. Neither the Source,
+Dependency nor Build Environment track asks for it; the Dependency track's
+nearest control is the opposite one, curated ingestion through a
+producer-controlled mirror. None of Scorecard's twenty checks credits it,
+and Pinned-Dependencies penalises it if ever left unpinned. No OpenSSF Best
+Practices criterion through Gold requires it. No OSPS Baseline control
+requires it — BR-01.03, the closest, is credential isolation and is already
+met by zizmor-pedantic plus `cache: false`. Hermeticity remains a
+future-directions candidate that "may or may not" become a level.
+
+Against nothing, the costs are real and measured. Wrong egress allowlists
+broke releases in this organisation's earlier pipelines, in a flow where
+crates.io is yank-only and a pulled digest exists forever; adding
+fragility to an irreversible pipeline to answer an unscored threat is the
+wrong trade. Admitting the agent would also mean widening an Actions
+allowlist that deliberately sets `verified_allowed: false` — weakening a
+control that works to add one that scores nothing. And the attack class it
+detects best, a backdoored third-party action, is one this organisation
+already prevents structurally, since such an action cannot run here at all.
+
+**Revisit only if SLSA promotes hermeticity into an actual level.** If that
+happens the allowlist is derived from audit-mode data across real releases
+and never written by construction, which is the mistake that burned the
+previous attempt. The recovered list from the pre-strip signer is preserved
+in that repository's history for that day.
 
 ## Version policy
 

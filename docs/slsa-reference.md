@@ -194,7 +194,10 @@ while the certificate was valid". This is why an unreachable TUF repository
 makes every artifact report as bad provenance rather than as a network
 failure — without it a verifier cannot obtain the trusted keys at all.
 `tuf-repo.github.com` and the TUF target store must be in the egress
-allowlist of any job that verifies.
+allowlist of any job that verifies *under an egress policy*. This org runs
+none (see `release.md`), which removes the failure mode rather than
+managing it — but the fact is kept here because the day an allowlist
+returns, omitting these two is what makes good artifacts look forged.
 
 **rekor-monitor** offers consistency checking ("logs are tamper-evident but
 not tamper-proof") and identity monitoring, configurable by certificate SAN
