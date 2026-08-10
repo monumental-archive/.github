@@ -245,6 +245,17 @@ jobs:
             exit 0
           fi
           name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
+          # Only installations that can exist can be stranded: the upgrade
+          # path is required only when the previous release actually
+          # shipped this extension. A repo adding the class mid-life has a
+          # previous release and no previous extension.
+          shipped=$(gh release view "v${prev}" --repo "${GITHUB_REPOSITORY}" \
+            --json assets --jq \
+            "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))] | length")
+          if [[ "${shipped}" == "0" ]]; then
+            echo "::notice::v${prev} shipped no ${name} tarballs; first publish of this extension, no upgrade path needed"
+            exit 0
+          fi
           upgrade="${UNTRUSTED_CRATE_DIR}/sql/${name}--${prev}--${UNTRUSTED_VERSION}.sql"
           if [[ ! -f "${upgrade}" ]]; then
             echo "::error::no upgrade path ${upgrade} from published ${prev} — existing installations would be stranded"
