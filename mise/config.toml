@@ -235,6 +235,44 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 zizmor --persona=auditor .github/workflows/
 '''
 
+[tasks."audit:template-pins"]
+description = "Warn when the template pin misses shipped canon changes (scheduled, not the gate)"
+dir = "{{cwd}}"
+# The judgement call lint:template-pins deliberately leaves out, measured
+# by the right yardstick. Days-behind is a proxy — the #110 incident was a
+# ONE-day lag that already predated three shipped fixes, so no day
+# threshold catches it. What makes a stale pin dangerous is commits between
+# the pin and HEAD touching what the pin actually delivers: the shared
+# workflows and the toolbelt (one SHA pins both). Diff those paths; HEAD
+# moving on docs, rulesets or the profile README is not staleness worth a
+# bump. audit:*, not lint:*: pin-vs-HEAD drift is a property of time
+# passing on main, not of the diff under review.
+run = '''
+compgen -G "workflow-templates/*.y*ml" > /dev/null || {
+  echo "audit:template-pins: no workflow-templates/, skipped"; exit 0
+}
+sha=$(grep -hoE "uses:[[:space:]]*monumental-archive/\.github/[^@]+@[0-9a-f]{40}" \
+  workflow-templates/*.y*ml | grep -oE "[0-9a-f]{40}" | sort -u)
+[[ -n "${sha}" ]] || { echo "audit:template-pins: no org pins in templates, skipped"; exit 0; }
+if [[ "$(wc -l <<< "${sha}" | tr -d " ")" -gt 1 ]]; then
+  echo "audit:template-pins: templates pin more than one SHA (lint:template-pins should have failed)" >&2
+  exit 1
+fi
+if ! git cat-file -e "${sha}^{commit}" 2> /dev/null; then
+  echo "audit:template-pins: pinned SHA ${sha:0:8} not in local history (shallow clone?)" >&2
+  exit 1
+fi
+drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
+if [[ -n "${drift}" ]]; then
+  echo "audit:template-pins: pin ${sha:0:8} misses shipped canon changes:" >&2
+  git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/ | sed "s/^/  /" >&2
+  echo "  a repo standing up from the templates would not get these —" >&2
+  echo "  bump the template pins to current canon (see #110, #111)." >&2
+  exit 1
+fi
+echo "audit:template-pins: pin ${sha:0:8} carries all shipped workflow and belt changes"
+'''
+
 [tasks."lint:trivy"]
 description = "Misconfiguration + committed-secret scan (trivy)"
 dir = "{{cwd}}"
