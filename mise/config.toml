@@ -273,6 +273,50 @@ fi
 echo "audit:template-pins: pin ${sha:0:8} carries all shipped workflow and belt changes"
 '''
 
+[tasks."audit:canon-pins"]
+description = "Warn when any canon reference lags the canon's latest tag (scheduled, not the gate)"
+dir = "{{cwd}}"
+# The alarm on the mechanism: Renovate bumps canon references (#133), and
+# when Renovate is paused, misconfigured or dead, nothing else goes red —
+# the v0.16.1 release shipped without its VSA off a three-merge-stale pin
+# with every board green. lint:canon-pins proves the references are
+# bumpable (shape, offline); this compares each claimed version against
+# the canon's latest tag. Network-bound and time-dependent, so audit:*,
+# never the gate.
+run = '''
+latest=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
+  | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V | tail -1)
+[[ -n "${latest}" ]] || { echo "audit:canon-pins: canon has no tags, skipped"; exit 0; }
+stale=""
+found=0
+claims=$(git ls-files "*.yml" "*.yaml" | while IFS= read -r f; do
+  grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
+    | grep -oE "# v[0-9][0-9.]*" | sed "s|# |${f}:|"
+  if grep -qF "github.com/monumental-archive/.github" "${f}"; then
+    grep -E "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
+      | grep -oE "v[0-9][0-9.]*" | sed "s|^|${f}:|"
+  fi
+done; git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json" \
+  | while IFS= read -r f; do
+  grep -oE "github>monumental-archive/\.github#v[0-9][0-9.]*" "${f}" \
+    | sed "s|.*#|${f}:|"
+done)
+while IFS= read -r claim; do
+  [[ -n "${claim}" ]] || continue
+  found=$((found + 1))
+  v="${claim##*:}"
+  [[ "${v}" == "${latest}" ]] || stale="${stale} ${claim}"
+done <<< "${claims}"
+[[ ${found} -gt 0 ]] || { echo "audit:canon-pins: no canon references, skipped"; exit 0; }
+if [[ -n "${stale}" ]]; then
+  echo "audit:canon-pins: references behind canon ${latest}:${stale}" >&2
+  echo "  Renovate should have bumped these — check the Renovate dashboard" >&2
+  echo "  and default.json's first-party rules before bumping by hand (#133)." >&2
+  exit 1
+fi
+echo "audit:canon-pins: ${found} canon references, all at ${latest}"
+'''
+
 [tasks."lint:trivy"]
 description = "Misconfiguration + committed-secret scan (trivy)"
 dir = "{{cwd}}"
@@ -555,6 +599,57 @@ if [[ -n "${bad}" ]]; then
   exit 1
 fi
 echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless"
+'''
+
+[tasks."lint:canon-pins"]
+description = "Every canon reference is a version: workflow pins carry '# vX.Y.Z', lefthook and preset refs are tags"
+dir = "{{cwd}}"
+# Renovate is the bump mechanism (#133); this lint makes the unbumpable
+# state unrepresentable. Three surfaces consume the canon and each must
+# carry a machine-readable version: a workflow pin's trailing '# vX.Y.Z'
+# comment is what Renovate's github-actions manager reads and rewrites
+# with the SHA; a lefthook branch ref or an untagged preset reference can
+# be bumped by nothing, so it silently rots — the v0.16.1 failure class.
+# Shape is the gate's business; freshness is audit:canon-pins (network).
+# Comment lines are excluded: workflow headers quote the pin shape as
+# documentation.
+run = '''
+bad=""
+found=0
+files=$(git ls-files "*.yml" "*.yaml")
+if [[ -n "${files}" ]]; then
+  while IFS= read -r f; do
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] || continue
+      found=$((found + 1))
+      grep -qE "@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+" <<< "${line}" \
+        || bad="${bad} ${f}(canon pin without '@<full-sha> # vX.Y.Z')"
+    done < <(grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" || true)
+  done <<< "${files}"
+fi
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  grep -qF "github.com/monumental-archive/.github" "${f}" || continue
+  found=$((found + 1))
+  grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
+    || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
+done < <(git ls-files "lefthook.yml" "*/lefthook.yml")
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  grep -qF "github>monumental-archive/.github" "${f}" || continue
+  found=$((found + 1))
+  grep -qE "github>monumental-archive/\.github#v[0-9]" "${f}" \
+    || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
+done < <(git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json")
+[[ ${found} -gt 0 ]] || { echo "lint:canon-pins: no canon references, skipped"; exit 0; }
+if [[ -n "${bad}" ]]; then
+  echo "lint:canon-pins: unversioned canon references:${bad}" >&2
+  echo "  every canon reference pins a tag Renovate can bump (#133);" >&2
+  echo "  workflow pins: '@<sha> # vX.Y.Z', lefthook: 'ref: vX.Y.Z'," >&2
+  echo "  preset: 'github>monumental-archive/.github#vX.Y.Z'." >&2
+  exit 1
+fi
+echo "lint:canon-pins: ${found} canon references, all versioned"
 '''
 
 [tasks."lint:bash-portability"]

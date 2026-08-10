@@ -1,6 +1,6 @@
 remotes:
   - git_url: https://github.com/monumental-archive/.github
-    ref: main
+    ref: v1.0.0
     refetch_frequency: 24h
     configs:
       - lefthook/org-hooks.yml
