@@ -56,6 +56,14 @@ on:
         required: false
         type: string
         default: ""
+      exclude:
+        description: >
+          Comma-separated workspace members this class must not touch —
+          the pgrx-extension crate above all, which builds only inside
+          its Postgres container.
+        required: false
+        type: string
+        default: ""
     outputs:
       subjects:
         description: sha256sum manifest of the release archives.
@@ -174,6 +182,18 @@ jobs:
             sudo apt-get install -y -qq musl-tools
           fi
 
+      - name: Resolve the exclusion flags
+        env:
+          UNTRUSTED_EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          flags=""
+          IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
+          for m in "${members[@]}"; do
+            if [[ -n "${m}" ]]; then flags="${flags} --exclude ${m}"; fi
+          done
+          echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
+
       - name: Refuse a tag whose version disagrees with the manifest
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -199,7 +219,8 @@ jobs:
           # Against the release target, not the host default: the musl legs
           # prove the statically linked test binaries actually run, which is
           # the property the shipped binary claims.
-          cargo test --workspace --locked --target "${TARGET}"
+          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
+          cargo test --workspace --locked --target "${TARGET}" ${EXCLUDE_FLAGS}
 
       - name: Build
         env:
@@ -210,7 +231,8 @@ jobs:
           # tag rebuilds to the same bytes on any machine on any day.
           epoch=$(git log -1 --pretty=%ct)
           export SOURCE_DATE_EPOCH="${epoch}"
-          cargo build --workspace --locked --release --target "${TARGET}"
+          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
+          cargo build --workspace --locked --release --target "${TARGET}" ${EXCLUDE_FLAGS}
 
       - name: Stage the binaries
         id: stage
