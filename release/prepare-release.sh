@@ -80,6 +80,21 @@ if [[ -f CITATION.cff ]]; then
   files="${files} CITATION.cff"
 fi
 
+# pgrx upgrade scripts: authors cannot know the next version — git-cliff
+# decides it right here — so they write <ext>--<from>--next.sql (the
+# `from` they always know: it is the manifest version they migrate from)
+# and the bump renames `next` to the decided version, exactly as it owns
+# the version in Cargo.toml and CITATION.cff. Guessed filenames strand
+# installations; the class guard refuses them; this is why nobody has to
+# guess.
+while IFS= read -r pending; do
+  [[ -n ${pending} ]] || continue
+  renamed="${pending%--next.sql}--${version}.sql"
+  git mv "${pending}" "${renamed}"
+  files="${files} ${pending} ${renamed}"
+  echo "upgrade path: ${pending} -> ${renamed}"
+done < <(git ls-files '*--next.sql')
+
 git cliff --bump --output CHANGELOG.md
 
 # git-cliff separates releases with a trailing blank line, which at end of
