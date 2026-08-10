@@ -475,7 +475,11 @@ jobs:
   doi:
     name: Mint the version DOI
     needs: [guard, attach]
-    if: ${{ inputs.mint-doi && !inputs.dry-run }}
+    # !cancelled() + explicit attach check: the implicit success() looks
+    # THROUGH attach to its legitimately-skipped class ancestors and goes
+    # false — the same transitive quirk attach's own condition exists for.
+    # Measured on v0.14.2, where everything succeeded and doi skipped.
+    if: ${{ !cancelled() && needs.attach.result == 'success' && inputs.mint-doi && !inputs.dry-run }}
     uses: ./.github/workflows/mint-doi.yml
     permissions:
       contents: read # the minting job downloads the released source
