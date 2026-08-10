@@ -77,12 +77,18 @@ signoff="Signed-off-by: ${bot}"
 
 # prepare-release.sh has already exited early when there was nothing to bump,
 # so every file in FILES differs from the base commit by the time we get here.
+# A path that no longer exists on disk is the old half of a rename (the bump
+# renames *--next.sql upgrade scripts) and must ride the commit as a deletion.
 request=$(
   STAGING="${staging}" TITLE="${title}" SIGNOFF="${signoff}" python3 - << 'PY'
 import base64, json, os
 
 additions = []
+deletions = []
 for path in os.environ["FILES"].split():
+    if not os.path.exists(path):
+        deletions.append({"path": path})
+        continue
     with open(path, "rb") as handle:
         additions.append(
             {"path": path, "contents": base64.b64encode(handle.read()).decode()}
@@ -104,7 +110,7 @@ print(json.dumps({
                 "headline": os.environ["TITLE"],
                 "body": os.environ["SIGNOFF"],
             },
-            "fileChanges": {"additions": additions},
+            "fileChanges": {"additions": additions, "deletions": deletions},
             "expectedHeadOid": os.environ["GITHUB_SHA"],
         }
     },
