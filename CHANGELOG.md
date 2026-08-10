@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.2.2](https://github.com/monumental-archive/.github/compare/v1.2.1...v1.2.2) - 2026-08-10
+
+### Fixed
+
+- widen the zero-cooldown rule to all first-party packages ([#142](https://github.com/monumental-archive/.github/pull/142))
+
 ## [1.2.1](https://github.com/monumental-archive/.github/compare/v1.2.0...v1.2.1) - 2026-08-10
 
 ### Fixed
