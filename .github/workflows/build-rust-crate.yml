@@ -23,6 +23,15 @@ on:
         required: false
         type: boolean
         default: false
+      exclude:
+        description: >
+          Comma-separated workspace members this class must not touch —
+          the pgrx-extension crate above all, which builds only inside
+          its Postgres container. Declared by the caller once, applied to
+          every cargo invocation here.
+        required: false
+        type: string
+        default: ""
     outputs:
       subjects:
         description: sha256sum manifest of the packaged crates.
@@ -68,6 +77,18 @@ jobs:
           # cache would be signed along with everything else.
           cache: false
 
+      - name: Resolve the exclusion flags
+        env:
+          UNTRUSTED_EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          flags=""
+          IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
+          for m in "${members[@]}"; do
+            if [[ -n "${m}" ]]; then flags="${flags} --exclude ${m}"; fi
+          done
+          echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
+
       - name: Refuse a tag whose version disagrees with the manifest
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -86,7 +107,10 @@ jobs:
           fi
 
       - name: Test
-        run: cargo test --workspace --locked
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
+          cargo test --workspace --locked ${EXCLUDE_FLAGS}
 
       - name: Package
         # Verification is ON here, deliberately: this is the job that is
@@ -96,7 +120,10 @@ jobs:
         # No --allow-dirty: it is a flag, not a boolean option, and
         # omitting it is what refuses a dirty tree. `--allow-dirty=false`
         # is rejected outright by cargo.
-        run: cargo package --workspace --locked
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
+          cargo package --workspace --locked ${EXCLUDE_FLAGS}
 
       - name: Compute the subject manifest
         id: hash
@@ -166,6 +193,18 @@ jobs:
         with:
           cache: false
 
+      - name: Resolve the exclusion flags
+        env:
+          UNTRUSTED_EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          flags=""
+          IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
+          for m in "${members[@]}"; do
+            if [[ -n "${m}" ]]; then flags="${flags} --exclude ${m}"; fi
+          done
+          echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
+
       - name: Publish
         # Resumable: a crate already at this version is a completed step,
         # not a failure. crates.io is yank-only, so re-running a partly
@@ -198,5 +237,6 @@ jobs:
           # The exchanged token is single-use: crates.io records the JWT's
           # jti and rejects a replay, so a resumed release mints its own
           # rather than reusing one.
+          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           CARGO_REGISTRY_TOKEN="${token}" \
-            cargo publish --workspace --locked --no-verify
+            cargo publish --workspace --locked --no-verify ${EXCLUDE_FLAGS}

@@ -110,6 +110,13 @@ on:
         required: false
         type: string
         default: "."
+      exclude:
+        description: >
+          Comma-separated workspace members the rust-crate and rust-binary
+          classes must not touch — the pgrx-extension crate above all.
+        required: false
+        type: string
+        default: ""
       extension-crate-dir:
         description: >
           Directory of the extension crate, for the pgrx-extension class.
@@ -209,6 +216,7 @@ jobs:
       id-token: write # crates.io trusted publishing, in the publish job
     with:
       version: ${{ needs.guard.outputs.version }}
+      exclude: ${{ inputs.exclude }}
       dry-run: ${{ inputs.dry-run }}
 
   build-oci:
@@ -286,6 +294,7 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
       targets: ${{ inputs.binary-targets }}
       smoke-test: ${{ inputs.binary-smoke-test }}
+      exclude: ${{ inputs.exclude }}
 
   # Binaries have no registry to pull back from: they become release
   # assets, and GitHub's own release attestation binds tag, commit and
