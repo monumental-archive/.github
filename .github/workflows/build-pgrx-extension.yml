@@ -324,6 +324,14 @@ jobs:
                   --no-default-features --features "pg${PG}" \
                   --pg-config /usr/bin/pg_config \
                   --out-dir /out/pkgroot
+                # Author-provided upgrade scripts install alongside the
+                # generated ones: the guard demands sql/<ext>--A--B.sql
+                # exists, so the package must SHIP it, or ALTER EXTENSION
+                # UPDATE fails at the one consumer the guard protected.
+                extdir=$(find /out/pkgroot -type d -name extension | head -1)
+                if compgen -G "sql/*.sql" > /dev/null; then
+                  cp sql/*.sql "${extdir}/"
+                fi
                 # The CloudNativePG ImageVolume mirror is staged HERE, by
                 # the user that owns the tree — the runner cannot create
                 # directories inside a bind mount owned by the container
