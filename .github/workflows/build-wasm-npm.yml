@@ -34,6 +34,15 @@ on:
         required: false
         type: string
         default: "."
+      npm-scope:
+        description: >
+          npm scope (without the @) the package publishes under. Empty
+          means unscoped. Scoped is canon for this organisation: the
+          scope is claimed and cannot be squatted, and the org namespace
+          is where trusted publishing is enforced.
+        required: false
+        type: string
+        default: ""
       dry-run:
         description: Rehearsal — build, pack and prove, but publish nothing.
         required: false
@@ -129,9 +138,14 @@ jobs:
       - name: Build the package
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+          UNTRUSTED_SCOPE: ${{ inputs.npm-scope }}
         run: |
           set -euo pipefail
-          wasm-pack build --release "${UNTRUSTED_CRATE_DIR}"
+          scope_flag=()
+          if [[ -n "${UNTRUSTED_SCOPE}" ]]; then
+            scope_flag=(--scope "${UNTRUSTED_SCOPE}")
+          fi
+          wasm-pack build --release "${scope_flag[@]}" "${UNTRUSTED_CRATE_DIR}"
 
       - name: Pack and hash the exact bytes that will publish
         id: pack
