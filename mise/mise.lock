@@ -80,6 +80,11 @@ checksum = "sha256:6e60ae390d375cecb9d8008c49f0e724a8dfe40390b532ef5501e421d2cc8
 url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-apple-darwin.tar.gz"
 url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850193"
 
+[tools."aqua:orhun/git-cliff"."platforms.windows-x64"]
+checksum = "sha256:3ae3a5549e85c7ad5b20192ebcfee4371269deca51255f6f2f2e051c6541f5ca"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405851866"
+
 [[tools.committed]]
 version = "1.1.11"
 backend = "aqua:crate-ci/committed"

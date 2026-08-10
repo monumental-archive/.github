@@ -1,4 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>monumental-archive/.github"]
+  "extends": [
+    "github>monumental-archive/.github"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "pgrx base images: keep tag AND digest current together in docker/pgrx-base-images.toml \u2014 a pinned-but-stale base is worse than a floating one",
+      "managerFilePatterns": [
+        "/^docker/pgrx-base-images\\.toml$/"
+      ],
+      "matchStrings": [
+        "# renovate: pgrx-base-image\\n\"[0-9]+\" = \"(?<depName>postgres):(?<currentValue>[a-z0-9.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
 }
