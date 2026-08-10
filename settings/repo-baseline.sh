@@ -35,6 +35,17 @@ for repo in ${repos}; do
       gh api "repos/${org}/${repo}/actions/oidc/customization/sub" \
         --method PUT -F use_default=true -F use_immutable_subject=true \
         > /dev/null
+      # The `publish` environment is a repo object — one of the three
+      # irreducibly caller-side pieces of the release design — and both
+      # registries' trusted-publisher configs name it. A repo that carries
+      # the canonical publish.yml entry workflow gets the environment; the
+      # PUT is idempotent and creates it bare (no reviewers, no wait timer:
+      # an environment gate mid-release would pause between publish and
+      # attest, which is the one place a pause is unsafe).
+      if gh api "repos/${org}/${repo}/contents/.github/workflows/publish.yml" \
+        > /dev/null 2>&1; then
+        gh api -X PUT "repos/${org}/${repo}/environments/publish" > /dev/null
+      fi
       echo "applied: ${repo}"
       ;;
     check)
@@ -51,6 +62,13 @@ for repo in ${repos}; do
         --jq '.use_immutable_subject')"
       if [[ ${immutable} != "true" ]]; then
         echo "drift: ${repo} OIDC sub claim is not immutable (${immutable})"
+        drift=1
+      fi
+      if gh api "repos/${org}/${repo}/contents/.github/workflows/publish.yml" \
+        > /dev/null 2>&1 \
+        && ! gh api "repos/${org}/${repo}/environments/publish" \
+          > /dev/null 2>&1; then
+        echo "drift: ${repo} has publish.yml but no publish environment"
         drift=1
       fi
       ;;
