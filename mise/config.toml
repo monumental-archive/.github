@@ -235,6 +235,44 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 zizmor --persona=auditor .github/workflows/
 '''
 
+[tasks."audit:template-pins"]
+description = "Warn when the template pin misses shipped canon changes (scheduled, not the gate)"
+dir = "{{cwd}}"
+# The judgement call lint:template-pins deliberately leaves out, measured
+# by the right yardstick. Days-behind is a proxy — the #110 incident was a
+# ONE-day lag that already predated three shipped fixes, so no day
+# threshold catches it. What makes a stale pin dangerous is commits between
+# the pin and HEAD touching what the pin actually delivers: the shared
+# workflows and the toolbelt (one SHA pins both). Diff those paths; HEAD
+# moving on docs, rulesets or the profile README is not staleness worth a
+# bump. audit:*, not lint:*: pin-vs-HEAD drift is a property of time
+# passing on main, not of the diff under review.
+run = '''
+compgen -G "workflow-templates/*.y*ml" > /dev/null || {
+  echo "audit:template-pins: no workflow-templates/, skipped"; exit 0
+}
+sha=$(grep -hoE "uses:[[:space:]]*monumental-archive/\.github/[^@]+@[0-9a-f]{40}" \
+  workflow-templates/*.y*ml | grep -oE "[0-9a-f]{40}" | sort -u)
+[[ -n "${sha}" ]] || { echo "audit:template-pins: no org pins in templates, skipped"; exit 0; }
+if [[ "$(wc -l <<< "${sha}" | tr -d " ")" -gt 1 ]]; then
+  echo "audit:template-pins: templates pin more than one SHA (lint:template-pins should have failed)" >&2
+  exit 1
+fi
+if ! git cat-file -e "${sha}^{commit}" 2> /dev/null; then
+  echo "audit:template-pins: pinned SHA ${sha:0:8} not in local history (shallow clone?)" >&2
+  exit 1
+fi
+drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
+if [[ -n "${drift}" ]]; then
+  echo "audit:template-pins: pin ${sha:0:8} misses shipped canon changes:" >&2
+  git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/ | sed "s/^/  /" >&2
+  echo "  a repo standing up from the templates would not get these —" >&2
+  echo "  bump the template pins to current canon (see #110, #111)." >&2
+  exit 1
+fi
+echo "audit:template-pins: pin ${sha:0:8} carries all shipped workflow and belt changes"
+'''
+
 [tasks."lint:trivy"]
 description = "Misconfiguration + committed-secret scan (trivy)"
 dir = "{{cwd}}"
@@ -461,6 +499,57 @@ if [[ -n "${bad}" ]]; then
   exit 1
 fi
 echo "lint:nested-permissions: ${checked} workflow(s) with uses: jobs clean"
+'''
+
+[tasks."lint:template-pins"]
+description = "Workflow templates pin one SHA that is an ancestor of HEAD; scorecard stays pinless"
+dir = "{{cwd}}"
+# Found by the #28 pre-close audit: all five templates sat a day behind
+# canon, predating three shipped fixes, with nothing anywhere going red — a
+# repo standing up from the templates would have inherited known bugs. The
+# deterministic properties are: every pin is a full SHA that is an ancestor
+# of HEAD (never unmerged or foreign history), all pinned templates agree
+# on ONE SHA (stub pins move together), and scorecard.yml carries no org
+# pin at all (it is self-contained by design — Scorecard's publish
+# validation rejects reusables). Deliberately NOT required: pin == HEAD —
+# that would couple every canon commit to a template touch. Staleness
+# within merged history is the scheduled audit's judgement call, not the
+# gate's.
+run = '''
+compgen -G "workflow-templates/*.y*ml" > /dev/null || {
+  echo "lint:template-pins: no workflow-templates/, skipped"; exit 0
+}
+bad=""
+shas=""
+count=0
+for f in workflow-templates/*.y*ml; do
+  lines=$(grep -E "uses:[[:space:]]*monumental-archive/\.github/" "${f}" || true)
+  if [[ "${f##*/}" == scorecard.* ]]; then
+    [[ -z "${lines}" ]] || bad="${bad} ${f}(must stay pinless: self-contained by design)"
+    continue
+  fi
+  [[ -n "${lines}" ]] || continue
+  while IFS= read -r line; do
+    sha=$(grep -oE "@[0-9a-f]{40}" <<< "${line}" | tr -d "@")
+    if [[ -z "${sha}" ]]; then
+      bad="${bad} ${f}(pin is not a full 40-hex SHA)"
+      continue
+    fi
+    count=$((count + 1))
+    git merge-base --is-ancestor "${sha}" HEAD 2> /dev/null \
+      || bad="${bad} ${f}(${sha:0:8} not an ancestor of HEAD)"
+    case " ${shas} " in *" ${sha} "*) ;; *) shas="${shas} ${sha}" ;; esac
+  done <<< "${lines}"
+done
+n=$(wc -w <<< "${shas}" | tr -d " ")
+[[ "${n}" -le 1 ]] || bad="${bad} (templates disagree, ${n} distinct SHAs:${shas})"
+if [[ -n "${bad}" ]]; then
+  echo "lint:template-pins: template pin violations:${bad}" >&2
+  echo "  templates pin one merged canon SHA and move together (see #111);" >&2
+  echo "  scorecard.yml never pins a reusable." >&2
+  exit 1
+fi
+echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless"
 '''
 
 [tasks."lint:bash-portability"]
