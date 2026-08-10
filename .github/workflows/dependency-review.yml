@@ -1,0 +1,36 @@
+# Dependency review on pull requests, org canon: fail a PR that introduces
+# a dependency with a known vulnerability, before it exists on main.
+#
+# A separate reusable workflow rather than part of the gate: the gate is
+# deterministic, and this check consults GitHub's advisory data — the same
+# PR can pass today and fail tomorrow. It blocks PRs (that is its point:
+# content changes are gated, remediation never is), but it is not the `ci`
+# required check, so an advisory-database outage stalls nothing but the
+# PR that actually adds a dependency.
+name: dependency-review
+
+on:
+  workflow_call: {}
+
+permissions: {}
+
+jobs:
+  review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # Licence policy is a separate, deliberate decision (belt item
+          # `lint:deny`); this workflow gates vulnerabilities only.
+          comment-summary-in-pr: on-failure

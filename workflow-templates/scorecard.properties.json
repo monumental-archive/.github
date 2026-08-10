@@ -1,0 +1,5 @@
+{
+  "name": "OpenSSF Scorecard",
+  "description": "Scorecard analysis published to the public API. Self-contained per repository because scorecard's publish validation rejects reusable workflows.",
+  "categories": ["ci"]
+}
