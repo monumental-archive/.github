@@ -57,6 +57,43 @@ The machinery is shared: callers pin
 [`release/`](../release/) at that same SHA. The caller stub is
 [`workflow-templates/release.yml`](../workflow-templates/release.yml).
 
+**The canon itself is a versioned repository** and releases with this same
+machinery, called locally
+([`self-release.yml`](../.github/workflows/self-release.yml), the gate.yml
+pattern): a repository cannot SHA-pin itself without being permanently one
+commit behind, and a local `uses:` makes `github.job_workflow_sha` the
+released commit itself, so the atomic pin holds by construction. Canon tags
+are what consumers pin (`@<sha> # vX.Y.Z` — the comment is what Renovate's
+`github-actions` manager reads and rewrites together with the SHA), what
+the lefthook remote refs (`ref: vX.Y.Z`), and what the shared preset
+reference carries (`github>monumental-archive/.github#vX.Y.Z`). One
+release moves all three surfaces; Renovate fans it out (#133). The canon's
+phase 2 is empty by the archetype contract: its artifact is the tagged
+tree, and its semver surface is named in
+[`MAINTENANCE.md`](../MAINTENANCE.md).
+
+### The version source
+
+Phase 1 asks one question of a repository — *where does the current
+version live?* — and answers it by detection, never configuration:
+
+- **Cargo workspace** (`Cargo.toml` present): `[workspace.package].version`
+  is the source; the release commit bumps it, the internal dependency
+  constraints, the lockfile and `CITATION.cff`, and proves the tree still
+  resolves.
+- **No manifest** (the canon, and any docs/config/image-only repository):
+  the `v*` tags are the source. Nothing mirrors the version into files, so
+  the release commit carries only `CHANGELOG.md` (plus `CITATION.cff`
+  where present), and the tag step reads the version from the release
+  commit's subject — which the tag guard already authenticates.
+- **Anything else** (package.json, single-crate Cargo, pyproject): an
+  unbuilt branch of this contract. It is added in
+  [`release/`](../release/) — at the version read, the version write and
+  the release-commit file list, the only three points that vary — when a
+  real repository needs it, and never speculatively. Identifying which
+  branch a repository hits is a migration-playbook step; hitting an
+  unbuilt one is a named prerequisite, not a release-day surprise.
+
 Phase-1 rules, all proven in iiif-server:
 
 - An ordinary push to `main` only refreshes the release PR. **Merging the

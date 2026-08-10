@@ -399,6 +399,11 @@ bad=""
 for f in .github/workflows/release.yml .github/workflows/publish.yml; do
   if [[ ! -f "${f}" ]]; then
     bad="${bad} ${f}(missing)"
+  # In the canon itself these two files ARE the reusable implementations
+  # (they declare workflow_call), not caller stubs; the canon's wiring is
+  # self-release.yml's local `uses:`, exercised on every push to main.
+  elif grep -qE "^[[:space:]]+workflow_call:" "${f}"; then
+    continue
   elif ! grep -qE "uses: monumental-archive/.github/.github/workflows/(release|publish)\.yml@[0-9a-f]{40}|uses: \./\.github/workflows/(release|publish)\.yml" "${f}"; then
     bad="${bad} ${f}(no pinned org uses)"
   fi

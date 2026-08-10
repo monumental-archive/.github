@@ -18,6 +18,12 @@ a fresh session **started in the target repo's checkout**.
 - [ ] Release pass complete (`.github#28`): this repo has tags, the
       lefthook remote and workflow template pin versions, the `v*` tag
       ruleset and release App exist.
+- [ ] **Identify the repo's version source** against the phase-1 contract
+      (docs/release.md, "The version source"): Cargo workspace, tags-only,
+      or an unbuilt branch (package.json, single-crate Cargo, …). An
+      unbuilt branch is a named prerequisite to stand up in `release/`
+      first — not a release-day surprise; phase 1 fails only at release
+      time, the one time it runs.
 - [ ] **Org-wide tooling survey** (its own session): inventory every
       tool, config, and CI job across all candidate repos. Verdict each:
       **belt** (docs-first standup here, org-wide), **repo-specific**

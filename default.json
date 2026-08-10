@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Org-wide Renovate preset. Repos extend with: github>monumental-archive/.github",
+  "description": "Org-wide Renovate preset. Repos extend with: github>monumental-archive/.github#vX.Y.Z",
   "extends": [
     "config:best-practices",
     ":dependencyDashboard"
@@ -17,6 +17,40 @@
         "pinDigest"
       ],
       "automerge": true
+    },
+    {
+      "description": "First-party canon skips the age gate: it models third-party supply-chain risk, and applied to our own repo — gated by our own CI — it only guarantees every consumer runs a week-stale canon (#133, the v0.16.1 VSA failure).",
+      "matchPackageNames": [
+        "monumental-archive/.github",
+        "monumental-archive/.github/**"
+      ],
+      "minimumReleaseAge": "0 days"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "lefthook remote hooks pin a canon tag; lefthook.yml has no native manager for the ref line (#133).",
+      "managerFilePatterns": [
+        "/(^|/)lefthook\\.yml$/"
+      ],
+      "matchStrings": [
+        "git_url: https://github\\.com/monumental-archive/\\.github\\n\\s*ref: (?<currentValue>v[0-9][\\w.+-]*)"
+      ],
+      "depNameTemplate": "monumental-archive/.github",
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "description": "The shared-preset reference pins a canon tag; extends: has no native manager for the #tag suffix (#133).",
+      "managerFilePatterns": [
+        "/(^|/)renovate\\.json$/"
+      ],
+      "matchStrings": [
+        "github>monumental-archive/\\.github#(?<currentValue>v[0-9][\\w.+-]*)"
+      ],
+      "depNameTemplate": "monumental-archive/.github",
+      "datasourceTemplate": "github-tags"
     }
   ],
   "lockFileMaintenance": {
