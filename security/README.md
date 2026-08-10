@@ -4,8 +4,8 @@ The canonical org security configuration — the one class of repo settings
 GitHub lets an org centrally **enforce**: with `"enforcement": "enforced"`,
 repo admins cannot change any feature the configuration sets.
 
-Like `rulesets/`, these files are not applied by anything; they are the
-reviewable source of truth. Apply:
+These files are not applied by anything; they are the reviewable source
+of truth. Apply:
 
 ```bash
 gh api -X POST orgs/monumental-archive/code-security/configurations --input security/org-default.json

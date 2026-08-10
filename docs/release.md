@@ -107,7 +107,7 @@ trigger no workflows, and a release that silently triggers nothing looks
 exactly like a success.
 
 **The ruleset lock**: `v*` tag creation is restricted org-wide with the App
-as sole bypass actor ([`rulesets/org-release-tag.json`](../rulesets/README.md)).
+as sole bypass actor (see [`rulesets.md`](rulesets.md)).
 The lock and the pipeline land together — either alone is a lockout or a
 hole. Break-glass for a dead App: an org admin disables the ruleset, in a
 change that is itself recorded here.

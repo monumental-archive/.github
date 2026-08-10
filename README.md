@@ -11,7 +11,7 @@ genuinely theirs; this repo supplies the rest.
 | **Toolbelt** | `mise/config.toml` + `mise.lock` — the universal tools, exact-pinned with per-platform checksums, consumed identically by laptops (conf.d symlink) and CI (`MISE_GLOBAL_CONFIG_FILE`) |
 | **Task contract** | the global `ci` task: wildcard-collects `lint:*`, optionally runs `test`/`build`; repos never define `ci` |
 | **Shared workflows** | `ci.yml` (the reusable gate, pinned by one SHA that also pins the belt), `audit.yml` (scheduled link + drift checks) |
-| **Settings as code** | `rulesets/`, `security/`, `settings/` — branch/tag rules, the enforced security configuration, and the repo-settings baseline with drift check |
+| **Settings as code** | `security/`, `settings/` — the enforced security configuration and the repo-settings baseline with drift check; the org-level branch/tag rules are UI-applied and recorded in `docs/rulesets.md` |
 | **Renovate preset** | `default.json` — every repo `extends` it |
 | **Git hooks** | `lefthook/org-hooks.yml`, consumed live over git by every repo's stub |
 | **Scaffold** | `scaffold/` — the four files a new repo copies to be fully governed |
