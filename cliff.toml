@@ -1,7 +1,8 @@
-# git-cliff: the version decision and the changelog for release phase 1.
-# Org canon — see docs/release.md in monumental-archive/.github. The [bump]
-# settings are load-bearing and not repo-tunable; the changelog body is
-# repo-local only in its OWNER/REPO substitutions.
+# git-cliff: the version decision and the changelog for release phase 1 —
+# the canon's own copy, because the canon versions itself with the same
+# machinery it hands to every other repository (docs/release.md). The
+# [bump] settings are load-bearing and not repo-tunable; the changelog
+# body is repo-local only in its monumental-archive/.github substitutions.
 #
 # Why git-cliff rather than a release tool: neither release-plz nor
 # release-please can drive a workspace whose interdependent crates are
@@ -20,9 +21,12 @@ features_always_bump_minor = true
 # 0.x means. 1.0.0 gets set deliberately, by hand, once.
 breaking_always_bump_major = false
 
-# The first Release PR opens at 0.1.0 rather than 0.0.1; 1.0.0 is reserved
-# as above.
-initial_tag = "v0.1.0"
+# This line is the org's one by-hand 1.0.0 commitment (docs/release.md,
+# version policy: "1.0.0 is never reached by automation — it is set by
+# hand, once"). The canon predates its own tags: its surface was proven at
+# full width in the release lab before this file existed, so its first tag
+# is the commitment, not a rehearsal. Written deliberately, here, once.
+initial_tag = "v1.0.0"
 
 # Housekeeping commits do not justify a release on their own. A run where
 # everything since the last tag is chore/ci/docs produces no version bump
@@ -43,9 +47,9 @@ body = """\
 {% if version %}\
 ## [{{ version | trim_start_matches(pat="v") }}]\
 {% if previous.version %}\
-(https://github.com/OWNER/REPO/compare/{{ previous.version }}...{{ version }})\
+(https://github.com/monumental-archive/.github/compare/{{ previous.version }}...{{ version }})\
 {% else %}\
-(https://github.com/OWNER/REPO/releases/tag/{{ version }})\
+(https://github.com/monumental-archive/.github/releases/tag/{{ version }})\
 {% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}\
 ## Unreleased
@@ -55,7 +59,7 @@ body = """\
 
 {% for commit in commits %}\
 {% if commit.remote.pr_number %}\
-- {{ commit.message | split(pat="\n") | first | trim_end_matches(pat=" (#" ~ commit.remote.pr_number ~ ")") }} ([#{{ commit.remote.pr_number }}](https://github.com/OWNER/REPO/pull/{{ commit.remote.pr_number }}))
+- {{ commit.message | split(pat="\n") | first | trim_end_matches(pat=" (#" ~ commit.remote.pr_number ~ ")") }} ([#{{ commit.remote.pr_number }}](https://github.com/monumental-archive/.github/pull/{{ commit.remote.pr_number }}))
 {% else %}\
 - {{ commit.message | split(pat="\n") | first }}
 {% endif %}\
@@ -80,7 +84,7 @@ body = """\
 # unconventional one — kept by filter_unconventional = false — carries its
 # whole body and trailers into the bullet, and one pre-governance squash
 # title anywhere in the history is enough to break the changelog's
-# markdown (found rendering .github's own history, its #102).
+# markdown (found rendering this repo's own #102).
 trim = false
 footer = ""
 

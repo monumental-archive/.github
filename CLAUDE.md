@@ -26,7 +26,10 @@ shared lives here and nowhere else. Five layers:
 4. **Shared workflows**: `ci.yml` (the reusable gate — callers pin one SHA
    which also pins the toolbelt via `github.workflow_sha`), `gate.yml`
    (this repo self-applies it), `audit.yml` (Monday cron: link check +
-   repo-settings drift).
+   repo-settings drift), `self-release.yml` (this repo versions itself
+   with its own release machinery via local `uses:` — canon tags are what
+   every consumer pin, lefthook ref and preset reference resolve to, and
+   what Renovate fans out; see #133, MAINTENANCE.md).
 5. **Settings as code**: `docs/rulesets.md` (the org-level branch + tag
    rules — enforced and edited in the GitHub UI on the Team plan,
    recorded and explained in that doc; deliberately no JSON mirror),

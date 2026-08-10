@@ -11,7 +11,21 @@
 # this job is the only place in the org a release tag can come from.
 set -euo pipefail
 
-version=$(taplo get -f Cargo.toml 'workspace.package.version')
+# The version source is detected, never configured — the phase-1 contract
+# in docs/release.md. With no manifest to read, the release commit's own
+# subject names the version; the guard below already refuses any HEAD that
+# is not a release commit, so the subject is exactly as trusted as the
+# manifest path.
+if [[ -f Cargo.toml ]]; then
+  version=$(taplo get -f Cargo.toml 'workspace.package.version')
+else
+  version=$(git log -1 --pretty=%s | sed -nE 's/^chore: release v([0-9][^ ]*).*/\1/p')
+  if [[ -z ${version} ]]; then
+    echo "FAIL: no manifest, and HEAD's subject names no release version" >&2
+    echo "  subject: $(git log -1 --pretty=%s)" >&2
+    exit 1
+  fi
+fi
 tag="v${version}"
 
 # Guard: only ever tag a commit that is a release commit. A workflow_dispatch

@@ -1,0 +1,37 @@
+# The canon eats its own release machinery: phase 1 runs at this repo's
+# own ref, the gate.yml pattern. The local `uses:` is load-bearing, not a
+# shortcut — a repository cannot SHA-pin itself without being permanently
+# one commit behind, and with a local call `github.job_workflow_sha` IS
+# the commit being released, so the atomic pin (workflow + scripts +
+# toolbelt + lockfile at one SHA) holds by construction rather than by
+# discipline.
+#
+# Phase 2 for this repository is empty by the archetype contract, not by
+# exception: the canon's artifact is the tagged tree itself — nothing is
+# built, published or signed here. Source-track attestations are #120's
+# standup and are contemporaneous with pushes, not release-time.
+name: self-release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# Serialise, never cancel: a run that is minting a tag must not be killed
+# by the next push to main.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      # Stated, not inherited (see gate.yml): the release-pr job inside
+      # release.yml authenticates git-cliff's GitHub API calls with the
+      # caller's token, and `contents: read` is the whole grant that buys.
+      contents: read
+    uses: ./.github/workflows/release.yml
+    secrets:
+      app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}

@@ -21,11 +21,28 @@
 # reaching 1.0.0, and chore/ci/docs-only ranges release nothing.
 set -euo pipefail
 
-current=$(taplo get -f Cargo.toml 'workspace.package.version')
+# The version source is detected, never configured — the phase-1 contract
+# in docs/release.md. A Cargo workspace mirrors its version into manifests
+# that must be bumped in the release commit; a repository with no manifest
+# (the canon itself, and any docs/config/image-only repository) has no
+# mirror: its tags are the source of truth and the release commit carries
+# only the changelog (plus citation, where present). Further manifest
+# kinds (package.json, single-crate Cargo) are added here, at the read,
+# the write and the file list, when a real repository needs them — never
+# speculatively.
+if [[ -f Cargo.toml ]]; then
+  source="cargo-workspace"
+  current=$(taplo get -f Cargo.toml 'workspace.package.version')
+else
+  source="tags"
+  current=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2> /dev/null || true)
+  current=${current#v}
+fi
 next=$(git cliff --bumped-version)
 version=${next#v}
 
-echo "current: ${current}"
+echo "source:  ${source}"
+echo "current: ${current:-<no tag yet>}"
 echo "next:    ${version}"
 
 emit() {
@@ -40,35 +57,39 @@ if [[ ${version} == "${current}" ]]; then
   exit 0
 fi
 
-# Bump every place the version lives, and nowhere else. The two sed
-# expressions are deliberately narrow: the workspace package version is the
-# line `version = "current"` at column zero, and internal dependency
-# constraints are the only lines that pair `path = ` with a version. An
-# unrestricted substitution would also rewrite an external dependency that
-# happens to share the version string.
-sed -i.bak "s|^version = \"${current}\"\$|version = \"${version}\"|" Cargo.toml
-sed -i.bak "/path = /s|version = \"${current}\"|version = \"${version}\"|g" Cargo.toml
-rm -f Cargo.toml.bak
+files="CHANGELOG.md"
 
-# Fail loudly rather than open a PR that does not build: a survivor on either
-# line family means a substitution missed, which is how a workspace ends up
-# with an internal constraint pointing at a crate version that no longer
-# exists.
-if grep -n "path = .*version = \"${current}\"" Cargo.toml \
-  || grep -qn "^version = \"${current}\"\$" Cargo.toml; then
-  echo "FAIL: Cargo.toml still mentions ${current} after the bump" >&2
-  exit 1
+if [[ ${source} == "cargo-workspace" ]]; then
+  # Bump every place the version lives, and nowhere else. The two sed
+  # expressions are deliberately narrow: the workspace package version is the
+  # line `version = "current"` at column zero, and internal dependency
+  # constraints are the only lines that pair `path = ` with a version. An
+  # unrestricted substitution would also rewrite an external dependency that
+  # happens to share the version string.
+  sed -i.bak "s|^version = \"${current}\"\$|version = \"${version}\"|" Cargo.toml
+  sed -i.bak "/path = /s|version = \"${current}\"|version = \"${version}\"|g" Cargo.toml
+  rm -f Cargo.toml.bak
+
+  # Fail loudly rather than open a PR that does not build: a survivor on
+  # either line family means a substitution missed, which is how a workspace
+  # ends up with an internal constraint pointing at a crate version that no
+  # longer exists.
+  if grep -n "path = .*version = \"${current}\"" Cargo.toml \
+    || grep -qn "^version = \"${current}\"\$" Cargo.toml; then
+    echo "FAIL: Cargo.toml still mentions ${current} after the bump" >&2
+    exit 1
+  fi
+
+  files="Cargo.toml ${files}"
+
+  # Refresh the lockfile's copy of the workspace member versions, then prove
+  # the tree still resolves before anyone is asked to review it.
+  if [[ -f Cargo.lock ]]; then
+    cargo update --workspace --offline 2> /dev/null || cargo update --workspace
+    files="${files} Cargo.lock"
+  fi
+  cargo metadata --format-version 1 --no-deps > /dev/null
 fi
-
-files="Cargo.toml CHANGELOG.md"
-
-# Refresh the lockfile's copy of the workspace member versions, then prove
-# the tree still resolves before anyone is asked to review it.
-if [[ -f Cargo.lock ]]; then
-  cargo update --workspace --offline 2> /dev/null || cargo update --workspace
-  files="${files} Cargo.lock"
-fi
-cargo metadata --format-version 1 --no-deps > /dev/null
 
 # The citation is release metadata like any other: a stale version there is
 # the drift the Release PR exists to prevent. date-released is the commit
