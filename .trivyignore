@@ -1,0 +1,5 @@
+# DS-0026 asks for HEALTHCHECK on docker/pgrx-artifact.Dockerfile — a
+# FROM scratch data-only image with no shell and no process. A health
+# check needs something to execute; this image is the deliberate absence
+# of anything executable.
+DS-0026

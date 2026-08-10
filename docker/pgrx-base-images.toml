@@ -1,0 +1,39 @@
+# Base images for the pgrx-extension class, digest-pinned. One mapping,
+# org-wide: every extension builds against the oldest supported glibc
+# (bookworm, 2.36 — the floor consumers inherit) and smokes on both
+# bookworm and trixie, so forward compatibility is demonstrated rather
+# than assumed.
+#
+# Renovate's custom manager in renovate.json keeps tag AND digest current
+# together — the pairing that makes pinning safe. A pinned-but-stale base
+# would be worse than a floating one.
+
+[build]
+# renovate: pgrx-base-image
+"14" = "postgres:14-bookworm@sha256:f819dd96de74db3de87d13f0a4fbcdfbdc4f4ca37ed6e0807bf73848170eae3d"
+# renovate: pgrx-base-image
+"15" = "postgres:15-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
+# renovate: pgrx-base-image
+"16" = "postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+# renovate: pgrx-base-image
+"17" = "postgres:17-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f"
+# renovate: pgrx-base-image
+"18" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
+
+[smoke]
+# renovate: pgrx-base-image
+"14" = "postgres:14-trixie@sha256:2f439458ab6a57a925825ae14f9d06910e4fe4a41c8d4a0ae06397e65b707e1b"
+# renovate: pgrx-base-image
+"15" = "postgres:15-trixie@sha256:6eb0add3b77c081df18aa518ce43df58fdcc40f2e6d868a6fd08038dc7acd425"
+# renovate: pgrx-base-image
+"16" = "postgres:16-trixie@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b"
+# renovate: pgrx-base-image
+"17" = "postgres:17-trixie@sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317"
+# renovate: pgrx-base-image
+"18" = "postgres:18-trixie@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636"
+
+# The glibc floor the [build] images guarantee, asserted per-build with
+# readelf: an extension whose symbols exceed this fails the release
+# instead of failing at dlopen on someone's Debian 12.
+[floor]
+glibc = "2.36"

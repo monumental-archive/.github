@@ -1,0 +1,446 @@
+# Artifact class: pgrx-extension. A Postgres extension packaged per PG
+# major × architecture, tested against the Postgres build consumers run,
+# with a verified glibc floor and reproducible tarballs (docs/release.md).
+#
+#   Built INSIDE `postgres:<major>-bookworm`, digest-pinned from
+#   docker/pgrx-base-images.toml. Two properties are structural, not
+#   remembered: the consumer's pg_config (pgrx's own downloaded Postgres
+#   builds green and fails at CREATE EXTENSION for exactly the person the
+#   artifact serves), and the glibc floor (bookworm's 2.36 covers Debian
+#   12 and 13; build against the oldest, smoke on the newest).
+#
+#   Tests run inside the SAME container, per cell — the native-hardware
+#   principle applied to the Postgres dimension. Smoke runs on bookworm
+#   AND trixie, so forward compatibility is demonstrated, never assumed.
+#
+#   The floor is asserted, not presumed: readelf proves no GLIBC_ symbol
+#   exceeds the mapping's floor, so a dependency dragging in a newer
+#   symbol fails the release instead of failing at dlopen on Debian 12.
+#
+# rust and cargo-pgrx are CALLER BUILD INPUTS, pinned in the caller's own
+# mise config. No cache of any kind: everything downstream is signed.
+name: build-pgrx-extension
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+      crate-dir:
+        description: Directory of the extension crate, relative to the root.
+        required: true
+        type: string
+      pg-majors:
+        description: >
+          Comma-separated PG majors to build. The plan job refuses anything
+          the base-image mapping does not carry — a typo must fail the
+          release, not quietly ship four majors instead of five.
+        required: false
+        type: string
+        default: 14,15,16,17,18
+      smoke-test:
+        description: >
+          Script proving the packaged extension does the one thing it
+          exists to do, run INSIDE a stock postgres container of each
+          distro. Receives the extracted package root as $1 and the PG
+          major as $2. Empty means only CREATE EXTENSION is proven, which
+          is permitted and unwise.
+        required: false
+        type: string
+        default: ""
+      ref:
+        description: >
+          Ref of the caller repository to build; empty means the
+          triggering commit. Exists for the reproducibility audit.
+        required: false
+        type: string
+        default: ""
+    outputs:
+      subjects:
+        description: sha256sum manifest of the extension tarballs.
+        value: ${{ jobs.collect.outputs.subjects }}
+      artifact-name:
+        description: Actions artifact holding the tarballs.
+        value: ${{ jobs.collect.outputs.artifact-name }}
+
+permissions: {}
+
+jobs:
+  # The matrix is constructed against the canon base-image mapping: a
+  # major with no digest-pinned image cannot be requested, and the mapping
+  # travels at the same SHA as this workflow.
+  plan:
+    name: Validate the majors against the base-image mapping
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check out org canon (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          persist-credentials: false
+
+      - name: Derive the matrix
+        id: plan
+        env:
+          UNTRUSTED_MAJORS: ${{ inputs.pg-majors }}
+        run: |
+          set -euo pipefail
+          mapping=$(python3 -c '
+          import json, sys, tomllib
+          with open("docker/pgrx-base-images.toml", "rb") as f:
+              t = tomllib.load(f)
+          print(json.dumps(t))
+          ')
+          IFS=',' read -ra majors <<< "${UNTRUSTED_MAJORS// /}"
+          if ((${#majors[@]} == 0)); then
+            echo "::error::no PG majors requested — a release that builds nothing is not a release"
+            exit 1
+          fi
+          include="[]"
+          for pg in "${majors[@]}"; do
+            build=$(jq -r --arg pg "${pg}" '.build[$pg] // empty' <<< "${mapping}")
+            smoke=$(jq -r --arg pg "${pg}" '.smoke[$pg] // empty' <<< "${mapping}")
+            if [[ -z "${build}" || -z "${smoke}" ]]; then
+              echo "::error::pg${pg} has no digest-pinned base image in docker/pgrx-base-images.toml"
+              exit 1
+            fi
+            for arch_runner in "amd64 ubuntu-latest" "arm64 ubuntu-24.04-arm"; do
+              read -r arch runner <<< "${arch_runner}"
+              include=$(jq -c \
+                --arg pg "${pg}" --arg arch "${arch}" --arg runner "${runner}" \
+                --arg build "${build}" --arg smoke "${smoke}" \
+                '. + [{pg: $pg, arch: $arch, runner: $runner, build: $build, smoke: $smoke}]' \
+                <<< "${include}")
+            done
+          done
+          dupes=$(jq -r '[.[] | "\(.pg)-\(.arch)"] | length - (unique | length)' <<< "${include}")
+          if [[ "${dupes}" != "0" ]]; then
+            echo "::error::duplicate PG major requested"
+            exit 1
+          fi
+          floor=$(jq -r '.floor.glibc' <<< "${mapping}")
+          matrix=$(jq -c '{include: .}' <<< "${include}")
+          expected=$(jq -c '[.[] | "\(.pg)-\(.arch)"]' <<< "${include}")
+          {
+            echo "matrix=${matrix}"
+            echo "expected=${expected}"
+            echo "floor=${floor}"
+          } >> "${GITHUB_OUTPUT}"
+          jq -r '.[] | "::notice::will build pg\(.pg) on \(.runner)"' <<< "${include}"
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected: ${{ steps.plan.outputs.expected }}
+      floor: ${{ steps.plan.outputs.floor }}
+
+  build:
+    name: Build and prove pg${{ matrix.pg }} (${{ matrix.arch }})
+    needs: plan
+    strategy:
+      # One failing cell must not hide the state of the other nine.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PG: ${{ matrix.pg }}
+      ARCH: ${{ matrix.arch }}
+      BUILD_IMAGE: ${{ matrix.build }}
+      SMOKE_IMAGE: ${{ matrix.smoke }}
+      GLIBC_FLOOR: ${{ needs.plan.outputs.floor }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Resolve the caller's build-input pins
+        env:
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          # rust and cargo-pgrx come from the caller's mise config, like
+          # every build input. Parsed with the runner's python (tomllib is
+          # stdlib) because the build happens inside the container and the
+          # belt has no business on a build leg.
+          pins=$(python3 -c '
+          import json, sys, tomllib
+          for candidate in ("mise.toml", ".mise.toml", "mise/config.toml"):
+              try:
+                  with open(candidate, "rb") as f:
+                      t = tomllib.load(f)
+                  break
+              except FileNotFoundError:
+                  continue
+          else:
+              sys.exit("no mise config found")
+          tools = t.get("tools", {})
+          rust = tools.get("rust", "")
+          pgrx = tools.get("cargo:cargo-pgrx", "")
+          if isinstance(rust, dict): rust = rust.get("version", "")
+          print(json.dumps({"rust": rust, "pgrx": pgrx}))
+          ')
+          rust=$(jq -r .rust <<< "${pins}")
+          pgrx=$(jq -r .pgrx <<< "${pins}")
+          if [[ -z "${rust}" || -z "${pgrx}" ]]; then
+            echo "::error::rust and cargo:cargo-pgrx must be pinned in this repository's mise config; they are build inputs of the pgrx-extension class"
+            exit 1
+          fi
+          {
+            echo "RUST_VERSION=${rust}"
+            echo "PGRX_VERSION=${pgrx}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Refuse a tag whose version disagrees with the manifests
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          manifest=$(python3 -c '
+          import sys, tomllib
+          with open("'"${UNTRUSTED_CRATE_DIR}"'/Cargo.toml", "rb") as f:
+              t = tomllib.load(f)
+          v = t.get("package", {}).get("version")
+          if isinstance(v, dict):
+              # version.workspace = true
+              with open("Cargo.toml", "rb") as f:
+                  w = tomllib.load(f)
+              v = w["workspace"]["package"]["version"]
+          print(v)
+          ')
+          if [[ "${manifest}" != "${UNTRUSTED_VERSION}" ]]; then
+            echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+            exit 1
+          fi
+
+      - name: Refuse a control file that strands existing installations
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # pgrx generates the control file with default_version at build
+          # time, but the SQL upgrade path from the previous published
+          # version is the author's to provide — and a missing one ships
+          # green while stranding every existing installation at ALTER
+          # EXTENSION UPDATE. Statically checked here; executing the
+          # upgrade is the class's documented fast-follow.
+          prev=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName 2> /dev/null || true)
+          if [[ -z "${prev}" || "${prev}" != v* ]]; then
+            echo "::notice::no previous release; first publish needs no upgrade path"
+            exit 0
+          fi
+          prev="${prev#v}"
+          if [[ "${prev}" == "${UNTRUSTED_VERSION}" ]]; then
+            echo "::notice::re-run of ${prev}; upgrade path not applicable"
+            exit 0
+          fi
+          name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
+          upgrade="${UNTRUSTED_CRATE_DIR}/sql/${name}--${prev}--${UNTRUSTED_VERSION}.sql"
+          if [[ ! -f "${upgrade}" ]]; then
+            echo "::error::no upgrade path ${upgrade} from published ${prev} — existing installations would be stranded"
+            exit 1
+          fi
+          echo "::notice::upgrade path ${prev} -> ${UNTRUSTED_VERSION} present"
+
+      - name: Build, test and package inside the target Postgres
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          epoch=$(git log -1 --pretty=%ct)
+          mkdir -p /tmp/out
+          # Source mounted read-only and copied inside: the container must
+          # not write into the checkout, and target/ never enters it.
+          docker run --rm \
+            --env PG --env RUST_VERSION --env PGRX_VERSION \
+            --env VERSION="${UNTRUSTED_VERSION}" \
+            --env CRATE_DIR="${UNTRUSTED_CRATE_DIR}" \
+            --env SOURCE_DATE_EPOCH="${epoch}" \
+            --volume "${PWD}:/src:ro" \
+            --volume /tmp/out:/out \
+            "${BUILD_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends \
+                "postgresql-server-dev-${PG}" build-essential \
+                ca-certificates curl pkg-config libclang-dev git
+              curl --proto "=https" --tlsv1.2 -sSf -o /tmp/rustup-init \
+                "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+              chmod +x /tmp/rustup-init
+              /tmp/rustup-init -y --profile minimal \
+                --default-toolchain "${RUST_VERSION}" --no-modify-path
+              . "${HOME}/.cargo/env"
+              cargo install cargo-pgrx --version "${PGRX_VERSION}" --locked
+              cargo pgrx init "--pg${PG}" /usr/bin/pg_config
+              mkdir -p /build
+              cp -a /src/. /build/
+              cd "/build/${CRATE_DIR}"
+              # Reproducibility, by construction: same flags as the
+              # rust-binary class, applied inside the container.
+              export CARGO_INCREMENTAL=0
+              export CARGO_PROFILE_RELEASE_STRIP=false
+              export RUSTFLAGS="--remap-path-prefix=/build=/src"
+              # The test suite, against the Postgres consumers run — not
+              # pgrx'\''s downloaded lookalike.
+              cargo pgrx test "pg${PG}"
+              cargo pgrx package \
+                --no-default-features --features "pg${PG}" \
+                --pg-config /usr/bin/pg_config \
+                --out-dir /out/pkgroot
+              chmod -R a+rX /out/pkgroot
+            '
+
+      - name: Assert the glibc floor
+        run: |
+          set -euo pipefail
+          so=$(find /tmp/out/pkgroot -name '*.so' -type f | head -n 1)
+          [[ -n "${so}" ]] || { echo "::error::no shared library packaged"; exit 1; }
+          worst=$(readelf --dyn-syms --wide "${so}" \
+            | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -uV | tail -1 || true)
+          if [[ -z "${worst}" ]]; then
+            echo "::notice::no versioned glibc symbols (static or unusual link)"
+            exit 0
+          fi
+          highest=$(printf '%s\n' "GLIBC_${GLIBC_FLOOR}" "${worst}" | sort -V | tail -1)
+          if [[ "${highest}" != "GLIBC_${GLIBC_FLOOR}" ]]; then
+            echo "::error::${so##*/} needs ${worst}, above the ${GLIBC_FLOOR} floor the class guarantees"
+            exit 1
+          fi
+          echo "::notice::glibc ceiling ${worst} within floor ${GLIBC_FLOOR}"
+
+      - name: Stage the CloudNativePG layout
+        run: |
+          set -euo pipefail
+          # A mirror of the Debian tree in the extension-ImageVolume
+          # layout, so one artifact serves COPY --from consumers and CNPG
+          # ImageVolume mounts alike. A mirror, not a replacement.
+          mkdir -p /tmp/out/cnpgroot/lib /tmp/out/cnpgroot/share/extension
+          cp -a "/tmp/out/pkgroot/usr/lib/postgresql/${PG}/lib/." /tmp/out/cnpgroot/lib/
+          cp -a "/tmp/out/pkgroot/usr/share/postgresql/${PG}/extension/." /tmp/out/cnpgroot/share/extension/
+
+      - name: Smoke the package on both distros
+        env:
+          UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
+        run: |
+          set -euo pipefail
+          for image in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
+            docker run --rm \
+              --env PG \
+              --env UNTRUSTED_SMOKE \
+              --volume /tmp/out/pkgroot:/pkgroot:ro \
+              --volume "${PWD}:/src:ro" \
+              "${image}" \
+              bash -c '
+                set -euo pipefail
+                cp -a /pkgroot/usr/lib/postgresql/${PG}/lib/. \
+                  "/usr/lib/postgresql/${PG}/lib/"
+                cp -a /pkgroot/usr/share/postgresql/${PG}/extension/. \
+                  "/usr/share/postgresql/${PG}/extension/"
+                ext=$(ls /pkgroot/usr/share/postgresql/${PG}/extension/*.control)
+                ext=$(basename "${ext}" .control)
+                su postgres -c "
+                  set -euo pipefail
+                  /usr/lib/postgresql/${PG}/bin/initdb -D /tmp/pgdata -A trust > /dev/null
+                  /usr/lib/postgresql/${PG}/bin/pg_ctl -D /tmp/pgdata -o \"-c listen_addresses=\" -w start > /dev/null
+                  psql -c \"CREATE EXTENSION ${ext};\"
+                  psql -c \"SELECT extversion FROM pg_extension WHERE extname = '\''${ext}'\'';\"
+                "
+                if [[ -n "${UNTRUSTED_SMOKE}" ]]; then
+                  if [[ ! -x "/src/${UNTRUSTED_SMOKE}" ]]; then
+                    echo "::error::smoke-test ${UNTRUSTED_SMOKE} is not executable"
+                    exit 1
+                  fi
+                  "/src/${UNTRUSTED_SMOKE}" /pkgroot "${PG}"
+                fi
+              '
+          done
+
+      - name: Archive, normalised
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          epoch=$(git log -1 --pretty=%ct)
+          name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
+          mkdir -p dist
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            --mtime="@${epoch}" -C /tmp/out -cf - pkgroot cnpgroot \
+            | gzip -n > "dist/${name}-${UNTRUSTED_VERSION}-pg${PG}-linux-${ARCH}.tar.gz"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: extension-pg${{ matrix.pg }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  collect:
+    name: Collect and refuse a partial set
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    outputs:
+      subjects: ${{ steps.manifest.outputs.subjects }}
+      artifact-name: release-extensions
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: extension-pg*
+          merge-multiple: true
+          path: dist
+
+      - name: Compute the subject manifest
+        id: manifest
+        env:
+          EXPECTED: ${{ needs.plan.outputs.expected }}
+        run: |
+          set -euo pipefail
+          cd dist
+          shopt -s nullglob
+          cell_list=$(jq -r '.[]' <<< "${EXPECTED}")
+          cells=()
+          while IFS= read -r c; do
+            if [[ -n "${c}" ]]; then cells+=("${c}"); fi
+          done <<< "${cell_list}"
+          for c in "${cells[@]}"; do
+            pg="${c%-*}"
+            arch="${c#*-}"
+            matches=(./*-pg"${pg}"-linux-"${arch}".tar.gz)
+            if ((${#matches[@]} != 1)); then
+              echo "::error::expected exactly one tarball for pg${pg}/${arch}, found ${#matches[@]}"
+              exit 1
+            fi
+          done
+          archives=(./*.tar.gz)
+          if ((${#archives[@]} != ${#cells[@]})); then
+            echo "::error::${#archives[@]} tarballs for ${#cells[@]} planned cells"
+            exit 1
+          fi
+          manifest=$(sha256sum ./*.tar.gz | sed 's| \./| |')
+          {
+            echo "subjects<<SUBJECTS_EOF"
+            printf '%s\n' "${manifest}"
+            echo "SUBJECTS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+          printf '%s\n' "${manifest}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-extensions
+          path: dist/*.tar.gz
+          if-no-files-found: error

@@ -318,6 +318,41 @@ verify-published leg: they ship as release assets, GitHub's own release
 attestation binds tag, commit and asset digests at publish, and the
 subjects `signer` attests are the same archives the attach job uploads.
 
+### pgrx extensions build inside the Postgres consumers run
+
+The fifth class, `pgrx-extension`, was designed from edtf's proven
+pipeline — mined for lessons, never for shape (the legacy build was
+correctness-by-patching; this is the same knowledge by design):
+
+- **Built and tested inside `postgres:<major>-bookworm`**, digest-pinned
+  from [`docker/pgrx-base-images.toml`](../docker/pgrx-base-images.toml)
+  (one Renovate-managed mapping org-wide). The consumer's `pg_config` is
+  structural — pgrx's own downloaded Postgres builds green and fails at
+  `CREATE EXTENSION` for exactly the person the artifact serves — and the
+  test suite runs per cell against the same build, not a lookalike.
+- **The glibc floor is verified, not assumed**: bookworm sets 2.36, and
+  readelf proves no symbol exceeds it, so a dependency dragging in a
+  newer symbol fails the release instead of failing at dlopen on
+  someone's Debian 12. Smoke runs on bookworm AND trixie: forward
+  compatibility demonstrated, never presumed.
+- **Static upgrade-path guard**: when a previous release exists, the SQL
+  upgrade file `<ext>--<prev>--<new>.sql` must exist, or the release
+  refuses — a missing one ships green and strands every installation at
+  `ALTER EXTENSION UPDATE`. Executing the upgrade against the previous
+  release's real tarball is the class's documented fast-follow.
+- **Reproducible tarballs**, same flags and normalisation as rust-binary,
+  named `<ext>-<version>-pg<major>-linux-<arch>.tar.gz`, each shipping
+  both the Debian tree and the CloudNativePG ImageVolume layout.
+- **One artifact image per PG major**, `FROM scratch`, both layouts, both
+  architectures assembled in one build (nothing executes, so nothing is
+  emulated), built in-run from the same verified tarballs the release
+  attests — one byte path, no post-release download. Each index is
+  signed under the org identity and proved the way a consumer uses it:
+  pulled by digest, `COPY --from` into a stock postgres,
+  `CREATE EXTENSION`. The runnable convenience image deliberately does
+  not exist in canon: its CVE posture would be its base's, refreshable
+  only by a release.
+
 ### wasm-npm and the second provenance
 
 The wasm package is built by **wasm-pack** and packed once — `npm pack` in

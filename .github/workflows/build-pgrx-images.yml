@@ -1,0 +1,247 @@
+# The pgrx-extension artifact images: one `FROM scratch` image per PG
+# major, both architectures, built from the SAME verified tarballs whose
+# digests the release attests — in-run, not from a post-release download,
+# so there is one byte path and the index is signed in the same run under
+# the same identity (docs/release.md).
+#
+# FROM scratch executes nothing, so both platforms assemble in one build
+# with no emulation involved — there is nothing to emulate. The consumer
+# proof afterwards pulls the pushed index back BY DIGEST and does what the
+# README tells consumers to do: COPY --from into a stock postgres and
+# CREATE EXTENSION.
+#
+# The runnable convenience image deliberately does not exist in canon:
+# its CVE posture would be its base's, refreshable only by a release —
+# the exact failure ma-db's own-the-installation decision documents.
+name: build-pgrx-images
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+      crate-dir:
+        description: Directory of the extension crate (names the image).
+        required: true
+        type: string
+      pg-majors:
+        description: PG majors, matching what build-pgrx-extension built.
+        required: false
+        type: string
+        default: 14,15,16,17,18
+      dry-run:
+        description: Rehearsal — assemble and prove locally, push nothing.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      images:
+        description: >
+          JSON array of {pg, image, digest} for every pushed index — the
+          signing matrix.
+        value: ${{ jobs.collect.outputs.images }}
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Derive the image matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected: ${{ steps.plan.outputs.expected }}
+    steps:
+      - name: Derive the matrix
+        id: plan
+        env:
+          UNTRUSTED_MAJORS: ${{ inputs.pg-majors }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra majors <<< "${UNTRUSTED_MAJORS// /}"
+          if ((${#majors[@]} == 0)); then
+            echo "::error::no PG majors requested"
+            exit 1
+          fi
+          include="[]"
+          for pg in "${majors[@]}"; do
+            if [[ ! "${pg}" =~ ^[0-9]+$ ]]; then
+              echo "::error::${pg} is not a PG major"
+              exit 1
+            fi
+            include=$(jq -c --arg pg "${pg}" '. + [{pg: $pg}]' <<< "${include}")
+          done
+          matrix=$(jq -c '{include: .}' <<< "${include}")
+          expected=$(jq -c '[.[].pg]' <<< "${include}")
+          {
+            echo "matrix=${matrix}"
+            echo "expected=${expected}"
+          } >> "${GITHUB_OUTPUT}"
+
+  image:
+    name: Assemble and prove the pg${{ matrix.pg }} artifact image
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push the per-major index by digest and tag
+    env:
+      PG: ${{ matrix.pg }}
+    steps:
+      - name: Check out org canon (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-extensions
+          path: tarballs
+
+      - name: Stage the per-arch trees from the verified tarballs
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
+          for arch in amd64 arm64; do
+            tarball="tarballs/${name}-${UNTRUSTED_VERSION}-pg${PG}-linux-${arch}.tar.gz"
+            if [[ ! -f "${tarball}" ]]; then
+              echo "::error::missing ${tarball} — the extension build did not produce this cell"
+              exit 1
+            fi
+            mkdir -p "staged/${arch}"
+            tar -xzf "${tarball}" -C "staged/${arch}"
+          done
+
+      - name: Resolve the image name
+        id: name
+        env:
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          base=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '[:upper:]' '[:lower:]')
+          owner=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner}/${base}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create a container-driver builder
+        run: docker buildx create --use --name org-pgrx --driver docker-container
+
+      - name: Build both platforms and push by digest with the tag
+        id: push
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.name.outputs.image }}
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          epoch=$(git log -1 --pretty=%ct)
+          created=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)
+          # One build, both platforms: FROM scratch runs nothing, so no
+          # emulation is involved and the native-hardware rule is not in
+          # play — there is no hardware behaviour to prove.
+          docker buildx build \
+            --file docker/pgrx-artifact.Dockerfile \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg PG="${PG}" \
+            --build-arg VERSION="${UNTRUSTED_VERSION}" \
+            --build-arg REVISION="${GITHUB_SHA}" \
+            --build-arg CREATED="${created}" \
+            --tag "${IMAGE}:${UNTRUSTED_VERSION}-pg${PG}-artifact" \
+            --push --metadata-file /tmp/meta.json \
+            .
+          digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
+          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::no index digest from the push"
+            exit 1
+          fi
+          mkdir -p /tmp/digests
+          jq -n --arg pg "${PG}" --arg image "${IMAGE}" --arg digest "${digest}" \
+            '{pg: $pg, image: $image, digest: $digest}' > "/tmp/digests/pg${PG}.json"
+          echo "::notice::pg${PG} index ${digest}"
+
+      - name: Prove the pushed image the way a consumer uses it
+        if: ${{ !inputs.dry-run }}
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+        run: |
+          set -euo pipefail
+          digest=$(jq -r .digest "/tmp/digests/pg${PG}.json")
+          build=$(python3 -c '
+          import tomllib
+          with open("docker/pgrx-base-images.toml", "rb") as f:
+              print(tomllib.load(f)["build"]["'"${PG}"'"])
+          ')
+          # By digest, never by tag, and exactly the documented pattern:
+          # COPY --from into a stock postgres, then CREATE EXTENSION.
+          cat > /tmp/consumer.Dockerfile << EOF
+          FROM ${IMAGE}@${digest} AS ext
+          FROM ${build}
+          COPY --from=ext /usr/lib/postgresql/${PG}/lib/ /usr/lib/postgresql/${PG}/lib/
+          COPY --from=ext /usr/share/postgresql/${PG}/extension/ /usr/share/postgresql/${PG}/extension/
+          EOF
+          docker buildx build --file /tmp/consumer.Dockerfile --load \
+            --tag "consumer-proof:pg${PG}" /tmp
+          docker run --rm "consumer-proof:pg${PG}" bash -c '
+            set -euo pipefail
+            ext=$(ls /usr/share/postgresql/*/extension/*.control | head -1)
+            ext=$(basename "${ext}" .control)
+            su postgres -c "
+              set -euo pipefail
+              /usr/lib/postgresql/*/bin/initdb -D /tmp/pgdata -A trust > /dev/null
+              /usr/lib/postgresql/*/bin/pg_ctl -D /tmp/pgdata -o \"-c listen_addresses=\" -w start > /dev/null
+              psql -c \"CREATE EXTENSION ${ext};\"
+            "
+          '
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.dry-run }}
+        with:
+          name: pgrx-image-digest-pg${{ matrix.pg }}
+          path: /tmp/digests/
+          if-no-files-found: error
+          retention-days: 1
+
+  collect:
+    name: Collect the signing matrix
+    needs: [plan, image]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    outputs:
+      images: ${{ steps.collect.outputs.images }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pgrx-image-digest-pg*
+          merge-multiple: true
+          path: digests
+
+      - name: Assemble and refuse a partial set
+        id: collect
+        env:
+          EXPECTED: ${{ needs.plan.outputs.expected }}
+        run: |
+          set -euo pipefail
+          expected_count=$(jq -r 'length' <<< "${EXPECTED}")
+          images=$(jq -sc '.' digests/*.json)
+          got=$(jq -r 'length' <<< "${images}")
+          if [[ "${got}" != "${expected_count}" ]]; then
+            echo "::error::${got} image digests for ${expected_count} planned majors; refusing a partial set"
+            exit 1
+          fi
+          echo "images=${images}" >> "${GITHUB_OUTPUT}"
+          jq -r '.[] | "::notice::pg\(.pg) \(.digest)"' <<< "${images}"
