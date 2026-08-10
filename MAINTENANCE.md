@@ -29,7 +29,8 @@ with no change of its own.
 
 Not part of the surface: `scaffold/` and `workflow-templates/` (copied
 once, never consumed live), `profile/`, community health files, docs,
-and this repository's own gate plumbing (`gate.yml`, `self-release.yml`).
+and this repository's own gate plumbing (`gate.yml`, `self-release.yml`,
+`self-publish.yml`).
 
 ## What a release means
 

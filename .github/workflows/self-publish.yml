@@ -1,0 +1,44 @@
+# Release phase 2 for the canon itself: on its own v* tag, the canon walks
+# the same pipeline as every other versioned repository — build the
+# source-archive class, sign it through the one signer, attach the
+# evidence bundle, publish the release on proof. Local `uses:`, like
+# self-release.yml: `github.job_workflow_sha` is the released commit, so
+# the orchestrator, the build workflow and the toolbelt are pinned by the
+# tag itself.
+#
+# This file is NOT named publish.yml because in this repository that name
+# belongs to the orchestrator. The publish.yml-filename rule exists for
+# registry trusted publishing (crates.io/npm pin the caller's
+# workflow_ref), and the source-archive class touches no registry — the
+# only consumer of this run's identity is the signer, which pins the
+# reusable workflow path, not the caller filename.
+name: self-publish
+
+on:
+  push:
+    tags: [v*]
+  # Resume path. ALWAYS dispatch with --ref <tag>: the shared guard refuses
+  # anything that is not a tag, because a branch ref would attest a moving
+  # pointer and Sigstore is append-only.
+  workflow_dispatch: {}
+
+permissions: {}
+
+# Never cancel a publish mid-flight; queue instead.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    uses: ./.github/workflows/publish.yml
+    with:
+      classes: source-archive
+    permissions:
+      # The union every nested job needs — see workflow-templates/publish.yml.
+      contents: read # the build checks out this repository at the tag
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+    secrets:
+      app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}

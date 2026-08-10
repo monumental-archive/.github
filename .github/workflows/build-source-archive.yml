@@ -1,0 +1,93 @@
+# Release phase 2, source-archive class: the artifact IS the tagged tree.
+# For a repository whose deliverable is its own content — the org canon
+# above all — `git archive` of the release tag is the built artifact, and
+# it walks the same path as every other class: build here, sign in the
+# signer, attach with the evidence, publish on proof.
+#
+# The archive is deterministic by construction: `git archive` writes
+# tree-object bytes with the commit date as mtime, so the same tag always
+# produces the same tarball. The job proves that rather than assuming it —
+# it builds twice and refuses a digest mismatch, the repro-check property
+# at build time.
+name: build-source-archive
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version being released, without the leading v.
+        required: true
+        type: string
+    outputs:
+      subjects:
+        description: sha256 manifest of the archive, for the signer.
+        value: ${{ jobs.build.outputs.subjects }}
+      artifact-name:
+        description: Name of the uploaded release artifact.
+        value: release-source
+
+permissions: {}
+
+jobs:
+  build:
+    name: Archive the tagged tree
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout of the caller at the tag
+    outputs:
+      subjects: ${{ steps.manifest.outputs.subjects }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the archive twice and prove determinism
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          name="${GITHUB_REPOSITORY#*/}"
+          # The .github repo would produce a hidden-file basename; strip
+          # the dot so the asset is visible and predictable.
+          name="${name#.}"
+          base="${name}-${VERSION}"
+          mkdir -p dist
+          git archive --format=tar.gz --prefix="${base}/" \
+            -o "dist/${base}.tar.gz" "v${VERSION}"
+          git archive --format=tar.gz --prefix="${base}/" \
+            -o "/tmp/${base}.check.tar.gz" "v${VERSION}"
+          a=$(sha256sum "dist/${base}.tar.gz" | cut -d' ' -f1)
+          b=$(sha256sum "/tmp/${base}.check.tar.gz" | cut -d' ' -f1)
+          if [[ "${a}" != "${b}" ]]; then
+            echo "::error::source archive is not deterministic (${a} vs ${b})"
+            exit 1
+          fi
+          # Smoke test: the archive must actually contain the tagged tree,
+          # not an empty or truncated stream.
+          count=$(tar -tzf "dist/${base}.tar.gz" | wc -l)
+          tracked=$(git ls-files | wc -l)
+          if (( count <= tracked / 2 )); then
+            echo "::error::archive lists ${count} entries for ${tracked} tracked files"
+            exit 1
+          fi
+          echo "::notice::${base}.tar.gz: ${count} entries, digest ${a}"
+
+      - name: Compute the subject manifest
+        id: manifest
+        run: |
+          set -euo pipefail
+          cd dist
+          manifest=$(sha256sum ./*.tar.gz | sed 's| \./| |')
+          {
+            echo "subjects<<SUBJECTS_EOF"
+            printf '%s\n' "${manifest}"
+            echo "SUBJECTS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+          printf '%s\n' "${manifest}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-source
+          path: dist/*.tar.gz
+          if-no-files-found: error

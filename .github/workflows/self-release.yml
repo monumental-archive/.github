@@ -6,10 +6,12 @@
 # toolbelt + lockfile at one SHA) holds by construction rather than by
 # discipline.
 #
-# Phase 2 for this repository is empty by the archetype contract, not by
-# exception: the canon's artifact is the tagged tree itself — nothing is
-# built, published or signed here. Source-track attestations are #120's
-# standup and are contemporaneous with pushes, not release-time.
+# Phase 2 is self-publish.yml: the tag this phase mints triggers the
+# shared orchestrator on the source-archive class — the canon's artifact
+# is the tagged tree, archived, signed through the one signer, attached
+# with its evidence and published on proof, exactly like every other
+# versioned repository. (Source-track attestations — the git-notes kind —
+# remain #120's standup: contemporaneous with pushes, not release-time.)
 name: self-release
 
 on:
