@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.2.0](https://github.com/monumental-archive/.github/compare/v1.1.0...v1.2.0) - 2026-08-10
+
+### Added
+
+- publish the canon through the pipeline — the source-archive class ([#138](https://github.com/monumental-archive/.github/pull/138))
+
 ## [1.1.0](https://github.com/monumental-archive/.github/compare/v1.0.0...v1.1.0) - 2026-08-10
 
 ### Added
