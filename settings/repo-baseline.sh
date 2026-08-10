@@ -9,6 +9,16 @@
 set -euo pipefail
 
 org="monumental-archive"
+
+# True when the repo carries publish.yml as an ENTRY workflow (tag-triggered
+# caller stub), false when absent or when it is a reusable — the canon
+# repo's publish.yml is `workflow_call` and must not grow an environment.
+publish_yml_is_entry() {
+  local content
+  content="$(gh api "repos/${org}/${1}/contents/.github/workflows/publish.yml" \
+    --jq '.content' 2> /dev/null)" || return 1
+  ! printf '%s\n' "${content}" | base64 -d | grep -q 'workflow_call'
+}
 baseline="$(dirname "$0")/repo-baseline.json"
 mode="${1:?usage: repo-baseline.sh check|apply}"
 
@@ -38,12 +48,13 @@ for repo in ${repos}; do
       # The `publish` environment is a repo object — one of the three
       # irreducibly caller-side pieces of the release design — and both
       # registries' trusted-publisher configs name it. A repo that carries
-      # the canonical publish.yml entry workflow gets the environment; the
+      # the canonical publish.yml ENTRY workflow gets the environment; the
       # PUT is idempotent and creates it bare (no reviewers, no wait timer:
       # an environment gate mid-release would pause between publish and
-      # attest, which is the one place a pause is unsafe).
-      if gh api "repos/${org}/${repo}/contents/.github/workflows/publish.yml" \
-        > /dev/null 2>&1; then
+      # attest, which is the one place a pause is unsafe). Entry, not
+      # reusable: this repo's own publish.yml is the shared workflow_call
+      # workflow, and the canon repo publishes nothing.
+      if publish_yml_is_entry "${repo}"; then
         gh api -X PUT "repos/${org}/${repo}/environments/publish" > /dev/null
       fi
       echo "applied: ${repo}"
@@ -64,11 +75,19 @@ for repo in ${repos}; do
         echo "drift: ${repo} OIDC sub claim is not immutable (${immutable})"
         drift=1
       fi
-      if gh api "repos/${org}/${repo}/contents/.github/workflows/publish.yml" \
-        > /dev/null 2>&1 \
+      if publish_yml_is_entry "${repo}" \
         && ! gh api "repos/${org}/${repo}/environments/publish" \
           > /dev/null 2>&1; then
         echo "drift: ${repo} has publish.yml but no publish environment"
+        drift=1
+      fi
+      # Web-UI commit signoff is enforced at the org level, and once it is,
+      # the repos API refuses the key outright (422 on PATCH, even to the
+      # enforced value) — so it cannot live in the baseline JSON. Assert it
+      # here instead: if the org setting ever regresses, this goes red.
+      signoff="$(jq -r '.web_commit_signoff_required' <<< "${actual}")"
+      if [[ ${signoff} != "true" ]]; then
+        echo "drift: ${repo} web commit signoff is ${signoff} (org enforcement regressed?)"
         drift=1
       fi
       ;;
