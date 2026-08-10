@@ -23,8 +23,8 @@ computation cannot yet serve an org-level-ruleset deployment under its
 own signing identity. Four defects filed upstream: source-tool
 issues 433 (org rulesets 404), 434 (dynamic required-check controls
 dropped), 435 (genesis impossible on an empty notes ref), and 436
-(chain evaluation ignores the configured signer identity). The genesis attestations remain
-in release-lab's `refs/notes/commits` as the record.
+(chain evaluation ignores the configured signer identity). The genesis
+attestations remain in release-lab's `refs/notes/commits` as the record.
 
 ## Requirement mapping (v1.2, L1–L3)
 
