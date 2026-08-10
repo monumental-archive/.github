@@ -1,20 +1,20 @@
 {
   "protected_branches": [
     {
-      "since": "2026-08-10T21:00:00Z",
+      "since": "2026-08-10T21:15:00Z",
       "name": "main",
       "target_slsa_source_level": "SLSA_SOURCE_LEVEL_3",
       "org_status_check_controls": [
         {
           "property_name": "ORG_SOURCE_GATED",
           "check_name": "ci / ci",
-          "since": "2026-08-10T21:00:00Z"
+          "since": "2026-08-10T21:15:00Z"
         }
       ]
     }
   ],
   "protected_tag": {
-    "since": "2026-08-10T21:00:00Z",
+    "since": "2026-08-10T21:15:00Z",
     "tag_hygiene": true
   }
 }
