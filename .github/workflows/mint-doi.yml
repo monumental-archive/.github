@@ -69,7 +69,13 @@ jobs:
           # repository facts otherwise. jq builds the JSON so nothing is
           # string-interpolated.
           creators='[{"name": "'"${GITHUB_REPOSITORY_OWNER}"'"}]'
-          if gh api "repos/${repo}/contents/CITATION.cff" --jq .content 2> /dev/null | base64 -d > cff.yaml; then
+          # Test gh's exit status, not the pipeline's: on a 404 gh prints
+          # the JSON error body to stdout, and piping that straight into
+          # base64 -d reaches the fallback only because an error body
+          # happens not to be valid base64. Decide on "does the file
+          # exist", not "did the decoder choke".
+          if content=$(gh api "repos/${repo}/contents/CITATION.cff" --jq .content 2> /dev/null) \
+            && printf '%s\n' "${content}" | base64 -d > cff.yaml; then
             # Minimal CFF read without new tools: names only.
             name_lines=$(grep -A1 '^[[:space:]]*- family-names:' cff.yaml \
               | paste - - | sed -E 's/.*family-names: *"?([^"]*)"?.*given-names: *"?([^"]*)"?.*/\1, \2/' || true)
