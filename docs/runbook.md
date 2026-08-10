@@ -40,6 +40,14 @@ written for two moments: wiring a repository in, and a release going wrong.
    `exclude:` input.
 7. `lint:release-stub` (belt) enforces 2–3 from then on: `cliff.toml`
    present means the stubs must be, pinned.
+8. **Score-ready extras**, so the repository badges the day it lands:
+   commit a `.coverage-floor` (a bare number; the gate's `coverage:check`
+   ratchet enforces it — Silver wants ≥ 80) and pass the `codecov-token`
+   secret to the ci stub for the badge feed; copy `scaffold/REUSE.toml`
+   and licence texts into `LICENSES/`; paste
+   `scaffold/README-badges.md` into the README and fill the ids; answer
+   the Best Practices form from [`best-practices.md`](best-practices.md)
+   (post-transfer — it binds the repo URL).
 
 ### Continuous (no versions — the artifact's version is its pin set)
 
