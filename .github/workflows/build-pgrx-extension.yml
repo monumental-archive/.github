@@ -288,30 +288,44 @@ jobs:
               apt-get install -y -qq --no-install-recommends \
                 "postgresql-server-dev-${PG}" build-essential \
                 ca-certificates curl pkg-config libclang-dev git
-              curl --proto "=https" --tlsv1.2 -sSf -o /tmp/rustup-init \
-                "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
-              chmod +x /tmp/rustup-init
-              /tmp/rustup-init -y --profile minimal \
-                --default-toolchain "${RUST_VERSION}" --no-modify-path
-              . "${HOME}/.cargo/env"
-              cargo install cargo-pgrx --version "${PGRX_VERSION}" --locked
-              cargo pgrx init "--pg${PG}" /usr/bin/pg_config
+              # Everything after the installs runs as the unprivileged
+              # postgres user: initdb refuses root, and the test suite
+              # spins up real clusters. Root hands over exactly what the
+              # build needs to write — the copied source, the out dir, and
+              # the extension install dirs pgrx test installs into.
               mkdir -p /build
               cp -a /src/. /build/
-              cd "/build/${CRATE_DIR}"
-              # Reproducibility, by construction: same flags as the
-              # rust-binary class, applied inside the container.
-              export CARGO_INCREMENTAL=0
-              export CARGO_PROFILE_RELEASE_STRIP=false
-              export RUSTFLAGS="--remap-path-prefix=/build=/src"
-              # The test suite, against the Postgres consumers run — not
-              # pgrx'\''s downloaded lookalike.
-              cargo pgrx test "pg${PG}"
-              cargo pgrx package \
-                --no-default-features --features "pg${PG}" \
-                --pg-config /usr/bin/pg_config \
-                --out-dir /out/pkgroot
-              chmod -R a+rX /out/pkgroot
+              chown -R postgres:postgres /build /out \
+                "$(/usr/bin/pg_config --pkglibdir)" \
+                "$(/usr/bin/pg_config --sharedir)/extension"
+              exec su -w PG,VERSION,CRATE_DIR,RUST_VERSION,PGRX_VERSION,SOURCE_DATE_EPOCH \
+                postgres -s /bin/bash -c '\''
+                set -euo pipefail
+                export HOME=/var/lib/postgresql
+                curl --proto "=https" --tlsv1.2 -sSf -o /tmp/rustup-init \
+                  "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+                chmod +x /tmp/rustup-init
+                /tmp/rustup-init -y --profile minimal \
+                  --default-toolchain "${RUST_VERSION}" --no-modify-path
+                . "${HOME}/.cargo/env"
+                cargo install cargo-pgrx --version "${PGRX_VERSION}" --locked
+                cargo pgrx init "--pg${PG}" /usr/bin/pg_config
+                cd "/build/${CRATE_DIR}"
+                # Reproducibility, by construction: same flags as the
+                # rust-binary class, applied inside the container.
+                export CARGO_INCREMENTAL=0
+                export CARGO_PROFILE_RELEASE_STRIP=false
+                export RUSTFLAGS="--remap-path-prefix=/build=/src"
+                # The test suite, against the Postgres consumers run —
+                # real initdb, real clusters, not the pgrx-managed
+                # lookalike.
+                cargo pgrx test "pg${PG}"
+                cargo pgrx package \
+                  --no-default-features --features "pg${PG}" \
+                  --pg-config /usr/bin/pg_config \
+                  --out-dir /out/pkgroot
+                chmod -R a+rX /out/pkgroot
+              '\''
             '
 
       - name: Assert the glibc floor
