@@ -210,7 +210,7 @@ jobs:
           fi
           for c in "${requested[@]}"; do
             case "${c}" in
-              rust-crate | oci-image | rust-binary | wasm-npm | pgrx-extension) ;;
+              rust-crate | oci-image | rust-binary | wasm-npm | pgrx-extension | source-archive) ;;
               *)
                 echo "::error::unknown class requested"
                 exit 1
@@ -368,6 +368,36 @@ jobs:
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
 
+  # The source-archive class: the artifact is the tagged tree itself, for
+  # repositories whose deliverable is their own content — the org canon
+  # above all. Like binaries it has no registry to pull back from: it
+  # becomes a release asset, GitHub's release attestation binds tag,
+  # commit and asset digests at publish, and the signed subjects are the
+  # same bytes the attach job uploads.
+  build-source:
+    name: Build source archive
+    needs: guard
+    if: contains(inputs.classes, 'source-archive')
+    uses: ./.github/workflows/build-source-archive.yml
+    permissions:
+      # Restated, not inherited — see the note on `build` above.
+      contents: read # checkout of the caller at the tag
+    with:
+      version: ${{ needs.guard.outputs.version }}
+
+  sign-source:
+    name: Sign source archive
+    needs: build-source
+    if: contains(inputs.classes, 'source-archive')
+    uses: monumental-archive/signer/.github/workflows/sign.yml@2623e654851c948abd9332ab1fd1ce2c60b4395c # main
+    with:
+      subjects: ${{ needs.build-source.outputs.subjects }}
+      bundle-artifact: attestation-bundle-source
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+
   build-wasm:
     name: Build wasm package
     needs: guard
@@ -509,7 +539,7 @@ jobs:
   # more job above, not a contract change here.
   attach:
     name: Attach evidence and publish
-    needs: [guard, sign, sign-vsa, sign-image, sign-binaries, sign-wasm, sign-vsa-wasm, sign-extensions, sign-extension-images]
+    needs: [guard, sign, sign-vsa, sign-image, sign-binaries, sign-source, sign-wasm, sign-vsa-wasm, sign-extensions, sign-extension-images]
     if: >-
       ${{
         !cancelled() && needs.guard.result == 'success'
@@ -517,6 +547,7 @@ jobs:
         && (!contains(inputs.classes, 'rust-crate') || (needs.sign.result == 'success' && (needs.sign-vsa.result == 'success' || inputs.dry-run)))
         && (!contains(inputs.classes, 'oci-image') || needs.sign-image.result == 'success' || inputs.dry-run)
         && (!contains(inputs.classes, 'rust-binary') || needs.sign-binaries.result == 'success')
+        && (!contains(inputs.classes, 'source-archive') || needs.sign-source.result == 'success')
         && (!contains(inputs.classes, 'wasm-npm') || (needs.sign-wasm.result == 'success' && (needs.sign-vsa-wasm.result == 'success' || inputs.dry-run)))
         && (!contains(inputs.classes, 'pgrx-extension') || (needs.sign-extensions.result == 'success' && (needs.sign-extension-images.result == 'success' || inputs.dry-run)))
       }}

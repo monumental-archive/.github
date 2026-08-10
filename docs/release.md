@@ -68,8 +68,11 @@ are what consumers pin (`@<sha> # vX.Y.Z` — the comment is what Renovate's
 the lefthook remote refs (`ref: vX.Y.Z`), and what the shared preset
 reference carries (`github>monumental-archive/.github#vX.Y.Z`). One
 release moves all three surfaces; Renovate fans it out (#133). The canon's
-phase 2 is empty by the archetype contract: its artifact is the tagged
-tree, and its semver surface is named in
+phase 2 is the **source-archive class**
+([`self-publish.yml`](../.github/workflows/self-publish.yml)): its
+artifact is the tagged tree, archived deterministically, signed through
+the one signer, and published with its evidence bundle like every other
+class. Its semver surface is named in
 [`MAINTENANCE.md`](../MAINTENANCE.md).
 
 ### The version source
@@ -351,6 +354,21 @@ stranger will pull, never of a local twin.
 
 Both rules were arrived at independently in three repositories before
 being promoted here.
+
+### The source archive is an artifact class like any other
+
+`source-archive` is for repositories whose deliverable is their own
+content — the canon itself above all. The build is `git archive` of the
+release tag, which is deterministic by construction (tree-object bytes,
+commit-date mtimes); the build job proves it anyway, building twice and
+refusing a digest mismatch. Like binaries there is no registry to pull
+back from: the archive becomes a release asset, GitHub's release
+attestation binds tag, commit and asset digests at publish, and the
+signed subjects are the same bytes the attach job uploads. This is an
+*artifact* claim — "this tarball is the tree of this tag, built by this
+workflow" — not a SLSA Source-track claim about review and history;
+those live in git notes, are contemporaneous with pushes, and remain the
+standup tracked in #120.
 
 ### Binaries build on native hardware too
 
