@@ -153,10 +153,26 @@ on:
         required: false
         type: string
         default: ""
+      mint-doi:
+        description: >
+          Mint a Zenodo version DOI after the release publishes. Needs the
+          zenodo-token secret. The DOI comes last of all — after proof,
+          after publish — like everything else.
+        required: false
+        type: boolean
+        default: false
+      zenodo-base-url:
+        description: Zenodo instance; the lab passes the sandbox.
+        required: false
+        type: string
+        default: https://zenodo.org
     secrets:
       app-private-key:
         description: Tag-mint App private key, for publishing the release
         required: true
+      zenodo-token:
+        description: Zenodo token (deposit:write + deposit:actions); only with mint-doi
+        required: false
     outputs:
       version:
         description: The version published, without the leading v.
@@ -453,3 +469,18 @@ jobs:
       dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}
+
+  # The DOI comes last of all: it cites a release that is already public,
+  # proven and signed. Skipped on dry-run (a rehearsal must cite nothing).
+  doi:
+    name: Mint the version DOI
+    needs: [guard, attach]
+    if: ${{ inputs.mint-doi && !inputs.dry-run }}
+    uses: ./.github/workflows/mint-doi.yml
+    permissions:
+      contents: read # the minting job downloads the released source
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      base-url: ${{ inputs.zenodo-base-url }}
+    secrets:
+      zenodo-token: ${{ secrets.zenodo-token }}
