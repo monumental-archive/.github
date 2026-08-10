@@ -1,0 +1,57 @@
+# Rekor identity monitoring — the detective control for the one risk
+# `--signer-workflow` verification cannot prevent: a branch push in the
+# signer repository minting a certificate whose SAN matches the pinned
+# identity. Verification pins the path, not the ref; this watches the
+# transparency log for every certificate issued to that identity, so an
+# unexpected issuance surfaces as a filed issue instead of never.
+#
+# Known gap, recorded in issue #28 and accepted: rekor-monitor's identity
+# matching covers the hashedrekord entry type only, and GitHub artifact
+# attestations are DSSE — so this watches the identity's use in signing
+# flows generally, not each attestation individually. A detective control
+# with a gap beats declining to watch the log at all; revisit when
+# rekor-monitor grows DSSE identity matching.
+#
+# The job grants `id-token: write` to sigstore's reusable workflow (it
+# uses the token to identify its own repository and ref). This is a
+# standalone scheduled workflow that runs no caller-supplied code, which
+# is precisely the case the org's narrowed id-token rule exists to allow —
+# monitoring the log to protect the signer, rather than protecting the
+# signer by declining to monitor the log.
+#
+# sigstore/rekor-monitor@* is on the org Actions allowlist for exactly
+# this workflow (added 2026-08-10); the SHA pin below is the house rule,
+# their `@main` guidance notwithstanding.
+name: rekor-monitor
+
+on:
+  schedule:
+    # Twice daily. The monitor advances from its last stored checkpoint,
+    # so no interval loses log entries — a shorter one only shortens the
+    # window between a forged issuance and its issue being filed.
+    - cron: "17 5,17 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    uses: sigstore/rekor-monitor/.github/workflows/reusable_monitoring.yml@2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
+    permissions:
+      # Restated, not inherited — the startup_failure trap.
+      contents: read # read the checkpoint artifact branch
+      issues: write # file the alert; a detective control must page
+      id-token: write # the reusable identifies its own repo and ref
+    with:
+      file_issue: true
+      artifact_retention_days: 14
+      config: |
+        monitoredValues:
+          certIdentities:
+            - certSubject: https://github\.com/monumental-archive/signer/\.github/workflows/sign\.yml@.*
+              issuers:
+                - https://token\.actions\.githubusercontent\.com
