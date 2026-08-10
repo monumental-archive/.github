@@ -37,6 +37,15 @@ on:
         required: false
         type: string
         default: "18"
+      exclude:
+        description: >-
+          Workspace members to exclude from the runner-side cargo build
+          (rust-binary class) — same value the caller's publish passes.
+          Without it a workspace with a pgrx crate rebuilds that crate on
+          the bare runner and dies on the missing PGRX_HOME.
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -92,6 +101,7 @@ jobs:
       version: ${{ needs.resolve.outputs.version }}
       targets: ${{ inputs.target }}
       ref: ${{ needs.resolve.outputs.tag }}
+      exclude: ${{ inputs.exclude }}
 
   rebuild-extension:
     name: Rebuild the release (extension)
