@@ -290,6 +290,53 @@ fi
 echo "lint:capability-boundary: ok"
 '''
 
+[tasks."lint:belt-available"]
+description = "Every belt tool actually resolves — a missing belt must fail loudly, not lint nothing"
+dir = "{{cwd}}"
+# The belt arrives via MISE_GLOBAL_CONFIG_FILE in CI and a conf.d symlink
+# locally. If either is absent, every guarded lint task "skips clean" and
+# the gate goes green having checked nothing — the vacuous-success failure.
+# This canary asserts the layer itself is present.
+run = '''
+missing=""
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl; do
+  command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
+done
+if [[ -n "${missing}" ]]; then
+  echo "lint:belt-available: belt tools missing:${missing}" >&2
+  echo "  CI: MISE_GLOBAL_CONFIG_FILE not set or checkout missing" >&2
+  echo "  locally: ~/.config/mise/conf.d symlink to the org belt is absent" >&2
+  exit 1
+fi
+echo "lint:belt-available: ok"
+'''
+
+[tasks."lint:release-stub"]
+description = "A versioned repo carries the canonical release stubs (cliff.toml implies publish.yml + release.yml)"
+dir = "{{cwd}}"
+# The versioned archetype is three files: cliff.toml, release.yml,
+# publish.yml — and the registries pin the publish.yml FILENAME, so a
+# missing or renamed stub breaks trusted publishing with nothing local
+# going red. cliff.toml is the archetype marker: continuous repositories
+# do not have one and skip clean.
+run = '''
+[[ -f cliff.toml ]] || { echo "lint:release-stub: no cliff.toml, not a versioned repo, skipped"; exit 0; }
+bad=""
+for f in .github/workflows/release.yml .github/workflows/publish.yml; do
+  if [[ ! -f "${f}" ]]; then
+    bad="${bad} ${f}(missing)"
+  elif ! grep -qE "uses: monumental-archive/.github/.github/workflows/(release|publish)\.yml@[0-9a-f]{40}|uses: \./\.github/workflows/(release|publish)\.yml" "${f}"; then
+    bad="${bad} ${f}(no pinned org uses)"
+  fi
+done
+if [[ -n "${bad}" ]]; then
+  echo "lint:release-stub: versioned repo with broken release stubs:${bad}" >&2
+  echo "  copy scaffold/ from monumental-archive/.github; the publish.yml filename is load-bearing" >&2
+  exit 1
+fi
+echo "lint:release-stub: ok"
+'''
+
 [tasks."lint:toolbelt-lock"]
 description = "Every pinned tool has a locked entry (mise config vs mise.lock)"
 dir = "{{cwd}}"

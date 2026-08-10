@@ -1,0 +1,5 @@
+{
+  "name": "Dependency review",
+  "description": "Fail a pull request that introduces a dependency with a known vulnerability, via the shared org workflow.",
+  "categories": ["ci"]
+}
