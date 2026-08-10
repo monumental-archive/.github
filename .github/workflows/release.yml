@@ -3,8 +3,6 @@
 #   jobs:
 #     release:
 #       uses: monumental-archive/.github/.github/workflows/release.yml@<sha> # vX.Y.Z
-#       with:
-#         app-id: ${{ vars.TAG_MINT_APP_ID }}
 #       secrets:
 #         app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
 #
@@ -28,23 +26,6 @@ name: release
 
 on:
   workflow_call:
-    inputs:
-      app-id:
-        description: >
-          DEPRECATED and ignored. The App's numeric id used to be passed
-          in; `actions/create-github-app-token` now deprecates `app-id` in
-          favour of `client-id`, and this workflow reads
-          `vars.TAG_MINT_APP_CLIENT_ID` directly instead.
-
-          Kept accepted, and unused, so that existing callers do not break:
-          removing a declared input is a breaking change for every
-          repository passing it, and a shared workflow's interface is a
-          public contract (docs/release.md). Callers should drop the `with:
-          app-id:` line at their leisure; this input disappears in a
-          deliberate bump, not as a side effect.
-        required: false
-        type: string
-        default: ""
     secrets:
       app-private-key:
         description: Tag-mint App private key
