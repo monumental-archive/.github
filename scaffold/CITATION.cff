@@ -1,0 +1,20 @@
+# Fill the <angle-bracket> fields; `cffconvert --validate` checks the file
+# (survey #82 decides its belt entry). The version and date-released lines
+# are maintained by the release pipeline's bump script.
+cff-version: 1.2.0
+message: If you use this software, please cite it using these metadata.
+title: <human title of the software>
+type: software
+authors:
+  - family-names: Allen
+    given-names: Carl
+repository-code: https://github.com/monumental-archive/<repo>
+license: <SPDX expression>
+version: <current version>
+date-released: "<YYYY-MM-DD>"
+# After the first DOI-minting release, add the CONCEPT DOI (covers all
+# versions):
+# identifiers:
+#   - type: doi
+#     value: <concept DOI>
+#     description: The concept DOI of the software.

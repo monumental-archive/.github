@@ -324,7 +324,15 @@ jobs:
                   --no-default-features --features "pg${PG}" \
                   --pg-config /usr/bin/pg_config \
                   --out-dir /out/pkgroot
-                chmod -R a+rX /out/pkgroot
+                # The CloudNativePG ImageVolume mirror is staged HERE, by
+                # the user that owns the tree — the runner cannot create
+                # directories inside a bind mount owned by the container
+                # user. A mirror, not a replacement: one artifact serves
+                # COPY --from consumers and CNPG mounts alike.
+                mkdir -p /out/cnpgroot/lib /out/cnpgroot/share/extension
+                cp -a "/out/pkgroot/usr/lib/postgresql/${PG}/lib/." /out/cnpgroot/lib/
+                cp -a "/out/pkgroot/usr/share/postgresql/${PG}/extension/." /out/cnpgroot/share/extension/
+                chmod -R a+rX /out/pkgroot /out/cnpgroot
               '\''
             '
 
@@ -345,16 +353,6 @@ jobs:
             exit 1
           fi
           echo "::notice::glibc ceiling ${worst} within floor ${GLIBC_FLOOR}"
-
-      - name: Stage the CloudNativePG layout
-        run: |
-          set -euo pipefail
-          # A mirror of the Debian tree in the extension-ImageVolume
-          # layout, so one artifact serves COPY --from consumers and CNPG
-          # ImageVolume mounts alike. A mirror, not a replacement.
-          mkdir -p /tmp/out/cnpgroot/lib /tmp/out/cnpgroot/share/extension
-          cp -a "/tmp/out/pkgroot/usr/lib/postgresql/${PG}/lib/." /tmp/out/cnpgroot/lib/
-          cp -a "/tmp/out/pkgroot/usr/share/postgresql/${PG}/extension/." /tmp/out/cnpgroot/share/extension/
 
       - name: Smoke the package on both distros
         env:
