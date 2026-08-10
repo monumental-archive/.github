@@ -5,30 +5,36 @@
 # transparency log for every certificate issued to that identity, so an
 # unexpected issuance surfaces as a filed issue instead of never.
 #
-# Known gap, recorded in issue #28 and accepted: rekor-monitor's identity
-# matching covers the hashedrekord entry type only, and GitHub artifact
-# attestations are DSSE — so this watches the identity's use in signing
-# flows generally, not each attestation individually. A detective control
-# with a gap beats declining to watch the log at all; revisit when
-# rekor-monitor grows DSSE identity matching.
+# SELF-CONTAINED, deliberately. sigstore/rekor-monitor ships a reusable
+# workflow, and this org briefly allowlisted it — but its base workflow
+# runs `dawidd6/action-download-artifact` (third-party, single-maintainer)
+# and a slsa-github-generator action, so admitting it meant admitting
+# those: the first dispatch died as startup_failure on the org's own
+# Actions policy. What the reusable actually does is `go run
+# ./cmd/rekor_monitor --once` around a checkpoint file, so this workflow
+# does exactly that with github-owned actions only — the same trade as
+# hand-rolled `docker buildx` over the docker/* actions, and the
+# allowlist stays at four patterns.
 #
-# The job grants `id-token: write` to sigstore's reusable workflow (it
-# uses the token to identify its own repository and ref). This is a
-# standalone scheduled workflow that runs no caller-supplied code, which
-# is precisely the case the org's narrowed id-token rule exists to allow —
-# monitoring the log to protect the signer, rather than protecting the
-# signer by declining to monitor the log.
+# Known gap, recorded in issue #28 and accepted: identity matching covers
+# the hashedrekord entry type only, and GitHub artifact attestations are
+# DSSE — so this watches the identity's use in signing flows generally,
+# not each attestation individually. A detective control with a gap beats
+# declining to watch the log; revisit when rekor-monitor grows DSSE
+# identity matching.
 #
-# sigstore/rekor-monitor@* is on the org Actions allowlist for exactly
-# this workflow (added 2026-08-10); the SHA pin below is the house rule,
-# their `@main` guidance notwithstanding.
+# The checkpoint rides the Actions cache. That is safe HERE and would not
+# be in a build workflow: nothing downstream is signed, main's cache is
+# not writable from pull requests, and the worst a stale or lost
+# checkpoint causes is re-scanning a log range — the monitor's consistency
+# proof runs from whatever checkpoint it is given.
 name: rekor-monitor
 
 on:
   schedule:
-    # Twice daily. The monitor advances from its last stored checkpoint,
-    # so no interval loses log entries — a shorter one only shortens the
-    # window between a forged issuance and its issue being filed.
+    # Twice daily. The monitor advances from its stored checkpoint, so no
+    # interval loses log entries — a shorter one only shortens the window
+    # between a forged issuance and its issue being filed.
     - cron: "17 5,17 * * *"
   workflow_dispatch:
 
@@ -40,18 +46,64 @@ concurrency:
 
 jobs:
   monitor:
-    uses: sigstore/rekor-monitor/.github/workflows/reusable_monitoring.yml@2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
+    name: Watch the log for the signer identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
-      # Restated, not inherited — the startup_failure trap.
-      contents: read # read the checkpoint artifact branch
-      issues: write # file the alert; a detective control must page
-      id-token: write # the reusable identifies its own repo and ref
-    with:
-      file_issue: true
-      artifact_retention_days: 14
-      config: |
-        monitoredValues:
-          certIdentities:
-            - certSubject: https://github\.com/monumental-archive/signer/\.github/workflows/sign\.yml@.*
-              issuers:
-                - https://token\.actions\.githubusercontent\.com
+      contents: read # checkout of the pinned monitor source
+      issues: write # an unexpected issuance must page, not just log
+    steps:
+      - name: Check out rekor-monitor (pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: sigstore/rekor-monitor
+          ref: 2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
+          persist-credentials: false
+
+      - name: Set up Go from the monitor's own go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ./go.mod
+
+      - name: Restore the previous checkpoint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: checkpoint_log.txt
+          key: rekor-checkpoint-${{ github.run_id }}
+          restore-keys: rekor-checkpoint-
+
+      - name: Run the monitor once
+        run: |
+          set -euo pipefail
+          cat > /tmp/monitor-config.yaml << 'CONFIG'
+          monitoredValues:
+            certIdentities:
+              - certSubject: https://github\.com/monumental-archive/signer/\.github/workflows/sign\.yml@.*
+                issuers:
+                  - https://token\.actions\.githubusercontent\.com
+          CONFIG
+          config=$(cat /tmp/monitor-config.yaml)
+          go run ./cmd/rekor_monitor \
+            --file checkpoint_log.txt \
+            --once=true \
+            --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
+            --config "${config}"
+
+      - name: Save the advanced checkpoint
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: checkpoint_log.txt
+          key: rekor-checkpoint-${{ github.run_id }}
+
+      - name: File an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A monitoring failure and an identity finding land the same way:
+          # loudly. The run log carries the distinction.
+          gh issue create --repo "${GITHUB_REPOSITORY}" \
+            --title "rekor-monitor: failure or unexpected signer issuance (run ${GITHUB_RUN_ID})" \
+            --body "The Rekor identity monitor failed or matched an unexpected certificate for the signer identity. Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
