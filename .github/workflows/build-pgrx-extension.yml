@@ -391,6 +391,70 @@ jobs:
               '
           done
 
+      - name: Execute the upgrade from the previous release
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The static guard proved the upgrade SQL exists; this proves it
+          # RUNS: install the previous release's real tarball, CREATE
+          # EXTENSION at the old version, install the new package over it,
+          # ALTER EXTENSION UPDATE, and read the version back. Skips
+          # cleanly when no previous release shipped this cell — the
+          # fresh-install smokes above are then the whole story.
+          name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
+          prev=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName 2> /dev/null || true)
+          if [[ -z "${prev}" || "${prev}" != v* || "${prev#v}" == "${UNTRUSTED_VERSION}" ]]; then
+            echo "::notice::no previous release; upgrade execution skipped"
+            exit 0
+          fi
+          prev="${prev#v}"
+          asset="${name}-${prev}-pg${PG}-linux-${ARCH}.tar.gz"
+          if ! gh release download "v${prev}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "${asset}" --output /tmp/prev.tar.gz 2> /dev/null; then
+            echo "::notice::v${prev} shipped no ${asset}; upgrade execution skipped"
+            exit 0
+          fi
+          mkdir -p /tmp/prevroot
+          tar -xzf /tmp/prev.tar.gz -C /tmp/prevroot
+          docker run --rm \
+            --env PG --env NAME="${name}" \
+            --env PREV="${prev}" --env NEW="${UNTRUSTED_VERSION}" \
+            --volume /tmp/prevroot/pkgroot:/prev:ro \
+            --volume /tmp/out/pkgroot:/new:ro \
+            "${SMOKE_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+              lib="/usr/lib/postgresql/${PG}/lib"
+              ext="/usr/share/postgresql/${PG}/extension"
+              cp -a "/prev${lib}/." "${lib}/"
+              cp -a "/prev${ext}/." "${ext}/"
+              su postgres -c "
+                set -euo pipefail
+                /usr/lib/postgresql/${PG}/bin/initdb -D /tmp/pgdata -A trust > /dev/null
+                /usr/lib/postgresql/${PG}/bin/pg_ctl -D /tmp/pgdata -o \"-c listen_addresses=\" -w start > /dev/null
+                psql -c \"CREATE EXTENSION ${NAME} VERSION '"'"'${PREV}'"'"';\"
+              "
+              # The new package lands over the old — exactly what a
+              # package upgrade does — and the running installation
+              # must cross the gap.
+              cp -a "/new${lib}/." "${lib}/"
+              cp -a "/new${ext}/." "${ext}/"
+              su postgres -c "
+                set -euo pipefail
+                psql -c \"ALTER EXTENSION ${NAME} UPDATE TO '"'"'${NEW}'"'"';\"
+                got=\$(psql -tA -c \"SELECT extversion FROM pg_extension WHERE extname = '"'"'${NAME}'"'"';\")
+                if [[ \"\${got}\" != \"${NEW}\" ]]; then
+                  echo \"::error::upgrade left extversion \${got}, wanted ${NEW}\"
+                  exit 1
+                fi
+                echo \"upgraded ${PREV} -> \${got}\"
+              "
+            '
+          echo "::notice::pg${PG}/${ARCH}: ${prev} -> ${UNTRUSTED_VERSION} upgrade executed"
+
       - name: Archive, normalised
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}

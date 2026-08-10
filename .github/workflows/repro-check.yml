@@ -17,11 +17,26 @@ name: repro-check
 on:
   workflow_call:
     inputs:
+      class:
+        description: Which class workflow rebuilds the release.
+        required: false
+        type: string
+        default: rust-binary
       target:
-        description: The canary target to rebuild.
+        description: Canary target (rust-binary class).
         required: false
         type: string
         default: x86_64-unknown-linux-musl
+      extension-crate-dir:
+        description: Extension crate dir (pgrx-extension class).
+        required: false
+        type: string
+        default: ""
+      pg-major:
+        description: Canary PG major (pgrx-extension class).
+        required: false
+        type: string
+        default: "18"
 
 permissions: {}
 
@@ -63,9 +78,12 @@ jobs:
           echo "::notice::proving ${tag} reproduces"
 
   # The genuine article: the class workflow itself, pointed at the tag.
+  # One job per class because `uses:` takes no expressions; exactly one
+  # runs, and compare takes whichever produced subjects.
   rebuild:
-    name: Rebuild the release
+    name: Rebuild the release (binaries)
     needs: resolve
+    if: inputs.class == 'rust-binary'
     uses: ./.github/workflows/build-rust-binary.yml
     permissions:
       # Restated, not inherited — the startup_failure trap.
@@ -75,9 +93,24 @@ jobs:
       targets: ${{ inputs.target }}
       ref: ${{ needs.resolve.outputs.tag }}
 
+  rebuild-extension:
+    name: Rebuild the release (extension)
+    needs: resolve
+    if: inputs.class == 'pgrx-extension'
+    uses: ./.github/workflows/build-pgrx-extension.yml
+    permissions:
+      # Restated, not inherited — the startup_failure trap.
+      contents: read # checkout of the caller at the released tag
+    with:
+      version: ${{ needs.resolve.outputs.version }}
+      crate-dir: ${{ inputs.extension-crate-dir }}
+      pg-majors: ${{ inputs.pg-major }}
+      ref: ${{ needs.resolve.outputs.tag }}
+
   compare:
     name: Same bytes, or say so loudly
-    needs: [resolve, rebuild]
+    needs: [resolve, rebuild, rebuild-extension]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.rebuild.result == 'success' || needs.rebuild-extension.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -86,7 +119,7 @@ jobs:
       - name: Compare rebuilt digests with the published ones
         env:
           PUBLISHED: ${{ needs.resolve.outputs.checksums }}
-          REBUILT: ${{ needs.rebuild.outputs.subjects }}
+          REBUILT: ${{ needs.rebuild.outputs.subjects || needs.rebuild-extension.outputs.subjects }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
