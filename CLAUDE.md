@@ -27,9 +27,11 @@ shared lives here and nowhere else. Five layers:
    which also pins the toolbelt via `github.workflow_sha`), `gate.yml`
    (this repo self-applies it), `audit.yml` (Monday cron: link check +
    repo-settings drift).
-5. **Settings as code**: `rulesets/` (branch + tag canon; applied per-repo
-   now, org-level on the Team plan), `security/` (the enforced org
-   security configuration), `settings/` (repo baseline + check/apply
+5. **Settings as code**: `docs/rulesets.md` (the org-level branch + tag
+   rules — enforced and edited in the GitHub UI on the Team plan,
+   recorded and explained in that doc; deliberately no JSON mirror),
+   `security/` (the enforced org security configuration), `settings/`
+   (repo baseline + check/apply
    script), `scaffold/` (the four stubs a new repo copies), and
    `default.json` (the org Renovate preset; this repo's own config is
    `renovate.json`).
