@@ -1,11 +1,15 @@
 # Source-track policies
 
-One file per org repository, consumed by that repository's
-`source-attest` workflow via sourcetool's `--use-local-policy`. The
-policy pins each protected branch's target SLSA source level and the
-`ORG_SOURCE_` properties claimed for it (only status-check-backed
-properties are expressible; everything else the provenance carries as
-built-in `SLSA_SOURCE_SCS_*` controls).
+`default.json` is the org policy, shared by every repo — consumed by each
+repository's `source-attest` workflow via sourcetool's
+`--use-local-policy`. It pins the protected branch's target SLSA source
+level and the `ORG_SOURCE_` properties claimed for it (only
+status-check-backed properties are expressible; everything else the
+provenance carries as built-in `SLSA_SOURCE_SCS_*` controls). One file
+works for all repos because the controls it names are org-level rulesets
+scoped `~ALL`: nothing in the policy is repo-specific. A repo that ever
+genuinely diverges gets its own `<repo>.json`, which its workflow prefers
+over the default — the Renovate-preset pattern.
 
 Kept here rather than in the upstream community policy repo
 (`slsa-framework/source-policies`), deliberately: self-contained over
