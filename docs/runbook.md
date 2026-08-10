@@ -142,6 +142,10 @@ gh attestation verify <artifact> --owner monumental-archive \
   --deny-self-hosted-runners
 ```
 
+- The verification verdict (artifact VSA): same command plus
+  `--predicate-type https://slsa.dev/verification_summary/v1` — gate on
+  `verificationResult: PASSED` and `verifiedLevels` instead of
+  re-deriving the policy yourself. Absent on dry-run releases, by design.
 - Images: same command with `oci://<image>@<digest>` (the **index**
   digest — per-arch digests are not covered).
 - Offline: add `--bundle attestations*.intoto.jsonl` from the release.

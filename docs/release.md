@@ -269,6 +269,33 @@ output is signed, and the evidence bundle — one checksum filename, one SBOM
 format, Sigstore bundles — attached to the release in the shape Scorecard's
 Signed-Releases check recognises.
 
+### The verdict beside the evidence
+
+Every claim the org signs beyond build provenance travels through the
+same one file in `signer`, varying only a predicate type drawn from the
+allowlist inside it — that case statement is the org's entire signing
+surface, enumerable by reading it. The first such claim is the **artifact
+VSA** (`slsa.dev/verification_summary/v1`): after verify-published proves
+the released bytes and the provenance is signed,
+[`emit-vsa.yml`](../.github/workflows/emit-vsa.yml) — a job that runs no
+caller code — assembles the verdict ("verified against the policy at this
+pinned SHA, at Build L3") and the signer signs it over the same verified
+digests. The provenance bundle is the *evidence*; the VSA is the
+*verdict*. A stranger who trusts the org's policy gates on the verdict's
+one-liner (see the runbook); a stranger who does not still has the
+evidence to re-derive from — which is why the VSA sits beside the
+per-class bundles and never replaces them. Dry-runs skip it: the verifier
+only passed the manifest through, and a rehearsal must never sign
+"PASSED".
+
+OpenVEX is allowlisted in the signer but not yet emitted: an honest
+`not_affected` at org scale needs the blast-radius query (#106) that
+answers "which releases ship an affected crate". Source provenance
+deliberately does not route through `sign.yml` at all — the source
+track's git-notes convention needs `contents: write`, the one grant the
+signer must never hold — and gets its own org-owned standalone workflow
+(#107, rekor-monitor precedent).
+
 ### Images build on native hardware
 
 Every architecture is built on a runner of that architecture. No QEMU, and
