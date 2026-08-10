@@ -1,0 +1,15 @@
+# REUSE.toml (spec 3.3): machine-readable licensing for every file.
+# Fill the <angle-bracket> fields; add [[annotations]] blocks for file
+# classes that cannot carry headers. `reuse lint` validates (tool
+# adjudication in .github#82); the api.reuse.software badge registers
+# post-transfer. License texts live in LICENSES/ by SPDX id.
+version = 1
+SPDX-PackageName = "<repo>"
+SPDX-PackageSupplier = "Carl Allen <carl.allen313@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/monumental-archive/<repo>"
+
+[[annotations]]
+path = ["**/*.lock", "**/.gitignore", "**/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Carl Allen"
+SPDX-License-Identifier = "<SPDX expression>"

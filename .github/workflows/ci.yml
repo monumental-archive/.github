@@ -11,6 +11,15 @@ name: ci
 
 on:
   workflow_call:
+    secrets:
+      codecov-token:
+        description: >
+          Codecov upload token, for the coverage badge. Optional: absent,
+          the coverage job skips clean. The gate's coverage RATCHET does
+          not live here — coverage:check runs inside the ci job,
+          deterministic against the committed floor; this job only makes
+          the number visible.
+        required: false
 
 permissions:
   contents: read
@@ -48,3 +57,60 @@ jobs:
 
       - name: Run the gate
         run: mise run ci
+
+  # The badge feed, never the gate: uploads the coverage report to
+  # Codecov on pushes to main. Separate job so the required check  stays deterministic; skips clean without a floor or a token.
+  coverage-upload:
+    name: coverage upload (badge only)
+    needs: ci
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out org toolbelt (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-toolbelt
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          cache: false
+
+      - name: Generate the report
+        id: gen
+        env:
+          HAS_TOKEN: ${{ secrets.codecov-token != '' }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f .coverage-floor || ! -f Cargo.toml || "${HAS_TOKEN}" != "true" ]]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::no floor or no token; badge upload skipped"
+            exit 0
+          fi
+          rustup component add llvm-tools-preview 2> /dev/null || true
+          cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload to Codecov
+        if: steps.gen.outputs.skip == 'false'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.codecov-token }}
+          files: lcov.info
+          fail_ci_if_error: false

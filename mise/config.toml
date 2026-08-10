@@ -68,6 +68,12 @@ shfmt = "3.13.1"
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.52"
 lychee = "0.24.2"
+# Coverage ratchet (docs/runbook.md): repos commit a floor in
+# .coverage-floor and the canonical coverage:check enforces it in the
+# gate — deterministic (local run against a committed number), Rust-only
+# by guard, skip-clean everywhere else. Best Practices Silver requires
+# >=80% statement coverage; the floor only ratchets up.
+"aqua:taiki-e/cargo-llvm-cov" = "0.8.7"
 # The release phase-1 version decision and changelog (docs/release.md).
 # In the belt rather than a per-repo install: the shared release workflow
 # runs it in every versioned repo, and `release:preview` should answer
@@ -95,6 +101,9 @@ depends = [
   "lint:*",
   { task = "test", optional = true },
   { task = "build", optional = true },
+  # The coverage ratchet joins the gate the moment a repo commits a
+  # floor; without one it skips clean like every guarded belt task.
+  "coverage:check",
 ]
 run = "echo 'ci: all gates green'"
 
@@ -294,6 +303,28 @@ if [[ -n "${bad}" ]]; then
 fi
 echo "lint:capability-boundary: ok"
 '''
+
+[tasks."coverage:check"]
+description = "Enforce the committed coverage floor (.coverage-floor); repos without one skip clean"
+dir = "{{cwd}}"
+# The ratchet: the floor is a committed number that only rises. A repo
+# without a floor has not adopted coverage yet and skips clean; a repo
+# with one cannot merge below it. Deterministic — the number is local,
+# the run is local; the Codecov upload (the badge) lives in ci.yml as a
+# separate non-blocking job.
+run = """
+[[ -f .coverage-floor && -f Cargo.toml ]] || {
+  echo "coverage:check: no .coverage-floor, skipped"; exit 0
+}
+floor=$(tr -d '[:space:]' < .coverage-floor)
+if [[ ! "${floor}" =~ ^[0-9]+(\\.[0-9]+)?$ ]]; then
+  echo "coverage:check: .coverage-floor is not a number: ${floor}" >&2
+  exit 1
+fi
+rustup component add llvm-tools-preview 2> /dev/null || true
+cargo llvm-cov --workspace --locked --fail-under-lines "${floor}"
+echo "coverage:check: floor ${floor} held"
+"""
 
 [tasks."lint:belt-available"]
 description = "Every belt tool actually resolves — a missing belt must fail loudly, not lint nothing"
