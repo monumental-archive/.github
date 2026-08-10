@@ -40,7 +40,10 @@ written for two moments: wiring a repository in, and a release going wrong.
    `exclude:` input.
 7. `lint:release-stub` (belt) enforces 2–3 from then on: `cliff.toml`
    present means the stubs must be, pinned.
-8. **Score-ready extras**, so the repository badges the day it lands:
+8. Copy `scaffold/CODEOWNERS` to `.github/CODEOWNERS` and grant the
+   `owners` team write access — documentation and reviewer routing now,
+   enforcement when a second maintainer flips the Code Owners toggle.
+9. **Score-ready extras**, so the repository badges the day it lands:
    commit a `.coverage-floor` (a bare number; the gate's `coverage:check`
    ratchet enforces it — Silver wants ≥ 80) and pass the `codecov-token`
    secret to the ci stub for the badge feed; copy `scaffold/REUSE.toml`
