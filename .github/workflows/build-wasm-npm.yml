@@ -263,4 +263,8 @@ jobs:
           # npm generates provenance automatically under trusted
           # publishing; --provenance is asserted anyway so a silent fallback
           # to a weaker auth path fails instead of publishing unattested.
-          npm publish "${tarball}" --provenance --access public
+          # ./ prefix, load-bearing: an argument with one slash and no
+          # leading ./ is a GitHub SHORTHAND to npm (owner/repo) — it
+          # tried to git-clone dist/<name>.tgz as a repository. Found by
+          # the v0.14.0 run.
+          npm publish "./${tarball}" --provenance --access public
