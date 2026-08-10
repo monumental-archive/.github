@@ -85,6 +85,13 @@ jobs:
       - name: Tag and cut the draft release
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          # git-cliff reads GITHUB_TOKEN (not GH_TOKEN) for its GitHub
+          # integration; without it the release-notes render runs
+          # anonymous — 60 requests/hour shared across the runner fleet —
+          # and 403s on quota luck. The release-pr job has carried this
+          # since the first time trap 4 fired; the tag job ran on luck
+          # until v0.15.1 spent it: tag minted, draft never cut.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git config user.name "tag-mint[bot]"
           git config user.email "tag-mint[bot]@users.noreply.github.com"
