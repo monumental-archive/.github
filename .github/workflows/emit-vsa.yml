@@ -1,0 +1,126 @@
+# Assemble the artifact VSA (slsa.dev/verification_summary/v1): the
+# machine-checkable verdict that lets a stranger gate on "the org verified
+# this release against its policy at Build L3" instead of re-deriving the
+# whole verification themselves — signer workflow, signer digest, source
+# ref, runner policy — knowledge a stranger does not have and should not
+# need. The provenance bundle stays beside it, untouched: the bundle is the
+# EVIDENCE, this is the VERDICT, and a consumer who does not trust the
+# verdict still has the evidence to re-derive from.
+#
+# This job only ASSEMBLES the claim; the signer signs it. That split is the
+# #28 design constraint — the verifier must not grow signing capability —
+# and it is also what makes the claim honest: predicates handed to the
+# signer must come from a job that runs no caller-supplied code, and this
+# workflow runs none. No checkout, no caller scripts; every step is
+# first-party, and the only caller-controlled bytes it touches are the
+# subject records, validated to the same whitelist shape sign.yml enforces.
+#
+# What the verdict asserts, and why each leg is already true when this job
+# runs (the orchestrator sequences it after verify and sign):
+#   - the released bytes were pulled back from the registry and proved
+#     against the built digests (verify-published),
+#   - build provenance over those proven digests was signed by the org
+#     signer, the only id-token holder in the release path (sign.yml),
+#   - both under the policy pinned by one SHA: the orchestrator, the
+#     builders, the verifier and the toolbelt, atomically.
+#
+# SLSA_BUILD_LEVEL_3 is asserted structurally, not measured per-run: the
+# provenance is generated and signed in a workflow that runs no tenant
+# code (isolation), is unforgeable by the build (separate repo, separate
+# job, no shared runner), and names the org signer as builder.id. Those
+# are properties of the architecture the pinned SHA selects, which is
+# exactly what a VSA's policy URI is for.
+name: emit-vsa
+
+on:
+  workflow_call:
+    inputs:
+      subjects:
+        description: >
+          The VERIFIED subject manifest, in `sha256sum` output format —
+          verify-published's output, never the build's. A VSA over
+          unproven digests would be a verdict about nothing.
+        required: true
+        type: string
+      version:
+        description: The version released, without the leading v.
+        required: true
+        type: string
+    outputs:
+      predicate:
+        description: The VSA predicate, one JSON object, ready for sign.yml.
+        value: ${{ jobs.assemble.outputs.predicate }}
+      predicate-type:
+        description: The predicate type URI sign.yml expects alongside it.
+        value: https://slsa.dev/verification_summary/v1
+
+permissions: {}
+
+jobs:
+  assemble:
+    name: Assemble the verification summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      predicate: ${{ steps.vsa.outputs.predicate }}
+    steps:
+      - name: Build the predicate from the verified results
+        id: vsa
+        env:
+          UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          # The SHA the caller pinned — which pins this file, the
+          # orchestrator, the builders, the verifier and the toolbelt
+          # atomically. That is the policy the verdict names.
+          POLICY_SHA: ${{ github.job_workflow_sha }}
+        run: |
+          set -euo pipefail
+
+          # The manifest is only counted here, never re-emitted: the
+          # subjects the signer binds this predicate to are passed to
+          # sign.yml separately by the orchestrator, from the same
+          # verify output. But an empty or malformed manifest means the
+          # sequencing this verdict relies on did not happen — refuse.
+          record='^[0-9a-f]{64}  [^[:space:]]'
+          count=0
+          while IFS= read -r line; do
+            line="${line%$'\r'}"
+            [[ -n "${line}" ]] || continue
+            count=$((count + 1))
+            if [[ ! "${line}" =~ ${record} ]]; then
+              # Not echoed: the line is caller-controlled.
+              echo "::error::subject line ${count} is not a sha256sum record"
+              exit 1
+            fi
+          done <<< "${UNTRUSTED_SUBJECTS}"
+          if ((count == 0)); then
+            echo "::error::no verified subjects — a verdict over nothing is not a verdict"
+            exit 1
+          fi
+
+          if [[ ! "${UNTRUSTED_VERSION}" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::version is not a plausible version string"
+            exit 1
+          fi
+
+          # jq --arg does all quoting: nothing caller-controlled is
+          # spliced into JSON by hand. Field set is VSA v1 minimum plus
+          # nothing speculative; grow it when a consumer needs a field,
+          # not before.
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          predicate=$(jq -cn \
+            --arg verifier "https://github.com/monumental-archive/.github/.github/workflows/verify-published.yml" \
+            --arg time "${now}" \
+            --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
+            --arg policy "https://github.com/monumental-archive/.github/tree/${POLICY_SHA}" \
+            '{
+              verifier: { id: $verifier },
+              timeVerified: $time,
+              resourceUri: $resource,
+              policy: { uri: $policy },
+              verificationResult: "PASSED",
+              verifiedLevels: ["SLSA_BUILD_LEVEL_3"]
+            }')
+          echo "predicate=${predicate}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::VSA assembled over ${count} verified subject(s)"
