@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.1.0](https://github.com/monumental-archive/.github/compare/v1.0.0...v1.1.0) - 2026-08-10
+
+### Added
+
+- pin every canon reference to v1.0.0 and alarm the bump loop ([#136](https://github.com/monumental-archive/.github/pull/136))
+
 ## [1.0.0](https://github.com/monumental-archive/.github/releases/tag/v1.0.0) - 2026-08-10
 
 ### Added
