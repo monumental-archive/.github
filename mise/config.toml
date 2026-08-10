@@ -234,7 +234,12 @@ dir = "{{cwd}}"
 # non-deterministic CI (a new CVE fails unrelated PRs) and already enforced
 # org-wide via Dependabot alerts/security updates + Renovate.
 # --exit-code 1: trivy exits 0 on findings by default.
-run = "trivy fs --scanners misconfig,secret --exit-code 1 ."
+# --skip-dirs .org-toolbelt: in CI the shared workflows check the canon
+# repo out INTO the workspace, and trivy walks directories rather than
+# tracked files — so without this, every repo's gate re-scans the belt's
+# own Dockerfiles and trips over findings whose .trivyignore lives in the
+# canon repo, not here. The lefthook-remotes trap, in a new costume.
+run = "trivy fs --skip-dirs .org-toolbelt --scanners misconfig,secret --exit-code 1 ."
 
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows (actionlint)"
