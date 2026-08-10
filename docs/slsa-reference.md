@@ -89,7 +89,16 @@ start point, and if it lapses, continuity **resets** at the next revision.
 A temporarily disabled ruleset is a level-resetting event, not a blip.
 
 This org's rulesets are the substance of L2/L3. The missing half is source
-provenance attestations, for which no off-the-shelf tooling was found.
+provenance attestations. Candidate tooling now exists (checked
+2026-08-10): `slsa-framework/source-tool` with its `source-actions`
+companion computes per-revision levels by recursing over prior
+attestations and stores source provenance + a source VSA in git notes —
+but it is PoC-grade, and as shipped its *reusable workflow's* identity
+would sign our source claims. The adoption path is the rekor-monitor
+one: run the binary under an org-owned workflow so the identity is ours
+(tracked with the other signer predicate extensions, issue #107).
+`gittuf` overlaps the same track from the git layer; evaluation tracked
+in #106.
 
 ## Dependency track (draft)
 
@@ -434,7 +443,13 @@ when the package itself is public.
 
 ## Scoring frameworks
 
-**Scorecard** — sixteen checks can reach 10/10. Signed-Releases awards 8
+**Scorecard** — fifteen checks can reach 10/10 here; Packaging is
+structurally **inconclusive (-1, excluded from the aggregate)** for every
+repo publishing through the shared orchestrator — the check greps the
+caller's own workflows for publish commands, and the caller's entire
+publish surface is one `uses:` line (measured by local preflight; the
+same gap made Scorecard special-case slsa-github-generator).
+Signed-Releases awards 8
 for signatures and **10 only when `*.intoto.jsonl` provenance is present**;
 recognised patterns are `*.minisig`, `*.asc`, `*.sig`, `*.sign`,
 `*.sigstore`, `*.sigstore.json`, `*.intoto.jsonl`. There is an **SBOM
