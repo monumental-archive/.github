@@ -1,0 +1,132 @@
+# Reproducibility audit: rebuild the latest release and prove the bytes.
+#
+# Best Practices Silver's build_repeatable is a MUST, and the org's answer
+# is proof rather than assertion: this workflow re-runs the REAL
+# rust-binary class workflow — same file, same steps, no parallel
+# implementation to drift — against the released tag, and compares the
+# rebuilt archives' digests with the checksums the release published. A
+# mismatch means a build input escaped the pinning (a nondeterministic
+# proc macro, an environment leak) and files loudly.
+#
+# One target by default: reproducibility across REBUILDS is the property
+# under test; the per-target archives already differ from each other by
+# construction. audit-shaped, never in a gate: it takes minutes of
+# compile time and proves a property of the release, not of a diff.
+name: repro-check
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: The canary target to rebuild.
+        required: false
+        type: string
+        default: x86_64-unknown-linux-musl
+
+permissions: {}
+
+jobs:
+  resolve:
+    name: Resolve the latest release and its published checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.rel.outputs.tag }}
+      version: ${{ steps.rel.outputs.version }}
+      checksums: ${{ steps.rel.outputs.checksums }}
+    steps:
+      - name: Read the latest release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [[ ! "${tag}" =~ ^v[0-9] ]]; then
+            echo "::error::latest release tag ${tag} is not a v* release"
+            exit 1
+          fi
+          gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt --output checksums.txt
+          if [[ ! -s checksums.txt ]]; then
+            echo "::error::release ${tag} has no checksums.txt — nothing to prove against"
+            exit 1
+          fi
+          {
+            echo "checksums<<CHECKSUMS_EOF"
+            cat checksums.txt
+            echo "CHECKSUMS_EOF"
+            echo "tag=${tag}"
+            echo "version=${tag#v}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice::proving ${tag} reproduces"
+
+  # The genuine article: the class workflow itself, pointed at the tag.
+  rebuild:
+    name: Rebuild the release
+    needs: resolve
+    uses: ./.github/workflows/build-rust-binary.yml
+    permissions:
+      # Restated, not inherited — the startup_failure trap.
+      contents: read # checkout of the caller at the released tag
+    with:
+      version: ${{ needs.resolve.outputs.version }}
+      targets: ${{ inputs.target }}
+      ref: ${{ needs.resolve.outputs.tag }}
+
+  compare:
+    name: Same bytes, or say so loudly
+    needs: [resolve, rebuild]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write # a broken reproducibility claim must page
+    steps:
+      - name: Compare rebuilt digests with the published ones
+        env:
+          PUBLISHED: ${{ needs.resolve.outputs.checksums }}
+          REBUILT: ${{ needs.rebuild.outputs.subjects }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          status=0
+          count=0
+          while IFS= read -r line; do
+            [[ -n "${line}" ]] || continue
+            count=$((count + 1))
+            name="${line##*  }"
+            digest="${line%% *}"
+            published=$(grep -F "  ${name}" <<< "${PUBLISHED}" || true)
+            if [[ -z "${published}" ]]; then
+              echo "::error::${name}: rebuilt but absent from the published checksums"
+              status=1
+              continue
+            fi
+            if [[ "${published%% *}" != "${digest}" ]]; then
+              echo "::error::${name}: published ${published%% *}, rebuilt ${digest}"
+              status=1
+            else
+              echo "reproduced ${name}"
+            fi
+          done <<< "${REBUILT}"
+          if ((count == 0)); then
+            echo "::error::nothing was rebuilt — an empty proof is not a proof"
+            exit 1
+          fi
+          if ((status != 0)); then
+            echo "::error::${TAG} did not reproduce"
+            exit 1
+          fi
+          echo "::notice::${TAG}: ${count} archive(s) reproduced bit-for-bit"
+
+      - name: File an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh issue create --repo "${GITHUB_REPOSITORY}" \
+            --title "repro-check: ${TAG} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
+            --body "The reproducibility audit rebuilt ${TAG} with the class workflow and the digests differ from the release's checksums.txt — a build input has escaped the pinning. Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

@@ -47,6 +47,15 @@ on:
         required: false
         type: string
         default: ""
+      ref:
+        description: >
+          Ref of the caller repository to build; empty means the
+          triggering commit. Exists for the reproducibility audit, which
+          rebuilds a released tag from a run on main and must check out
+          the tag, not the branch that has moved past it.
+        required: false
+        type: string
+        default: ""
     outputs:
       subjects:
         description: sha256sum manifest of the release archives.
@@ -142,6 +151,7 @@ jobs:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Install mise and the caller's pinned toolchain
