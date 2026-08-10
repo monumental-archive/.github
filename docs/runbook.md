@@ -29,12 +29,13 @@ written for two moments: wiring a repository in, and a release going wrong.
    | `wasm-npm` | `crate-dir`, `npm-scope` | `rust`, `aqua:rustwasm/wasm-pack`, `node` |
    | `pgrx-extension` | `extension-crate-dir`, `pg-majors`, `extension-smoke-test` | `rust`, `cargo:cargo-pgrx` (must equal the pgrx crate dep) |
 
-4. Create the `publish` **environment** (Settings → Environments — it is a
-   repository object and cannot be shared).
-5. Repository objects with no org lever: run
-   `settings/repo-baseline.sh check` and fix drift; attach the org
-   security configuration (Settings → Code security, a manual step on
-   every new repository).
+4. Run `settings/repo-baseline.sh apply` — settings baseline, immutable
+   OIDC sub claim, and the `publish` **environment** (a repository object
+   that cannot be shared; apply creates it automatically wherever the
+   canonical entry `publish.yml` exists). Then `check` and fix any
+   remaining drift it reports.
+5. Attach the org security configuration (Settings → Code security — the
+   one manual step on every new repository).
 6. Workspace shape: version via `[workspace.package]` inheritance; a pgrx
    crate is a member but **not** a default-member, and goes in the
    `exclude:` input.
@@ -72,12 +73,15 @@ That is the whole wiring.
   `pkg/`. Then package Settings: Trusted Publisher (org / repo /
   `publish.yml` / `publish`, allow `npm publish`) and "Require 2FA and
   disallow tokens".
-- **Zenodo**: create the repository's token (production zenodo.org,
-  scopes `deposit:write` + `deposit:actions`), store as repository or org
-  secret, pass `mint-doi: true` + the secret in the publish stub. The
-  pipeline mints the DOI **after** the release publishes — never the
-  flip-switch webhook integration (no token auth). The lab proves against
-  sandbox.zenodo.org.
+- **Zenodo**: `ZENODO_TOKEN` is an organisation secret with
+  `visibility: selected` — tick the repository onto it rather than
+  minting per-repo tokens (the value is a sandbox-account token until
+  the first production DOI is wanted; swapping to a production token,
+  scopes `deposit:write` + `deposit:actions`, is one `gh secret set`).
+  Pass `mint-doi: true` + the secret in the publish stub. The pipeline
+  mints the DOI **after** the release publishes — never the flip-switch
+  webhook integration (no token auth). The lab proves against
+  sandbox.zenodo.org; production zenodo.org is the workflow default.
 
 ## Cutting a release
 

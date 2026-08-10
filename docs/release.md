@@ -95,14 +95,12 @@ caller's environment protection rules, variables and OIDC `environment`
 claim, but not its secrets ([`slsa-reference.md`](slsa-reference.md)). An
 environment governs *when a job runs*, never *who can read a secret*.
 
-What the key actually has today is `visibility: all` on an organisation
-secret, readable by any workflow in any repository in the organisation,
-including one added tomorrow — `signer` and the release lab among them.
-The only mechanism that narrows that is repository scoping,
-`visibility: selected`, which cannot be set without re-supplying the
-encrypted value and therefore means rotating the App key first. That is
-deferred deliberately, not overlooked, and is recorded here so the
-deferral is visible rather than implied.
+The key lives as an organisation secret with `visibility: selected`,
+readable only by the repositories ticked onto it — narrowing it required
+re-supplying the encrypted value, so the App key was rotated first
+(2026-08-09) and verified through both token paths. A repository joining
+the release flow at transfer is added to the selection list; nothing is
+readable org-wide by default.
 
 The default `GITHUB_TOKEN` is never used to push a tag: tags it pushes
 trigger no workflows, and a release that silently triggers nothing looks
@@ -243,12 +241,19 @@ requirement doing real work rather than ceremony.
   never the artifacts themselves, and never a checkout of anyone.
   One certificate identity for every org artifact; `id-token: write` lives
   there and never here.
-- The Zenodo webhook mints the version DOI when the immutable release is
-  published — after proof, like everything else.
+- The version DOI is minted by [`mint-doi.yml`](../.github/workflows/mint-doi.yml)
+  through Zenodo's REST deposition API — after the release is published,
+  after proof, like everything else. (The webhook flip-switch integration
+  is deliberately not used: webhooks are Scorecard's one Critical-risk
+  check, and the REST job is token-auth, testable against the sandbox,
+  and in the pipeline where its failure is visible.) `ZENODO_TOKEN` is an
+  organisation secret, `visibility: selected`, sandbox-account token
+  until the first production DOI is wanted.
 
 There is one shared build workflow per **artifact class** — `rust-crate`,
-`rust-binary`, `oci-image`, `wasm-npm` — and callers declare inputs, not
-steps. An earlier draft of this document kept publish workflows per-repo,
+`rust-binary`, `oci-image`, `wasm-npm`, `pgrx-extension` — and callers
+declare inputs, not steps. An earlier draft of this document kept
+publish workflows per-repo,
 on the grounds that pgrx matrices and musl statics were legitimate quirks.
 They are class-shaped, not repo-shaped: a matrix belongs to the class that
 needs one, and a repository that wants a different one is a design question
@@ -335,11 +340,18 @@ correctness-by-patching; this is the same knowledge by design):
   newer symbol fails the release instead of failing at dlopen on
   someone's Debian 12. Smoke runs on bookworm AND trixie: forward
   compatibility demonstrated, never presumed.
-- **Static upgrade-path guard**: when a previous release exists, the SQL
-  upgrade file `<ext>--<prev>--<new>.sql` must exist, or the release
-  refuses — a missing one ships green and strands every installation at
-  `ALTER EXTENSION UPDATE`. Executing the upgrade against the previous
-  release's real tarball is the class's documented fast-follow.
+- **Upgrade path guarded AND executed**: when the previous release
+  shipped this extension's tarballs, the SQL upgrade file
+  `<ext>--<prev>--<new>.sql` must exist or the release refuses — a
+  missing one ships green and strands every installation at
+  `ALTER EXTENSION UPDATE`. Authors write `<ext>--<prev>--next.sql`
+  (they cannot know the version; git-cliff decides it) and the release
+  PR renames it. The guard is not trusted on faith: each cell installs
+  the previous release's real tarball into a live Postgres,
+  `CREATE EXTENSION`, installs the new package, runs
+  `ALTER EXTENSION UPDATE` and reads the version back — the path
+  executes, not merely exists. Majors the previous release did not ship
+  skip execution: only installations that can exist can be stranded.
 - **Reproducible tarballs**, same flags and normalisation as rust-binary,
   named `<ext>-<version>-pg<major>-linux-<arch>.tar.gz`, each shipping
   both the Debian tree and the CloudNativePG ImageVolume layout.

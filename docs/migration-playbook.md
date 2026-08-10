@@ -31,15 +31,19 @@ a fresh session **started in the target repo's checkout**.
 - [ ] Attach the org security configuration (transfers do **not**
       inherit the new-repo default): Settings → Advanced Security, or
       the API attach call in `security/README.md`.
-- [ ] `./settings/repo-baseline.sh apply` (from the `.github` checkout).
-- [ ] Apply both rulesets per `rulesets/README.md` (repo-level until the
-      Team plan; strip the `repository_name` condition).
+- [ ] `./settings/repo-baseline.sh apply` (from the `.github` checkout —
+      settings, immutable OIDC sub claim, and the `publish` environment
+      where the canonical entry `publish.yml` exists).
+- [ ] Rulesets need nothing: they are org-level, `enforcement: active`,
+      scope `~ALL` — a transferred repo is covered the moment it lands.
 - [ ] Verify: `./settings/repo-baseline.sh check` exits clean; ruleset
       shows `current_user_can_bypass: never`.
 
 ## Phase 2 — scaffold and toolchain (session, in-repo)
 
-- [ ] Copy the four `scaffold/` stubs; fill the repo-specific holes
+- [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
+      always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the
+      runbook's wiring section says so); fill the repo-specific holes
       (`allowed_scopes` in committed.toml, real tools/tasks in
       mise.toml).
 - [ ] Convert the existing task runner to mise tasks: every Taskfile (or
@@ -89,5 +93,14 @@ a fresh session **started in the target repo's checkout**.
 - Fine-grained PATs are REST-only, and Administration needs read+write
   to see merge-settings fields.
 - Transferred repos inherit **nothing** automatically: not the security
-  configuration, not rulesets, not baseline settings. Phase 1 is not
-  optional.
+  configuration, not baseline settings (org rulesets are the exception —
+  scope `~ALL` covers arrivals). Phase 1 is not optional.
+- **Transfer flips the OIDC subject claim** (post-2026-07-15 rule) to the
+  id-embedding `repo:owner@id/name@id:` format. Everything keyed on
+  identity changes at that moment: registry trusted-publisher matches,
+  `ghcr.io/<owner>/*` paths, attestation identities — and attestations do
+  not survive the transfer. Preview the future claim via GitHub's
+  endpoint and confirm registry configs against it BEFORE transferring;
+  re-verify a publish in the lab pattern after. **No production repo cuts
+  a real release before its transfer** (canon, release.md). The lab's own
+  rename is the rehearsal for this flip and goes first.
