@@ -1,0 +1,93 @@
+# The continuous archetype, org canon (docs/release.md): digest publish on
+# merge plus a scheduled rebuild, no tags, no version surface. The
+# artifact's "version" is its pin set, and the weekly rebuild is the
+# remediation path for base layers nothing can pin.
+#
+# It reuses the oci-image class build wholesale — native per-arch legs,
+# build/smoke/push-by-digest/manifest-list/pull-back/re-smoke — and signs
+# the index under the same org identity as every versioned release. What
+# it deliberately lacks is the release half: no guard-for-tags, no
+# evidence bundle, no draft, no attach. A moving `latest` tag names the
+# stream; the digest names the artifact; the attestation binds the digest.
+#
+# The scheduled rebuild needs no --no-cache flag: the shared build carries
+# no cache of any kind (everything downstream of it is signed), so every
+# run is a full rebuild by construction.
+#
+# capability-boundary: the `sign` job below declares `id-token: write`,
+# but this file runs no steps of its own — every job is a `uses:`. The
+# grant exists solely to be passed to `signer`, and the build job that
+# runs caller code holds `contents: read` + `packages: write` only.
+name: continuous
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        description: Path to the Dockerfile, relative to the context.
+        required: false
+        type: string
+        default: Dockerfile
+      context:
+        description: Build context directory.
+        required: false
+        type: string
+        default: "."
+      smoke-test:
+        description: >
+          Script proving the image does the one thing it exists to do.
+          Same contract as the oci-image class; empty is permitted and
+          unwise.
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  # The inverse of publish.yml's guard: this pipeline must never run from
+  # a tag. A continuous repository has no versions, and an attestation
+  # minted for a ref that looks like a release would manufacture a version
+  # surface the archetype exists to not have.
+  guard:
+    name: Refuse tags — this stream has no versions
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check the ref
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "::error::continuous publishes from branches and schedules only, got ${GITHUB_REF}"
+            exit 1
+          fi
+          echo "::notice::continuous publish from ${GITHUB_REF}"
+
+  build:
+    name: Build image
+    needs: guard
+    uses: ./.github/workflows/build-oci-image.yml
+    permissions:
+      # Restated, not inherited — the startup_failure trap.
+      contents: read # checkout of the caller
+      packages: write # push per-arch images and the manifest list
+    with:
+      # The stream tag. Moving by design: consumers who need immutability
+      # pin the digest, which is what the attestation names.
+      version: latest
+      dockerfile: ${{ inputs.dockerfile }}
+      context: ${{ inputs.context }}
+      smoke-test: ${{ inputs.smoke-test }}
+
+  sign:
+    name: Sign image
+    needs: build
+    uses: monumental-archive/signer/.github/workflows/sign.yml@40ada01b4f6cdce65fe8e1edcacac83bea4473a4 # main
+    with:
+      image-name: ${{ needs.build.outputs.image }}
+      image-digest: ${{ needs.build.outputs.digest }}
+      bundle-artifact: attestation-bundle-image
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record

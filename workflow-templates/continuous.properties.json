@@ -1,0 +1,5 @@
+{
+  "name": "Continuous publish",
+  "description": "Digest publish on merge plus the weekly remediation rebuild, via the shared org workflow. No tags, no versions.",
+  "categories": ["ci"]
+}

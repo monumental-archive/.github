@@ -18,11 +18,17 @@ builds, proves, signs and publishes. Consumers get semver, a changelog, a
 citable DOI and signed release assets.
 
 **Continuous** (monumental-archive-db): digest publish on merge plus a weekly
-`--no-cache` rebuild, no tags, no version surface — the artifact's "version"
-is its pin set, and scheduled republishing is the remediation path for
-unpinnable base layers. Continuous repositories share the toolbelt, the gate
-and the signing identity, and nothing else from this document applies to
-them.
+rebuild, no tags, no version surface — the artifact's "version" is its pin
+set, and scheduled republishing is the remediation path for unpinnable base
+layers. The machinery is
+[`continuous.yml`](../.github/workflows/continuous.yml): the oci-image class
+build reused wholesale (which carries no cache, so every scheduled run is a
+full rebuild by construction), a guard that refuses *tags* — the inverse of
+the versioned guard — and the same signing identity over the index digest.
+The caller stub is
+[`workflow-templates/continuous.yml`](../workflow-templates/continuous.yml).
+Continuous repositories share the toolbelt, the gate and the signer, and
+nothing else in this document applies to them.
 
 A repository whose release needs fit neither archetype is a design question
 for this repo, not a licence to improvise.

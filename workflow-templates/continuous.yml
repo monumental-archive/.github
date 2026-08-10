@@ -1,0 +1,32 @@
+# The continuous archetype: digest publish on merge, weekly rebuild, no
+# tags, no versions. For repositories whose artifact's "version" is its
+# pin set (monumental-archive-db).
+name: continuous
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Wednesdays 06:00 UTC — the weekly remediation rebuild, refreshing
+    # every base layer nothing can pin.
+    - cron: "0 6 * * 3"
+  workflow_dispatch:
+
+permissions: {}
+
+# Never two publishes racing; a fresher merge supersedes a queued rebuild.
+concurrency:
+  group: continuous-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    uses: monumental-archive/.github/.github/workflows/continuous.yml@370f8fb7c33bae2a1deddc544f5de4fb07274b4c # main 2026-08-09
+    with:
+      smoke-test: scripts/image-smoke.sh
+    permissions:
+      contents: read # build checks out this repository
+      packages: write # push per-arch images and the manifest list
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
