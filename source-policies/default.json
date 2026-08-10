@@ -1,5 +1,4 @@
 {
-  "canonical_repo": "https://github.com/monumental-archive/release-lab.git",
   "protected_branches": [
     {
       "since": "2026-08-10T21:00:00Z",
