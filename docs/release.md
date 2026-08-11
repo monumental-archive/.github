@@ -399,6 +399,19 @@ and split into two kinds:
     Ecosystems beyond Cargo are unbuilt branches of this contract, added
     at the manifest-read only, when a real repository needs one — the
     version-source rule applied to licences.
+
+    Measured, so the fallback tier's behaviour is not a surprise on
+    release day: the API **does** honour a commit SHA (`cli/cli` answers
+    `MIT` at branch and at SHA alike). A `NOASSERTION` answer means
+    genuine ambiguity in the tree, not a broken ref — a two-file
+    `LICENSE-MIT` + `LICENSE-APACHE` layout returns it, while
+    `?ref=<default branch>` returns the repository's *cached, flattened*
+    licence field, which is the one value this contract must never
+    adopt. Refusing is therefore correct, not an obstacle to route
+    around. **A manifest-less repository that ships images must carry a
+    single unambiguous licence file, or declare its licence in-tree**;
+    `monumental-archive-db` is that shape and wants checking before its
+    first canonical release rather than at it.
 - **Editorial** — `title` and `description`: caller inputs
   (`image-title`/`image-description`), defaulting to the repository's
   name and description, **omitted when absent** rather than emitted
@@ -416,12 +429,18 @@ annotation reads as set, which is worse than absent. That is
 deliberately stricter than the OCI spec, which permits empty values.
 
 Two properties belong to the remote object and stay checks rather than
-construction. The per-arch push exporter sets `oci-mediatypes=true`
-because the default is `false`, a Docker-mediatype manifest makes
-`imagetools create` assemble a Docker manifest list, and that format has
-no annotations field — buildx drops index annotations **silently**
+construction. The per-arch push exporter sets `oci-mediatypes=true`: the
+exporter default is `false`, and a Docker-mediatype manifest makes
+`imagetools create` assemble a Docker manifest list, which has no
+annotations field — buildx then drops index annotations **silently**
 (docker/buildx#1965; the flag also predicates a buildx ≥ 0.12 floor,
-asserted rather than assumed). So `release/assert-image-facts.sh` runs
+asserted rather than assumed). Measured honestly: the images published
+*before* this change already carried an OCI index, so on this path the
+annotations were absent because nothing ever passed `--annotation`,
+not because a manifest list swallowed them. The flag makes the media
+type a guarantee rather than a property we happened to get, which is
+what the assertion below is entitled to rely on. So
+`release/assert-image-facts.sh` runs
 at the existing pull-back points and asserts, of the published bytes by
 digest: the index media type is OCI, the index annotations **equal** the
 map, and every per-arch config's labels equal it too. Equality, not
