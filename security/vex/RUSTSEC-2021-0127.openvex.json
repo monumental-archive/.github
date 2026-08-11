@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://openvex.dev/docs/public/vex-fecd7c697566d893eee062aae988b6f7d9e7f8dddbaaf9b9386de2b0b3a24722",
   "author": "monumental-archive",
-  "version": 1,
+  "version": 2,
   "statements": [
     {
       "vulnerability": {
@@ -26,6 +26,9 @@
         },
         {
           "@id": "pkg:github/monumental-archive/release-lab@v0.17.0"
+        },
+        {
+          "@id": "pkg:github/monumental-archive/release-lab@v0.18.1"
         }
       ],
       "status": "not_affected",
