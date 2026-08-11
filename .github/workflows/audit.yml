@@ -216,9 +216,12 @@ jobs:
       # AUDIT_TOKEN is a fine-grained PAT (all org repos, Administration:
       # read AND write — the merge-settings fields in GET /repos are only
       # returned to push/admin-capable identities, and the fine-grained
-      # read-only grant does not qualify; verified empirically 2026-08-09
-      # — plus Packages: read for the org-packages visibility check).
+      # read-only grant does not qualify; verified empirically 2026-08-09).
       GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+      # Fine-grained PATs offer no Packages permission (measured
+      # 2026-08-12), so the org-packages visibility check carries its own
+      # minimal classic PAT: read:packages, nothing else.
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

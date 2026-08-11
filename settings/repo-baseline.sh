@@ -110,13 +110,20 @@ done
 # cannot be verified by a stranger, and is invisible to Scorecard — while
 # everything upstream of it looks green.
 if [[ ${mode} == check ]]; then
-  if ! packages="$(gh api "orgs/${org}/packages?package_type=container&per_page=100" \
+  # Its own credential, deliberately: fine-grained PATs offer no Packages
+  # permission (measured 2026-08-12 — the picker returns "No items
+  # available"), so the admin token cannot carry this scope, and growing
+  # it a classic-PAT alternative would over-credential every other
+  # check. PACKAGES_TOKEN is a classic PAT holding read:packages and
+  # nothing else, living beside AUDIT_TOKEN in the audit environment.
+  if ! packages="$(GH_TOKEN="${PACKAGES_TOKEN:-}" gh api \
+    "orgs/${org}/packages?package_type=container&per_page=100" \
     --paginate 2> /dev/null)"; then
-    # Deliberately drift rather than a silent skip. If the audit token
-    # lacks the packages scope this check is doing nothing, and a check
+    # Deliberately drift rather than a silent skip. If the token is
+    # absent or lacks the scope this check is doing nothing, and a check
     # that quietly does nothing is worse than no check — it manufactures
     # the impression of coverage.
-    echo "drift: cannot read org packages (does the token carry packages:read?)"
+    echo "drift: cannot read org packages (is PACKAGES_TOKEN set, with read:packages?)"
     drift=1
     packages='[]'
   fi
