@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.4.0](https://github.com/monumental-archive/.github/compare/v1.3.2...v1.4.0) - 2026-08-11
+
+### Added
+
+- emit oci image metadata from one resolved facts map ([#155](https://github.com/monumental-archive/.github/pull/155))
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.3.2 ([#156](https://github.com/monumental-archive/.github/pull/156))
+
 ## [1.3.2](https://github.com/monumental-archive/.github/compare/v1.3.1...v1.3.2) - 2026-08-11
 
 ### Fixed
