@@ -1,12 +1,10 @@
 # The canon eats its own release machinery: phase 1 runs at this repo's
 # own ref, the gate.yml pattern. The local `uses:` is load-bearing, not a
 # shortcut — a repository cannot SHA-pin itself without being permanently
-# one commit behind. The canon checkouts inside the called workflows take
-# the `github.sha` arm of their canon-pin conditional when the caller IS
-# the canon, so scripts + toolbelt + lockfile ride the very commit being
-# released, and the atomic pin holds by construction rather than by
-# discipline (#158 — the previous carrier, github.job_workflow_sha,
-# evaluated empty).
+# one commit behind, and with a local call `github.job_workflow_sha` IS
+# the commit being released, so the atomic pin (workflow + scripts +
+# toolbelt + lockfile at one SHA) holds by construction rather than by
+# discipline.
 #
 # Phase 2 is self-publish.yml: the tag this phase mints triggers the
 # shared orchestrator on the source-archive class — the canon's artifact

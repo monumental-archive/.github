@@ -33,8 +33,7 @@ shared lives here and nowhere else. Five layers:
    change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
    are network-bound or noisy checks, structurally outside the gate.
 4. **Shared workflows**: `ci.yml` (the reusable gate — callers pin one SHA
-   whose stamped `# canon-pin` checkout also pins the toolbelt, #158),
-   `gate.yml`
+   which also pins the toolbelt via `github.workflow_sha`), `gate.yml`
    (this repo self-applies it), `audit.yml` (Monday cron: link check +
    repo-settings drift), `self-release.yml` (this repo versions itself
    with its own release machinery via local `uses:` — canon tags are what

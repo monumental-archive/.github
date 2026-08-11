@@ -62,11 +62,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out org toolbelt (the ref the caller pinned)
+      - name: Check out org toolbelt (same SHA the caller pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
+          ref: ${{ github.job_workflow_sha }}
           path: .org-toolbelt
           persist-credentials: false
 
@@ -180,11 +180,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out org toolbelt (the ref the caller pinned)
+      - name: Check out org toolbelt (same SHA the caller pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
+          ref: ${{ github.job_workflow_sha }}
           path: .org-toolbelt
           persist-credentials: false
 
