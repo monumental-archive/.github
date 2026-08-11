@@ -373,3 +373,43 @@ jobs:
             --severity HIGH,CRITICAL --format table "${IMAGE}@${INDEX}" \
             | tee -a "${GITHUB_STEP_SUMMARY}"
           echo '```' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Generate the image SBOM from the published bytes
+        env:
+          IMAGE: ${{ steps.assemble.outputs.image }}
+          INDEX: ${{ steps.assemble.outputs.digest }}
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Class-shaped SBOM (docs/dependency-track.md): derived from the
+          # published bytes at the pull-back point, like every other proof —
+          # OS packages plus, via cargo-auditable's .dep-v0 section, the
+          # Rust dependencies of the binaries actually inside. In the
+          # versioned flow this artifact fans into the release via the
+          # release-* pattern; in the continuous flow it stays a run
+          # artifact until #108 annotates it onto the image.
+          base="${GITHUB_REPOSITORY##*/}"
+          # The canon's own name starts with a dot, and `dist/*` globs and
+          # checksum loops silently skip dotfiles — measured: every canon
+          # release before this change shipped without its SBOM, green.
+          base="${base#.}"
+          v="${UNTRUSTED_VERSION:-continuous}"
+          mkdir -p /tmp/sbom
+          out="/tmp/sbom/${base}-${v}-image.spdx.json"
+          trivy image --config /dev/null --format spdx-json \
+            --output "${out}" "${IMAGE}@${INDEX}"
+          [[ -s "${out}" ]] || { echo "::error::image SBOM export produced nothing"; exit 1; }
+          purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
+          bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator | select(test("@") | not)] | length' "${out}")
+          if [[ "${purls}" -eq 0 || "${bare}" -ne 0 ]]; then
+            echo "::error::image SBOM has ${purls} PURLs, ${bare} versionless — a versionless PURL is invisible to every scanner"
+            exit 1
+          fi
+          echo "::notice::image SBOM: ${purls} versioned PURLs"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom-image
+          path: /tmp/sbom/
+          if-no-files-found: error
+          retention-days: 7

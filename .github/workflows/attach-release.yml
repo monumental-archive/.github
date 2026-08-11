@@ -30,11 +30,6 @@ on:
         description: Version being released, without the leading v.
         required: true
         type: string
-      sbom-basename:
-        description: Basename for the SBOM asset; defaults to the repo name.
-        required: false
-        type: string
-        default: ""
       dry-run:
         description: Rehearsal — attach the bundle, leave the release a draft.
         required: false
@@ -120,26 +115,31 @@ jobs:
           fi
           echo "::notice::${found} attestation bundle(s) attached"
 
-      - name: Generate the SPDX SBOM
-        env:
-          UNTRUSTED_BASENAME: ${{ inputs.sbom-basename }}
-          UNTRUSTED_VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ github.token }}
+      - name: Assert the SBOM arrived
         run: |
           set -euo pipefail
-          base="${UNTRUSTED_BASENAME:-${GITHUB_REPOSITORY##*/}}"
-          # GitHub natively produces SPDX; CycloneDX is third-party here.
-          # The dependency-graph export is the platform's own view of what
-          # this repository depends on, so it needs no extra tooling in a
-          # job that must run none.
-          gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" \
-            --jq '.sbom' > "dist/${base}-${UNTRUSTED_VERSION}.spdx.json"
-          # A zero-byte or null SBOM would satisfy the filename pattern and
-          # assert nothing. Fail instead.
-          if [[ ! -s "dist/${base}-${UNTRUSTED_VERSION}.spdx.json" ]]; then
-            echo "::error::SBOM export produced nothing"
+          # Generation moved to the publish orchestrator's sbom job (and,
+          # for images, the build's pull-back step) — class-shaped, derived
+          # from what actually ships (docs/dependency-track.md). This job
+          # runs no tooling, so it only asserts the inventory is present:
+          # a release without one blinds audit:blast-radius and caps
+          # Scorecard's SBOM check, silently.
+          #
+          # -name over a glob: the dist/* glob skips dotfiles, which is
+          # how every canon release (.github -> .github-x.y.z.spdx.json)
+          # shipped SBOM-less with everything green. Names are dot-proofed
+          # at generation now; this assertion is the backstop.
+          n=$(find dist -maxdepth 1 -name "*.spdx.json" | wc -l | tr -d " ")
+          if [[ "${n}" -eq 0 ]]; then
+            echo "::error::no SBOM in dist — the sbom job should have delivered one"
             exit 1
           fi
+          hidden=$(find dist -maxdepth 1 -name ".*" -type f | wc -l | tr -d " ")
+          if [[ "${hidden}" -ne 0 ]]; then
+            echo "::error::dotfile in dist — dist/* globs and the checksum loop would silently skip it"
+            exit 1
+          fi
+          echo "::notice::${n} SBOM(s) in the bundle"
 
       - name: Checksum everything that ships
         run: |

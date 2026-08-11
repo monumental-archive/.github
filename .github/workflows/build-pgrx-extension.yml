@@ -180,18 +180,21 @@ jobs:
           tools = t.get("tools", {})
           rust = tools.get("rust", "")
           pgrx = tools.get("cargo:cargo-pgrx", "")
+          auditable = tools.get("cargo:cargo-auditable", "")
           if isinstance(rust, dict): rust = rust.get("version", "")
-          print(json.dumps({"rust": rust, "pgrx": pgrx}))
+          print(json.dumps({"rust": rust, "pgrx": pgrx, "auditable": auditable}))
           ')
           rust=$(jq -r .rust <<< "${pins}")
           pgrx=$(jq -r .pgrx <<< "${pins}")
-          if [[ -z "${rust}" || -z "${pgrx}" ]]; then
-            echo "::error::rust and cargo:cargo-pgrx must be pinned in this repository's mise config; they are build inputs of the pgrx-extension class"
+          auditable=$(jq -r .auditable <<< "${pins}")
+          if [[ -z "${rust}" || -z "${pgrx}" || -z "${auditable}" ]]; then
+            echo "::error::rust, cargo:cargo-pgrx and cargo:cargo-auditable must be pinned in this repository's mise config; they are build inputs of the pgrx-extension class"
             exit 1
           fi
           {
             echo "RUST_VERSION=${rust}"
             echo "PGRX_VERSION=${pgrx}"
+            echo "AUDITABLE_VERSION=${auditable}"
           } >> "${GITHUB_ENV}"
 
       - name: Refuse a tag whose version disagrees with the manifests
@@ -271,7 +274,7 @@ jobs:
           # Source mounted read-only and copied inside: the container must
           # not write into the checkout, and target/ never enters it.
           docker run --rm \
-            --env PG --env RUST_VERSION --env PGRX_VERSION \
+            --env PG --env RUST_VERSION --env PGRX_VERSION --env AUDITABLE_VERSION \
             --env VERSION="${UNTRUSTED_VERSION}" \
             --env CRATE_DIR="${UNTRUSTED_CRATE_DIR}" \
             --env SOURCE_DATE_EPOCH="${epoch}" \
@@ -295,7 +298,7 @@ jobs:
               chown -R postgres:postgres /build /out \
                 "$(/usr/bin/pg_config --pkglibdir)" \
                 "$(/usr/bin/pg_config --sharedir)/extension"
-              exec su -w PG,VERSION,CRATE_DIR,RUST_VERSION,PGRX_VERSION,SOURCE_DATE_EPOCH \
+              exec su -w PG,VERSION,CRATE_DIR,RUST_VERSION,PGRX_VERSION,AUDITABLE_VERSION,SOURCE_DATE_EPOCH \
                 postgres -s /bin/bash -c '\''
                 set -euo pipefail
                 export HOME=/var/lib/postgresql
@@ -306,6 +309,20 @@ jobs:
                   --default-toolchain "${RUST_VERSION}" --no-modify-path
                 . "${HOME}/.cargo/env"
                 cargo install cargo-pgrx --version "${PGRX_VERSION}" --locked
+                cargo install cargo-auditable --version "${AUDITABLE_VERSION}" --locked
+                # cargo-pgrx owns the cargo invocation, so cargo-auditable
+                # goes in through its documented wrapper mechanism
+                # (REPLACING_CARGO.md): a cargo shim first on PATH that
+                # delegates to the real cargo with the auditable
+                # subcommand. Every binary pgrx builds then carries its
+                # dependency tree in the .dep-v0 linker section — the
+                # section stripping is already disabled to preserve.
+                real_cargo=$(command -v cargo)
+                mkdir -p "${HOME}/cargo-shim"
+                printf "#!/bin/sh\nexec %s auditable \"\$@\"\n" \
+                  "${real_cargo}" > "${HOME}/cargo-shim/cargo"
+                chmod +x "${HOME}/cargo-shim/cargo"
+                export PATH="${HOME}/cargo-shim:${PATH}"
                 cargo pgrx init "--pg${PG}" /usr/bin/pg_config
                 cd "/build/${CRATE_DIR}"
                 # Reproducibility, by construction: same flags as the

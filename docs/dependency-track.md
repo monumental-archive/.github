@@ -100,6 +100,14 @@ suppresses consumers' scanner findings on our word.
 There is no second bookkeeping: the VEX **is** the triage record.
 `audit:deny` ignores cite it; blast-radius filters on it.
 
+Delivery, shaped by immutability: published releases cannot gain assets,
+so a post-hoc decision reaches consumers on two surfaces — the signed
+claim lands in the attestation store the moment the statement merges
+(`vex-attest.yml`, one statement per merge, enforced — a decision is
+reviewed like a release), and the raw document rides the *next* release
+of each affected repository (`release/collect-vex.sh`). Roll-forward,
+like everything else.
+
 ## SBOMs are class-shaped, derived from what the class ships
 
 The version-source rule applied to SBOMs: derivation is by detection of
@@ -110,6 +118,7 @@ what the artifact actually is, never configuration.
 | rust-crate, rust-binary, pgrx tarballs | trivy over `Cargo.lock` at the tagged commit | Deterministic; every PURL versioned |
 | oci-image, pgrx images, continuous db image | trivy over the **published image by digest**, at the pull-back step | Captures OS packages and (via cargo-auditable) the Rust deps of the artifact a stranger pulls, not a local twin |
 | Manifest-less (the canon, source-archive) | GitHub dependency-graph export | Its dependencies are actions, which the graph covers |
+| pgrx artifact images | none, deliberately | `FROM scratch`: no OS layer, and their only content is the attested tarballs whose lock-derived SBOM already ships — an image with no surface of its own derives nothing new |
 
 trivy is the single generator — already in the belt, no new tooling.
 The GitHub dependency-graph export was replaced for code and image

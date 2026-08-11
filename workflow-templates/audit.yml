@@ -1,0 +1,23 @@
+# The repo-side Monday audit. This stub is a repo's entire audit
+# obligation: the checks (today, the dependency advisory feed) arrive via
+# the shared workflow and the toolbelt it pins — same model as the gate.
+name: audit
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, beside the canon's own audit.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    permissions:
+      contents: read # the audit reads the tree and the advisory feed
+    uses: monumental-archive/.github/.github/workflows/repo-audit.yml@719c65597a1ba5338ed7ab45e2f2ed706474c8b2 # v1.4.1

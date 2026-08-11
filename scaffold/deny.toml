@@ -1,0 +1,50 @@
+# Org dependency policy (docs/dependency-track.md in monumental-archive/.github).
+# Copied verbatim from scaffold/ like every stub; lint:deny (gate) runs
+# bans+licenses+sources over it, audit:deny (Monday cron) runs advisories.
+#
+# The gate half is deterministic: outcome is a function of Cargo.lock plus
+# this file. The advisory half is a moving feed and lives outside the gate.
+
+[graph]
+# All targets: the lock is one artifact; policy must not vary by the
+# machine that happens to evaluate it.
+all-features = true
+
+[licenses]
+# Pure allowlist — anything not named here is denied by default (the only
+# shape the current config offers; the old copyleft/osi knobs are gone).
+# Additions are a canon decision, not a repo edit.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+]
+
+[bans]
+# A `*` requirement is an unpinned intention — deny. Duplicate transitive
+# versions are endemic and outside any one repo's control — warn, the one
+# deliberately non-maximal setting (reasoned in docs/dependency-track.md).
+wildcards = "deny"
+multiple-versions = "warn"
+
+[sources]
+# Where dependencies come from is a gated invariant: crates.io only.
+# A git or alternate-registry dependency is a decision for the canon,
+# recorded here as an allow entry, never a repo-local default.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+# Defaults are already maximal: every advisory class errors. The only
+# exit is a written `ignore` entry — reason required, citing the VEX
+# statement in the canon's security/vex/ that records the decision
+# (the L2 contract: known, decided, written down).
+ignore = [
+  # { id = "RUSTSEC-0000-0000", reason = "see security/vex/<file> — <one line>" },
+]
