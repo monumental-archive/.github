@@ -332,6 +332,11 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
         run: .org-canon/release/generate-sbom.sh
 
+      - name: Collect the VEX documents that ride this release
+        # Immutable releases mean a post-hoc decision reaches consumers on
+        # the NEXT release — this is that delivery (docs/dependency-track.md).
+        run: .org-canon/release/collect-vex.sh
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-sbom
