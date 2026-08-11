@@ -112,12 +112,8 @@ jobs:
     env:
       PG: ${{ matrix.pg }}
     steps:
-      - name: Check out org canon (the ref the caller pinned)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: monumental-archive/.github
-          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
-          persist-credentials: false
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -196,7 +192,7 @@ jobs:
           # map (docker/buildx#1965) — the assert step downstream proves
           # the published index is OCI.
           docker buildx build \
-            --file docker/pgrx-artifact.Dockerfile \
+            --file .org-canon/docker/pgrx-artifact.Dockerfile \
             --platform linux/amd64,linux/arm64 \
             "${LABELS[@]}" \
             "${ANNOS[@]}" \
@@ -223,7 +219,7 @@ jobs:
           digest=$(jq -r .digest "/tmp/digests/pg${PG}.json")
           build=$(python3 -c '
           import tomllib
-          with open("docker/pgrx-base-images.toml", "rb") as f:
+          with open(".org-canon/docker/pgrx-base-images.toml", "rb") as f:
               print(tomllib.load(f)["build"]["'"${PG}"'"])
           ')
           # By digest, never by tag, and exactly the documented pattern:

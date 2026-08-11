@@ -32,8 +32,9 @@ shared lives here and nowhere else. Five layers:
    `lint:<tool>` task here enforces that tool in every repo with no repo
    change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
    are network-bound or noisy checks, structurally outside the gate.
-4. **Shared workflows**: `ci.yml` (the reusable gate — callers pin one SHA
-   whose stamped `# canon-pin` checkout also pins the toolbelt, #158),
+4. **Shared workflows**: `ci.yml` (the reusable gate — callers pin one
+   SHA, and `$/.github/actions/canon` delivers the toolbelt at that same
+   resolution, #165),
    `gate.yml`
    (this repo self-applies it), `audit.yml` (Monday cron: link check +
    repo-settings drift), `self-release.yml` (this repo versions itself
