@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.3.1](https://github.com/monumental-archive/.github/compare/v1.3.0...v1.3.1) - 2026-08-11
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.3.0 ([#151](https://github.com/monumental-archive/.github/pull/151))
+
+### Fixed
+
+- let postgres traverse the derive work directory ([#149](https://github.com/monumental-archive/.github/pull/149))
+
 ## [1.3.0](https://github.com/monumental-archive/.github/compare/v1.2.2...v1.3.0) - 2026-08-11
 
 ### Added
