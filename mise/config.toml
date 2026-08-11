@@ -626,7 +626,7 @@ echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless"
 '''
 
 [tasks."lint:canon-pins"]
-description = "Every canon reference is a version: workflow pins carry '# vX.Y.Z', lefthook and preset refs are tags"
+description = "Every canon reference is a version: workflow pins carry '# vX.Y.Z', lefthook/preset refs are tags, canon checkouts are stamped '# canon-pin' lines"
 dir = "{{cwd}}"
 # Renovate is the bump mechanism (#133); this lint makes the unbumpable
 # state unrepresentable. Three surfaces consume the canon and each must
@@ -665,12 +665,30 @@ while IFS= read -r f; do
   grep -qE "github>monumental-archive/\.github#v[0-9]" "${f}" \
     || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
 done < <(git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json")
+# The fourth surface: a workflow step that clones the canon. Its ref must
+# be the stamped `# canon-pin` conditional — literal tag for remote
+# callers, github.sha when the caller IS the canon — because the previous
+# carrier (github.job_workflow_sha) evaluated empty at runtime and
+# actions/checkout silently fell back to main (#158). Count-matching is
+# the check: every `repository: monumental-archive/.github` needs exactly
+# one canonical canon-pin ref line, and a site someone writes with a bare
+# ref (or the dead context) breaks the count and goes red here.
+pin_re="^[[:space:]]*ref: \\$\\{\\{ github\\.repository == 'monumental-archive/\\.github' && github\\.sha \\|\\| 'v[0-9][0-9A-Za-z.+-]*' \\}\\} # canon-pin$"
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  checkouts=$(grep -cE "^[^#]*repository:[[:space:]]*monumental-archive/\.github[[:space:]]*$" "${f}") || continue
+  found=$((found + checkouts))
+  pins=$(grep -cE "${pin_re}" "${f}") || true
+  [[ "${checkouts}" -eq "${pins}" ]] \
+    || bad="${bad} ${f}(${checkouts} canon checkout(s), ${pins} stamped '# canon-pin' ref line(s))"
+done < <(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml")
 [[ ${found} -gt 0 ]] || { echo "lint:canon-pins: no canon references, skipped"; exit 0; }
 if [[ -n "${bad}" ]]; then
   echo "lint:canon-pins: unversioned canon references:${bad}" >&2
   echo "  every canon reference pins a tag Renovate can bump (#133);" >&2
   echo "  workflow pins: '@<sha> # vX.Y.Z', lefthook: 'ref: vX.Y.Z'," >&2
-  echo "  preset: 'github>monumental-archive/.github#vX.Y.Z'." >&2
+  echo "  preset: 'github>monumental-archive/.github#vX.Y.Z', canon" >&2
+  echo "  checkouts: the stamped '# canon-pin' ref conditional (#158)." >&2
   exit 1
 fi
 echo "lint:canon-pins: ${found} canon references, all versioned"

@@ -117,6 +117,29 @@ if [[ -n ${stubs} ]]; then
   exit 1
 fi
 
+# The canon pin is stamped, never resolved at runtime (#158): workflows
+# that clone this repository carry a literal tag on their `# canon-pin`
+# ref lines, and this is where the literal becomes the release being cut
+# — the tagged tree names its own tag, so the pin that resolved a
+# workflow file and the tree that workflow clones cannot disagree. Only
+# the canon carries such lines; every other repository skips clean.
+# (The previous carrier, github.job_workflow_sha, evaluated empty at
+# runtime and actions/checkout silently fell back to the default branch.)
+pin_files=$(git grep -l "}} # canon-pin" -- '.github/workflows/*.yml' 2> /dev/null || true)
+if [[ -n ${pin_files} ]]; then
+  for f in ${pin_files}; do
+    sed -i.bak "s|'v[0-9][0-9A-Za-z.+-]*' }} # canon-pin|'v${version}' }} # canon-pin|" "${f}"
+    rm -f "${f}.bak"
+  done
+  # A canon-pin line the substitution missed would float exactly the way
+  # #158 did — refuse before the Release PR opens, not after the tag.
+  if git grep -n "}} # canon-pin" -- '.github/workflows/*.yml' | grep -v "'v${version}' }} # canon-pin"; then
+    echo "FAIL: a # canon-pin line did not take v${version}" >&2
+    exit 1
+  fi
+  files="${files} ${pin_files//$'\n'/ }"
+fi
+
 git cliff --bump --output CHANGELOG.md
 
 # git-cliff separates releases with a trailing blank line, which at end of
