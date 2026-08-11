@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.5.2](https://github.com/monumental-archive/.github/compare/v1.5.1...v1.5.2) - 2026-08-11
+
+### Fixed
+
+- serialize lint:deny behind the rust-driving tasks ([#177](https://github.com/monumental-archive/.github/pull/177))
+- complete the rust task serialization chain ([#179](https://github.com/monumental-archive/.github/pull/179))
+
 ## [1.5.1](https://github.com/monumental-archive/.github/compare/v1.5.0...v1.5.1) - 2026-08-11
 
 ### Dependencies
