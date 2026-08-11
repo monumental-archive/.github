@@ -809,6 +809,38 @@ fi
 echo "lint:from-digests: ok"
 '''
 
+[tasks."lint:installer-pinned"]
+description = "Every mise-action step pins mise's own version — the installer is a build input (#117)"
+dir = "{{cwd}}"
+# Found the expensive way (v0.18.2 darwin leg): every tool was pinned,
+# every uses: SHA-pinned — and the tool that installs them floated,
+# pulling a same-day mise release that broke rustup mid-install. A gap a
+# human "should have seen" is a gap the belt owns from then on: this
+# asserts each jdx/mise-action step carries an explicit `version:`.
+# Grep-shaped like every belt lint: count steps, count pins, any
+# shortfall is red with the file named.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "lint:installer-pinned: no workflows, skipped"; exit 0
+}
+bad=""
+for f in .github/workflows/*.y*ml; do
+  steps=$(grep -cE "^[^#]*uses:[[:space:]]*jdx/mise-action@" "${f}") || true
+  ((steps > 0)) || continue
+  pins=$(grep -cE "^[^#]*version:[[:space:]]*[0-9]{4}\.[0-9]+\.[0-9]+" "${f}") || true
+  if ((steps > pins)); then
+    bad="${bad} ${f}(${steps} steps, ${pins} version pins)"
+  fi
+done
+if [[ -n "${bad}" ]]; then
+  echo "lint:installer-pinned: mise-action without a mise version pin:${bad}" >&2
+  echo "  the installer is a build input — an unpinned mise delivers" >&2
+  echo "  same-day releases straight into attested builds (v0.18.2 darwin leg)" >&2
+  exit 1
+fi
+echo "lint:installer-pinned: ok"
+'''
+
 [tasks."lint:cold-attested"]
 description = "No cache on any attested path — caches are unattested, writable-from-any-branch build inputs (#117)"
 dir = "{{cwd}}"
