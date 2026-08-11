@@ -1,0 +1,5 @@
+{
+  "name": "Org Monday audit",
+  "description": "The monumental-archive repo-side scheduled audit: dependency advisory feed (cargo-deny) via the shared reusable workflow.",
+  "categories": ["ci"]
+}

@@ -291,6 +291,54 @@ jobs:
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
         run: .org-canon/release/resolve-oci-facts.sh
 
+  # The release SBOM, class-shaped: lock-derived where a Cargo.lock is
+  # tracked, GitHub's dependency-graph export for manifest-less repos
+  # (docs/dependency-track.md). Its own job, like facts: it reads the
+  # caller's tree and runs belt tooling, never caller code, and the
+  # artifact fans into attach via the release-* pattern. Runs for every
+  # class — a release without an inventory caps Scorecard's SBOM check
+  # and blinds audit:blast-radius.
+  sbom:
+    name: Generate the release SBOM
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository at the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        # trivy comes from the belt. No tool cache in a job whose output
+        # ships with the release.
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+
+      - name: Derive the SBOM from what this repository ships
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.guard.outputs.version }}
+          SBOM_BASENAME: ${{ inputs.sbom-basename }}
+        run: .org-canon/release/generate-sbom.sh
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build
     needs: guard
@@ -613,10 +661,11 @@ jobs:
   # more job above, not a contract change here.
   attach:
     name: Attach evidence and publish
-    needs: [guard, sign, sign-vsa, sign-image, sign-binaries, sign-source, sign-wasm, sign-vsa-wasm, sign-extensions, sign-extension-images]
+    needs: [guard, sbom, sign, sign-vsa, sign-image, sign-binaries, sign-source, sign-wasm, sign-vsa-wasm, sign-extensions, sign-extension-images]
     if: >-
       ${{
         !cancelled() && needs.guard.result == 'success'
+        && needs.sbom.result == 'success'
         && !contains(join(needs.*.result, ','), 'failure')
         && (!contains(inputs.classes, 'rust-crate') || (needs.sign.result == 'success' && (needs.sign-vsa.result == 'success' || inputs.dry-run)))
         && (!contains(inputs.classes, 'oci-image') || needs.sign-image.result == 'success' || inputs.dry-run)
@@ -629,7 +678,6 @@ jobs:
     permissions: {} # it publishes with the App token, not GITHUB_TOKEN
     with:
       version: ${{ needs.guard.outputs.version }}
-      sbom-basename: ${{ inputs.sbom-basename }}
       dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}

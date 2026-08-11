@@ -227,12 +227,24 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # cargo-auditable is a build input like the toolchain itself,
+          # pinned in the caller's mise config (cargo:cargo-auditable) —
+          # asserted, never installed here; an unpinned install on a
+          # release leg is a runner mutation.
+          command -v cargo-auditable > /dev/null || {
+            echo "::error::cargo-auditable missing — pin cargo:cargo-auditable in this repository's mise config; it is a build input of the rust-binary class"
+            exit 1
+          }
           # SOURCE_DATE_EPOCH is the released commit's own time, so the same
           # tag rebuilds to the same bytes on any machine on any day.
           epoch=$(git log -1 --pretty=%ct)
           export SOURCE_DATE_EPOCH="${epoch}"
+          # `auditable`: the shipped binary carries its dependency tree in
+          # the .dep-v0 linker section (stripping is already disabled to
+          # preserve it), so image and binary scanners see the Rust
+          # surface of the artifact itself (docs/dependency-track.md).
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
-          cargo build --workspace --locked --release --target "${TARGET}" ${EXCLUDE_FLAGS}
+          cargo auditable build --workspace --locked --release --target "${TARGET}" ${EXCLUDE_FLAGS}
 
       - name: Stage the binaries
         id: stage

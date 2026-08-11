@@ -46,6 +46,144 @@ url = "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_
 url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924919"
 provenance = "github-attestations"
 
+[[tools."aqua:EmbarkStudios/cargo-deny"]]
+version = "0.20.2"
+backend = "aqua:EmbarkStudios/cargo-deny"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.linux-arm64"]
+checksum = "sha256:995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471598345"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.linux-arm64-musl"]
+checksum = "sha256:995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471598345"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.linux-x64"]
+checksum = "sha256:9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471598214"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.linux-x64-musl"]
+checksum = "sha256:9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471598214"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.macos-arm64"]
+checksum = "sha256:fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471597689"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.macos-x64"]
+checksum = "sha256:248da7f581724e470071990c088ffc55c811981715f4cbdb258621fb79f8b7a6"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471598357"
+
+[tools."aqua:EmbarkStudios/cargo-deny"."platforms.windows-x64"]
+checksum = "sha256:975a22143262fd27476d19ee00c7af67978426e40e1dee94eed6bbade1cf87dc"
+url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-pc-windows-msvc.tar.gz"
+url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471599057"
+
+[[tools."aqua:google/osv-scanner"]]
+version = "2.4.0"
+backend = "aqua:google/osv-scanner"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-arm64"]
+checksum = "sha256:44e580752910f0ff36ec99aff59af20f65df1e859aa31e5605a8f0d055b496e9"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_arm64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242338"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-arm64".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-arm64-musl"]
+checksum = "sha256:44e580752910f0ff36ec99aff59af20f65df1e859aa31e5605a8f0d055b496e9"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_arm64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242338"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-arm64-musl".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-x64"]
+checksum = "sha256:15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242336"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-x64".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-x64-musl"]
+checksum = "sha256:15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242336"
+
+[tools."aqua:google/osv-scanner"."platforms.linux-x64-musl".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[tools."aqua:google/osv-scanner"."platforms.macos-arm64"]
+checksum = "sha256:9ca3185ad63e9ab54f7cb90f46a7362be02d80e37f0123d095a54355ea202f5d"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_darwin_arm64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242387"
+
+[tools."aqua:google/osv-scanner"."platforms.macos-arm64".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[tools."aqua:google/osv-scanner"."platforms.macos-x64"]
+checksum = "sha256:088119325156321c34c456ac3703d6013538fd71cbac82b891ab34db491e4d66"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_darwin_amd64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242389"
+
+[tools."aqua:google/osv-scanner"."platforms.macos-x64".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[tools."aqua:google/osv-scanner"."platforms.windows-x64"]
+checksum = "sha256:0cdd113610126d5dfd5e12ad0e0b4f3e879291ff19bb43b0c52ed2f2c2df1a37"
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_windows_amd64.exe"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242340"
+
+[tools."aqua:google/osv-scanner"."platforms.windows-x64".provenance.slsa]
+url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+
+[[tools."aqua:openvex/vexctl"]]
+version = "0.4.4"
+backend = "aqua:openvex/vexctl"
+
+[tools."aqua:openvex/vexctl"."platforms.linux-arm64"]
+checksum = "sha256:2f37f2d6fd00d3d73dc2c657639d2f3b00060608aef517766fdd0e0dc07abe21"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-linux-arm64"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430968"
+
+[tools."aqua:openvex/vexctl"."platforms.linux-arm64-musl"]
+checksum = "sha256:2f37f2d6fd00d3d73dc2c657639d2f3b00060608aef517766fdd0e0dc07abe21"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-linux-arm64"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430968"
+
+[tools."aqua:openvex/vexctl"."platforms.linux-x64"]
+checksum = "sha256:d315e2778af88b999ad4bba30a08aa2677ed701638e16c341b6d57b43c1e064d"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-linux-amd64"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430942"
+
+[tools."aqua:openvex/vexctl"."platforms.linux-x64-musl"]
+checksum = "sha256:d315e2778af88b999ad4bba30a08aa2677ed701638e16c341b6d57b43c1e064d"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-linux-amd64"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430942"
+
+[tools."aqua:openvex/vexctl"."platforms.macos-arm64"]
+checksum = "sha256:6d810a5022d7624a7cfe71dbdb973708d4fe4e8210d8f7bd99266f6e282b04f7"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-darwin-arm64"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430838"
+
+[tools."aqua:openvex/vexctl"."platforms.macos-x64"]
+checksum = "sha256:6e9631e7b5020b9e5f42d57fb6670dd5323156d8d68a608aab9a8ebea0544702"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-darwin-amd64"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430840"
+
+[tools."aqua:openvex/vexctl"."platforms.windows-x64"]
+checksum = "sha256:af3fb09d2a3dc4f2ac2db70e7877b2da3b9650aa74cd2347a1a2b7885bf7fcfe"
+url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-windows-amd64.exe"
+url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430835"
+
 [[tools."aqua:orhun/git-cliff"]]
 version = "2.13.1"
 backend = "aqua:orhun/git-cliff"

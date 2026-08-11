@@ -1,0 +1,45 @@
+# The repo-side Monday audit: the scheduled, network-touching checks the
+# deterministic gate deliberately excludes — today the dependency advisory
+# feed (audit:deny). Callers pin by full SHA, ci.yml-style:
+#
+#   jobs:
+#     audit:
+#       uses: monumental-archive/.github/.github/workflows/repo-audit.yml@<sha> # vX.Y.Z
+#
+# Failures page via the Actions UI rather than blocking merges. The
+# org-wide audit surface (blast-radius over published SBOMs, link rot,
+# settings drift) runs in the canon's own audit.yml; this workflow carries
+# only the checks that must run against each repo's own tree. No inputs,
+# by design — zero caller-controlled expansion.
+name: repo-audit
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    name: audit / dependency advisories
+    runs-on: ubuntu-latest
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+
+      - name: Check the advisory feed against the lock
+        run: mise run audit:deny

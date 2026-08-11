@@ -79,6 +79,18 @@ lychee = "0.24.2"
 # runs it in every versioned repo, and `release:preview` should answer
 # locally with the same pinned binary CI uses.
 "aqua:orhun/git-cliff" = "2.13.1"
+# The dependency track (docs/dependency-track.md). cargo-deny is the gate
+# half (bans+licenses+sources, deterministic over the lock) and the
+# advisories half (audit:deny, network). cargo-audit is skipped-subsumed:
+# same RustSec DB, strictly a subset.
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+# Blast-radius scanning over published SBOMs (audit:blast-radius). The
+# aqua registry lags upstream by one release at standup (2.5.0 exists);
+# the pin advances via Renovate like everything else.
+"aqua:google/osv-scanner" = "2.4.0"
+# OpenVEX assembly (vex:new). The statement is the triage record; the
+# signer signs it, blast-radius filters on it.
+"aqua:openvex/vexctl" = "0.4.4"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -210,6 +222,175 @@ if [[ -n "${bad}" ]]; then
   exit 1
 fi
 echo "lint:dco: ${count} commits signed off"
+'''
+
+[tasks."lint:deny"]
+description = "Dependency policy: bans + licenses + sources (cargo-deny, deterministic over the lock)"
+dir = "{{cwd}}"
+# The gate half of the dependency track (docs/dependency-track.md).
+# Deterministic: the outcome is a function of Cargo.lock + the committed
+# deny.toml. `cargo fetch --locked` first — fetching pinned inputs is the
+# same category as fetching the toolchain. Advisories are deliberately
+# NOT here: RustSec is a moving feed, so they live in audit:deny.
+run = '''
+locks=$(git ls-files "Cargo.lock" "*/Cargo.lock")
+[[ -n "${locks}" ]] || { echo "lint:deny: no Cargo.lock tracked, skipped"; exit 0; }
+# A repo with a lock has rust pinned as a build input; cargo absent is a
+# broken toolchain, and skipping would be the vacuous-success failure.
+command -v cargo > /dev/null || {
+  echo "lint:deny: Cargo.lock present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+[[ -f deny.toml ]] || {
+  echo "lint:deny: Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon" >&2
+  exit 1
+}
+cargo fetch --locked
+cargo deny check bans licenses sources
+'''
+
+[tasks."audit:deny"]
+description = "Dependency advisories (cargo-deny + RustSec — network, not in ci)"
+dir = "{{cwd}}"
+# audit:*, not lint:*: a new advisory fails unrelated work, which is a
+# property of the feed, not the diff. Every `ignore` in deny.toml carries
+# a reason and cites the VEX statement recording the decision — the L2
+# exit is a written decision, never an override.
+run = '''
+locks=$(git ls-files "Cargo.lock" "*/Cargo.lock")
+[[ -n "${locks}" ]] || { echo "audit:deny: no Cargo.lock tracked, skipped"; exit 0; }
+command -v cargo > /dev/null || {
+  echo "audit:deny: Cargo.lock present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+[[ -f deny.toml ]] || {
+  echo "audit:deny: Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon" >&2
+  exit 1
+}
+cargo fetch --locked
+cargo deny check advisories
+'''
+
+[tasks."audit:blast-radius"]
+description = "Advisory blast radius over every published SBOM (osv-scanner — network, canon only)"
+dir = "{{cwd}}"
+# The L2 triage mechanism at scale and the honesty input VEX statements
+# wait on: which published releases ship an affected package? Walks every
+# non-draft release of every org repo, verifies each SBOM asset against
+# GitHub's release attestation before trusting it, scans with
+# osv-scanner, and aggregates one report. Red means NEW AND UNDECIDED:
+# findings covered by a VEX statement in security/vex/ are reported but
+# do not fail. Loud failure modes, constructed:
+#   - an SBOM that verifies but parses to zero packages (osv exit 128)
+#   - the canary: the pinned lab release must yield its known advisory,
+#     or this job cannot see and says so
+#   - a release with no SBOM asset at all (pre-standup releases are
+#     recorded, not failed — they predate the obligation)
+# Guarded on security/vex/ so it runs only in the canon checkout.
+run = '''
+[[ -d security/vex ]] || { echo "audit:blast-radius: no security/vex/, not the canon, skipped"; exit 0; }
+command -v osv-scanner > /dev/null || { echo "audit:blast-radius: osv-scanner missing from the belt" >&2; exit 1; }
+command -v gh > /dev/null || { echo "audit:blast-radius: gh missing" >&2; exit 1; }
+org="${BLAST_RADIUS_ORG:-monumental-archive}"
+canary_repo="release-lab"; canary_tag="v0.17.0"; canary_id="RUSTSEC-2021-0127"
+work=$(mktemp -d)
+findings="${work}/findings.tsv"; : > "${findings}"
+missing="${work}/missing.txt"; : > "${missing}"
+decided_f="${work}/decided.txt"
+# An empty pattern file matches EVERYTHING under grep -f — an empty VEX
+# directory must mean "nothing decided", never "everything decided".
+cat security/vex/*.openvex.json 2> /dev/null \
+  | jq -r '.statements[]?.vulnerability.name // empty' | sort -u \
+  | grep -v "^$" > "${decided_f}" || true
+failed=0; canary_hit=0; scanned=0
+while read -r repo; do
+  [[ -n "${repo}" ]] || continue
+  while read -r tag; do
+    [[ -n "${tag}" ]] || continue
+    dir="${work}/${repo}-${tag}"
+    mkdir -p "${dir}"
+    if ! gh release download "${tag}" --repo "${org}/${repo}" \
+      --pattern "*.spdx.json" --dir "${dir}" 2> /dev/null \
+      || ! compgen -G "${dir}/*.spdx.json" > /dev/null; then
+      echo "${repo}@${tag}" >> "${missing}"
+      continue
+    fi
+    for sbom in "${dir}"/*.spdx.json; do
+      # Trust nothing downloaded: the asset must be the one GitHub's
+      # release attestation bound at publish.
+      if ! gh release verify-asset "${tag}" "${sbom}" \
+        --repo "${org}/${repo}" > /dev/null 2>&1; then
+        echo "audit:blast-radius: ${repo}@${tag} SBOM failed asset verification" >&2
+        failed=1
+        continue
+      fi
+      out="${dir}/osv.json"
+      set +e
+      osv-scanner scan source -L "${sbom}" --format json > "${out}" 2> /dev/null
+      ec=$?
+      set -e
+      if [[ ${ec} -eq 128 ]]; then
+        echo "audit:blast-radius: ${repo}@${tag} SBOM parsed to zero packages — a scan that reads nothing must not report clean" >&2
+        failed=1
+        continue
+      fi
+      if [[ ${ec} -ne 0 && ${ec} -ne 1 ]]; then
+        echo "audit:blast-radius: osv-scanner errored (${ec}) on ${repo}@${tag}" >&2
+        failed=1
+        continue
+      fi
+      scanned=$((scanned + 1))
+      jq -r --arg where "${repo}@${tag}" '
+        .results[]?.packages[]? | select(.vulnerabilities != null) as $p
+        | $p.vulnerabilities[] | [.id, $p.package.name, $p.package.version, $where] | @tsv
+      ' "${out}" >> "${findings}"
+      if [[ "${repo}" == "${canary_repo}" && "${tag}" == "${canary_tag}" ]] \
+        && grep -q "^${canary_id}$(printf "\t")" "${findings}"; then
+        canary_hit=1
+      fi
+    done
+  done < <(gh api "repos/${org}/${repo}/releases" --paginate \
+    --jq '.[] | select(.draft | not) | .tag_name')
+done < <(gh api "orgs/${org}/repos" --paginate --jq '.[].name')
+[[ ${scanned} -gt 0 ]] || { echo "audit:blast-radius: zero SBOMs scanned — the walk found nothing to check" >&2; exit 1; }
+if [[ ${canary_hit} -eq 0 ]]; then
+  echo "audit:blast-radius: CANARY MISSED — ${canary_id} not found in ${canary_repo}@${canary_tag}; the scanner cannot see" >&2
+  failed=1
+fi
+report() {
+  echo "## Blast radius — advisory → affected releases"
+  echo
+  if [[ -s "${findings}" ]]; then
+    echo "| advisory | package | version | release | decided |"
+    echo "| --- | --- | --- | --- | --- |"
+    sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where; do
+      d="NEW"
+      grep -qxF "${id}" "${decided_f}" && d="VEX"
+      echo "| ${id} | ${name} | ${ver} | ${where} | ${d} |"
+    done
+  else
+    echo "No findings across ${scanned} SBOM(s)."
+  fi
+  if [[ -s "${missing}" ]]; then
+    echo
+    echo "Releases with no SBOM asset (predate the obligation):"
+    sed "s/^/- /" "${missing}"
+  fi
+}
+report
+[[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && report >> "${GITHUB_STEP_SUMMARY}"
+undecided=$(cut -f1 "${findings}" | sort -u)
+if [[ -s "${decided_f}" ]]; then
+  undecided=$(grep -vxF -f "${decided_f}" <<< "${undecided}" || true)
+fi
+if [[ -n "${undecided}" ]]; then
+  echo "audit:blast-radius: undecided advisories (no VEX statement):" >&2
+  sed "s/^/  /" <<< "${undecided}" >&2
+  echo "  triage each and record the decision in security/vex/ (docs/dependency-track.md)" >&2
+  exit 1
+fi
+[[ ${failed} -eq 0 ]] || exit 1
+echo "audit:blast-radius: ${scanned} SBOM(s) scanned, every finding decided, canary seen"
 '''
 
 [tasks."audit:links"]
@@ -447,7 +628,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl cargo-deny osv-scanner vexctl; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
