@@ -42,7 +42,7 @@ permissions: {}
 jobs:
   verify:
     name: Prove the registry bytes match the built bytes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       # Read-only, and no id-token: this job handles artifact bytes, so it

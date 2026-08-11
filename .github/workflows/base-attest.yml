@@ -1,0 +1,147 @@
+# Base-image approval, org canon (#117): the BuildEnv L1 fallback path.
+#
+# The pgrx builds instantiate postgres containers as their build
+# environment, which makes this org the build platform at that layer —
+# and the draft BuildEnv track's L1 wants the build image's provenance
+# verified before the environment exists. Docker Official Images publish
+# no provenance and no signatures (measured: `cosign verify` returns "no
+# signatures found"), so this workflow implements the spec's stated
+# fallback: "an attestation asserting the expected hash value of the
+# build image", minted under the org's own identity for every digest
+# pinned in docker/pgrx-base-images.toml. The builds then verify that
+# attestation before any container runs and fail closed
+# (build-pgrx-extension.yml). Full provenance-bearing rebuild or formal
+# ingestion of the bases is deliberately out of scope — deferred with
+# reasons in the #117 standup: maximal within reason.
+#
+# Runs on push when the pin set changes (a Renovate digest roll re-attests
+# immediately), on a weekly schedule (freshness floor), and on dispatch.
+#
+# capability-boundary: this workflow declares `id-token: write` but is
+# not a `workflow_call` workflow and runs no caller-supplied code — it
+# reads one committed TOML file from this repository's tree and mints
+# attestations over the digests found there. Same standing as
+# scorecard.yml and rekor-monitor.yml: a standalone scheduled workflow
+# whose identity the attestation is supposed to bear.
+name: base-attest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/pgrx-base-images.toml
+      # Changing the approval machinery re-runs it — and lands the first
+      # approval set the moment this workflow merges.
+      - .github/workflows/base-attest.yml
+  schedule:
+    # Mondays 05:20 UTC, before audit.yml's sweep reads the results.
+    - cron: "20 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+# One approval run at a time: a Renovate roll landing mid-schedule must
+# queue behind the running set, never interleave with it.
+concurrency:
+  group: base-attest
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Read the pinned base set
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Check out the canon
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Enumerate every pinned digest
+        id: plan
+        run: |
+          set -euo pipefail
+          # The runner's python: tomllib is stdlib, and the belt has no
+          # business here — this job reads one file and emits a matrix.
+          include=$(python3 - << 'EOF'
+          import json, tomllib
+          with open("docker/pgrx-base-images.toml", "rb") as f:
+              t = tomllib.load(f)
+          cells = []
+          for role in ("build", "smoke"):
+              for pg, ref in sorted(t.get(role, {}).items()):
+                  name, _, digest = ref.partition("@")
+                  if not digest.startswith("sha256:"):
+                      raise SystemExit(f"{role}.{pg}: no digest in {ref!r}")
+                  repo = name.split(":", 1)[0]
+                  if "/" not in repo:
+                      repo = f"docker.io/library/{repo}"
+                  cells.append({"role": role, "pg": pg, "ref": ref,
+                                "name": repo, "digest": digest})
+          print(json.dumps(cells))
+          EOF
+          )
+          count=$(jq "length" <<< "${include}" || true)
+          if [[ "${count}" == "0" ]]; then
+            echo "::error::no pinned base images found — an empty approval set approves nothing"
+            exit 1
+          fi
+          matrix=$(jq -c '{include: .}' <<< "${include}")
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          jq -r '.[] | "::notice::will attest \(.role) pg\(.pg): \(.ref)"' <<< "${include}"
+
+  attest:
+    name: Attest ${{ matrix.role }} base pg${{ matrix.pg }}
+    needs: plan
+    strategy:
+      # One image's failure must not hide the approval state of the rest.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # mints the Sigstore identity for the approval
+      attestations: write # persists it in this repo's attestation store
+    steps:
+      - name: Check out the canon
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Confirm the digest resolves upstream
+        # The approval asserts bytes that exist. A digest is content-
+        # addressed so it cannot lie, but a pin that no longer resolves
+        # (registry GC, repo rename) must fail HERE, loudly, not at the
+        # next release's build leg.
+        env:
+          REF: ${{ matrix.ref }}
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${REF}" > /dev/null
+          echo "::notice::${REF} resolves"
+
+      - name: Write the approval predicate
+        env:
+          ROLE: ${{ matrix.role }}
+          PG: ${{ matrix.pg }}
+          REF: ${{ matrix.ref }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg role "${ROLE}" --arg pg "${PG}" --arg ref "${REF}" \
+            --arg source "docker/pgrx-base-images.toml" \
+            --arg revision "${GITHUB_SHA}" \
+            '{role: $role, pgMajor: $pg, pinnedRef: $ref,
+              pinSource: $source, pinRevision: $revision}' \
+            > predicate.json
+
+      - name: Attest the expected hash under the org identity
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ matrix.name }}
+          subject-digest: ${{ matrix.digest }}
+          predicate-type: https://monumental-archive.github.io/attestations/base-image-approval/v1
+          predicate-path: predicate.json

@@ -73,7 +73,7 @@ jobs:
   # travels at the same SHA as this workflow.
   plan:
     name: Validate the majors against the base-image mapping
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     steps:
@@ -105,7 +105,7 @@ jobs:
               echo "::error::pg${pg} has no digest-pinned base image in docker/pgrx-base-images.toml"
               exit 1
             fi
-            for arch_runner in "amd64 ubuntu-latest" "arm64 ubuntu-24.04-arm"; do
+            for arch_runner in "amd64 ubuntu-24.04" "arm64 ubuntu-24.04-arm"; do
               read -r arch runner <<< "${arch_runner}"
               include=$(jq -c \
                 --arg pg "${pg}" --arg arch "${arch}" --arg runner "${runner}" \
@@ -156,6 +156,29 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+
+      - name: Verify the base images are org-approved
+        # BuildEnv L1's verify-before-instantiation, fallback shape
+        # (#117): the digest pin says which bytes; this proves the org
+        # attested those bytes as the approved base (base-attest.yml in
+        # the canon), before any container exists. Fails closed — an
+        # unapproved base is a red build, not a warning. The upstream
+        # publisher signs nothing, which is why the identity checked is
+        # ours; the attestation lives in the canon's store.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for ref in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
+            repo="${ref%%@*}"; repo="${repo%%:*}"; digest="${ref##*@}"
+            [[ "${repo}" == */* ]] || repo="docker.io/library/${repo}"
+            gh attestation verify "oci://${repo}@${digest}" \
+              --repo monumental-archive/.github \
+              --predicate-type https://monumental-archive.github.io/attestations/base-image-approval/v1 \
+              --signer-workflow monumental-archive/.github/.github/workflows/base-attest.yml \
+              > /dev/null
+            echo "::notice::approved base: ${ref}"
+          done
 
       - name: Resolve the caller's build-input pins
         env:
@@ -501,7 +524,7 @@ jobs:
   collect:
     name: Collect and refuse a partial set
     needs: [plan, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions: {}
     outputs:

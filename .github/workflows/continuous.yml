@@ -65,7 +65,7 @@ jobs:
   # surface the archetype exists to not have.
   guard:
     name: Refuse tags — this stream has no versions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions: {}
     steps:
       - name: Check the ref
@@ -84,7 +84,7 @@ jobs:
   facts:
     name: Resolve the image facts
     needs: guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:

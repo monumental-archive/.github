@@ -10,7 +10,10 @@ lockfile = true
 # cargo:cargo-auditable are required by the rust build classes (the
 # builds assert them and fail with this remedy); cargo:cargo-pgrx is the
 # pgrx-extension class only and must equal the pgrx crate dependency.
-# rust = "1.xx.x"
+# Components ride the toolchain pin so they install before any task runs
+# — task-time rustup races parallel tasks (the v0.18.0 lesson);
+# coverage:check asserts llvm-tools rather than installing it.
+# rust = { version = "1.xx.x", components = "llvm-tools" }
 # "cargo:cargo-auditable" = "0.7.5"
 
 [tasks.test]

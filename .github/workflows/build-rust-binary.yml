@@ -81,7 +81,7 @@ jobs:
   # instead a target that either builds or fails the whole release here.
   plan:
     name: Validate the target list
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     outputs:
@@ -102,10 +102,10 @@ jobs:
           include="[]"
           for t in "${requested[@]}"; do
             case "${t}" in
-              x86_64-unknown-linux-musl) runner=ubuntu-latest ;;
+              x86_64-unknown-linux-musl) runner=ubuntu-24.04 ;;
               aarch64-unknown-linux-musl) runner=ubuntu-24.04-arm ;;
               x86_64-apple-darwin) runner=macos-15-intel ;;
-              aarch64-apple-darwin) runner=macos-latest ;;
+              aarch64-apple-darwin) runner=macos-15 ;;
               *)
                 echo "::error::unknown target ${t}; canon targets only"
                 exit 1
@@ -322,7 +322,7 @@ jobs:
   collect:
     name: Collect and refuse a partial set
     needs: [plan, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions: {}
     outputs:
