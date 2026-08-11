@@ -256,7 +256,7 @@ jobs:
           set -euo pipefail
           DIGEST=$(jq -r .digest "/tmp/digests/pg${PG}.json")
           export DIGEST
-          release/assert-image-facts.sh
+          .org-canon/release/assert-image-facts.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.dry-run }}
