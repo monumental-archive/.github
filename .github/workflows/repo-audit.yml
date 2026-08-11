@@ -22,7 +22,7 @@ permissions:
 jobs:
   deny:
     name: audit / dependency advisories
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -40,6 +40,7 @@ jobs:
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
           version: 2026.8.3
+          cache: false
 
       - name: Check the advisory feed against the lock
         run: mise run audit:deny

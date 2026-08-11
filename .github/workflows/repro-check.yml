@@ -52,7 +52,7 @@ permissions: {}
 jobs:
   resolve:
     name: Resolve the latest release and its published checksums
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -121,7 +121,7 @@ jobs:
     name: Same bytes, or say so loudly
     needs: [resolve, rebuild, rebuild-extension]
     if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.rebuild.result == 'success' || needs.rebuild-extension.result == 'success') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       issues: write # a broken reproducibility claim must page

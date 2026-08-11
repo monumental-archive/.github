@@ -108,9 +108,33 @@ locations · L4 enforced secure ingestion policy.
 
 ## Build Environment track (draft)
 
-L1 signed build-image provenance · L2 attested instantiation (vTPM, Secure
-Boot) · L3 hardware-attested. Not required for any Build level, and on
-GitHub-hosted runners it is a property of the platform, not of us.
+L1 signed build-image provenance, verified before the environment is
+instantiated · L2 attested instantiation (vTPM, Secure Boot) · L3
+hardware-attested. Not required for any Build level, still a **draft**
+track — any conformance claim is a claim against a draft and says so.
+
+The org has two build-environment layers, and the claim splits (#117):
+
+- **The runner VM image** is GitHub's: no signed runner-image
+  provenance exists and nothing verifies before instantiation, so L1 is
+  structurally out of reach at this layer. The maximum available move is
+  made — `ubuntu-24.04` everywhere, a named input Renovate rolls as a
+  visible diff — and the rest is a property of the platform, not of us.
+- **The pgrx build containers** are ours: the org instantiates them, so
+  at this layer the org is the build platform and L1 is entirely ours to
+  claim — via the spec's stated fallback, because Docker Official Images
+  publish no provenance and no signatures (measured: `cosign verify`
+  returns "no signatures found"). `base-attest.yml` mints the fallback's
+  "attestation asserting the expected hash" for every digest pinned in
+  `docker/pgrx-base-images.toml`, under org identity; the build legs
+  verify it before any container runs and fail closed;
+  `audit:attestations` proves the approval set stays complete. The
+  verification-outcome attestation (L1's third obligation) rides the
+  signer predicate surface (#107). Rebuilding or formally ingesting the
+  bases so they carry true Build L2+ provenance of their own creation is
+  deliberately deferred: it is standing infrastructure with its own
+  threat model, and the fallback is the spec's own answer for exactly
+  this case — maximal within reason.
 
 ## Build L4 (planned, uncertain)
 

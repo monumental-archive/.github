@@ -44,7 +44,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.head_commit.message, 'chore: release v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions: {}
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -100,7 +100,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       !startsWith(github.event.head_commit.message, 'chore: release v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # git-cliff calls the GitHub API. The canonical cliff.toml renders
       # `commit.remote.pr_number`, so every changelog entry is linked to
@@ -132,6 +132,7 @@ jobs:
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
           version: 2026.8.3
+          cache: false
 
       - name: Prepare the release
         id: prepare

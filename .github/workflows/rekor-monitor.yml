@@ -47,7 +47,7 @@ concurrency:
 jobs:
   monitor:
     name: Watch the log for the signer identity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read # checkout of the pinned monitor source
@@ -65,6 +65,12 @@ jobs:
         with:
           go-version-file: ./go.mod
 
+      # unattested-path: this workflow builds and signs nothing — the
+      # cache holds the monitor's own Rekor checkpoint, which is exactly
+      # the state it exists to carry between runs (consistency proofs
+      # need the previous checkpoint). Poisoning it degrades the monitor,
+      # never an artifact; the cold-build rule (lint:cold-attested)
+      # governs attested paths only.
       - name: Restore the previous checkpoint
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

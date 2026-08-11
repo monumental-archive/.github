@@ -252,18 +252,12 @@ echo "lint:exec-bits: $(wc -l <<< "${files}" | tr -d " ") scripts executable"
 [tasks."lint:deny"]
 description = "Dependency policy: bans + licenses + sources (cargo-deny, deterministic over the lock)"
 dir = "{{cwd}}"
-# rustup is not concurrency-safe: on a cold runner this task's
-# `cargo fetch` races test/build/coverage's own toolchain driving and
-# dies mid-download (measured on the lab's v0.18.0 release PR). wait_for
-# blocks only when those tasks are co-scheduled; it adds nothing to the
-# run.
-# Optional: a repo without the task (the canon has no `test`) must not
-# make the reference an error — same shape as ci's optional depends.
-wait_for = [
-  { task = "test", optional = true },
-  { task = "build", optional = true },
-  { task = "coverage:check", optional = true },
-]
+# No wait_for: the rustup concurrency race this chain once served
+# (measured twice on the lab's v0.18.0 release PR) was task-time
+# toolchain driving on a cold runner. The toolchain — components
+# included — is now fully installed before any task runs (#117:
+# coverage:check asserts llvm-tools as a declared build input instead of
+# installing it), and cargo's own locking handles concurrent fetches.
 # The gate half of the dependency track (docs/dependency-track.md).
 # Deterministic: the outcome is a function of Cargo.lock + the committed
 # deny.toml. `cargo fetch --locked` first — fetching pinned inputs is the
@@ -449,6 +443,132 @@ if [[ -n "${undecided}" ]]; then
 fi
 [[ ${failed} -eq 0 ]] || exit 1
 echo "audit:blast-radius: ${scanned} SBOM(s) scanned, every finding decided, canary seen"
+'''
+
+[tasks."audit:attestations"]
+description = "Nothing ships unattested: every published artifact carries its full evidence set (network, canon only)"
+dir = "{{cwd}}"
+# The difference between "we attest" and "nothing ships unattested"
+# (#117). Walks every non-draft release of every org repo, reads the
+# classes the caller requested FROM ITS publish.yml AT THE TAG (the only
+# honest source — classes change over time), and fails if any requested
+# class is missing its bundle, or any release its SBOM asset or
+# checksums — the canon's own releases shipped without their SBOM from
+# v1.0.0 to v1.4.1 with every board green, which is exactly the silent
+# gap this audit exists to catch. Continuous digests are the other
+# straggler class: their bundle artifact expires with the run, so the
+# durable record is the attestation store, and that is what is checked.
+# VEX documents are deliberately not asserted: statements exist only
+# when decisions do. Releases predating the canon machinery (no
+# publish.yml at the tag) are reported, never failed — the obligation
+# starts when the machinery does.
+run = '''
+set -euo pipefail
+org="monumental-archive"
+missing=""
+legacy=""
+checked=0
+while IFS= read -r repo; do
+  while IFS= read -r tag; do
+    wf=$(gh api "repos/${org}/${repo}/contents/.github/workflows/publish.yml?ref=${tag}" \
+      --jq ".content" 2> /dev/null | base64 -d 2> /dev/null) || true
+    [[ -n "${wf}" ]] || { legacy="${legacy} ${repo}@${tag}"; continue; }
+    # The canon's own publish.yml IS the orchestrator; its caller stub is
+    # self-publish.yml — read the classes from there.
+    if grep -qE "^[[:space:]]*workflow_call:" <<< "${wf}"; then
+      wf=$(gh api "repos/${org}/${repo}/contents/.github/workflows/self-publish.yml?ref=${tag}" \
+        --jq ".content" 2> /dev/null | base64 -d 2> /dev/null) || true
+      [[ -n "${wf}" ]] || { legacy="${legacy} ${repo}@${tag}"; continue; }
+    fi
+    classes=$(grep -E "^[^#]*classes:" <<< "${wf}" | head -1 | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")
+    [[ -n "${classes}" ]] || { legacy="${legacy} ${repo}@${tag}(no-classes)"; continue; }
+    assets=$(gh api "repos/${org}/${repo}/releases/tags/${tag}" --jq ".assets[].name")
+    checked=$((checked + 1))
+    need="checksums.txt"
+    grep -q "\.spdx\.json$" <<< "${assets}" || missing="${missing} ${repo}@${tag}(sbom)"
+    case ",${classes// /}," in *",rust-crate,"*) need="${need} attestations-crates.intoto.jsonl attestations-vsa-crates.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",oci-image,"*) need="${need} attestations-image.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",rust-binary,"*) need="${need} attestations-binaries.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",source-archive,"*) need="${need} attestations-source.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",wasm-npm,"*) need="${need} attestations-npm.intoto.jsonl attestations-vsa-npm.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",pgrx-extension,"*)
+      need="${need} attestations-extensions.intoto.jsonl"
+      grep -q "^attestations-extimg-pg" <<< "${assets}" || missing="${missing} ${repo}@${tag}(extimg)"
+      ;;
+    esac
+    # One bundle covering the whole release truthfully takes the
+    # umbrella name (attach-release.yml, the single-bundle case).
+    bundles=$(tr " " "\n" <<< "${need}" | grep -c "intoto") || true
+    for asset in ${need}; do
+      if [[ "${asset}" == attestations-* && "${bundles}" == "1" ]] \
+        && grep -qxF "attestations.intoto.jsonl" <<< "${assets}"; then
+        continue
+      fi
+      grep -qxF "${asset}" <<< "${assets}" || missing="${missing} ${repo}@${tag}(${asset})"
+    done
+  done < <(gh api "repos/${org}/${repo}/releases" --paginate \
+    --jq '.[] | select(.draft | not) | .tag_name')
+  # The continuous half: a repo with the archetype STUB (a caller of the
+  # canon's continuous.yml — the canon itself only defines it) publishes
+  # digests, and the digest's evidence lives only in the attestation
+  # store. The certificate names the signer's reusable workflow, so the
+  # verify pins that identity, same as rekor-monitor watches for.
+  stub=$(gh api "repos/${org}/${repo}/contents/.github/workflows/continuous.yml" \
+    --jq ".content" 2> /dev/null | base64 -d 2> /dev/null) || true
+  if grep -qE "uses:[[:space:]]*${org}/\.github/" <<< "${stub:-}"; then
+    digest=$(gh api "orgs/${org}/packages/container/${repo}/versions" --paginate \
+      --jq '.[] | select(.metadata.container.tags | index("latest")) | .name' 2> /dev/null \
+      | grep -E "^sha256:[a-f0-9]{64}$" | head -1) || true
+    if [[ -n "${digest:-}" ]]; then
+      checked=$((checked + 1))
+      gh attestation verify "oci://ghcr.io/${org}/${repo}@${digest}" \
+        --repo "${org}/${repo}" \
+        --signer-workflow "${org}/signer/.github/workflows/sign.yml" > /dev/null 2>&1 \
+        || missing="${missing} ${repo}@latest(${digest:7:12}:store)"
+    fi
+  fi
+done < <(gh api "orgs/${org}/repos" --paginate --jq '.[].name')
+# The base-approval half, canon only: every pinned base digest carries
+# its approval attestation (base-attest.yml) — a Renovate roll that
+# outran the approval run must surface here, not at the next release.
+if [[ -f docker/pgrx-base-images.toml ]]; then
+  while IFS= read -r ref; do
+    repo_part="${ref%%@*}"; repo_part="${repo_part%%:*}"; digest="${ref##*@}"
+    [[ "${repo_part}" == */* ]] || repo_part="docker.io/library/${repo_part}"
+    checked=$((checked + 1))
+    gh attestation verify "oci://${repo_part}@${digest}" \
+      --repo "${org}/.github" \
+      --predicate-type https://monumental-archive.github.io/attestations/base-image-approval/v1 \
+      > /dev/null 2>&1 \
+      || missing="${missing} base(${ref})"
+  done < <(grep -oE "\"[a-z0-9./:-]+@sha256:[a-f0-9]{64}\"" docker/pgrx-base-images.toml | tr -d "\"")
+fi
+[[ ${checked} -gt 0 ]] || { echo "audit:attestations: zero subjects checked — the walk found nothing" >&2; exit 1; }
+# Immutable history with a written-down reason is debt, not failure —
+# security/attestation-debt.txt is the VEX pattern for evidence gaps.
+if [[ -f security/attestation-debt.txt ]]; then
+  debt=""
+  kept=""
+  for m in ${missing}; do
+    if grep -v "^#" security/attestation-debt.txt | grep -qxF "${m}"; then
+      debt="${debt} ${m}"
+    else
+      kept="${kept} ${m}"
+    fi
+  done
+  missing="${kept}"
+  [[ -n "${debt}" ]] && echo "audit:attestations: written-down debt (security/attestation-debt.txt):${debt}"
+fi
+if [[ -n "${legacy}" ]]; then
+  echo "audit:attestations: predate the machinery (reported, not failed):${legacy}"
+fi
+if [[ -n "${missing}" ]]; then
+  echo "audit:attestations: shipped without full evidence:${missing}" >&2
+  echo "  every published artifact carries SBOM + checksums + its class bundles;" >&2
+  echo "  continuous digests and base pins verify against the attestation store (#117)" >&2
+  exit 1
+fi
+echo "audit:attestations: ${checked} subject(s) checked, nothing ships unattested"
 '''
 
 [tasks."audit:links"]
@@ -655,19 +775,92 @@ fi
 echo "lint:capability-boundary: ok"
 '''
 
+[tasks."lint:from-digests"]
+description = "Every FROM in a tracked Dockerfile is digest-pinned (a tag is a moving pointer into the build)"
+dir = "{{cwd}}"
+# Digest pinning is practiced (docker/pgrx-base-images.toml) but was not
+# enforced — the lab's builder stage shipped as `rust:1.97-slim`, tag
+# only, found in the #117 research. A tag names a stream; the digest
+# names the bytes, and only named bytes can be verified before use
+# (base-attest.yml). Renovate keeps tag AND digest current together, so
+# a pin here never goes stale. Exempt: `FROM scratch` and references to
+# named build stages. Tracked files only, like every belt linter.
+run = '''
+files=$(git ls-files "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*")
+[[ -n "${files}" ]] || { echo "lint:from-digests: no Dockerfiles tracked, skipped"; exit 0; }
+bad=""
+while IFS= read -r f; do
+  stages=$(grep -iE "^[[:space:]]*FROM[[:space:]]" "${f}" \
+    | sed -nE 's/.*[[:space:]][Aa][Ss][[:space:]]+([A-Za-z0-9_.-]+).*/\1/p')
+  while IFS= read -r line; do
+    set -- ${line}
+    ref="$2"
+    case "${ref}" in --platform=*) ref="$3" ;; esac
+    case "$(printf "%s" "${ref}" | tr "[:upper:]" "[:lower:]")" in scratch) continue ;; esac
+    grep -qxF "${ref}" <<< "${stages}" && continue
+    [[ "${ref}" == *"@sha256:"* ]] || bad="${bad} ${f}(${ref})"
+  done < <(grep -iE "^[[:space:]]*FROM[[:space:]]" "${f}")
+done <<< "${files}"
+if [[ -n "${bad}" ]]; then
+  echo "lint:from-digests: FROM without a digest pin:${bad}" >&2
+  echo "  pin as image:tag@sha256:… — Renovate rolls tag and digest together" >&2
+  exit 1
+fi
+echo "lint:from-digests: ok"
+'''
+
+[tasks."lint:cold-attested"]
+description = "No cache on any attested path — caches are unattested, writable-from-any-branch build inputs (#117)"
+dir = "{{cwd}}"
+# The cold-build rule, made mechanical. actions/cache (and every tool
+# cache riding an action's `cache:` default) is state injected into the
+# build that no provenance captures — cache poisoning is the classic
+# attack the attestation cannot see. The rule: caches only where a human
+# is waiting and nothing is signed. Structurally that means a workflow
+# using a cache must say why its path is unattested, with an
+# `unattested-path:` marker — the capability-boundary pattern: an
+# exception you have to write down is an exception somebody reviews.
+#
+# Two shapes are caught: an explicit `uses: actions/cache*`, and a
+# mise-action step without `cache: false` (its default is true — the
+# silent shape). Both are per-file heuristics, deliberately: the gate is
+# deterministic and this stays grep-shaped, like every belt lint.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "lint:cold-attested: no workflows, skipped"; exit 0
+}
+bad=""
+for f in .github/workflows/*.y*ml; do
+  grep -q "unattested-path:" "${f}" && continue
+  if grep -qE "^[^#]*uses:[[:space:]]*actions/cache" "${f}"; then
+    bad="${bad} ${f}(actions/cache)"
+    continue
+  fi
+  actions=$(grep -cE "^[^#]*uses:[[:space:]]*jdx/mise-action@" "${f}") || true
+  cold=$(grep -cE "^[^#]*cache:[[:space:]]*false" "${f}") || true
+  if ((actions > cold)); then
+    bad="${bad} ${f}(mise-action without cache: false)"
+  fi
+done
+if [[ -n "${bad}" ]]; then
+  echo "lint:cold-attested: cache on a path with no unattested-path marker:${bad}" >&2
+  echo "  attested paths build cold — a cache is an unattested input" >&2
+  echo "  (docs/release.md); if this workflow truly signs nothing, say why" >&2
+  echo "  with an 'unattested-path:' comment" >&2
+  exit 1
+fi
+echo "lint:cold-attested: ok"
+'''
+
 [tasks."coverage:check"]
 description = "Enforce the committed coverage floor (.coverage-floor); repos without one skip clean"
 dir = "{{cwd}}"
-# The other half of the lint:deny serialization: rustup is not
-# concurrency-safe, and on a cold runner this task's component add races
-# `test`'s toolchain driving (measured twice on the lab's v0.18.0
-# release PR — the first fix serialized only lint:deny and the race
-# moved here). The rust-driving chain is test -> coverage:check ->
-# lint:deny; wait_for adds nothing to the run.
-wait_for = [
-  { task = "test", optional = true },
-  { task = "build", optional = true },
-]
+# No task-time rustup, by rule: a component installed mid-run races
+# every other task driving the toolchain (measured twice on the lab's
+# v0.18.0 release PR; the wait_for chains that served as the workaround
+# are deleted, #117). llvm-tools is a declared build input like
+# cargo-auditable — pinned in the repo's mise.toml, installed before any
+# task runs — and this task asserts it with a remedy, never installs.
 # The ratchet: the floor is a committed number that only rises. A repo
 # without a floor has not adopted coverage yet and skips clean; a repo
 # with one cannot merge below it. Deterministic — the number is local,
@@ -682,7 +875,12 @@ if [[ ! "${floor}" =~ ^[0-9]+(\\.[0-9]+)?$ ]]; then
   echo "coverage:check: .coverage-floor is not a number: ${floor}" >&2
   exit 1
 fi
-rustup component add llvm-tools-preview 2> /dev/null || true
+if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
+  echo "coverage:check: llvm-tools component missing — declare it with the" >&2
+  echo "  rust pin in mise.toml: rust = { version = \\"1.xx.x\\", components = \\"llvm-tools\\" }" >&2
+  echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
+  exit 1
+fi
 cargo llvm-cov --workspace --locked --fail-under-lines "${floor}"
 echo "coverage:check: floor ${floor} held"
 """

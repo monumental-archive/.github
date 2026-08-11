@@ -41,7 +41,7 @@ permissions: {}
 jobs:
   mint:
     name: Deposit and publish the version DOI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read # download the release source tarball

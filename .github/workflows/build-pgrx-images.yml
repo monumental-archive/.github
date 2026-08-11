@@ -65,7 +65,7 @@ permissions: {}
 jobs:
   plan:
     name: Derive the image matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     outputs:
@@ -104,7 +104,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -270,7 +270,7 @@ jobs:
     name: Collect the signing matrix
     needs: [plan, image]
     if: ${{ !inputs.dry-run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions: {}
     outputs:

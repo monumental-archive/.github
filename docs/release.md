@@ -314,6 +314,24 @@ output is signed, and the evidence bundle — one checksum filename, one SBOM
 format, Sigstore bundles — attached to the release in the shape Scorecard's
 Signed-Releases check recognises.
 
+### The cold-build rule
+
+Caches are unattested, writable-from-any-branch inputs injected straight
+into the build — cache poisoning is the classic attack provenance does
+not capture. The rule (#117): **caches are permitted only where a human
+is waiting and nothing is signed**. Every path that signs or publishes
+builds cold; the runner image is a named pin (`ubuntu-24.04`, rolled by
+Renovate as a visible diff); the toolchain — components included — is
+fully installed before any task runs, which is also what retired the
+rustup-race serialization (`wait_for`) from the belt. `lint:cold-attested`
+enforces the rule mechanically: a workflow that uses a cache carries an
+`unattested-path:` marker saying why its path signs nothing, or it fails
+the gate. Base images are digest-pinned (`lint:from-digests`), org-
+approved before use (`base-attest.yml`; the pgrx build legs verify the
+approval and fail closed), and `audit:attestations` proves weekly that
+nothing published lacks its evidence set — the difference between "we
+attest" and "nothing ships unattested".
+
 ### The verdict beside the evidence
 
 Every claim the org signs beyond build provenance travels through the

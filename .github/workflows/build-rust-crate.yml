@@ -45,7 +45,7 @@ permissions: {}
 jobs:
   build:
     name: Package and prove the crates build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -146,7 +146,7 @@ jobs:
     # this and nothing else, so the shape of the run it rehearses is the
     # shape that will happen.
     if: ${{ !inputs.dry-run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Resolves against the CALLER's repository — measured. That is what
     # sets the OIDC `environment` claim, which crates.io can pin in the

@@ -16,6 +16,12 @@
 # assert their presence and fail with the remedy rather than installing
 # anything unpinned.
 #
+# No npm install on this path, by rule (#117): install-time lifecycle
+# scripts are npm's worst network-and-code-execution vector, and this
+# class never runs one — wasm-pack builds from cargo, pack/publish take
+# the tarball as-is. Any future step that must install node dependencies
+# on an attested path runs `npm ci --ignore-scripts` or does not land.
+#
 # npm mints its own provenance and publish attestations under trusted
 # publishing, naming the CALLER's workflow — a second, independent evidence
 # path beside the org's Sigstore identity (docs/slsa-reference.md: the two
@@ -68,7 +74,7 @@ permissions: {}
 jobs:
   build:
     name: Build, test and pack the wasm package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -205,7 +211,7 @@ jobs:
     # The only irreversible step in the class (npm unpublish closes after
     # 72 hours). A rehearsal skips exactly this and nothing else.
     if: ${{ !inputs.dry-run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Resolves against the CALLER's repository — measured. Sets the OIDC
     # `environment` claim npm can pin beside the caller's entry filename.
