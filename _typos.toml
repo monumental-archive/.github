@@ -4,6 +4,12 @@
 # only for jargon the dictionary cannot know about — not for spelling
 # preferences.
 
+[files]
+# Vendored SPDX identifiers, verbatim from spdx/license-list-data — ids
+# like CC-BY-ND and Unicode-TOU read as misspellings to the dictionary.
+# Data, not prose; regenerated, never edited.
+extend-exclude = ["release/spdx-license-data.json"]
+
 [default.extend-words]
 # in-toto's attestation bundles are named `<artifact>.intoto.jsonl`. That
 # filename is fixed by the in-toto spec and is what OpenSSF Scorecard's

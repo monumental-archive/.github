@@ -317,6 +317,30 @@ fi
 echo "audit:canon-pins: ${found} canon references, all at ${latest}"
 '''
 
+[tasks."audit:spdx-list"]
+description = "Warn when the vendored SPDX id list lags the published license list (scheduled, not the gate)"
+dir = "{{cwd}}"
+# The licence validation in release/resolve-oci-facts.sh checks ids
+# against release/spdx-license-data.json — vendored so the release path
+# stays offline and deterministic. Staleness fails closed (a brand-new id
+# is refused until the vendored list is refreshed), and this audit is what
+# turns that quiet lag into a red scheduled run. Guarded on the data file,
+# so it skips clean everywhere but canon. Network- and time-dependent, so
+# audit:*, never the gate.
+run = '''
+[[ -f release/spdx-license-data.json ]] || { echo "audit:spdx-list: no vendored list, skipped"; exit 0; }
+have=$(jq -r .version release/spdx-license-data.json)
+latest=$(git ls-remote --tags https://github.com/spdx/license-list-data "v[0-9]*" \
+  | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V | tail -1)
+[[ -n "${latest}" ]] || { echo "audit:spdx-list: upstream unreachable, skipped"; exit 0; }
+if [[ "${have}" != "${latest}" ]]; then
+  echo "audit:spdx-list: vendored ${have}, upstream ${latest}" >&2
+  echo "  regenerate release/spdx-license-data.json per its own regenerate field" >&2
+  exit 1
+fi
+echo "audit:spdx-list: vendored list is current (${have})"
+'''
+
 [tasks."lint:trivy"]
 description = "Misconfiguration + committed-secret scan (trivy)"
 dir = "{{cwd}}"

@@ -31,6 +31,23 @@ on:
         required: false
         type: string
         default: 14,15,16,17,18
+      facts:
+        description: >
+          The resolved facts map (JSON, org.opencontainers.image.* keys)
+          from the orchestrator's facts job — the same map every image
+          this release publishes carries. Applied as config labels and
+          index annotations; this workflow derives no metadata of its own.
+          (Its predecessor derived `created` from the only checkout it
+          has, which is canon — every published extension image carried a
+          .github commit's timestamp. Resolving in the caller's own guard
+          job makes that bug unwritable.)
+        required: true
+        type: string
+      source-epoch:
+        description: >
+          Committer epoch of the released commit, for SOURCE_DATE_EPOCH.
+        required: true
+        type: string
       dry-run:
         description: Rehearsal — assemble and prove locally, push nothing.
         required: false
@@ -141,26 +158,51 @@ jobs:
         id: push
         if: ${{ !inputs.dry-run }}
         env:
+          FACTS: ${{ inputs.facts }}
+          SOURCE_DATE_EPOCH: ${{ inputs.source-epoch }}
           GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.name.outputs.image }}
           UNTRUSTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # --annotation was silently ignored before buildx 0.12
+          # (docker/buildx#1965) — assert the floor rather than trust the
+          # runner image.
+          buildx_version=$(docker buildx version)
+          v=$(sed -nE '1s/^.*v?([0-9]+)\.([0-9]+)\.[0-9]+.*$/\1.\2/p' <<< "${buildx_version}")
+          pair=$(printf '%s\n%s' "0.12" "${v}")
+          ordered=$(sort -V <<< "${pair}")
+          floor=$(head -1 <<< "${ordered}")
+          if [[ -z "${v}" ]] || [[ "${floor}" != "0.12" ]]; then
+            echo "::error::buildx ${v:-unknown} < 0.12: index annotations would be dropped silently"
+            exit 1
+          fi
           printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          epoch=$(git log -1 --pretty=%ct)
-          created=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)
+          # Labels for both per-arch configs, annotations for the index —
+          # one map, generated the same way at every surface. This path
+          # produces its index in the single build below, so the index:
+          # annotations enter here rather than at an imagetools create.
+          pairs=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${FACTS}")
+          LABELS=()
+          while IFS= read -r kv; do LABELS+=(--label "${kv}"); done <<< "${pairs}"
+          ANNOS=()
+          while IFS= read -r kv; do ANNOS+=(--annotation "index:${kv}"); done <<< "${pairs}"
           # One build, both platforms: FROM scratch runs nothing, so no
           # emulation is involved and the native-hardware rule is not in
           # play — there is no hardware behaviour to prove.
+          #
+          # oci-mediatypes=true: the exporter default is false and a
+          # Docker manifest list has no annotations field to carry the
+          # map (docker/buildx#1965) — the assert step downstream proves
+          # the published index is OCI.
           docker buildx build \
             --file docker/pgrx-artifact.Dockerfile \
             --platform linux/amd64,linux/arm64 \
-            --build-arg PG="${PG}" \
-            --build-arg VERSION="${UNTRUSTED_VERSION}" \
-            --build-arg REVISION="${GITHUB_SHA}" \
-            --build-arg CREATED="${created}" \
+            "${LABELS[@]}" \
+            "${ANNOS[@]}" \
             --tag "${IMAGE}:${UNTRUSTED_VERSION}-pg${PG}-artifact" \
-            --push --metadata-file /tmp/meta.json \
+            --output type=image,push=true,oci-mediatypes=true \
+            --metadata-file /tmp/meta.json \
             .
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
           if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -205,6 +247,20 @@ jobs:
               psql -c \"CREATE EXTENSION ${ext};\"
             "
           '
+
+      - name: Assert the published metadata equals the facts
+        if: ${{ !inputs.dry-run }}
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          FACTS: ${{ inputs.facts }}
+        # Same proof as the oci-image class, at this class's own pull-back
+        # point: OCI index, annotations and every per-arch config's labels
+        # all EQUAL the one map.
+        run: |
+          set -euo pipefail
+          DIGEST=$(jq -r .digest "/tmp/digests/pg${PG}.json")
+          export DIGEST
+          release/assert-image-facts.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.dry-run }}

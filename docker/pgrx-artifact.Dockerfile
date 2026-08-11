@@ -19,10 +19,6 @@
 FROM scratch
 
 ARG TARGETARCH
-ARG PG
-ARG VERSION
-ARG REVISION
-ARG CREATED
 
 COPY staged/${TARGETARCH}/pkgroot/ /
 COPY staged/${TARGETARCH}/cnpgroot/ /
@@ -33,8 +29,8 @@ COPY staged/${TARGETARCH}/cnpgroot/ /
 # cannot exist without an executable — see .trivyignore.)
 USER 65534:65534
 
-LABEL org.opencontainers.image.title="pgrx extension artifact (pg${PG})" \
-  org.opencontainers.image.description="Extension files alone, from the attested release tarballs, in both the Debian and CloudNativePG layouts" \
-  org.opencontainers.image.version=${VERSION} \
-  org.opencontainers.image.revision=${REVISION} \
-  org.opencontainers.image.created=${CREATED}
+# Deliberately no LABEL: metadata comes as --label/--annotation from the
+# release's one resolved facts map (docs/release.md, "Image metadata: one
+# map"). A LABEL here would be a second mechanism for the same facts —
+# and whether a --label overrides a same-key Dockerfile LABEL is not
+# specified behaviour to rely on.

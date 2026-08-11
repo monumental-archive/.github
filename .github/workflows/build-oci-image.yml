@@ -51,6 +51,26 @@ on:
         required: false
         type: string
         default: ""
+      facts:
+        description: >
+          The resolved facts map (JSON, org.opencontainers.image.* keys)
+          from the orchestrator's facts job. Builds consume it — as config
+          labels on every per-arch image and annotations on the index —
+          and derive nothing themselves. Both build invocations below take
+          the SAME label set from it: a label changes the config digest
+          while every layer stays identical, so a drifted set would
+          publish an image that was never smoked.
+        required: true
+        type: string
+      source-epoch:
+        description: >
+          Committer epoch of the released commit, resolved beside the
+          facts. Exported as SOURCE_DATE_EPOCH, which BuildKit propagates
+          into the config and index `created` fields — so the one
+          wall-clock value this build could otherwise publish beside a
+          commit-pinned one is unwritable, not merely avoided.
+        required: true
+        type: string
       dry-run:
         description: Rehearsal — build and prove, push nothing.
         required: false
@@ -117,16 +137,24 @@ jobs:
       - name: Build for testing, loaded and unpublished
         env:
           ARCH: ${{ matrix.arch }}
+          FACTS: ${{ inputs.facts }}
+          SOURCE_DATE_EPOCH: ${{ inputs.source-epoch }}
           UNTRUSTED_CONTEXT: ${{ inputs.context }}
           UNTRUSTED_DOCKERFILE: ${{ inputs.dockerfile }}
         run: |
           set -euo pipefail
+          # The SAME labels as the push below, from the same map: labels
+          # are part of the config the smoke test runs against.
+          pairs=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${FACTS}")
+          LABELS=()
+          while IFS= read -r kv; do LABELS+=(--label "${kv}"); done <<< "${pairs}"
           # No --platform: the runner IS the target architecture, so the
           # default native build is the guarantee that no emulation crept
           # in. --load puts it in the local daemon, where it can be tested
           # and cannot be pulled by anyone.
           docker buildx build \
             --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
+            "${LABELS[@]}" \
             --load --tag "oci-under-test:${ARCH}" \
             "${UNTRUSTED_CONTEXT}"
 
@@ -148,12 +176,17 @@ jobs:
         if: ${{ !inputs.dry-run }}
         env:
           ARCH: ${{ matrix.arch }}
+          FACTS: ${{ inputs.facts }}
+          SOURCE_DATE_EPOCH: ${{ inputs.source-epoch }}
           GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.name.outputs.image }}
           UNTRUSTED_CONTEXT: ${{ inputs.context }}
           UNTRUSTED_DOCKERFILE: ${{ inputs.dockerfile }}
         run: |
           set -euo pipefail
+          pairs=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${FACTS}")
+          LABELS=()
+          while IFS= read -r kv; do LABELS+=(--label "${kv}"); done <<< "${pairs}"
           printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
           # push-by-digest: no tag yet. A tag would make the untested
           # per-architecture image pullable by name before the manifest
@@ -166,9 +199,18 @@ jobs:
           # the two inside one command substitution would hand the exit
           # status to jq and mask a failed build entirely, and silencing
           # the build would throw away the log needed to explain it.
+          #
+          # oci-mediatypes=true is load-bearing, not cosmetic: the exporter
+          # default is false, a Docker-mediatype manifest makes imagetools
+          # create assemble a Docker manifest list, and that format has no
+          # annotations field — buildx drops index annotations SILENTLY
+          # (docker/buildx#1965). The assert step downstream proves the
+          # published index is OCI precisely because this is the failure
+          # mode that looks exactly like success.
           docker buildx build \
             --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
-            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            "${LABELS[@]}" \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true" \
             --metadata-file /tmp/meta.json \
             "${UNTRUSTED_CONTEXT}"
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
@@ -240,10 +282,23 @@ jobs:
       - name: Assemble the manifest list
         id: assemble
         env:
+          FACTS: ${{ inputs.facts }}
           GH_TOKEN: ${{ github.token }}
           UNTRUSTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # imagetools create silently ignored --annotation before buildx
+          # 0.12 (docker/buildx#1965) — assert the floor rather than trust
+          # the runner image.
+          buildx_version=$(docker buildx version)
+          v=$(sed -nE '1s/^.*v?([0-9]+)\.([0-9]+)\.[0-9]+.*$/\1.\2/p' <<< "${buildx_version}")
+          pair=$(printf '%s\n%s' "0.12" "${v}")
+          ordered=$(sort -V <<< "${pair}")
+          floor=$(head -1 <<< "${ordered}")
+          if [[ -z "${v}" ]] || [[ "${floor}" != "0.12" ]]; then
+            echo "::error::buildx ${v:-unknown} < 0.12: index annotations would be dropped silently"
+            exit 1
+          fi
           image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           AMD=$(cat digests/amd64 2>/dev/null || echo "")
           ARM=$(cat digests/arm64 2>/dev/null || echo "")
@@ -253,8 +308,14 @@ jobs:
               exit 1
             fi
           done
+          # The index gets the same map as annotations. The key set exists
+          # once, in the resolver: this step never names a key.
+          pairs=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${FACTS}")
+          ANNOS=()
+          while IFS= read -r kv; do ANNOS+=(--annotation "index:${kv}"); done <<< "${pairs}"
           printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
           docker buildx imagetools create \
+            "${ANNOS[@]}" \
             --tag "${image}:${UNTRUSTED_VERSION}" \
             "${image}@${AMD}" "${image}@${ARM}"
           index=$(docker buildx imagetools inspect "${image}:${UNTRUSTED_VERSION}" \
@@ -279,6 +340,17 @@ jobs:
           # point is to prove the exact bytes that were published.
           docker pull "${IMAGE}@${INDEX}"
           "${UNTRUSTED_SMOKE}" "${IMAGE}@${INDEX}"
+
+      - name: Assert the published metadata equals the facts
+        env:
+          IMAGE: ${{ steps.assemble.outputs.image }}
+          DIGEST: ${{ steps.assemble.outputs.digest }}
+          FACTS: ${{ inputs.facts }}
+        # At the pull-back point, like every other proof: the index media
+        # type is OCI, its annotations EQUAL the map, and every per-arch
+        # config's labels equal it too — equality, not presence, because
+        # presence lets a wrong revision through.
+        run: .org-toolbelt/release/assert-image-facts.sh
 
       - name: Scan the published image, report-only
         env:

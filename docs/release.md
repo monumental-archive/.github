@@ -355,6 +355,85 @@ stranger will pull, never of a local twin.
 Both rules were arrived at independently in three repositories before
 being promoted here.
 
+### Image metadata: one map, resolved once
+
+Every image the org publishes carries the `org.opencontainers.image.*`
+facts as config labels on each per-architecture image and as annotations
+on the index. The rule that makes them trustworthy: **every fact is
+resolved once, before anything builds, and builds consume the map without
+deriving anything** (`release/resolve-oci-facts.sh`, run by the `facts`
+job in `publish.yml` and `continuous.yml`). A per-build derivation is a
+drift surface, and a late derivation is a late failure — the predecessor
+of this design stamped every extension image's `created` with a canon
+commit's timestamp, because the deriving job's only checkout was canon.
+Under this design that bug is unwritable.
+
+Facts derive from exactly three sources — the guard-proven ref, in-tree
+metadata at that commit, and the GitHub API's view of the repository —
+and split into two kinds:
+
+- **Provenance** — never caller inputs, validated, fail-closed:
+  - `revision`: the full 40-hex SHA the tag points at.
+  - `version`: the guard's own output; the continuous archetype's map
+    simply never contains it.
+  - `source`: `server_url/repository`, verbatim case, no trailing slash,
+    no `.git` — one canonical rendering.
+  - `created`: the released commit's committer time, RFC 3339 UTC — the
+    same instant is exported as `SOURCE_DATE_EPOCH`, which BuildKit
+    propagates into the config and index `created` fields, so every
+    timestamp surface is a function of one resolved value and none is
+    wall clock.
+  - `licenses`: **precedence chooses which declaration speaks; SPDX
+    validation makes speaking safe.** `[workspace.package].license`,
+    else `[package].license`, read with taplo, never grep; a repository
+    with no manifest falls to `GET /repos/{o}/{r}/license?ref=<sha>` —
+    Licensee reading the actual LICENSE file. The tiers are deliberately
+    *not* cross-checked against each other: the manifest field is the
+    author's declaration and the API is a lossy heuristic that flattens
+    `MIT OR Apache-2.0` to a single id, so they are not independent
+    statements of one fact. Every expression must satisfy the SPDX
+    grammar AND every id must appear in the vendored list
+    (`release/spdx-license-data.json`, refreshed on `audit:spdx-list`'s
+    alarm). `LicenseRef-*` (dangles outside an SPDX document),
+    `NOASSERTION`, `NONE` and the legacy `/` syntax are refused.
+    Ecosystems beyond Cargo are unbuilt branches of this contract, added
+    at the manifest-read only, when a real repository needs one — the
+    version-source rule applied to licences.
+- **Editorial** — `title` and `description`: caller inputs
+  (`image-title`/`image-description`), defaulting to the repository's
+  name and description, **omitted when absent** rather than emitted
+  empty. Registry UI garnish; machinery to prevent a wrong one buys
+  nothing.
+
+Where a manifest declares `repository`, it must **equal** `source` —
+those two *are* independent statements of one fact, npm trusted
+publishing already dies on their mismatch at publish time (after images
+are pushed), and a transferred repository's stale field is exactly what
+this converts into a five-second failure with the remedy named.
+
+An empty value is a failure, never a fact: a present-but-empty
+annotation reads as set, which is worse than absent. That is
+deliberately stricter than the OCI spec, which permits empty values.
+
+Two properties belong to the remote object and stay checks rather than
+construction. The per-arch push exporter sets `oci-mediatypes=true`
+because the default is `false`, a Docker-mediatype manifest makes
+`imagetools create` assemble a Docker manifest list, and that format has
+no annotations field — buildx drops index annotations **silently**
+(docker/buildx#1965; the flag also predicates a buildx ≥ 0.12 floor,
+asserted rather than assumed). So `release/assert-image-facts.sh` runs
+at the existing pull-back points and asserts, of the published bytes by
+digest: the index media type is OCI, the index annotations **equal** the
+map, and every per-arch config's labels equal it too. Equality, not
+presence — presence lets a wrong `revision` through, which is worse than
+a missing one.
+
+The artifact Dockerfile carries no `LABEL`s, deliberately: a `LABEL`
+would be a second mechanism for the same facts, and whether a `--label`
+overrides a same-key Dockerfile `LABEL` is unspecified CLI behaviour.
+One map, generated identically at every surface; adding a key is a line
+in the resolver, not an edit in three workflows.
+
 ### The source archive is an artifact class like any other
 
 `source-archive` is for repositories whose deliverable is their own
