@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.7.1](https://github.com/monumental-archive/.github/compare/v1.7.0...v1.7.1) - 2026-08-11
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.7.0 ([#192](https://github.com/monumental-archive/.github/pull/192))
+
+### Fixed
+
+- pin mise itself on the build legs — the installer is a build input ([#191](https://github.com/monumental-archive/.github/pull/191))
+
 ## [1.7.0](https://github.com/monumental-archive/.github/compare/v1.6.0...v1.7.0) - 2026-08-11
 
 ### Added
