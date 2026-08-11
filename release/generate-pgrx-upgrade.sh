@@ -156,6 +156,14 @@ for control in "${controls[@]}"; do
   build_image=$(jq -r --arg pg "${pg}" '.build[$pg]' <<< "${mapping}")
 
   work=$(mktemp -d)
+  # mktemp -d is 0700 owned by the runner, and this directory is mounted
+  # into the containers as /work. Both inner scripts drop to `postgres`
+  # (pgrx refuses to run as root), and that user cannot traverse 0700 —
+  # bash then reports "Permission denied" for a file it can otherwise
+  # read, and the step dies with a bare exit 126. Chowning inside the
+  # container is not an option for the proof pass, which mounts /work
+  # read-only, so the traversal bit is set here, once, on the host.
+  chmod 755 "${work}"
   mkdir -p "${work}/prevroot" "${work}/out"
 
   echo "deriving ${name}: ${prev} -> ${VERSION} (pg${pg})"
