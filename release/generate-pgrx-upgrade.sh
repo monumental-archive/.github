@@ -617,6 +617,15 @@ EOSH
     files_out="${files_out} ${data_fragment}"
   fi
 
+  # The build container chowns /work/out to postgres, so its files — and
+  # the directories holding them — come back owned by a container uid the
+  # runner cannot write to, and a plain rm -rf dies with Permission denied
+  # AFTER the upgrade script has already been derived, proven and copied.
+  # Hand ownership back from inside the same image (already pulled, so no
+  # extra network) rather than reaching for sudo, which this script should
+  # not need and would not have outside a runner.
+  docker run --rm --volume "${work}:/work" "${build_image}" \
+    chown -R "$(id -u):$(id -g)" /work
   rm -rf "${work}"
 done
 
