@@ -5,8 +5,12 @@
 #       uses: monumental-archive/.github/.github/workflows/ci.yml@<sha> # vX.Y.Z
 #
 # One SHA pins this file, the toolbelt, and its lockfile atomically: the
-# toolbelt checkout below rides github.job_workflow_sha, the exact ref the
-# caller pinned. No inputs, by design — zero caller-controlled expansion.
+# toolbelt checkout below carries the canon tag as a literal, stamped into
+# its canon-pin line by the release commit — so the file and the tree it
+# clones are the same release by construction. (It was previously
+# github.job_workflow_sha, which evaluated empty at runtime and silently
+# cloned main; #158.) No inputs, by design — zero caller-controlled
+# expansion.
 name: ci
 
 on:
@@ -42,11 +46,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check out org toolbelt (same SHA the caller pinned)
+      - name: Check out org toolbelt (the ref the caller pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
           path: .org-toolbelt
           persist-credentials: false
 
@@ -79,11 +83,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out org toolbelt (same SHA the caller pinned)
+      - name: Check out org toolbelt (the ref the caller pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
           path: .org-toolbelt
           persist-credentials: false
 

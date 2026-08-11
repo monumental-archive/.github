@@ -70,10 +70,14 @@ jobs:
         env:
           UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
           UNTRUSTED_VERSION: ${{ inputs.version }}
-          # The SHA the caller pinned — which pins this file, the
-          # orchestrator, the builders, the verifier and the toolbelt
-          # atomically. That is the policy the verdict names.
-          POLICY_SHA: ${{ github.job_workflow_sha }}
+          # The ref the caller pinned — the canon tag stamped into this
+          # line at release time, or the released commit itself when the
+          # canon self-publishes. Either way it names the exact canon
+          # tree — workflows, scripts, toolbelt — that rendered this
+          # verdict, which is what a VSA's policy URI is for. Stamped,
+          # not resolved at runtime: github.job_workflow_sha evaluated
+          # empty and the URI shipped as a bare .../tree/ (#158).
+          POLICY_REF: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
         run: |
           set -euo pipefail
 
@@ -104,6 +108,15 @@ jobs:
             exit 1
           fi
 
+          # The v0.16.3 VSA shipped a bare .../tree/ because the ref
+          # expression came back empty (#158). The pin is stamped now,
+          # but a signed verdict naming no policy must never recur —
+          # refuse rather than render.
+          if [[ -z "${POLICY_REF}" ]]; then
+            echo "::error::POLICY_REF is empty — refusing to sign a verdict with no policy"
+            exit 1
+          fi
+
           # jq --arg does all quoting: nothing caller-controlled is
           # spliced into JSON by hand. Field set is VSA v1 minimum plus
           # nothing speculative; grow it when a consumer needs a field,
@@ -113,7 +126,7 @@ jobs:
             --arg verifier "https://github.com/monumental-archive/.github/.github/workflows/verify-published.yml" \
             --arg time "${now}" \
             --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
-            --arg policy "https://github.com/monumental-archive/.github/tree/${POLICY_SHA}" \
+            --arg policy "https://github.com/monumental-archive/.github/tree/${POLICY_REF}" \
             '{
               verifier: { id: $verifier },
               timeVerified: $time,

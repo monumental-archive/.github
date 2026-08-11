@@ -100,11 +100,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check out release canon (same SHA the caller pinned)
+      - name: Check out release canon (the ref the caller pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: monumental-archive/.github
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
           path: .org-canon
           persist-credentials: false
 
