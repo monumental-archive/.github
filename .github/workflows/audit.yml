@@ -203,6 +203,12 @@ jobs:
   baseline-drift:
     name: audit / repo settings drift
     runs-on: ubuntu-24.04
+    # The secret lives in this environment, not repo-wide: an org-admin
+    # token referenced ambiently is drawable by any job anyone adds to
+    # any workflow here; scoped to the environment, only jobs that
+    # declare it are ever issued the secret (zizmor secrets-outside-env,
+    # the audit persona's one standing finding).
+    environment: audit
     permissions:
       contents: read
     env:
@@ -210,8 +216,8 @@ jobs:
       # AUDIT_TOKEN is a fine-grained PAT (all org repos, Administration:
       # read AND write — the merge-settings fields in GET /repos are only
       # returned to push/admin-capable identities, and the fine-grained
-      # read-only grant does not qualify; verified empirically 2026-08-09).
-      # Write also enables a future self-healing `apply` job.
+      # read-only grant does not qualify; verified empirically 2026-08-09
+      # — plus Packages: read for the org-packages visibility check).
       GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
     steps:
       - name: Check out repository
