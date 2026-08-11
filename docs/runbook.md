@@ -143,8 +143,13 @@ gh attestation verify <artifact> --owner monumental-archive \
 ```
 
 - The verification verdict (artifact VSA): same command plus
-  `--predicate-type https://slsa.dev/verification_summary/v1` — gate on
-  `verificationResult: PASSED` and `verifiedLevels` instead of
+  `--predicate-type https://slsa.dev/verification_summary/v1` **and**
+  `--bundle attestations-vsa-<class>.intoto.jsonl` from the release — the
+  VSA lives in its own bundle, not in `attestations-<class>.intoto.jsonl`.
+  The bundle is required: GitHub's attestations API rejects that
+  predicate type as a query filter (`HTTP 422: invalid predicate type`,
+  measured on v0.16.3) even though the attestation is present in the API.
+  Gate on `verificationResult: PASSED` and `verifiedLevels` instead of
   re-deriving the policy yourself. Absent on dry-run releases, by design.
 - Images: same command with `oci://<image>@<digest>` (the **index**
   digest — per-arch digests are not covered).
