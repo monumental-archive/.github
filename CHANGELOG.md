@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.5.1](https://github.com/monumental-archive/.github/compare/v1.5.0...v1.5.1) - 2026-08-11
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.5.0 ([#176](https://github.com/monumental-archive/.github/pull/176))
+
+### Fixed
+
+- restore the executable bit on collect-vex.sh, and gate script modes ([#174](https://github.com/monumental-archive/.github/pull/174))
+
 ## [1.5.0](https://github.com/monumental-archive/.github/compare/v1.4.1...v1.5.0) - 2026-08-11
 
 ### Added
