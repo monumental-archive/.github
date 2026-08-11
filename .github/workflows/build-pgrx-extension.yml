@@ -77,12 +77,8 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Check out org canon (the ref the caller pinned)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: monumental-archive/.github
-          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
-          persist-credentials: false
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
 
       - name: Derive the matrix
         id: plan
@@ -92,7 +88,7 @@ jobs:
           set -euo pipefail
           mapping=$(python3 -c '
           import json, sys, tomllib
-          with open("docker/pgrx-base-images.toml", "rb") as f:
+          with open(".org-canon/docker/pgrx-base-images.toml", "rb") as f:
               t = tomllib.load(f)
           print(json.dumps(t))
           ')

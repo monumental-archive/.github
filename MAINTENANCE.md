@@ -35,10 +35,10 @@ and this repository's own gate plumbing (`gate.yml`, `self-release.yml`,
 ## What a release means
 
 Every tag `vX.Y.Z` versions all of the above at one SHA — the SHA the
-caller's `uses:` pin resolves, and the tag the workflows' stamped
-`# canon-pin` checkouts clone (#158) — so workflow, toolbelt and
-lockfile move atomically. Consumers reference it three ways, all carrying
-the same version: workflow pins (`@<sha> # vX.Y.Z`), the lefthook remote
-(`ref: vX.Y.Z`), and the preset
+caller's `uses:` pin resolves, and the same resolution delivers the
+canon tree to every job via `$/.github/actions/canon` (#165) — so
+workflow, toolbelt and lockfile move atomically. Consumers reference it
+three ways, all carrying the same version: workflow pins
+(`@<sha> # vX.Y.Z`), the lefthook remote (`ref: vX.Y.Z`), and the preset
 (`github>monumental-archive/.github#vX.Y.Z`). Renovate fans each tag out
 to every consumer (see #133).

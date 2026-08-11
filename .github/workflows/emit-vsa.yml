@@ -65,19 +65,22 @@ jobs:
     outputs:
       predicate: ${{ steps.vsa.outputs.predicate }}
     steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        id: canon
+        uses: $/.github/actions/canon
+
       - name: Build the predicate from the verified results
         id: vsa
         env:
           UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
           UNTRUSTED_VERSION: ${{ inputs.version }}
-          # The ref the caller pinned — the canon tag stamped into this
-          # line at release time, or the released commit itself when the
-          # canon self-publishes. Either way it names the exact canon
-          # tree — workflows, scripts, toolbelt — that rendered this
-          # verdict, which is what a VSA's policy URI is for. Stamped,
-          # not resolved at runtime: github.job_workflow_sha evaluated
-          # empty and the URI shipped as a bare .../tree/ (#158).
-          POLICY_REF: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
+          # The ref the caller pinned, read from the same $/ resolution
+          # that fetched this workflow — it names the exact canon tree
+          # (workflows, scripts, toolbelt) that rendered this verdict,
+          # which is what a VSA's policy URI is for. Never re-derived:
+          # the two prior carriers disagreed with the resolution or
+          # could not be written at all (#158, #165).
+          POLICY_REF: ${{ steps.canon.outputs.ref }}
         run: |
           set -euo pipefail
 
@@ -109,9 +112,9 @@ jobs:
           fi
 
           # The v0.16.3 VSA shipped a bare .../tree/ because the ref
-          # expression came back empty (#158). The pin is stamped now,
-          # but a signed verdict naming no policy must never recur —
-          # refuse rather than render.
+          # expression came back empty (#158). The carrier is the $/
+          # resolution now, but a signed verdict naming no policy must
+          # never recur — refuse rather than render.
           if [[ -z "${POLICY_REF}" ]]; then
             echo "::error::POLICY_REF is empty — refusing to sign a verdict with no policy"
             exit 1

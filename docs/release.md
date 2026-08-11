@@ -61,12 +61,13 @@ The machinery is shared: callers pin
 machinery, called locally
 ([`self-release.yml`](../.github/workflows/self-release.yml), the gate.yml
 pattern): a repository cannot SHA-pin itself without being permanently one
-commit behind, and a local `uses:` means the canon checkouts take the
-`github.sha` arm of their `# canon-pin` conditional — the released commit
-itself — so the atomic pin holds by construction. (For remote callers the
-same lines carry the canon tag as a literal, stamped by the release
-commit; the runtime context this used to ride, `github.job_workflow_sha`,
-evaluated empty and silently cloned main — #158.) Canon tags
+commit behind, and under a local `uses:` the canon tree arrives via
+`$/.github/actions/canon` at the released commit itself — so the atomic
+pin holds by construction. (For remote callers the same `$/` resolution
+delivers the tree at the caller's pinned ref; the two earlier carriers —
+the `github.job_workflow_sha` context, which evaluated empty and silently
+cloned main, and a release-time stamp the tag-mint App could not commit —
+are #158 and #165.) Canon tags
 are what consumers pin (`@<sha> # vX.Y.Z` — the comment is what Renovate's
 `github-actions` manager reads and rewrites together with the SHA), what
 the lefthook remote refs (`ref: vX.Y.Z`), and what the shared preset

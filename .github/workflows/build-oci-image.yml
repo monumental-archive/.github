@@ -249,20 +249,15 @@ jobs:
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-toolbelt/mise/config.toml
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Check out org toolbelt (the ref the caller pinned)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: monumental-archive/.github
-          ref: ${{ github.repository == 'monumental-archive/.github' && github.sha || 'v1.4.0' }} # canon-pin
-          path: .org-toolbelt
-          persist-credentials: false
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
 
       - name: Install mise and the pinned toolchain
         # trivy comes from the belt. Without this the scan step dies as
@@ -350,7 +345,7 @@ jobs:
         # type is OCI, its annotations EQUAL the map, and every per-arch
         # config's labels equal it too — equality, not presence, because
         # presence lets a wrong revision through.
-        run: .org-toolbelt/release/assert-image-facts.sh
+        run: .org-canon/release/assert-image-facts.sh
 
       - name: Scan the published image, report-only
         env:

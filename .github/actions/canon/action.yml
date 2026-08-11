@@ -1,0 +1,59 @@
+# The one way canon content reaches a job. Referenced only as
+# `uses: $/.github/actions/canon` — GitHub's self-repository syntax
+# resolves it against the repository that owns the running workflow, at
+# the ref the caller's `uses:` pin already resolved. The same resolution
+# that fetched the workflow file fetches this tree, so there is no
+# second derivation that can disagree (#165; the two prior carriers —
+# github.job_workflow_sha, which evaluated empty at runtime (#158), and
+# release-time stamping, which the tag-mint App cannot commit (#164) —
+# were both re-derivations of an answer the runner already had).
+#
+# Requires runner >= 2.336.0 ($/ shipped 2026-07-30). A rollback fails
+# loudly at workflow parse, in canon's own gate first.
+name: canon
+description: >-
+  Link the canon tree this run resolved to .org-canon and name the
+  resolved ref
+outputs:
+  ref:
+    description: >-
+      The canon ref this run resolved — the caller's pin (tag or SHA)
+      for remote calls, the running commit when the canon calls itself
+    value: ${{ steps.resolve.outputs.ref }}
+  path:
+    description: Workspace path of the canon tree
+    value: ${{ github.workspace }}/.org-canon
+runs:
+  using: composite
+  steps:
+    - name: Link the resolved canon tree
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
+        case "${root}" in
+          */_actions/monumental-archive/.github/*)
+            # Remote resolution: the path segment under _actions is the
+            # ref the caller pinned, verbatim.
+            ref="$(basename "${root}")"
+            ;;
+          *)
+            # Local resolution: the canon running itself, where the tree
+            # is the running commit by definition. Anything else here is
+            # a resolution shape this action does not understand —
+            # refuse rather than guess.
+            if [[ "${GITHUB_REPOSITORY}" != "monumental-archive/.github" ]]; then
+              echo "::error::canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon self-call"
+              exit 1
+            fi
+            ref="${GITHUB_SHA}"
+            ;;
+        esac
+        if [[ ! -f "${root}/mise/config.toml" ]]; then
+          echo "::error::resolved canon tree at '${root}' has no mise/config.toml — not a canon tree"
+          exit 1
+        fi
+        ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
+        echo "canon resolved: ${ref} at ${root}"
+        echo "ref=${ref}" >> "${GITHUB_OUTPUT}"

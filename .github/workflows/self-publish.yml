@@ -2,10 +2,10 @@
 # the same pipeline as every other versioned repository — build the
 # source-archive class, sign it through the one signer, attach the
 # evidence bundle, publish the release on proof. Local `uses:`, like
-# self-release.yml: the canon checkouts take the `github.sha` arm of
-# their canon-pin conditional (caller == canon), which for a tag push is
-# the released commit — so the orchestrator, the build workflow and the
-# toolbelt are pinned by the tag itself (#158).
+# self-release.yml: the canon tree arrives via `$/.github/actions/canon`,
+# which for a local call resolves to the very commit running — for a tag
+# push, the released commit — so the orchestrator, the build workflow and
+# the toolbelt are pinned by the tag itself (#165).
 #
 # This file is NOT named publish.yml because in this repository that name
 # belongs to the orchestrator. The publish.yml-filename rule exists for
