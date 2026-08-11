@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.5.3](https://github.com/monumental-archive/.github/compare/v1.5.2...v1.5.3) - 2026-08-11
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.5.2 ([#181](https://github.com/monumental-archive/.github/pull/181))
+
+### Fixed
+
+- reach assert-image-facts through the canon tree in the pgrx image cells ([#180](https://github.com/monumental-archive/.github/pull/180))
+
 ## [1.5.2](https://github.com/monumental-archive/.github/compare/v1.5.1...v1.5.2) - 2026-08-11
 
 ### Fixed
