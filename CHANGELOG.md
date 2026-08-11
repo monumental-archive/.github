@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.4.1](https://github.com/monumental-archive/.github/compare/v1.4.0...v1.4.1) - 2026-08-11
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.4.0 ([#161](https://github.com/monumental-archive/.github/pull/161))
+
+### Documentation
+
+- correct two image-metadata claims the lab disproved ([#159](https://github.com/monumental-archive/.github/pull/159))
+- state the direction and the slsa ceiling ([#162](https://github.com/monumental-archive/.github/pull/162))
+- correct the vsa stranger one-liner to the bundle form ([#163](https://github.com/monumental-archive/.github/pull/163))
+
+### Fixed
+
+- stamp the canon pin as a literal the release commit writes ([#164](https://github.com/monumental-archive/.github/pull/164))
+- consume the canon through $/ self-repository resolution ([#167](https://github.com/monumental-archive/.github/pull/167))
+
 ## [1.4.0](https://github.com/monumental-archive/.github/compare/v1.3.2...v1.4.0) - 2026-08-11
 
 ### Added
