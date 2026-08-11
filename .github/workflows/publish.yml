@@ -90,6 +90,24 @@ on:
         required: false
         type: string
         default: ""
+      image-title:
+        description: >
+          org.opencontainers.image.title, for the image classes. Editorial
+          only — registry UI garnish. Defaults to the repository name.
+          Provenance facts (source, revision, version, created, licenses)
+          are never inputs: they are resolved and validated by the facts
+          job before anything builds.
+        required: false
+        type: string
+        default: ""
+      image-description:
+        description: >
+          org.opencontainers.image.description, for the image classes.
+          Editorial only; defaults to the repository description, and is
+          omitted when neither exists.
+        required: false
+        type: string
+        default: ""
       binary-targets:
         description: >
           Target subset for the rust-binary class; defaults to the canon
@@ -221,6 +239,63 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
 
+  # Every fact the image classes will assert — OCI annotations and config
+  # labels — is resolved HERE, once, before anything is built, and the
+  # builds consume the map without deriving anything. One resolution per
+  # release also means a repository shipping several image classes cannot
+  # disagree with itself about revision, licence or created. The guard
+  # stays `permissions: {}` and untouched: this is its own job precisely
+  # so that resolving facts (which needs a checkout and a token) never
+  # contaminates the job whose identity is "nothing runs until it passes".
+  # It executes no caller code — it reads the caller's tree, and failing
+  # here costs five seconds instead of forty minutes of built images.
+  facts:
+    name: Resolve the image facts
+    needs: guard
+    if: contains(inputs.classes, 'oci-image') || contains(inputs.classes, 'pgrx-extension')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      facts: ${{ steps.resolve.outputs.facts }}
+      epoch: ${{ steps.resolve.outputs.epoch }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository at the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out release canon (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-canon
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        # taplo comes from the belt: the licence and repository fields are
+        # read with a TOML parser, never grep. No tool cache in a job
+        # whose output every image build consumes.
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+
+      - name: Resolve and validate the facts
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHETYPE: versioned
+          VERSION: ${{ needs.guard.outputs.version }}
+          IMAGE_TITLE: ${{ inputs.image-title }}
+          IMAGE_DESCRIPTION: ${{ inputs.image-description }}
+        run: .org-canon/release/resolve-oci-facts.sh
+
   build:
     name: Build
     needs: guard
@@ -242,7 +317,7 @@ jobs:
 
   build-oci:
     name: Build image
-    needs: guard
+    needs: [guard, facts]
     if: contains(inputs.classes, 'oci-image')
     uses: ./.github/workflows/build-oci-image.yml
     permissions:
@@ -254,6 +329,8 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
+      facts: ${{ needs.facts.outputs.facts }}
+      source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
 
   # An image subject is a different shape from a file one, and sign.yml
@@ -496,7 +573,7 @@ jobs:
   # signature under the same identity.
   build-extension-images:
     name: Build extension images
-    needs: [guard, build-extension]
+    needs: [guard, build-extension, facts]
     if: contains(inputs.classes, 'pgrx-extension')
     uses: ./.github/workflows/build-pgrx-images.yml
     permissions:
@@ -507,6 +584,8 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
       crate-dir: ${{ inputs.extension-crate-dir }}
       pg-majors: ${{ inputs.pg-majors }}
+      facts: ${{ needs.facts.outputs.facts }}
+      source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
 
   sign-extension-images:

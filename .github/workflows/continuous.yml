@@ -41,6 +41,20 @@ on:
         required: false
         type: string
         default: ""
+      image-title:
+        description: >
+          org.opencontainers.image.title — editorial only, defaults to the
+          repository name. Provenance facts are resolved, never inputs.
+        required: false
+        type: string
+        default: ""
+      image-description:
+        description: >
+          org.opencontainers.image.description — editorial only, defaults
+          to the repository description, omitted when neither exists.
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -63,9 +77,55 @@ jobs:
           fi
           echo "::notice::continuous publish from ${GITHUB_REF}"
 
+  # Same resolver, same rules as the versioned facts job in publish.yml —
+  # the archetype difference is one flag: the continuous map simply never
+  # contains `version`, because this stream has none. It runs no caller
+  # code; the guard stays `permissions: {}` untouched.
+  facts:
+    name: Resolve the image facts
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      facts: ${{ steps.resolve.outputs.facts }}
+      epoch: ${{ steps.resolve.outputs.epoch }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out release canon (same SHA the caller pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: monumental-archive/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .org-canon
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+
+      - name: Resolve and validate the facts
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHETYPE: continuous
+          IMAGE_TITLE: ${{ inputs.image-title }}
+          IMAGE_DESCRIPTION: ${{ inputs.image-description }}
+        run: .org-canon/release/resolve-oci-facts.sh
+
   build:
     name: Build image
-    needs: guard
+    needs: [guard, facts]
     uses: ./.github/workflows/build-oci-image.yml
     permissions:
       # Restated, not inherited — the startup_failure trap.
@@ -78,6 +138,8 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
+      facts: ${{ needs.facts.outputs.facts }}
+      source-epoch: ${{ needs.facts.outputs.epoch }}
 
   sign:
     name: Sign image
