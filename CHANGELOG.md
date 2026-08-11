@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.3.0](https://github.com/monumental-archive/.github/compare/v1.2.2...v1.3.0) - 2026-08-11
+
+### Added
+
+- derive and prove pgrx upgrade scripts on the release pr ([#147](https://github.com/monumental-archive/.github/pull/147))
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.2.1 ([#144](https://github.com/monumental-archive/.github/pull/144))
+- update dependency monumental-archive/.github to v1.2.2 ([#146](https://github.com/monumental-archive/.github/pull/146))
+- update monumental-archive/signer digest to e50552b ([#148](https://github.com/monumental-archive/.github/pull/148))
+
 ## [1.2.2](https://github.com/monumental-archive/.github/compare/v1.2.1...v1.2.2) - 2026-08-10
 
 ### Fixed
