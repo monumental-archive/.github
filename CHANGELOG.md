@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.6.0](https://github.com/monumental-archive/.github/compare/v1.5.3...v1.6.0) - 2026-08-11
+
+### Added
+
+- triage-class the blast radius and decide the base-layer set ([#186](https://github.com/monumental-archive/.github/pull/186))
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.5.3 ([#183](https://github.com/monumental-archive/.github/pull/183))
+
+### Fixed
+
+- extend the serde_cbor decision to v0.18.1 ([#185](https://github.com/monumental-archive/.github/pull/185))
+
 ## [1.5.3](https://github.com/monumental-archive/.github/compare/v1.5.2...v1.5.3) - 2026-08-11
 
 ### Dependencies
