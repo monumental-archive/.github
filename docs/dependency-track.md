@@ -70,6 +70,15 @@ releases / images / majors.
 
 Findings already covered by a signed VEX statement are filtered — red
 always means *new and undecided*, never the standing advisory again.
+
+Two triage classes, decided when the first image SBOM landed (v0.18.1,
+~30 Debian base findings, most unfixable in stable — the oldest from
+2005): **ecosystem packages** (cargo, npm — the org's own code surface)
+always gate; **OS packages** gate only when a shipped fix exists —
+lagging a fix is actionable, while the perpetual unfixed base-layer
+background's remediation path is the rebuild cadence (`docs/release.md`
+already states this: remediation is never per-CVE), so those are
+reported, never red, and never worth a VEX that decides nothing.
 Zero standing infrastructure; deterministic inputs (immutable release
 artifacts); network only for the feed — which is exactly why it is
 `audit:*` and can never be gate-eligible.

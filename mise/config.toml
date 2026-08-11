@@ -377,9 +377,24 @@ while read -r repo; do
         continue
       fi
       scanned=$((scanned + 1))
+      # The fifth column is the triage class. OS packages (deb/rpm/apk)
+      # with no shipped fix anywhere are the perpetual base-layer
+      # background of every stable distro — their remediation path is
+      # the rebuild cadence (docs/release.md), and a per-CVE decision
+      # would decide nothing; they are REPORTED, never red. An OS
+      # finding WITH a shipped fix means our image lags a fix — that is
+      # actionable and gates like everything else. Ecosystem packages
+      # (the org's own code surface) always gate.
       jq -r --arg where "${repo}@${tag}" '
         .results[]?.packages[]? | select(.vulnerabilities != null) as $p
-        | $p.vulnerabilities[] | [.id, $p.package.name, $p.package.version, $where] | @tsv
+        | ($p.package.ecosystem // "" | ascii_downcase) as $eco
+        | (if ($eco | test("debian|alpine|ubuntu|rocky|redhat|rpm")) then "os" else "eco" end) as $kind
+        | $p.vulnerabilities[]
+        | ([.affected[]?.ranges[]?.events[]? | select(.fixed)] | length > 0) as $fixable
+        | (if $kind == "eco" then "gate"
+           elif $fixable then "gate"
+           else "base-unfixed" end) as $class
+        | [.id, $p.package.name, $p.package.version, $where, $class] | @tsv
       ' "${out}" >> "${findings}"
       if [[ "${repo}" == "${canary_repo}" && "${tag}" == "${canary_tag}" ]] \
         && grep -q "^${canary_id}$(printf "\t")" "${findings}"; then
@@ -400,9 +415,13 @@ report() {
   if [[ -s "${findings}" ]]; then
     echo "| advisory | package | version | release | decided |"
     echo "| --- | --- | --- | --- | --- |"
-    sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where; do
+    sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where class; do
       d="NEW"
-      grep -qxF "${id}" "${decided_f}" && d="VEX"
+      if grep -qxF "${id}" "${decided_f}"; then
+        d="VEX"
+      elif [[ "${class}" == "base-unfixed" ]]; then
+        d="base (rebuild cadence)"
+      fi
       echo "| ${id} | ${name} | ${ver} | ${where} | ${d} |"
     done
   else
@@ -416,7 +435,9 @@ report() {
 }
 report
 [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && report >> "${GITHUB_STEP_SUMMARY}"
-undecided=$(cut -f1 "${findings}" | sort -u)
+# Only gate-class findings demand a decision: unfixed base-layer OS
+# findings are the rebuild cadence's input, reported above.
+undecided=$(awk -F "\t" '$5 == "gate" { print $1 }' "${findings}" | sort -u)
 if [[ -s "${decided_f}" ]]; then
   undecided=$(grep -vxF -f "${decided_f}" <<< "${undecided}" || true)
 fi
