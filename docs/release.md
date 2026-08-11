@@ -422,18 +422,34 @@ correctness-by-patching; this is the same knowledge by design):
   newer symbol fails the release instead of failing at dlopen on
   someone's Debian 12. Smoke runs on bookworm AND trixie: forward
   compatibility demonstrated, never presumed.
-- **Upgrade path guarded AND executed**: when the previous release
-  shipped this extension's tarballs, the SQL upgrade file
-  `<ext>--<prev>--<new>.sql` must exist or the release refuses — a
-  missing one ships green and strands every installation at
-  `ALTER EXTENSION UPDATE`. Authors write `<ext>--<prev>--next.sql`
-  (they cannot know the version; git-cliff decides it) and the release
-  PR renames it. The guard is not trusted on faith: each cell installs
-  the previous release's real tarball into a live Postgres,
-  `CREATE EXTENSION`, installs the new package, runs
-  `ALTER EXTENSION UPDATE` and reads the version back — the path
-  executes, not merely exists. Majors the previous release did not ship
-  skip execution: only installations that can exist can be stranded.
+- **Upgrade path derived, proven AND executed**: upgrade SQL is a build
+  product, never authored (#132 — a hand-maintained stub is derived
+  state written by humans, and forgetting it burned immutable version
+  numbers; PostGIS and TimescaleDB both generate theirs from the
+  canonical schema for the same reason). On every Release-PR refresh,
+  `release/generate-pgrx-upgrade.sh` takes the previous release's
+  generated schema — out of its own signed tarball — and the
+  candidate's, and derives `<ext>--<prev>--<new>.sql`:
+  `CREATE OR REPLACE` for changed and new functions, `DROP` for removed
+  members, a comment-only no-op when only the library changed, and a
+  loud refusal for anything not soundly derivable (in-place type or
+  table changes need a human decision). It is then PROVEN before it is
+  committed: a live Postgres installs the previous release's real
+  tarball, `CREATE EXTENSION` at the old version, overlays the
+  candidate package plus the derived script, `ALTER EXTENSION UPDATE`,
+  and the upgraded catalog must match a fresh install of the candidate
+  exactly — read through `pg_depend`, because `pg_dump` cannot see
+  extension members. An underivable or unsound change therefore fails
+  the Release PR, pre-tag and free, never the publish. Data
+  migrations — the one thing no schema mechanism can derive — go in an
+  optional version-free `sql/next-data.sql`, folded into the derived
+  script (and consumed by the release commit) under the same proof. At
+  publish the guard still refuses a tag whose upgrade file is missing
+  (the backstop), and each cell installs the previous release's real
+  tarball into a live Postgres and crosses the gap with
+  `ALTER EXTENSION UPDATE` — the path executes, not merely exists.
+  Majors the previous release did not ship skip execution: only
+  installations that can exist can be stranded.
 - **Reproducible tarballs**, same flags and normalisation as rust-binary,
   named `<ext>-<version>-pg<major>-linux-<arch>.tar.gz`, each shipping
   both the Debian tree and the CloudNativePG ImageVolume layout.

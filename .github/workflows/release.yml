@@ -150,6 +150,25 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: .org-canon/release/prepare-release.sh
 
+      - name: Derive and prove pgrx upgrade scripts
+        # Upgrade SQL is a build product, never authored (#132): derived
+        # from the published release's own tarball and the candidate
+        # build, proven with a live ALTER EXTENSION UPDATE plus catalog
+        # equality against a fresh install, and committed to the Release
+        # PR alongside the bump. Skips clean when the repo tracks no
+        # extension control file — this step is why a pgrx repo's Release
+        # PR takes a build's worth of minutes: failing here is free;
+        # failing after the tag burns an immutable version number.
+        if: steps.prepare.outputs.release == 'true'
+        id: upgrade
+        env:
+          # Read-only: release metadata and tarball download on a public
+          # repository.
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          PREV_MANIFEST: ${{ steps.prepare.outputs.current }}
+        run: .org-canon/release/generate-pgrx-upgrade.sh
+
       - name: Mint the Release-PR token
         # A range of nothing but chore/ci/docs commits bumps no version, so
         # there is nothing to propose, no empty PR to leave lying around —
@@ -172,5 +191,7 @@ jobs:
           # installation token has no user context and answers 403.
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
           VERSION: ${{ steps.prepare.outputs.version }}
-          FILES: ${{ steps.prepare.outputs.files }}
+          FILES: >-
+            ${{ steps.prepare.outputs.files }}
+            ${{ steps.upgrade.outputs.files }}
         run: .org-canon/release/open-release-pr.sh

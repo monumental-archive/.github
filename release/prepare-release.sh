@@ -101,20 +101,21 @@ if [[ -f CITATION.cff ]]; then
   files="${files} CITATION.cff"
 fi
 
-# pgrx upgrade scripts: authors cannot know the next version — git-cliff
-# decides it right here — so they write <ext>--<from>--next.sql (the
-# `from` they always know: it is the manifest version they migrate from)
-# and the bump renames `next` to the decided version, exactly as it owns
-# the version in Cargo.toml and CITATION.cff. Guessed filenames strand
-# installations; the class guard refuses them; this is why nobody has to
-# guess.
-while IFS= read -r pending; do
-  [[ -n ${pending} ]] || continue
-  renamed="${pending%--next.sql}--${version}.sql"
-  git mv "${pending}" "${renamed}"
-  files="${files} ${pending} ${renamed}"
-  echo "upgrade path: ${pending} -> ${renamed}"
-done < <(git ls-files '*--next.sql')
+# pgrx upgrade scripts are DERIVED, never authored: the release workflow
+# runs generate-pgrx-upgrade.sh after this script, which builds the
+# candidate schema, diffs it against the published release's own tarball,
+# and proves the result with a live ALTER EXTENSION UPDATE before it
+# rides the release commit. The old hand-authored <ext>--<from>--next.sql
+# stub was derived state written by humans, and forgetting it burned
+# immutable version numbers (#132) — a leftover stub is therefore a
+# refusal, not a rename.
+stubs=$(git ls-files '*--next.sql')
+if [[ -n ${stubs} ]]; then
+  echo "FAIL: --next.sql stubs are retired; upgrade scripts are derived by" >&2
+  echo "release/generate-pgrx-upgrade.sh. Delete: ${stubs}" >&2
+  echo "(A data migration for this cycle belongs in sql/next-data.sql.)" >&2
+  exit 1
+fi
 
 git cliff --bump --output CHANGELOG.md
 
@@ -126,5 +127,8 @@ printf '%s\n' "${changelog}" > CHANGELOG.md
 
 emit "release=true"
 emit "version=${version}"
+# The pre-bump version: generate-pgrx-upgrade.sh cross-checks it against
+# the published release when deriving upgrade scripts.
+emit "current=${current}"
 emit "files=${files}"
 echo "prepared ${version} (${files})"
