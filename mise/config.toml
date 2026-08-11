@@ -252,6 +252,18 @@ echo "lint:exec-bits: $(wc -l <<< "${files}" | tr -d " ") scripts executable"
 [tasks."lint:deny"]
 description = "Dependency policy: bans + licenses + sources (cargo-deny, deterministic over the lock)"
 dir = "{{cwd}}"
+# rustup is not concurrency-safe: on a cold runner this task's
+# `cargo fetch` races test/build/coverage's own toolchain driving and
+# dies mid-download (measured on the lab's v0.18.0 release PR). wait_for
+# blocks only when those tasks are co-scheduled; it adds nothing to the
+# run.
+# Optional: a repo without the task (the canon has no `test`) must not
+# make the reference an error — same shape as ci's optional depends.
+wait_for = [
+  { task = "test", optional = true },
+  { task = "build", optional = true },
+  { task = "coverage:check", optional = true },
+]
 # The gate half of the dependency track (docs/dependency-track.md).
 # Deterministic: the outcome is a function of Cargo.lock + the committed
 # deny.toml. `cargo fetch --locked` first — fetching pinned inputs is the
