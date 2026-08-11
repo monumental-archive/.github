@@ -39,6 +39,10 @@ header = """
 
 All notable changes to this project are recorded here.
 
+<!-- rumdl-disable MD013 -->
+<!-- entries are commit subjects, verbatim: a recorded subject's
+length is a fact about history, not prose to reflow -->
+
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
