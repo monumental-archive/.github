@@ -4,6 +4,9 @@ The governance repository of the Monumental Archive organisation:
 everything shared lives here and nowhere else. Repos carry only what is
 genuinely theirs; this repo supplies the rest.
 
+Why it is shaped this way and what it is aiming at — including the
+SLSA v1.2 targets — is stated in [docs/direction.md](docs/direction.md).
+
 ## What lives here
 
 | | |

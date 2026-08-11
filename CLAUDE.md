@@ -3,6 +3,15 @@
 This file provides guidance to Claude Code (claude.ai/code) when working
 with code in this repository.
 
+## Purpose
+
+This repo is the org's **conformance root** — see `docs/direction.md`
+for the thesis and the SLSA targets (v1.2: Build L3, Source L3, Dep L2,
+BuildEnv L1 — the current ceiling, by choice). Other repos pin this one
+and conform to it; it does not adapt to them. The centralisation is the
+design, decided in the standup PRs (#5–#26) — question changes against
+the targets, never the architecture against priors.
+
 ## What this is
 
 `monumental-archive/.github` — the org's governance repository. Everything
