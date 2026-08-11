@@ -228,12 +228,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # pgrx generates the control file with default_version at build
-          # time, but the SQL upgrade path from the previous published
-          # version is the author's to provide — and a missing one ships
-          # green while stranding every existing installation at ALTER
-          # EXTENSION UPDATE. Statically checked here; executing the
-          # upgrade is the class's documented fast-follow.
+          # The upgrade path from the previous published version is
+          # derived and proven on the Release PR by
+          # release/generate-pgrx-upgrade.sh, so by the time a tag exists
+          # the file exists. This guard is the BACKSTOP for a tag minted
+          # around that path — a missing script ships green while
+          # stranding every existing installation at ALTER EXTENSION
+          # UPDATE, so its absence refuses the release.
           prev=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName 2> /dev/null || true)
           if [[ -z "${prev}" || "${prev}" != v* ]]; then
             echo "::notice::no previous release; first publish needs no upgrade path"
@@ -324,10 +325,11 @@ jobs:
                   --no-default-features --features "pg${PG}" \
                   --pg-config /usr/bin/pg_config \
                   --out-dir /out/pkgroot
-                # Author-provided upgrade scripts install alongside the
-                # generated ones: the guard demands sql/<ext>--A--B.sql
-                # exists, so the package must SHIP it, or ALTER EXTENSION
-                # UPDATE fails at the one consumer the guard protected.
+                # Derived upgrade scripts (committed to sql/ by the
+                # Release PR) install alongside the generated schema: the
+                # guard demands sql/<ext>--A--B.sql exists, so the package
+                # must SHIP it, or ALTER EXTENSION UPDATE fails at the one
+                # consumer the guard protected.
                 extdir=$(find /out/pkgroot -type d -name extension | head -1)
                 if compgen -G "sql/*.sql" > /dev/null; then
                   cp sql/*.sql "${extdir}/"
