@@ -224,6 +224,31 @@ fi
 echo "lint:dco: ${count} commits signed off"
 '''
 
+[tasks."lint:exec-bits"]
+description = "Every tracked shell script is executable (exit-126 trap)"
+dir = "{{cwd}}"
+# Found by the v1.5.0 publish: fix:shell recreated collect-vex.sh
+# without its mode, workflows exec release scripts by path, and the
+# release died at run time with exit 126 — after the tag, which is
+# immutable, so the version was burned. Nothing else checks a mode.
+run = '''
+files=$(git ls-files "*.sh")
+[[ -n "${files}" ]] || { echo "lint:exec-bits: no shell scripts tracked, skipped"; exit 0; }
+bad=""
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  mode=$(git ls-files -s "${f}" | cut -d" " -f1)
+  [[ "${mode}" == "100755" ]] || bad="${bad} ${f}(${mode})"
+done <<< "${files}"
+if [[ -n "${bad}" ]]; then
+  echo "lint:exec-bits: tracked scripts missing the executable bit:${bad}" >&2
+  echo "  workflows exec these by path; a lost mode is exit 126 after the tag" >&2
+  echo "  fix with: chmod +x <file> && git add <file>" >&2
+  exit 1
+fi
+echo "lint:exec-bits: $(wc -l <<< "${files}" | tr -d " ") scripts executable"
+'''
+
 [tasks."lint:deny"]
 description = "Dependency policy: bans + licenses + sources (cargo-deny, deterministic over the lock)"
 dir = "{{cwd}}"
