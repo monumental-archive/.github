@@ -637,6 +637,16 @@ echo "lint:capability-boundary: ok"
 [tasks."coverage:check"]
 description = "Enforce the committed coverage floor (.coverage-floor); repos without one skip clean"
 dir = "{{cwd}}"
+# The other half of the lint:deny serialization: rustup is not
+# concurrency-safe, and on a cold runner this task's component add races
+# `test`'s toolchain driving (measured twice on the lab's v0.18.0
+# release PR — the first fix serialized only lint:deny and the race
+# moved here). The rust-driving chain is test -> coverage:check ->
+# lint:deny; wait_for adds nothing to the run.
+wait_for = [
+  { task = "test", optional = true },
+  { task = "build", optional = true },
+]
 # The ratchet: the floor is a committed number that only rises. A repo
 # without a floor has not adopted coverage yet and skips clean; a repo
 # with one cannot merge below it. Deterministic — the number is local,
