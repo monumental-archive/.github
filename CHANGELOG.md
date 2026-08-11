@@ -2,9 +2,31 @@
 
 All notable changes to this project are recorded here.
 
+<!-- rumdl-disable MD013 -->
+<!-- entries are commit subjects, verbatim: a recorded subject's
+length is a fact about history, not prose to reflow -->
+
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
+
+## [1.5.0](https://github.com/monumental-archive/.github/compare/v1.4.1...v1.5.0) - 2026-08-11
+
+### Added
+
+- the dependency track, complete — deny, blast-radius, class-shaped sboms, auditable binaries, vex live ([#172](https://github.com/monumental-archive/.github/pull/172))
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.4.1 ([#171](https://github.com/monumental-archive/.github/pull/171))
+
+### Documentation
+
+- stand up the dependency track at its chosen ceiling ([#169](https://github.com/monumental-archive/.github/pull/169))
+
+### Fixed
+
+- generate the changelog md013 waiver from the cliff header ([#173](https://github.com/monumental-archive/.github/pull/173))
 
 ## [1.4.1](https://github.com/monumental-archive/.github/compare/v1.4.0...v1.4.1) - 2026-08-11
 
