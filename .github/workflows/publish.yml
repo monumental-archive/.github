@@ -345,6 +345,23 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
         run: .org-canon/release/derive-vex.sh
 
+      - name: Triage the tagged lock against the advisory feed
+        # Dependency L2's own wording — triage all known vulnerabilities
+        # BEFORE release — enforced against the release rather than the
+        # Monday cron (#211). The same belt task the cron runs, at the
+        # tagged checkout: cargo-deny reads RustSec directly (no OSV
+        # import lag) and additionally refuses yanked crates, and every
+        # `ignore` in deny.toml carries a reason citing the VEX statement
+        # that records the decision — so the exit is a written decision,
+        # never an override, and only its timing moves. Red blocks the
+        # release; there is no warn path (a warning here converts the
+        # control into a log line, the #118 rule). The task guards its
+        # own applicability: no tracked Cargo.lock skips clean, a lock
+        # without cargo or deny.toml is a loud failure, never a vacuous
+        # green. The Monday cron stays: it sweeps advisories published
+        # BETWEEN releases, which no release-time gate can see.
+        run: mise run audit:deny
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-sbom

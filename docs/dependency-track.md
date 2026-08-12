@@ -185,15 +185,22 @@ The requirement is worded against the release, not the pull request:
 MUST triage all known vulnerabilities and either remediate the
 vulnerability, or not remediate in the given release."*
 
-This is now a property of the release path itself: the `sbom` job in
-`publish.yml` runs `release/derive-vex.sh` after generating the SBOM,
-which scans it with osv-scanner and **fails the release** — before
-anything builds or publishes — if any gate-class advisory in it has no
-decision for its exact `package@version`. A Tuesday advisory against a
-Wednesday release is triaged on Wednesday or the release does not
-happen. The Monday crons (`audit:deny`, `audit:blast-radius`) remain as
-the sweep over *already-published* releases, which no release-time gate
-can cover.
+This is now a property of the release path itself, on two feeds. The
+`sbom` job in `publish.yml` runs `release/derive-vex.sh` after
+generating the SBOM, which scans it with osv-scanner and **fails the
+release** — before anything builds or publishes — if any gate-class
+advisory in it has no decision for its exact `package@version`. The
+same job then runs `audit:deny` against the tagged lock (#211): the
+identical belt task the Monday cron runs, so cargo-deny reads RustSec
+directly (no OSV import lag) and additionally refuses yanked crates,
+with the triage record unchanged — every `ignore` in `deny.toml`
+carries a reason citing its VEX statement, so the exit is a written
+decision and only its timing moves. Neither leg has a warn path: a
+warning here converts the control into a log line (the #118 rule). A
+Tuesday advisory against a Wednesday release is triaged on Wednesday or
+the release does not happen. The Monday crons (`audit:deny`,
+`audit:blast-radius`) remain as the sweep over *already-published*
+releases, which no release-time gate can cover.
 
 The gate-determinism rule is untouched: it keeps network-bound checks
 out of the **`ci` gate**, and it is right. The release path is already
