@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.9.0](https://github.com/monumental-archive/.github/compare/v1.8.0...v1.9.0) - 2026-08-12
+
+### Added
+
+- key vex decisions by dependency, derive coverage everywhere ([#216](https://github.com/monumental-archive/.github/pull/216))
+- point blast-radius at the remediation and the inert decisions ([#217](https://github.com/monumental-archive/.github/pull/217))
+- emit source provenance and VSAs in-org ([#218](https://github.com/monumental-archive/.github/pull/218))
+
+### Dependencies
+
+- update monumental-archive/signer digest to b05fe88 ([#204](https://github.com/monumental-archive/.github/pull/204))
+- update dependency monumental-archive/.github to v1.8.0 ([#205](https://github.com/monumental-archive/.github/pull/205))
+
+### Documentation
+
+- correct the buildenv claim and the base-image measurement ([#203](https://github.com/monumental-archive/.github/pull/203))
+
 ## [1.8.0](https://github.com/monumental-archive/.github/compare/v1.7.1...v1.8.0) - 2026-08-12
 
 ### Added
