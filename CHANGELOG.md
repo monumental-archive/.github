@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.13.0](https://github.com/monumental-archive/.github/compare/v1.12.1...v1.13.0) - 2026-08-12
+
+### Added
+
+- verify buildType and externalParameters in the verdict ([#256](https://github.com/monumental-archive/.github/pull/256))
+- triage the tagged lock on the release path ([#260](https://github.com/monumental-archive/.github/pull/260))
+- render a verdict for every class after publish ([#259](https://github.com/monumental-archive/.github/pull/259))
+
 ## [1.12.1](https://github.com/monumental-archive/.github/compare/v1.12.0...v1.12.1) - 2026-08-12
 
 ### Fixed
