@@ -1,10 +1,1 @@
-# The org signer pin: the commit of monumental-archive/signer that every
-# sign.yml `uses:` in this tree points at, declared once so the release
-# verifier (verify-release.yml, verdict mode) can check the provenance it
-# opens was signed by the SAME tree that signed this release. GitHub
-# requires `uses:` refs to be literal, so this cannot be single-sourced at
-# runtime — instead lint:signer-pin asserts every literal equals this
-# file, and Renovate updates both in one PR (renovate.json). A half-bump
-# reddens the gate; it never verifies against a stale signer.
-# renovate: signer-pin
-9adecf65df19bc63a9e5576dac1b1c0c223bb514
+5ca3bba24a984f3635797bbd371837cf7220e481
