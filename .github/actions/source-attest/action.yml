@@ -155,6 +155,7 @@ runs:
         }
         base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"
         jq -e '(.rulesReadAt | type == "string")
+          and (.rulesetsUpdatedAt | type == "array" and all(.[]; type == "number"))
           and (.controls | type == "array")
           and all(.controls[]; (.property | type == "string") and has("evidence"))' \
           "${SA_WORK}/claims.json" > /dev/null || {
@@ -180,7 +181,19 @@ runs:
         export MISE_GLOBAL_CONFIG_FILE="${SA_CANON_ROOT}/mise/config.toml"
         export MISE_TRUSTED_CONFIG_PATHS="${SA_CANON_ROOT}"
         export MISE_LOCKED=1
-        mise install "aqua:sigstore/cosign"
+        # Retried with backoff: the GitHub release download behind this
+        # died twice on 2026-08-12 alone (#265). The retry shortens the
+        # window; the auto-heal in chain.sh is what makes losing it
+        # recoverable.
+        for attempt in 1 2 3 4 5; do
+          mise install "aqua:sigstore/cosign" && break
+          if [[ "${attempt}" == 5 ]]; then
+            echo "::error::could not install cosign after ${attempt} attempts"
+            exit 1
+          fi
+          echo "::warning::cosign install failed (attempt ${attempt}), retrying"
+          sleep $((attempt * 10))
+        done
         dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
 
     - name: Fetch the chain and verify the previous link

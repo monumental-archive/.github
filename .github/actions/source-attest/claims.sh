@@ -94,6 +94,7 @@ fi
 if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
   tag_rulesets=$(jq -c '[.[] | select(.target == "tag" and .enforcement == "active")]' \
     "${SA_RULES_FIXTURE_DIR}/tag-rulesets.json")
+  branch_ruleset_details=$(cat "${SA_RULES_FIXTURE_DIR}/branch-ruleset-details.json")
 else
   tag_ids=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true" --paginate \
     --jq '.[] | select(.target == "tag" and .enforcement == "active") | .id') || {
@@ -107,6 +108,20 @@ else
       exit 1
     }
     tag_rulesets=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${tag_rulesets}")
+  done
+  # The rulesets behind the branch rules, fetched for their updated_at:
+  # the continuity horizon healed links are level-guarded against
+  # (#265). Same read discipline as above — an unreadable detail fails
+  # the run, because a healed link guarded against a partial horizon
+  # would over-claim.
+  branch_ids=$(jq -r '[.[].ruleset_id] | unique | .[]' <<< "${branch_rules}")
+  branch_ruleset_details="[]"
+  for id in ${branch_ids}; do
+    detail=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}") || {
+      echo "::error::branch ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment's read token (#240)"
+      exit 1
+    }
+    branch_ruleset_details=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${branch_ruleset_details}")
   done
 fi
 [[ $(jq length <<< "${tag_rulesets}") -ge 1 ]] || {
@@ -147,7 +162,24 @@ if [[ ${gated_live} == true ]]; then
     && add ORG_SOURCE_CAPABILITY_BOUNDARY "${belt_evidence}"
 fi
 
+# The continuity horizon (#265): when every contributing ruleset last
+# changed, normalised to epochs here so the attest stage compares plain
+# integers. A healed link may claim the target level only when this
+# whole set predates its commit — the rules provably have not changed
+# since before the revision landed. updated_at arrives with arbitrary
+# UTC offsets; jq's own date built-ins are UTC-only, so the offset is
+# applied by hand.
+updated_epochs=$(jq -cn --argjson b "${branch_ruleset_details}" --argjson t "${tag_rulesets}" '
+  def iso_epoch:
+    capture("(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(\\.[0-9]+)?(?<tz>Z|[+-][0-9]{2}:[0-9]{2})")
+    | ((.d + "Z") | fromdateiso8601)
+      - (if .tz == "Z" then 0
+         else ((.tz[0:1] + "1") | tonumber) * ((.tz[1:3] | tonumber) * 3600 + (.tz[4:6] | tonumber) * 60)
+         end);
+  [($b + $t)[] | (.updated_at // .created_at // empty) | iso_epoch]')
+
 read_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-jq -n --argjson c "${claims}" --arg t "${read_at}" '{rulesReadAt: $t, controls: $c}' \
+jq -n --argjson c "${claims}" --arg t "${read_at}" --argjson u "${updated_epochs}" \
+  '{rulesReadAt: $t, rulesetsUpdatedAt: $u, controls: $c}' \
   > "${SA_WORK}/claims.json"
 echo "::notice::claims: $(jq -r '[.controls[].property] | join(", ")' "${SA_WORK}/claims.json")"

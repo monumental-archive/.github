@@ -71,7 +71,7 @@ fail() {
 
 blind="${tmp}/fixtures-blind"
 mkdir -p "${blind}"
-cp "${here}/testdata/branch-rules.json" "${blind}/"
+cp "${here}/testdata/branch-rules.json" "${here}/testdata/branch-ruleset-details.json" "${blind}/"
 jq '[]' "${here}/testdata/tag-rulesets.json" > "${blind}/tag-rulesets.json"
 guard_work="${tmp}/work-blind"
 mkdir -p "${guard_work}"
@@ -83,7 +83,7 @@ grep -q "refusing to claim from a blind read" <<< "${out}" \
 
 lapsed="${tmp}/fixtures-lapsed"
 mkdir -p "${lapsed}"
-cp "${here}/testdata/branch-rules.json" "${lapsed}/"
+cp "${here}/testdata/branch-rules.json" "${here}/testdata/branch-ruleset-details.json" "${lapsed}/"
 # The lapse: someone grants a bypass on the all-tags ruleset. The
 # ruleset is still visible and readable — only its content no longer
 # matches, so exactly ORG_SOURCE_TAG_IMMUTABLE must drop.
@@ -103,6 +103,7 @@ jq -e '[.controls[].property] | (index("ORG_SOURCE_TAG_IMMUTABLE") == null)
 "${here}/chain.sh"
 "${here}/emit.sh"
 "${here}/append.sh"
+link="${SA_WORK}/links/${rev}"
 
 # Shape validation against the spec's required fields — the statements a
 # live run would sign, checked field by field, plus the level the full
@@ -117,7 +118,7 @@ jq -e --arg rev "${rev}" '
     and .actor.login and .commitTime and .rulesReadAt
     and (.controls | type == "array") and .canonRef
     and has("prev"))
-' "${SA_WORK}/provenance.json" > /dev/null || fail "provenance statement shape invalid"
+' "${link}/provenance.json" > /dev/null || fail "provenance statement shape invalid"
 jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" --arg canon "${SA_CANON_REF}" '
   ._type == "https://in-toto.io/Statement/v1"
   and .subject[0].digest.gitCommit == $rev
@@ -129,9 +130,93 @@ jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" --arg canon "${SA_CANON_REF}"
     and .slsaVersion == "1.2"
     and .verificationResult == "PASSED"
     and .verifiedLevels[0] == "SLSA_SOURCE_LEVEL_3")
-' "${SA_WORK}/vsa.json" > /dev/null \
+' "${link}/vsa.json" > /dev/null \
   || fail "VSA shape invalid (the #267 SHOULDs are asserted too), or the full fixture set does not reach SLSA_SOURCE_LEVEL_3"
 jq -e '.version == 1 and .provenance.statement and .provenance.bundle and .vsa.statement and .vsa.bundle' \
-  "${SA_WORK}/note.json" > /dev/null || fail "chain-link note shape invalid"
+  "${link}/note.json" > /dev/null || fail "chain-link note shape invalid"
 
-echo "lint:source-attest: ok — read guards refuse blindness, a lapse under-claims, emitter dry run clean, both statements shaped, note assembled, push negotiated"
+# ── Auto-heal (#265): a hole left by a lapsed run is healed by the next
+# push, honestly. The genesis link is landed on the stand-in remote for
+# real (file protocol, no auth), two commits advance main with no
+# emitter run between them, and the next "push" must emit links for
+# both — the hole marked repaired, the fresh one not.
+git -C "${SA_WORK}/repo" push -q origin refs/notes/commits:refs/notes/commits
+echo two > "${seed}/two.txt"
+git -C "${seed}" add two.txt
+git -C "${seed}" commit -qm "chore: two"
+rev2="$(git -C "${seed}" rev-parse HEAD)"
+echo three > "${seed}/three.txt"
+git -C "${seed}" add three.txt
+git -C "${seed}" commit -qm "chore: three"
+rev3="$(git -C "${seed}" rev-parse HEAD)"
+git -C "${seed}" push -q "${upstream}" main
+
+heal_work="${tmp}/work-heal"
+mkdir -p "${heal_work}"
+(
+  export SA_WORK="${heal_work}" SA_GENESIS=false GITHUB_SHA="${rev3}"
+  "${here}/claims.sh"
+  "${here}/chain.sh"
+  "${here}/emit.sh"
+  "${here}/append.sh"
+)
+[[ $(wc -l < "${heal_work}/manifest.tsv" | tr -d " ") == 2 ]] \
+  || fail "the heal run did not emit exactly the hole and the pushed revision (#265)"
+jq -e '.predicate.repaired.at' "${heal_work}/links/${rev2}/provenance.json" > /dev/null \
+  || fail "the healed link does not carry the repaired marker (#265)"
+jq -e '.predicate | has("repaired") | not' "${heal_work}/links/${rev3}/provenance.json" > /dev/null \
+  || fail "the fresh link carries a repaired marker it must not have (#265)"
+jq -e '.predicate.verifiedLevels[0] == "SLSA_SOURCE_LEVEL_3"' \
+  "${heal_work}/links/${rev2}/vsa.json" > /dev/null \
+  || fail "healed link with provable ruleset continuity did not reach the target level (#265)"
+jq -e --arg p "${rev2}" '.predicate.prev.revision == $p' \
+  "${heal_work}/links/${rev3}/provenance.json" > /dev/null \
+  || fail "the fresh link does not chain to the just-healed hole (#265)"
+
+# ── The continuity guard under-claims when it cannot prove (#265): with
+# a contributing ruleset changed AFTER the commits (a future updated_at
+# in the fixture), healed links must claim level 2 while the fresh link
+# still claims the target — the guard binds late emission, not fresh.
+future="${tmp}/fixtures-future"
+mkdir -p "${future}"
+cp "${here}/testdata/branch-rules.json" "${future}/"
+cp "${here}/testdata/tag-rulesets.json" "${future}/"
+jq '[.[] | .updated_at = "2999-01-01T00:00:00Z"]' \
+  "${here}/testdata/branch-ruleset-details.json" > "${future}/branch-ruleset-details.json"
+echo four > "${seed}/four.txt"
+git -C "${seed}" add four.txt
+git -C "${seed}" commit -qm "chore: four"
+rev4="$(git -C "${seed}" rev-parse HEAD)"
+git -C "${seed}" push -q "${upstream}" main
+
+guard2_work="${tmp}/work-future"
+mkdir -p "${guard2_work}"
+(
+  # The stand-in remote never received the heal run's links (its push
+  # was --dry-run), so this run heals rev2 and rev3 again — now with an
+  # unprovable horizon.
+  export SA_WORK="${guard2_work}" SA_GENESIS=false GITHUB_SHA="${rev4}" \
+    SA_RULES_FIXTURE_DIR="${future}"
+  "${here}/claims.sh"
+  "${here}/chain.sh"
+  "${here}/emit.sh"
+  "${here}/append.sh"
+)
+jq -e '.predicate.verifiedLevels[0] == "SLSA_SOURCE_LEVEL_2"' \
+  "${guard2_work}/links/${rev2}/vsa.json" > /dev/null \
+  || fail "a healed link with unprovable ruleset continuity did not under-claim (#265)"
+jq -e '.predicate.verifiedLevels[0] == "SLSA_SOURCE_LEVEL_3"' \
+  "${guard2_work}/links/${rev4}/vsa.json" > /dev/null \
+  || fail "the continuity guard wrongly bound a fresh link (#265)"
+
+# ── Genesis stays refused on a founded history (#265): auto-heal must
+# never become a quiet re-founding.
+refound_work="${tmp}/work-refound"
+mkdir -p "${refound_work}"
+if out=$(SA_WORK="${refound_work}" SA_GENESIS=true GITHUB_SHA="${rev4}" "${here}/chain.sh" 2>&1); then
+  fail "genesis was accepted on a history that already carries a link"
+fi
+grep -q "genesis refused" <<< "${out}" \
+  || fail "genesis was refused but without its named error"
+
+echo "lint:source-attest: ok — read guards refuse blindness, a lapse under-claims, emitter dry run clean, holes heal with honest markers and computed levels, genesis stays refused, push negotiated"

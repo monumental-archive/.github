@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Append the link and push the chain.
+# Push the chain. The notes themselves were assembled and added by
+# emit.sh, one per revision in the heal list (#265) — this script owns
+# only the network step, so a push failure can never leave a
+# half-assembled note behind.
 #
 # The note is the world-readable storage of record (docs/
 # source-assessment.md): statements carried base64 so the signed bytes
@@ -11,22 +14,19 @@
 #
 # The push races admins and (across repos) nobody: the workflow's
 # concurrency group serializes same-repo runs, so a rejected push means
-# the ref moved underneath us — refetch, re-annotate, retry. Three
-# failures is a real error, not a retry budget to grow.
+# the ref moved underneath us — refetch, re-add every note from the
+# manifest, retry. Three failures is a real error, not a retry budget
+# to grow. A rejected-then-retried push re-adds ALL of this run's
+# notes: the refetch resets the local notes ref, and a partial re-add
+# would push a chain missing its own newest links.
 set -euo pipefail
 
 cd "${SA_WORK}/repo"
 
-jq -n \
-  --arg ps "$(base64 -w0 < "${SA_WORK}/provenance.json")" \
-  --arg vs "$(base64 -w0 < "${SA_WORK}/vsa.json")" \
-  --slurpfile pb "${SA_WORK}/provenance.bundle.json" \
-  --slurpfile vb "${SA_WORK}/vsa.bundle.json" \
-  '{
-    version: 1,
-    provenance: {statement: $ps, bundle: $pb[0]},
-    vsa: {statement: $vs, bundle: $vb[0]}
-  }' > "${SA_WORK}/note.json"
+if [[ ! -s "${SA_WORK}/manifest.tsv" ]]; then
+  echo "::notice::nothing to push — every revision already carried a link"
+  exit 0
+fi
 
 # The dry run (#236) pushes --dry-run to a file-protocol remote: same
 # notes add, same push negotiation, no auth header (no token off-CI)
@@ -37,14 +37,17 @@ auth=()
 [[ -n ${GH_TOKEN:-} ]] \
   && auth=(-c "http.extraheader=AUTHORIZATION: basic $(printf "x-access-token:%s" "${GH_TOKEN}" | base64 -w0)")
 
+count=$(wc -l < "${SA_WORK}/manifest.tsv" | tr -d " ")
 for attempt in 1 2 3; do
-  git notes add -f -F "${SA_WORK}/note.json" "${GITHUB_SHA}"
   if git ${auth[@]+"${auth[@]}"} "${push[@]}" origin refs/notes/commits:refs/notes/commits; then
-    echo "::notice::chain link pushed for ${GITHUB_SHA} (attempt ${attempt})"
+    echo "::notice::${count} chain link(s) pushed (attempt ${attempt})"
     exit 0
   fi
-  echo "::warning::notes push rejected (attempt ${attempt}) — refetching"
+  echo "::warning::notes push rejected (attempt ${attempt}) — refetching and re-adding this run's links"
   git fetch -q origin "+refs/notes/commits:refs/notes/commits"
+  while IFS=$'\t' read -r rev notefile; do
+    git notes add -f -F "${notefile}" "${rev}"
+  done < "${SA_WORK}/manifest.tsv"
 done
 echo "::error::refs/notes/commits would not fast-forward after three attempts"
 exit 1

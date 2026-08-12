@@ -1,18 +1,30 @@
 #!/usr/bin/env bash
-# Fetch the history and the chain, and verify the previous link before
-# anything signs.
+# Fetch the history and the chain, and decide what needs a link.
 #
-# The previous link is the NEAREST first-parent ancestor that carries a
-# link, not necessarily the parent: an emission lapse leaves a hole, and
-# holes are debt the Monday audit reports (audit:source-vsa) — never a
-# reason to refuse all future emission, and emphatically never a reason
-# to re-found the chain. Genesis is explicit (`genesis: "true"`, a
-# dispatch), and refused the moment any link exists on the walked
-# history.
+# Since #265 the emitter is self-healing: every push walks first-parent
+# from the pushed revision down to the genesis link and collects EVERY
+# revision without a link — not just the pushed one. A lapse (the mise
+# download died twice on 2026-08-12 alone) leaves a hole; the next push
+# emits the missing links, oldest first, each marked as repaired in its
+# provenance and level-guarded by ruleset continuity (emit.sh). A hole
+# is therefore a transient state the system exits on its own; the
+# Monday audit (audit:source-vsa) is the alarm while it is in it.
+#
+# Because every revision between genesis and the tip is either linked
+# or in the heal list, each heal target's previous link is simply its
+# first-parent parent by the time emit.sh reaches it. Verification of
+# pre-existing links happens in emit.sh, immediately before anything
+# signs against them.
+#
+# Genesis is explicit (`genesis: "true"`, a dispatch), and refused the
+# moment any link exists on the walked history — a gap is debt, never a
+# reason to re-found the chain.
 #
 # Everything here is git plumbing against a scratch clone — no checkout
 # of a working tree, nothing from the attested repository is executed.
 set -euo pipefail
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 scratch="${SA_WORK}/repo"
 git init -q "${scratch}"
@@ -38,61 +50,56 @@ git merge-base --is-ancestor "${GITHUB_SHA}" refs/sa/main || {
   exit 1
 }
 
-# A link is a note that parses as a chain link (version + provenance) —
-# the seed notes and unrelated annotations are not links.
-is_link() {
-  git notes show "${1}" 2> /dev/null \
-    | jq -e '.version and .provenance.bundle and .vsa.bundle' > /dev/null 2>&1
-}
-
-prev=""
+# Walk first-parent from the pushed revision toward the root, collecting
+# unlinked revisions, until the genesis link (predicate.prev == null)
+# ends the walk. Linked revisions along the way are passed over, not
+# re-emitted — a redundant rerun with nothing to do is a success.
+holes=()
+genesis_found=""
 c="${GITHUB_SHA}"
-while c=$(git rev-parse -q --verify "${c}^" 2> /dev/null); do
+while [[ -n ${c} ]]; do
   if is_link "${c}"; then
-    prev="${c}"
-    break
+    if git notes show "${c}" | jq -r '.provenance.statement' | base64 -d \
+      | jq -e '.predicate.prev == null' > /dev/null 2>&1; then
+      genesis_found="${c}"
+      break
+    fi
+  else
+    holes+=("${c}")
   fi
+  c=$(git rev-parse -q --verify "${c}^" 2> /dev/null || true)
 done
 
 if [[ ${SA_GENESIS} == "true" ]]; then
-  if [[ -n ${prev} ]] || is_link "${GITHUB_SHA}"; then
+  if [[ -n ${genesis_found} ]] || ((${#holes[@]} < 1)) || [[ ${holes[0]} != "${GITHUB_SHA}" ]] \
+    || ((${#holes[@]} != $(git rev-list --first-parent --count "${GITHUB_SHA}"))); then
+    # Any link on the walked history — genesis or not — refuses a
+    # re-founding: a full-history walk that stopped early, or that
+    # collected fewer holes than there are revisions, saw a link.
     echo "::error::genesis refused — a chain link already exists on this history; a gap is debt, not a new founding"
     exit 1
   fi
-  echo '{"prev": null}' > "${SA_WORK}/prev.json"
+  echo "${GITHUB_SHA}" > "${SA_WORK}/heal.list"
   echo "::notice::genesis: founding the chain at ${GITHUB_SHA}"
   exit 0
 fi
 
-if [[ -z ${prev} ]]; then
-  echo "::error::no previous chain link on this history — found the chain first with a genesis dispatch (genesis: true)"
+if [[ -z ${genesis_found} ]]; then
+  echo "::error::no genesis link on this history — found the chain first with a genesis dispatch (genesis: true)"
   exit 1
 fi
 
-# Verify the link against the pinned org identity — the same check a
-# stranger runs with the published root of trust, nothing more.
-note=$(git notes show "${prev}")
-jq -r '.provenance.statement' <<< "${note}" | base64 -d > "${SA_WORK}/prev-statement.json"
-jq -c '.provenance.bundle' <<< "${note}" > "${SA_WORK}/prev-bundle.json"
-cosign verify-blob \
-  --bundle "${SA_WORK}/prev-bundle.json" \
-  --certificate-identity "${SA_IDENTITY}" \
-  --certificate-oidc-issuer "${SA_ISSUER}" \
-  "${SA_WORK}/prev-statement.json" > /dev/null 2>&1 || {
-  echo "::error::previous link at ${prev} does not verify against ${SA_IDENTITY} — refusing to extend a chain that fails the published root of trust"
-  exit 1
-}
-jq -e --arg c "${prev}" '.subject[0].digest.gitCommit == $c' \
-  "${SA_WORK}/prev-statement.json" > /dev/null || {
-  echo "::error::previous link at ${prev} attests a different revision than the commit it annotates"
-  exit 1
-}
+# Oldest first: healing in order keeps every target's first-parent
+# parent linked by the time its turn comes.
+: > "${SA_WORK}/heal.list"
+for ((i = ${#holes[@]} - 1; i >= 0; i--)); do
+  echo "${holes[$i]}" >> "${SA_WORK}/heal.list"
+done
 
-# The chain digest is over the raw note blob — command substitution
-# strips trailing newlines, and a digest two tools compute differently
-# is no digest at all.
-note_obj=$(git notes list "${prev}")
-note_sha=$(git cat-file blob "${note_obj}" | sha256sum | cut -d" " -f1)
-jq -n --arg r "${prev}" --arg d "${note_sha}" \
-  '{prev: {revision: $r, noteSha256: $d}}' > "${SA_WORK}/prev.json"
-echo "::notice::previous link verified: ${prev}"
+count=$(wc -l < "${SA_WORK}/heal.list" | tr -d " ")
+if ((count == 0)); then
+  echo "::notice::every revision since genesis already carries a link — nothing to emit"
+elif ((count > 1)); then
+  echo "::warning::healing $((count - 1)) unattested revision(s) left by earlier lapses — see the repaired marker in their provenance"
+fi
+echo "::notice::genesis at ${genesis_found}; ${count} revision(s) to link"
