@@ -1,0 +1,5 @@
+{
+  "name": "Source attest (identity reserve)",
+  "description": "Inert holder of the repo's future source-signing identity. The path at @refs/heads/main is the frozen root-of-trust contract; activation waits on upstream (watch .github#199).",
+  "categories": ["ci"]
+}
