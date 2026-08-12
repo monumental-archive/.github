@@ -784,6 +784,159 @@ fi
 echo "audit:source-vsa: ${checked} link(s) checked across activated repos"
 '''
 
+[tasks."audit:badges"]
+description = "Every README shield re-checked against its source of truth (network, canon only)"
+dir = "{{cwd}}"
+# A badge is a fact computed by somebody else's service, earned once and
+# then trusted forever — exactly the claim shape this org refuses
+# everywhere else (#215; audit:attestations is the pattern). This walks
+# every org repo's README and, for every shield found, asks the issuer
+# whether it still agrees. Loud by construction: an unrecognised shield
+# fails (a badge nobody can check is a badge nobody is checking), an
+# issuer returning nothing fails (a check that reads nothing must never
+# report clean), and a Scorecard shield with no floor line fails. The
+# Scorecard leg is a per-repo ratcheted floor (security/
+# scorecard-floors.txt) — regression is the signal, never the absolute.
+run = '''
+[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -d source-policies ]] || {
+  echo "audit:badges: not the canon, skipped"; exit 0
+}
+command -v gh > /dev/null || { echo "audit:badges: gh missing" >&2; exit 1; }
+floors="security/scorecard-floors.txt"
+repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
+failed=""
+checked=0
+note() { echo "audit:badges: ${1}"; [[ -n ${GITHUB_STEP_SUMMARY:-} ]] && echo "- ${1}" >> "${GITHUB_STEP_SUMMARY}" || true; }
+while read -r repo; do
+  [[ -n "${repo}" ]] || continue
+  readme=$(gh api "repos/monumental-archive/${repo}/readme" --jq '.content' 2> /dev/null || true)
+  if [[ -z "${readme}" ]]; then
+    note "${repo}: no README, nothing asserted"
+    continue
+  fi
+  body=$(base64 -d <<< "${readme}")
+  # Shields are markdown images; comments are stripped first so a
+  # deferred (commented-out) badge line is not audited as live.
+  urls=$(sed -e 's/<!--/\n<!--/g' -e 's/-->/-->\n/g' <<< "${body}" | sed '/<!--/,/-->/d' \
+    | grep -oE '!\[[^]]*\]\([^)]+\)' | sed -E 's/^!\[[^]]*\]\(([^) ]+).*\)$/\1/' || true)
+  if [[ -z "${urls}" ]]; then
+    note "${repo}: no shields, nothing asserted"
+    continue
+  fi
+  while read -r url; do
+    [[ -n "${url}" ]] || continue
+    checked=$((checked + 1))
+    case "${url}" in
+      https://api.scorecard.dev/projects/github.com/monumental-archive/*/badge)
+        proj="${url#https://api.scorecard.dev/projects/}"
+        proj="${proj%/badge}"
+        score=$(curl -sf "https://api.scorecard.dev/projects/${proj}" | jq -r '.score // empty')
+        if [[ -z "${score}" ]]; then
+          failed="${failed} ${repo}(scorecard: issuer returned no score — a shield over nothing)"
+          continue
+        fi
+        floor=$(awk -v r="${repo}" '$1 == r {print $2}' "${floors}")
+        if [[ -z "${floor}" ]]; then
+          failed="${failed} ${repo}(scorecard: no floor in ${floors} — an unfloored badge is unwatched)"
+        elif awk -v s="${score}" -v f="${floor}" 'BEGIN {exit !(s < f)}'; then
+          failed="${failed} ${repo}(scorecard: ${score} below floor ${floor} — regression)"
+        elif awk -v s="${score}" -v f="${floor}" 'BEGIN {exit !(s >= f + 0.3)}'; then
+          note "${repo}: scorecard ${score} well above floor ${floor} — ratchet: raise the floor"
+        else
+          note "${repo}: scorecard ${score} (floor ${floor})"
+        fi
+        ;;
+      https://www.bestpractices.dev/projects/*/badge | https://bestpractices.dev/projects/*/badge)
+        id="${url##*/projects/}"
+        id="${id%/badge}"
+        bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
+        if [[ -z "${bp}" ]]; then
+          failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
+        elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
+          failed="${failed} ${repo}(bestpractices: passing percentage below 100)"
+        elif jq -e '[.lost_baseline_1_at, .lost_baseline_2_at, .lost_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
+          failed="${failed} ${repo}(bestpractices: issuer records a LOST baseline)"
+        else
+          note "${repo}: bestpractices ${id} passing"
+        fi
+        ;;
+      https://api.reuse.software/badge/*)
+        proj="${url#https://api.reuse.software/badge/}"
+        st=$(curl -sf "https://api.reuse.software/status/${proj}" | jq -r '.status // empty')
+        if [[ "${st}" != "compliant" ]]; then
+          failed="${failed} ${repo}(reuse: status '${st:-none}' is not compliant)"
+        else
+          note "${repo}: reuse compliant"
+        fi
+        ;;
+      https://img.shields.io/badge/SLSA-Build%20L3-*)
+        # Self-asserted, so its source of truth is the canon's own table:
+        # the shield may claim exactly what direction.md claims.
+        if ! grep -q '^| Build | \*\*L3\*\* | Met' docs/direction.md; then
+          failed="${failed} ${repo}(slsa-shield: direction.md no longer claims Build L3 Met)"
+        else
+          note "${repo}: SLSA shield matches direction.md"
+        fi
+        ;;
+      https://zenodo.org/badge/DOI/*)
+        doi="${url#https://zenodo.org/badge/DOI/}"
+        doi="${doi%.svg}"
+        if ! curl -sfI "https://doi.org/${doi}" > /dev/null; then
+          failed="${failed} ${repo}(doi: ${doi} does not resolve)"
+        else
+          note "${repo}: DOI resolves"
+        fi
+        ;;
+      https://img.shields.io/crates/v/* | https://img.shields.io/docsrs/*)
+        crate="${url##*/}"
+        crate="${crate%.svg}"
+        if ! curl -sf "https://crates.io/api/v1/crates/${crate}" > /dev/null; then
+          failed="${failed} ${repo}(crates: ${crate} not on crates.io)"
+        else
+          note "${repo}: crate ${crate} exists"
+        fi
+        ;;
+      https://img.shields.io/npm/v/*)
+        pkg="${url#https://img.shields.io/npm/v/}"
+        pkg="${pkg%.svg}"
+        if ! curl -sf "https://registry.npmjs.org/${pkg//%2F//}" > /dev/null; then
+          failed="${failed} ${repo}(npm: package not on the registry)"
+        else
+          note "${repo}: npm package exists"
+        fi
+        ;;
+      https://img.shields.io/badge/ghcr.io-*)
+        if ! curl -sfI "https://github.com/orgs/monumental-archive/packages" > /dev/null; then
+          failed="${failed} ${repo}(ghcr: the org packages page is unreachable)"
+        else
+          note "${repo}: ghcr link live"
+        fi
+        ;;
+      https://codecov.io/gh/monumental-archive/*/graph/badge.svg | https://codecov.io/gh/monumental-archive/*/branch/*/graph/badge.svg)
+        cc="${url#https://codecov.io/gh/monumental-archive/}"
+        cc="${cc%%/*}"
+        if ! curl -sf "https://api.codecov.io/api/v2/github/monumental-archive/repos/${cc}" | jq -e '.name' > /dev/null 2>&1; then
+          failed="${failed} ${repo}(codecov: issuer has no data for ${cc})"
+        else
+          note "${repo}: codecov live"
+        fi
+        ;;
+      *)
+        # Not silently skipped, by design: silently skipping reproduces
+        # the exact gap this audit closes.
+        failed="${failed} ${repo}(unrecognised shield — nobody is checking it: ${url})"
+        ;;
+    esac
+  done <<< "${urls}"
+done <<< "${repos}"
+if [[ -n "${failed}" ]]; then
+  echo "audit:badges: shield defects:${failed}" >&2
+  echo "  every shield must agree with its source of truth; fix the fact, the floor, or the badge" >&2
+  exit 1
+fi
+echo "audit:badges: ${checked} shield(s) checked, all agree with their issuers"
+'''
+
 [tasks."audit:links"]
 description = "Check links in tracked markdown (lychee — network, not in ci)"
 dir = "{{cwd}}"
