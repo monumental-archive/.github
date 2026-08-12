@@ -435,7 +435,14 @@ jobs:
     if: contains(inputs.classes, 'rust-crate')
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # the verifier holds no more than this
+      # The full verifier set: verify-release declares its verdict-mode
+      # signing identity at the job, and a called workflow's permissions
+      # are checked statically — a bytes-mode call must grant what the
+      # workflow declares, spent only in verdict mode (#264).
+      contents: read # pull-back reads
+      id-token: write # spent only in verdict mode (#264)
+      attestations: write # spent only in verdict mode (#264)
+      artifact-metadata: write # spent only in verdict mode (#264)
     with:
       subjects: ${{ needs.build.outputs.subjects }}
       dry-run: ${{ inputs.dry-run }}
@@ -462,8 +469,11 @@ jobs:
   # (signer identity to the pinned commit, buildType and
   # externalParameters to this run, subjects to the manifest), and only
   # then assembles the verification summary — every predicate field an
-  # output of a check it just ran (#208). The signer signs it under the
-  # same identity as the provenance, varying only the predicate type.
+  # output of a check it just ran (#208) — and signs it ITSELF (#264):
+  # verifier.id is the certificate subject, so "who computed this
+  # verdict" is a cryptographic fact rather than a predicate field the
+  # org signer would have signed on faith. Verdicts are the org's second
+  # root of trust (docs/runbook.md); provenance stays under the signer.
   # The VSA lives in the attestation store alone: the release sealed at
   # publish, before any verdict existed, and the store is where the
   # runbook's consumer recipe reads. A stranger gates on it instead of
@@ -474,31 +484,19 @@ jobs:
   # the implicit success() looks THROUGH attach to its legitimately-
   # skipped class ancestors and goes false (measured on v0.14.2).
   vsa:
-    name: Assemble VSA
+    name: Assemble and sign VSA
     needs: [guard, verify, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # pull-back plus attestation reads, nothing more
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       subjects: ${{ needs.verify.outputs.subjects }}
       version: ${{ needs.guard.outputs.version }}
-
-  sign-vsa:
-    name: Sign VSA
-    needs: [verify, vsa]
-    if: ${{ !cancelled() && needs.vsa.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.verify.outputs.subjects }}
-      predicate-type: ${{ needs.vsa.outputs.predicate-type }}
-      predicate: ${{ needs.vsa.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-crates
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
 
   build-binary:
     name: Build binaries
@@ -583,7 +581,11 @@ jobs:
     if: contains(inputs.classes, 'wasm-npm')
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # the verifier holds no more than this
+      # The full verifier set — see the note on `verify` above (#264).
+      contents: read # pull-back reads
+      id-token: write # spent only in verdict mode (#264)
+      attestations: write # spent only in verdict mode (#264)
+      artifact-metadata: write # spent only in verdict mode (#264)
     with:
       subjects: ${{ needs.build-wasm.outputs.subjects }}
       npm-package: ${{ needs.build-wasm.outputs.package }}
@@ -606,32 +608,21 @@ jobs:
   # in needs only for the package name the re-pull needs to reconstruct
   # the registry path.
   vsa-wasm:
-    name: Assemble wasm VSA
+    name: Assemble and sign wasm VSA
     needs: [guard, build-wasm, verify-wasm, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # pull-back plus attestation reads, nothing more
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
       npm-package: ${{ needs.build-wasm.outputs.package }}
       version: ${{ needs.guard.outputs.version }}
 
-  sign-vsa-wasm:
-    name: Sign wasm VSA
-    needs: [verify-wasm, vsa-wasm]
-    if: ${{ !cancelled() && needs.vsa-wasm.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.verify-wasm.outputs.subjects }}
-      predicate-type: ${{ needs.vsa-wasm.outputs.predicate-type }}
-      predicate: ${{ needs.vsa-wasm.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-npm
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
 
   build-extension:
     name: Build extension
@@ -743,88 +734,55 @@ jobs:
   # `vsa` above for the pattern; the VSA is signed over the verdict job's
   # own re-proved manifest.
   vsa-binaries:
-    name: Assemble binaries VSA
+    name: Assemble and sign binaries VSA
     needs: [guard, build-binary, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'rust-binary') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # pull-back plus attestation reads, nothing more
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       subjects: ${{ needs.build-binary.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
 
-  sign-vsa-binaries:
-    name: Sign binaries VSA
-    needs: vsa-binaries
-    if: ${{ !cancelled() && needs.vsa-binaries.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.vsa-binaries.outputs.subjects }}
-      predicate-type: ${{ needs.vsa-binaries.outputs.predicate-type }}
-      predicate: ${{ needs.vsa-binaries.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-binaries
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
 
   vsa-source:
-    name: Assemble source VSA
+    name: Assemble and sign source VSA
     needs: [guard, build-source, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'source-archive') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # pull-back plus attestation reads, nothing more
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       subjects: ${{ needs.build-source.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
 
-  sign-vsa-source:
-    name: Sign source VSA
-    needs: vsa-source
-    if: ${{ !cancelled() && needs.vsa-source.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.vsa-source.outputs.subjects }}
-      predicate-type: ${{ needs.vsa-source.outputs.predicate-type }}
-      predicate: ${{ needs.vsa-source.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-source
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
 
   vsa-extensions:
-    name: Assemble extensions VSA
+    name: Assemble and sign extensions VSA
     needs: [guard, build-extension, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # pull-back plus attestation reads, nothing more
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       subjects: ${{ needs.build-extension.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
 
-  sign-vsa-extensions:
-    name: Sign extensions VSA
-    needs: vsa-extensions
-    if: ${{ !cancelled() && needs.vsa-extensions.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.vsa-extensions.outputs.subjects }}
-      predicate-type: ${{ needs.vsa-extensions.outputs.predicate-type }}
-      predicate: ${{ needs.vsa-extensions.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-extensions
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
 
   # The image verdicts. No pull-back — content addressing already proves
   # the bytes; what the verdict job proves is the mutable half, that the
@@ -835,60 +793,36 @@ jobs:
   # the file classes — the subject names are the untagged references the
   # signer attested.
   vsa-image:
-    name: Assemble image VSA
+    name: Assemble and sign image VSA
     needs: [guard, build-oci, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
-      contents: read # registry resolution plus attestation reads
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       images: ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]', needs.build-oci.outputs.image, needs.guard.outputs.version, needs.build-oci.outputs.digest) }}
       version: ${{ needs.guard.outputs.version }}
 
-  sign-vsa-image:
-    name: Sign image VSA
-    needs: vsa-image
-    if: ${{ !cancelled() && needs.vsa-image.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.vsa-image.outputs.subjects }}
-      predicate-type: ${{ needs.vsa-image.outputs.predicate-type }}
-      predicate: ${{ needs.vsa-image.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-image
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
-
   vsa-extension-images:
-    name: Assemble extension images VSA
+    name: Assemble and sign extension images VSA
     needs: [guard, build-extension-images, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
       contents: read # registry resolution plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
       # The signing matrix as-is: {pg, image, tag, digest} — the verdict
       # job reads image, tag and digest and ignores the rest.
       images: ${{ needs.build-extension-images.outputs.images }}
       version: ${{ needs.guard.outputs.version }}
-
-  sign-vsa-extension-images:
-    name: Sign extension images VSA
-    needs: vsa-extension-images
-    if: ${{ !cancelled() && needs.vsa-extension-images.result == 'success' }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@9adecf65df19bc63a9e5576dac1b1c0c223bb514 # main
-    with:
-      subjects: ${{ needs.vsa-extension-images.outputs.subjects }}
-      predicate-type: ${{ needs.vsa-extension-images.outputs.predicate-type }}
-      predicate: ${{ needs.vsa-extension-images.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vsa-extimg
-    permissions:
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the verdict
-      artifact-metadata: write # the signer creates the storage record
 
   # The DOI comes last of all: it cites a release that is already public,
   # proven and signed. Skipped on dry-run (a rehearsal must cite nothing).

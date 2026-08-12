@@ -166,10 +166,24 @@ gh attestation verify <artifact> --owner monumental-archive \
       | .predicateType == "https://slsa.dev/verification_summary/v1")' \
     > vsa.jsonl
   gh attestation verify <file-or-oci://ref@digest> --repo <owner>/<repo> \
-    --signer-workflow monumental-archive/signer/.github/workflows/sign.yml \
+    --signer-workflow monumental-archive/.github/.github/workflows/verify-release.yml \
     --predicate-type https://slsa.dev/verification_summary/v1 \
     --bundle vsa.jsonl
   ```
+
+  **The verdict is the org's second root of trust (#264).** Provenance
+  and producer evidence verify under the signer identity above; the
+  verdict verifies under the VERIFIER's own —
+  `monumental-archive/.github/.github/workflows/verify-release.yml`, the
+  doubled `.github` correct as always. The workflow that computed the
+  verdict is the certificate subject, so `verifier.id` is a tautology
+  rather than a field taken on faith; pin `--signer-digest` to the canon
+  release commit the publishing repo pinned. **Version boundary:**
+  verdicts on releases cut before canon v1.14.0 were signed by the org
+  signer instead — verify those with `--signer-workflow
+  monumental-archive/signer/.github/workflows/sign.yml`, the recipe this
+  one replaced (the same shape as the pre-v1.13.0
+  `attestations-vsa-*` asset caveat below).
 
   Gate on `verificationResult: PASSED` and `verifiedLevels` instead of
   re-deriving the policy yourself; a consumer who distrusts verdicts
@@ -183,10 +197,7 @@ gh attestation verify <artifact> --owner monumental-archive \
   under the signer and that its subjects cover the artifact in hand. A
   verdict asserting something untrue must either list evidence that
   fails those checks or list none at all; a verdict whose evidence
-  checks out is one you could have derived yourself. Until #264 lands,
-  this is also what bounds `verifier.id`, which is today a field in the
-  predicate rather than the certificate subject
-  ([`build-assessment.md`](build-assessment.md), control plane). Expect
+  checks out is one you could have derived yourself. Expect
   `resourceUri: pkg:github/<owner>/<repo>@v<version>` — the release the
   verdict covers; per the VSA spec, this stated expectation is the
   out-of-band channel, so a VSA naming any other resource must be
