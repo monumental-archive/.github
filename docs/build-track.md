@@ -107,8 +107,11 @@ org-attested (`base-attest.yml`) and verified fail-closed before any
 container runs. What would make those controls a *level* is a signed
 build-image provenance from the image producers, which they do not
 publish, and which building harder here cannot conjure. `base-attest.yml`
-is the org attesting its own *approval* of a base digest — an
-org-authored claim about a third-party artifact, deliberately not
-passed off as the producer provenance it is not. The row moves to L1
+verifies the upstream (unsigned, Build L1) BuildKit provenance names
+the `docker-library` source the pin implies, and signs *that
+verification* under org identity (#212) — the strongest claim
+available without owning the builds, and also BuildEnv L1's
+third-obligation artefact — deliberately never passed off as the
+producer provenance it is not. The row moves to L1
 the day base-image provenance arrives signed and the org's
 verification of it is itself attested (#125 watches the runner half).
