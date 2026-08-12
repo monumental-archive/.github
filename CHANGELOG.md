@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.10.1](https://github.com/monumental-archive/.github/compare/v1.10.0...v1.10.1) - 2026-08-12
+
+### Fixed
+
+- stop the self-pin release loop with a chore(canon) scope ([#231](https://github.com/monumental-archive/.github/pull/231))
+
 ## [1.10.0](https://github.com/monumental-archive/.github/compare/v1.9.0...v1.10.0) - 2026-08-12
 
 ### Added
@@ -35,7 +41,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 ### Dependencies
 
 - update monumental-archive/signer digest to b05fe88 ([#204](https://github.com/monumental-archive/.github/pull/204))
-- update dependency monumental-archive/.github to v1.8.0 ([#205](https://github.com/monumental-archive/.github/pull/205))
 
 ### Documentation
 
@@ -46,10 +51,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 ### Added
 
 - freeze the source-track claims contract, reserve the identity ([#201](https://github.com/monumental-archive/.github/pull/201))
-
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.7.1 ([#195](https://github.com/monumental-archive/.github/pull/195))
 
 ### Documentation
 
@@ -63,10 +64,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
 ## [1.7.1](https://github.com/monumental-archive/.github/compare/v1.7.0...v1.7.1) - 2026-08-11
 
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.7.0 ([#192](https://github.com/monumental-archive/.github/pull/192))
-
 ### Fixed
 
 - pin mise itself on the build legs — the installer is a build input ([#191](https://github.com/monumental-archive/.github/pull/191))
@@ -77,29 +74,17 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
 - close the build track's unattested-input holes (#117) ([#188](https://github.com/monumental-archive/.github/pull/188))
 
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.6.0 ([#189](https://github.com/monumental-archive/.github/pull/189))
-
 ## [1.6.0](https://github.com/monumental-archive/.github/compare/v1.5.3...v1.6.0) - 2026-08-11
 
 ### Added
 
 - triage-class the blast radius and decide the base-layer set ([#186](https://github.com/monumental-archive/.github/pull/186))
 
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.5.3 ([#183](https://github.com/monumental-archive/.github/pull/183))
-
 ### Fixed
 
 - extend the serde_cbor decision to v0.18.1 ([#185](https://github.com/monumental-archive/.github/pull/185))
 
 ## [1.5.3](https://github.com/monumental-archive/.github/compare/v1.5.2...v1.5.3) - 2026-08-11
-
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.5.2 ([#181](https://github.com/monumental-archive/.github/pull/181))
 
 ### Fixed
 
@@ -114,10 +99,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
 ## [1.5.1](https://github.com/monumental-archive/.github/compare/v1.5.0...v1.5.1) - 2026-08-11
 
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.5.0 ([#176](https://github.com/monumental-archive/.github/pull/176))
-
 ### Fixed
 
 - restore the executable bit on collect-vex.sh, and gate script modes ([#174](https://github.com/monumental-archive/.github/pull/174))
@@ -128,10 +109,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
 - the dependency track, complete — deny, blast-radius, class-shaped sboms, auditable binaries, vex live ([#172](https://github.com/monumental-archive/.github/pull/172))
 
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.4.1 ([#171](https://github.com/monumental-archive/.github/pull/171))
-
 ### Documentation
 
 - stand up the dependency track at its chosen ceiling ([#169](https://github.com/monumental-archive/.github/pull/169))
@@ -141,10 +118,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 - generate the changelog md013 waiver from the cliff header ([#173](https://github.com/monumental-archive/.github/pull/173))
 
 ## [1.4.1](https://github.com/monumental-archive/.github/compare/v1.4.0...v1.4.1) - 2026-08-11
-
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.4.0 ([#161](https://github.com/monumental-archive/.github/pull/161))
 
 ### Documentation
 
@@ -163,10 +136,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
 - emit oci image metadata from one resolved facts map ([#155](https://github.com/monumental-archive/.github/pull/155))
 
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.3.2 ([#156](https://github.com/monumental-archive/.github/pull/156))
-
 ## [1.3.2](https://github.com/monumental-archive/.github/compare/v1.3.1...v1.3.2) - 2026-08-11
 
 ### Fixed
@@ -174,10 +143,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 - hand work-dir ownership back before cleaning up ([#152](https://github.com/monumental-archive/.github/pull/152))
 
 ## [1.3.1](https://github.com/monumental-archive/.github/compare/v1.3.0...v1.3.1) - 2026-08-11
-
-### Dependencies
-
-- update dependency monumental-archive/.github to v1.3.0 ([#151](https://github.com/monumental-archive/.github/pull/151))
 
 ### Fixed
 
@@ -191,8 +156,6 @@ over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
 ### Dependencies
 
-- update dependency monumental-archive/.github to v1.2.1 ([#144](https://github.com/monumental-archive/.github/pull/144))
-- update dependency monumental-archive/.github to v1.2.2 ([#146](https://github.com/monumental-archive/.github/pull/146))
 - update monumental-archive/signer digest to e50552b ([#148](https://github.com/monumental-archive/.github/pull/148))
 
 ## [1.2.2](https://github.com/monumental-archive/.github/compare/v1.2.1...v1.2.2) - 2026-08-10
