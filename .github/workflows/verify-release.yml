@@ -12,7 +12,10 @@
 #                    the same API a stranger would use, verifies each
 #                    against the org signer identity at the pinned commit
 #                    (security/signer.pin in the canon tree), checks the
-#                    provenance subjects equal the verified manifest, and
+#                    provenance subjects equal the verified manifest,
+#                    asserts buildType and externalParameters against this
+#                    run's own identity (all four of verifying-artifacts'
+#                    comparisons, #210), and
 #                    only then assembles the VSA predicate
 #                    (slsa.dev/verification_summary/v1) for sign.yml.
 #
@@ -330,6 +333,57 @@ jobs:
                   echo "::error::${name}: builder.id does not name the org signer"
                   exit 1
                 fi
+                # The other two of verifying-artifacts' four comparisons
+                # (#210): the CLI covers builder identity and source repo
+                # by flag but has nothing for buildType or
+                # externalParameters, so both are asserted here, over the
+                # SAME statement the verify call just returned. Every
+                # expectation is derived from this run's own identity —
+                # the provenance was minted in this workflow run, so the
+                # run is the expectation, and it cannot drift from
+                # reality because it is read from reality.
+                buildtype=$(jq -r \
+                  '.[0].verificationResult.statement.predicate.buildDefinition.buildType // empty' \
+                  "${WORKDIR}/result.json")
+                if [[ "${buildtype}" != "https://actions.github.io/buildtypes/workflow/v1" ]]; then
+                  echo "::error::${name}: buildType is not the GitHub Actions buildType"
+                  exit 1
+                fi
+                # The buildType defines exactly two externalParameters
+                # keys, workflow and inputs. The spec says REJECT
+                # unrecognised fields, not ignore them: an unknown key is
+                # where unofficial behaviour hides.
+                unrecognized=$(jq -r \
+                  '.[0].verificationResult.statement.predicate.buildDefinition.externalParameters
+                   | keys[] | select(. != "workflow" and . != "inputs")' \
+                  "${WORKDIR}/result.json")
+                if [[ -n "${unrecognized}" ]]; then
+                  # Not echoed: the field name is attacker-controlled.
+                  echo "::error::${name}: externalParameters carries an unrecognised field"
+                  exit 1
+                fi
+                # workflow identity: repository, ref and path must equal
+                # this run's own. GITHUB_WORKFLOW_REF is
+                # "<owner>/<repo>/<path>@<ref>" — the caller's entry
+                # workflow, which is the same top-level run the signer
+                # ran in.
+                expected_path="${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY}"/}"
+                expected_path="${expected_path%@*}"
+                jq -r '.[0].verificationResult.statement.predicate.buildDefinition.externalParameters.workflow
+                  | [.repository // "", .ref // "", .path // ""] | @tsv' \
+                  "${WORKDIR}/result.json" \
+                  | {
+                    IFS=$'\t' read -r wf_repo wf_ref wf_path
+                    fail=""
+                    [[ "${wf_repo}" == "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" ]] || fail="repository"
+                    [[ "${wf_ref}" == "${GITHUB_REF}" ]] || fail="${fail} ref"
+                    [[ "${wf_path}" == "${expected_path}" ]] || fail="${fail} path"
+                    if [[ -n "${fail}" ]]; then
+                      # Field names only; the values are attacker-controlled.
+                      echo "::error::${name}: externalParameters.workflow does not match this run:${fail}"
+                      exit 1
+                    fi
+                  }
                 # No subject the manifest does not claim: the statement's
                 # subject set must be a subset of what this run verified.
                 jq -r '.[0].verificationResult.statement.subject[]

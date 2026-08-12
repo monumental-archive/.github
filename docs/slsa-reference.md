@@ -295,10 +295,14 @@ platform itself."
 `--source-ref`/`--source-digest` cover the canonical source repository,
 but `gh attestation verify` exposes nothing for `buildType` or
 `externalParameters` — and the spec asks verifiers to compare both, and
-to "reject unrecognized fields in `externalParameters`". Closing that
-means reading the predicate out of the bundle and asserting on it
-directly; no tool in the belt does it today, here or in the published
-consumer recipe (`runbook.md`).
+to "reject unrecognized fields in `externalParameters`". Closed on the
+release path (#210): `verify-release.yml`'s verdict mode asserts the
+GitHub Actions buildType, rejects unrecognised `externalParameters`
+fields, and compares `externalParameters.workflow` — repository, ref
+and path — against the run's own identity, all before any verdict field
+is written. The equivalent consumer check is published in `runbook.md`;
+it is jq over the verify call's JSON output, so no new tool enters the
+belt.
 
 **VSA** — `https://slsa.dev/verification_summary/v1`, with `verifier`,
 `timeVerified`, `resourceUri`, `policy`, `verificationResult`

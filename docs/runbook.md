@@ -165,13 +165,34 @@ gh attestation verify <artifact> --owner monumental-archive \
   evidence"). For those, verify the provenance directly with the command
   above; there is nothing weaker about the evidence, only no delegation
   shortcut over it.
-- **What these commands do not check.** `gh attestation verify` compares
-  builder identity and canonical source repository, but exposes no flag
-  for `buildType` or `externalParameters` — two of the four fields
-  `verifying-artifacts` asks a verifier to compare. A consumer wanting
-  those must read the predicate out of the bundle and assert on it. The
-  org's own release-path verification has the same gap; it is recorded
-  in `slsa-reference.md` rather than papered over.
+- **The two comparisons the CLI has no flag for.** `gh attestation
+  verify` compares builder identity and canonical source repository, but
+  exposes nothing for `buildType` or `externalParameters` — the other
+  two of the four fields `verifying-artifacts` asks a verifier to
+  compare. The org's release-path verification asserts both before any
+  verdict is assembled (`verify-release.yml`, verdict mode). A consumer
+  completing their own verification reads the statement out of the
+  verify call's JSON and asserts on it — expected `<owner>/<repo>` and
+  tag substituted:
+
+  ```bash
+  gh attestation verify <file> --repo <owner>/<repo> \
+    --signer-workflow monumental-archive/signer/.github/workflows/sign.yml \
+    --format json |
+    jq -e '.[0].verificationResult.statement.predicate.buildDefinition
+      | .buildType == "https://actions.github.io/buildtypes/workflow/v1"
+        and (.externalParameters | keys - ["workflow", "inputs"] == [])
+        and (.externalParameters.workflow
+             | .repository == "https://github.com/<owner>/<repo>"
+               and .ref == "refs/tags/<tag>"
+               and .path == ".github/workflows/publish.yml")'
+  ```
+
+  The spec's own wording is to *reject* unrecognised
+  `externalParameters` fields, which is what the `keys` subtraction
+  does. The canon repository's entry workflow is `self-publish.yml`
+  rather than `publish.yml`; everything else in the org uses the canon
+  filename.
 - Images: same command with `oci://<image>@<digest>` (the **index**
   digest — per-arch digests are not covered).
 - Offline: add `--bundle attestations*.intoto.jsonl` from the release.
