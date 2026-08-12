@@ -43,7 +43,11 @@ rev="$(git -C "${seed}" rev-parse HEAD)"
 export SA_WORK="${tmp}/work"
 mkdir -p "${SA_WORK}"
 export SA_CANON_ROOT="${canon_root}"
-export SA_CANON_REF="dry-run"
+# A real commit, not a placeholder: emit.sh refuses a non-SHA canon ref
+# (policy.digest needs the commit, #267), and the dry run must exercise
+# the refusal's happy path with the same shape a live run sees.
+SA_CANON_REF="$(git -C "${canon_root}" rev-parse HEAD)"
+export SA_CANON_REF
 export SA_IDENTITY="https://github.com/monumental-archive/.github/.github/workflows/source-attest.yml@refs/heads/main"
 export SA_ISSUER="https://token.actions.githubusercontent.com"
 export SA_RULES_FIXTURE_DIR="${here}/testdata"
@@ -114,16 +118,19 @@ jq -e --arg rev "${rev}" '
     and (.controls | type == "array") and .canonRef
     and has("prev"))
 ' "${SA_WORK}/provenance.json" > /dev/null || fail "provenance statement shape invalid"
-jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" '
+jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" --arg canon "${SA_CANON_REF}" '
   ._type == "https://in-toto.io/Statement/v1"
   and .subject[0].digest.gitCommit == $rev
+  and (.subject[0].uri | endswith("/commit/" + $rev))
   and .predicateType == "https://slsa.dev/verification_summary/v1"
   and (.predicate | .verifier.id == $id and .timeVerified
     and .resourceUri and .policy.uri
+    and .policy.digest.gitCommit == $canon
+    and .slsaVersion == "1.2"
     and .verificationResult == "PASSED"
     and .verifiedLevels[0] == "SLSA_SOURCE_LEVEL_3")
 ' "${SA_WORK}/vsa.json" > /dev/null \
-  || fail "VSA shape invalid, or the full fixture set does not reach SLSA_SOURCE_LEVEL_3"
+  || fail "VSA shape invalid (the #267 SHOULDs are asserted too), or the full fixture set does not reach SLSA_SOURCE_LEVEL_3"
 jq -e '.version == 1 and .provenance.statement and .provenance.bundle and .vsa.statement and .vsa.bundle' \
   "${SA_WORK}/note.json" > /dev/null || fail "chain-link note shape invalid"
 

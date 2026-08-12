@@ -32,6 +32,16 @@ cd "${SA_WORK}/repo"
 parents=$(git rev-parse "${GITHUB_SHA}^@" | jq -Rc . | jq -sc .)
 commit_time=$(git show -s --format=%cI "${GITHUB_SHA}")
 
+# policy.digest wants the canon COMMIT (the spec's policy SHOULD, #267).
+# The canon is consumed SHA-pinned by convention, so the resolution's ref
+# already is the digest; a non-SHA ref here means the pin convention was
+# broken, which is refused rather than guessed around — emit.sh holds no
+# token to resolve refs with, on purpose.
+if [[ ! ${SA_CANON_REF} =~ ^[0-9a-f]{40}$ ]]; then
+  echo "::error::canon ref '${SA_CANON_REF}' is not a commit SHA — the emitter must be pinned by full SHA so the VSA can carry policy.digest (#267)"
+  exit 1
+fi
+
 jq -n \
   --arg type "${prov_type}" \
   --arg repo "${GITHUB_REPOSITORY}" \
@@ -46,6 +56,7 @@ jq -n \
   '{
     _type: "https://in-toto.io/Statement/v1",
     subject: [{
+      uri: ("https://github.com/" + $repo + "/commit/" + $rev),
       digest: {gitCommit: $rev},
       annotations: {sourceRefs: ["refs/heads/main"]}
     }],
@@ -106,30 +117,32 @@ fi
 
 verified_levels=$(jq -cn --arg l "${level}" --argjson p "${present}" '[$l] + $p')
 time_verified=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# The predicate renders through the shared assembler (#267): one file,
+# release/vsa-predicate.jq in the canon tree, owns the VSA field set for
+# both of the org's VSA kinds — see its header.
+predicate=$(jq -cn \
+  --arg verifier "${SA_IDENTITY}" \
+  --arg time "${time_verified}" \
+  --arg resource "git+https://github.com/${GITHUB_REPOSITORY}" \
+  --arg policyUri "https://github.com/monumental-archive/.github/blob/${SA_CANON_REF}/source-policies/$(basename "${policy}")" \
+  --arg policySha "${SA_CANON_REF}" \
+  --arg result "PASSED" \
+  --argjson levels "${verified_levels}" \
+  -f "${SA_CANON_ROOT}/release/vsa-predicate.jq")
 jq -n \
   --arg type "${vsa_type}" \
-  --arg id "${SA_IDENTITY}" \
   --arg repo "${GITHUB_REPOSITORY}" \
   --arg rev "${GITHUB_SHA}" \
-  --arg tv "${time_verified}" \
-  --arg canon "${SA_CANON_REF}" \
-  --arg policy "source-policies/$(basename "${policy}")" \
-  --argjson levels "${verified_levels}" \
+  --argjson predicate "${predicate}" \
   '{
     _type: "https://in-toto.io/Statement/v1",
     subject: [{
+      uri: ("https://github.com/" + $repo + "/commit/" + $rev),
       digest: {gitCommit: $rev},
       annotations: {sourceRefs: ["refs/heads/main"]}
     }],
     predicateType: $type,
-    predicate: {
-      verifier: {id: $id},
-      timeVerified: $tv,
-      resourceUri: ("git+https://github.com/" + $repo),
-      policy: {uri: ("https://github.com/monumental-archive/.github/blob/" + $canon + "/" + $policy)},
-      verificationResult: "PASSED",
-      verifiedLevels: $levels
-    }
+    predicate: $predicate
   }' > "${SA_WORK}/vsa.json"
 
 if [[ ${SA_SKIP_SIGN:-false} == true ]]; then
