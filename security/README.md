@@ -26,6 +26,45 @@ gh api -X POST \
   -f scope=all
 ```
 
+## The Actions allowlist
+
+Which third-party code may execute in org CI — org-level, Settings →
+Actions → General → *Allow select actions*:
+
+- **GitHub-owned allowed** (`actions/*`, `github/*`).
+- **Marketplace-verified NOT allowed.** A verification badge is a
+  publisher identity check, not a supply-chain one, and it is not ours to
+  revoke — the set it admits changes without our review.
+- **Patterns:** `monumental-archive/*` (our own), `jdx/mise-action@*`
+  (the belt installer), `codecov/codecov-action@*` (the coverage badge
+  feed), `ossf/scorecard-action@*` (the Scorecard publish, which must be
+  self-contained).
+
+Read or re-apply it:
+
+```bash
+gh api orgs/monumental-archive/actions/permissions/selected-actions
+```
+
+Like the rulesets (`docs/rulesets.md`), the org setting is the
+enforcement and this is the record — no JSON mirror for six patterns.
+Two mechanisms keep it honest, because GitHub enforces the allowlist at
+`Set up job`, where a run dies before any step executes and nothing is
+red until then:
+
+- `lint:actions-allowed` carries the enforcement copy in the belt, so
+  every repo fails a forbidden `uses:` in the gate. It lints composite
+  actions (`.github/actions/*/action.yml`) as well as workflows — the
+  blind spot that let `sigstore/cosign-installer` reach a live lab run
+  (#207).
+- `audit:actions-allowlist` reconciles the belt's copy with the live org
+  setting every Monday, so widening or narrowing the setting cannot
+  quietly disagree with what the gate enforces.
+
+Widening the allowlist is a supply-chain decision: prefer a belt tool
+(checksums, attestations, no install scripts) over a new action, exactly
+as the toolbelt conventions say.
+
 ## Notes
 
 - **Applied 2026-08-09 via the settings UI** as configuration id `265775`
