@@ -146,7 +146,7 @@ above), the activated `workflow-templates/source-attest.yml`, and the
    holds no `id-token` and no `contents: write` — is ever issued the
    secret, so the token and the signing identity never share a job.
 2. Copy the template over the repo's inert stub — same path, new
-   content; requires canon **>= v1.12.0**, the release that ships the
+   content; requires canon **>= v1.11.1**, the release that ships the
    two-stage action (#240) — earlier emitters swallow an unreadable
    tag-ruleset read and under-claim L2 silently. (Not v1.9.0 for a
    second reason: that release shipped the action taking cosign from
