@@ -1,0 +1,17 @@
+# Scorecard floors, ratcheted (#215): repo, space, minimum score.
+# The audit fails a repo whose live score drops below its floor and
+# nudges when it rises ~0.3 above (raise the floor, keep the ratchet).
+# Regression is the signal, not the absolute number: several checks are
+# structurally capped here (Code-Review/Contributors by headcount,
+# Fuzzing by subject, Packaging inconclusive by the shared-orchestrator
+# design), so an absolute target would be permanently red for reasons
+# no work can fix. A repo with a Scorecard shield and no line here is a
+# failure: an unfloored badge is a badge nobody is watching.
+#
+# Watermarks, 2026-08-12: the canon read 7 at first probe and 6.9 an
+# hour later after the day's thirty-PR churn recomputed — a tenth
+# inside the structurally-capped checks, so the floor takes the lower
+# reading and the ratchet nudge re-raises it when the score recovers.
+.github 6.9
+signer 6.9
+release-lab 7.0
