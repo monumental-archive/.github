@@ -158,13 +158,20 @@ jobs:
           persist-credentials: false
 
       - name: Verify the base images are org-approved
-        # BuildEnv L1's verify-before-instantiation, fallback shape
-        # (#117): the digest pin says which bytes; this proves the org
-        # attested those bytes as the approved base (base-attest.yml in
-        # the canon), before any container exists. Fails closed — an
-        # unapproved base is a red build, not a warning. The upstream
-        # publisher signs nothing, which is why the identity checked is
-        # ours; the attestation lives in the canon's store.
+        # Verify-before-instantiation (#117): the digest pin says which
+        # bytes; this proves the org attested those bytes as the approved
+        # base (base-attest.yml in the canon), before any container
+        # exists. Fails closed — an unapproved base is a red build, not a
+        # warning. The upstream publisher applies no Sigstore signature,
+        # which is why the identity checked is ours; the attestation
+        # lives in the canon's store.
+        #
+        # This is BuildEnv L1's verification obligation, not BuildEnv L1:
+        # the level's provenance obligation falls on the build image
+        # producer, and these bases are upstream. See base-attest.yml's
+        # header and docs/slsa-reference.md for what upstream does and
+        # does not publish. It also does not emit the signed attestation
+        # of THIS verification's result, which L1 additionally requires.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

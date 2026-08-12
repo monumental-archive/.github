@@ -95,10 +95,20 @@ companion computes per-revision levels by recursing over prior
 attestations and stores source provenance + a source VSA in git notes —
 but it is PoC-grade, and as shipped its *reusable workflow's* identity
 would sign our source claims. The adoption path is the rekor-monitor
-one: run the binary under an org-owned workflow so the identity is ours
-(tracked with the other signer predicate extensions, issue #107).
-`gittuf` overlaps the same track from the git layer; evaluation tracked
-in #106.
+one: run the binary under an org-owned workflow so the identity is ours.
+Stood up and proven in the lab, then parked on four upstream defects;
+the standing trigger is watch #199 and the position is `source-track.md`.
+
+`gittuf` overlaps the same track from the git layer, and v1.2 names it
+explicitly as an implementation route for both Identity Management and
+Protected Named References. **Evaluated and declined**: it substitutes
+for the ruleset half the org already satisfies platform-anchored, and
+emits no source VSAs — so it cannot move the org off Source L0, which is
+the only thing actually blocking the level. Its trust root is
+self-held keys, which reintroduces the human key custody the keyless
+architecture deliberately removed, for a platform-compromise threat
+below the org's risk line, and a threshold root with one maintainer is a
+threshold of one.
 
 ## Dependency track (draft)
 
@@ -113,28 +123,98 @@ instantiated · L2 attested instantiation (vTPM, Secure Boot) · L3
 hardware-attested. Not required for any Build level, still a **draft**
 track — any conformance claim is a claim against a draft and says so.
 
-The org has two build-environment layers, and the claim splits (#117):
+L1 places three obligations, and it matters which party carries each.
+On the **build image producer**: generate SLSA Build **L2 or higher**
+provenance for the images they create, and allow independent automatic
+verification of it. On the **build platform**: meet Build L2, and verify
+the selected image's provenance before instantiating an environment,
+emitting *"a signed attestation to the result of the SLSA Provenance
+verification"*.
+
+The fallback clause is narrower than it reads. It permits *"an
+attestation asserting the expected hash value of the build image"* only
+where the image artifact **cannot be published**, the spec's example
+being intellectual-property concerns. It is an escape hatch for a
+producer who withholds an image, not for a consumer whose upstream
+publishes an image without provenance.
+
+The org has two build-environment layers, and **both are formally L0**:
 
 - **The runner VM image** is GitHub's: no signed runner-image
   provenance exists and nothing verifies before instantiation, so L1 is
   structurally out of reach at this layer. The maximum available move is
   made — `ubuntu-24.04` everywhere, a named input Renovate rolls as a
   visible diff — and the rest is a property of the platform, not of us.
-- **The pgrx build containers** are ours: the org instantiates them, so
-  at this layer the org is the build platform and L1 is entirely ours to
-  claim — via the spec's stated fallback, because Docker Official Images
-  publish no provenance and no signatures (measured: `cosign verify`
-  returns "no signatures found"). `base-attest.yml` mints the fallback's
-  "attestation asserting the expected hash" for every digest pinned in
-  `docker/pgrx-base-images.toml`, under org identity; the build legs
-  verify it before any container runs and fail closed;
-  `audit:attestations` proves the approval set stays complete. The
-  verification-outcome attestation (L1's third obligation) rides the
-  signer predicate surface (#107). Rebuilding or formally ingesting the
-  bases so they carry true Build L2+ provenance of their own creation is
-  deliberately deferred: it is standing infrastructure with its own
-  threat model, and the fallback is the spec's own answer for exactly
-  this case — maximal within reason.
+  Watch #125.
+- **The pgrx build containers** are stock Docker Official Images
+  (`postgres:14`–`18`, bookworm and trixie, digest-pinned in
+  `docker/pgrx-base-images.toml`). The org instantiates them, so at this
+  layer the org is the build **platform** — but it is not the build
+  **image producer**, and the producer's two obligations are therefore
+  not the org's to discharge. `base-attest.yml` mints an
+  expected-hash approval for every pinned digest under org identity; the
+  build legs verify it before any container runs and fail closed;
+  `audit:attestations` proves the approval set stays complete. That is a
+  real control and it is **not** the spec's fallback, which does not
+  cover this case. L1's third obligation — the signed attestation of the
+  verification result — is not implemented at all.
+
+Rebuilding the postgres bases in-org so they carry Build L3 provenance
+of their own creation is the only route to the label, and it is
+declined: it buys a draft-track level in exchange for owning a five-major
+× two-suite build matrix and its end-of-life treadmill, permanently.
+
+### What Docker Official Images actually publish
+
+**Measured 2026-08-12, and it corrects an earlier measurement recorded
+here.** The prior reading — "Docker Official Images publish no
+provenance and no signatures", from `cosign verify` returning "no
+signatures found" — was half wrong, and wrong in the instrument. `cosign
+verify` looks for Sigstore signatures; BuildKit attestations are not
+Sigstore signatures and are invisible to it. They ride the manifest list
+as the `unknown/unknown` entries documented above under `actions/attest`.
+
+Reading the registry directly for the pinned
+`postgres:18-bookworm@sha256:8822…` index: each architecture has a
+sibling manifest annotated `vnd.docker.reference.type:
+attestation-manifest`, carrying two `application/vnd.in-toto+json`
+layers — an SPDX SBOM and:
+
+```json
+{
+  "predicateType": "https://slsa.dev/provenance/v0.2",
+  "builder":  { "id": "https://github.com/docker-library" },
+  "buildType": "https://mobyproject.org/buildkit@v1",
+  "invocation": { "configSource": {
+    "uri": "https://github.com/docker-library/postgres.git#4f9ced00…:18/bookworm",
+    "entryPoint": "Dockerfile" } },
+  "metadata": { "completeness":
+    { "parameters": true, "environment": true, "materials": true },
+    "reproducible": false }
+}
+```
+
+So provenance exists, it is complete, and it names the exact upstream git
+commit and Dockerfile that produced the pinned bytes.
+
+**It is still not Build L2.** The blob is a bare in-toto Statement, not a
+DSSE envelope — it carries no signature. Its integrity comes from the
+digest chain (pin the index; the index covers the attestation manifest,
+which covers the blob), not from a key held by the build platform. Build
+L2's "Provenance is Authentic" requires validating *"the digital
+signature of the provenance attestation"*, so what upstream publishes is
+Build **L1** provenance, one level short of what BuildEnv L1 demands of
+the producer.
+
+The consequence is not "nothing to do". It is that the strongest
+available claim is a *verification* claim rather than a level: fetch the
+upstream provenance, assert its subject matches the pinned digest and its
+`configSource.uri` matches the expected `docker-library` repository and
+commit, and sign **that** under org identity — replacing "the org
+approved these bytes" with "the org verified these bytes carry upstream
+provenance naming this source revision". That single change would also
+discharge L1's unimplemented third obligation. It does not make the org
+BuildEnv L1, and the claim must not be written as though it did.
 
 ## Build L4 (planned, uncertain)
 
@@ -208,11 +288,57 @@ source repository, `buildType` and `externalParameters` to expectations.
 Caveat quoted: "SLSA Build L3 does **not** cover compromise of the build
 platform itself."
 
+**Two of those four expectation fields have no flag.**
+`--signer-workflow`/`--signer-digest` cover builder identity and
+`--source-ref`/`--source-digest` cover the canonical source repository,
+but `gh attestation verify` exposes nothing for `buildType` or
+`externalParameters` — and the spec asks verifiers to compare both, and
+to "reject unrecognized fields in `externalParameters`". Closing that
+means reading the predicate out of the bundle and asserting on it
+directly; no tool in the belt does it today, here or in the published
+consumer recipe (`runbook.md`).
+
 **VSA** — `https://slsa.dev/verification_summary/v1`, with `verifier`,
 `timeVerified`, `resourceUri`, `policy`, `verificationResult`
 (PASSED/FAILED), `verifiedLevels`. Lets a consumer decide "without needing
 to have access to all of the attestations" — the delegation primitive for a
 cross-repo release train.
+
+Required: `verifier.id`, `resourceUri`, `policy`, `verificationResult`,
+`verifiedLevels`. `policy` **SHOULD** carry a `digest` beside its `uri`.
+Optional and worth knowing: `slsaVersion` (absent means "unspecified
+1.x", which is weaker than saying 1.2), `inputAttestations` (if present it
+MUST list *all* attestations used, each with a digest), and
+`verifier.version`. `resourceUri` **SHOULD** be the URI a consumer fetches
+the artifact from; anything else obliges the producer to communicate the
+expected value out of band.
+
+The model matters as much as the schema: a VSA attests that the verifier
+evaluated *"the artifact **and a bundle of attestations** against some
+policy"*, and `verifier` "MUST reflect the trust base that consumers care
+about". A verdict assembled without opening the provenance it summarises
+is asserting a level from architecture rather than from evidence — legal,
+since the policy URI can encode the architecture, but it should be
+written down as what it is.
+
+### Verified properties (new in v1.2)
+
+v1.2 adds a page of named properties that may appear in `verifiedLevels`
+alongside a level, for controls that do not fit a track:
+
+- **`SLSA_SOURCE_TWO_PARTY_REVIEWED`** — issued only per the Source
+  track's two-party-review requirements; may be issued at any source
+  level. Headcount-blocked here, like Source L4.
+- **`SLSA_BUILD_REPRODUCED`** — the artifact "has been reproduced by two
+  or more builders", and MUST only be issued where the artifact has
+  build provenance from **two or more independently operated build
+  platforms** trusted by the VSA issuer.
+
+The second has a direct consequence for this org: `repro-check` rebuilds
+on the same platform from the same pinned workflow SHA — deliberately, because
+skew-proofing is what makes a mismatch mean *nondeterminism*. A
+same-platform rebuild is a real integrity control and it can **never**
+earn `SLSA_BUILD_REPRODUCED`. Nothing here should ever label it so.
 
 ## Sigstore
 
@@ -382,6 +508,14 @@ SLSA `distributing-provenance` gives a normative naming SHOULD: provenance
 filename", e.g. `<filename>.intoto.jsonl`. That is also exactly what
 Scorecard's Signed-Releases check recognises for full marks — one
 convention satisfies both.
+
+This org ships `attestations-<class>.intoto.jsonl`: one multi-subject
+bundle per artifact class, not one file per artifact. That satisfies
+Scorecard and the "publish in at least one place" MUST, and it is a
+deliberate deviation from the naming SHOULD — a single attestation may
+carry up to 1024 subjects, and per-artifact copies of the same bundle
+would be redundancy, not information. Recorded so the deviation is a
+decision on the page rather than an omission.
 
 Three endorsed venues: source-repository releases, package-registry sidecar
 or OCI referrer (preferred long-term, since "clients already trust the

@@ -155,7 +155,20 @@ gh attestation verify <artifact> --owner monumental-archive \
   predicate type as a query filter (`HTTP 422: invalid predicate type`,
   measured on v0.16.3) even though the attestation is present in the API.
   Gate on `verificationResult: PASSED` and `verifiedLevels` instead of
-  re-deriving the policy yourself. Absent on dry-run releases, by design.
+  re-deriving the policy yourself. Absent on dry-run releases, by design
+  — and **present only for the `rust-crate` and `wasm-npm` classes**:
+  binaries, images, source archives and pgrx extensions ship evidence
+  with no verdict beside it (`release.md`, "The verdict beside the
+  evidence"). For those, verify the provenance directly with the command
+  above; there is nothing weaker about the evidence, only no delegation
+  shortcut over it.
+- **What these commands do not check.** `gh attestation verify` compares
+  builder identity and canonical source repository, but exposes no flag
+  for `buildType` or `externalParameters` — two of the four fields
+  `verifying-artifacts` asks a verifier to compare. A consumer wanting
+  those must read the predicate out of the bundle and assert on it. The
+  org's own release-path verification has the same gap; it is recorded
+  in `slsa-reference.md` rather than papered over.
 - Images: same command with `oci://<image>@<digest>` (the **index**
   digest — per-arch digests are not covered).
 - Offline: add `--bundle attestations*.intoto.jsonl` from the release.
