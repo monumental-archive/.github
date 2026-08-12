@@ -922,6 +922,22 @@ fi
 echo "lint:capability-boundary: ok"
 '''
 
+[tasks."lint:source-attest"]
+description = "Dry-run the source emitter end-to-end short of signing (#236)"
+dir = "{{cwd}}"
+# The emitter's execution layer must be exercisable without burning a
+# lab run: the real claims/chain/emit/append scripts run against
+# recorded rule fixtures and a file-protocol stand-in repo, signing
+# skipped, push --dry-run, statements shape-checked against the spec.
+# Deterministic — no network — so it belongs in the gate. Only the
+# canon carries the emitter; everywhere else this skips clean.
+run = '''
+[ -x .github/actions/source-attest/dryrun.sh ] || {
+  echo "lint:source-attest: no source-attest action, skipped"; exit 0
+}
+.github/actions/source-attest/dryrun.sh
+'''
+
 [tasks."lint:actions-allowed"]
 description = "Every uses: names an action the org allowlist permits (workflows AND composite actions)"
 dir = "{{cwd}}"

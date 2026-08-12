@@ -1,0 +1,24 @@
+[
+  { "type": "deletion", "ruleset_id": 1 },
+  { "type": "non_fast_forward", "ruleset_id": 1 },
+  { "type": "required_linear_history", "ruleset_id": 1 },
+  { "type": "required_signatures", "ruleset_id": 1 },
+  {
+    "type": "required_status_checks",
+    "ruleset_id": 1,
+    "parameters": {
+      "strict_required_status_checks_policy": true,
+      "required_status_checks": [
+        { "context": "ci / ci", "integration_id": 15368 }
+      ]
+    }
+  },
+  {
+    "type": "pull_request",
+    "ruleset_id": 1,
+    "parameters": {
+      "required_review_thread_resolution": true,
+      "allowed_merge_methods": ["squash"]
+    }
+  }
+]

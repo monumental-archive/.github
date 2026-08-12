@@ -117,6 +117,15 @@ runs:
         SA_GENESIS: ${{ inputs.genesis }}
       run: ${GITHUB_ACTION_PATH}/chain.sh
 
+    # Signing mints Rekor entries; the push is the last step. Prove the
+    # environment can carry the run to completion BEFORE anything
+    # irreversible — no orphan log entries for links that never land.
+    - name: Preflight — prove the run can finish before anything signs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: ${GITHUB_ACTION_PATH}/preflight.sh
+
     - name: Emit and sign the provenance, derive and sign the VSA
       shell: bash
       env:

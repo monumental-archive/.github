@@ -63,20 +63,27 @@ jq -n \
     }
   }' > "${SA_WORK}/provenance.json"
 
-cosign sign-blob --yes \
-  --bundle "${SA_WORK}/provenance.bundle.json" \
-  "${SA_WORK}/provenance.json" > /dev/null
+# SA_SKIP_SIGN is the dry run's seam (#236): everything is shaped,
+# nothing is signed — no OIDC token exists off-CI and no Rekor entry
+# may ever be minted for a run that cannot complete.
+if [[ ${SA_SKIP_SIGN:-false} == true ]]; then
+  jq -n '{dryRun: true}' > "${SA_WORK}/provenance.bundle.json"
+else
+  cosign sign-blob --yes \
+    --bundle "${SA_WORK}/provenance.bundle.json" \
+    "${SA_WORK}/provenance.json" > /dev/null
 
-# Self-verify with exactly the stranger's inputs: the published SAN and
-# issuer, nothing this run knows that a consumer does not.
-cosign verify-blob \
-  --bundle "${SA_WORK}/provenance.bundle.json" \
-  --certificate-identity "${SA_IDENTITY}" \
-  --certificate-oidc-issuer "${SA_ISSUER}" \
-  "${SA_WORK}/provenance.json" > /dev/null 2>&1 || {
-  echo "::error::the provenance just signed does not verify against ${SA_IDENTITY} — the certificate identity is not the published contract"
-  exit 1
-}
+  # Self-verify with exactly the stranger's inputs: the published SAN and
+  # issuer, nothing this run knows that a consumer does not.
+  cosign verify-blob \
+    --bundle "${SA_WORK}/provenance.bundle.json" \
+    --certificate-identity "${SA_IDENTITY}" \
+    --certificate-oidc-issuer "${SA_ISSUER}" \
+    "${SA_WORK}/provenance.json" > /dev/null 2>&1 || {
+    echo "::error::the provenance just signed does not verify against ${SA_IDENTITY} — the certificate identity is not the published contract"
+    exit 1
+  }
+fi
 
 # Level, from the policy against the VERIFIED provenance. Presence of
 # every required property means the target level; anything less
@@ -125,8 +132,12 @@ jq -n \
     }
   }' > "${SA_WORK}/vsa.json"
 
-cosign sign-blob --yes \
-  --bundle "${SA_WORK}/vsa.bundle.json" \
-  "${SA_WORK}/vsa.json" > /dev/null
+if [[ ${SA_SKIP_SIGN:-false} == true ]]; then
+  jq -n '{dryRun: true}' > "${SA_WORK}/vsa.bundle.json"
+else
+  cosign sign-blob --yes \
+    --bundle "${SA_WORK}/vsa.bundle.json" \
+    "${SA_WORK}/vsa.json" > /dev/null
+fi
 
 echo "::notice::emitted ${level} for ${GITHUB_SHA}"

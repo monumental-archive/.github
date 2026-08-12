@@ -14,7 +14,15 @@
 # errored or paginated away would assert controls nobody checked.
 set -euo pipefail
 
-branch_rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/main" --paginate)
+# SA_RULES_FIXTURE_DIR is the dry run's seam (#236): recorded API
+# responses replace the live read, the derivation logic is the same
+# bytes — the point is exercising THIS file without a runner, not a
+# parallel implementation that can drift.
+if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
+  branch_rules=$(cat "${SA_RULES_FIXTURE_DIR}/branch-rules.json")
+else
+  branch_rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/main" --paginate)
+fi
 [[ -n ${branch_rules} && ${branch_rules} != "[]" ]] || {
   echo "::error::rules API returned no effective rules for main — refusing to claim from a blind read"
   exit 1
@@ -63,11 +71,21 @@ fi
 # Tag properties come from ruleset details: effective per-ref rules only
 # exist for branches, so each active tag ruleset is fetched and matched
 # by content — conditions, rules and bypass actors together.
-tag_ids=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true" --paginate \
-  --jq '.[] | select(.target == "tag" and .enforcement == "active") | .id')
-while read -r id; do
-  [[ -n ${id} ]] || continue
-  rs=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}")
+tag_rulesets() {
+  if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
+    jq -c '.[] | select(.target == "tag" and .enforcement == "active")' \
+      "${SA_RULES_FIXTURE_DIR}/tag-rulesets.json"
+    return
+  fi
+  gh api "repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true" --paginate \
+    --jq '.[] | select(.target == "tag" and .enforcement == "active") | .id' \
+    | while read -r id; do
+      [[ -n ${id} ]] || continue
+      gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}" | jq -c .
+    done
+}
+while read -r rs; do
+  [[ -n ${rs} ]] || continue
   # ORG_SOURCE_TAG_IMMUTABLE: update, move and deletion blocked, all
   # tags, nobody bypasses.
   if jq -e '(.conditions.ref_name.include == ["~ALL"])
@@ -83,7 +101,7 @@ while read -r id; do
       and (.bypass_actors == [{actor_id: 4534781, actor_type: "Integration", bypass_mode: "always"}])' <<< "${rs}" > /dev/null; then
     add ORG_SOURCE_RELEASE_TAG_MINTED "$(jq -c '{id, rules: [.rules[].type], conditions, bypass_actors}' <<< "${rs}")"
   fi
-done <<< "${tag_ids}"
+done < <(tag_rulesets)
 
 # Belt-carried properties: enforced INSIDE the gated check, so they are
 # claimable exactly when the gate is live and the canon tree this run
