@@ -18,6 +18,17 @@ on:
         description: Version being released, without the leading v.
         required: true
         type: string
+      repro:
+        description: >
+          Rebuild leg of the repro gate (#118): build and hash the same
+          bytes, upload NO release-* artifact (the gate needs only the
+          subjects), skip the smoke tests (the gate proves bytes; the
+          first build already proved behaviour), and publish nothing.
+          Intermediate artifacts carry a repro- prefix so the two builds
+          of one run cannot collide or cross-contaminate a glob.
+        required: false
+        type: boolean
+        default: false
     outputs:
       subjects:
         description: sha256 manifest of the archive, for the signer.
@@ -87,6 +98,7 @@ jobs:
           printf '%s\n' "${manifest}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.repro }}
         with:
           name: release-source
           path: dist/*.tar.gz

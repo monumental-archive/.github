@@ -332,6 +332,36 @@ approval and fail closed), and `audit:attestations` proves weekly that
 nothing published lacks its evidence set — the difference between "we
 attest" and "nothing ships unattested".
 
+### The repro gate
+
+Every irreversible step — the crates.io upload (yank-only), the npm
+upload (72-hour unpublish window), every ghcr tag, every append-only
+Sigstore entry, the release itself — sits downstream of a full-width
+bit-for-bit proof (#118): each class builds twice, independently, in
+the same run, and the `repro-gate` job compares sha256 subject
+manifests for the file classes and per-arch (oci) / per-major-index
+(pgrx) digests for the image classes. A mismatch fails the release
+outright; there is no warn-and-ship path, because a warn path converts
+the control into a log line. Skew-proofing is free by construction:
+both builds resolve at the caller's pinned SHA in one orchestrator
+run, so a mismatch can only mean *nondeterminism*.
+
+The rewiring this required: the registry publishes were extracted from
+their build workflows (`publish-rust-crate.yml`, `publish-wasm-npm.yml`
+— trusted publishing survives because both registries pin the CALLER's
+entry filename, `workflow_ref`, never `job_workflow_ref`); image
+builds stop after untagged digest pushes, with the oci index assembled
+and tagged exactly once post-gate (`assemble-oci-index.yml`) and the
+pgrx per-major tags applied post-gate by manifest PUT
+(`tag-images.yml`), digest preserved by construction. Rebuild legs
+skip smoke tests — the gate proves bytes; the first build already
+proved behaviour — and upload nothing matching the `release-*` glob
+that attach fans in on. The scheduled `repro-check` stays untouched:
+it re-verifies published history from cold, which the release-time
+gate does not cover. And nothing here ever claims
+`SLSA_BUILD_REPRODUCED` — a same-platform rebuild can never earn it,
+by design ([`tooling-verdicts.md`](tooling-verdicts.md)).
+
 ### The verdict beside the evidence
 
 Every claim the org signs beyond build provenance travels through the
