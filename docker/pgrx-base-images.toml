@@ -10,9 +10,9 @@
 
 [build]
 # renovate: pgrx-base-image
-"14" = "postgres:14-bookworm@sha256:f819dd96de74db3de87d13f0a4fbcdfbdc4f4ca37ed6e0807bf73848170eae3d"
+"14" = "postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
 # renovate: pgrx-base-image
-"15" = "postgres:15-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
+"15" = "postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
 # renovate: pgrx-base-image
 "16" = "postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
 # renovate: pgrx-base-image
