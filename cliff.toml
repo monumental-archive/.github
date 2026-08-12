@@ -28,9 +28,13 @@ breaking_always_bump_major = false
 # is the commitment, not a rehearsal. Written deliberately, here, once.
 initial_tag = "v1.0.0"
 
-# Housekeeping commits do not justify a release on their own. A run where
-# everything since the last tag is chore/ci/docs produces no version bump
-# and therefore no Release PR.
+# Housekeeping commits should not justify a release on their own. INERT at
+# the pinned git-cliff (2.13.1 silently drops unknown [bump] keys; the key
+# is documented upstream but unreleased — verified 2026-08-12, #227): today
+# any non-skipped commit bumps the patch. Kept for the git-cliff release
+# that ships it; until then the only working suppression is a skip parser,
+# which also removes the commit from the changelog — acceptable for
+# chore(canon) below, wrong for docs/ci, so those still bump for now.
 no_increment_regex = "^(chore|ci|docs|style|test)"
 
 [changelog]
@@ -115,6 +119,19 @@ commit_parsers = [
   { message = "^ci", group = "CI" },
   # Release commits are the mechanism, not the news.
   { message = "^chore: release", skip = true },
+  # Canon-pin bumps are the convergence step, not content (#227): a commit
+  # cannot contain its own SHA, so pins reach N only after N is tagged —
+  # releasing that step moves the fixed point and loops forever. skip is
+  # load-bearing twice: it keeps the bump out of the changelog AND it is
+  # what actually suppresses the version bump at git-cliff 2.13.1 (see
+  # no_increment_regex above). The scope is minted by default.json's
+  # monumental-archive/** rule — two configs we own, one token.
+  { message = "^chore\\(canon\\)", skip = true },
+  # Frozen history, not a live contract: self-pin bumps merged before the
+  # chore(canon) scope existed (#223, #228) carry Renovate's default title.
+  # Matching it here is safe only because those commits are immutable; new
+  # ones land as chore(canon) above.
+  { message = "^chore\\(deps\\): update dependency monumental-archive/\\.github", skip = true },
   { message = "^chore\\(deps\\)", group = "Dependencies" },
   { message = "^chore", group = "Miscellaneous" },
   { message = "^revert", group = "Reverted" },
