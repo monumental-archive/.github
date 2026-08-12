@@ -219,6 +219,10 @@ runs:
       env:
         SA_ACTOR: ${{ github.actor }}
         SA_ACTOR_ID: ${{ github.actor_id }}
+        # emit.sh branches on genesis too (#265) — the first live heal
+        # run died on exactly this env being scoped to chain.sh only,
+        # a gap the dry run masked by exporting it globally.
+        SA_GENESIS: ${{ inputs.genesis }}
       run: ${GITHUB_ACTION_PATH}/emit.sh
 
     - name: Append the link and push the notes ref
