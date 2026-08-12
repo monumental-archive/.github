@@ -53,6 +53,6 @@ jobs:
       id-token: write # mint the Sigstore identity — see the boundary marker
     steps:
       - name: Emit provenance and VSA, append the chain link
-        uses: monumental-archive/.github/.github/actions/source-attest@eec2e54f93db5ee704927f8abe0c5cee7f92ceca # v1.9.0
+        uses: monumental-archive/.github/.github/actions/source-attest@9943d269fcdb888ef25d49bf03668e703813157c # v1.10.0
         with:
           genesis: ${{ github.event.inputs.genesis || 'false' }}
