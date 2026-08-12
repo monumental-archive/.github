@@ -389,7 +389,10 @@ while read -r repo; do
       # would decide nothing; they are REPORTED, never red. An OS
       # finding WITH a shipped fix means our image lags a fix — that is
       # actionable and gates like everything else. Ecosystem packages
-      # (the org's own code surface) always gate.
+      # (the org's own code surface) always gate. The sixth column keeps
+      # the os/eco split for the report: os findings' remediation is the
+      # base digest bump, so the report points at the pending Renovate
+      # PR when one exists (#187's sibling improvement).
       jq -r --arg where "${repo}@${tag}" '
         .results[]?.packages[]? | select(.vulnerabilities != null) as $p
         | ($p.package.ecosystem // "" | ascii_downcase) as $eco
@@ -399,7 +402,7 @@ while read -r repo; do
         | (if $kind == "eco" then "gate"
            elif $fixable then "gate"
            else "base-unfixed" end) as $class
-        | [.id, $p.package.name, $p.package.version, $where, $class] | @tsv
+        | [.id, $p.package.name, $p.package.version, $where, $class, $kind] | @tsv
       ' "${out}" >> "${findings}"
       if [[ "${repo}" == "${canary_repo}" && "${tag}" == "${canary_tag}" ]] \
         && grep -q "^${canary_id}$(printf "\t")" "${findings}"; then
@@ -420,7 +423,7 @@ report() {
   if [[ -s "${findings}" ]]; then
     echo "| advisory | package | version | release | decided |"
     echo "| --- | --- | --- | --- | --- |"
-    sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where class; do
+    sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where class kind; do
       d="NEW"
       if grep -qxF "$(printf "%s\t%s\t%s" "${id}" "${name}" "${ver}")" "${decided_f}"; then
         d="VEX"
@@ -436,6 +439,48 @@ report() {
     echo
     echo "Releases with no SBOM asset (predate the obligation):"
     sed "s/^/- /" "${missing}"
+  fi
+  # The base-image treadmill pointer (#187): os findings' remediation is
+  # never per-CVE, it is the next release on a refreshed base digest —
+  # so when a repo has os-package findings, name the pending Renovate
+  # digest PR a human would otherwise go hunting for. Report-only.
+  os_repos=$(awk -F "\t" '$6 == "os" { split($4, a, "@"); print a[1] }' "${findings}" | sort -u)
+  if [[ -n "${os_repos}" ]]; then
+    echo
+    echo "Base-image findings above remediate via the next release on a refreshed digest:"
+    while IFS= read -r r; do
+      [[ -n "${r}" ]] || continue
+      prs=$(gh pr list --repo "${org}/${r}" --author "app/renovate" --state open \
+        --json title,url --jq '.[] | select(.title | test("digest"; "i")) | "  - \(.title) (\(.url))"' 2> /dev/null || true)
+      if [[ -n "${prs}" ]]; then
+        echo "- ${r}: pending Renovate digest bump —"
+        echo "${prs}"
+      else
+        echo "- ${r}: no pending Renovate digest PR (base current, or the next bump has not landed yet)"
+      fi
+    done <<< "${os_repos}"
+  fi
+  # Decisions that matched no current finding. Coverage is derived, so a
+  # withdrawn advisory or a dropped/bumped dependency needs no doc edit —
+  # the decision simply stops matching everywhere. This names those inert
+  # decisions so retiring them is a choice, never an archaeology project.
+  # Report-only: an inert decision suppresses nothing and gates nothing.
+  if [[ -s "${decided_f}" ]]; then
+    live="${work}/live.tsv"
+    awk -F "\t" '{ print $1 "\t" $2 "\t" $3 }' "${findings}" | sort -u > "${live}"
+    # An empty live file under grep -v -f would suppress every decided
+    # line and hide a fully-stale record — zero findings means every
+    # decision is inert, not none.
+    if [[ -s "${live}" ]]; then
+      stale=$(grep -vxF -f "${live}" "${decided_f}" || true)
+    else
+      stale=$(cat "${decided_f}")
+    fi
+    if [[ -n "${stale}" ]]; then
+      echo
+      echo "Decisions matching no current finding (candidates for retirement, not errors):"
+      awk -F "\t" '{ print "- " $1 " (" $2 "@" $3 ")" }' <<< "${stale}"
+    fi
   fi
 }
 report
