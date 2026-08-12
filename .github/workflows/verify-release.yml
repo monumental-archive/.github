@@ -567,23 +567,21 @@ jobs:
           # controlled is spliced into JSON by hand. Every field below is
           # an output of the checks above; this line is unreachable if
           # any of them failed.
+          # Rendered through the shared assembler (#267): one file owns
+          # the VSA field set for both of the org's VSA kinds, so a field
+          # added for one cannot fail to appear in the other. The build
+          # verdict's extra — inputAttestations — is merged on top.
           now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          predicate=$(jq -cn \
+          base=$(jq -cn \
             --arg verifier "https://github.com/monumental-archive/.github/.github/workflows/verify-release.yml" \
             --arg time "${now}" \
             --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
-            --arg policy "https://github.com/monumental-archive/.github/tree/${POLICY_REF}" \
+            --arg policyUri "https://github.com/monumental-archive/.github/tree/${POLICY_REF}" \
             --arg policySha "${policy_sha}" \
-            --slurpfile atts "${atts}" \
-            '{
-              verifier: { id: $verifier },
-              timeVerified: $time,
-              resourceUri: $resource,
-              policy: { uri: $policy, digest: { gitCommit: $policySha } },
-              inputAttestations: $atts[0],
-              verificationResult: "PASSED",
-              verifiedLevels: ["SLSA_BUILD_LEVEL_3"],
-              slsaVersion: "1.2"
-            }')
+            --arg result "PASSED" \
+            --argjson levels '["SLSA_BUILD_LEVEL_3"]' \
+            -f "${CANON_PATH}/release/vsa-predicate.jq")
+          predicate=$(jq -cn --argjson base "${base}" --slurpfile atts "${atts}" \
+            '$base + {inputAttestations: $atts[0]}')
           echo "predicate=${predicate}" >> "${GITHUB_OUTPUT}"
           echo "::notice::verdict assembled: ${opened} attestation(s) opened and verified"
