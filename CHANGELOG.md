@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.14.0](https://github.com/monumental-archive/.github/compare/v1.13.0...v1.14.0) - 2026-08-12
+
+### Added
+
+- carry the VSA SHOULDs in the source VSA via one shared assembler ([#269](https://github.com/monumental-archive/.github/pull/269))
+- heal chain holes on every push, with computed levels ([#270](https://github.com/monumental-archive/.github/pull/270))
+- sign the verdict with the verifier's own identity ([#271](https://github.com/monumental-archive/.github/pull/271))
+- sign the implicit build facts as a verifier-computed enrichment ([#272](https://github.com/monumental-archive/.github/pull/272))
+- make an unactivated repo a finding, not a skip ([#273](https://github.com/monumental-archive/.github/pull/273))
+- land the canon's licence and make the licence a step ([#274](https://github.com/monumental-archive/.github/pull/274))
+
+### Documentation
+
+- record the measured release-path triage run ([#261](https://github.com/monumental-archive/.github/pull/261))
+- correct the claims the third conformance pass falsified ([#268](https://github.com/monumental-archive/.github/pull/268))
+- complete the docs set — build-track, verdict register, provenance format ([#275](https://github.com/monumental-archive/.github/pull/275))
+
 ## [1.13.0](https://github.com/monumental-archive/.github/compare/v1.12.1...v1.13.0) - 2026-08-12
 
 ### Added
