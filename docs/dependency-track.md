@@ -206,10 +206,15 @@ The gate-determinism rule is untouched: it keeps network-bound checks
 out of the **`ci` gate**, and it is right. The release path is already
 network-bound by construction — it publishes to registries and pulls
 the bytes back to prove them — so the OSV feed at release time is the
-same category as `verify-release`. The step landed with the
-dependency-keyed VEX redesign (the #187 close-out); first exercised on
-the next lab release, which carries updating this sentence with the
-measured run.
+same category as `verify-release`. Both legs are lab-proven, and the
+`audit:deny` leg caught a real finding on its first live run: the
+lab's v0.19.1 was blocked before anything built — RUSTSEC-2021-0127,
+`serde_cbor` unmaintained via pgrx itself, RustSec-direct where the
+OSV gate-class filter had not flagged it — and shipped as v0.20.1 only
+behind an `ignore` entry citing the pre-existing
+`security/vex/RUSTSEC-2021-0127.openvex.json` decision. The control,
+the written-decision exit and the roll-forward all behaved exactly as
+designed.
 
 ## Recorded verdicts
 
