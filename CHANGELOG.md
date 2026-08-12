@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.11.0](https://github.com/monumental-archive/.github/compare/v1.10.1...v1.11.0) - 2026-08-12
+
+### Added
+
+- require template pins to name a released tag ([#235](https://github.com/monumental-archive/.github/pull/235))
+- give the source emitter an environment contract ([#237](https://github.com/monumental-archive/.github/pull/237))
+
+### Documentation
+
+- name v1.10.0 as the activation minimum, not v1.9.0 ([#225](https://github.com/monumental-archive/.github/pull/225))
+
+### Fixed
+
+- stop renovate majoring the pgrx base-image matrix flat ([#238](https://github.com/monumental-archive/.github/pull/238))
+
 ## [1.10.1](https://github.com/monumental-archive/.github/compare/v1.10.0...v1.10.1) - 2026-08-12
 
 ### Fixed
