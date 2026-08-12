@@ -4,15 +4,36 @@ The org's position against the SLSA v1.2 source track (published spec,
 final): what is enforced, what is claimable, and what formal standing is
 — stated honestly.
 
-## Formal standing: Level 0, controls at Level 3 substance
+## Formal standing: Level 3, emitted and stranger-verifiable
 
 The v1.2 source VSA is constitutive: "If the SCS DOES NOT generate a VSA
-for a revision, the revision has Source Level 0." Nothing currently
-emits source VSAs here, so the formal level is **0** regardless of
-controls. The controls themselves are at L3 substance (below), all
-enforced by org-level rulesets, with continuity clocks that derive from
-GitHub's ruleset timestamps — they accrue now and survive any later
-attestation stand-up.
+for a revision, the revision has Source Level 0." Since **2026-08-12**
+the org emits them. Every revision reaching `main` in `.github`,
+`signer` and `release-lab` carries signed source provenance and a source
+VSA at `SLSA_SOURCE_LEVEL_3`, naming all eight `ORG_SOURCE_` properties,
+chained in `refs/notes/commits` under each repo's reserved signing
+identity. The formal level is **3**.
+
+Genesis revisions: `.github` `624babfa`, `signer` `9adecf65`,
+`release-lab` `ea49b2f0`. Verify any link with nothing but the root of
+trust published in `source-assessment.md` — no org token, no canon
+checkout:
+
+```bash
+cosign verify-blob --bundle <bundle> \
+  --certificate-identity \
+  https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com <statement>
+```
+
+**release-lab's first five links claim `SLSA_SOURCE_LEVEL_2`, and stay
+that way.** They were emitted before the claims job held a token that
+could read org-level tag-ruleset details, so `ORG_SOURCE_TAG_IMMUTABLE`
+and `ORG_SOURCE_RELEASE_TAG_MINTED` were absent and the VSA under-claimed
+rather than asserting a control it could not see. They are not
+backfilled: they are the record of what was verifiable at that moment,
+and the evidence that honest degradation is a real behaviour rather than
+a design intention.
 
 The attestation machinery was first stood up and proven in release-lab
 on 2026-08-10 with `slsa-framework/source-tool`, then parked on four
@@ -28,9 +49,9 @@ record — a different dialect, not a link in the new chain. If upstream
 ships its fixes, source-tool becomes an independent *cross-check* of
 these VSAs, never the thing that issues them.
 
-Activation is per repo, deliberate, and lab-first: the formal level
-stays **0** until a repo's chain is founded and stranger-verified, and
-`docs/direction.md` moves only when that is real.
+Activation was per repo and lab-first: release-lab proved the emitter
+end to end before `signer` and `.github` founded their chains, and
+`docs/direction.md` moved only once all three were stranger-verified.
 
 ## Requirement mapping (v1.2, L1–L3)
 
@@ -38,12 +59,12 @@ stays **0** until a repo's chain is founded and stranger-verified, and
 | --- | --- | --- |
 | Choose an appropriate SCS | 1 | GitHub |
 | Repository IDs / immutable revision IDs / human-readable diffs | 1 | GitHub (git SHAs, PR diffs) |
-| Source VSAs | 1 | **Emitter built (#207), not yet activated** (the L0 gap) |
+| Source VSAs | 1 | **Emitted** per push, all three repos (#207) |
 | Access control + reliable history | 2 | `org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list |
 | Tag immutability | 2 | `org-default-tag` ruleset: update/move/delete blocked, all tags, all repos |
 | Safe expunging process | 2 | `docs/expunging.md` |
 | Identity management | 2 | GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change |
-| Source provenance, contemporaneous | 2 | **Emitter built (#207), not yet activated** |
+| Source provenance, contemporaneous | 2 | **Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207) |
 | Continuity | 2 | Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md` |
 | Continuous technical controls, documented | 3 | This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint |
 | Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` proven claimable in the lab pilot |
