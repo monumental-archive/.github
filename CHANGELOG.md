@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.10.0](https://github.com/monumental-archive/.github/compare/v1.9.0...v1.10.0) - 2026-08-12
+
+### Added
+
+- lint every uses: against the org actions allowlist ([#222](https://github.com/monumental-archive/.github/pull/222))
+
+### Documentation
+
+- name the expected red run in the activation checklist ([#219](https://github.com/monumental-archive/.github/pull/219))
+
+### Fixed
+
+- take cosign from the belt, not sigstore's installer ([#221](https://github.com/monumental-archive/.github/pull/221))
+
 ## [1.9.0](https://github.com/monumental-archive/.github/compare/v1.8.0...v1.9.0) - 2026-08-12
 
 ### Added
