@@ -44,6 +44,11 @@ jobs:
         with:
           # Full history: lint:commits checks the origin/main..HEAD range.
           fetch-depth: 0
+          # Tags too: checkout passes --no-tags by default even at depth
+          # 0, and lint:template-pins asserts each pin names a released
+          # tag (#233). Part of the checkout that already happens, so the
+          # gate stays deterministic — no runtime network of its own.
+          fetch-tags: true
           persist-credentials: false
 
       - name: Resolve the canon tree (the ref the caller pinned)
