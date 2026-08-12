@@ -1338,13 +1338,34 @@ for f in workflow-templates/*.y*ml; do
 done
 n=$(wc -w <<< "${shas}" | tr -d " ")
 [[ "${n}" -le 1 ]] || bad="${bad} (templates disagree, ${n} distinct SHAs:${shas})"
+# Ancestor-of-HEAD is the weaker property (#233). What a copier depends
+# on is that the pin names a RELEASED commit — tagged, published through
+# the signer, evidence attached, immutable. An untagged mid-history
+# commit satisfies "ancestor" and shouldn't: nothing was ever cut from
+# it, so there is nothing to verify and nothing that survives a rebuild.
+# The gate's checkout fetches tags for exactly this (ci.yml, fetch-tags).
+released=""
+if [[ -n "$(git tag --list "v[0-9]*" | head -1)" ]]; then
+  for sha in ${shas}; do
+    tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | head -1)
+    if [[ -z "${tag}" ]]; then
+      bad="${bad} (${sha:0:8} names no released tag — pins must name a release, not any ancestor)"
+    else
+      released="${released} ${tag}"
+    fi
+  done
+else
+  # A repo before its first release has nothing to point at. Honest skip,
+  # named — never a silent pass.
+  released=" (no tags in this clone, released-tag check skipped)"
+fi
 if [[ -n "${bad}" ]]; then
   echo "lint:template-pins: template pin violations:${bad}" >&2
-  echo "  templates pin one merged canon SHA and move together (see #111);" >&2
-  echo "  scorecard.yml never pins a reusable." >&2
+  echo "  templates pin one merged, RELEASED canon SHA and move together" >&2
+  echo "  (#111, #233); scorecard.yml never pins a reusable." >&2
   exit 1
 fi
-echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless"
+echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless, released as${released}"
 '''
 
 [tasks."lint:canon-pins"]
