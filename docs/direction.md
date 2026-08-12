@@ -34,16 +34,20 @@ it; everywhere else it is labelled as what it is.
 | Track | Ceiling | Status | Enforced by |
 | --- | --- | --- | --- |
 | Build | **L3** | Met, and verifiable by strangers | The signer split (`id-token: write` lives only in a repo that runs no caller code — the capability boundary, linted), the reusable gate, App-minted tags, evidence bundles per release |
-| Source | **L3** | Controls at L3 substance; **formally L0** until source VSAs are emitted (engine parked — see `source-track.md`) | Org-level rulesets: required gate, required signatures, linear history, squash-only, locked `v*` tags, empty bypass lists |
+| Source | **L3** | **Met**, and verifiable by strangers: every revision on `main` in all three repos carries signed source provenance and a source VSA at `SLSA_SOURCE_LEVEL_3` with all eight `ORG_SOURCE_` properties, chained in `refs/notes/commits` (see `source-track.md`) | Org-level rulesets: required gate, required signatures, linear history, squash-only, locked `v*` tags, empty bypass lists — read from the rules API at emission time, never from configuration intent |
 | Dependencies | **L2** | Met by construction: the release path refuses to publish with an undecided advisory in its SBOM (see `dependency-track.md`; first exercised on the next lab release) | Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed dependency-keyed VEX as the only exit |
 | Build Environment | **L1** | **Formally L0** at both layers: L1's verify-before-instantiation obligation is implemented, its signed-build-image-provenance obligation belongs to producers who do not meet it (see `slsa-reference.md`) | Runner image a named, Renovate-rolled pin; pgrx bases digest-pinned, org-attested and verified fail-closed before any container runs |
 
-Two of those rows name a gap rather than a level, and both gaps are the
-same shape: the controls are built, the *attestation* that would make
-them a level is not ours to emit. Source waits on an upstream engine
-(#199); Build Environment waits on image producers signing what they
-publish. Neither is fixed by building harder here, which is why both are
-stated as L0 rather than described as "effectively L1".
+One row still names a gap rather than a level. Build Environment's
+controls are built; the *attestation* that would make them a level
+belongs to image producers who do not sign what they publish, and that
+is not fixed by building harder here — which is why it is stated as L0
+rather than described as "effectively L1".
+
+Source was the same shape until 2026-08-12. It stopped being so by
+emitting: the org built its own SCS control plane (#207) rather than
+continuing to wait on an upstream engine, and the level moved the day
+strangers could verify it.
 
 Beyond the ceiling, the doors and their triggers are recorded; opening
 one is a decision, not drift:
@@ -53,12 +57,13 @@ one is a decision, not drift:
 - issue #122 — Dependencies L4, trust map
 - issue #125 — Build Environment L2+: waits on runner attestation
 - issue #126 — Source L4: waits on a second maintainer
-- issue #199 — Source track re-adoption: waits on the upstream engine
+- issue #199 — Source track: upstream `source-tool` as an independent
+  cross-check of our VSAs, never the thing that issues them
 
 **When a gap closes, this table is the first thing that changes.** The
 BuildEnv row becomes L1 at the container layer the day base-image
 provenance arrives signed and the org's verification of it is itself
-attested; the Source row becomes L3 the day VSAs emit. Any issue that
+attested; the Source row became L3 the day VSAs emitted. Any issue that
 delivers one of those carries updating this row as part of its done
 condition — a level that becomes true and goes unrecorded is the same
 defect as one claimed before it was.
