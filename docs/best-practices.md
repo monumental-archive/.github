@@ -10,7 +10,7 @@ Answers below are the org-wide evidence; anything repo-specific is marked.
 | Criterion family | Answer | Evidence |
 | --- | --- | --- |
 | Basics: homepage, description, contribution | Met | README + CONTRIBUTING.md (org-wide health files) |
-| FLOSS licence, in LICENSE | Met | per-repo LICENSE (+ REUSE machinery) |
+| FLOSS licence, in LICENSE | Met | per-repo LICENSE (0BSD in the org's own repos), `LICENSES/` + REUSE.toml, enforced by `lint:licence` (#214) |
 | Change control: public VCS, unique versions, release notes | Met | GitHub; semver by git-cliff; CHANGELOG per release |
 | Reporting: issue process, vulnerability process, ack ≤ 14 days | Met | issue forms; SECURITY.md (private reporting, 14-day ack) |
 | Quality: build, automated test suite, new-functionality tests, warnings | Met | `mise run ci` = the cloud gate; clippy/tests enforced; warnings deny |

@@ -1312,6 +1312,36 @@ fi
 echo "lint:belt-available: ok"
 '''
 
+[tasks."lint:licence"]
+description = "The repo carries its licence: tracked LICENSE or LICENSES/, and REUSE.toml's expression filled"
+dir = "{{cwd}}"
+# "Every repo carries its own" was a statement of intent that nothing
+# implemented, and the predictable result was that no repo carried one
+# (#214) — the same shape as the BuildEnv defect: a claim with no
+# mechanism, believed because it was written down. This is the
+# mechanism. The licence itself stays a per-repo choice (the canon is
+# 0BSD; a crate repo will dual-license MIT OR Apache-2.0); what the
+# belt enforces is only that the choice was MADE: a tracked licence
+# text exists, and a tracked REUSE.toml does not still carry the
+# scaffold's angle-bracket placeholder. Deterministic, offline,
+# tracked files only. Skips only an empty tree — a repo with content
+# and no licence is exactly the defect, never an exemption.
+run = '''
+[[ -n "$(git ls-files | head -1)" ]] || { echo "lint:licence: no tracked files, skipped"; exit 0; }
+lic=$(git ls-files "LICENSE" "LICENSE.*" "LICENSES/*")
+if [[ -z "${lic}" ]]; then
+  echo "lint:licence: no tracked LICENSE or LICENSES/ — every repo carries its own licence (#214)" >&2
+  echo "  with no licence the default is all rights reserved, the opposite of the intent" >&2
+  exit 1
+fi
+if git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 \
+  && grep -q "<SPDX expression>" "REUSE.toml"; then
+  echo "lint:licence: REUSE.toml still carries the scaffold's <SPDX expression> placeholder — pick the licence (#214)" >&2
+  exit 1
+fi
+echo "lint:licence: ok"
+'''
+
 [tasks."lint:release-stub"]
 description = "A versioned repo carries the canonical release stubs (cliff.toml implies publish.yml + release.yml)"
 dir = "{{cwd}}"

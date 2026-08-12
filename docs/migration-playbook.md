@@ -52,6 +52,11 @@ a fresh session **started in the target repo's checkout**.
       runbook's wiring section says so); fill the repo-specific holes
       (`allowed_scopes` in committed.toml, real tools/tasks in
       mise.toml).
+- [ ] **Pick and land the licence** (#214): `LICENSE` at the root,
+      `LICENSES/<SPDX-ID>.txt`, the expression in `REUSE.toml`. The
+      choice is per-repo (Rust convention `MIT OR Apache-2.0`; the
+      canon is 0BSD). `lint:licence` reddens the gate until this is
+      done, so a repo cannot be brought into conformance without it.
 - [ ] Convert the existing task runner to mise tasks: every Taskfile (or
       Makefile/script) target becomes a task or is deliberately dropped,
       with the mapping recorded in the migration PR body. Repo-specific
