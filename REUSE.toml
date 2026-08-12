@@ -1,0 +1,18 @@
+# REUSE.toml (spec 3.3): machine-readable licensing for every file in
+# the canon. The licence is 0BSD — the public-domain-equivalent,
+# OSI-approved, zero-condition licence — chosen deliberately for this
+# repository (#214): the canon exists to be copied, scaffold and
+# workflow-templates above all, and a licence that demands nothing of
+# the copier is the licence that matches the intent. Aggregate
+# precedence over the whole tree: configuration and workflows do not
+# carry per-file headers.
+version = 1
+SPDX-PackageName = ".github"
+SPDX-PackageSupplier = "Carl Allen <carl.allen313@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/monumental-archive/.github"
+
+[[annotations]]
+path = ["**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Carl Allen"
+SPDX-License-Identifier = "0BSD"

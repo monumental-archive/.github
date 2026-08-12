@@ -10,6 +10,14 @@ footprint of the governance stack:
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
 - `.rumdl.toml` — markdown canon (MD013 exempts code blocks)
 
+**Pick the licence — this is a step, not an afterthought (#214).** The
+choice is per-repo (Rust repos conventionally dual-license
+`MIT OR Apache-2.0`; the canon itself is 0BSD): land `LICENSE` at the
+root, the matching text in `LICENSES/<SPDX-ID>.txt`, and fill
+`REUSE.toml`'s `SPDX-License-Identifier`. With no licence the default
+is all rights reserved — the opposite of publishing anything — and
+`lint:licence` in the belt reddens the gate until the choice is made.
+
 Conditional stubs, wired per the runbook's "Wiring in a repository"
 section (`docs/runbook.md`): `cliff.toml` and the release/publish
 workflow templates for versioned repos, `CITATION.cff` where citable,
