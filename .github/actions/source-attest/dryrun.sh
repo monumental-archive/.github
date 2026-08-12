@@ -154,9 +154,14 @@ git -C "${seed}" push -q "${upstream}" main
 heal_work="${tmp}/work-heal"
 mkdir -p "${heal_work}"
 (
-  export SA_WORK="${heal_work}" SA_GENESIS=false GITHUB_SHA="${rev3}"
-  "${here}/claims.sh"
-  "${here}/chain.sh"
+  export SA_WORK="${heal_work}" GITHUB_SHA="${rev3}"
+  SA_GENESIS=false "${here}/claims.sh"
+  SA_GENESIS=false "${here}/chain.sh"
+  # emit.sh runs WITHOUT SA_GENESIS, exactly as the action scoped it
+  # before the fix that added it to the emit step — the first live heal
+  # died on the unbound variable while this dry run masked it with a
+  # global export. Never again: the default path is exercised here.
+  unset SA_GENESIS
   "${here}/emit.sh"
   "${here}/append.sh"
 )

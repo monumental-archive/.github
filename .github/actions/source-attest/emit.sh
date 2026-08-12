@@ -86,7 +86,7 @@ while IFS= read -r rev; do
   # parent is either a pre-existing link (verified here, with the
   # published root of trust, before anything signs against it) or one
   # this loop just emitted.
-  if [[ ${SA_GENESIS} == "true" ]]; then
+  if [[ ${SA_GENESIS:-false} == "true" ]]; then
     echo '{"prev": null}' > "${linkdir}/prev.json"
   else
     parent=$(git rev-parse -q --verify "${rev}^")
