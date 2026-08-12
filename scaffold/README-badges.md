@@ -7,7 +7,7 @@ Remove lines that do not apply (e.g. coverage in a Dockerfile-only repo).
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/monumental-archive/<repo>/badge)](https://scorecard.dev/viewer/?uri=github.com/monumental-archive/<repo>)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/BP_ID/badge)](https://www.bestpractices.dev/projects/BP_ID)
-[![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
+[![SLSA 3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
 [![REUSE status](https://api.reuse.software/badge/github.com/monumental-archive/<repo>)](https://api.reuse.software/info/github.com/monumental-archive/<repo>)
 [![coverage](https://codecov.io/gh/monumental-archive/<repo>/branch/main/graph/badge.svg)](https://codecov.io/gh/monumental-archive/<repo>)
 [![DOI](https://zenodo.org/badge/DOI/CONCEPT_DOI.svg)](https://doi.org/CONCEPT_DOI)
