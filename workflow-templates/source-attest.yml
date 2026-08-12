@@ -1,0 +1,42 @@
+# The org's future source-signing identity, held inert.
+#
+# This file's path at @refs/heads/main IS the identity: a keyless
+# certificate names the workflow path plus ref, so reserving the path now
+# freezes the identity strangers will one day pin — the root-of-trust
+# contract in docs/source-assessment.md of monumental-archive/.github.
+# RENAMING OR MOVING THIS FILE IS A BREAKING CHANGE to that contract.
+# Content (triggers, body) changes freely; the path never does.
+#
+# Copied per repository, deliberately, like the scorecard stub: an
+# in-repo workflow's identity is stable forever, where a SHA-pinned
+# shared workflow would rotate the org's signing identity on every pin
+# bump and orphan chain verification of older links (the pick-two
+# trilemma, .github#120).
+#
+# Inert means: workflow_dispatch only, no id-token, no signing. At
+# activation (standing watch .github#199: an upstream source-tool
+# release with issues 433/434/436 fixed) the trigger becomes on-push to
+# protected refs, the body invokes the verified tool, and `id-token:
+# write` enters WITH the capability-boundary marker — the workflow runs
+# zero caller-supplied code, which is what makes that grant safe.
+name: source-attest
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  reserved:
+    name: Identity reserved, emission parked
+    runs-on: ubuntu-24.04
+    steps:
+      - name: State the contract
+        run: |
+          echo "This path is the reserved source-signing identity:"
+          echo "  ${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
+          echo "Emission is parked — see monumental-archive/.github#199."

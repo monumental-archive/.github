@@ -1,0 +1,121 @@
+# Source control system self-assessment
+
+The SLSA v1.2 source track says consumers cannot trust a source control
+system without proof it meets the requirements, and its
+assessing-source-systems page provides the prompts. On GitHub the
+platform is not the whole SCS for this track: GitHub provides identity
+management, rulesets, history enforcement and diffs, but emits no
+source provenance and no source VSAs. Whoever emits them operates a
+control-plane extension and verifier, and the assessment applies to
+*them*. That will be this organisation. This document answers the
+prompts for that role, honestly, ahead of activation — emission is
+currently parked (`source-track.md`, watch #199), and publishing the
+assessment first means the trust contract is externally visible before
+it is ever exercised.
+
+## Change management interface
+
+GitHub pull requests. Approval rights are governed by repository roles
+under org-level rulesets with empty bypass lists (`rulesets.md`). Plain
+text renders as diffs; the org's artefact classes carry no
+non-plain-text source. Trusted robots: Renovate (dependency bumps,
+automerge under the full required gate) and the release App (tag
+minting only, `org-release-tag`). Both operate under the same required
+checks as humans; neither can approve a pull request.
+
+## Control configuration and technical controls
+
+Controls are org-level rulesets plus belt lints inside the required
+gate — the full set, with meanings, is the `ORG_SOURCE_` table in
+`source-track.md`. Regression protection:
+
+- Ruleset edits are possible only in the GitHub UI by an org owner;
+  every edit is timestamped by GitHub and the Monday audit
+  (`audit.yml`, repo-settings drift) compares live settings against
+  the recorded baseline, so silent drift surfaces on a cadence.
+- A single maintainer *can* tamper with controls — there is one human
+  (see Administration). The design compensates with observability,
+  not headcount: ruleset timestamps are GitHub's own and reset the
+  continuity ledger (`source-track.md`), so weakening a control is
+  recorded evidence, not a silent act.
+- GitHub-the-platform's administrators are above this assessment's
+  trust boundary, as they are for every GitHub-hosted SCS.
+
+## Control plane and verifier
+
+The future emitter: the per-repo workflow
+`.github/workflows/source-attest.yml@refs/heads/main` — inert today,
+path reserved (`source-track.md`, the signing identity section).
+
+**Administration.** One human administrator, stated plainly. Accounts
+are 2FA-required org-wide. There are no cryptographic secrets to
+access: signing is keyless (Sigstore), the certificate minted from the
+workflow's ambient OIDC identity per run — nothing to store, rotate,
+steal, or back up. The compromise-remediation story is the identity's:
+certificates are minutes-lived, every signing lands in Rekor, and the
+org's rekor-monitor workflow watches the log for signatures under org
+identities that the org did not make.
+
+**Control effectiveness.** The claims in any future VSA are read from
+GitHub's rules API at emission time, not asserted from configuration
+intent — the ground truth is the platform's enforcement state, and the
+Monday drift audit checks that state against the baseline continuously.
+
+**Provenance generation.** On-push, contemporaneous with the ref
+update, in the repo where the push event authentically exists. The
+workflow runs zero caller-supplied code (the narrowed
+capability-boundary rule; marker required at activation). Situations
+with no provenance: pushes predating activation, and any lapse — both
+are visible as gaps against the continuity ledger, and the Monday
+audit's job at activation is to assert every new protected-ref
+revision has its VSA, attestation-debt pattern for gaps.
+
+**VSA generation.** Derived from the SCS-issued provenance only (the
+L2+ requirement), never computed independently; each run verifies the
+previous chain link against the pinned org identity before appending.
+
+**Development practices.** The emitter workflow is itself version
+controlled in the repo it attests, protected by the very rulesets it
+claims, and gated by the same required check. The tool it will invoke
+is verified against its upstream SLSA provenance before use, no
+patches (`source-track.md`, re-adoption checklist). Communications are
+GitHub's TLS.
+
+## Storage
+
+Revisions, provenance and VSAs live in the repos themselves (git
+notes, `refs/notes/commits` — seeded in every org repo) and in
+GitHub's attestation store; both are world-readable because every org
+repo is public. Tampering with notes history is constrained by the
+chain (each link verifies its predecessor); cross-project isolation is
+GitHub's repository model.
+
+## Root of trust
+
+What a consumer pins, in the verifying-source page's configuration
+shape:
+
+```json
+{
+  "slsaSourceRootsOfTrust": [
+    {
+      "sigstore": {
+        "root": "global",
+        "subjectAlternativeNamePattern":
+          "https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main"
+      },
+      "scsId":
+        "https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main",
+      "slsaSourceLevel": 3
+    }
+  ]
+}
+```
+
+One entry per org repo, `<repo>` substituted. The issuer is GitHub's
+OIDC (`https://token.actions.githubusercontent.com`). **This identity
+is frozen**: renaming or moving `source-attest.yml` is a breaking
+change to this contract and will not happen; content changes freely.
+Until activation, nothing signs under these identities — a consumer
+configuring this today correctly verifies nothing, which is the honest
+state (formal Source L0, `source-track.md`).
