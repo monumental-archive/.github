@@ -21,7 +21,14 @@ set -euo pipefail
 if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
   branch_rules=$(cat "${SA_RULES_FIXTURE_DIR}/branch-rules.json")
 else
-  branch_rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/main" --paginate)
+  [[ -n ${GH_TOKEN:-} ]] || {
+    echo "::error::no GH_TOKEN in the environment — the claims stage must be handed the source-attest environment's read token (#240)"
+    exit 1
+  }
+  branch_rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/main" --paginate) || {
+    echo "::error::reading the effective branch rules for main failed — refusing to claim from a blind read"
+    exit 1
+  }
 fi
 [[ -n ${branch_rules} && ${branch_rules} != "[]" ]] || {
   echo "::error::rules API returned no effective rules for main — refusing to claim from a blind read"
@@ -71,37 +78,62 @@ fi
 # Tag properties come from ruleset details: effective per-ref rules only
 # exist for branches, so each active tag ruleset is fetched and matched
 # by content — conditions, rules and bypass actors together.
-tag_rulesets() {
-  if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
-    jq -c '.[] | select(.target == "tag" and .enforcement == "active")' \
-      "${SA_RULES_FIXTURE_DIR}/tag-rulesets.json"
-    return
-  fi
-  gh api "repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true" --paginate \
-    --jq '.[] | select(.target == "tag" and .enforcement == "active") | .id' \
-    | while read -r id; do
-      [[ -n ${id} ]] || continue
-      gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}" | jq -c .
-    done
+#
+# The read is shape-identical to the branch read above: every API call
+# is a plain command substitution with its own named error, the results
+# land in one JSON array variable, and the derivation is pure jq over
+# that array. There is no streaming and no process substitution — the
+# structure that let a failed read masquerade as an absent control
+# (#240) — so a read that fails cannot reach the claim logic at all.
+# Failure, blindness and lapse are three different outcomes: an API
+# error or an unreadable detail fails the run; an EMPTY list is a blind
+# read and also fails (the org tag rulesets exist by the frozen table,
+# so a token that sees none of them is proving its own incapability,
+# exactly like the branch guard); only a ruleset that is visible,
+# readable and does not match its content yields an absent property.
+if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
+  tag_rulesets=$(jq -c '[.[] | select(.target == "tag" and .enforcement == "active")]' \
+    "${SA_RULES_FIXTURE_DIR}/tag-rulesets.json")
+else
+  tag_ids=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true" --paginate \
+    --jq '.[] | select(.target == "tag" and .enforcement == "active") | .id') || {
+    echo "::error::listing rulesets for ${GITHUB_REPOSITORY} failed — refusing to claim from a blind read (#240)"
+    exit 1
+  }
+  tag_rulesets="[]"
+  for id in ${tag_ids}; do
+    detail=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}") || {
+      echo "::error::ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment's read token (#240)"
+      exit 1
+    }
+    tag_rulesets=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${tag_rulesets}")
+  done
+fi
+[[ $(jq length <<< "${tag_rulesets}") -ge 1 ]] || {
+  echo "::error::no active tag rulesets visible — the org tag rulesets exist (docs/source-track.md), so this token cannot see them; refusing to claim from a blind read (#240)"
+  exit 1
 }
-while read -r rs; do
-  [[ -n ${rs} ]] || continue
-  # ORG_SOURCE_TAG_IMMUTABLE: update, move and deletion blocked, all
-  # tags, nobody bypasses.
-  if jq -e '(.conditions.ref_name.include == ["~ALL"])
-      and (.conditions.ref_name.exclude == [])
-      and ([.rules[].type] | contains(["update", "deletion", "non_fast_forward"]))
-      and (.bypass_actors == [])' <<< "${rs}" > /dev/null; then
-    add ORG_SOURCE_TAG_IMMUTABLE "$(jq -c '{id, rules: [.rules[].type], conditions}' <<< "${rs}")"
-  fi
-  # ORG_SOURCE_RELEASE_TAG_MINTED: v* creation blocked for everyone
-  # except exactly the minting App (integration 4534781).
-  if jq -e '(.conditions.ref_name.include == ["refs/tags/v*"])
-      and ([.rules[].type] | contains(["creation"]))
-      and (.bypass_actors == [{actor_id: 4534781, actor_type: "Integration", bypass_mode: "always"}])' <<< "${rs}" > /dev/null; then
-    add ORG_SOURCE_RELEASE_TAG_MINTED "$(jq -c '{id, rules: [.rules[].type], conditions, bypass_actors}' <<< "${rs}")"
-  fi
-done < <(tag_rulesets)
+
+# ORG_SOURCE_TAG_IMMUTABLE: update, move and deletion blocked, all
+# tags, nobody bypasses.
+imm=$(jq -c '[.[] | select((.conditions.ref_name.include == ["~ALL"])
+  and (.conditions.ref_name.exclude == [])
+  and ([.rules[].type] | contains(["update", "deletion", "non_fast_forward"]))
+  and (.bypass_actors == []))
+  | {id, rules: [.rules[].type], conditions}]' <<< "${tag_rulesets}")
+if [[ $(jq length <<< "${imm}") -ge 1 ]]; then
+  add ORG_SOURCE_TAG_IMMUTABLE "${imm}"
+fi
+
+# ORG_SOURCE_RELEASE_TAG_MINTED: v* creation blocked for everyone
+# except exactly the minting App (integration 4534781).
+minted=$(jq -c '[.[] | select((.conditions.ref_name.include == ["refs/tags/v*"])
+  and ([.rules[].type] | contains(["creation"]))
+  and (.bypass_actors == [{actor_id: 4534781, actor_type: "Integration", bypass_mode: "always"}]))
+  | {id, rules: [.rules[].type], conditions, bypass_actors}]' <<< "${tag_rulesets}")
+if [[ $(jq length <<< "${minted}") -ge 1 ]]; then
+  add ORG_SOURCE_RELEASE_TAG_MINTED "${minted}"
+fi
 
 # Belt-carried properties: enforced INSIDE the gated check, so they are
 # claimable exactly when the gate is live and the canon tree this run

@@ -13,18 +13,28 @@
 # shared workflow would rotate the org's signing identity on every pin
 # bump and orphan chain verification of older links (the pick-two
 # trilemma, .github#120). The logic lives once, in the canon action the
-# single `uses:` below pins — composite steps run inside this job, so
-# the certificate still names this file. Requires canon >= v1.9.0 (the
-# release that ships the action); first run per repo is a genesis
-# dispatch, see docs/source-track.md.
+# single `uses:` pinned below (twice, same resolution) — composite
+# steps run inside this job, so the certificate still names this file.
+# Requires canon >= v1.12.0 (the release that ships the two-stage
+# action, #240); first run per repo is a genesis dispatch, see
+# docs/source-track.md.
 #
-# capability-boundary: this job holds `id-token: write` and runs ZERO
-# caller-supplied code — the attested repository is never checked out
-# and nothing from its tree is executed; the body is the canon's
+# capability-boundary: the attest job holds `id-token: write` and runs
+# ZERO caller-supplied code — the attested repository is never checked
+# out and nothing from its tree is executed; the body is the canon's
 # reviewed action, which touches the repo only through git plumbing
 # (notes fetch/push) and the rules API. `contents: write` is why source
 # provenance does not route through the org signer: the chain append
 # needs the one grant sign.yml must never hold (docs/release.md).
+#
+# Two jobs, disjoint capabilities (#240): reading org-level tag-ruleset
+# details needs a token the runner is not given ambiently, and a secret
+# must never share a job with the signing identity. So the claims job
+# holds the environment-scoped read token and nothing else — no
+# id-token, no contents: write — and the attest job holds the identity
+# and zero secrets, consuming the claim set as data across the job
+# boundary. The read token can read rulesets; it cannot sign or push.
+# A compromised attest job has no secret to take.
 name: source-attest
 
 on:
@@ -45,8 +55,32 @@ concurrency:
   cancel-in-progress: false # a queued push must not cancel a chain append
 
 jobs:
+  claims:
+    name: source-attest / claims
+    runs-on: ubuntu-24.04
+    # The read token lives in this environment, not repo-wide: scoped to
+    # the environment, only jobs that declare it are ever issued the
+    # secret (the audit.yml baseline-drift pattern, zizmor
+    # secrets-outside-env). Activation creates the environment and the
+    # token — docs/source-track.md, activation checklist.
+    environment: source-attest
+    permissions: {} # reads only; the token is the capability
+    outputs:
+      claims: ${{ steps.claims.outputs.claims }}
+    steps:
+      - name: Read enforcement and derive the claims
+        id: claims
+        uses: monumental-archive/.github/.github/actions/source-attest@ba20af2824de83e3f7b7085637e009c1f7586ad0 # v1.10.1
+        env:
+          # Fine-grained read-only PAT that can see org-level ruleset
+          # details — the ambient GITHUB_TOKEN cannot (#240).
+          GH_TOKEN: ${{ secrets.SOURCE_RULES_TOKEN }}
+        with:
+          stage: claims
+
   attest:
     name: source-attest
+    needs: claims
     runs-on: ubuntu-24.04
     permissions:
       contents: write # append the signed link to refs/notes/commits
@@ -55,4 +89,6 @@ jobs:
       - name: Emit provenance and VSA, append the chain link
         uses: monumental-archive/.github/.github/actions/source-attest@ba20af2824de83e3f7b7085637e009c1f7586ad0 # v1.10.1
         with:
+          stage: attest
+          claims: ${{ needs.claims.outputs.claims }}
           genesis: ${{ github.event.inputs.genesis || 'false' }}

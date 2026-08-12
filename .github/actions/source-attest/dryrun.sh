@@ -56,6 +56,45 @@ export GITHUB_SHA="${rev}"
 export SA_ACTOR="dry-run"
 export SA_ACTOR_ID="0"
 
+# The read guards are code too (#240): an empty or unreadable tag read
+# must refuse loudly, and a content lapse must drop exactly its own
+# properties. Both degraded fixture sets are DERIVED here from the one
+# canonical testdata — jq transforms, never second copies that drift.
+fail() {
+  echo "lint:source-attest: ${1}" >&2
+  exit 1
+}
+
+blind="${tmp}/fixtures-blind"
+mkdir -p "${blind}"
+cp "${here}/testdata/branch-rules.json" "${blind}/"
+jq '[]' "${here}/testdata/tag-rulesets.json" > "${blind}/tag-rulesets.json"
+guard_work="${tmp}/work-blind"
+mkdir -p "${guard_work}"
+if out=$(SA_WORK="${guard_work}" SA_RULES_FIXTURE_DIR="${blind}" "${here}/claims.sh" 2>&1); then
+  fail "claims.sh accepted a tag read that saw no rulesets — the blind-read guard is gone (#240)"
+fi
+grep -q "refusing to claim from a blind read" <<< "${out}" \
+  || fail "claims.sh refused the blind tag read but without its named error (#240)"
+
+lapsed="${tmp}/fixtures-lapsed"
+mkdir -p "${lapsed}"
+cp "${here}/testdata/branch-rules.json" "${lapsed}/"
+# The lapse: someone grants a bypass on the all-tags ruleset. The
+# ruleset is still visible and readable — only its content no longer
+# matches, so exactly ORG_SOURCE_TAG_IMMUTABLE must drop.
+jq '(.[] | select(.conditions.ref_name.include == ["~ALL"]) | .bypass_actors)
+  += [{actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always"}]' \
+  "${here}/testdata/tag-rulesets.json" > "${lapsed}/tag-rulesets.json"
+lapse_work="${tmp}/work-lapsed"
+mkdir -p "${lapse_work}"
+SA_WORK="${lapse_work}" SA_RULES_FIXTURE_DIR="${lapsed}" "${here}/claims.sh" \
+  || fail "claims.sh refused a readable-but-lapsed ruleset — a lapse must under-claim, not fail (#240)"
+jq -e '[.controls[].property] | (index("ORG_SOURCE_TAG_IMMUTABLE") == null)
+  and (index("ORG_SOURCE_RELEASE_TAG_MINTED") != null)' \
+  "${lapse_work}/claims.json" > /dev/null \
+  || fail "a lapsed tag ruleset did not drop exactly its own property (#240)"
+
 "${here}/claims.sh"
 "${here}/chain.sh"
 "${here}/emit.sh"
@@ -64,10 +103,6 @@ export SA_ACTOR_ID="0"
 # Shape validation against the spec's required fields — the statements a
 # live run would sign, checked field by field, plus the level the full
 # fixture set must reach.
-fail() {
-  echo "lint:source-attest: ${1}" >&2
-  exit 1
-}
 jq -e --arg rev "${rev}" '
   ._type == "https://in-toto.io/Statement/v1"
   and .subject[0].digest.gitCommit == $rev
@@ -92,4 +127,4 @@ jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" '
 jq -e '.version == 1 and .provenance.statement and .provenance.bundle and .vsa.statement and .vsa.bundle' \
   "${SA_WORK}/note.json" > /dev/null || fail "chain-link note shape invalid"
 
-echo "lint:source-attest: ok — emitter dry run clean, both statements shaped, note assembled, push negotiated"
+echo "lint:source-attest: ok — read guards refuse blindness, a lapse under-claims, emitter dry run clean, both statements shaped, note assembled, push negotiated"
