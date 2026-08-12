@@ -103,6 +103,17 @@ Failure modes are constructed loud:
   green cron run nobody reads is write-only, per the release canon's
   report-only obligation.
 
+Two report-only sections ride the same run (#187's sibling
+improvements). For repos with os-package findings, the report names the
+pending Renovate digest PR when one exists — the remediation is never
+per-CVE, so the pointer saves the hunt. And decisions matching no
+current finding are listed as **candidates for retirement**: coverage is
+derived, so a withdrawn advisory or a dropped/bumped dependency needs no
+document edit anywhere — the decision simply stops matching on every
+surface (audit join, `derive-vex.sh`, `vex-attest.yml` subjects) and
+sits inert in `security/vex/` as history. Deleting it is housekeeping,
+prompted by this list, never a correctness requirement.
+
 ### The exit: VEX, signed, never an override
 
 Every unremediated finding exits through an OpenVEX statement — assembled
