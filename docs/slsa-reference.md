@@ -105,8 +105,9 @@ rather than their issuer. Watch #199, position in `source-track.md`.
 explicitly as an implementation route for both Identity Management and
 Protected Named References. **Evaluated and declined**: it substitutes
 for the ruleset half the org already satisfies platform-anchored, and
-emits no source VSAs — so it cannot move the org off Source L0, which is
-the only thing actually blocking the level. Its trust root is
+emits no source VSAs — so at the time of the evaluation it could not
+have moved the org off Source L0, which was the only thing then blocking
+the level (the org's own emitter closed that in #207). Its trust root is
 self-held keys, which reintroduces the human key custody the keyless
 architecture deliberately removed, for a platform-compromise threat
 below the org's risk line, and a threshold root with one maintainer is a
@@ -779,7 +780,14 @@ Documentation does not answer these; the release lab does.
    digest or the per-arch digests, and what does
    `gh attestation verify oci://…:tag` resolve?~~ **Answered** — the
    index; see "Measured 2026-08-09" under `actions/attest`.
-3. What predicate type does GitHub's automatic release attestation use?
+3. ~~What predicate type does GitHub's automatic release attestation
+   use?~~ **Answered, measured 2026-08-12** —
+   `https://in-toto.io/attestation/release/v0.2`, read from the
+   attestations store for release-lab v0.20.1 and the canon's own
+   v1.13.0. It appears beside our provenance and VSA on every published
+   subject, including assets we do not attest ourselves (SBOM, VEX),
+   which is what makes it a useful independent binding rather than a
+   duplicate.
 4. Does the OIDC subject-claim format change break either registry's
    trusted publishing configuration on transfer? **Answered for
    crates.io** — no, it never reads `sub`. npm still open.

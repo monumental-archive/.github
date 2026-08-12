@@ -6,10 +6,11 @@ with code in this repository.
 ## Purpose
 
 This repo is the org's **conformance root** — see `docs/direction.md`
-for the thesis and the SLSA targets (v1.2: Build L3 **met**; Dep L2
-mechanisms met; Source and BuildEnv **formally L0** with L3-substance and
-L1-verification controls respectively, both gapped on attestations that
-are not ours to emit — the ceiling is by choice, the two L0s are not).
+for the thesis and the SLSA targets (v1.2: Build L3 **met**; Source L3
+**met** since 2026-08-12, the org emitting its own VSAs; Dep L2 met by
+construction; BuildEnv **formally L0** with L1-verification controls,
+gapped on attestations that are not ours to emit — the ceiling is by
+choice, the L0 is not).
 Never restate a target from memory: `direction.md` is the one table, and
 it is the first thing a closing issue updates. Other repos pin this one
 and conform to it; it does not adapt to them. The centralisation is the

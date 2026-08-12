@@ -173,7 +173,20 @@ gh attestation verify <artifact> --owner monumental-archive \
 
   Gate on `verificationResult: PASSED` and `verifiedLevels` instead of
   re-deriving the policy yourself; a consumer who distrusts verdicts
-  still has the provenance bundles in the release. Expect
+  still has the provenance bundles in the release.
+
+  **A verdict is falsifiable from its own evidence list.** The predicate
+  carries `inputAttestations` — every bundle the verifier opened, by URI
+  and sha256 — appended inside the loop that verified each one, so it
+  cannot list what was not read. A consumer who wants the verdict
+  checked rather than trusted fetches each entry, confirms it verifies
+  under the signer and that its subjects cover the artifact in hand. A
+  verdict asserting something untrue must either list evidence that
+  fails those checks or list none at all; a verdict whose evidence
+  checks out is one you could have derived yourself. Until #264 lands,
+  this is also what bounds `verifier.id`, which is today a field in the
+  predicate rather than the certificate subject
+  ([`build-assessment.md`](build-assessment.md), control plane). Expect
   `resourceUri: pkg:github/<owner>/<repo>@v<version>` — the release the
   verdict covers; per the VSA spec, this stated expectation is the
   out-of-band channel, so a VSA naming any other resource must be

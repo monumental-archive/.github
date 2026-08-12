@@ -26,6 +26,32 @@ cosign verify-blob --bundle <bundle> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com <statement>
 ```
 
+That is step 1 of `verifying-source` — the signature and the issuing
+identity. Step 2 is comparing the VSA against expectations, and these
+are the values to expect, published here so a consumer forms them from
+the producer rather than from the first VSA they happen to see:
+
+| Field | Expected |
+| --- | --- |
+| `verifier.id` | the same `source-attest.yml@refs/heads/main` URI as the certificate identity, per repo |
+| `subject[0].digest.gitCommit` | the revision you fetched |
+| `subject[0].annotations.sourceRefs` | `["refs/heads/main"]` — the emitter attests protected-ref revisions only |
+| `predicate.resourceUri` | `git+https://github.com/monumental-archive/<repo>` |
+| `predicate.verificationResult` | `PASSED` |
+| `predicate.verifiedLevels` | one source level, plus the `ORG_SOURCE_` properties live at that revision |
+
+A VSA naming any other resource, ref or verifier is not this chain's.
+
+### The one recorded gap
+
+`.github@e1ad2dde` (#256) carries **no link**: its emitter run died
+fetching the toolchain (`curl: (56)`) before anything was signed, and the
+next link chains over it. By the spec's own rule that revision is Source
+Level 0, and there is currently no path to backfill one — tracked, with
+the repair and the wording both, in #265. It is written here rather than
+quietly absent because a hole nobody records is the defect; the hole
+itself is an incident.
+
 **release-lab's first five links claim `SLSA_SOURCE_LEVEL_2`, and stay
 that way.** They were emitted before the claims job held a token that
 could read org-level tag-ruleset details, so `ORG_SOURCE_TAG_IMMUTABLE`

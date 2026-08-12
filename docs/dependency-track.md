@@ -10,7 +10,7 @@ the target and the declined doors were decided there and in #121/#122.
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path itself refuses to publish with an undecided advisory in its SBOM (`derive-vex.sh`, below); every decision exits through a signed VEX keyed by `package@version`. First exercised on the next lab release |
+| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path itself refuses to publish with an undecided advisory in its SBOM (`derive-vex.sh`, below); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.19.1, which it blocked — see "Where L2 is met by construction" |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
 

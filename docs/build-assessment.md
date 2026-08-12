@@ -54,11 +54,16 @@ from an allowlist. `lint:capability-boundary` fails the gate if any
 `workflow_call` workflow declares `id-token: write` without an explicit
 marker stating why it is safe.
 
-**Known limit.** Verification here compares builder identity and
-canonical source repository but not `buildType` or `externalParameters`
-— `gh attestation verify` exposes no flag for the latter two. Recorded in
-[`slsa-reference.md`](slsa-reference.md); it is a gap in the org's
-*verification*, not in the provenance itself.
+**Closed limit, recorded.** `gh attestation verify` exposes no flag for
+`buildType` or `externalParameters`, two of the four fields
+`verifying-artifacts` asks a verifier to compare. That was a gap in the
+org's *verification* until #210: `verify-release.yml`'s verdict mode now
+asserts the GitHub Actions buildType, rejects unrecognised
+`externalParameters` fields, and compares `externalParameters.workflow`
+against the run's own identity — all before any verdict field is
+written. The equivalent consumer-side check is published in
+[`runbook.md`](runbook.md) as jq over the verify call's JSON, so no new
+tool enters the belt.
 
 ## Control plane
 
@@ -114,6 +119,21 @@ matching identity, because `--signer-workflow` is a prefix regex with no
 trailing anchor. `signer` therefore carries the same org rulesets as every
 other repo, and consumers are told to pin `--signer-digest` as well as
 `--signer-workflow`.
+
+**Known limit.** One identity signs both provenance and verdicts, so a
+VSA's `verifier.id` is a field in a signed predicate rather than the
+certificate subject: anything able to call the signer could mint a
+verdict naming `verify-release.yml` without that workflow having run.
+The spec permits this shape explicitly — `verification_summary`'s own
+example has one party signing for a different verifier, and places the
+binding in the consumer's `(signer, verifier)` allowlist — and the
+residual is bounded by who can merge a workflow into an org repository,
+which is the single-administrator boundary above. It is nonetheless a
+fact a stranger takes on the org's word, so it is being closed by giving
+the verifier its own signing identity (#264). Until then the offline
+cross-check is `inputAttestations`: a *false* verdict must list evidence
+that does not verify or does not cover the subject, and that is
+checkable ([`runbook.md`](runbook.md)).
 
 ## Build environment
 
