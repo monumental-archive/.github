@@ -86,8 +86,11 @@ a level this document does not.
 | The mechanism inventory | `README.md` |
 | The release machinery, end to end | `release.md` |
 | The SLSA and attestation source material | `slsa-reference.md` |
+| The Build track, per requirement | `build-track.md` |
 | The build-platform self-assessment | `build-assessment.md` |
 | The source-track position, honestly | `source-track.md` |
+| The source provenance format, field by field | `source-provenance.md` |
+| Every tool considered, with verdict and trigger | `tooling-verdicts.md` |
 | The source-control self-assessment | `source-assessment.md` |
 | The dependency-track position | `dependency-track.md` |
 | The branch and tag rules | `rulesets.md` |
