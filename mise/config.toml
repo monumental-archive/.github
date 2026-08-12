@@ -697,8 +697,12 @@ dir = "{{cwd}}"
 # from the genesis link to the tip and assert each revision carries a
 # link whose VSA verifies against that repo's pinned identity — the
 # published root-of-trust contract, checked with exactly a stranger's
-# inputs. A repo with no genesis link is not activated: reported,
-# skipped, never red — activation is deliberate and lab-first.
+# inputs. The audit enumerates the POPULATION, not the enrolled set
+# (#266): a repo with a main branch and no founded chain is a FINDING
+# unless security/source-attest-optout.txt names it with a reason —
+# an unactivated repo is otherwise silent by construction, the SBOM
+# gap in a different track. "Deliberate and lab-first" survives as a
+# written exception, never as silence.
 run = '''
 [[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -d source-policies ]] || {
   echo "audit:source-vsa: not the canon, skipped"; exit 0
@@ -709,6 +713,10 @@ issuer="https://token.actions.githubusercontent.com"
 repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
 failed=""
 checked=0
+optout="security/source-attest-optout.txt"
+opted_out() { # repo — listed with a reason in the opt-out file
+  [[ -f "${optout}" ]] && grep -qE "^${1}[[:space:]]" "${optout}"
+}
 while read -r repo; do
   [[ -n "${repo}" ]] || continue
   dir=$(mktemp -d)
@@ -716,7 +724,11 @@ while read -r repo; do
   git -C "${dir}" remote add origin "https://github.com/monumental-archive/${repo}.git"
   git -C "${dir}" fetch -q origin "+refs/heads/main:refs/sa/main" \
     "+refs/notes/commits:refs/notes/commits" 2> /dev/null || {
-    echo "audit:source-vsa: ${repo}: no main or no notes ref, skipped"
+    if opted_out "${repo}"; then
+      echo "audit:source-vsa: ${repo}: no main or no notes ref, opted out (${optout})"
+    else
+      failed="${failed} ${repo}(no main or notes ref and not in ${optout})"
+    fi
     continue
   }
   san="https://github.com/monumental-archive/${repo}/.github/workflows/source-attest.yml@refs/heads/main"
@@ -750,7 +762,11 @@ while read -r repo; do
     c=$(git -C "${dir}" rev-parse -q --verify "${c}^" 2> /dev/null || true)
   done
   if [[ ${links} -eq 0 ]]; then
-    echo "audit:source-vsa: ${repo}: no chain founded, not activated, skipped"
+    if opted_out "${repo}"; then
+      echo "audit:source-vsa: ${repo}: no chain founded, opted out (${optout})"
+    else
+      failed="${failed} ${repo}(no chain founded and not in ${optout} — an unactivated repo is silent, #266)"
+    fi
     continue
   fi
   if [[ -n "${holes}" ]]; then

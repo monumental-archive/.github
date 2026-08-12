@@ -16,3 +16,10 @@ extend-exclude = ["release/spdx-license-data.json"]
 # Signed-Releases check looks for, so it appears verbatim in prose and in
 # the evidence bundle. `typos` reads it as a misspelling of "into".
 intoto = "intoto"
+
+[default.extend-identifiers]
+# "SHOULDs" — RFC-2119 keyword pluralised, in prose and in commit
+# subjects the changelog reproduces. The tokenizer splits the trailing
+# lowercase s as its own word ("SHOUL" + "Ds") and flags the stem,
+# which reddened the v1.14.0 release PR's generated CHANGELOG.
+SHOULDs = "SHOULDs"
