@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.15.0](https://github.com/monumental-archive/.github/compare/v1.14.1...v1.15.0) - 2026-08-12
+
+### Added
+
+- stand up the canon's badge surface ([#284](https://github.com/monumental-archive/.github/pull/284))
+- re-check every shield against its source of truth ([#287](https://github.com/monumental-archive/.github/pull/287))
+- verify the upstream base provenance and sign the result ([#288](https://github.com/monumental-archive/.github/pull/288))
+- block every irreversible step on a bit-for-bit rebuild ([#289](https://github.com/monumental-archive/.github/pull/289))
+
+### Documentation
+
+- retire the claims the final pass made stale ([#283](https://github.com/monumental-archive/.github/pull/283))
+
+### Miscellaneous
+
+- bump the emitter pin to v1.14.1 ([#281](https://github.com/monumental-archive/.github/pull/281))
+
 ## [1.14.1](https://github.com/monumental-archive/.github/compare/v1.14.0...v1.14.1) - 2026-08-12
 
 ### Fixed
