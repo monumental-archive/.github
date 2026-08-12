@@ -1,5 +1,7 @@
 {
   "name": "Source attest",
-  "description": "The repo's source-track emitter: per push to main, signed source provenance and a source VSA under this file's frozen identity, chained in git notes. Copy at canon >= v1.9.0; genesis dispatch first (.github#207).",
-  "categories": ["ci"]
+  "description": "The repo's source-track emitter: per push to main, signed source provenance and a source VSA under this file's frozen identity, chained in git notes. Requires canon >= v1.11.1, the source-attest environment holding SOURCE_RULES_TOKEN, and a genesis dispatch \u2014 see docs/source-track.md (.github#207).",
+  "categories": [
+    "ci"
+  ]
 }
