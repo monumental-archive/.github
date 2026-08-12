@@ -23,7 +23,7 @@ Answers below are the org-wide evidence; anything repo-specific is marked.
 | Criterion | Answer | Evidence |
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
-| `build_repeatable` | Met | repro-check rebuilds releases bit-for-bit (proven in the lab) |
+| `build_repeatable` | Met | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold |
 | `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 | canonical `coverage:check` ratchet in the gate |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | git-cliff + App-minted `v*` tags |

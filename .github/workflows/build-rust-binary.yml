@@ -64,6 +64,17 @@ on:
         required: false
         type: string
         default: ""
+      repro:
+        description: >
+          Rebuild leg of the repro gate (#118): build and hash the same
+          bytes, upload NO release-* artifact (the gate needs only the
+          subjects), skip the smoke tests (the gate proves bytes; the
+          first build already proved behaviour), and publish nothing.
+          Intermediate artifacts carry a repro- prefix so the two builds
+          of one run cannot collide or cross-contaminate a glob.
+        required: false
+        type: boolean
+        default: false
     outputs:
       subjects:
         description: sha256sum manifest of the release archives.
@@ -284,7 +295,7 @@ jobs:
           echo "count=${#bins[@]}" >> "${GITHUB_OUTPUT}"
 
       - name: Smoke the binaries
-        if: inputs.smoke-test != ''
+        if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:
           TARGET: ${{ matrix.target }}
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
@@ -316,7 +327,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: binary-${{ matrix.target }}
+          name: ${{ inputs.repro && 'repro-' || '' }}binary-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
           retention-days: 1
@@ -336,7 +347,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: binary-*
+          pattern: ${{ inputs.repro && 'repro-binary-*' || 'binary-*' }}
           merge-multiple: true
           path: dist
 
@@ -377,6 +388,7 @@ jobs:
           printf '%s\n' "${manifest}"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.repro }}
         with:
           name: release-binaries
           path: dist/*.tar.gz

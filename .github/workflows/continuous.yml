@@ -136,13 +136,30 @@ jobs:
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
 
+  # The index assembly moved out of the build workflow when the
+  # versioned flow gained its repro gate (#118); the continuous stream
+  # is ungated by design — its tag is a moving pointer and its
+  # immutability story is the digest attestation — so build and
+  # assemble simply run back to back here.
+  assemble:
+    name: Assemble the image index
+    needs: [guard, facts, build]
+    uses: ./.github/workflows/assemble-oci-index.yml
+    permissions:
+      contents: read # checkout of the caller
+      packages: write # create and tag the manifest list
+    with:
+      version: latest
+      smoke-test: ${{ inputs.smoke-test }}
+      facts: ${{ needs.facts.outputs.facts }}
+
   sign:
     name: Sign image
-    needs: build
+    needs: assemble
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
-      image-name: ${{ needs.build.outputs.image }}
-      image-digest: ${{ needs.build.outputs.digest }}
+      image-name: ${{ needs.assemble.outputs.image }}
+      image-digest: ${{ needs.assemble.outputs.digest }}
       bundle-artifact: attestation-bundle-image
     permissions:
       id-token: write # the signer mints the Sigstore identity

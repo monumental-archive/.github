@@ -10,6 +10,11 @@
 # README tells consumers to do: COPY --from into a stock postgres and
 # CREATE EXTENSION.
 #
+# Since #118 the build pushes UNTAGGED (by digest): the per-major tag
+# is applied post-gate by tag-images.yml, putting the exact manifest
+# bytes the gate compared under the advertised name — digest preserved
+# by construction.
+#
 # The runnable convenience image deliberately does not exist in canon:
 # its CVE posture would be its base's, refreshable only by a release —
 # the exact failure ma-db's own-the-installation decision documents.
@@ -50,6 +55,19 @@ on:
         type: string
       dry-run:
         description: Rehearsal — assemble and prove locally, push nothing.
+        required: false
+        type: boolean
+        default: false
+      repro:
+        description: >
+          Rebuild leg of the repro gate (#118): assemble and push the
+          per-major indexes by digest exactly like the first build (a
+          reproduced rebuild is an idempotent no-op; a mismatch leaves
+          an unreferenced, untagged digest and the gate goes red), skip
+          the behavioural proofs, and record the digests under repro-
+          prefixed artifacts so the gate can compare. Both builds stage
+          from the SAME release-extensions artifact, so a compare here
+          isolates image-layer nondeterminism.
         required: false
         type: boolean
         default: false
@@ -151,7 +169,7 @@ jobs:
       - name: Create a container-driver builder
         run: docker buildx create --use --name org-pgrx --driver docker-container
 
-      - name: Build both platforms and push by digest with the tag
+      - name: Build both platforms and push by digest, untagged (#118)
         id: push
         if: ${{ !inputs.dry-run }}
         env:
@@ -197,8 +215,7 @@ jobs:
             --platform linux/amd64,linux/arm64 \
             "${LABELS[@]}" \
             "${ANNOS[@]}" \
-            --tag "${IMAGE}:${UNTRUSTED_VERSION}-pg${PG}-artifact" \
-            --output type=image,push=true,oci-mediatypes=true \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true" \
             --metadata-file /tmp/meta.json \
             .
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
@@ -207,16 +224,19 @@ jobs:
             exit 1
           fi
           mkdir -p /tmp/digests
-          # tag rides along so downstream consumers (the VSA's tag→digest
-          # binding proof) never re-derive the scheme: the step that names
-          # the tag is the step that records it.
+          # The tag NAME rides along — applied only post-gate, by
+          # tag-images.yml putting the very same manifest bytes under the
+          # tag — so downstream consumers (the VSA's tag→digest binding
+          # proof) never re-derive the scheme: the step that names the
+          # tag is the step that records it, and nothing referenceable
+          # exists until the repro gate has passed.
           jq -n --arg pg "${PG}" --arg image "${IMAGE}" --arg digest "${digest}" \
             --arg tag "${UNTRUSTED_VERSION}-pg${PG}-artifact" \
             '{pg: $pg, image: $image, tag: $tag, digest: $digest}' > "/tmp/digests/pg${PG}.json"
           echo "::notice::pg${PG} index ${digest}"
 
       - name: Prove the pushed image the way a consumer uses it
-        if: ${{ !inputs.dry-run }}
+        if: ${{ !inputs.dry-run && !inputs.repro }}
         env:
           IMAGE: ${{ steps.name.outputs.image }}
         run: |
@@ -250,7 +270,7 @@ jobs:
           '
 
       - name: Assert the published metadata equals the facts
-        if: ${{ !inputs.dry-run }}
+        if: ${{ !inputs.dry-run && !inputs.repro }}
         env:
           IMAGE: ${{ steps.name.outputs.image }}
           FACTS: ${{ inputs.facts }}
@@ -266,7 +286,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.dry-run }}
         with:
-          name: pgrx-image-digest-pg${{ matrix.pg }}
+          name: ${{ inputs.repro && 'repro-' || '' }}pgrx-image-digest-pg${{ matrix.pg }}
           path: /tmp/digests/
           if-no-files-found: error
           retention-days: 1

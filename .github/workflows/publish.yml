@@ -16,7 +16,9 @@
 # The step order below is not rearrangeable, and it lives here rather than
 # in each caller precisely so that it cannot be rearranged:
 #
-#   build -> smoke test -> push -> pull the published bytes back and prove
+#   build (twice, independently) -> smoke test -> repro gate (every
+#   irreversible step blocks on the bit-for-bit proof, #118) -> registry
+#   publish / index tag -> pull the published bytes back and prove
 #   them -> attest -> verify as a stranger would -> publish the release ->
 #   verdict (every class: re-prove the now-immutable public artifacts,
 #   open their evidence, sign the VSA into the attestation store)
@@ -384,11 +386,39 @@ jobs:
       # dies as startup_failure with no jobs and no log. Measured; every
       # `uses:` job below therefore restates exactly what its callee needs.
       contents: read # checkout of the caller
-      id-token: write # crates.io trusted publishing, in the publish job
     with:
       version: ${{ needs.guard.outputs.version }}
       exclude: ${{ inputs.exclude }}
-      dry-run: ${{ inputs.dry-run }}
+
+  # The rebuild legs (#118): same workflow, repro: true — no release-*
+  # upload, no smoke, repro- prefixed intermediates. They run in
+  # parallel with the first builds; the gate below compares the two
+  # subject manifests bit for bit before anything irreversible.
+  repro-build:
+    name: Rebuild (repro)
+    needs: guard
+    if: contains(inputs.classes, 'rust-crate')
+    uses: ./.github/workflows/build-rust-crate.yml
+    permissions:
+      contents: read # checkout of the caller
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      exclude: ${{ inputs.exclude }}
+      repro: true
+
+  publish-crates:
+    name: Publish crates
+    needs: [guard, build, repro-gate]
+    # Post-gate, pre-verify: the registry upload is the class's
+    # irreversible step (crates.io is yank-only), so it waits on the
+    # bit-for-bit proof (#118) and on nothing else.
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
+    uses: ./.github/workflows/publish-rust-crate.yml
+    permissions:
+      contents: read # checkout for cargo publish
+      id-token: write # crates.io trusted publishing, no token secret
+    with:
+      exclude: ${{ inputs.exclude }}
 
   build-oci:
     name: Build image
@@ -408,18 +438,52 @@ jobs:
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
 
+  repro-build-oci:
+    name: Rebuild image (repro)
+    needs: [guard, facts]
+    if: contains(inputs.classes, 'oci-image')
+    uses: ./.github/workflows/build-oci-image.yml
+    permissions:
+      contents: read # checkout of the caller
+      packages: write # push per-arch digests (idempotent when reproduced)
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      dockerfile: ${{ inputs.dockerfile }}
+      context: ${{ inputs.context }}
+      smoke-test: ${{ inputs.smoke-test }}
+      facts: ${{ needs.facts.outputs.facts }}
+      source-epoch: ${{ needs.facts.outputs.epoch }}
+      dry-run: ${{ inputs.dry-run }}
+      repro: true
+
+  # The index is assembled and TAGGED exactly once, here, post-gate
+  # (#118): the builds pushed per-arch digests only, the gate compared
+  # them, and this is the first moment a public reference exists.
+  assemble-oci:
+    name: Assemble the image index
+    needs: [guard, facts, build-oci, repro-gate]
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+    uses: ./.github/workflows/assemble-oci-index.yml
+    permissions:
+      contents: read # checkout of the caller
+      packages: write # create and tag the manifest list
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      smoke-test: ${{ inputs.smoke-test }}
+      facts: ${{ needs.facts.outputs.facts }}
+
   # An image subject is a different shape from a file one, and sign.yml
   # takes exactly one — so a repository shipping both classes signs twice,
   # under the same identity, rather than mixing unrelated subjects into one
   # certificate.
   sign-image:
     name: Sign image
-    needs: build-oci
-    if: ${{ contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+    needs: assemble-oci
+    if: ${{ !cancelled() && needs.assemble-oci.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
-      image-name: ${{ needs.build-oci.outputs.image }}
-      image-digest: ${{ needs.build-oci.outputs.digest }}
+      image-name: ${{ needs.assemble-oci.outputs.image }}
+      image-digest: ${{ needs.assemble-oci.outputs.digest }}
       bundle-artifact: attestation-bundle-image
     permissions:
       id-token: write # the signer mints the Sigstore identity
@@ -431,8 +495,12 @@ jobs:
   # is what shipped, not what we hoped shipped.
   verify:
     name: Verify published bytes
-    needs: [guard, build]
-    if: contains(inputs.classes, 'rust-crate')
+    needs: [guard, build, publish-crates]
+    # Post-publish: the registry pull-back needs the bytes to be on the
+    # registry, which now happens downstream of the repro gate (#118). A
+    # dry-run excuses the skipped publish — the verifier passes the
+    # manifest through unchanged.
+    if: ${{ !cancelled() && needs.build.result == 'success' && contains(inputs.classes, 'rust-crate') && (needs.publish-crates.result == 'success' || inputs.dry-run) }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
       # The full verifier set: verify-release declares its verdict-mode
@@ -452,7 +520,7 @@ jobs:
   sign:
     name: Sign
     needs: verify
-    if: contains(inputs.classes, 'rust-crate')
+    if: ${{ !cancelled() && needs.verify.result == 'success' && contains(inputs.classes, 'rust-crate') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
       subjects: ${{ needs.verify.outputs.subjects }}
@@ -517,10 +585,26 @@ jobs:
   # asset digests at publish. The subjects signed are the archives the
   # attach job uploads — the same bytes, proven by the collect job's
   # refuse-a-partial-set guard.
+  repro-build-binary:
+    name: Rebuild binaries (repro)
+    needs: guard
+    if: contains(inputs.classes, 'rust-binary')
+    uses: ./.github/workflows/build-rust-binary.yml
+    permissions:
+      contents: read # checkout of the caller
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      targets: ${{ inputs.binary-targets }}
+      smoke-test: ${{ inputs.binary-smoke-test }}
+      exclude: ${{ inputs.exclude }}
+      repro: true
+
   sign-binaries:
     name: Sign binaries
-    needs: build-binary
-    if: contains(inputs.classes, 'rust-binary')
+    needs: [build-binary, repro-gate]
+    # The Sigstore entry is append-only — an irreversible step, so it
+    # sits downstream of the bit-for-bit proof (#118).
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'rust-binary') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
       subjects: ${{ needs.build-binary.outputs.subjects }}
@@ -547,10 +631,21 @@ jobs:
     with:
       version: ${{ needs.guard.outputs.version }}
 
+  repro-build-source:
+    name: Rebuild source archive (repro)
+    needs: guard
+    if: contains(inputs.classes, 'source-archive')
+    uses: ./.github/workflows/build-source-archive.yml
+    permissions:
+      contents: read # checkout of the caller at the tag
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      repro: true
+
   sign-source:
     name: Sign source archive
-    needs: build-source
-    if: contains(inputs.classes, 'source-archive')
+    needs: [build-source, repro-gate]
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'source-archive') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
       subjects: ${{ needs.build-source.outputs.subjects }}
@@ -568,17 +663,42 @@ jobs:
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller
-      id-token: write # npm trusted publishing, in the publish job
     with:
       version: ${{ needs.guard.outputs.version }}
       crate-dir: ${{ inputs.crate-dir }}
       npm-scope: ${{ inputs.npm-scope }}
-      dry-run: ${{ inputs.dry-run }}
+
+  repro-build-wasm:
+    name: Rebuild wasm package (repro)
+    needs: guard
+    if: contains(inputs.classes, 'wasm-npm')
+    uses: ./.github/workflows/build-wasm-npm.yml
+    permissions:
+      contents: read # checkout of the caller
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      crate-dir: ${{ inputs.crate-dir }}
+      npm-scope: ${{ inputs.npm-scope }}
+      repro: true
+
+  publish-wasm:
+    name: Publish wasm package
+    needs: [guard, build-wasm, repro-gate]
+    # Post-gate: npm's unpublish window closes after 72 hours, so the
+    # upload waits on the bit-for-bit proof (#118).
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
+    uses: ./.github/workflows/publish-wasm-npm.yml
+    permissions:
+      contents: read # checkout for the pinned npm
+      id-token: write # npm trusted publishing, no token secret
+    with:
+      package: ${{ needs.build-wasm.outputs.package }}
+      artifact-name: ${{ needs.build-wasm.outputs.artifact-name }}
 
   verify-wasm:
     name: Verify published wasm bytes
-    needs: build-wasm
-    if: contains(inputs.classes, 'wasm-npm')
+    needs: [build-wasm, publish-wasm]
+    if: ${{ !cancelled() && needs.build-wasm.result == 'success' && contains(inputs.classes, 'wasm-npm') && (needs.publish-wasm.result == 'success' || inputs.dry-run) }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
       # The full verifier set — see the note on `verify` above (#264).
@@ -594,7 +714,7 @@ jobs:
   sign-wasm:
     name: Sign wasm package
     needs: verify-wasm
-    if: contains(inputs.classes, 'wasm-npm')
+    if: ${{ !cancelled() && needs.verify-wasm.result == 'success' && contains(inputs.classes, 'wasm-npm') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
@@ -638,10 +758,24 @@ jobs:
       pg-majors: ${{ inputs.pg-majors }}
       smoke-test: ${{ inputs.extension-smoke-test }}
 
+  repro-build-extension:
+    name: Rebuild extension (repro)
+    needs: guard
+    if: contains(inputs.classes, 'pgrx-extension')
+    uses: ./.github/workflows/build-pgrx-extension.yml
+    permissions:
+      contents: read # checkout of the caller
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      crate-dir: ${{ inputs.extension-crate-dir }}
+      pg-majors: ${{ inputs.pg-majors }}
+      smoke-test: ${{ inputs.extension-smoke-test }}
+      repro: true
+
   sign-extensions:
     name: Sign extension tarballs
-    needs: build-extension
-    if: contains(inputs.classes, 'pgrx-extension')
+    needs: [build-extension, repro-gate]
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@1107fa24afad563c6ac8dfd9116d6b51fd96c8a4 # main
     with:
       subjects: ${{ needs.build-extension.outputs.subjects }}
@@ -671,10 +805,43 @@ jobs:
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
 
+  repro-build-extension-images:
+    name: Rebuild extension images (repro)
+    # Both image builds stage from the SAME release-extensions artifact
+    # (the first build's), so the compare isolates image-layer
+    # nondeterminism; tarball equality is the gate's own extension leg.
+    needs: [guard, build-extension, facts]
+    if: contains(inputs.classes, 'pgrx-extension')
+    uses: ./.github/workflows/build-pgrx-images.yml
+    permissions:
+      contents: read # checkout of canon for the Dockerfile and mapping
+      packages: write # push the per-major indexes (idempotent when reproduced)
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      crate-dir: ${{ inputs.extension-crate-dir }}
+      pg-majors: ${{ inputs.pg-majors }}
+      facts: ${{ needs.facts.outputs.facts }}
+      source-epoch: ${{ needs.facts.outputs.epoch }}
+      dry-run: ${{ inputs.dry-run }}
+      repro: true
+
+  # The per-major tags, applied post-gate by manifest PUT — the exact
+  # bytes the gate compared land under the advertised names, digests
+  # preserved by construction (#118).
+  tag-extension-images:
+    name: Tag extension images
+    needs: [build-extension-images, repro-gate]
+    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+    uses: ./.github/workflows/tag-images.yml
+    permissions:
+      packages: write # PUT each gated manifest under its tag
+    with:
+      images: ${{ needs.build-extension-images.outputs.images }}
+
   sign-extension-images:
     name: Sign extension image pg${{ matrix.pg }}
-    needs: build-extension-images
-    if: ${{ contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+    needs: [build-extension-images, tag-extension-images]
+    if: ${{ !cancelled() && needs.tag-extension-images.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
     strategy:
       fail-fast: false
       matrix:
@@ -688,6 +855,153 @@ jobs:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
+
+  # The repro gate (#118): every public or permanent effect — the
+  # crates.io/npm uploads, the ghcr tags, the Sigstore entries, the
+  # release itself — sits downstream of this job, which compares the
+  # first build's outputs against an independent rebuild's, full width:
+  # sha256 subject manifests for the file classes, per-arch (oci) and
+  # per-major-index (pgrx) digests for the image classes. Mismatch
+  # fails the release outright — no warn-and-ship path, because a warn
+  # path converts the control into a log line. Skew-proofing is free by
+  # construction here: both builds are relative `uses:` in this same
+  # run, resolved at the caller's pinned SHA, so a mismatch can only
+  # mean NONDETERMINISM, never version skew.
+  #
+  # Nothing here ever emits SLSA_BUILD_REPRODUCED: a same-platform
+  # rebuild can never earn it, by design (docs/tooling-verdicts.md).
+  # Fan-in mirrors attach: !cancelled() plus explicit result checks,
+  # because the implicit success() looks THROUGH to legitimately
+  # skipped class ancestors and goes false (measured on v0.14.2).
+  repro-gate:
+    name: Repro gate
+    needs: [guard, build, repro-build, build-oci, repro-build-oci, build-binary, repro-build-binary, build-source, repro-build-source, build-wasm, repro-build-wasm, build-extension, repro-build-extension, build-extension-images, repro-build-extension-images]
+    if: >-
+      ${{
+        !cancelled() && needs.guard.result == 'success'
+        && !contains(join(needs.*.result, ','), 'failure')
+        && (!contains(inputs.classes, 'rust-crate') || (needs.build.result == 'success' && needs.repro-build.result == 'success'))
+        && (!contains(inputs.classes, 'oci-image') || (needs.build-oci.result == 'success' && needs.repro-build-oci.result == 'success'))
+        && (!contains(inputs.classes, 'rust-binary') || (needs.build-binary.result == 'success' && needs.repro-build-binary.result == 'success'))
+        && (!contains(inputs.classes, 'source-archive') || (needs.build-source.result == 'success' && needs.repro-build-source.result == 'success'))
+        && (!contains(inputs.classes, 'wasm-npm') || (needs.build-wasm.result == 'success' && needs.repro-build-wasm.result == 'success'))
+        && (!contains(inputs.classes, 'pgrx-extension') || (needs.build-extension.result == 'success' && needs.repro-build-extension.result == 'success' && needs.build-extension-images.result == 'success' && needs.repro-build-extension-images.result == 'success'))
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {} # compares digests; no caller code, no checkout, no writes
+    steps:
+      - name: Compare the file-class subject manifests
+        env:
+          CLASSES: ${{ inputs.classes }}
+          CRATES_A: ${{ needs.build.outputs.subjects }}
+          CRATES_B: ${{ needs.repro-build.outputs.subjects }}
+          BIN_A: ${{ needs.build-binary.outputs.subjects }}
+          BIN_B: ${{ needs.repro-build-binary.outputs.subjects }}
+          SRC_A: ${{ needs.build-source.outputs.subjects }}
+          SRC_B: ${{ needs.repro-build-source.outputs.subjects }}
+          WASM_A: ${{ needs.build-wasm.outputs.subjects }}
+          WASM_B: ${{ needs.repro-build-wasm.outputs.subjects }}
+          EXT_A: ${{ needs.build-extension.outputs.subjects }}
+          EXT_B: ${{ needs.repro-build-extension.outputs.subjects }}
+        run: |
+          set -euo pipefail
+          compared=0
+          check() { # class, first, rebuild
+            local class="${1}" a="${2}" b="${3}"
+            case ",${CLASSES// /}," in *",${class},"*) ;; *) return 0 ;; esac
+            if [[ -z "${a}" || -z "${b}" ]]; then
+              echo "::error::${class}: a build produced no subjects — an empty proof is not a proof"
+              exit 1
+            fi
+            if [[ "${a}" != "${b}" ]]; then
+              echo "::error::${class}: the rebuild does not reproduce the first build bit for bit"
+              diff <(printf '%s\n' "${a}") <(printf '%s\n' "${b}") || true
+              exit 1
+            fi
+            lines=$(wc -l <<< "${a}" | tr -d ' ')
+            echo "::notice::${class}: ${lines} subject(s) reproduced bit for bit"
+            compared=$((compared + 1))
+          }
+          check rust-crate "${CRATES_A}" "${CRATES_B}"
+          check rust-binary "${BIN_A}" "${BIN_B}"
+          check source-archive "${SRC_A}" "${SRC_B}"
+          check wasm-npm "${WASM_A}" "${WASM_B}"
+          check pgrx-extension "${EXT_A}" "${EXT_B}"
+          echo "FILE_COMPARED=${compared}" >> "${GITHUB_ENV}"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+        with:
+          pattern: oci-digest-*
+          merge-multiple: true
+          path: oci-a
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+        with:
+          pattern: repro-oci-digest-*
+          merge-multiple: true
+          path: oci-b
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+        with:
+          pattern: pgrx-image-digest-pg*
+          merge-multiple: true
+          path: pgrx-a
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+        with:
+          pattern: repro-pgrx-image-digest-pg*
+          merge-multiple: true
+          path: pgrx-b
+
+      - name: Compare the image-class digests
+        env:
+          CLASSES: ${{ inputs.classes }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          compared="${FILE_COMPARED:-0}"
+          if [[ "${DRY_RUN}" != "true" ]]; then
+            case ",${CLASSES// /}," in
+              *,oci-image,*)
+                for arch in oci-a/*; do
+                  [[ -f "${arch}" ]] || { echo "::error::oci-image: no per-arch digests to compare"; exit 1; }
+                  b="oci-b/$(basename "${arch}")"
+                  [[ -f "${b}" ]] || { echo "::error::oci-image: rebuild produced no $(basename "${arch}") digest"; exit 1; }
+                  if ! cmp -s "${arch}" "${b}"; then
+                    echo "::error::oci-image: $(basename "${arch}") digest differs — the rebuild does not reproduce the image"
+                    exit 1
+                  fi
+                done
+                echo "::notice::oci-image: per-arch digests reproduced bit for bit"
+                compared=$((compared + 1))
+                ;;
+              *) ;; # class not requested
+            esac
+            case ",${CLASSES// /}," in
+              *,pgrx-extension,*)
+                for f in pgrx-a/*.json; do
+                  [[ -f "${f}" ]] || { echo "::error::pgrx images: no index digests to compare"; exit 1; }
+                  b="pgrx-b/$(basename "${f}")"
+                  [[ -f "${b}" ]] || { echo "::error::pgrx images: rebuild produced no $(basename "${f}")"; exit 1; }
+                  da=$(jq -r .digest "${f}"); db=$(jq -r .digest "${b}")
+                  if [[ "${da}" != "${db}" ]]; then
+                    echo "::error::pgrx images: $(basename "${f}" .json) index differs (${da} vs ${db})"
+                    exit 1
+                  fi
+                done
+                echo "::notice::pgrx images: per-major index digests reproduced bit for bit"
+                compared=$((compared + 1))
+                ;;
+              *) ;; # class not requested
+            esac
+          fi
+          if ((compared == 0)); then
+            echo "::error::the gate compared nothing — an empty proof is not a proof"
+            exit 1
+          fi
+          echo "::notice::repro gate: ${compared} class comparison(s) reproduced"
 
   # Last, and only on proof. Attaches the evidence bundle and publishes the
   # draft — the first moment anything becomes public.
@@ -794,7 +1108,7 @@ jobs:
   # signer attested.
   vsa-image:
     name: Assemble and sign image VSA
-    needs: [guard, build-oci, attach]
+    needs: [guard, assemble-oci, attach]
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -804,7 +1118,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
-      images: ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]', needs.build-oci.outputs.image, needs.guard.outputs.version, needs.build-oci.outputs.digest) }}
+      images: ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]', needs.assemble-oci.outputs.image, needs.guard.outputs.version, needs.assemble-oci.outputs.digest) }}
       version: ${{ needs.guard.outputs.version }}
 
   vsa-extension-images:
