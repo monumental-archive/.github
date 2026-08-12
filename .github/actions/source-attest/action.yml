@@ -79,10 +79,31 @@ runs:
           echo "SA_ISSUER=https://token.actions.githubusercontent.com"
         } >> "${GITHUB_ENV}"
 
-    - name: Install cosign
-      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+    # cosign comes from the toolbelt, not from sigstore's installer
+    # action: the belt pin carries per-platform checksums and provenance
+    # verification (mise `locked_verify_provenance`), which is the org's
+    # standing answer to "where did this binary come from", and
+    # jdx/mise-action is on the org's Actions allowlist where
+    # sigstore/cosign-installer is not. The signing tool arriving through
+    # the same gate as every other tool is the point, not a workaround.
+    - name: Install mise
+      uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
       with:
-        cosign-release: v3.1.3
+        version: 2026.8.3
+        cache: false
+        install: false
+
+    - name: Install the belt's cosign
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        export MISE_GLOBAL_CONFIG_FILE="${SA_CANON_ROOT}/mise/config.toml"
+        export MISE_TRUSTED_CONFIG_PATHS="${SA_CANON_ROOT}"
+        export MISE_LOCKED=1
+        mise install "aqua:sigstore/cosign"
+        dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
 
     - name: Read enforcement and derive the claims
       shell: bash
