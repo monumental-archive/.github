@@ -932,15 +932,27 @@ dir = "{{cwd}}"
 # Renovate bump that moves the uses: lines but not the pin would verify
 # releases against a stale signer, silently. This makes the drift red.
 # Deterministic — reads only tracked files — so it belongs in the gate.
-# Repos that never reference the signer directly skip clean.
+#
+# Applicability is the declared pin, not the signer reference. Repos that
+# call the signer directly (release-lab's exercise-sign.yml) legitimately
+# carry no security/signer.pin: the file exists so the CANON's verdict
+# has an expected identity to check against, and a consumer has no
+# verdict to render. Requiring it everywhere failed the lab's gate on
+# canon v1.12.0 — a linter that cannot skip cannot be universal. The one
+# case that still fails closed is a tree whose own workflows READ the
+# pin but do not ship it, which is the canon with the file deleted.
 run = '''
 files=$(git ls-files ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:signer-pin: no workflows, skipped"; exit 0; }
 refs=$(xargs grep -hoE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" <<< "${files}" | sort -u || true)
 [[ -n "${refs}" ]] || { echo "lint:signer-pin: no signer references, skipped"; exit 0; }
 if [[ ! -f security/signer.pin ]]; then
-  echo "lint:signer-pin: sign.yml is referenced but security/signer.pin is missing" >&2
-  exit 1
+  consumers=$(xargs grep -l "security/signer\.pin" <<< "${files}" || true)
+  if [[ -n "${consumers}" ]]; then
+    echo "lint:signer-pin: workflows read security/signer.pin but the file is missing:${consumers}" >&2
+    exit 1
+  fi
+  echo "lint:signer-pin: no signer pin declared here, skipped"; exit 0
 fi
 pin=$(grep -Eo "^[0-9a-f]{40}$" security/signer.pin | head -1)
 if [[ -z "${pin}" ]]; then
