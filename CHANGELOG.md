@@ -10,6 +10,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.8.0](https://github.com/monumental-archive/.github/compare/v1.7.1...v1.8.0) - 2026-08-12
+
+### Added
+
+- freeze the source-track claims contract, reserve the identity ([#201](https://github.com/monumental-archive/.github/pull/201))
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.7.1 ([#195](https://github.com/monumental-archive/.github/pull/195))
+
+### Documentation
+
+- fill signer's boundary-b start revision in the ledger ([#202](https://github.com/monumental-archive/.github/pull/202))
+
+### Fixed
+
+- scope the audit token to a dedicated environment ([#194](https://github.com/monumental-archive/.github/pull/194))
+- teach audit:links the scaffold's placeholder tokens ([#197](https://github.com/monumental-archive/.github/pull/197))
+- render the slsa badge from shields, not slsa.dev ([#198](https://github.com/monumental-archive/.github/pull/198))
+
 ## [1.7.1](https://github.com/monumental-archive/.github/compare/v1.7.0...v1.7.1) - 2026-08-11
 
 ### Dependencies
