@@ -576,7 +576,12 @@ description = "Check links in tracked markdown (lychee — network, not in ci)"
 dir = "{{cwd}}"
 # audit:*, not lint:*: link liveness is a property of the internet, not the
 # diff. Runs on demand locally and on a schedule in CI (step-3 workflow).
-run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
+# Scaffold files carry deliberate placeholders a new repo fills in
+# (<repo>, BP_ID, CONCEPT_DOI — README-badges.md above all); lychee
+# resolves them to real requests and 404s. Excluded by exact token, not
+# by skipping scaffold files wholesale: the scaffold's REAL links still
+# deserve the check.
+run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress --exclude "%3Crepo%3E|BP_ID|CONCEPT_DOI" <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
 
 [tasks."audit:actions"]
 description = "zizmor online + auditor persona — the audits the gate cannot run"
