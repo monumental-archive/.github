@@ -15,7 +15,16 @@
 # Correct by construction, stated as invariants the steps enforce:
 #   - Claims are read from GitHub's rules API at emission time, never
 #     from configuration intent; a control that is not live is absent,
-#     so a lapse under-claims and resets its own clock.
+#     so a lapse under-claims and resets its own clock. A control that
+#     cannot be READ is not absent — it fails the run with a named
+#     error, because a consumer must never have to guess whether an
+#     absent property means "lapsed" or "unreadable" (#240).
+#   - The action runs in two stages in two jobs with disjoint
+#     capabilities (#240): the `claims` stage holds the org-ruleset
+#     read token and nothing else — no id-token, no contents: write —
+#     and the `attest` stage holds the signing identity and zero
+#     secrets. The read token can never mint a certificate; a
+#     compromised signing job has no secret to exfiltrate.
 #   - Nothing from the attested repository is ever EXECUTED. The repo is
 #     touched only through git plumbing (history + notes fetch, notes
 #     push) and the REST API — which is what makes the caller's
@@ -30,20 +39,52 @@ description: >-
   revision, chained in refs/notes/commits under the calling repo's
   reserved source-attest identity
 inputs:
+  stage:
+    description: >-
+      Which capability half this invocation is (#240). "claims" reads
+      the enforcement state and derives the claim set — the caller's
+      job must hold the source-attest environment's read token as
+      GH_TOKEN and nothing else. "attest" consumes the claims payload
+      and signs — the caller's job holds `id-token: write` and
+      `contents: write` and no secrets.
+    required: true
+  claims:
+    description: >-
+      The claims payload from the claims stage (this action's `claims`
+      output), handed across the job boundary. Required when stage is
+      "attest"; ignored otherwise.
+    required: false
+    default: ""
   genesis:
     description: >-
       "true" founds the chain: attests the current revision with no
       previous link. Refused when any link already exists on the walked
-      history — a gap is debt, never a reason to re-found.
+      history — a gap is debt, never a reason to re-found. Attest stage
+      only.
     required: false
     default: "false"
+outputs:
+  claims:
+    description: >-
+      base64 of the derived claims.json — data, not secret; carried as
+      a job output so no artifact store sits inside the trust boundary.
+    value: ${{ steps.claims.outputs.claims }}
 runs:
   using: composite
   steps:
     - name: Guard the identity and resolve the canon tree
       shell: bash
+      env:
+        SA_STAGE: ${{ inputs.stage }}
       run: |
         set -euo pipefail
+        case "${SA_STAGE}" in
+          claims | attest) ;;
+          *)
+            echo "::error::source-attest stage must be 'claims' or 'attest', got '${SA_STAGE}' (#240)"
+            exit 1
+            ;;
+        esac
         expected="${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
         if [[ "${GITHUB_WORKFLOW_REF}" != "${expected}" ]]; then
           echo "::error::source-attest invoked from '${GITHUB_WORKFLOW_REF}' — the emitter runs only under the reserved identity '${expected}' (docs/source-assessment.md)"
@@ -86,7 +127,43 @@ runs:
     # jdx/mise-action is on the org's Actions allowlist where
     # sigstore/cosign-installer is not. The signing tool arriving through
     # the same gate as every other tool is the point, not a workaround.
+    # Claims stage: read enforcement under the caller's read token —
+    # this step deliberately declares no GH_TOKEN of its own, so the
+    # only token it can ever use is the one the calling job's
+    # environment hands it, and claims.sh refuses to run without one.
+    - name: Read enforcement and derive the claims
+      if: ${{ inputs.stage == 'claims' }}
+      id: claims
+      shell: bash
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/claims.sh"
+        echo "claims=$(base64 -w0 "${SA_WORK}/claims.json")" >> "${GITHUB_OUTPUT}"
+
+    # Attest stage: the claims payload crosses the job boundary as
+    # data and is shape-checked before anything downstream reads it.
+    - name: Receive and validate the claims payload
+      if: ${{ inputs.stage == 'attest' }}
+      shell: bash
+      env:
+        SA_CLAIMS_B64: ${{ inputs.claims }}
+      run: |
+        set -euo pipefail
+        [[ -n ${SA_CLAIMS_B64} ]] || {
+          echo "::error::stage 'attest' requires the claims payload from the claims job — wire this input to needs.claims.outputs.claims (#240)"
+          exit 1
+        }
+        base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"
+        jq -e '(.rulesReadAt | type == "string")
+          and (.controls | type == "array")
+          and all(.controls[]; (.property | type == "string") and has("evidence"))' \
+          "${SA_WORK}/claims.json" > /dev/null || {
+          echo "::error::the claims payload does not have the shape claims.sh emits — refusing to sign it"
+          exit 1
+        }
+
     - name: Install mise
+      if: ${{ inputs.stage == 'attest' }}
       uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
       with:
         version: 2026.8.3
@@ -94,6 +171,7 @@ runs:
         install: false
 
     - name: Install the belt's cosign
+      if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -105,13 +183,8 @@ runs:
         mise install "aqua:sigstore/cosign"
         dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
 
-    - name: Read enforcement and derive the claims
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: ${GITHUB_ACTION_PATH}/claims.sh
-
     - name: Fetch the chain and verify the previous link
+      if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         SA_GENESIS: ${{ inputs.genesis }}
@@ -121,12 +194,14 @@ runs:
     # environment can carry the run to completion BEFORE anything
     # irreversible — no orphan log entries for links that never land.
     - name: Preflight — prove the run can finish before anything signs
+      if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
       run: ${GITHUB_ACTION_PATH}/preflight.sh
 
     - name: Emit and sign the provenance, derive and sign the VSA
+      if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         SA_ACTOR: ${{ github.actor }}
@@ -134,6 +209,7 @@ runs:
       run: ${GITHUB_ACTION_PATH}/emit.sh
 
     - name: Append the link and push the notes ref
+      if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}

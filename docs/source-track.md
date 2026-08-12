@@ -136,11 +136,22 @@ The machinery landed with #207: the canon's `source-attest` action,
 above), the activated `workflow-templates/source-attest.yml`, and the
 `audit:source-vsa` Monday walk. Activation is per repo, lab first:
 
-1. Copy the template over the repo's inert stub — same path, new
-   content; requires canon **>= v1.10.0**. Not v1.9.0: that release
-   shipped the action taking cosign from sigstore's installer, which the
-   org Actions allowlist refuses at `Set up job`, so the emitter it
-   ships cannot run at all (#221). Copy the template as it stands in the
+1. Create the repo's `source-attest` environment holding
+   `SOURCE_RULES_TOKEN`: a fine-grained read-only PAT that can read
+   org-level ruleset details (`repos/{repo}/rulesets/{id}` for an
+   org-parented id — the ambient `GITHUB_TOKEN` cannot, #240; the
+   minimal grant is measured at lab activation and recorded here, the
+   `AUDIT_TOKEN` precedent). The environment scoping is the
+   `audit.yml` `baseline-drift` pattern: only the claims job — which
+   holds no `id-token` and no `contents: write` — is ever issued the
+   secret, so the token and the signing identity never share a job.
+2. Copy the template over the repo's inert stub — same path, new
+   content; requires canon **>= v1.12.0**, the release that ships the
+   two-stage action (#240) — earlier emitters swallow an unreadable
+   tag-ruleset read and under-claim L2 silently. (Not v1.9.0 for a
+   second reason: that release shipped the action taking cosign from
+   sigstore's installer, which the org Actions allowlist refuses at
+   `Set up job`, #221.) Copy the template as it stands in the
    canon rather than reconstructing the pin — a template pin can name a
    canon release older than the newest, and for this template that is
    the difference between an emitter and a dead run.
@@ -155,19 +166,19 @@ above), the activated `workflow-templates/source-attest.yml`, and the
    alternative is an emitter that quietly re-founds a chain somebody
    truncated. One red run per repo, once, at a moment when a human is
    already watching.
-2. Found the chain: `gh workflow run source-attest -f genesis=true`.
+3. Found the chain: `gh workflow run source-attest -f genesis=true`.
    Genesis is refused if any link already exists on the history.
-3. Push something ordinary; confirm the link chains to genesis.
-4. Stranger-verify on a machine holding nothing but the published root
+4. Push something ordinary; confirm the link chains to genesis.
+5. Stranger-verify on a machine holding nothing but the published root
    of trust (`source-assessment.md`): extract the note, then
    `cosign verify-blob --bundle <bundle> --certificate-identity
    https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main
    --certificate-oidc-issuer https://token.actions.githubusercontent.com
    <statement>`.
-5. Lab only: simulate a lapse — weaken one ruleset rule, push, confirm
+6. Lab only: simulate a lapse — weaken one ruleset rule, push, confirm
    the property drops and the VSA under-claims level 2; restore, confirm
    recovery. The claim set must be a function of live enforcement.
-6. When release-lab, signer and this repo are chained and verified:
+7. When release-lab, signer and this repo are chained and verified:
    update `docs/direction.md`'s Source row to L3 and rewrite this
    document's formal-standing section — a level that becomes true and
    goes unrecorded is the same defect as one claimed before it was
