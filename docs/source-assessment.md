@@ -8,10 +8,11 @@ management, rulesets, history enforcement and diffs, but emits no
 source provenance and no source VSAs. Whoever emits them operates a
 control-plane extension and verifier, and the assessment applies to
 *them*. That will be this organisation. This document answers the
-prompts for that role, honestly, ahead of activation — the emitter is
-built in-org (#207, `source-track.md`) and activation is per repo,
-lab first; publishing the assessment first means the trust contract is
-externally visible before it is ever exercised.
+prompts for that role. The emitter is in-org (#207,
+`source-track.md`), activated per repo and lab-first; this assessment
+was published before it was ever exercised, so the trust contract was
+externally visible ahead of the first signature rather than written to
+fit it.
 
 ## Change management interface
 
@@ -45,11 +46,18 @@ gate — the full set, with meanings, is the `ORG_SOURCE_` table in
 
 The emitter: the per-repo workflow
 `.github/workflows/source-attest.yml@refs/heads/main` — the frozen
-identity (`source-track.md`, the signing identity section) — whose one
-step is the canon's `source-attest` composite action (#207). Composite
-steps run inside the caller's job, so the certificate names the
-per-repo path while the logic lives once, reviewed and gated, in the
-canon.
+identity (`source-track.md`, the signing identity section) — whose body
+is the canon's `source-attest` composite action (#207). Composite steps
+run inside the caller's job, so the certificate names the per-repo path
+while the logic lives once, reviewed and gated, in the canon.
+
+It runs as two jobs with disjoint capabilities: a **claims** job holding
+only an environment-scoped read token, and an **attest** job holding the
+signing identity and no secrets, consuming the claim set as data across
+the job boundary. Reading org-level ruleset details needs a credential
+the runner is not given ambiently, and a secret must never share a job
+with the signing identity — so a compromised attest job has no secret to
+take, and the read token can neither sign nor push.
 
 **Administration.** One human administrator, stated plainly. Accounts
 are 2FA-required org-wide. There are no cryptographic secrets to
@@ -60,7 +68,7 @@ certificates are minutes-lived, every signing lands in Rekor, and the
 org's rekor-monitor workflow watches the log for signatures under org
 identities that the org did not make.
 
-**Control effectiveness.** The claims in any future VSA are read from
+**Control effectiveness.** The claims in every VSA are read from
 GitHub's rules API at emission time, not asserted from configuration
 intent — the ground truth is the platform's enforcement state, and the
 Monday drift audit checks that state against the baseline continuously.
@@ -68,11 +76,11 @@ Monday drift audit checks that state against the baseline continuously.
 **Provenance generation.** On-push, contemporaneous with the ref
 update, in the repo where the push event authentically exists. The
 workflow runs zero caller-supplied code (the narrowed
-capability-boundary rule; marker required at activation). Situations
-with no provenance: pushes predating activation, and any lapse — both
-are visible as gaps against the continuity ledger, and the Monday
-audit's job at activation is to assert every new protected-ref
-revision has its VSA, attestation-debt pattern for gaps.
+capability-boundary rule, marker carried in the workflow). Situations
+with no provenance: revisions predating each repo's genesis, and any
+lapse — both are visible as gaps against the chain, and the Monday
+`audit:source-vsa` walk asserts every revision since genesis carries a
+verifying link, reporting holes under the attestation-debt pattern.
 
 **VSA generation.** Derived from the SCS-issued provenance only (the
 L2+ requirement), never computed independently; each run verifies the
@@ -133,6 +141,10 @@ One entry per org repo, `<repo>` substituted. The issuer is GitHub's
 OIDC (`https://token.actions.githubusercontent.com`). **This identity
 is frozen**: renaming or moving `source-attest.yml` is a breaking
 change to this contract and will not happen; content changes freely.
-Until activation, nothing signs under these identities — a consumer
-configuring this today correctly verifies nothing, which is the honest
-state (formal Source L0, `source-track.md`).
+These identities are live: since 2026-08-12 every revision reaching
+`main` in each repo is signed under them (`source-track.md`). A consumer
+configuring the above verifies real claims — genesis revisions and the
+verification command are in `source-track.md`. Revisions predating each
+repo's genesis carry no VSA and are Source Level 0 by the spec's own
+rule; the chain says where it starts rather than implying it always
+existed.

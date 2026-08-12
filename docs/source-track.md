@@ -127,18 +127,18 @@ start here. All other clocks continue from boundary A.
 | `signer` | `b05fe88` (2026-08-12 — the identity-stub landing, first main commit after the boundary) |
 | `release-lab` | `2281c5e` |
 
-## The signing identity, reserved
+## The signing identity, frozen
 
-The future source-signing identity is the per-repo workflow
+The source-signing identity is the per-repo workflow
 `.github/workflows/source-attest.yml` at `@refs/heads/main` — the
 certificate identity is the workflow path plus ref, so the path is the
-contract. An inert stub now holds that path in every org repo
-(`workflow-templates/source-attest.yml`, copied per repo like the
-scorecard stub). **Renaming or moving the file is a breaking change to
-the root-of-trust contract** published in `source-assessment.md`;
-content changes freely, the path never. The stub carries no `id-token`
-and no triggers beyond `workflow_dispatch` while inert — trigger and
-body are content, not identity.
+contract. Every org repo carries it (`workflow-templates/source-attest.yml`,
+copied per repo like the scorecard stub). **Renaming or moving the file
+is a breaking change to the root-of-trust contract** published in
+`source-assessment.md`; content changes freely, the path never — which
+is why the file went from an inert `workflow_dispatch` stub to a live
+two-job emitter without the identity moving, and why chain links signed
+before that change still verify against the same pattern today.
 
 ## L4: recorded headcount ceiling
 

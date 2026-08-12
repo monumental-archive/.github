@@ -381,8 +381,8 @@ blast-radius query (#106, closed) is what makes an honest `not_affected`
 possible at org scale. Source provenance deliberately does not route
 through `sign.yml` at all — the source track's git-notes convention needs
 `contents: write`, the one grant the signer must never hold — and gets
-its own org-owned standalone workflow, per-repo and inert today
-(`source-track.md`, watch #199).
+its own org-owned standalone workflow, per-repo and live since
+2026-08-12 (`source-track.md`).
 
 ### Images build on native hardware
 

@@ -17,10 +17,13 @@ written for two moments: wiring a repository in, and a release going wrong.
    `release.yml`, `publish.yml` — **the publish.yml filename is
    load-bearing**: both registries pin it, renaming it breaks trusted
    publishing with nothing local going red. Copy `scorecard.yml` and
-   `dependency-review.yml` too, and `source-attest.yml` — inert, but
-   its path reserves the repo's future source-signing identity
-   (docs/source-track.md); every repo joining the org carries it,
-   created or transferred alike. Seed the notes ref while at it:
+   `dependency-review.yml` too, and `source-attest.yml` — the repo's
+   source-signing identity, live (docs/source-track.md); every repo
+   joining the org carries it, created or transferred alike. It needs
+   the `source-attest` environment holding `SOURCE_RULES_TOKEN` before
+   its first run, and a genesis dispatch to found its chain — the
+   activation checklist in `source-track.md` is the sequence, including
+   the one expected red run. Seed the notes ref while at it:
    `git notes add -m "source-track: notes ref seeded" HEAD && git push
    origin refs/notes/commits`.
 3. Declare the artifact classes in the publish stub's `classes:` line
