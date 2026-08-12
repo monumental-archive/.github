@@ -332,10 +332,18 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
         run: .org-canon/release/generate-sbom.sh
 
-      - name: Collect the VEX documents that ride this release
-        # Immutable releases mean a post-hoc decision reaches consumers on
-        # the NEXT release — this is that delivery (docs/dependency-track.md).
-        run: .org-canon/release/collect-vex.sh
+      - name: Derive this release's VEX and gate on undecided advisories
+        # Decisions are keyed by package@version; coverage is derived from
+        # the SBOM just generated, so a release is born covered — and a
+        # gate-class advisory with no decision fails HERE, before anything
+        # publishes: triage is a property of the release, not the calendar
+        # (docs/dependency-track.md). Network-bound (the OSV feed), which
+        # is fine on the release path — it is already network-bound by
+        # construction, like verify-published — and never in the ci gate.
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          SBOM_BASENAME: ${{ inputs.sbom-basename }}
+        run: .org-canon/release/derive-vex.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

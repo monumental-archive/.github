@@ -35,7 +35,7 @@ it; everywhere else it is labelled as what it is.
 | --- | --- | --- | --- |
 | Build | **L3** | Met, and verifiable by strangers | The signer split (`id-token: write` lives only in a repo that runs no caller code — the capability boundary, linted), the reusable gate, App-minted tags, evidence bundles per release |
 | Source | **L3** | Controls at L3 substance; **formally L0** until source VSAs are emitted (engine parked — see `source-track.md`) | Org-level rulesets: required gate, required signatures, linear history, squash-only, locked `v*` tags, empty bypass lists |
-| Dependencies | **L2** | Mechanisms met; advisory triage runs on the Monday cron rather than on the release path — the one requirement satisfied by cadence, not construction (see `dependency-track.md`) | Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed VEX as the only exit |
+| Dependencies | **L2** | Met by construction: the release path refuses to publish with an undecided advisory in its SBOM (see `dependency-track.md`; first exercised on the next lab release) | Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed dependency-keyed VEX as the only exit |
 | Build Environment | **L1** | **Formally L0** at both layers: L1's verify-before-instantiation obligation is implemented, its signed-build-image-provenance obligation belongs to producers who do not meet it (see `slsa-reference.md`) | Runner image a named, Renovate-rolled pin; pgrx bases digest-pinned, org-attested and verified fail-closed before any container runs |
 
 Two of those rows name a gap rather than a level, and both gaps are the

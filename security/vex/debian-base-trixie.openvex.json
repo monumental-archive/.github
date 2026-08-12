@@ -1,0 +1,230 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-monumental-archive-debian-base-trixie-2026-08-12",
+  "author": "monumental-archive",
+  "timestamp": "2026-08-12T00:00:00Z",
+  "version": 2,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2011-4099"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2@2.75-10+deb13u1+b1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2016-2781"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/coreutils@9.7-3"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2022-3715"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bash@5.2.37-2+b9"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2023-2602"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2@2.75-10+deb13u1+b1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2023-2603"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2@2.75-10+deb13u1+b1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2025-1390"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2@2.75-10+deb13u1+b1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2025-14104"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-13595"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-2219"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/dpkg@1.22.22"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-27456"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-3184"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-4878"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2@2.75-10+deb13u1+b1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-53612"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-53613"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-53614"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/util-linux@2.41-5"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DEBIAN-CVE-2026-5958"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/sed@4.9-2+deb13u1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "DLA-4092-1"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libcap2@2.75-10+deb13u1+b1"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Base-layer package in the pinned Debian trixie image base with a fix shipped upstream after the pin. The decision is a fact about this exact package@version: any release whose image SBOM ships it is covered by derivation, and the version bump that arrives with the Renovate-refreshed base digest ends the coverage by construction — the rebuilt base either drops the finding or presents a new version for a fresh decision. Remediation is the next release on the refreshed digest (docs/release.md: remediation is never per-CVE); the lab fixture image is not deployed anywhere, so there is no live exposure to mitigate in the interim.",
+      "action_statement_timestamp": "2026-08-12T00:00:00Z"
+    }
+  ]
+}
