@@ -1,18 +1,35 @@
-# Base-image approval, org canon (#117): the BuildEnv L1 fallback path.
+# Base-image approval, org canon (#117): the pinned-digest approval set.
 #
 # The pgrx builds instantiate postgres containers as their build
 # environment, which makes this org the build platform at that layer —
 # and the draft BuildEnv track's L1 wants the build image's provenance
-# verified before the environment exists. Docker Official Images publish
-# no provenance and no signatures (measured: `cosign verify` returns "no
-# signatures found"), so this workflow implements the spec's stated
-# fallback: "an attestation asserting the expected hash value of the
-# build image", minted under the org's own identity for every digest
-# pinned in docker/pgrx-base-images.toml. The builds then verify that
-# attestation before any container runs and fail closed
-# (build-pgrx-extension.yml). Full provenance-bearing rebuild or formal
-# ingestion of the bases is deliberately out of scope — deferred with
-# reasons in the #117 standup: maximal within reason.
+# verified before the environment exists. This workflow mints, under the
+# org's own identity, an approval asserting the expected hash of every
+# digest pinned in docker/pgrx-base-images.toml. The builds then verify
+# that approval before any container runs and fail closed
+# (build-pgrx-extension.yml).
+#
+# What this is NOT, stated so the claim never drifts (docs/direction.md,
+# docs/slsa-reference.md):
+#
+#   - It is not the spec's fallback clause. That clause covers a build
+#     image producer who CANNOT PUBLISH the image; it does not cover a
+#     consumer whose upstream publishes an image without provenance.
+#   - It does not make the org BuildEnv L1. L1 puts the provenance
+#     obligation on the build image PRODUCER, and these bases are stock
+#     Docker Official Images — the org is the platform, not the producer.
+#   - The bases are not provenance-less, as an earlier note here claimed.
+#     They carry BuildKit in-toto provenance (slsa.dev/provenance/v0.2,
+#     naming the docker-library source commit) as unknown/unknown
+#     attestation manifests; `cosign verify` cannot see those, which is
+#     what the original measurement got wrong. It is unsigned, so it is
+#     Build L1 provenance — one level below what BuildEnv L1 requires.
+#
+# The stronger claim available without owning postgres builds is to fetch
+# that upstream provenance, assert its subject and configSource against
+# the pin, and sign THAT verification — which would also discharge L1's
+# unimplemented third obligation, the signed attestation of the
+# verification result. Not built yet; this workflow asserts the hash only.
 #
 # Runs on push when the pin set changes (a Renovate digest roll re-attests
 # immediately), on a weekly schedule (freshness floor), and on dispatch.

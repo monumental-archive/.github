@@ -27,7 +27,7 @@ SLSA v1.2 targets — is stated in [docs/direction.md](docs/direction.md).
 [signer](https://github.com/monumental-archive/signer),
 which holds `id-token: write` and runs no caller code. This repository is
 the opposite: it runs caller code and **never** holds a signing identity.
-That separation is the SLSA v1.0 Build L3 boundary, and keeping it
+That separation is the SLSA v1.2 Build L3 boundary, and keeping it
 structural — one repo per side — is what lets consumers pin
 `--signer-repo` safely.
 

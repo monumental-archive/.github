@@ -10,7 +10,7 @@ the target and the declined doors were decided there and in #121/#122.
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **This standup** — deny in the gate, blast-radius on the cron, every undecided finding exits through a signed VEX |
+| L2 | Known vulnerabilities triaged per release | **Mechanisms met** — deny in the gate, blast-radius on the cron, every undecided finding exits through a signed VEX. One gap: the advisory sweep is weekly, not release-gated (below) |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
 
@@ -145,6 +145,31 @@ a linker section of the shipped binary itself (the pipeline already
 disables stripping precisely to preserve that section), and image SBOMs
 gain the Rust surface. Binary and SBOM then agree by construction.
 
+## Where L2 is met by cadence, not construction
+
+The requirement is worded against the release, not the pull request:
+*"Triage all vulnerable dependencies **before release** … an organization
+MUST triage all known vulnerabilities and either remediate the
+vulnerability, or not remediate in the given release."*
+
+What runs today: `lint:deny` in the gate covers bans, licences and
+sources — not advisories. The advisory feed is `audit:deny`, and
+blast-radius is `audit:blast-radius`; both are Monday cron only
+(`repo-audit.yml`, `audit.yml`). So a release cut on a Wednesday ships
+having been triaged as of Monday, and a Tuesday advisory reaches
+consumers before it reaches a decision.
+
+The gate-determinism rule is not what blocks closing this. That rule
+keeps network-bound checks out of the **`ci` gate**, and it is right; but
+the release path is already network-bound by construction — it publishes
+to registries and pulls the bytes back to prove them. An `audit:deny`
+step between build and publish is the same category as `verify-published`
+and would make the triage a property of every release rather than of the
+calendar. Until it exists, this row is honest as "mechanisms met, one
+requirement satisfied by cadence" — and the issue that adds the step
+carries flipping this section and the table row above as part of its
+done condition.
+
 ## Recorded verdicts
 
 - **cargo-audit: skipped-subsumed.** Same RustSec DB, strictly a subset
@@ -155,6 +180,17 @@ gain the Rust surface. Binary and SBOM then agree by construction.
   and declined at current scale. Revisit when cross-release queries are
   needed at a volume or complexity a scheduled walk cannot serve.
 - **Dependency L3/L4: declined** (#121/#122) — the doors stay findable.
+  One correction to how the L4 declination reads: the **level** is
+  sequential ("this capability builds on Level 3"), but **cargo-vet is
+  not**. It needs no vendoring and could run tomorrow. Its real blocker
+  is the one #122's own body names — with one maintainer the uncovered
+  tail makes the maintainer the auditor of last resort and queues
+  Renovate behind a reading list — and that is a headcount boundary, like
+  Source L4, not a sequencing one. Recorded so nobody later reads the
+  door as technically barred when it is deliberately unopened. Note also
+  that most of L4's letter already runs for its own reasons: the 7-day
+  `minimumReleaseAge` is a quarantine period, and OSV's
+  malicious-package data rides `audit:blast-radius`.
 - **`multiple-versions = "warn"`**: the one non-maximal enforcement
   setting, reasoned above.
 - **Hermetic ingestion** is the build track's business (#119), not this

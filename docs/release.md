@@ -351,13 +351,37 @@ per-class bundles and never replaces them. Dry-runs skip it: the verifier
 only passed the manifest through, and a rehearsal must never sign
 "PASSED".
 
-OpenVEX is allowlisted in the signer but not yet emitted: an honest
-`not_affected` at org scale needs the blast-radius query (#106) that
-answers "which releases ship an affected crate". Source provenance
-deliberately does not route through `sign.yml` at all — the source
-track's git-notes convention needs `contents: write`, the one grant the
-signer must never hold — and gets its own org-owned standalone workflow
-(#107, rekor-monitor precedent).
+Two limits on that verdict, stated because a signed claim must not read
+wider than what produced it.
+
+**It covers two classes, not six.** `emit-vsa` is wired for `rust-crate`
+and `wasm-npm` only, because `verify-published` proves bytes by pulling
+them back from a registry and only crates.io and npm serve them that way.
+`oci-image`, `rust-binary`, `source-archive` and `pgrx-extension` ship
+full evidence with no verdict beside it. Release assets are pullable by
+URL exactly as registry artifacts are, so extending both is mechanical;
+images by digest are self-proving and need a different shape, not a
+pretend pull-back.
+
+**`SLSA_BUILD_LEVEL_3` is asserted structurally, not measured.**
+`verify-published` compares bytes; it never opens an attestation, checks
+a signature or reads a `builder.id`. The level comes from the
+architecture the policy URI pins — which the VSA spec permits, since that
+is what a policy URI is for — but the spec's model is a verifier
+evaluating "the artifact *and a bundle of attestations*", and this one
+evaluates only the artifact. Until the verdict verifies the provenance it
+summarises and records what it read in `inputAttestations`, `verifier.id`
+names a workflow that proved less than the claim states.
+
+OpenVEX travels the same surface and **is** emitted: `vex-attest.yml`
+signs one statement per merge and `release/collect-vex.sh` rides the raw
+documents onto the next release of each affected repository — the
+blast-radius query (#106, closed) is what makes an honest `not_affected`
+possible at org scale. Source provenance deliberately does not route
+through `sign.yml` at all — the source track's git-notes convention needs
+`contents: write`, the one grant the signer must never hold — and gets
+its own org-owned standalone workflow, per-repo and inert today
+(`source-track.md`, watch #199).
 
 ### Images build on native hardware
 

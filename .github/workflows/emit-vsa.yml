@@ -30,6 +30,21 @@
 # job, no shared runner), and names the org signer as builder.id. Those
 # are properties of the architecture the pinned SHA selects, which is
 # exactly what a VSA's policy URI is for.
+#
+# Known gaps in this verdict, recorded rather than left to be rediscovered
+# (docs/release.md, "The verdict beside the evidence"):
+#
+#   - The VSA spec's model is a verifier evaluating "the artifact AND a
+#     bundle of attestations". This job evaluates only the artifact:
+#     verify-published compares bytes and never opens an attestation. The
+#     fix is to verify the provenance being summarised and list what was
+#     read in `inputAttestations` — at which point verifier.id names a
+#     workflow that proved what the claim states.
+#   - `policy` carries a uri but no digest (the spec SHOULDs a digest).
+#   - `slsaVersion` is unset, which the spec reads as "unspecified 1.x";
+#     this org targets 1.2 and could say so.
+#   - Wired for rust-crate and wasm-npm only, because verify-published
+#     can only pull bytes back from crates.io and npm.
 name: emit-vsa
 
 on:
