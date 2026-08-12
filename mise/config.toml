@@ -91,6 +91,10 @@ lychee = "0.24.2"
 # OpenVEX assembly (vex:new). The statement is the triage record; the
 # signer signs it, blast-radius filters on it.
 "aqua:openvex/vexctl" = "0.4.4"
+# Source-track chain verification (audit:source-vsa) and stranger
+# verification of chain links generally — the same binary the emitter's
+# action installs in per-repo runs (docs/source-track.md, #207).
+"aqua:sigstore/cosign" = "3.1.3"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -626,6 +630,87 @@ if [[ -n "${missing}" ]]; then
   exit 1
 fi
 echo "audit:attestations: ${checked} subject(s) checked, nothing ships unattested"
+'''
+
+[tasks."audit:source-vsa"]
+description = "Every protected-ref revision since genesis has a verified chain link (network, canon only)"
+dir = "{{cwd}}"
+# The source track's coverage audit (#207): the emitter is per-push, so
+# a lapse leaves a hole in the chain rather than going red anywhere —
+# this is the cadence that finds the holes, the attestation-debt pattern
+# for evidence gaps. For every org repo with a founded chain, walk main
+# from the genesis link to the tip and assert each revision carries a
+# link whose VSA verifies against that repo's pinned identity — the
+# published root-of-trust contract, checked with exactly a stranger's
+# inputs. A repo with no genesis link is not activated: reported,
+# skipped, never red — activation is deliberate and lab-first.
+run = '''
+[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -d source-policies ]] || {
+  echo "audit:source-vsa: not the canon, skipped"; exit 0
+}
+command -v cosign > /dev/null || { echo "audit:source-vsa: cosign missing from the belt" >&2; exit 1; }
+command -v gh > /dev/null || { echo "audit:source-vsa: gh missing" >&2; exit 1; }
+issuer="https://token.actions.githubusercontent.com"
+repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
+failed=""
+checked=0
+while read -r repo; do
+  [[ -n "${repo}" ]] || continue
+  dir=$(mktemp -d)
+  git init -q "${dir}"
+  git -C "${dir}" remote add origin "https://github.com/monumental-archive/${repo}.git"
+  git -C "${dir}" fetch -q origin "+refs/heads/main:refs/sa/main" \
+    "+refs/notes/commits:refs/notes/commits" 2> /dev/null || {
+    echo "audit:source-vsa: ${repo}: no main or no notes ref, skipped"
+    continue
+  }
+  san="https://github.com/monumental-archive/${repo}/.github/workflows/source-attest.yml@refs/heads/main"
+  # Walk first-parent from the tip; the genesis link (prev: null) ends
+  # the walk. Revisions between links are the holes this audit reports.
+  holes=""
+  links=0
+  c=$(git -C "${dir}" rev-parse refs/sa/main)
+  while [[ -n "${c}" ]]; do
+    note=$(git -C "${dir}" notes show "${c}" 2> /dev/null || true)
+    if jq -e '.version and .provenance.bundle' <<< "${note}" > /dev/null 2>&1; then
+      links=$((links + 1))
+      jq -r '.provenance.statement' <<< "${note}" | base64 -d > "${dir}/st.json"
+      jq -c '.provenance.bundle' <<< "${note}" > "${dir}/pb.json"
+      jq -r '.vsa.statement' <<< "${note}" | base64 -d > "${dir}/vsa.json"
+      jq -c '.vsa.bundle' <<< "${note}" > "${dir}/vb.json"
+      for pair in "pb.json st.json" "vb.json vsa.json"; do
+        set -- ${pair}
+        cosign verify-blob --bundle "${dir}/${1}" \
+          --certificate-identity "${san}" --certificate-oidc-issuer "${issuer}" \
+          "${dir}/${2}" > /dev/null 2>&1 || failed="${failed} ${repo}@${c}(${1%.json})"
+      done
+      jq -e --arg c "${c}" '.subject[0].digest.gitCommit == $c' "${dir}/st.json" \
+        > /dev/null || failed="${failed} ${repo}@${c}(subject)"
+      checked=$((checked + 1))
+      # Genesis ends the walk.
+      jq -e '.predicate.prev == null' "${dir}/st.json" > /dev/null && break
+    else
+      [[ ${links} -gt 0 ]] && holes="${holes} ${c}"
+    fi
+    c=$(git -C "${dir}" rev-parse -q --verify "${c}^" 2> /dev/null || true)
+  done
+  if [[ ${links} -eq 0 ]]; then
+    echo "audit:source-vsa: ${repo}: no chain founded, not activated, skipped"
+    continue
+  fi
+  if [[ -n "${holes}" ]]; then
+    n=$(wc -w <<< "${holes}")
+    failed="${failed} ${repo}(${n// /} unattested revision(s) since genesis:${holes})"
+  fi
+  echo "audit:source-vsa: ${repo}: ${links} link(s) verified"
+done <<< "${repos}"
+if [[ -n "${failed}" ]]; then
+  echo "audit:source-vsa: chain defects:${failed}" >&2
+  echo "  every revision since genesis carries a link; every link verifies" >&2
+  echo "  against the repo's pinned source-attest identity (docs/source-track.md)" >&2
+  exit 1
+fi
+echo "audit:source-vsa: ${checked} link(s) checked across activated repos"
 '''
 
 [tasks."audit:links"]

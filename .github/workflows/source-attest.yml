@@ -14,11 +14,12 @@
 # trilemma, .github#120).
 #
 # Inert means: workflow_dispatch only, no id-token, no signing. At
-# activation (standing watch .github#199: an upstream source-tool
-# release with issues 433/434/436 fixed) the trigger becomes on-push to
-# protected refs, the body invokes the verified tool, and `id-token:
-# write` enters WITH the capability-boundary marker — the workflow runs
-# zero caller-supplied code, which is what makes that grant safe.
+# activation (#207 — per repo, lab first, after a canon release ships
+# the source-attest action) this file is replaced by
+# workflow-templates/source-attest.yml: on-push trigger, the canon
+# action as the body, and `id-token: write` WITH the
+# capability-boundary marker — the workflow runs zero caller-supplied
+# code, which is what makes that grant safe.
 name: source-attest
 
 on:
@@ -39,4 +40,4 @@ jobs:
         run: |
           echo "This path is the reserved source-signing identity:"
           echo "  ${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
-          echo "Emission is parked — see monumental-archive/.github#199."
+          echo "Activation is pending — see monumental-archive/.github#207."

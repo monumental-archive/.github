@@ -1,0 +1,110 @@
+# The org's source-track emitter (#207): per push to a protected ref,
+# read the enforcement state from the rules API, emit source provenance
+# and a source VSA under the CALLING repository's frozen identity, and
+# append both to the revision's chain link in refs/notes/commits.
+#
+# The identity contract: a Fulcio certificate names the top-level
+# workflow's path plus ref, and composite steps run inside the caller's
+# job — so this action can carry every line of logic while the signing
+# identity stays `<repo>/.github/workflows/source-attest.yml@refs/heads/main`,
+# the root-of-trust contract in docs/source-assessment.md. The identity
+# guard below refuses to run from any other workflow path: an emitter
+# invoked from an unreserved path would mint chain links nobody can
+# verify against the published contract.
+#
+# Correct by construction, stated as invariants the steps enforce:
+#   - Claims are read from GitHub's rules API at emission time, never
+#     from configuration intent; a control that is not live is absent,
+#     so a lapse under-claims and resets its own clock.
+#   - Nothing from the attested repository is ever EXECUTED. The repo is
+#     touched only through git plumbing (history + notes fetch, notes
+#     push) and the REST API — which is what makes the caller's
+#     `id-token: write` grant safe (the capability-boundary rule).
+#   - The VSA is derived from the just-signed provenance only, after
+#     verifying it against the pinned identity — the L2+ requirement.
+#   - The chain verifies its previous link before appending; a missing
+#     genesis fails loudly rather than re-founding the chain.
+name: source-attest
+description: >-
+  Emit signed source provenance and a source VSA for the pushed
+  revision, chained in refs/notes/commits under the calling repo's
+  reserved source-attest identity
+inputs:
+  genesis:
+    description: >-
+      "true" founds the chain: attests the current revision with no
+      previous link. Refused when any link already exists on the walked
+      history — a gap is debt, never a reason to re-found.
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Guard the identity and resolve the canon tree
+      shell: bash
+      run: |
+        set -euo pipefail
+        expected="${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
+        if [[ "${GITHUB_WORKFLOW_REF}" != "${expected}" ]]; then
+          echo "::error::source-attest invoked from '${GITHUB_WORKFLOW_REF}' — the emitter runs only under the reserved identity '${expected}' (docs/source-assessment.md)"
+          exit 1
+        fi
+        # The action tree IS a canon tree: `uses:` fetched the whole
+        # repository at the caller's pin, the same single resolution the
+        # canon action relies on (#165).
+        root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
+        case "${root}" in
+          */_actions/monumental-archive/.github/*)
+            canon_ref="$(basename "${root}")"
+            ;;
+          *)
+            if [[ "${GITHUB_REPOSITORY}" != "monumental-archive/.github" ]]; then
+              echo "::error::source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon self-call"
+              exit 1
+            fi
+            canon_ref="${GITHUB_SHA}"
+            ;;
+        esac
+        if [[ ! -f "${root}/source-policies/default.json" ]]; then
+          echo "::error::resolved canon tree at '${root}' has no source-policies/default.json"
+          exit 1
+        fi
+        work="${RUNNER_TEMP}/source-attest"
+        mkdir -p "${work}"
+        {
+          echo "SA_WORK=${work}"
+          echo "SA_CANON_ROOT=${root}"
+          echo "SA_CANON_REF=${canon_ref}"
+          echo "SA_IDENTITY=https://github.com/${expected}"
+          echo "SA_ISSUER=https://token.actions.githubusercontent.com"
+        } >> "${GITHUB_ENV}"
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      with:
+        cosign-release: v3.1.3
+
+    - name: Read enforcement and derive the claims
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: ${GITHUB_ACTION_PATH}/claims.sh
+
+    - name: Fetch the chain and verify the previous link
+      shell: bash
+      env:
+        SA_GENESIS: ${{ inputs.genesis }}
+      run: ${GITHUB_ACTION_PATH}/chain.sh
+
+    - name: Emit and sign the provenance, derive and sign the VSA
+      shell: bash
+      env:
+        SA_ACTOR: ${{ github.actor }}
+        SA_ACTOR_ID: ${{ github.actor_id }}
+      run: ${GITHUB_ACTION_PATH}/emit.sh
+
+    - name: Append the link and push the notes ref
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: ${GITHUB_ACTION_PATH}/append.sh

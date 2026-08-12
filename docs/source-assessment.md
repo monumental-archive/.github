@@ -8,10 +8,10 @@ management, rulesets, history enforcement and diffs, but emits no
 source provenance and no source VSAs. Whoever emits them operates a
 control-plane extension and verifier, and the assessment applies to
 *them*. That will be this organisation. This document answers the
-prompts for that role, honestly, ahead of activation — emission is
-currently parked (`source-track.md`, watch #199), and publishing the
-assessment first means the trust contract is externally visible before
-it is ever exercised.
+prompts for that role, honestly, ahead of activation — the emitter is
+built in-org (#207, `source-track.md`) and activation is per repo,
+lab first; publishing the assessment first means the trust contract is
+externally visible before it is ever exercised.
 
 ## Change management interface
 
@@ -43,9 +43,13 @@ gate — the full set, with meanings, is the `ORG_SOURCE_` table in
 
 ## Control plane and verifier
 
-The future emitter: the per-repo workflow
-`.github/workflows/source-attest.yml@refs/heads/main` — inert today,
-path reserved (`source-track.md`, the signing identity section).
+The emitter: the per-repo workflow
+`.github/workflows/source-attest.yml@refs/heads/main` — the frozen
+identity (`source-track.md`, the signing identity section) — whose one
+step is the canon's `source-attest` composite action (#207). Composite
+steps run inside the caller's job, so the certificate names the
+per-repo path while the logic lives once, reviewed and gated, in the
+canon.
 
 **Administration.** One human administrator, stated plainly. Accounts
 are 2FA-required org-wide. There are no cryptographic secrets to
@@ -76,19 +80,22 @@ previous chain link against the pinned org identity before appending.
 
 **Development practices.** The emitter workflow is itself version
 controlled in the repo it attests, protected by the very rulesets it
-claims, and gated by the same required check. The tool it will invoke
-is verified against its upstream SLSA provenance before use, no
-patches (`source-track.md`, re-adoption checklist). Communications are
-GitHub's TLS.
+claims, and gated by the same required check; the action it invokes is
+version controlled and gated in the canon, and reaches the workflow
+only through a SHA-pinned reference (`source-track.md`, activation
+checklist). Communications are GitHub's TLS.
 
 ## Storage
 
-Revisions, provenance and VSAs live in the repos themselves (git
-notes, `refs/notes/commits` — seeded in every org repo) and in
-GitHub's attestation store; both are world-readable because every org
-repo is public. Tampering with notes history is constrained by the
-chain (each link verifies its predecessor); cross-project isolation is
-GitHub's repository model.
+Revisions, provenance and VSAs live in the repos themselves: git
+notes, `refs/notes/commits` — seeded in every org repo, world-readable
+because every org repo is public. GitHub's attestation store is
+deliberately not written for this track — its subjects are sha256
+artifact digests, and the source track's subject is a `gitCommit`
+revision; a store entry would attest a different subject than the one
+the spec verifies. Tampering with notes history is constrained by the
+chain (each link verifies its predecessor against the pinned identity);
+cross-project isolation is GitHub's repository model.
 
 ## Root of trust
 

@@ -1,5 +1,5 @@
 {
-  "name": "Source attest (identity reserve)",
-  "description": "Inert holder of the repo's future source-signing identity. The path at @refs/heads/main is the frozen root-of-trust contract; activation waits on upstream (watch .github#199).",
+  "name": "Source attest",
+  "description": "The repo's source-track emitter: per push to main, signed source provenance and a source VSA under this file's frozen identity, chained in git notes. Copy at canon >= v1.9.0; genesis dispatch first (.github#207).",
   "categories": ["ci"]
 }
