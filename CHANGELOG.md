@@ -10,6 +10,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.12.0](https://github.com/monumental-archive/.github/compare/v1.11.1...v1.12.0) - 2026-08-12
+
+### Added
+
+- activate the canon's own source-track emitter ([#248](https://github.com/monumental-archive/.github/pull/248))
+- record the source track at Level 3, emitted and verifiable ([#249](https://github.com/monumental-archive/.github/pull/249))
+- verify the evidence the vsa summarises ([#253](https://github.com/monumental-archive/.github/pull/253))
+
+### Documentation
+
+- record the measured token grant for the claims job ([#246](https://github.com/monumental-archive/.github/pull/246))
+- retire the pre-activation language across the doc set ([#250](https://github.com/monumental-archive/.github/pull/250))
+- correct the source-attest template metadata ([#251](https://github.com/monumental-archive/.github/pull/251))
+
+### Fixed
+
+- pair the two-stage template with the release that understands it ([#244](https://github.com/monumental-archive/.github/pull/244))
+
 ## [1.11.1](https://github.com/monumental-archive/.github/compare/v1.11.0...v1.11.1) - 2026-08-12
 
 ### Fixed
