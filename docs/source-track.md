@@ -137,7 +137,13 @@ above), the activated `workflow-templates/source-attest.yml`, and the
 `audit:source-vsa` Monday walk. Activation is per repo, lab first:
 
 1. Copy the template over the repo's inert stub — same path, new
-   content; requires a canon release that ships the action (>= v1.9.0).
+   content; requires canon **>= v1.10.0**. Not v1.9.0: that release
+   shipped the action taking cosign from sigstore's installer, which the
+   org Actions allowlist refuses at `Set up job`, so the emitter it
+   ships cannot run at all (#221). Copy the template as it stands in the
+   canon rather than reconstructing the pin — a template pin can name a
+   canon release older than the newest, and for this template that is
+   the difference between an emitter and a dead run.
    The per-repo copy is deliberate: the workflow is the signer, and an
    in-repo workflow's identity is `@refs/heads/main`, stable forever —
    while every line of logic lives once in the canon action, whose pin
