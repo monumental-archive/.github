@@ -34,9 +34,25 @@
 # The only caller-controlled bytes it touches are the declared inputs,
 # validated to the same whitelist shape sign.yml enforces.
 #
-# Class coverage is bytes-pull-back coverage: crates.io and npm serve
-# published bytes by stable URL, so rust-crate and wasm-npm get verdicts.
-# Widening coverage is a separate issue, per #208's boundaries.
+# Class coverage (#209): every class gets a verdict, because every class
+# has a public store to prove against — three shapes, one manifest:
+#
+#   registry files   — crates.io and npm serve published bytes by stable
+#                      URL; pulled back and hash-compared.
+#   release assets   — fetchable by public URL once the release is
+#                      published, and immutable from that moment, so the
+#                      proved bytes cannot drift under the verdict. Only
+#                      reachable AFTER attach publishes: verdicts for
+#                      these classes run post-publish, and their VSAs
+#                      live in the attestation store alone (the release
+#                      is sealed before the verdict exists).
+#   images           — content addressing already proves the bytes;
+#                      fetching a blob to re-hash it would prove nothing.
+#                      What is NOT self-proving is the tag: the binding
+#                      the release advertises is a mutable pointer, so
+#                      the proof asserted here is that the tag resolves
+#                      in the registry to the attested index digest. The
+#                      policy claims exactly that, nothing more.
 name: verify-release
 
 on:
@@ -44,12 +60,39 @@ on:
     inputs:
       subjects:
         description: >
-          sha256sum manifest. In bytes mode: produced by the build, proven
-          here. In verdict mode: verify-release's own bytes-mode output —
-          the manifest the signer attested. A VSA over unproven digests
-          would be a verdict about nothing.
-        required: true
+          sha256sum manifest of file subjects. In bytes mode: produced by
+          the build, proven here. In verdict mode: the manifest the signer
+          attested — verify-release's own bytes-mode output for registry
+          classes, the build's own manifest for release-asset classes
+          (whose first pull-back is necessarily here, post-publish). A VSA
+          over unproven digests would be a verdict about nothing, which is
+          why this step re-proves everything regardless. Optional when
+          `images` carries the subjects instead; at least one of the two
+          must be non-empty.
+        required: false
         type: string
+        default: ""
+      images:
+        description: >
+          Image subjects as a JSON array of {image, tag, digest} — the
+          untagged lowercase registry reference, the tag this release
+          advertises, and the attested index digest (sha256:<hex>). Extra
+          keys are ignored, so a build's signing-matrix output passes
+          through unchanged. Proven by tag→digest binding, not pull-back:
+          see the header.
+        required: false
+        type: string
+        default: ""
+      release-tag:
+        description: >
+          Declares that file subjects matched by no registry are assets of
+          this published release, fetched from its public download URL.
+          The declaration is proven, never inferred: with the tag set, a
+          missing asset is a failure; without it, an unclaimed subject is
+          a failure. There is no path on which a subject is skipped.
+        required: false
+        type: string
+        default: ""
       mode:
         description: bytes (default) or verdict — see the header.
         required: false
@@ -115,7 +158,9 @@ jobs:
         id: prove
         env:
           UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
+          UNTRUSTED_IMAGES: ${{ inputs.images }}
           UNTRUSTED_NPM_PACKAGE: ${{ inputs.npm-package }}
+          UNTRUSTED_RELEASE_TAG: ${{ inputs.release-tag }}
           UNTRUSTED_MODE: ${{ inputs.mode }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
@@ -129,6 +174,10 @@ jobs:
           esac
           if [[ "${UNTRUSTED_MODE}" == "verdict" && "${DRY_RUN}" == "true" ]]; then
             echo "::error::a rehearsal must never assemble a PASSED verdict"
+            exit 1
+          fi
+          if [[ -n "${UNTRUSTED_RELEASE_TAG}" && ! "${UNTRUSTED_RELEASE_TAG}" =~ ^v[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::release-tag is not a plausible release tag"
             exit 1
           fi
           record='^[0-9a-f]{64}  [^[:space:]]'
@@ -184,12 +233,33 @@ jobs:
                 url="https://registry.npmjs.org/${pkg}/-/${pkg##*/}-${ver}.tgz"
                 ;;
               *)
-                echo "::error::${name}: no registry claims this subject type"
-                exit 1
+                # Declared a release asset (see the release-tag input) or
+                # refused — never guessed from the filename. Publishing is
+                # what makes this URL exist AND what makes it immutable,
+                # so this leg only runs post-publish.
+                if [[ -z "${UNTRUSTED_RELEASE_TAG}" ]]; then
+                  echo "::error::${name}: no registry claims this subject type and no release-tag was declared"
+                  exit 1
+                fi
+                url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${UNTRUSTED_RELEASE_TAG}/${name}"
                 ;;
             esac
             echo "::group::${name}"
-            curl -sSfL --retry 5 --retry-connrefused -o "${workdir}/${name}" "${url}"
+            # --retry covers transient server errors; the outer loop covers
+            # the 404 window while a just-published release propagates.
+            fetched=""
+            for attempt in 1 2 3 4 5; do
+              if curl -sSfL --retry 5 --retry-connrefused -o "${workdir}/${name}" "${url}"; then
+                fetched=1
+                break
+              fi
+              echo "fetch of ${name} not ready (attempt ${attempt}), retrying"
+              sleep $((attempt * 5))
+            done
+            if [[ -z "${fetched}" ]]; then
+              echo "::error::${name}: the published bytes could not be fetched"
+              exit 1
+            fi
             actual=$(sha256sum "${workdir}/${name}" | cut -d' ' -f1)
             if [[ "${actual}" != "${digest}" ]]; then
               echo "::error::${name}: built ${digest}, registry served ${actual}"
@@ -199,7 +269,60 @@ jobs:
             echo "verified ${name}"
             echo "::endgroup::"
           done <<< "${UNTRUSTED_SUBJECTS}"
-          if ((count == 0)); then
+          # Image subjects: the proof is the tag→digest binding — the one
+          # claim content addressing does not make (see the header). The
+          # manifest line carries the UNTAGGED reference, because that is
+          # the subject name the signer attested (sign.yml, image mode)
+          # and the coverage equality below compares names exactly.
+          imgcount=0
+          if [[ -n "${UNTRUSTED_IMAGES//[[:space:]]/}" ]]; then
+            if ! jq -e 'type == "array" and length > 0 and all(.[];
+                (.image | type == "string") and (.tag | type == "string")
+                and (.digest | type == "string"))' \
+              <<< "${UNTRUSTED_IMAGES}" > /dev/null 2>&1; then
+              echo "::error::images is not a JSON array of {image, tag, digest}"
+              exit 1
+            fi
+            # jq runs as its own statement so a parse failure surfaces as
+            # itself rather than as an empty loop (SC2312).
+            jq -r '.[] | [.image, .tag, .digest] | @tsv' \
+              <<< "${UNTRUSTED_IMAGES}" > "${workdir}/images.tsv"
+            while IFS=$'\t' read -r image tag idigest; do
+              imgcount=$((imgcount + 1))
+              if [[ ! "${image}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
+                echo "::error::image ${imgcount} is not a lowercase ghcr.io reference"
+                exit 1
+              fi
+              if [[ ! "${tag}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                echo "::error::image ${imgcount} has an implausible tag"
+                exit 1
+              fi
+              if [[ ! "${idigest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::image ${imgcount} digest is not sha256:<64 lowercase hex>"
+                exit 1
+              fi
+              if [[ "${DRY_RUN}" == "true" ]]; then
+                echo "${idigest#sha256:}  ${image}" >> "${out}"
+                echo "::warning::rehearsal: ${image}:${tag} was NOT resolved against the registry"
+                continue
+              fi
+              # The registry is asked what the tag serves; the answer must
+              # be the attested index. Anonymous read: the package is
+              # public by the time this runs. Inspect as its own statement
+              # so a failed resolution surfaces as itself, never masked by
+              # the pipe into jq (SC2312).
+              docker buildx imagetools inspect "${image}:${tag}" \
+                --format '{{json .Manifest}}' > "${workdir}/tag-manifest.json"
+              resolved=$(jq -r '.digest' "${workdir}/tag-manifest.json")
+              if [[ "${resolved}" != "${idigest}" ]]; then
+                echo "::error::${image}:${tag} resolves to ${resolved}, attested ${idigest}"
+                exit 1
+              fi
+              echo "${idigest#sha256:}  ${image}" >> "${out}"
+              echo "verified tag binding for ${image}:${tag}"
+            done < "${workdir}/images.tsv"
+          fi
+          if ((count + imgcount == 0)); then
             echo "::error::nothing to verify — an empty proof is not a proof"
             exit 1
           fi
@@ -209,7 +332,7 @@ jobs:
             cat "${out}"
             echo "SUBJECTS_EOF"
           } >> "${GITHUB_OUTPUT}"
-          echo "::notice::${count} subjects proved against the registry"
+          echo "::notice::${count} file subject(s) and ${imgcount} image subject(s) proved"
 
       # The ref the caller pinned, read from the same $/ resolution that
       # fetched this workflow — it names the exact canon tree (workflows,
@@ -307,10 +430,17 @@ jobs:
               if ! grep -qx "${bsha}" "${seen}"; then
                 printf '%s' "${bundle}" > "${bfile}"
                 # The cryptographic check: this exact bundle, over this
-                # exact artifact file, signed by the org signer. gh
-                # rebuilds the Sigstore trust root and walks the chain;
-                # a verdict field is written only after it passes.
-                gh attestation verify "${WORKDIR}/${name}" \
+                # exact artifact, signed by the org signer. gh rebuilds
+                # the Sigstore trust root and walks the chain; a verdict
+                # field is written only after it passes. A file subject
+                # is the bytes the prove step pulled back; an image
+                # subject is addressed oci:// at the digest whose tag
+                # binding the prove step just verified.
+                case "${name}" in
+                  ghcr.io/*) target="oci://${name}@sha256:${digest}" ;;
+                  *) target="${WORKDIR}/${name}" ;;
+                esac
+                gh attestation verify "${target}" \
                   --bundle "${bfile}" \
                   --repo "${GITHUB_REPOSITORY}" \
                   --signer-workflow "${signer_path}" \

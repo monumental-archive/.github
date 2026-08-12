@@ -150,21 +150,39 @@ gh attestation verify <artifact> --owner monumental-archive \
   --deny-self-hosted-runners
 ```
 
-- The verification verdict (artifact VSA): same command plus
-  `--predicate-type https://slsa.dev/verification_summary/v1` **and**
-  `--bundle attestations-vsa-<class>.intoto.jsonl` from the release — the
-  VSA lives in its own bundle, not in `attestations-<class>.intoto.jsonl`.
-  The bundle is required: GitHub's attestations API rejects that
-  predicate type as a query filter (`HTTP 422: invalid predicate type`,
-  measured on v0.16.3) even though the attestation is present in the API.
+- The verification verdict (artifact VSA): **every class carries one,
+  in the attestation store** — verdicts are rendered after the release
+  publishes, and a published release is immutable, so the store is the
+  VSA's only home (#209; releases cut before canon v1.13.0 instead
+  carry `attestations-vsa-{crates,npm}.intoto.jsonl` as assets, two
+  classes only). Fetch-then-filter, because GitHub's attestations API
+  rejects the VSA predicate type as a query filter (`HTTP 422`,
+  measured on v0.16.3) even though the attestation is present:
+
+  ```bash
+  gh api "repos/<owner>/<repo>/attestations/sha256:<digest>" \
+    --jq '.attestations[].bundle' |
+    jq -c 'select(.dsseEnvelope.payload | @base64d | fromjson
+      | .predicateType == "https://slsa.dev/verification_summary/v1")' \
+    > vsa.jsonl
+  gh attestation verify <file-or-oci://ref@digest> --repo <owner>/<repo> \
+    --signer-workflow monumental-archive/signer/.github/workflows/sign.yml \
+    --predicate-type https://slsa.dev/verification_summary/v1 \
+    --bundle vsa.jsonl
+  ```
+
   Gate on `verificationResult: PASSED` and `verifiedLevels` instead of
-  re-deriving the policy yourself. Absent on dry-run releases, by design
-  — and **present only for the `rust-crate` and `wasm-npm` classes**:
-  binaries, images, source archives and pgrx extensions ship evidence
-  with no verdict beside it (`release.md`, "The verdict beside the
-  evidence"). For those, verify the provenance directly with the command
-  above; there is nothing weaker about the evidence, only no delegation
-  shortcut over it.
+  re-deriving the policy yourself; a consumer who distrusts verdicts
+  still has the provenance bundles in the release. Expect
+  `resourceUri: pkg:github/<owner>/<repo>@v<version>` — the release the
+  verdict covers; per the VSA spec, this stated expectation is the
+  out-of-band channel, so a VSA naming any other resource must be
+  rejected. `verifiedLevels` claims `SLSA_BUILD_LEVEL_3` and only that:
+  one level, one track, exactly what the verdict's own loops verified.
+  For image subjects the verdict's byte basis is content addressing
+  itself; what the org verified is the tag→digest binding and the
+  signed provenance at the index digest (`release.md`). Absent on
+  dry-run releases, by design: a rehearsal must never sign "PASSED".
 - **The two comparisons the CLI has no flag for.** `gh attestation
   verify` compares builder identity and canonical source repository, but
   exposes nothing for `buildType` or `externalParameters` — the other
