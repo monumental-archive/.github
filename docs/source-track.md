@@ -97,7 +97,7 @@ start here. All other clocks continue from boundary A.
 | Repo | Start revision |
 | --- | --- |
 | `.github` | `b4c3f08` |
-| `signer` | none yet — the first main commit after the boundary starts it |
+| `signer` | `b05fe88` (2026-08-12 — the identity-stub landing, first main commit after the boundary) |
 | `release-lab` | `2281c5e` |
 
 ## The signing identity, reserved
