@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.14.1](https://github.com/monumental-archive/.github/compare/v1.14.0...v1.14.1) - 2026-08-12
+
+### Fixed
+
+- hand the genesis flag to the emit step too ([#278](https://github.com/monumental-archive/.github/pull/278))
+
+### Miscellaneous
+
+- bump the emitter pin to v1.14.0 ([#276](https://github.com/monumental-archive/.github/pull/276))
+
 ## [1.14.0](https://github.com/monumental-archive/.github/compare/v1.13.0...v1.14.0) - 2026-08-12
 
 ### Added
