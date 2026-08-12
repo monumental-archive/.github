@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.10.1](https://github.com/monumental-archive/.github/compare/v1.10.0...v1.10.1) - 2026-08-12
+
+### Dependencies
+
+- update dependency monumental-archive/.github to v1.9.0 ([#223](https://github.com/monumental-archive/.github/pull/223))
+
 ## [1.10.0](https://github.com/monumental-archive/.github/compare/v1.9.0...v1.10.0) - 2026-08-12
 
 ### Added
