@@ -339,7 +339,7 @@ jobs:
         # publishes: triage is a property of the release, not the calendar
         # (docs/dependency-track.md). Network-bound (the OSV feed), which
         # is fine on the release path — it is already network-bound by
-        # construction, like verify-published — and never in the ci gate.
+        # construction, like verify-release — and never in the ci gate.
         env:
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
@@ -414,7 +414,7 @@ jobs:
     name: Verify published bytes
     needs: [guard, build]
     if: contains(inputs.classes, 'rust-crate')
-    uses: ./.github/workflows/verify-published.yml
+    uses: ./.github/workflows/verify-release.yml
     permissions:
       contents: read # the verifier holds no more than this
     with:
@@ -436,21 +436,26 @@ jobs:
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
 
-  # The verdict beside the evidence. emit-vsa assembles the verification
-  # summary — bytes pulled back and proved, provenance signed, all under
-  # the one pinned policy SHA — and the signer signs it under the same
-  # identity as the provenance, varying only the predicate type. A
-  # stranger gates on this instead of re-deriving the whole verification;
-  # a stranger who distrusts verdicts still has the provenance bundle.
-  # Skipped on dry-run: the verifier only passed the manifest through, and
-  # a rehearsal must never sign "PASSED".
+  # The verdict beside the evidence. verify-release's verdict mode
+  # re-proves the published bytes, opens and verifies the signed
+  # provenance over them (signer identity to the pinned commit, subjects
+  # to the manifest), and only then assembles the verification summary —
+  # every predicate field an output of a check it just ran (#208). The
+  # signer signs it under the same identity as the provenance, varying
+  # only the predicate type. A stranger gates on this instead of
+  # re-deriving the whole verification; a stranger who distrusts verdicts
+  # still has the provenance bundle. Skipped on dry-run — and verdict
+  # mode refuses a dry-run on its own: a rehearsal must never sign
+  # "PASSED".
   vsa:
     name: Assemble VSA
     needs: [guard, verify, sign]
     if: ${{ contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
-    uses: ./.github/workflows/emit-vsa.yml
-    permissions: {} # assembly reads nothing and writes nothing
+    uses: ./.github/workflows/verify-release.yml
+    permissions:
+      contents: read # pull-back plus attestation reads, nothing more
     with:
+      mode: verdict
       subjects: ${{ needs.verify.outputs.subjects }}
       version: ${{ needs.guard.outputs.version }}
 
@@ -550,7 +555,7 @@ jobs:
     name: Verify published wasm bytes
     needs: build-wasm
     if: contains(inputs.classes, 'wasm-npm')
-    uses: ./.github/workflows/verify-published.yml
+    uses: ./.github/workflows/verify-release.yml
     permissions:
       contents: read # the verifier holds no more than this
     with:
@@ -571,15 +576,20 @@ jobs:
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
 
-  # Same verdict, wasm leg — see the note on `vsa` above.
+  # Same verdict, wasm leg — see the note on `vsa` above. build-wasm is
+  # in needs only for the package name the re-pull needs to reconstruct
+  # the registry path.
   vsa-wasm:
     name: Assemble wasm VSA
-    needs: [guard, verify-wasm, sign-wasm]
+    needs: [guard, build-wasm, verify-wasm, sign-wasm]
     if: ${{ contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
-    uses: ./.github/workflows/emit-vsa.yml
-    permissions: {} # assembly reads nothing and writes nothing
+    uses: ./.github/workflows/verify-release.yml
+    permissions:
+      contents: read # pull-back plus attestation reads, nothing more
     with:
+      mode: verdict
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
+      npm-package: ${{ needs.build-wasm.outputs.package }}
       version: ${{ needs.guard.outputs.version }}
 
   sign-vsa-wasm:

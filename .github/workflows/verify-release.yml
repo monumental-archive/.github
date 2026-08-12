@@ -1,0 +1,405 @@
+# The release verifier: one identity for every check the org's verdict
+# rests on. Two modes, two invocations per release, same file:
+#
+#   mode: bytes    — pull the published bytes back from the registry and
+#                    prove them against the built digests. Runs BEFORE the
+#                    signer, and its output manifest is what the signer
+#                    attests — so the attested subject is what shipped,
+#                    not what we hoped shipped.
+#   mode: verdict  — runs AFTER the signer. Re-proves the bytes, then
+#                    opens the provenance being summarised: fetches the
+#                    attestation bundles for every verified digest from
+#                    the same API a stranger would use, verifies each
+#                    against the org signer identity at the pinned commit
+#                    (security/signer.pin in the canon tree), checks the
+#                    provenance subjects equal the verified manifest, and
+#                    only then assembles the VSA predicate
+#                    (slsa.dev/verification_summary/v1) for sign.yml.
+#
+# Correct by construction (#208): every field of the predicate is an
+# output of a check performed in this job. `verificationResult: PASSED`
+# is only reachable after both the byte loop and the attestation loop
+# exit clean; `verifiedLevels` is emitted only after the builder identity
+# checks pass; `inputAttestations` is appended inside the same loop that
+# verifies each bundle, so it cannot list what was not read or omit what
+# was. The verdict is not asserted beside the verification — it is the
+# verification's return value.
+#
+# This job runs no caller code and holds no id-token: it handles artifact
+# bytes, so it must not be able to sign them. The predicate it assembles
+# is handed to sign.yml by the orchestrator — the #28 split, unchanged.
+# The only caller-controlled bytes it touches are the declared inputs,
+# validated to the same whitelist shape sign.yml enforces.
+#
+# Class coverage is bytes-pull-back coverage: crates.io and npm serve
+# published bytes by stable URL, so rust-crate and wasm-npm get verdicts.
+# Widening coverage is a separate issue, per #208's boundaries.
+name: verify-release
+
+on:
+  workflow_call:
+    inputs:
+      subjects:
+        description: >
+          sha256sum manifest. In bytes mode: produced by the build, proven
+          here. In verdict mode: verify-release's own bytes-mode output —
+          the manifest the signer attested. A VSA over unproven digests
+          would be a verdict about nothing.
+        required: true
+        type: string
+      mode:
+        description: bytes (default) or verdict — see the header.
+        required: false
+        type: string
+        default: bytes
+      version:
+        description: >
+          The version released, without the leading v. Required in verdict
+          mode (it names the resourceUri); ignored in bytes mode.
+        required: false
+        type: string
+        default: ""
+      npm-package:
+        description: >
+          For .tgz subjects: the npm package as name@version. Required
+          because a scoped package's tarball filename mangles the scope
+          (`@org/pkg` packs as `org-pkg-<v>.tgz`), so the registry path
+          cannot be reconstructed from the file. Empty is fine when no
+          subject is a tarball; a .tgz subject with no package name fails.
+        required: false
+        type: string
+        default: ""
+      dry-run:
+        description: >
+          Rehearsal. Nothing was published, so there are no registry bytes
+          to pull back. In bytes mode the manifest passes through unchanged
+          and the run says so loudly — a rehearsal must never be mistaken
+          for proof. Verdict mode REFUSES a dry-run outright: a rehearsal
+          must never assemble a PASSED.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      subjects:
+        description: The manifest, re-derived from the published bytes.
+        value: ${{ jobs.verify.outputs.subjects }}
+      predicate:
+        description: >
+          Verdict mode only: the VSA predicate, one JSON object, ready for
+          sign.yml. Empty in bytes mode.
+        value: ${{ jobs.verify.outputs.predicate }}
+      predicate-type:
+        description: The predicate type URI sign.yml expects alongside it.
+        value: https://slsa.dev/verification_summary/v1
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify the release (${{ inputs.mode }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # Read-only, and no id-token: this job handles artifact bytes, so it
+      # must not be able to sign them. contents: read also scopes the
+      # token the verdict step uses to read the attestations API.
+      contents: read
+    outputs:
+      subjects: ${{ steps.prove.outputs.subjects }}
+      predicate: ${{ steps.verdict.outputs.predicate }}
+    steps:
+      - name: Prove each declared subject against the registry
+        id: prove
+        env:
+          UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
+          UNTRUSTED_NPM_PACKAGE: ${{ inputs.npm-package }}
+          UNTRUSTED_MODE: ${{ inputs.mode }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          case "${UNTRUSTED_MODE}" in
+            bytes | verdict) ;;
+            *)
+              echo "::error::mode must be bytes or verdict"
+              exit 1
+              ;;
+          esac
+          if [[ "${UNTRUSTED_MODE}" == "verdict" && "${DRY_RUN}" == "true" ]]; then
+            echo "::error::a rehearsal must never assemble a PASSED verdict"
+            exit 1
+          fi
+          record='^[0-9a-f]{64}  [^[:space:]]'
+          # The pulled bytes outlive this step on purpose: the verdict
+          # step verifies the attestation bundles against these exact
+          # files, so both checks open the same evidence.
+          workdir="${RUNNER_TEMP}/verified-subjects"
+          mkdir -p "${workdir}"
+          out="${workdir}/verified.sha256"
+          : > "${out}"
+          count=0
+          while IFS= read -r line; do
+            line="${line%$'\r'}"
+            [[ -n "${line}" ]] || continue
+            count=$((count + 1))
+            if [[ ! "${line}" =~ ${record} ]]; then
+              # Not echoed: the line is caller-controlled.
+              echo "::error::subject line ${count} is not a sha256sum record"
+              exit 1
+            fi
+            digest="${line%% *}"
+            name="${line##*  }"
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              echo "${digest}  ${name}" >> "${out}"
+              echo "::warning::rehearsal: ${name} was NOT proved against a registry"
+              continue
+            fi
+            # Each registry serves the exact bytes it stored, under a
+            # stable path. Anything else here would be proving the
+            # artifact against itself. The registry is dispatched on the
+            # subject's extension; an extension nothing claims is a
+            # failure, never a skip.
+            case "${name}" in
+              *.crate)
+                crate="${name%-*}"
+                ver="${name##*-}"; ver="${ver%.crate}"
+                url="https://static.crates.io/crates/${crate}/${crate}-${ver}.crate"
+                ;;
+              *.tgz)
+                if [[ -z "${UNTRUSTED_NPM_PACKAGE}" ]]; then
+                  echo "::error::${name} is an npm tarball but no npm-package was declared"
+                  exit 1
+                fi
+                # name@version, scope included; the version splits off the
+                # LAST @ so scoped names survive.
+                pkg="${UNTRUSTED_NPM_PACKAGE%@*}"
+                ver="${UNTRUSTED_NPM_PACKAGE##*@}"
+                if [[ -z "${pkg}" || -z "${ver}" || "${pkg}" == "${UNTRUSTED_NPM_PACKAGE}" ]]; then
+                  echo "::error::npm-package must be name@version, got ${UNTRUSTED_NPM_PACKAGE}"
+                  exit 1
+                fi
+                # The tarball path always uses the unscoped basename.
+                url="https://registry.npmjs.org/${pkg}/-/${pkg##*/}-${ver}.tgz"
+                ;;
+              *)
+                echo "::error::${name}: no registry claims this subject type"
+                exit 1
+                ;;
+            esac
+            echo "::group::${name}"
+            curl -sSfL --retry 5 --retry-connrefused -o "${workdir}/${name}" "${url}"
+            actual=$(sha256sum "${workdir}/${name}" | cut -d' ' -f1)
+            if [[ "${actual}" != "${digest}" ]]; then
+              echo "::error::${name}: built ${digest}, registry served ${actual}"
+              exit 1
+            fi
+            echo "${actual}  ${name}" >> "${out}"
+            echo "verified ${name}"
+            echo "::endgroup::"
+          done <<< "${UNTRUSTED_SUBJECTS}"
+          if ((count == 0)); then
+            echo "::error::nothing to verify — an empty proof is not a proof"
+            exit 1
+          fi
+          echo "WORKDIR=${workdir}" >> "${GITHUB_ENV}"
+          {
+            echo "subjects<<SUBJECTS_EOF"
+            cat "${out}"
+            echo "SUBJECTS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice::${count} subjects proved against the registry"
+
+      # The ref the caller pinned, read from the same $/ resolution that
+      # fetched this workflow — it names the exact canon tree (workflows,
+      # scripts, toolbelt, signer pin) that rendered this verdict, which
+      # is what a VSA's policy URI is for. Never re-derived: the two prior
+      # carriers disagreed with the resolution or could not be written at
+      # all (#158, #165).
+      - name: Resolve the canon tree (the ref the caller pinned)
+        id: canon
+        if: inputs.mode == 'verdict'
+        uses: $/.github/actions/canon
+
+      - name: Open the evidence and assemble the verdict
+        id: verdict
+        if: inputs.mode == 'verdict'
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          POLICY_REF: ${{ steps.canon.outputs.ref }}
+          CANON_PATH: ${{ steps.canon.outputs.path }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${UNTRUSTED_VERSION}" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::version is not a plausible version string"
+            exit 1
+          fi
+          # The v0.16.3 VSA shipped a bare .../tree/ because the ref
+          # expression came back empty (#158). The carrier is the $/
+          # resolution now, but a signed verdict naming no policy must
+          # never recur — refuse rather than render.
+          if [[ -z "${POLICY_REF}" ]]; then
+            echo "::error::POLICY_REF is empty — refusing a verdict with no policy"
+            exit 1
+          fi
+
+          # The signer identity this verdict verifies against comes from
+          # the canon tree the SAME resolution delivered — one pin, one
+          # tree, no second derivation. lint:signer-pin keeps this file
+          # equal to every sign.yml uses: literal, so a half-bump reddens
+          # the gate instead of verifying against a stale signer.
+          pin=$(grep -Eo '^[0-9a-f]{40}$' "${CANON_PATH}/security/signer.pin" | head -1)
+          if [[ -z "${pin}" ]]; then
+            echo "::error::security/signer.pin holds no 40-hex commit — cannot verify the signer"
+            exit 1
+          fi
+          signer_path="monumental-archive/signer/.github/workflows/sign.yml"
+
+          manifest="${WORKDIR}/verified.sha256"
+          bundles="${WORKDIR}/bundles"
+          mkdir -p "${bundles}"
+          covered="${WORKDIR}/covered"      # subject lines proven by verified provenance
+          seen="${WORKDIR}/seen-bundles"    # bundle digests already verified
+          atts="${WORKDIR}/input-attestations.json"
+          : > "${covered}"; : > "${seen}"
+          echo '[]' > "${atts}"
+
+          # Iterate over a copy: the subset check greps the manifest while
+          # the loop reads it, and one file in both roles reads like a
+          # read/write hazard even when both are reads (SC2094).
+          cp "${manifest}" "${WORKDIR}/manifest-iter"
+          while IFS= read -r line; do
+            [[ -n "${line}" ]] || continue
+            digest="${line%% *}"
+            name="${line##*  }"
+            api="repos/${GITHUB_REPOSITORY}/attestations/sha256:${digest}"
+            # The same API a stranger queries: fetching from the store —
+            # not this run's artifact — also proves the attestation was
+            # persisted. Retried: the signer finished moments ago.
+            fetched=""
+            for attempt in 1 2 3 4 5; do
+              if gh api "${api}" --jq '.attestations[].bundle' > "${WORKDIR}/raw-bundles.jsonl" 2> /dev/null \
+                && [[ -s "${WORKDIR}/raw-bundles.jsonl" ]]; then
+                fetched=1
+                break
+              fi
+              echo "attestation fetch for ${name} not ready (attempt ${attempt}), retrying"
+              sleep $((attempt * 5))
+            done
+            if [[ -z "${fetched}" ]]; then
+              echo "::error::${name}: no attestation retrievable for sha256:${digest}"
+              exit 1
+            fi
+            while IFS= read -r bundle; do
+              [[ -n "${bundle}" ]] || continue
+              # Only build provenance is the evidence this verdict
+              # summarises; other predicate types over the same subject
+              # (the VSA itself, VEX) are claims, not evidence.
+              ptype=$(printf '%s' "${bundle}" \
+                | jq -r '.dsseEnvelope.payload' | base64 -d \
+                | jq -r '.predicateType')
+              [[ "${ptype}" == "https://slsa.dev/provenance/v1" ]] || continue
+              bsha=$(printf '%s' "${bundle}" | sha256sum | cut -d' ' -f1)
+              bfile="${bundles}/${bsha}.json"
+              if ! grep -qx "${bsha}" "${seen}"; then
+                printf '%s' "${bundle}" > "${bfile}"
+                # The cryptographic check: this exact bundle, over this
+                # exact artifact file, signed by the org signer. gh
+                # rebuilds the Sigstore trust root and walks the chain;
+                # a verdict field is written only after it passes.
+                gh attestation verify "${WORKDIR}/${name}" \
+                  --bundle "${bfile}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --signer-workflow "${signer_path}" \
+                  --predicate-type https://slsa.dev/provenance/v1 \
+                  --format json > "${WORKDIR}/result.json"
+                # Identity, to the commit: the certificate's signer digest
+                # must be the pinned signer tree, and builder.id must name
+                # the signer file — the L3 legs a run CAN measure.
+                cert_digest=$(jq -r \
+                  '.[0].verificationResult.signature.certificate.buildSignerDigest // empty' \
+                  "${WORKDIR}/result.json")
+                if [[ "${cert_digest}" != "${pin}" ]]; then
+                  echo "::error::${name}: provenance signed at '${cert_digest}', pin is '${pin}'"
+                  exit 1
+                fi
+                builder=$(jq -r \
+                  '.[0].verificationResult.statement.predicate.runDetails.builder.id // empty' \
+                  "${WORKDIR}/result.json")
+                if [[ "${builder}" != "https://github.com/${signer_path}@"* ]]; then
+                  echo "::error::${name}: builder.id does not name the org signer"
+                  exit 1
+                fi
+                # No subject the manifest does not claim: the statement's
+                # subject set must be a subset of what this run verified.
+                jq -r '.[0].verificationResult.statement.subject[]
+                  | "\(.digest.sha256)  \(.name)"' "${WORKDIR}/result.json" \
+                  > "${WORKDIR}/stmt-subjects"
+                while IFS= read -r sline; do
+                  if ! grep -qxF "${sline}" "${manifest}"; then
+                    echo "::error::provenance covers a subject this run did not verify"
+                    exit 1
+                  fi
+                  echo "${sline}" >> "${covered}"
+                done < "${WORKDIR}/stmt-subjects"
+                echo "${bsha}" >> "${seen}"
+                # Appended HERE, inside the verification of this bundle —
+                # the list and the checks are the same iteration, which is
+                # what makes inputAttestations complete by construction.
+                jq -c --arg uri "https://api.github.com/${api}" --arg sha "${bsha}" \
+                  '. + [{uri: $uri, digest: {sha256: $sha}}]' "${atts}" \
+                  > "${atts}.tmp" && mv "${atts}.tmp" "${atts}"
+                echo "verified provenance ${bsha} (via ${name})"
+              fi
+            done < "${WORKDIR}/raw-bundles.jsonl"
+          done < "${WORKDIR}/manifest-iter"
+
+          # ...and no verified subject the provenance does not cover: the
+          # union of statement subjects must equal the manifest exactly.
+          missing=$(grep -vxFf "${covered}" "${manifest}" || true)
+          if [[ -n "${missing}" ]]; then
+            echo "::error::a verified subject has no verified provenance covering it"
+            exit 1
+          fi
+          opened=$(jq 'length' "${atts}")
+          if ((opened == 0)); then
+            echo "::error::no provenance opened — a verdict over nothing is not a verdict"
+            exit 1
+          fi
+
+          # policy.digest pins WHICH canon tree rendered this verdict. The
+          # ref may be a tag; the commit is the digest the spec wants.
+          if [[ "${POLICY_REF}" =~ ^[0-9a-f]{40}$ ]]; then
+            policy_sha="${POLICY_REF}"
+          else
+            policy_sha=$(gh api "repos/monumental-archive/.github/commits/${POLICY_REF}" --jq '.sha')
+          fi
+          if [[ ! "${policy_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::could not resolve the policy ref to a commit"
+            exit 1
+          fi
+
+          # jq --arg/--slurpfile does all quoting: nothing caller-
+          # controlled is spliced into JSON by hand. Every field below is
+          # an output of the checks above; this line is unreachable if
+          # any of them failed.
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          predicate=$(jq -cn \
+            --arg verifier "https://github.com/monumental-archive/.github/.github/workflows/verify-release.yml" \
+            --arg time "${now}" \
+            --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
+            --arg policy "https://github.com/monumental-archive/.github/tree/${POLICY_REF}" \
+            --arg policySha "${policy_sha}" \
+            --slurpfile atts "${atts}" \
+            '{
+              verifier: { id: $verifier },
+              timeVerified: $time,
+              resourceUri: $resource,
+              policy: { uri: $policy, digest: { gitCommit: $policySha } },
+              inputAttestations: $atts[0],
+              verificationResult: "PASSED",
+              verifiedLevels: ["SLSA_BUILD_LEVEL_3"],
+              slsaVersion: "1.2"
+            }')
+          echo "predicate=${predicate}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::verdict assembled: ${opened} attestation(s) opened and verified"

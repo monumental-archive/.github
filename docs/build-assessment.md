@@ -170,7 +170,7 @@ tokens exist to steal — and crates.io exchange tokens are single-use.
 
 **Processing of output artifacts by the control plane.** The control plane
 pulls published bytes back from the registry and proves them against the
-built digests before anything is signed (`verify-published.yml`), so the
+built digests before anything is signed (`verify-release.yml`, bytes mode), so the
 attested subject is what a consumer downloads rather than what a build
 claimed. It performs no transformation of artifact bytes.
 
