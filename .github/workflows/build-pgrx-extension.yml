@@ -170,8 +170,11 @@ jobs:
         # the level's provenance obligation falls on the build image
         # producer, and these bases are upstream. See base-attest.yml's
         # header and docs/slsa-reference.md for what upstream does and
-        # does not publish. It also does not emit the signed attestation
-        # of THIS verification's result, which L1 additionally requires.
+        # does not publish. The attestation verified here is itself the
+        # signed verification result L1's third obligation asks for
+        # (#212): base-attest verified the upstream provenance names the
+        # docker-library source before signing, so this check consumes a
+        # verification, not a bare hash approval.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

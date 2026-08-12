@@ -25,11 +25,18 @@
 #     what the original measurement got wrong. It is unsigned, so it is
 #     Build L1 provenance — one level below what BuildEnv L1 requires.
 #
-# The stronger claim available without owning postgres builds is to fetch
-# that upstream provenance, assert its subject and configSource against
-# the pin, and sign THAT verification — which would also discharge L1's
-# unimplemented third obligation, the signed attestation of the
-# verification result. Not built yet; this workflow asserts the hash only.
+# The stronger claim available without owning postgres builds is BUILT
+# (#212): each run fetches that upstream provenance, asserts — for every
+# platform in the index — that it names the docker-library/postgres
+# source and the <major>/<suite> directory the pinned tag implies, and
+# signs THAT verification under the org identity. The predicate carries
+# the upstream facts alongside the pin, so "the org approved these
+# bytes" became "the org verified these bytes carry upstream provenance
+# naming this source". The same artefact discharges BuildEnv L1's third
+# obligation — a signed attestation of the provenance-verification
+# result — which was previously a ::notice:: log line in the build leg
+# and nothing more. The build legs' fail-closed verification of THIS
+# attestation is unchanged (build-pgrx-extension.yml).
 #
 # Runs on push when the pin set changes (a Renovate digest roll re-attests
 # immediately), on a weekly schedule (freshness floor), and on dispatch.
@@ -140,7 +147,56 @@ jobs:
           docker manifest inspect "${REF}" > /dev/null
           echo "::notice::${REF} resolves"
 
-      - name: Write the approval predicate
+      - name: Verify the upstream provenance names this source (#212)
+        # Docker Official Images carry BuildKit in-toto provenance
+        # (slsa.dev/provenance/v0.2) as attestation manifests — unsigned,
+        # which is why it is Build L1 and why the org's SIGNED statement
+        # about having verified it is the strongest claim available
+        # without owning the build. Asserted per platform, fail-closed:
+        # every platform in the pinned index must carry provenance whose
+        # configSource names the docker-library/postgres repository and
+        # the <major>/<suite> directory the pinned tag implies. A
+        # platform with no provenance, or provenance naming any other
+        # source, fails the run — an unverifiable base is a red run.
+        id: upstream
+        env:
+          REF: ${{ matrix.ref }}
+          PG: ${{ matrix.pg }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "docker.io/library/${REF}" \
+            --format '{{json .Provenance}}' > provenance-map.json
+          count=$(jq 'length' provenance-map.json)
+          if [[ "${count}" == "0" || "${count}" == "null" ]]; then
+            echo "::error::${REF}: upstream publishes no provenance — refusing to verify nothing"
+            exit 1
+          fi
+          # The suite is the tag's suffix (postgres:14-bookworm ->
+          # bookworm); upstream's configSource ends ":<major>/<suite>".
+          tag="${REF#postgres:}"
+          tag="${tag%%@*}"
+          suite="${tag#"${PG}"-}"
+          expect_prefix="https://github.com/docker-library/postgres.git#"
+          expect_suffix=":${PG}/${suite}"
+          jq -e --arg pre "${expect_prefix}" --arg suf "${expect_suffix}" '
+            to_entries | length > 0 and all(.[];
+              (.value.SLSA.invocation.configSource.uri // "")
+              | startswith($pre) and endswith($suf))' provenance-map.json > /dev/null || {
+            echo "::error::${REF}: a platform's provenance does not name docker-library/postgres at ${PG}/${suite} — refusing to attest a verification that failed"
+            exit 1
+          }
+          # The facts the predicate carries: the upstream source revision
+          # (one per platform, deduplicated — a healthy index builds all
+          # platforms from one commit) and the platform list verified.
+          jq -c '{
+            sources: ([.[] | .SLSA.invocation.configSource.uri] | unique),
+            platforms: (keys | sort),
+            provenanceType: "https://slsa.dev/provenance/v0.2"
+          }' provenance-map.json > upstream.json
+          platforms=$(jq -r '.platforms | length' upstream.json)
+          echo "::notice::${REF}: upstream provenance verified across ${platforms} platform(s)"
+
+      - name: Write the verification predicate
         env:
           ROLE: ${{ matrix.role }}
           PG: ${{ matrix.pg }}
@@ -151,8 +207,10 @@ jobs:
             --arg role "${ROLE}" --arg pg "${PG}" --arg ref "${REF}" \
             --arg source "docker/pgrx-base-images.toml" \
             --arg revision "${GITHUB_SHA}" \
+            --slurpfile upstream upstream.json \
             '{role: $role, pgMajor: $pg, pinnedRef: $ref,
-              pinSource: $source, pinRevision: $revision}' \
+              pinSource: $source, pinRevision: $revision,
+              upstreamProvenance: ($upstream[0] + {verified: true})}' \
             > predicate.json
 
       - name: Attest the expected hash under the org identity

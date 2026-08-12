@@ -154,13 +154,16 @@ The org has two build-environment layers, and **both are formally L0**:
   `docker/pgrx-base-images.toml`). The org instantiates them, so at this
   layer the org is the build **platform** — but it is not the build
   **image producer**, and the producer's two obligations are therefore
-  not the org's to discharge. `base-attest.yml` mints an
-  expected-hash approval for every pinned digest under org identity; the
-  build legs verify it before any container runs and fail closed;
-  `audit:attestations` proves the approval set stays complete. That is a
-  real control and it is **not** the spec's fallback, which does not
-  cover this case. L1's third obligation — the signed attestation of the
-  verification result — is not implemented at all.
+  not the org's to discharge. `base-attest.yml` verifies, for every
+  pinned digest and every platform in its index, that the upstream
+  BuildKit provenance names the `docker-library/postgres` source and
+  the pinned tag's `<major>/<suite>` directory, and signs **that
+  verification** under org identity (#212); the build legs verify the
+  signed result before any container runs and fail closed;
+  `audit:attestations` proves the set stays complete. That is a real
+  control and it is **not** the spec's fallback, which does not cover
+  this case. L1's third obligation — the signed attestation of the
+  verification result — is discharged by that same artefact.
 
 Rebuilding the postgres bases in-org so they carry Build L3 provenance
 of their own creation is the only route to the label, and it is
@@ -210,14 +213,16 @@ Build **L1** provenance, one level short of what BuildEnv L1 demands of
 the producer.
 
 The consequence is not "nothing to do". It is that the strongest
-available claim is a *verification* claim rather than a level: fetch the
-upstream provenance, assert its subject matches the pinned digest and its
-`configSource.uri` matches the expected `docker-library` repository and
-commit, and sign **that** under org identity — replacing "the org
-approved these bytes" with "the org verified these bytes carry upstream
-provenance naming this source revision". That single change would also
-discharge L1's unimplemented third obligation. It does not make the org
-BuildEnv L1, and the claim must not be written as though it did.
+available claim is a *verification* claim rather than a level — and
+that claim is now what `base-attest.yml` signs (#212): it fetches the
+upstream provenance for every platform in the pinned index, asserts
+`configSource.uri` names the `docker-library/postgres` repository and
+the pinned tag's directory, and signs **that** under org identity —
+"the org approved these bytes" became "the org verified these bytes
+carry upstream provenance naming this source". The same artefact
+discharges L1's third obligation, the signed attestation of the
+verification result. It does not make the org BuildEnv L1, and the
+claim is not written as though it did — `direction.md`'s row stays L0.
 
 ## Build L4 (planned, uncertain)
 
