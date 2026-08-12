@@ -621,3 +621,106 @@ jobs:
           subject-checksums: ${{ runner.temp }}/vsa-subjects.sha256
           predicate-type: https://slsa.dev/verification_summary/v1
           predicate-path: ${{ runner.temp }}/vsa-predicate.json
+
+      # Enrichment (#200): the implicit build facts become verifiable
+      # claims — the toolbelt lock (from which every tool version and
+      # checksum is derivable), the pgrx base-image digests, and the
+      # released repository's own lockfiles at the attested source
+      # revision. SLSA makes resolvedDependencies completeness a SHOULD
+      # at every level and demands that at L3 provenance fields be
+      # generated or verified by the control plane — which is why these
+      # facts live in a COMPANION predicate computed entirely HERE, in
+      # the verification control plane, rather than as tenant-generated
+      # fields inside the platform's provenance: the stock provenance
+      # stays unforgeable, and the enrichment is signed by the identity
+      # that computed every byte of it. The source revision is read from
+      # the provenance this job just verified; repo lockfiles are
+      # fetched at exactly that commit; canon facts are read from the
+      # same pinned tree that rendered the verdict.
+      - name: Compute the enrichment facts (control plane only)
+        id: enrich
+        if: inputs.mode == 'verdict'
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          POLICY_REF: ${{ steps.canon.outputs.ref }}
+          CANON_PATH: ${{ steps.canon.outputs.path }}
+        run: |
+          set -euo pipefail
+          # The attested source revision, from the last provenance this
+          # run verified (all bundles in one release share it; the
+          # subset/coverage checks above already proved coherence).
+          src=$(jq -r '.[0].verificationResult.statement.predicate.buildDefinition
+            .resolvedDependencies[0] | (.digest.gitCommit // empty)' "${WORKDIR}/result.json")
+          if [[ ! "${src}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the verified provenance carries no source gitCommit — enrichment would claim nothing"
+            exit 1
+          fi
+
+          deps='[]'
+          adddep() { # name, uri, sha256 (empty = digestless oci entry)
+            local entry
+            if [[ -n "${3}" ]]; then
+              entry=$(jq -cn --arg n "${1}" --arg u "${2}" --arg d "${3}" \
+                '{name: $n, uri: $u, digest: {sha256: $d}}')
+            else
+              entry=$(jq -cn --arg n "${1}" --arg u "${2}" '{name: $n, uri: $u}')
+            fi
+            deps=$(jq -c --argjson e "${entry}" '. + [$e]' <<< "${deps}")
+          }
+
+          # Canon facts: the toolbelt lock and the base-image mapping,
+          # hashed from the pinned tree this verdict was rendered from.
+          lock_sha=$(sha256sum "${CANON_PATH}/mise/mise.lock" | cut -d" " -f1)
+          adddep "toolbelt-lock" \
+            "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/mise/mise.lock" \
+            "${lock_sha}"
+          if [[ -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
+            map_sha=$(sha256sum "${CANON_PATH}/docker/pgrx-base-images.toml" | cut -d" " -f1)
+            adddep "pgrx-base-images" \
+              "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/docker/pgrx-base-images.toml" \
+              "${map_sha}"
+            grep -Eo 'postgres:[A-Za-z0-9.-]+@sha256:[0-9a-f]{64}' \
+              "${CANON_PATH}/docker/pgrx-base-images.toml" > "${RUNNER_TEMP}/base-images.raw"
+            sort -u "${RUNNER_TEMP}/base-images.raw" > "${RUNNER_TEMP}/base-images.list"
+            while IFS= read -r img; do
+              [[ -n "${img}" ]] || continue
+              adddep "pgrx-base" "oci://docker.io/library/${img}" ""
+            done < "${RUNNER_TEMP}/base-images.list"
+          fi
+
+          # The released repository's own lockfiles, at the attested
+          # revision — fetched from the commit the provenance names, so
+          # the claim is bound to the source that built, not to a branch
+          # that may have moved. Absence is normal (not every repo has
+          # every ecosystem); an absent file is simply not claimed.
+          for lf in Cargo.lock package-lock.json mise.toml; do
+            url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${src}/${lf}"
+            if curl -sSfL --retry 5 --retry-connrefused -o "${RUNNER_TEMP}/${lf}" "${url}" 2> /dev/null; then
+              lf_sha=$(sha256sum "${RUNNER_TEMP}/${lf}" | cut -d" " -f1)
+              adddep "${lf}" "${url}" "${lf_sha}"
+              echo "enriched: ${lf} at ${src}"
+            fi
+          done
+
+          jq -cn \
+            --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
+            --arg repo "https://github.com/${GITHUB_REPOSITORY}" \
+            --arg src "${src}" \
+            --arg canon "${POLICY_REF}" \
+            --argjson deps "${deps}" \
+            '{
+              resourceUri: $resource,
+              sourceRevision: {repository: $repo, digest: {gitCommit: $src}},
+              canon: {ref: $canon},
+              resolvedDependencies: $deps
+            }' > "${RUNNER_TEMP}/enrichment-predicate.json"
+          depcount=$(jq length <<< "${deps}")
+          echo "::notice::enrichment assembled: ${depcount} resolved dependencies"
+
+      - name: Sign the enrichment under this workflow's own identity
+        if: inputs.mode == 'verdict'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/vsa-subjects.sha256
+          predicate-type: https://monumental-archive.github.io/attestations/build-enrichment/v1
+          predicate-path: ${{ runner.temp }}/enrichment-predicate.json
