@@ -338,40 +338,44 @@ Every claim the org signs beyond build provenance travels through the
 same one file in `signer`, varying only a predicate type drawn from the
 allowlist inside it — that case statement is the org's entire signing
 surface, enumerable by reading it. The first such claim is the **artifact
-VSA** (`slsa.dev/verification_summary/v1`): after verify-published proves
-the released bytes and the provenance is signed,
-[`emit-vsa.yml`](../.github/workflows/emit-vsa.yml) — a job that runs no
-caller code — assembles the verdict ("verified against the policy at this
-pinned SHA, at Build L3") and the signer signs it over the same verified
-digests. The provenance bundle is the *evidence*; the VSA is the
-*verdict*. A stranger who trusts the org's policy gates on the verdict's
-one-liner (see the runbook); a stranger who does not still has the
-evidence to re-derive from — which is why the VSA sits beside the
-per-class bundles and never replaces them. Dry-runs skip it: the verifier
-only passed the manifest through, and a rehearsal must never sign
-"PASSED".
+VSA** (`slsa.dev/verification_summary/v1`), and one workflow performs
+every check it rests on:
+[`verify-release.yml`](../.github/workflows/verify-release.yml), a job
+that runs no caller code, invoked twice per release. In **bytes** mode
+(before the signer) it pulls the published bytes back from the registry
+and proves them against the built digests — its output manifest is what
+the signer attests. In **verdict** mode (after the signer) it re-proves
+the bytes, then opens the evidence it is about to summarise: it fetches
+the attestation bundles for every verified digest from the same API a
+stranger would use, verifies each cryptographically against the org
+signer identity at the commit `security/signer.pin` declares
+(`lint:signer-pin` keeps that file equal to every `sign.yml` `uses:`
+literal, so a half-bump reddens the gate rather than verifying against a
+stale signer), checks `builder.id` names the signer, and checks the
+provenance subjects equal the verified manifest exactly. Only then does
+it assemble the predicate — `verificationResult: PASSED` is unreachable
+unless both loops passed, `inputAttestations` is appended inside the
+loop that verifies each bundle (complete by construction), `policy`
+carries both the canon URI and the `gitCommit` digest of the tree that
+rendered the verdict, and `slsaVersion` says 1.2 (#208). The verdict is
+not asserted beside the verification; it is the verification's return
+value. The signer then signs it over the same verified digests.
 
-Two limits on that verdict, stated because a signed claim must not read
-wider than what produced it.
+The provenance bundle is the *evidence*; the VSA is the *verdict*. A
+stranger who trusts the org's policy gates on the verdict's one-liner
+(see the runbook); a stranger who does not still has the evidence to
+re-derive from — which is why the VSA sits beside the per-class bundles
+and never replaces them. Dry-runs skip it, and verdict mode refuses a
+dry-run on its own: a rehearsal must never sign "PASSED".
 
-**It covers two classes, not six.** `emit-vsa` is wired for `rust-crate`
-and `wasm-npm` only, because `verify-published` proves bytes by pulling
-them back from a registry and only crates.io and npm serve them that way.
-`oci-image`, `rust-binary`, `source-archive` and `pgrx-extension` ship
-full evidence with no verdict beside it. Release assets are pullable by
-URL exactly as registry artifacts are, so extending both is mechanical;
-images by digest are self-proving and need a different shape, not a
-pretend pull-back.
-
-**`SLSA_BUILD_LEVEL_3` is asserted structurally, not measured.**
-`verify-published` compares bytes; it never opens an attestation, checks
-a signature or reads a `builder.id`. The level comes from the
-architecture the policy URI pins — which the VSA spec permits, since that
-is what a policy URI is for — but the spec's model is a verifier
-evaluating "the artifact *and a bundle of attestations*", and this one
-evaluates only the artifact. Until the verdict verifies the provenance it
-summarises and records what it read in `inputAttestations`, `verifier.id`
-names a workflow that proved less than the claim states.
+One limit on that verdict, stated because a signed claim must not read
+wider than what produced it: **it covers two classes, not six.**
+Verdicts exist where bytes can be pulled back, and only crates.io and
+npm serve published bytes that way. `oci-image`, `rust-binary`,
+`source-archive` and `pgrx-extension` ship full evidence with no verdict
+beside it. Release assets are pullable by URL exactly as registry
+artifacts are, so extending both is mechanical; images by digest are
+self-proving and need a different shape, not a pretend pull-back.
 
 OpenVEX travels the same surface and **is** emitted: `vex-attest.yml`
 signs one statement per merge (subjects derived from published SBOMs)
@@ -546,8 +550,8 @@ disabled (it would destroy the section cargo-auditable lives in), and
 normalised archives — sorted members, zeroed ownership, clamped mtimes,
 `gzip -n`.
 
-Binaries have no registry to pull back from, so there is no
-verify-published leg: they ship as release assets, GitHub's own release
+Binaries have no registry to pull back from, so there is no pull-back
+leg and no verdict: they ship as release assets, GitHub's own release
 attestation binds tag, commit and asset digests at publish, and the
 subjects `signer` attests are the same archives the attach job uploads.
 

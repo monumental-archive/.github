@@ -199,7 +199,7 @@ The gate-determinism rule is untouched: it keeps network-bound checks
 out of the **`ci` gate**, and it is right. The release path is already
 network-bound by construction — it publishes to registries and pulls
 the bytes back to prove them — so the OSV feed at release time is the
-same category as `verify-published`. The step landed with the
+same category as `verify-release`. The step landed with the
 dependency-keyed VEX redesign (the #187 close-out); first exercised on
 the next lab release, which carries updating this sentence with the
 measured run.

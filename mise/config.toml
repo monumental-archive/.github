@@ -922,6 +922,44 @@ fi
 echo "lint:capability-boundary: ok"
 '''
 
+[tasks."lint:signer-pin"]
+description = "Every sign.yml uses: equals the declared signer pin (no half-bumps)"
+dir = "{{cwd}}"
+# The release verifier (verify-release.yml, verdict mode) checks the
+# provenance it opens against the signer commit declared in
+# security/signer.pin. The signer is also pinned as a literal SHA in
+# every `uses:` line — GitHub requires that — so the two can drift: a
+# Renovate bump that moves the uses: lines but not the pin would verify
+# releases against a stale signer, silently. This makes the drift red.
+# Deterministic — reads only tracked files — so it belongs in the gate.
+# Repos that never reference the signer directly skip clean.
+run = '''
+files=$(git ls-files ".github/workflows/*.y*ml")
+[[ -n "${files}" ]] || { echo "lint:signer-pin: no workflows, skipped"; exit 0; }
+refs=$(xargs grep -hoE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" <<< "${files}" | sort -u || true)
+[[ -n "${refs}" ]] || { echo "lint:signer-pin: no signer references, skipped"; exit 0; }
+if [[ ! -f security/signer.pin ]]; then
+  echo "lint:signer-pin: sign.yml is referenced but security/signer.pin is missing" >&2
+  exit 1
+fi
+pin=$(grep -Eo "^[0-9a-f]{40}$" security/signer.pin | head -1)
+if [[ -z "${pin}" ]]; then
+  echo "lint:signer-pin: security/signer.pin holds no 40-hex commit" >&2
+  exit 1
+fi
+bad=""
+while IFS= read -r ref; do
+  [[ -n "${ref}" ]] || continue
+  [[ "${ref##*@}" == "${pin}" ]] || bad="${bad} ${ref}"
+done <<< "${refs}"
+if [[ -n "${bad}" ]]; then
+  echo "lint:signer-pin: sign.yml pinned away from security/signer.pin (${pin}):${bad}" >&2
+  echo "  bump the pin file and the uses: lines together" >&2
+  exit 1
+fi
+echo "lint:signer-pin: all signer references match ${pin}"
+'''
+
 [tasks."lint:source-attest"]
 description = "Dry-run the source emitter end-to-end short of signing (#236)"
 dir = "{{cwd}}"
