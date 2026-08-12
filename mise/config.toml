@@ -922,6 +922,96 @@ fi
 echo "lint:capability-boundary: ok"
 '''
 
+[tasks."lint:actions-allowed"]
+description = "Every uses: names an action the org allowlist permits (workflows AND composite actions)"
+dir = "{{cwd}}"
+# The org restricts Actions to GitHub-owned plus four patterns. GitHub
+# enforces it at `Set up job` — the run dies before a single step
+# executes, with nothing red until then. Found by driving the first
+# source-track activation (#207): sigstore/cosign-installer passed every
+# local lint, every gate and code review, and died in the lab.
+#
+# The list below is the enforcement copy, delivered to every repo by the
+# belt; security/README.md is the record and audit:actions-allowlist
+# compares both against the live org setting on Mondays. Same shape as
+# the rulesets decision (docs/rulesets.md): the org setting is the
+# enforcement, this is the early warning.
+#
+# Composite actions are linted too, deliberately: every other workflow
+# lint globs .github/workflows/ only, which is exactly the blind spot
+# that let the bad `uses:` through.
+run = '''
+files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+[[ -n "${files}" ]] || { echo "lint:actions-allowed: no workflows or actions, skipped"; exit 0; }
+# github_owned_allowed=true covers the actions/ and github/ orgs.
+# verified_allowed=false — a Marketplace verification badge is a
+# publisher check, not a supply-chain one, and it is not ours to revoke.
+allowed="actions/* github/* monumental-archive/* jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
+bad=""
+checked=0
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  while IFS= read -r ref; do
+    [[ -n "${ref}" ]] || continue
+    # Local refs (./path, $/path) are the repo's own tree, never a
+    # third party — the allowlist does not govern them.
+    case "${ref}" in ./*|\$/*) continue ;; esac
+    checked=$((checked + 1))
+    owner_repo="${ref%%@*}"
+    ok=""
+    for pat in ${allowed}; do
+      case "${pat}" in
+        *@\*) [[ "${owner_repo}" == "${pat%@\*}" ]] && ok=1 ;;
+        */\*) [[ "${owner_repo}" == "${pat%/\*}/"* ]] && ok=1 ;;
+      esac
+    done
+    [[ -n "${ok}" ]] || bad="${bad} ${f}(${ref})"
+  done <<< "$(grep -hoE "^[^#]*uses:[[:space:]]*[A-Za-z0-9._$/-]+/[A-Za-z0-9._-]+[^[:space:]]*" "${f}" \
+    | sed -E "s|^.*uses:[[:space:]]*||")"
+done <<< "${files}"
+if [[ -n "${bad}" ]]; then
+  echo "lint:actions-allowed: uses: an action the org allowlist forbids:${bad}" >&2
+  echo "  allowed: GitHub-owned plus ${allowed}" >&2
+  echo "  GitHub refuses these at 'Set up job', so nothing goes red until a run dies" >&2
+  echo "  widen the org setting deliberately, or use an allowed action" >&2
+  exit 1
+fi
+echo "lint:actions-allowed: ${checked} action reference(s), all permitted"
+'''
+
+[tasks."audit:actions-allowlist"]
+description = "The live org Actions allowlist still matches the belt's enforcement copy (network, canon only)"
+dir = "{{cwd}}"
+# The drift half of lint:actions-allowed. That lint is only as true as
+# its embedded list: widen the org setting and the lint silently over-
+# blocks; narrow it and the lint silently under-blocks while runs start
+# dying. This is the reconciliation, on the same cadence as every other
+# settings-drift check.
+run = '''
+[[ -d security ]] || { echo "audit:actions-allowlist: not the canon, skipped"; exit 0; }
+command -v gh > /dev/null || { echo "audit:actions-allowlist: gh missing" >&2; exit 1; }
+live=$(gh api "orgs/monumental-archive/actions/permissions/selected-actions")
+live_patterns=$(jq -r '.patterns_allowed | sort | join(" ")' <<< "${live}")
+belt_patterns=$(mise tasks info "lint:actions-allowed" --json \
+  | jq -r '.run[0]' | sed -n 's|^allowed="\(.*\)"$|\1|p' \
+  | tr " " "\n" | grep -v "^actions/\*$" | grep -v "^github/\*$" \
+  | sort | tr "\n" " " | sed "s| $||")
+fail=""
+[[ "${live_patterns}" == "${belt_patterns}" ]] \
+  || fail="patterns differ — live: [${live_patterns}] belt: [${belt_patterns}]"
+jq -e '.github_owned_allowed == true' <<< "${live}" > /dev/null \
+  || fail="${fail}; github_owned_allowed is false but the belt allows actions/* and github/*"
+jq -e '.verified_allowed == false' <<< "${live}" > /dev/null \
+  || fail="${fail}; verified_allowed is true — the Marketplace badge is not a supply-chain control"
+if [[ -n "${fail}" ]]; then
+  echo "audit:actions-allowlist: ${fail}" >&2
+  echo "  reconcile mise/config.toml lint:actions-allowed and security/README.md" >&2
+  echo "  with the live setting, or put the live setting back" >&2
+  exit 1
+fi
+echo "audit:actions-allowlist: live org allowlist matches the belt"
+'''
+
 [tasks."lint:from-digests"]
 description = "Every FROM in a tracked Dockerfile is digest-pinned (a tag is a moving pointer into the build)"
 dir = "{{cwd}}"
