@@ -42,15 +42,21 @@ the producer rather than from the first VSA they happen to see:
 
 A VSA naming any other resource, ref or verifier is not this chain's.
 
-### The one recorded gap
+### Gaps heal — the one that taught it
 
-`.github@e1ad2dde` (#256) carries **no link**: its emitter run died
-fetching the toolchain (`curl: (56)`) before anything was signed, and the
-next link chains over it. By the spec's own rule that revision is Source
-Level 0, and there is currently no path to backfill one — tracked, with
-the repair and the wording both, in #265. It is written here rather than
-quietly absent because a hole nobody records is the defect; the hole
-itself is an incident.
+`.github@e1ad2dde` (#256) lost its emitter run to a toolchain-download
+flake before anything signed, and for one day it stood as the track's
+recorded gap: Source Level 0 by the spec's own rule, with no path to
+backfill. #265 closed that class of defect — the emitter now walks
+genesis→tip on every push and emits links for any holes, each carrying
+`repaired: {at}` in its provenance and a **computed** level (the
+target only when every contributing ruleset's `updated_at` predates
+the revision's commit time; `SLSA_SOURCE_LEVEL_2` otherwise). The
+revision itself was healed at `SLSA_SOURCE_LEVEL_3` on 2026-08-12,
+continuity proven. A hole is now a transient state the system exits on
+its own; `audit:source-vsa` is the alarm while it is in one. Field
+semantics for healed links live in
+[`source-provenance.md`](source-provenance.md).
 
 **release-lab's first five links claim `SLSA_SOURCE_LEVEL_2`, and stay
 that way.** They were emitted before the claims job held a token that
