@@ -1,0 +1,8 @@
+# The dry run's global git config (#236). useConfigOnly forbids git
+# from auto-detecting a committer identity from the host's username and
+# hostname — which developer machines can do and a CI runner cannot.
+# With it, the dry run reproduces the runner's blank slate faithfully:
+# only an identity the emitter's own scripts declare will satisfy
+# `git notes add`, which is exactly the bug the genesis run died on.
+[user]
+	useConfigOnly = true

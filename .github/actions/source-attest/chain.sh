@@ -17,7 +17,17 @@ set -euo pipefail
 scratch="${SA_WORK}/repo"
 git init -q "${scratch}"
 cd "${scratch}"
-git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+# The note's committer identity is part of the storage contract, not
+# incidental config (#236): the author of every chain-link note lands in
+# a world-readable ledger permanently, so it is declared here as a
+# constant and documented in docs/source-assessment.md (storage). A
+# runner has no global git config — without this, `git notes add` dies
+# with `fatal: empty ident name`.
+git config user.name "source-attest"
+git config user.email "source-attest@monumental-archive.github.io"
+# SA_REMOTE_URL is the dry run's seam (#236): a file-protocol stand-in
+# repo replaces the network, nothing else changes.
+git remote add origin "${SA_REMOTE_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
 # Public repos, anonymous fetch; the push in append.sh authenticates.
 git fetch -q origin "+refs/heads/main:refs/sa/main" "+refs/notes/commits:refs/notes/commits" || {
   echo "::error::could not fetch main and refs/notes/commits — the notes ref must exist (seeded org-wide, #202)"

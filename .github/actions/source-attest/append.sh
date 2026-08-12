@@ -28,10 +28,18 @@ jq -n \
     vsa: {statement: $vs, bundle: $vb[0]}
   }' > "${SA_WORK}/note.json"
 
+# The dry run (#236) pushes --dry-run to a file-protocol remote: same
+# notes add, same push negotiation, no auth header (no token off-CI)
+# and nothing written to the remote.
+push=(push -q)
+[[ ${SA_PUSH_DRY_RUN:-false} == true ]] && push+=(--dry-run)
+auth=()
+[[ -n ${GH_TOKEN:-} ]] \
+  && auth=(-c "http.extraheader=AUTHORIZATION: basic $(printf "x-access-token:%s" "${GH_TOKEN}" | base64 -w0)")
+
 for attempt in 1 2 3; do
   git notes add -f -F "${SA_WORK}/note.json" "${GITHUB_SHA}"
-  if git -c http.extraheader="AUTHORIZATION: basic $(printf "x-access-token:%s" "${GH_TOKEN}" | base64 -w0)" \
-    push -q origin refs/notes/commits:refs/notes/commits; then
+  if git ${auth[@]+"${auth[@]}"} "${push[@]}" origin refs/notes/commits:refs/notes/commits; then
     echo "::notice::chain link pushed for ${GITHUB_SHA} (attempt ${attempt})"
     exit 0
   fi

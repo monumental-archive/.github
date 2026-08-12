@@ -97,6 +97,16 @@ the spec verifies. Tampering with notes history is constrained by the
 chain (each link verifies its predecessor against the pinned identity);
 cross-project isolation is GitHub's repository model.
 
+Every chain-link note is committed under the emitter's declared git
+identity — `source-attest <source-attest@monumental-archive.github.io>`,
+a constant set by the emitter action itself, never inherited from the
+environment. It is part of this contract because the note author lands
+in the world-readable ledger permanently and a consumer walking
+`refs/notes/commits` sees it: notes authored under any other identity
+were not written by the emitter. (The email is a designation, not a
+mailbox — the domain is the org's Pages origin, same as the provenance
+predicate type.)
+
 ## Root of trust
 
 What a consumer pins, in the verifying-source page's configuration
