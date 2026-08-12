@@ -342,16 +342,20 @@ VSA** (`slsa.dev/verification_summary/v1`), and one workflow performs
 every check it rests on:
 [`verify-release.yml`](../.github/workflows/verify-release.yml), a job
 that runs no caller code, invoked twice per release. In **bytes** mode
-(before the signer) it pulls the published bytes back from the registry
-and proves them against the built digests — its output manifest is what
-the signer attests. In **verdict** mode (after the signer) it re-proves
-the bytes, then opens the evidence it is about to summarise: it fetches
+(before the signer, registry classes only) it pulls the published bytes
+back from the registry and proves them against the built digests — its
+output manifest is what the signer attests. In **verdict** mode (after
+the release publishes — see below) it re-proves
+the subjects, then opens the evidence it is about to summarise: it
+fetches
 the attestation bundles for every verified digest from the same API a
 stranger would use, verifies each cryptographically against the org
 signer identity at the commit `security/signer.pin` declares
 (`lint:signer-pin` keeps that file equal to every `sign.yml` `uses:`
 literal, so a half-bump reddens the gate rather than verifying against a
-stale signer), checks `builder.id` names the signer, and checks the
+stale signer), checks `builder.id` names the signer, asserts `buildType`
+and `externalParameters` against the run's own identity (#210 — all
+four of `verifying-artifacts`' comparisons), and checks the
 provenance subjects equal the verified manifest exactly. Only then does
 it assemble the predicate — `verificationResult: PASSED` is unreachable
 unless both loops passed, `inputAttestations` is appended inside the
@@ -364,18 +368,32 @@ value. The signer then signs it over the same verified digests.
 The provenance bundle is the *evidence*; the VSA is the *verdict*. A
 stranger who trusts the org's policy gates on the verdict's one-liner
 (see the runbook); a stranger who does not still has the evidence to
-re-derive from — which is why the VSA sits beside the per-class bundles
-and never replaces them. Dry-runs skip it, and verdict mode refuses a
+re-derive from — which is why the VSA never replaces the per-class
+bundles. Dry-runs skip it, and verdict mode refuses a
 dry-run on its own: a rehearsal must never sign "PASSED".
 
-One limit on that verdict, stated because a signed claim must not read
-wider than what produced it: **it covers two classes, not six.**
-Verdicts exist where bytes can be pulled back, and only crates.io and
-npm serve published bytes that way. `oci-image`, `rust-binary`,
-`source-archive` and `pgrx-extension` ship full evidence with no verdict
-beside it. Release assets are pullable by URL exactly as registry
-artifacts are, so extending both is mechanical; images by digest are
-self-proving and need a different shape, not a pretend pull-back.
+**Every class gets a verdict, and every verdict runs after publish**
+(#209). Three proof shapes feed one manifest: registry artifacts are
+pulled back by stable URL (crates.io, npm); release assets are pulled
+back from the published release's download URL — publishing is what
+makes that URL exist *and* what makes the release immutable, so the
+proved bytes are exactly and permanently what a stranger fetches;
+images are proven by **tag→digest binding** — content addressing
+already proves an image's bytes, and re-hashing a fetched blob would
+prove nothing, so the verdict asserts the one mutable claim instead:
+that the tag the release advertises resolves in the registry to the
+attested index digest, with the provenance then opened `oci://` at
+that digest. The policy claims exactly what was checked, per shape,
+nothing more.
+
+Because verdicts follow publish and publishing seals the release,
+**VSAs live in the attestation store alone** — the store the verdict
+job itself reads evidence from, and the store the runbook's consumer
+recipe queries. `audit:attestations` closes the loop weekly: every
+subject covered by a release's own provenance bundles must carry a
+store-resident VSA, with the obligation gated on the canon version
+pinned at the tag (older releases carried the two registry-class VSA
+bundles as assets instead, and are held to that shape).
 
 OpenVEX travels the same surface and **is** emitted: `vex-attest.yml`
 signs one statement per merge (subjects derived from published SBOMs)
@@ -550,10 +568,13 @@ disabled (it would destroy the section cargo-auditable lives in), and
 normalised archives — sorted members, zeroed ownership, clamped mtimes,
 `gzip -n`.
 
-Binaries have no registry to pull back from, so there is no pull-back
-leg and no verdict: they ship as release assets, GitHub's own release
-attestation binds tag, commit and asset digests at publish, and the
-subjects `signer` attests are the same archives the attach job uploads.
+Binaries have no registry, so there is no pre-sign pull-back leg: they
+ship as release assets, GitHub's own release attestation binds tag,
+commit and asset digests at publish, and the subjects `signer` attests
+are the same archives the attach job uploads. Their pull-back — and
+their verdict — comes after publish, from the released download URL,
+which by then is public and immutable ("The verdict beside the
+evidence" above).
 
 ### pgrx extensions build inside the Postgres consumers run
 

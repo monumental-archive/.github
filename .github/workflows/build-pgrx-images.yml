@@ -56,8 +56,9 @@ on:
     outputs:
       images:
         description: >
-          JSON array of {pg, image, digest} for every pushed index — the
-          signing matrix.
+          JSON array of {pg, image, tag, digest} for every pushed index —
+          the signing matrix, and (tag included) the verdict's tag→digest
+          binding expectations.
         value: ${{ jobs.collect.outputs.images }}
 
 permissions: {}
@@ -206,8 +207,12 @@ jobs:
             exit 1
           fi
           mkdir -p /tmp/digests
+          # tag rides along so downstream consumers (the VSA's tag→digest
+          # binding proof) never re-derive the scheme: the step that names
+          # the tag is the step that records it.
           jq -n --arg pg "${PG}" --arg image "${IMAGE}" --arg digest "${digest}" \
-            '{pg: $pg, image: $image, digest: $digest}' > "/tmp/digests/pg${PG}.json"
+            --arg tag "${UNTRUSTED_VERSION}-pg${PG}-artifact" \
+            '{pg: $pg, image: $image, tag: $tag, digest: $digest}' > "/tmp/digests/pg${PG}.json"
           echo "::notice::pg${PG} index ${digest}"
 
       - name: Prove the pushed image the way a consumer uses it

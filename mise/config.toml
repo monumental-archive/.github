@@ -513,8 +513,10 @@ dir = "{{cwd}}"
 # (#117). Walks every non-draft release of every org repo, reads the
 # classes the caller requested FROM ITS publish.yml AT THE TAG (the only
 # honest source — classes change over time), and fails if any requested
-# class is missing its bundle, or any release its SBOM asset or
-# checksums — the canon's own releases shipped without their SBOM from
+# class is missing its bundle, any release its SBOM asset or checksums,
+# or — from canon 1.13.0 (#209) — any provenance-covered subject its
+# store-resident VSA: verdicts live in the attestation store alone,
+# because the release seals at publish, before any verdict exists — the canon's own releases shipped without their SBOM from
 # v1.0.0 to v1.4.1 with every board green, which is exactly the silent
 # gap this audit exists to catch. Continuous digests are the other
 # straggler class: their bundle artifact expires with the run, so the
@@ -545,13 +547,32 @@ while IFS= read -r repo; do
     [[ -n "${classes}" ]] || { legacy="${legacy} ${repo}@${tag}(no-classes)"; continue; }
     assets=$(gh api "repos/${org}/${repo}/releases/tags/${tag}" --jq ".assets[].name")
     checked=$((checked + 1))
+    # The canon version pinned at the tag decides the verdict
+    # obligation's SHAPE (#209): from 1.13.0 every class's VSA is
+    # store-resident (the release seals at publish, before any verdict
+    # exists), and before it the two registry classes carried VSA
+    # bundles as release assets. The pin comment in the caller's stub
+    # is the honest source; the canon's own stub uses a local
+    # reference, so its version is the tag itself.
+    canon_ver=$(grep -E "uses:.*(publish|release)\.yml@" <<< "${wf}" | grep -oE "# v[0-9]+\.[0-9]+\.[0-9]+" | head -1 | tr -dc "0-9.") || true
+    [[ -n "${canon_ver}" ]] || canon_ver="${tag#v}"
+    store_vsa=""
+    [[ "$(printf "%s\n%s" "1.13.0" "${canon_ver}" | sort -V | head -1)" == "1.13.0" ]] && store_vsa=1
     need="checksums.txt"
     grep -q "\.spdx\.json$" <<< "${assets}" || missing="${missing} ${repo}@${tag}(sbom)"
-    case ",${classes// /}," in *",rust-crate,"*) need="${need} attestations-crates.intoto.jsonl attestations-vsa-crates.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",rust-crate,"*)
+      need="${need} attestations-crates.intoto.jsonl"
+      [[ -n "${store_vsa}" ]] || need="${need} attestations-vsa-crates.intoto.jsonl"
+      ;;
+    esac
     case ",${classes// /}," in *",oci-image,"*) need="${need} attestations-image.intoto.jsonl" ;; esac
     case ",${classes// /}," in *",rust-binary,"*) need="${need} attestations-binaries.intoto.jsonl" ;; esac
     case ",${classes// /}," in *",source-archive,"*) need="${need} attestations-source.intoto.jsonl" ;; esac
-    case ",${classes// /}," in *",wasm-npm,"*) need="${need} attestations-npm.intoto.jsonl attestations-vsa-npm.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",wasm-npm,"*)
+      need="${need} attestations-npm.intoto.jsonl"
+      [[ -n "${store_vsa}" ]] || need="${need} attestations-vsa-npm.intoto.jsonl"
+      ;;
+    esac
     case ",${classes// /}," in *",pgrx-extension,"*)
       need="${need} attestations-extensions.intoto.jsonl"
       grep -q "^attestations-extimg-pg" <<< "${assets}" || missing="${missing} ${repo}@${tag}(extimg)"
@@ -567,6 +588,40 @@ while IFS= read -r repo; do
       fi
       grep -qxF "${asset}" <<< "${assets}" || missing="${missing} ${repo}@${tag}(${asset})"
     done
+    # The verdict half, store shape (#209): every subject the release's
+    # own provenance bundles cover must carry a VSA in the attestation
+    # store. Subject digests are read out of the attached bundles — the
+    # audit asserts a verdict over exactly what the evidence covers,
+    # with no second derivation of the subject set, and that includes
+    # the image indexes (their bundles are release assets too). The
+    # store is queried per digest and filtered client-side: the API
+    # rejects the VSA predicate type as a query filter (HTTP 422,
+    # measured on v0.16.3).
+    if [[ -n "${store_vsa}" ]]; then
+      checked_digests=""
+      while IFS= read -r asset; do
+        [[ -n "${asset}" ]] || continue
+        payloads=$(curl -sSfL --retry 5 \
+          "https://github.com/${org}/${repo}/releases/download/${tag}/${asset}" \
+          | jq -r ".dsseEnvelope.payload") \
+          || { missing="${missing} ${repo}@${tag}(${asset}:unreadable)"; continue; }
+        while IFS= read -r sdigest; do
+          [[ "${sdigest}" =~ ^[0-9a-f]{64}$ ]] || continue
+          grep -qx "${sdigest}" <<< "${checked_digests}" && continue
+          checked_digests=$(printf "%s\n%s" "${checked_digests}" "${sdigest}")
+          have=""
+          while IFS= read -r p; do
+            [[ -n "${p}" ]] || continue
+            t=$(printf "%s" "${p}" | base64 -d 2> /dev/null | jq -r ".predicateType" 2> /dev/null) || t=""
+            [[ "${t}" == "https://slsa.dev/verification_summary/v1" ]] && have=1
+          done < <(gh api "repos/${org}/${repo}/attestations/sha256:${sdigest}" \
+            --jq ".attestations[].bundle.dsseEnvelope.payload" 2> /dev/null || true)
+          [[ -n "${have}" ]] || missing="${missing} ${repo}@${tag}(vsa:${sdigest:0:12})"
+        done < <(while IFS= read -r p; do
+          printf "%s" "${p}" | base64 -d 2> /dev/null | jq -r ".subject[].digest.sha256"
+        done <<< "${payloads}")
+      done < <(grep -E "^attestations.*\.intoto\.jsonl$" <<< "${assets}" | grep -v "^attestations-vsa-" || true)
+    fi
   done < <(gh api "repos/${org}/${repo}/releases" --paginate \
     --jq '.[] | select(.draft | not) | .tag_name')
   # The continuous half: a repo with the archetype STUB (a caller of the
