@@ -213,10 +213,20 @@ jobs:
           # (docker/buildx#1965). The assert step downstream proves the
           # published index is OCI precisely because this is the failure
           # mode that looks exactly like success.
+          # --provenance=false and --sbom=false, measured (#118): buildx
+          # otherwise embeds a per-build attestation manifest carrying
+          # wall-clock metadata, so two identical builds NEVER share a
+          # digest — the lab's first full-width gate run proved it on
+          # every image class. The org's provenance is its own signed
+          # evidence (the signer), never the embedded blob, so nothing
+          # is lost. rewrite-timestamp=true clamps layer mtimes to
+          # SOURCE_DATE_EPOCH — RUN and COPY otherwise record the
+          # build's own clock into the layer bytes.
           docker buildx build \
             --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
             "${LABELS[@]}" \
-            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true" \
+            --provenance=false --sbom=false \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true" \
             --metadata-file /tmp/meta.json \
             "${UNTRUSTED_CONTEXT}"
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
