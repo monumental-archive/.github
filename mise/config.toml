@@ -310,8 +310,14 @@ dir = "{{cwd}}"
 # non-draft release of every org repo, verifies each SBOM asset against
 # GitHub's release attestation before trusting it, scans with
 # osv-scanner, and aggregates one report. Red means NEW AND UNDECIDED:
-# findings covered by a VEX statement in security/vex/ are reported but
-# do not fail. Loud failure modes, constructed:
+# a finding is decided iff a statement in security/vex/ exists for its
+# exact (advisory, package@version) — decisions are keyed by the
+# dependency, never by release tag, so coverage is derived here rather
+# than stored there. The per-version join is also the drift guard, by
+# construction: a release that bumps a decided package's version matches
+# no decision and goes red for a fresh judgment; an ID-only filter would
+# silently extend the old judgment to a version nobody looked at.
+# Loud failure modes, constructed:
 #   - an SBOM that verifies but parses to zero packages (osv exit 128)
 #   - the canary: the pinned lab release must yield its known advisory,
 #     or this job cannot see and says so
@@ -327,12 +333,17 @@ canary_repo="release-lab"; canary_tag="v0.17.0"; canary_id="RUSTSEC-2021-0127"
 work=$(mktemp -d)
 findings="${work}/findings.tsv"; : > "${findings}"
 missing="${work}/missing.txt"; : > "${missing}"
-decided_f="${work}/decided.txt"
-# An empty pattern file matches EVERYTHING under grep -f — an empty VEX
-# directory must mean "nothing decided", never "everything decided".
+decided_f="${work}/decided.tsv"
+# Decided rows are (advisory, name, version) triples parsed from each
+# statement's product purls (pkg:<type>/…/<name>@<version>, version in
+# the dialect osv-scanner reports — no epoch, no encoding). An empty
+# pattern file matches EVERYTHING under grep -f — an empty VEX directory
+# must mean "nothing decided", never "everything decided".
 cat security/vex/*.openvex.json 2> /dev/null \
-  | jq -r '.statements[]?.vulnerability.name // empty' | sort -u \
-  | grep -v "^$" > "${decided_f}" || true
+  | jq -r '.statements[]? as $s | $s.products[]?["@id"] // empty
+      | capture("^pkg:.*/(?<name>[^/@]+)@(?<version>.+)$")
+      | [$s.vulnerability.name, .name, .version] | @tsv' \
+  | sort -u | grep -v "^$" > "${decided_f}" || true
 failed=0; canary_hit=0; scanned=0
 while read -r repo; do
   [[ -n "${repo}" ]] || continue
@@ -411,7 +422,7 @@ report() {
     echo "| --- | --- | --- | --- | --- |"
     sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where class; do
       d="NEW"
-      if grep -qxF "${id}" "${decided_f}"; then
+      if grep -qxF "$(printf "%s\t%s\t%s" "${id}" "${name}" "${ver}")" "${decided_f}"; then
         d="VEX"
       elif [[ "${class}" == "base-unfixed" ]]; then
         d="base (rebuild cadence)"
@@ -430,15 +441,16 @@ report() {
 report
 [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && report >> "${GITHUB_STEP_SUMMARY}"
 # Only gate-class findings demand a decision: unfixed base-layer OS
-# findings are the rebuild cadence's input, reported above.
-undecided=$(awk -F "\t" '$5 == "gate" { print $1 }' "${findings}" | sort -u)
+# findings are the rebuild cadence's input, reported above. The join is
+# the exact (advisory, name, version) triple — never the advisory alone.
+undecided=$(awk -F "\t" '$5 == "gate" { print $1 "\t" $2 "\t" $3 }' "${findings}" | sort -u)
 if [[ -s "${decided_f}" ]]; then
   undecided=$(grep -vxF -f "${decided_f}" <<< "${undecided}" || true)
 fi
 if [[ -n "${undecided}" ]]; then
-  echo "audit:blast-radius: undecided advisories (no VEX statement):" >&2
+  echo "audit:blast-radius: undecided advisories (no VEX decision for that package@version):" >&2
   sed "s/^/  /" <<< "${undecided}" >&2
-  echo "  triage each and record the decision in security/vex/ (docs/dependency-track.md)" >&2
+  echo "  triage each and record the decision in security/vex/, keyed by package@version (docs/dependency-track.md)" >&2
   exit 1
 fi
 [[ ${failed} -eq 0 ]] || exit 1

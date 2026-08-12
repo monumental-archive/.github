@@ -374,8 +374,9 @@ summarises and records what it read in `inputAttestations`, `verifier.id`
 names a workflow that proved less than the claim states.
 
 OpenVEX travels the same surface and **is** emitted: `vex-attest.yml`
-signs one statement per merge and `release/collect-vex.sh` rides the raw
-documents onto the next release of each affected repository — the
+signs one statement per merge (subjects derived from published SBOMs)
+and `release/derive-vex.sh` derives each release's own concrete VEX
+from the dependency-keyed decisions in `security/vex/` — the
 blast-radius query (#106, closed) is what makes an honest `not_affected`
 possible at org scale. Source provenance deliberately does not route
 through `sign.yml` at all — the source track's git-notes convention needs

@@ -1,26 +1,57 @@
-# VEX statements — the org's dependency triage record
+# VEX decisions — the org's dependency triage record
 
-One OpenVEX document per decision, `*.openvex.json`, assembled with the
-belt's pinned vexctl. This directory is the record `audit:blast-radius`
-filters on: a finding with no statement here is *undecided* and fails the
-Monday audit until a decision is written.
+One OpenVEX document per decision, `*.openvex.json`. This directory is
+the record the whole dependency track keys on: `audit:blast-radius`
+joins against it, `release/derive-vex.sh` derives each release's own VEX
+from it, and a finding with no decision here is *undecided* — it fails
+the Monday audit **and** fails any release whose SBOM ships it, until a
+decision is written.
 
-The contract (docs/dependency-track.md):
+## The keying rule — dependency, never release
+
+A triage judgment is a fact about a dependency: *this advisory, against
+this exact `package@version`*. It is never a fact about a release tag.
+So a statement's `products` name the component:
+
+- `pkg:cargo/serde_cbor@0.11.2`
+- `pkg:deb/debian/util-linux@2.41-5`
+
+**Version dialect**: write the version exactly as osv-scanner reports it
+— no Debian epoch, no purl percent-encoding, no `?arch=` qualifiers.
+Every join in the machinery is exact string equality on
+`(advisory, name, version)`.
+
+Coverage is **derived, not stored**: every release whose SBOM ships the
+decided `package@version` is covered, past and future, with nothing to
+retype (#187). A release that bumps the version is deliberately *not*
+covered — no decision matches, the finding is undecided, and a human
+makes a fresh judgment. Drift is structural, not guarded. Never
+enumerate release tags in `products`; a hand-kept coverage list is the
+toil and the drift hazard this keying removes.
+
+## The two surfaces a decision reaches
+
+1. **The attestation store, immediately** — on merge, `vex-attest.yml`
+   derives the affected-release set from published SBOMs and signs the
+   document through the org's one signer over those releases' digests.
+2. **The document surface, at each release** — `derive-vex.sh` emits the
+   release's own OpenVEX asset (product = the release purl, the decided
+   `package@version` as subcomponent), shipped under GitHub's release
+   attestation like the SBOM it derives from.
+
+## The contract (docs/dependency-track.md)
 
 - **No `not_affected` without the blast-radius query behind it** — a
   signed wrong `not_affected` suppresses consumers' scanner findings on
   our word.
 - Every `deny.toml` advisory `ignore` cites its statement here.
-- Statements are signed through the org's one signer (the OpenVEX
-  predicate type is allowlisted there) against the affected artifact
-  digests, and ride the *next* release of each affected repo as a raw
-  `.openvex.json` asset — published releases are immutable, so the fix
-  path is roll-forward, like everything else.
+- One decision per document, one document per merge (enforced by
+  `vex-attest.yml`).
 
 Authoring a statement:
 
 ```bash
-vexctl create --product "pkg:github/monumental-archive/<repo>@<tag>" \
+vexctl create --product "pkg:cargo/<name>@<version>" \
   --vuln "RUSTSEC-XXXX-XXXX" --status not_affected \
   --justification vulnerable_code_not_in_execute_path \
   --file security/vex/RUSTSEC-XXXX-XXXX.openvex.json

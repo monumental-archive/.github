@@ -10,7 +10,7 @@ the target and the declined doors were decided there and in #121/#122.
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **Mechanisms met** — deny in the gate, blast-radius on the cron, every undecided finding exits through a signed VEX. One gap: the advisory sweep is weekly, not release-gated (below) |
+| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path itself refuses to publish with an undecided advisory in its SBOM (`derive-vex.sh`, below); every decision exits through a signed VEX keyed by `package@version`. First exercised on the next lab release |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
 
@@ -68,8 +68,15 @@ release assets before trust), scans each with osv-scanner (OSV includes
 malicious-package data), and aggregates one report: advisory → affected
 releases / images / majors.
 
-Findings already covered by a signed VEX statement are filtered — red
-always means *new and undecided*, never the standing advisory again.
+Findings are filtered per exact `(advisory, package@version)` against
+the decisions in `security/vex/` — red always means *new and
+undecided*, never the standing advisory again, and never toil: a
+decision is keyed by the dependency, so every release that ships the
+decided `package@version` is covered by derivation, with no product
+list to extend per release (#187). The per-version join is also the
+drift guard, by construction — a bumped version matches no decision and
+goes red for a fresh judgment; an advisory-ID-only filter would
+silently extend the old judgment to a version nobody looked at.
 
 Two triage classes, decided when the first image SBOM landed (v0.18.1,
 ~30 Debian base findings, most unfixable in stable — the oldest from
@@ -101,21 +108,36 @@ Failure modes are constructed loud:
 Every unremediated finding exits through an OpenVEX statement — assembled
 with vexctl from the blast-radius query, signed through the org's one
 signer (the OpenVEX predicate type was allowlisted there ahead of this
-standup), and attached raw as a `.openvex.json` release asset so
-consuming tools eat the document. No `not_affected` is ever signed
-without the blast-radius query behind it: a signed wrong `not_affected`
-suppresses consumers' scanner findings on our word.
+standup). No `not_affected` is ever signed without the blast-radius
+query behind it: a signed wrong `not_affected` suppresses consumers'
+scanner findings on our word.
+
+Decisions are **keyed by the dependency, never the release**: a
+statement's products name the exact `package@version` the judgment was
+made against (`pkg:cargo/serde_cbor@0.11.2`), and which releases are
+covered is *derived* from published SBOMs wherever it is needed — the
+audit joins on it, `vex-attest.yml` resolves signing subjects from it,
+and each release derives its own concrete VEX document from it. A
+stored per-tag product list would be retyped every release and would
+silently extend to a bumped version; the keying removes both failure
+modes at once (`security/vex/README.md` states the contract and the
+version dialect).
 
 There is no second bookkeeping: the VEX **is** the triage record.
-`audit:deny` ignores cite it; blast-radius filters on it.
+`audit:deny` ignores cite it; blast-radius joins on it; releases derive
+from it.
 
 Delivery, shaped by immutability: published releases cannot gain assets,
 so a post-hoc decision reaches consumers on two surfaces — the signed
 claim lands in the attestation store the moment the statement merges
 (`vex-attest.yml`, one statement per merge, enforced — a decision is
-reviewed like a release), and the raw document rides the *next* release
-of each affected repository (`release/collect-vex.sh`). Roll-forward,
-like everything else.
+reviewed like a release, its affected-release subjects derived from
+published SBOMs), and every *subsequent* release of each affected
+repository ships its own derived document (`release/derive-vex.sh`:
+product = the release purl, the decided `package@version` as
+subcomponent — standard concrete-product OpenVEX for consuming tools,
+generated as a pure function of the reviewed decision and the release
+SBOM). Roll-forward, like everything else.
 
 ## SBOMs are class-shaped, derived from what the class ships
 
@@ -145,30 +167,31 @@ a linker section of the shipped binary itself (the pipeline already
 disables stripping precisely to preserve that section), and image SBOMs
 gain the Rust surface. Binary and SBOM then agree by construction.
 
-## Where L2 is met by cadence, not construction
+## Where L2 is met by construction, not cadence
 
 The requirement is worded against the release, not the pull request:
 *"Triage all vulnerable dependencies **before release** … an organization
 MUST triage all known vulnerabilities and either remediate the
 vulnerability, or not remediate in the given release."*
 
-What runs today: `lint:deny` in the gate covers bans, licences and
-sources — not advisories. The advisory feed is `audit:deny`, and
-blast-radius is `audit:blast-radius`; both are Monday cron only
-(`repo-audit.yml`, `audit.yml`). So a release cut on a Wednesday ships
-having been triaged as of Monday, and a Tuesday advisory reaches
-consumers before it reaches a decision.
+This is now a property of the release path itself: the `sbom` job in
+`publish.yml` runs `release/derive-vex.sh` after generating the SBOM,
+which scans it with osv-scanner and **fails the release** — before
+anything builds or publishes — if any gate-class advisory in it has no
+decision for its exact `package@version`. A Tuesday advisory against a
+Wednesday release is triaged on Wednesday or the release does not
+happen. The Monday crons (`audit:deny`, `audit:blast-radius`) remain as
+the sweep over *already-published* releases, which no release-time gate
+can cover.
 
-The gate-determinism rule is not what blocks closing this. That rule
-keeps network-bound checks out of the **`ci` gate**, and it is right; but
-the release path is already network-bound by construction — it publishes
-to registries and pulls the bytes back to prove them. An `audit:deny`
-step between build and publish is the same category as `verify-published`
-and would make the triage a property of every release rather than of the
-calendar. Until it exists, this row is honest as "mechanisms met, one
-requirement satisfied by cadence" — and the issue that adds the step
-carries flipping this section and the table row above as part of its
-done condition.
+The gate-determinism rule is untouched: it keeps network-bound checks
+out of the **`ci` gate**, and it is right. The release path is already
+network-bound by construction — it publishes to registries and pulls
+the bytes back to prove them — so the OSV feed at release time is the
+same category as `verify-published`. The step landed with the
+dependency-keyed VEX redesign (the #187 close-out); first exercised on
+the next lab release, which carries updating this sentence with the
+measured run.
 
 ## Recorded verdicts
 
