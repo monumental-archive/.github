@@ -10,13 +10,13 @@
 
 [build]
 # renovate: pgrx-base-image
-"14" = "postgres:14-bookworm@sha256:f819dd96de74db3de87d13f0a4fbcdfbdc4f4ca37ed6e0807bf73848170eae3d"
+"14" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
 # renovate: pgrx-base-image
-"15" = "postgres:15-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
+"15" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
 # renovate: pgrx-base-image
-"16" = "postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+"16" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
 # renovate: pgrx-base-image
-"17" = "postgres:17-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f"
+"17" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
 # renovate: pgrx-base-image
 "18" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
 
