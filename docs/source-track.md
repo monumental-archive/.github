@@ -143,6 +143,12 @@ above), the activated `workflow-templates/source-attest.yml`, and the
    while every line of logic lives once in the canon action, whose pin
    Renovate bumps without touching the identity (composite steps run
    inside the caller's job; pick-two trilemma resolved, .github#120).
+   **The merge that lands this goes red, and should.** Its own push
+   fires the workflow before any chain exists, and the emitter refuses
+   to self-found: a missing previous link is loud, always, because the
+   alternative is an emitter that quietly re-founds a chain somebody
+   truncated. One red run per repo, once, at a moment when a human is
+   already watching.
 2. Found the chain: `gh workflow run source-attest -f genesis=true`.
    Genesis is refused if any link already exists on the history.
 3. Push something ordinary; confirm the link chains to genesis.
