@@ -14,17 +14,23 @@ enforced by org-level rulesets, with continuity clocks that derive from
 GitHub's ruleset timestamps — they accrue now and survive any later
 attestation stand-up.
 
-The attestation machinery was stood up and proven in release-lab on
-2026-08-10 (signed source provenance + VSA under the repo's own workflow
-identity, stored in git notes, stranger-verified including an
-`ORG_SOURCE_GATED` property), then **parked**: the engine,
-`slsa-framework/source-tool`, is a proof-of-concept whose level
-computation cannot yet serve an org-level-ruleset deployment under its
-own signing identity. Four defects filed upstream: source-tool
-issues 433 (org rulesets 404), 434 (dynamic required-check controls
-dropped), 435 (genesis impossible on an empty notes ref), and 436
-(chain evaluation ignores the configured signer identity). The genesis
-attestations remain in release-lab's `refs/notes/commits` as the record.
+The attestation machinery was first stood up and proven in release-lab
+on 2026-08-10 with `slsa-framework/source-tool`, then parked on four
+upstream defects (433, 434, 435, 436 — watch #199). The org no longer
+waits on that tracker: the emitter is now in-org (#207) — the canon's
+`source-attest` action, invoked by each repo's `source-attest.yml`
+under its reserved identity. Per push to `main` it reads the rules API
+(enforcement, never intent), emits org-defined source provenance and
+the spec's VSA, verifies the previous chain link against the pinned
+identity, and appends both to `refs/notes/commits`. The old pilot's
+genesis attestations remain in release-lab's notes as the historical
+record — a different dialect, not a link in the new chain. If upstream
+ships its fixes, source-tool becomes an independent *cross-check* of
+these VSAs, never the thing that issues them.
+
+Activation is per repo, deliberate, and lab-first: the formal level
+stays **0** until a repo's chain is founded and stranger-verified, and
+`docs/direction.md` moves only when that is real.
 
 ## Requirement mapping (v1.2, L1–L3)
 
@@ -32,12 +38,12 @@ attestations remain in release-lab's `refs/notes/commits` as the record.
 | --- | --- | --- |
 | Choose an appropriate SCS | 1 | GitHub |
 | Repository IDs / immutable revision IDs / human-readable diffs | 1 | GitHub (git SHAs, PR diffs) |
-| Source VSAs | 1 | **Not emitted — parked** (the L0 gap) |
+| Source VSAs | 1 | **Emitter built (#207), not yet activated** (the L0 gap) |
 | Access control + reliable history | 2 | `org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list |
 | Tag immutability | 2 | `org-default-tag` ruleset: update/move/delete blocked, all tags, all repos |
 | Safe expunging process | 2 | `docs/expunging.md` |
 | Identity management | 2 | GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change |
-| Source provenance, contemporaneous | 2 | **Not emitted — parked** |
+| Source provenance, contemporaneous | 2 | **Emitter built (#207), not yet activated** |
 | Continuity | 2 | Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md` |
 | Continuous technical controls, documented | 3 | This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint |
 | Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` proven claimable in the lab pilot |
@@ -123,29 +129,34 @@ a second maintainer ever exists: flip
 `required_approving_review_count` to 1+, and the clock for that control
 starts at that revision.
 
-## Re-adoption checklist
+## Activation checklist
 
-When upstream is stable on org-level rulesets (at minimum issues 433,
-434 and 436 fixed in a release — the trigger is standing watch #199).
-The pre-work landed 2026-08-12 shrank this list: the identity path is
-reserved by the inert stub in every repo, `refs/notes/commits` is
-seeded everywhere, the `ORG_SOURCE_` names and continuity ledger are
-frozen above, and the self-assessment (`source-assessment.md`) is
-published. Re-adoption is *activation*:
+The machinery landed with #207: the canon's `source-attest` action,
+`source-policies/` (the org policy, `since` times from the ledger
+above), the activated `workflow-templates/source-attest.yml`, and the
+`audit:source-vsa` Monday walk. Activation is per repo, lab first:
 
-1. Verify the release binary against their SLSA provenance; no patches.
-2. Restore `source-policies/` (in this repo's history at the park
-   commit): shared `default.json`, per-repo override on divergence.
-   Claims implement the `ORG_SOURCE_` table above, verbatim.
-3. Activate the stub per repo: trigger becomes on-push to protected
-   refs, body invokes the tool, `id-token: write` enters with the
-   capability-boundary marker. The path does not change (the per-repo
-   copy is deliberate — the workflow is the signer, and an in-repo
-   workflow's identity is `@refs/heads/main`, stable forever; a
-   SHA-pinned shared workflow changes identity on every bump, and an
-   unpinned one costs Scorecard/zizmor findings — pick-two trilemma,
-   documented in .github#120).
-4. Genesis run, then move the policy `since` past it; L3 from the next
-   revision, continuity claims from the ledger above.
-5. Stranger-verify with `sourcetool verify --expected-san
-   https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main`.
+1. Copy the template over the repo's inert stub — same path, new
+   content; requires a canon release that ships the action (>= v1.9.0).
+   The per-repo copy is deliberate: the workflow is the signer, and an
+   in-repo workflow's identity is `@refs/heads/main`, stable forever —
+   while every line of logic lives once in the canon action, whose pin
+   Renovate bumps without touching the identity (composite steps run
+   inside the caller's job; pick-two trilemma resolved, .github#120).
+2. Found the chain: `gh workflow run source-attest -f genesis=true`.
+   Genesis is refused if any link already exists on the history.
+3. Push something ordinary; confirm the link chains to genesis.
+4. Stranger-verify on a machine holding nothing but the published root
+   of trust (`source-assessment.md`): extract the note, then
+   `cosign verify-blob --bundle <bundle> --certificate-identity
+   https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main
+   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   <statement>`.
+5. Lab only: simulate a lapse — weaken one ruleset rule, push, confirm
+   the property drops and the VSA under-claims level 2; restore, confirm
+   recovery. The claim set must be a function of live enforcement.
+6. When release-lab, signer and this repo are chained and verified:
+   update `docs/direction.md`'s Source row to L3 and rewrite this
+   document's formal-standing section — a level that becomes true and
+   goes unrecorded is the same defect as one claimed before it was
+   (#207's done condition).
