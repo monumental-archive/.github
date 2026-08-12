@@ -139,9 +139,17 @@ above), the activated `workflow-templates/source-attest.yml`, and the
 1. Create the repo's `source-attest` environment holding
    `SOURCE_RULES_TOKEN`: a fine-grained read-only PAT that can read
    org-level ruleset details (`repos/{repo}/rulesets/{id}` for an
-   org-parented id — the ambient `GITHUB_TOKEN` cannot, #240; the
-   minimal grant is measured at lab activation and recorded here, the
-   `AUDIT_TOKEN` precedent). The environment scoping is the
+   org-parented id — the ambient `GITHUB_TOKEN` cannot, #240). **The
+   measured minimal grant is `Administration: Read-only`** and nothing
+   else, scoped to the repos that run the emitter (measured at the
+   release-lab activation, 2026-08-12: the ambient token lists and
+   reads the tag rulesets without error, but the payload it returns
+   does not carry `bypass_actors`, so the content match fails and both
+   tag properties drop; a read-only Administration grant returns
+   `bypass_actors: []` and the match succeeds). Verify a candidate
+   token before wiring it in — `gh api
+   repos/monumental-archive/<repo>/rulesets/<tag-ruleset-id>` must
+   return `bypass_actors` alongside the rules. The environment scoping is the
    `audit.yml` `baseline-drift` pattern: only the claims job — which
    holds no `id-token` and no `contents: write` — is ever issued the
    secret, so the token and the signing identity never share a job.
