@@ -114,13 +114,16 @@ pin.
 ## Open items
 
 The release pass (#28) is **complete and closed**: five artifact classes,
-both archetypes, App-minted tags, the one-file signer, evidence bundles,
-repro-check, DOI minting — all proven in the lab at full width
-(v0.15.4: four classes real across pg 14–18, stranger-verified,
-immutable, reproduced bit-for-bit). Remaining, tracked as issues:
+both archetypes, App-minted tags, evidence bundles, repro-check, DOI
+minting — proven in the lab at full width and stranger-verified. The
+final conformance pass (2026-08-12, canon v1.14.x) closed the last
+level-bearing issues: the verifier signs its own verdicts (#264, two
+roots of trust), the source chain self-heals with computed levels
+(#265), the audit enumerates the population (#266), enrichment (#200),
+licences + `lint:licence` (#214), and the per-track mapping docs
+(#213) — the org is **done at its declared levels**, and importing
+repos is mechanical conformance. Remaining, tracked as issues:
 transfers (#83 — pure execution, lab rename first), badge stand-up
-(#88 — checklist only), tracks-to-ceiling tooling (#106 — cargo-vet,
-audit:deny, gittuf/GUAC evaluations), the attestation surface (#107 —
-VSA + VEX + source provenance through the signer), OCI annotations
-(#108), and sponsorship (#27). Deferred decisions and their reasons
-live in the standup PRs (#5–#26); the traps live in #28.
+(#88 — checklist only), sponsorship (#27), and the watch issues
+(`docs/tooling-verdicts.md` names them). Deferred decisions and their
+reasons live in the standup PRs (#5–#26); the traps live in #28.
