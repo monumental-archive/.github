@@ -96,8 +96,10 @@ attestations and stores source provenance + a source VSA in git notes —
 but it is PoC-grade, and as shipped its *reusable workflow's* identity
 would sign our source claims. The adoption path is the rekor-monitor
 one: run the binary under an org-owned workflow so the identity is ours.
-Stood up and proven in the lab, then parked on four upstream defects;
-the standing trigger is watch #199 and the position is `source-track.md`.
+Stood up and proven in the lab, then parked on four upstream defects —
+and ultimately not adopted: the org built its own emitter instead
+(#207), so this tool is now a candidate *cross-check* of our VSAs
+rather than their issuer. Watch #199, position in `source-track.md`.
 
 `gittuf` overlaps the same track from the git layer, and v1.2 names it
 explicitly as an implementation route for both Identity Management and
