@@ -932,6 +932,25 @@ while read -r repo; do
           note "${repo}: bestpractices ${id} passing"
         fi
         ;;
+      https://www.bestpractices.dev/projects/*/baseline | https://bestpractices.dev/projects/*/baseline)
+        # The OSPS Baseline shield on the same entry. Its own truth is
+        # the achieved/lost pair, not the metal percentage: a shield
+        # claiming a level the issuer never recorded, or one it has
+        # since withdrawn, is the drift #168 watches for.
+        id="${url##*/projects/}"
+        id="${id%/baseline}"
+        bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
+        if [[ -z "${bp}" ]]; then
+          failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
+        elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
+          failed="${failed} ${repo}(baseline: shield worn but the issuer records no achieved level)"
+        elif jq -e '[.lost_baseline_1_at, .lost_baseline_2_at, .lost_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
+          failed="${failed} ${repo}(baseline: issuer records a LOST level)"
+        else
+          lvl=$(jq -r '[.achieved_baseline_3_at, .achieved_baseline_2_at, .achieved_baseline_1_at] | map(. != null) | index(true) | if . == 0 then 3 elif . == 1 then 2 else 1 end' <<< "${bp}")
+          note "${repo}: OSPS Baseline level ${lvl} achieved"
+        fi
+        ;;
       https://api.reuse.software/badge/*)
         proj="${url#https://api.reuse.software/badge/}"
         st=$(curl -sf "https://api.reuse.software/status/${proj}" | jq -r '.status // empty')
@@ -2273,6 +2292,12 @@ bp_live=""
 if [[ -n "${bp}" && "${bp}" != "pending" ]]; then
   bp_live=1
   add "[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/${bp}/badge)](https://www.bestpractices.dev/projects/${bp})"
+  # The Baseline series is a second shield on the same entry, not a
+  # variant of the first: /projects/<id>/baseline is a sibling of
+  # /badge, and the image self-reports the highest level attained
+  # (v2026.02.19 | 1). Confirmed at registration — /badge?level= and
+  # ?series= are ignored, /baseline-<n>/badge 404s.
+  add "[![OpenSSF Baseline](https://www.bestpractices.dev/projects/${bp}/baseline)](https://www.bestpractices.dev/projects/${bp})"
 else
   add "<!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->"
 fi

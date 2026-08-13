@@ -10,6 +10,6 @@
 #   no tool meeting the belt's priors (kcov is source-only and
 #   Linux-only — tooling-verdicts.md, #316). The permanence of this
 #   line is the point of an exemplar.
-bestpractices pending
+bestpractices 14058
 reuse registered
 coverage exemplary
