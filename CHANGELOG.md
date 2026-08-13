@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.23.2](https://github.com/monumental-archive/.github/compare/v1.23.1...v1.23.2) - 2026-08-13
+
+### Fixed
+
+- schedule the two unrun audit legs, and ask the shield's question ([#356](https://github.com/monumental-archive/.github/pull/356))
+- move the lab's tag-signing epoch to its first signed tag ([#359](https://github.com/monumental-archive/.github/pull/359))
+- find the SBOM the decision covers, not the first one alphabetically ([#361](https://github.com/monumental-archive/.github/pull/361))
+
 ## [1.23.1](https://github.com/monumental-archive/.github/compare/v1.23.0...v1.23.1) - 2026-08-13
 
 ### Documentation
