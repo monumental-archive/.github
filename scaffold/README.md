@@ -18,6 +18,22 @@ root, the matching text in `LICENSES/<SPDX-ID>.txt`, and fill
 is all rights reserved — the opposite of publishing anything — and
 `lint:licence` in the belt reddens the gate until the choice is made.
 
+- `.bestpractices.json` — OpenSSF Best Practices pre-fill (#347). The
+  badge app reads this file from the repo root and proposes answers, so
+  registering a new repo means reviewing the handful that differ
+  instead of answering ~190 questions by hand. Derived from the canon's
+  earned entry ([project 14058](https://www.bestpractices.dev/projects/14058)),
+  trimmed to answers that are true **org-wide because the controls are
+  inherited** (rulesets, DCO, the gate, signed releases, SBOMs); every
+  repo-varying criterion — everything about builds, tests, coverage,
+  docs, crypto, hardening — is `?`, which the app ignores, so a stale
+  placeholder proposes nothing rather than something false. Two traps
+  the derivation already avoids, recorded so edits keep avoiding them:
+  `build_*` answers must NOT be copied from the canon (N/A there, Met
+  in any repo the repro gate builds), and a consuming repo will
+  legitimately **outscore** the conformance root — that is the design,
+  not a regression.
+
 Conditional stubs, wired per the runbook's "Wiring in a repository"
 section (`docs/runbook.md`): `cliff.toml` and the release/publish
 workflow templates for versioned repos, `CITATION.cff` where citable —

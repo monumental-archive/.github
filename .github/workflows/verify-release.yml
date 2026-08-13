@@ -514,6 +514,16 @@ jobs:
                   echo "::error::${name}: builder.id does not name the org signer"
                   exit 1
                 fi
+                # Fold, don't survive (#349 finding 7): result.json is
+                # overwritten every iteration, so any cross-bundle claim
+                # must be accumulated here and asserted after the loop.
+                # Every bundle's attested source revision lands in one
+                # file; enrichment later requires the set to have
+                # exactly one member instead of trusting whichever
+                # bundle the loop verified last.
+                jq -r '.[0].verificationResult.statement.predicate.buildDefinition
+                  .resolvedDependencies[0].digest.gitCommit // "MISSING"' \
+                  "${WORKDIR}/result.json" >> "${WORKDIR}/source-revisions"
                 # The other two of verifying-artifacts' four comparisons
                 # (#210): the CLI covers builder identity and source repo
                 # by flag but has nothing for buildType or
@@ -679,11 +689,24 @@ jobs:
           CANON_PATH: ${{ steps.canon.outputs.path }}
         run: |
           set -euo pipefail
-          # The attested source revision, from the last provenance this
-          # run verified (all bundles in one release share it; the
-          # subset/coverage checks above already proved coherence).
-          src=$(jq -r '.[0].verificationResult.statement.predicate.buildDefinition
-            .resolvedDependencies[0] | (.digest.gitCommit // empty)' "${WORKDIR}/result.json")
+          # The attested source revision, as the FOLD of every provenance
+          # this run verified — never the loop's survivor. The subset and
+          # coverage checks prove subject equality, not that all bundles
+          # name one revision, and the attestation store can serve a
+          # byte-identical digest provenance from an earlier release
+          # (#349 finding 7): agreement is asserted, not assumed.
+          [[ -s "${WORKDIR}/source-revisions" ]] || {
+            echo "::error::no source revisions were accumulated — enrichment has no evidence to fold"
+            exit 1
+          }
+          distinct=$(sort -u "${WORKDIR}/source-revisions")
+          count=$(wc -l <<< "${distinct}" | tr -d ' ')
+          if [[ "${count}" -ne 1 ]]; then
+            echo "::error::verified bundles disagree on the source revision — one release, one revision, or no claim"
+            while IFS= read -r r; do echo "::error::  ${r}"; done <<< "${distinct}"
+            exit 1
+          fi
+          src="${distinct}"
           if [[ ! "${src}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::the verified provenance carries no source gitCommit — enrichment would claim nothing"
             exit 1

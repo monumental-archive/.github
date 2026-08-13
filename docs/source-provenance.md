@@ -57,10 +57,26 @@ never a re-founding.
 
 Emission is self-healing (#265): every push walks from the pushed
 revision down to the genesis link and emits a link for every revision
-that lacks one, oldest first, so every span between genesis and tip is
-contiguous and each link's `prev` is its first-parent parent. A
-pre-existing parent link is verified against the published identity
-before anything signs on top of it.
+that lacks one, oldest first, so **coverage** is complete — every span
+between genesis and tip carries links. What healing does NOT restore is
+a single hash chain (#349 finding 3): a link emitted before the heal
+already named the healed revision's *predecessor* as its `prev`, so the
+healed link becomes a leaf nothing points at — `prev` is carrying two
+meanings at once (ledger order and git first-parent ancestry), and a
+healed link cannot satisfy both without rewriting an immutable
+predecessor. Measured on this repo: `e1ad2dde`'s healed link and
+`2b28c903` both name `prev = d52d91b8`, so a tip→genesis `prev` walk
+visits 82 links for 83 revisions, and deleting the healed note would
+break no `noteSha256` anywhere. Two consequences, both recorded rather
+than papered over: the documented verification procedure is
+**per revision** (fetch the revision's own link and verify it), which
+healing fully serves; and **nothing today checks chain linkage** —
+`audit:source-vsa` walks git history for coverage, not `prev` pointers.
+The structural fix is splitting the two meanings (a `version: 2` note
+carrying `ledgerPrev` and `revisionParent`, with linkage then auditable
+to genesis) — deferred in #349 S3, not forgotten. A pre-existing parent
+link is verified against the published identity before anything signs
+on top of it.
 
 ## Healed links
 

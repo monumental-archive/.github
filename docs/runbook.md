@@ -38,7 +38,16 @@ written for two moments: wiring a repository in, and a release going wrong.
    | `oci-image` | `dockerfile`, `context`, `smoke-test` | — |
    | `wasm-npm` | `crate-dir`, `npm-scope` | `rust`, `aqua:rustwasm/wasm-pack`, `node` |
    | `pgrx-extension` | `extension-crate-dir`, `pg-majors`, `extension-smoke-test` | `rust`, `cargo:cargo-pgrx` (must equal the pgrx crate dep) |
+   | `source-archive` | none — the artifact is the tagged tree itself | — |
 
+   `source-archive` is first-class, not canon-only: it is what this
+   repository publishes itself (`self-publish.yml`), built twice,
+   repro-gated, signed and attached like every other class. Any repo
+   whose release artifact is its tree may declare it. Its omission from
+   this table once caused three wrong badge answers by inviting
+   reasoning from "this repo builds nothing" (#347) — answer build,
+   SBOM and signing questions from what the release publishes, never
+   from a description of the repository.
 4. Run `settings/repo-baseline.sh apply` — settings baseline, immutable
    OIDC sub claim, and the `publish` **environment** (a repository object
    that cannot be shared; apply creates it automatically wherever the

@@ -115,6 +115,29 @@ were not written by the emitter. (The email is a designation, not a
 mailbox — the domain is the org's Pages origin, same as the provenance
 predicate type.)
 
+## Recorded residuals
+
+**The release tag object is unsigned** (#349 finding 9). The minting
+script runs `git tag -a` as the App and nothing signs the tag object,
+so `git verify-tag vX.Y.Z` returns nothing — platform behaviour, not
+misconfiguration: API-created commits get GitHub's web-flow signature,
+tag objects do not. No level is affected and no document over-claims:
+the spec's tag requirement is immutability, which `org-default-tag`
+enforces and `ORG_SOURCE_TAG_IMMUTABLE` claims, and the build-time
+tag→revision binding is a signed claim in the provenance certificate
+(`sourceRepositoryRef` + `sourceRepositoryDigest`). What is recorded
+here is what remains: (1) the tag object is the only pointer in the
+release chain whose integrity rests on a platform control plus GitHub's
+API answer rather than a signature; (2) `ORG_SOURCE_RELEASE_TAG_MINTED`
+evidences ruleset enforcement at attestation time, not the provenance
+of any particular tag object — links are immutable and tags can be
+created later; (3) the sharp edge is break-glass: a hand-minted tag
+leaves no cryptographic trace at all, so the manual ledger line in
+`continuity.md` is load-bearing evidence, not bookkeeping. The close is
+gitsign at the mint (#349 S4) — keyless, the same Sigstore identity as
+everything else — deferred because it touches the irreversible step and
+takes a full lab cycle, not because it is optional.
+
 ## Root of trust
 
 What a consumer pins, in the verifying-source page's configuration

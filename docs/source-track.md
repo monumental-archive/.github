@@ -93,6 +93,7 @@ end to end before `signer` and `.github` founded their chains, and
 | Repository IDs / immutable revision IDs / human-readable diffs | 1 | GitHub (git SHAs, PR diffs) |
 | Source VSAs | 1 | **Emitted** per push, all three repos (#207) |
 | Access control + reliable history | 2 | `org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list |
+| History (SCS): every Named Reference change recorded — when, by whom, new revision ID | 2 | Each chain link records the actor, `commitTime`, the revision and its parents, contemporaneously with the push (`source-attest` emit); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped |
 | Tag immutability | 2 | `org-default-tag` ruleset: update/move/delete blocked, all tags, all repos |
 | Safe expunging process | 2 | `docs/expunging.md` |
 | Identity management | 2 | GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change |

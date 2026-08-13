@@ -106,10 +106,16 @@ in [`tooling-verdicts.md`](tooling-verdicts.md), not watched.
 ## Build Environment: a section, not a page
 
 Formally **L0 at both layers, by attribution rather than effort**. The
-**platform** obligations of BuildEnv L1 are all discharged — the runner
-image is a named, Renovate-rolled pin enforced by `lint:runner-pin`;
-pgrx base images are digest-pinned, org-attested (`base-attest.yml`)
-and verified fail-closed before any container runs. The **producer**
+**platform** obligations of BuildEnv L1 are discharged **at the
+container layer** — pgrx base images are digest-pinned, org-attested
+(`base-attest.yml`) and verified fail-closed before any container runs.
+At the **runner layer** they are not, and cannot be from here: GitHub
+publishes no runner-image provenance, so there is nothing to verify
+before instantiation and nothing to attest — the runner image is a
+named, Renovate-rolled pin enforced by `lint:runner-pin`, which is
+selection, not verification (#125 watches; the claim was over-broad
+twice, #290 and #349 finding 5, and the qualifier is the sentence that
+keeps the claim beside its refutation). The **producer**
 obligations — generating Build L2+ provenance for the build images
 themselves and allowing its independent verification — are not ours to
 discharge and are unmet upstream, which is exactly why the row is L0:

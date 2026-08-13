@@ -41,6 +41,23 @@
 # `uses:` accepts no expressions — GitHub's context-availability table lists
 # no contexts for `jobs.<job_id>.uses` — so classes are dispatched by an
 # `if:` per job rather than by interpolating the input into a path.
+#
+# PHASES (#349 finding 1). Every job carries a `# phase:` marker on the
+# line above its id — admit, build, prove, commit-point, publish or
+# attest — in the same marker idiom as `capability-boundary:` and
+# `unattested-path:`. The `commit-point` job is the single barrier
+# between proof and consequence: every proof the release requires fans
+# into it, it FAILS (visibly, not skips) if any proof is not `success`,
+# and every `publish` and `attest` job reaches the irreversible world
+# only through it. `needs` cannot express a barrier across a workflow
+# boundary, which is one more reason this stays one workflow.
+# `lint:release-phases` enforces the shape: exactly one marker per job,
+# one commit-point whose needs equal `guard` plus every prove job —
+# equality, so a proof added without wiring reddens instead of silently
+# not gating — and no publish or attest job whose needs bypass it. The shape exists because it was
+# violated: on lab v0.20.0 the SBOM/triage gate failed at 18:26:58 and
+# npm publish started eleven seconds later, because nothing publish-side
+# depended on it — the graph raced and the org had merely been winning.
 name: publish
 
 on:
@@ -213,6 +230,7 @@ jobs:
   # from a branch would attest a moving pointer, and Sigstore is
   # append-only: that mistake is permanent, and it has already happened
   # once in this organisation's history.
+  # phase: admit
   guard:
     name: Refuse anything that is not a release tag
     runs-on: ubuntu-24.04
@@ -259,6 +277,7 @@ jobs:
   # contaminates the job whose identity is "nothing runs until it passes".
   # It executes no caller code — it reads the caller's tree, and failing
   # here costs five seconds instead of forty minutes of built images.
+  # phase: admit
   facts:
     name: Resolve the image facts
     needs: guard
@@ -308,6 +327,7 @@ jobs:
   # artifact fans into attach via the release-* pattern. Runs for every
   # class — a release without an inventory caps Scorecard's SBOM check
   # and blinds audit:blast-radius.
+  # phase: prove
   sbom:
     name: Generate the release SBOM
     needs: guard
@@ -345,9 +365,12 @@ jobs:
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
         # the SBOM just generated, so a release is born covered — and a
-        # gate-class advisory with no decision fails HERE, before anything
-        # publishes: triage is a property of the release, not the calendar
-        # (docs/dependency-track.md). Network-bound (the OSV feed), which
+        # gate-class advisory with no decision fails HERE, and the
+        # commit point refuses every publish job on that failure — the
+        # claim "before anything publishes" is a `needs` edge, not this
+        # comment (#349 finding 1): triage is a property of the release,
+        # not the calendar (docs/dependency-track.md).
+        # Network-bound (the OSV feed), which
         # is fine on the release path — it is already network-bound by
         # construction, like verify-release — and never in the ci gate.
         env:
@@ -379,6 +402,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # phase: build
   build:
     name: Build
     needs: guard
@@ -400,6 +424,7 @@ jobs:
   # upload, no smoke, repro- prefixed intermediates. They run in
   # parallel with the first builds; the gate below compares the two
   # subject manifests bit for bit before anything irreversible.
+  # phase: build
   repro-build:
     name: Rebuild (repro)
     needs: guard
@@ -412,13 +437,16 @@ jobs:
       exclude: ${{ inputs.exclude }}
       repro: true
 
+  # phase: publish
   publish-crates:
     name: Publish crates
-    needs: [guard, build, repro-gate]
-    # Post-gate, pre-verify: the registry upload is the class's
+    needs: [guard, build, commit-point]
+    # Post-barrier, pre-verify: the registry upload is the class's
     # irreversible step (crates.io is yank-only), so it waits on the
-    # bit-for-bit proof (#118) and on nothing else.
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
+    # commit point — which holds the bit-for-bit proof (#118) AND the
+    # SBOM/triage proof. It once waited on the repro gate alone, and lab
+    # v0.20.0 reached npm past a red triage gate (#349 finding 1).
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
     uses: ./.github/workflows/publish-rust-crate.yml
     permissions:
       contents: read # checkout for cargo publish
@@ -426,6 +454,7 @@ jobs:
     with:
       exclude: ${{ inputs.exclude }}
 
+  # phase: build
   build-oci:
     name: Build image
     needs: [guard, facts]
@@ -445,6 +474,7 @@ jobs:
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
 
+  # phase: build
   repro-build-oci:
     name: Rebuild image (repro)
     needs: [guard, facts]
@@ -467,10 +497,11 @@ jobs:
   # The index is assembled and TAGGED exactly once, here, post-gate
   # (#118): the builds pushed per-arch digests only, the gate compared
   # them, and this is the first moment a public reference exists.
+  # phase: publish
   assemble-oci:
     name: Assemble the image index
-    needs: [guard, facts, build-oci, repro-gate]
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+    needs: [guard, facts, build-oci, commit-point]
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
     uses: ./.github/workflows/assemble-oci-index.yml
     permissions:
       contents: read # checkout of the caller
@@ -484,6 +515,7 @@ jobs:
   # takes exactly one — so a repository shipping both classes signs twice,
   # under the same identity, rather than mixing unrelated subjects into one
   # certificate.
+  # phase: attest
   sign-image:
     name: Sign image
     needs: assemble-oci
@@ -501,6 +533,7 @@ jobs:
   # Runs no caller code, so it can hold the writes the build job must not.
   # It pulls the published bytes back and hashes them: the attested subject
   # is what shipped, not what we hoped shipped.
+  # phase: attest
   verify:
     name: Verify published bytes
     needs: [guard, build, publish-crates]
@@ -525,6 +558,7 @@ jobs:
 
   # The signer never sees artifact bytes, only digests, and holds the only
   # `id-token: write` in the release path.
+  # phase: attest
   sign:
     name: Sign
     needs: verify
@@ -559,6 +593,7 @@ jobs:
   # sign "PASSED". Every vsa job restates doi's !cancelled() pattern:
   # the implicit success() looks THROUGH attach to its legitimately-
   # skipped class ancestors and goes false (measured on v0.14.2).
+  # phase: attest
   vsa:
     name: Assemble and sign VSA
     needs: [guard, verify, attach]
@@ -574,6 +609,7 @@ jobs:
       subjects: ${{ needs.verify.outputs.subjects }}
       version: ${{ needs.guard.outputs.version }}
 
+  # phase: build
   build-binary:
     name: Build binaries
     needs: guard
@@ -593,6 +629,7 @@ jobs:
   # asset digests at publish. The subjects signed are the archives the
   # attach job uploads — the same bytes, proven by the collect job's
   # refuse-a-partial-set guard.
+  # phase: build
   repro-build-binary:
     name: Rebuild binaries (repro)
     needs: guard
@@ -607,12 +644,13 @@ jobs:
       exclude: ${{ inputs.exclude }}
       repro: true
 
+  # phase: attest
   sign-binaries:
     name: Sign binaries
-    needs: [build-binary, repro-gate]
+    needs: [build-binary, commit-point]
     # The Sigstore entry is append-only — an irreversible step, so it
     # sits downstream of the bit-for-bit proof (#118).
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'rust-binary') }}
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-binary') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@be5486980d5f779eaf5cfae1abc96ad56cf60869 # main
     with:
       subjects: ${{ needs.build-binary.outputs.subjects }}
@@ -628,6 +666,7 @@ jobs:
   # becomes a release asset, GitHub's release attestation binds tag,
   # commit and asset digests at publish, and the signed subjects are the
   # same bytes the attach job uploads.
+  # phase: build
   build-source:
     name: Build source archive
     needs: guard
@@ -639,6 +678,7 @@ jobs:
     with:
       version: ${{ needs.guard.outputs.version }}
 
+  # phase: build
   repro-build-source:
     name: Rebuild source archive (repro)
     needs: guard
@@ -650,10 +690,11 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
       repro: true
 
+  # phase: attest
   sign-source:
     name: Sign source archive
-    needs: [build-source, repro-gate]
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'source-archive') }}
+    needs: [build-source, commit-point]
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'source-archive') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@be5486980d5f779eaf5cfae1abc96ad56cf60869 # main
     with:
       subjects: ${{ needs.build-source.outputs.subjects }}
@@ -663,6 +704,7 @@ jobs:
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
 
+  # phase: build
   build-wasm:
     name: Build wasm package
     needs: guard
@@ -676,6 +718,7 @@ jobs:
       crate-dir: ${{ inputs.crate-dir }}
       npm-scope: ${{ inputs.npm-scope }}
 
+  # phase: build
   repro-build-wasm:
     name: Rebuild wasm package (repro)
     needs: guard
@@ -689,12 +732,13 @@ jobs:
       npm-scope: ${{ inputs.npm-scope }}
       repro: true
 
+  # phase: publish
   publish-wasm:
     name: Publish wasm package
-    needs: [guard, build-wasm, repro-gate]
+    needs: [guard, build-wasm, commit-point]
     # Post-gate: npm's unpublish window closes after 72 hours, so the
     # upload waits on the bit-for-bit proof (#118).
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
     uses: ./.github/workflows/publish-wasm-npm.yml
     permissions:
       contents: read # checkout for the pinned npm
@@ -703,6 +747,7 @@ jobs:
       package: ${{ needs.build-wasm.outputs.package }}
       artifact-name: ${{ needs.build-wasm.outputs.artifact-name }}
 
+  # phase: attest
   verify-wasm:
     name: Verify published wasm bytes
     needs: [build-wasm, publish-wasm]
@@ -719,6 +764,7 @@ jobs:
       npm-package: ${{ needs.build-wasm.outputs.package }}
       dry-run: ${{ inputs.dry-run }}
 
+  # phase: attest
   sign-wasm:
     name: Sign wasm package
     needs: verify-wasm
@@ -735,6 +781,7 @@ jobs:
   # Same verdict, wasm leg — see the note on `vsa` above. build-wasm is
   # in needs only for the package name the re-pull needs to reconstruct
   # the registry path.
+  # phase: attest
   vsa-wasm:
     name: Assemble and sign wasm VSA
     needs: [guard, build-wasm, verify-wasm, attach]
@@ -752,6 +799,7 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
 
 
+  # phase: build
   build-extension:
     name: Build extension
     needs: guard
@@ -766,6 +814,7 @@ jobs:
       pg-majors: ${{ inputs.pg-majors }}
       smoke-test: ${{ inputs.extension-smoke-test }}
 
+  # phase: build
   repro-build-extension:
     name: Rebuild extension (repro)
     needs: guard
@@ -780,10 +829,11 @@ jobs:
       smoke-test: ${{ inputs.extension-smoke-test }}
       repro: true
 
+  # phase: attest
   sign-extensions:
     name: Sign extension tarballs
-    needs: [build-extension, repro-gate]
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}
+    needs: [build-extension, commit-point]
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@be5486980d5f779eaf5cfae1abc96ad56cf60869 # main
     with:
       subjects: ${{ needs.build-extension.outputs.subjects }}
@@ -796,6 +846,7 @@ jobs:
   # The artifact images assemble from the SAME tarballs the signer just
   # attested — one byte path — and each per-major index gets its own
   # signature under the same identity.
+  # phase: build
   build-extension-images:
     name: Build extension images
     needs: [guard, build-extension, facts]
@@ -813,6 +864,7 @@ jobs:
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
 
+  # phase: build
   repro-build-extension-images:
     name: Rebuild extension images (repro)
     # Both image builds stage from the SAME release-extensions artifact
@@ -836,16 +888,18 @@ jobs:
   # The per-major tags, applied post-gate by manifest PUT — the exact
   # bytes the gate compared land under the advertised names, digests
   # preserved by construction (#118).
+  # phase: publish
   tag-extension-images:
     name: Tag extension images
-    needs: [build-extension-images, repro-gate]
-    if: ${{ !cancelled() && needs.repro-gate.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+    needs: [build-extension-images, commit-point]
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
     uses: ./.github/workflows/tag-images.yml
     permissions:
       packages: write # PUT each gated manifest under its tag
     with:
       images: ${{ needs.build-extension-images.outputs.images }}
 
+  # phase: attest
   sign-extension-images:
     name: Sign extension image pg${{ matrix.pg }}
     needs: [build-extension-images, tag-extension-images]
@@ -881,6 +935,7 @@ jobs:
   # Fan-in mirrors attach: !cancelled() plus explicit result checks,
   # because the implicit success() looks THROUGH to legitimately
   # skipped class ancestors and goes false (measured on v0.14.2).
+  # phase: prove
   repro-gate:
     name: Repro gate
     needs: [guard, build, repro-build, build-oci, repro-build-oci, build-binary, repro-build-binary, build-source, repro-build-source, build-wasm, repro-build-wasm, build-extension, repro-build-extension, build-extension-images, repro-build-extension-images]
@@ -1011,6 +1066,42 @@ jobs:
           fi
           echo "::notice::repro gate: ${compared} class comparison(s) reproduced"
 
+  # The commitment barrier (#349 finding 1). Both proofs are class-
+  # independent — the SBOM/triage job runs for every release, and the
+  # repro gate derives its own required build set from `inputs.classes` —
+  # so the required-proof derivation lives in those jobs, and this one
+  # asserts a single thing: every proof concluded `success`. It runs and
+  # FAILS rather than skipping, so a refused release shows one red job
+  # naming each refusal instead of a cloud of skips, and a re-dispatch
+  # re-proves before it can re-publish. Everything downstream that
+  # touches the irreversible world (registry uploads, index tags, signed
+  # attestations) reaches it only through this job's `success`.
+  # phase: commit-point
+  commit-point:
+    name: Commit point — every proof, or nothing publishes
+    needs: [guard, sbom, repro-gate]
+    if: ${{ !cancelled() && needs.guard.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {} # judges job results; no checkout, no caller code, no writes
+    env:
+      SBOM_RESULT: ${{ needs.sbom.result }}
+      REPRO_RESULT: ${{ needs.repro-gate.result }}
+    steps:
+      - name: Refuse unless every required proof succeeded
+        run: |
+          set -euo pipefail
+          fail=0
+          for p in "sbom and advisory triage:${SBOM_RESULT}" "repro gate:${REPRO_RESULT}"; do
+            name="${p%:*}" result="${p##*:}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::${name} is '${result}' — absence of a proof is never a proof"
+              fail=1
+            fi
+          done
+          ((fail == 0)) || exit 1
+          echo "::notice::commit point open: every required proof succeeded"
+
   # Last, and only on proof. Attaches the evidence bundle and publishes the
   # draft — the first moment anything becomes public.
   #
@@ -1024,6 +1115,7 @@ jobs:
   # bundles travel as `release-*` / `attestation-bundle-*` artifacts, so
   # attach needs no per-class inputs and a new class is one more job
   # above, not a contract change here.
+  # phase: attest
   attach:
     name: Attach evidence and publish
     needs: [guard, sbom, sign, sign-image, sign-binaries, sign-source, sign-wasm, sign-extensions, sign-extension-images]
@@ -1055,6 +1147,7 @@ jobs:
   # against the release before opening any evidence. See the note on
   # `vsa` above for the pattern; the VSA is signed over the verdict job's
   # own re-proved manifest.
+  # phase: attest
   vsa-binaries:
     name: Assemble and sign binaries VSA
     needs: [guard, build-binary, attach]
@@ -1072,6 +1165,7 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
 
 
+  # phase: attest
   vsa-source:
     name: Assemble and sign source VSA
     needs: [guard, build-source, attach]
@@ -1089,6 +1183,7 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
 
 
+  # phase: attest
   vsa-extensions:
     name: Assemble and sign extensions VSA
     needs: [guard, build-extension, attach]
@@ -1119,6 +1214,7 @@ jobs:
   # index), signed over the verdict job's re-proved manifest exactly like
   # the file classes — the subject names are the untagged references the
   # signer attested.
+  # phase: attest
   vsa-image:
     name: Assemble and sign image VSA
     needs: [guard, assemble-oci, attach]
@@ -1137,6 +1233,7 @@ jobs:
       # musl-static binary in an empty image has no base layer, and the
       # enrichment claims nothing it did not consume (#316 finding 3).
 
+  # phase: attest
   vsa-extension-images:
     name: Assemble and sign extension images VSA
     needs: [guard, build-extension-images, attach]
@@ -1160,6 +1257,7 @@ jobs:
 
   # The DOI comes last of all: it cites a release that is already public,
   # proven and signed. Skipped on dry-run (a rehearsal must cite nothing).
+  # phase: attest
   doi:
     name: Mint the version DOI
     needs: [guard, attach]

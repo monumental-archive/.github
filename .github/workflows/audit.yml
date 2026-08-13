@@ -115,6 +115,11 @@ jobs:
         # The alarm on the Renovate mechanism (#133): a paused or
         # misconfigured Renovate goes red here within a week instead of
         # silently costing a release its evidence (the v0.16.1 VSA).
+        # The token is for the staleness-age lookup — a public read, but
+        # `gh api` refuses to run tokenless in CI, and an unperformable
+        # read once rendered as "over 24h" (#349 finding 11).
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: mise run audit:canon-pins
 
   org-pins:
@@ -232,6 +237,15 @@ jobs:
   actions-allowlist:
     name: audit / actions allowlist drift
     runs-on: ubuntu-24.04
+    # Same environment discipline as repo-settings drift, and for the
+    # same reason: `orgs/{org}/actions/permissions/selected-actions` is
+    # an org-scoped read the default job token CANNOT perform. The old
+    # comment here claimed the opposite, and the leg spent its CI life
+    # comparing the belt against `null` — asserting drift that did not
+    # exist and equally ready to assert clean that was not measured
+    # (#349 finding 10). A leg's token must be able to perform its read,
+    # or its only honest output is "I could not read".
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -250,10 +264,7 @@ jobs:
 
       - name: Reconcile the belt's allowlist with the live org setting
         env:
-          # Org Actions permissions are public-readable metadata; the
-          # default token is enough. Red means the gate enforces a
-          # different list than GitHub does (#207).
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:actions-allowlist
 
   source-vsa:

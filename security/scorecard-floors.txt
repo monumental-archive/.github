@@ -28,6 +28,14 @@
 # hour later after the day's thirty-PR churn recomputed — a tenth
 # inside the structurally-capped checks, so the floor takes the lower
 # reading and the ratchet nudge re-raises it when the score recovers.
+# release-lab ratcheted 7.0 → 7.4 on the 2026-08-13 08:44 reading of
+# 7.5 (#347): the ratchet nudge fired ("well above floor — raise").
+# Floored a tenth under the reading per the drift observation above.
+# The same repo read 6.8 that morning on a transient Binary-Artifacts
+# 0 ("binaries present in source code") that a fresh run retracted —
+# a scanner defect, not a watermark, so it does not set the floor; and
+# a single low reading is not evidence of regression (the lesson #347
+# records against this file's own header).
 .github 6.9
 signer 6.8
-release-lab 7.0
+release-lab 7.4

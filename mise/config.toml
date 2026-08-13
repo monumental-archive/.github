@@ -1264,31 +1264,45 @@ if [[ -n "${stale}" ]]; then
   # works) — the date arithmetic lives in jq because ISO parsing in bash
   # is not portable between GNU and BSD date. An unlookupable age fails
   # closed: unknown staleness is not fresh.
+  # Unknown and stale are BOTH red, but they are different reds, and the
+  # message must never assert a measurement that did not happen: this
+  # leg once printed "over 24h" for a release 23 minutes old because the
+  # age lookup had failed, not because any clock had run (#349 finding
+  # 11). A finding's evidence is the read that produced it.
   red=0
+  unmeasured=""
   oldest=0
   for v in $(tr " " "\n" <<< "${stale}" | sed "s|.*:||" | sort -uV); do
     [[ -n "${v}" ]] || continue
     succ=$(awk -v p="${v}" '$0 == p { getline; print; exit }' <<< "${tags}")
-    [[ -n "${succ}" ]] || { red=1; continue; }
+    [[ -n "${succ}" ]] || { unmeasured="${unmeasured} ${v}(no successor tag resolved)"; continue; }
     age=$(gh api "repos/monumental-archive/.github/commits/${succ}" \
       --jq '((now - (.commit.committer.date | fromdateiso8601)) | floor)' \
       2> /dev/null || true)
-    [[ "${age}" =~ ^[0-9]+$ ]] || { red=1; continue; }
+    [[ "${age}" =~ ^[0-9]+$ ]] || { unmeasured="${unmeasured} ${v}(age lookup failed: repos/monumental-archive/.github/commits/${succ})"; continue; }
     [[ "${age}" -ge 86400 ]] && red=1
     [[ "${age}" -gt "${oldest}" ]] && oldest="${age}"
   done
-  if [[ ${red} -eq 0 ]]; then
+  if [[ ${red} -eq 0 && -z "${unmeasured}" ]]; then
     echo "audit:canon-pins: post-release window — canon at ${latest}, references stale for $((oldest / 3600))h:${stale}"
     echo "  the lag is structural (#227): a commit cannot contain its own"
     echo "  release SHA, and Renovate's chore(canon) bump closes it in one"
     echo "  bot cycle. Red only past the 24h grace (#290, #310)."
     exit 0
   fi
-  echo "audit:canon-pins: references behind canon ${latest} for over 24h:${stale}" >&2
-  echo "  Outside the post-release grace — Renovate should have bumped" >&2
-  echo "  these within one bot cycle. Check the Renovate dashboard and" >&2
-  echo "  default.json's first-party rules before bumping by hand" >&2
-  echo "  (#133, #290, #310)." >&2
+  if [[ ${red} -eq 1 ]]; then
+    echo "audit:canon-pins: references behind canon ${latest}, MEASURED over the 24h grace (oldest $((oldest / 3600))h):${stale}" >&2
+    echo "  Outside the post-release grace — Renovate should have bumped" >&2
+    echo "  these within one bot cycle. Check the Renovate dashboard and" >&2
+    echo "  default.json's first-party rules before bumping by hand" >&2
+    echo "  (#133, #290, #310)." >&2
+  fi
+  if [[ -n "${unmeasured}" ]]; then
+    echo "audit:canon-pins: staleness age UNKNOWN — the lookup failed, no duration was measured:${unmeasured}" >&2
+    echo "  Unknown staleness is not fresh (fail closed), but it is not" >&2
+    echo "  'over 24h' either — fix the read (GH_TOKEN present? API up?)" >&2
+    echo "  and re-run before concluding anything about Renovate (#349 f11)." >&2
+  fi
   exit 1
 fi
 echo "audit:canon-pins: ${found} canon references, all at ${latest}"
@@ -1503,6 +1517,115 @@ if [[ -n "${bad}" ]]; then
   exit 1
 fi
 echo "lint:capability-boundary: ok"
+'''
+
+[tasks."lint:release-phases"]
+description = "The release graph's commitment barrier cannot be bypassed or silently unwired (#349)"
+dir = "{{cwd}}"
+# The shape that closed #349 finding 1, kept closed. On lab v0.20.0 the
+# SBOM/triage gate failed and npm publish started eleven seconds later:
+# the ordering the docs claimed was a race the org kept winning, because
+# nothing publish-side carried the `needs` edge. The fix is a single
+# commit-point job between proof and consequence; this lint makes the
+# fix structural. Deterministic — parses one tracked file — so it is
+# gate-eligible. Canon-only: consuming repos hold a one-line caller
+# stub, not the orchestrator.
+#
+# Enforced, from the `# phase:` markers in publish.yml:
+#   1. every job carries exactly one marker, from the closed vocabulary
+#   2. exactly one commit-point job, named commit-point
+#   3. commit-point's needs EQUAL `guard` plus every prove-phase job —
+#      equality, so a new proof added without wiring goes red instead
+#      of silently not gating
+#   4. every publish job needs commit-point directly and its block
+#      tests `needs.commit-point.result == 'success'`
+#   5. every attest job reaches commit-point through transitive needs
+#   6. no admit, build or prove job holds `id-token: write` or
+#      `contents: write` — the capability boundary derived from the
+#      phase rather than restated beside it
+run = '''
+f=".github/workflows/publish.yml"
+[[ -f "${f}" && -d security ]] || { echo "lint:release-phases: not the canon orchestrator, skipped"; exit 0; }
+awk '
+  /^jobs:$/ { injobs = 1; next }
+  !injobs { next }
+  /^  # phase: / { pending = $NF; next }
+  /^  [a-z][a-z0-9-]*:$/ {
+    job = substr($1, 1, length($1) - 1)
+    order[++n] = job
+    if (pending == "") miss = miss " " job
+    phase[job] = pending; pending = ""
+    next
+  }
+  # a marker not immediately followed by a job id is itself a defect
+  pending != "" { stray = stray " " pending; pending = "" }
+  job == "" { next }
+  /^    needs: \[/ {
+    s = $0; sub(/^    needs: \[/, "", s); sub(/\].*$/, "", s)
+    gsub(/ /, "", s); needs[job] = s; next
+  }
+  /^    needs: [a-z]/ { needs[job] = $2; next }
+  /^      id-token: write/ { idtok[job] = 1 }
+  /^      contents: write/ { cwrite[job] = 1 }
+  /needs\.commit-point\.result == .success./ { testscp[job] = 1 }
+  END {
+    bad = ""
+    valid = ",admit,build,prove,commit-point,publish,attest,"
+    cp = ""; proves = ""
+    for (i = 1; i <= n; i++) {
+      j = order[i]; p = phase[j]
+      if (index(valid, "," p ",") == 0) bad = bad "\n  " j ": unknown phase \"" p "\""
+      if (p == "commit-point") { if (cp != "") bad = bad "\n  " j ": second commit-point (" cp " already is)"; cp = j }
+      if (p == "prove") proves = proves "," j
+    }
+    if (miss != "") bad = bad "\n  jobs with no # phase: marker:" miss
+    if (stray != "") bad = bad "\n  markers not directly above a job id:" stray
+    if (cp == "") bad = bad "\n  no commit-point job"
+    else if (cp != "commit-point") bad = bad "\n  the commit-point job must be named commit-point, got " cp
+    if (cp != "") {
+      want = "guard" proves
+      m = split(want, w, ","); have = "," needs[cp] ","
+      for (k = 1; k <= m; k++) if (index(have, "," w[k] ",") == 0)
+        bad = bad "\n  commit-point needs is missing " w[k]
+      m = split(needs[cp], g, ",")
+      for (k = 1; k <= m; k++) if (index("," want ",", "," g[k] ",") == 0)
+        bad = bad "\n  commit-point needs " g[k] ", which is neither guard nor a prove job"
+    }
+    for (i = 1; i <= n; i++) {
+      j = order[i]; p = phase[j]
+      if (p == "publish") {
+        if (index("," needs[j] ",", ",commit-point,") == 0)
+          bad = bad "\n  publish job " j " does not need commit-point directly"
+        if (!(j in testscp))
+          bad = bad "\n  publish job " j " never tests needs.commit-point.result"
+      }
+      if (p == "publish" || p == "attest") {
+        # BFS over needs for reachability of commit-point
+        delete seen; nq = 0; q[++nq] = j; head = 0; found = 0
+        while (head < nq && !found) {
+          cur = q[++head]
+          m = split(needs[cur], e, ",")
+          for (k = 1; k <= m; k++) {
+            if (e[k] == "commit-point") { found = 1; break }
+            if (!(e[k] in seen)) { seen[e[k]] = 1; q[++nq] = e[k] }
+          }
+        }
+        if (!found) bad = bad "\n  " p " job " j " cannot reach commit-point through needs"
+      }
+      if ((p == "admit" || p == "build" || p == "prove") && (j in idtok || j in cwrite))
+        bad = bad "\n  " p " job " j " holds id-token or contents write — pre-barrier jobs sign and publish nothing"
+    }
+    if (bad != "") {
+      printf "lint:release-phases: the commitment barrier is unwired:%s\n", bad > "/dev/stderr"
+      exit 1
+    }
+    printf "lint:release-phases: %d jobs, barrier intact\n", n
+  }
+' "${f}" || {
+  echo "  every publish/attest job must reach commit-point (#349 finding 1);" >&2
+  echo "  see the PHASES header in publish.yml" >&2
+  exit 1
+}
 '''
 
 [tasks."lint:signer-pin"]
@@ -1780,7 +1903,24 @@ dir = "{{cwd}}"
 run = '''
 [[ -d security ]] || { echo "audit:actions-allowlist: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:actions-allowlist: gh missing" >&2; exit 1; }
-live=$(gh api "orgs/monumental-archive/actions/permissions/selected-actions")
+# The read comes first, and a read that fails is its own red — never an
+# input to the comparison. This leg once compared the belt against the
+# `null` an unauthorised read returned, reporting drift that was the
+# exact opposite of the live setting (#349 finding 10): a blind leg has
+# one honest output, and it is "I could not read", with the endpoint
+# named. The org-scoped endpoint needs an org-admin-capable token
+# (AUDIT_TOKEN via the audit environment in CI); the default job token
+# cannot perform it.
+if ! live=$(gh api "orgs/monumental-archive/actions/permissions/selected-actions" 2> /dev/null); then
+  echo "audit:actions-allowlist: could not read orgs/monumental-archive/actions/permissions/selected-actions" >&2
+  echo "  no comparison was made — this red is 'unreadable', not 'drifted'." >&2
+  echo "  The endpoint needs an org-admin-capable token (AUDIT_TOKEN)." >&2
+  exit 1
+fi
+jq -e '.patterns_allowed | type == "array"' <<< "${live}" > /dev/null || {
+  echo "audit:actions-allowlist: the endpoint answered without patterns_allowed — refusing to compare against null" >&2
+  exit 1
+}
 live_patterns=$(jq -r '.patterns_allowed | sort | join(" ")' <<< "${live}")
 belt_patterns=$(mise tasks info "lint:actions-allowed" --json \
   | jq -r '.run[0]' | sed -n 's|^allowed="\(.*\)"$|\1|p' \
