@@ -56,7 +56,9 @@ accessible to the environment running the user-defined build steps").
 `sign.yml` runs no checkout and no caller code; a compromised build job
 can mint a certificate, but it bears the *caller's* identity, and every
 documented verification pins `--signer-workflow` to the signer path
-plus `--signer-digest` to the commit.
+plus `--signer-digest` to the commit — in workflows, always derived from
+the tree's own `sign.yml` pin by the `verify-signed` action, never
+hand-written (#314; `lint:signer-pin` enforces the ban).
 
 Where the claim rests on a spec carve-out, the carve-out by name:
 

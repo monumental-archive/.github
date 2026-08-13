@@ -150,6 +150,25 @@ gh attestation verify <artifact> --owner monumental-archive \
   --deny-self-hosted-runners
 ```
 
+That recipe is for a human at a terminal, where `<signer-commit>` is
+looked up fresh each time — from the canon's `security/signer.pin`, or
+from the `sign.yml@<sha>` pin in the tree that produced the release.
+**In a workflow, never write the digest as a literal**: nothing bumps a
+SHA inside a shell command, so it drifts from the `uses:` pin the
+certificate will actually carry — the #314 failure, a literal frozen at
+the signer's first commit while the `uses:` line was bumped twice, every
+dispatch a guaranteed identity mismatch. Workflows use the
+`verify-signed` action, which derives `--signer-digest` from the calling
+workflow's own `sign.yml` pin at run time (`lint:signer-pin` reddens any
+literal):
+
+```yaml
+- uses: monumental-archive/.github/.github/actions/verify-signed@<sha> # vX.Y.Z
+  with:
+    files: out/artifact-one out/artifact-two
+    # bundle: path/to/bundle.jsonl   # offline mode, same identity pins
+```
+
 - The verification verdict (artifact VSA): **every class carries one,
   in the attestation store** — verdicts are rendered after the release
   publishes, and a published release is immutable, so the store is the

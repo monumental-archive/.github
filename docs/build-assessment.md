@@ -118,7 +118,9 @@ did not make, and an unexpected issuance is a stop-everything event
 matching identity, because `--signer-workflow` is a prefix regex with no
 trailing anchor. `signer` therefore carries the same org rulesets as every
 other repo, and consumers are told to pin `--signer-digest` as well as
-`--signer-workflow`.
+`--signer-workflow` — in workflows via the `verify-signed` action, which
+derives the digest from the tree's own `sign.yml` pin rather than
+trusting a hand-written literal nothing bumps (#314).
 
 **Closed limit (#264).** Verdicts no longer route through the org
 signer: `verify-release.yml` signs its own VSA, so `verifier.id` is the

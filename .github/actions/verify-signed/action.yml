@@ -1,0 +1,100 @@
+# Verify artifacts against the org signer without ever writing the
+# signer commit by hand (#314). A tree states the trusted signer exactly
+# once — the `sign.yml@<sha>` `uses:` line, the only representation
+# Renovate manages natively — and this action derives `--signer-digest`
+# from that line at run time. The drift class #314 documents (a
+# hand-written digest literal that nothing bumps, frozen at the signer's
+# first commit while `uses:` moved twice) cannot exist here, because the
+# second copy of the value no longer exists.
+#
+# Why the derivation is not circular: the certificate's OID .10 carries
+# the signer commit the run ACTUALLY used, and this action checks it
+# against the reviewed, Renovate-bumped static text of the calling
+# workflow — intent, not echo. And it is lag-proof by the same token:
+# mid-fan-out, when a consumer's `uses:` is legitimately ahead of the
+# canon's `security/signer.pin` (the N-1 steady state, #227), the derived
+# digest still equals what the certificate carries, because both come
+# from the same tree. Binding to the pin file instead would go red on a
+# correct tree — measured live while #314 was being written.
+#
+# The file is fetched through the contents API at GITHUB_WORKFLOW_SHA —
+# the exact commit whose text GitHub already trusted enough to execute —
+# so no checkout is added to jobs that deliberately have none.
+#
+# GITHUB_WORKFLOW_REF names the TOP-LEVEL workflow. Call this action from
+# the workflow that carries the sign.yml `uses:` line, not from a local
+# reusable workflow it delegates to; a tree with no reference (or with
+# conflicting references) fails loudly rather than guessing.
+name: verify-signed
+description: >-
+  Verify artifacts against the org signer, deriving --signer-digest from
+  the calling workflow's own sign.yml pin so no hand-written literal can
+  drift (#314)
+inputs:
+  files:
+    description: >-
+      Whitespace-separated paths of the artifacts to verify
+    required: true
+  bundle:
+    description: >-
+      Path of a Sigstore bundle to verify offline against, instead of
+      GitHub's stored attestation
+    required: false
+    default: ""
+  token:
+    description: >-
+      Token for the contents read and the attestations API; the default
+      job token suffices
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: Derive the signer digest from the calling workflow's own pin
+      id: derive
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        # octocat/repo/.github/workflows/x.yml@refs/heads/main → the path
+        path="${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY}"/}"
+        path="${path%@refs/*}"
+        digest=$(gh api \
+          "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_WORKFLOW_SHA}" \
+          --jq '.content' | base64 -d |
+          grep -oE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' |
+          cut -d@ -f2 | sort -u)
+        if [[ -z "${digest}" ]]; then
+          echo "::error::${path} at ${GITHUB_WORKFLOW_SHA} pins no sign.yml uses: — nothing to derive --signer-digest from (call verify-signed from the workflow that calls the signer)"
+          exit 1
+        fi
+        if [[ "$(wc -l <<< "${digest}" | tr -d ' ')" != "1" ]]; then
+          echo "::error::${path} pins sign.yml at more than one digest — a tree states the trusted signer once: ${digest//$'\n'/ }"
+          exit 1
+        fi
+        echo "signer digest, derived from ${path}: ${digest}"
+        echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+    - name: Verify each artifact under both identity flags
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        FILES: ${{ inputs.files }}
+        BUNDLE: ${{ inputs.bundle }}
+        DIGEST: ${{ steps.derive.outputs.digest }}
+      run: |
+        set -euo pipefail
+        # --signer-workflow is a PREFIX regex over the certificate SAN and
+        # pins the path only, never the ref; --signer-digest pins OID .10,
+        # the signer commit. Pinning one without the other leaves any
+        # branch of the signer repository able to mint a matching
+        # identity, so both are pinned here (docs/slsa-reference.md).
+        for f in ${FILES}; do
+          gh attestation verify "${f}" \
+            ${BUNDLE:+--bundle "${BUNDLE}"} \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow monumental-archive/signer/.github/workflows/sign.yml \
+            --signer-digest "${DIGEST}" \
+            --deny-self-hosted-runners
+        done

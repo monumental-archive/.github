@@ -1339,7 +1339,7 @@ echo "lint:capability-boundary: ok"
 '''
 
 [tasks."lint:signer-pin"]
-description = "Every sign.yml uses: equals the declared signer pin (no half-bumps)"
+description = "Every sign.yml uses: equals the declared signer pin, and no hand-written --signer-digest literal exists (no half-bumps)"
 dir = "{{cwd}}"
 # The release verifier (verify-release.yml, verdict mode) checks the
 # provenance it opens against the signer commit declared in
@@ -1357,15 +1357,36 @@ dir = "{{cwd}}"
 # canon v1.12.0 — a linter that cannot skip cannot be universal. The one
 # case that still fails closed is a tree whose own workflows READ the
 # pin but do not ship it, which is the canon with the file deleted.
+# "Read" means the path on a non-comment line: a comment explaining why
+# a repo carries no pin file was counted as a consumer and reddened a
+# correct tree (#314 finding 2).
+#
+# Hand-written `--signer-digest <40-hex>` literals are banned outright
+# (#314 finding 1): the flag is the value a consumer's verification
+# turns on (OID .10), Renovate has no manager for a SHA inside a shell
+# command, and the lab's literal sat frozen at the signer's FIRST commit
+# while its uses: line was bumped twice — every dispatch a guaranteed
+# identity mismatch, silently. No agreement is enforced, because there
+# is nothing to agree: workflows derive the digest from their own
+# sign.yml uses: line via the verify-signed action, and the only
+# representable states are correct ones.
 run = '''
 files=$(git ls-files ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:signer-pin: no workflows, skipped"; exit 0; }
+literals=$(xargs grep -nE -- "--signer-digest[[:space:]]+[0-9a-f]{40}" <<< "${files}" || true)
+if [[ -n "${literals}" ]]; then
+  echo "lint:signer-pin: hand-written --signer-digest literal — nothing bumps it, so it drifts from the uses: pin the certificate will carry (#314):" >&2
+  echo "${literals}" >&2
+  echo "  derive it instead: uses: monumental-archive/.github/.github/actions/verify-signed" >&2
+  echo "  (\$/.github/actions/verify-signed from a canon-owned workflow)" >&2
+  exit 1
+fi
 refs=$(xargs grep -hoE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" <<< "${files}" | sort -u || true)
 [[ -n "${refs}" ]] || { echo "lint:signer-pin: no signer references, skipped"; exit 0; }
 if [[ ! -f security/signer.pin ]]; then
-  consumers=$(xargs grep -l "security/signer\.pin" <<< "${files}" || true)
+  consumers=$(xargs grep -lE "^[^#]*security/signer\.pin" <<< "${files}" || true)
   if [[ -n "${consumers}" ]]; then
-    echo "lint:signer-pin: workflows read security/signer.pin but the file is missing:${consumers}" >&2
+    echo "lint:signer-pin: workflows read security/signer.pin (on a non-comment line) but the file is missing:${consumers}" >&2
     exit 1
   fi
   echo "lint:signer-pin: no signer pin declared here, skipped"; exit 0
