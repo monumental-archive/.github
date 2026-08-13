@@ -10,8 +10,10 @@ written for two moments: wiring a repository in, and a release going wrong.
 
 1. Copy from [`scaffold/`](../scaffold/): `mise.toml`, `cliff.toml`,
    `committed.toml`, `.rumdl.toml`, and `SECURITY-INSIGHTS.yml` (fill the
-   `<angle-bracket>` fields). Add `CITATION.cff` from the scaffold if the
-   repository is citable.
+   `<angle-bracket>` fields). If the repository is citable (its release
+   stub passes `mint-doi: true`), render `CITATION.cff` with
+   `mise run fix:citation` — derived from `REUSE.toml`, enforced by
+   `lint:citation`, never hand-filled (#316).
 2. Copy the three workflow stubs from
    [`workflow-templates/`](../workflow-templates/): `ci.yml`,
    `release.yml`, `publish.yml` — **the publish.yml filename is

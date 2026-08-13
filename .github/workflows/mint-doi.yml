@@ -6,14 +6,24 @@
 # scoped token the repository owns.
 #
 # Runs no caller code. The deposit is the release's source tarball plus
-# metadata derived from the repository (and CITATION.cff where present),
-# so the DOI names exactly what the tag names.
+# metadata read from CITATION.cff at the released tag — the file
+# fix:citation derives from REUSE.toml and lint:citation keeps honest,
+# so the permanent record's licence and creators are the tree's own
+# declarations, never a literal or a fallback (#316 findings 1+6: the
+# v0.22.1 sandbox record said MIT for a 0BSD repo and credited the
+# machine account, because both fields were hard-coded fallbacks). The
+# file is REQUIRED here even though the lint already gates it upstream:
+# a permanent record fails closed, never publishes a guess.
 #
 # Versioning: Zenodo's concept DOI covers the software; each release gets
-# a version DOI. The first deposit creates the concept; later releases
-# find it by the deposition title (the repository's full name, which is
-# unique) and create a new version. The lab proves this flow against
-# sandbox.zenodo.org (test DOIs, prefix 10.5072) via the base-url input.
+# a version DOI. The concept is found by the concept-DOI identifier
+# CITATION.cff records — a direct fetch, not a search, so the title
+# listing's 100-deposition page cap can never mis-resolve it (#316
+# addendum A: past the cap a title search either errors on newversion
+# or silently splits the citation record). With no identifier recorded
+# this is the FIRST mint: guarded by asserting no submitted deposition
+# already bears the title, and the summary tells the human to record
+# the minted concept DOI in CITATION.cff before the next release.
 name: mint-doi
 
 on:
@@ -68,45 +78,77 @@ jobs:
           # The released source, from GitHub's own tarball of the tag.
           gh api "repos/${repo}/tarball/${TAG}" > source.tar.gz
 
-          # Metadata: CITATION.cff where the repository provides it,
-          # repository facts otherwise. jq builds the JSON so nothing is
-          # string-interpolated.
-          creators='[{"name": "'"${GITHUB_REPOSITORY_OWNER}"'"}]'
-          # Test gh's exit status, not the pipeline's: on a 404 gh prints
-          # the JSON error body to stdout, and piping that straight into
-          # base64 -d reaches the fallback only because an error body
-          # happens not to be valid base64. Decide on "does the file
-          # exist", not "did the decoder choke".
-          if content=$(gh api "repos/${repo}/contents/CITATION.cff" --jq .content 2> /dev/null) \
-            && printf '%s\n' "${content}" | base64 -d > cff.yaml; then
-            # Minimal CFF read without new tools: names only.
-            name_lines=$(grep -A1 '^[[:space:]]*- family-names:' cff.yaml \
-              | paste - - | sed -E 's/.*family-names: *"?([^"]*)"?.*given-names: *"?([^"]*)"?.*/\1, \2/' || true)
-            if [[ -n "${name_lines}" ]]; then
-              creators=$(printf '%s\n' "${name_lines}" | jq -R '{name: .}' | jq -sc '.')
-            fi
+          # Metadata: CITATION.cff at the released tag — the attested
+          # revision, so the record states what the tag's tree states.
+          # Required: a permanent record never publishes a fallback
+          # (#316 findings 1+6). Test gh's exit status, not the
+          # pipeline's: on a 404 gh prints the JSON error body to
+          # stdout, and piping that into base64 -d would fail only
+          # because an error body happens not to be valid base64. Decide
+          # on "does the file exist", not "did the decoder choke".
+          if ! content=$(gh api "repos/${repo}/contents/CITATION.cff?ref=${TAG}" --jq .content 2> /dev/null) \
+            || ! printf '%s\n' "${content}" | base64 -d > cff.yaml; then
+            echo "::error::no CITATION.cff at ${TAG} — a DOI-minting repo derives one from REUSE.toml (fix:citation; lint:citation gates this upstream)"
+            exit 1
+          fi
+          # The file is fix:citation's render, so its format is the
+          # generator's: these reads parse what the generator writes.
+          name_lines=$(grep -A1 '^[[:space:]]*- family-names:' cff.yaml \
+            | paste - - | sed -E 's/.*family-names: *"?([^"]*)"?.*given-names: *"?([^"]*)"?.*/\1, \2/' || true)
+          if [[ -z "${name_lines}" ]]; then
+            echo "::error::CITATION.cff carries no authors — the record credits people, never an account name"
+            exit 1
+          fi
+          creators=$(printf '%s\n' "${name_lines}" | jq -R '{name: .}' | jq -sc '.')
+          licence=$(sed -n 's/^license: //p' cff.yaml | head -1)
+          if [[ ! "${licence}" =~ ^[A-Za-z0-9.+-]+$ ]]; then
+            echo "::error::CITATION.cff license '${licence}' is not a single SPDX id — Zenodo's vocabulary holds ids, not expressions"
+            exit 1
           fi
           desc="Release ${TAG} of ${repo}. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release."
           metadata=$(jq -nc \
             --arg title "${title}" \
             --arg desc "${desc}" \
             --arg version "${UNTRUSTED_VERSION}" \
+            --arg licence "${licence}" \
             --argjson creators "${creators}" \
             '{metadata: {title: $title, upload_type: "software",
               description: $desc, version: $version, creators: $creators,
-              access_right: "open", license: "mit"}}')
+              access_right: "open", license: ($licence | ascii_downcase)}}')
 
-          # Find the concept by exact title, or start one.
-          listing=$(api "${BASE_URL}/api/deposit/depositions?q=title:%22${repo##*/}%22&size=100")
-          existing=$(jq -r --arg t "${title}" '[.[] | select(.title == $t and .submitted == true)] | sort_by(.id) | last | .id // empty' <<< "${listing}")
-          if [[ -z "${existing}" ]]; then
+          # The concept, from the identifier CITATION.cff records — a
+          # direct fetch that resolves the concept record to its latest
+          # version. No title listing, so the 100-deposition page cap
+          # can never mis-resolve the concept or split the citation
+          # record (#316 addendum A).
+          concept_doi=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' cff.yaml)
+          if [[ -z "${concept_doi}" ]]; then
+            # First mint. Refuse if a submitted deposition already bears
+            # this title — a concept the tree failed to record; minting
+            # again would split the citation record permanently.
+            listing=$(api "${BASE_URL}/api/deposit/depositions?q=title:%22${repo##*/}%22&size=10")
+            existing=$(jq -r --arg t "${title}" '[.[] | select(.title == $t and .submitted == true)] | length' <<< "${listing}")
+            if [[ "${existing}" != "0" ]]; then
+              echo "::error::a submitted deposition already bears this title but CITATION.cff records no concept DOI — record it under identifiers: before minting again"
+              exit 1
+            fi
             dep=$(api -X POST "${BASE_URL}/api/deposit/depositions" \
               -H 'Content-Type: application/json' --data '{}')
           else
-            # New version of the existing concept; its draft carries the
+            # New version of the recorded concept; its draft carries the
             # previous files, which are removed so the deposit is exactly
             # this release.
-            newv=$(api -X POST "${BASE_URL}/api/deposit/depositions/${existing}/actions/newversion")
+            concept_recid="${concept_doi##*.}"
+            if [[ ! "${concept_recid}" =~ ^[0-9]+$ ]]; then
+              echo "::error::CITATION.cff concept DOI '${concept_doi}' does not end in a Zenodo record id"
+              exit 1
+            fi
+            latest=$(api "${BASE_URL}/api/records/${concept_recid}" | jq -r '.id // empty')
+            if [[ -z "${latest}" ]]; then
+              echo "::error::the concept record ${concept_recid} resolves to no latest version"
+              exit 1
+            fi
+            newv=$(api -X POST "${BASE_URL}/api/deposit/depositions/${latest}/actions/newversion")
             draft=$(jq -r '.links.latest_draft' <<< "${newv}")
             dep=$(api "${draft}")
             depself=$(jq -r .links.self <<< "${dep}")
@@ -137,5 +179,11 @@ jobs:
             echo
             echo "- version: \`${doi}\`"
             echo "- concept: \`${concept}\`"
+            if [[ -z "${concept_doi}" ]]; then
+              echo
+              echo "**First mint** — record the concept DOI in CITATION.cff"
+              echo "(\`identifiers:\`, via fix:citation's preserved field) before"
+              echo "the next release; later mints resolve the concept from it."
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "::notice::DOI ${doi} (concept ${concept})"

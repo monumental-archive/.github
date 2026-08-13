@@ -49,7 +49,9 @@ a fresh session **started in the target repo's checkout**.
 
 - [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
       always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the
-      runbook's wiring section says so); fill the repo-specific holes
+      runbook's wiring section says so — CITATION.cff is rendered by
+      `fix:citation` from REUSE.toml, never copied filled); fill the
+      repo-specific holes
       (`allowed_scopes` in committed.toml, real tools/tasks in
       mise.toml).
 - [ ] **Pick and land the licence** (#214): `LICENSE` at the root,

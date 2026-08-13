@@ -1,20 +1,20 @@
-# Fill the <angle-bracket> fields; `cffconvert --validate` checks the file
-# (survey #82 decides its belt entry). The version and date-released lines
-# are maintained by the release pipeline's bump script.
+# Do not fill this by hand: run `mise run fix:citation` and commit the
+# render. Every field except two is derived — licence, authors and
+# repository-code from REUSE.toml, version and date-released stamped by
+# the release pipeline, the rest constants. The two human fields are
+# `title` and, after the first DOI-minting release, the CONCEPT DOI
+# under `identifiers:` (the run's summary prints it). lint:citation
+# reddens hand drift, and requires this file wherever the release stub
+# passes `mint-doi: true` (#316). No belt tool needed: the file is
+# generated, so the generator is its own validator (tooling-verdicts).
 cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.
-title: <human title of the software>
+title: <run fix:citation>
 type: software
 authors:
-  - family-names: Allen
-    given-names: Carl
-repository-code: https://github.com/monumental-archive/<repo>
-license: <SPDX expression>
-version: <current version>
-date-released: "<YYYY-MM-DD>"
-# After the first DOI-minting release, add the CONCEPT DOI (covers all
-# versions):
-# identifiers:
-#   - type: doi
-#     value: <concept DOI>
-#     description: The concept DOI of the software.
+  - family-names: <derived from REUSE.toml SPDX-PackageSupplier>
+    given-names: <derived>
+repository-code: <derived from REUSE.toml SPDX-PackageDownloadLocation>
+license: <derived from REUSE.toml SPDX-License-Identifier>
+version: <stamped by the release pipeline>
+date-released: "<stamped by the release pipeline>"
