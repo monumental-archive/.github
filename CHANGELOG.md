@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.24.0](https://github.com/monumental-archive/.github/compare/v1.23.2...v1.24.0) - 2026-08-13
+
+### Added
+
+- guard the seam class so a release cannot be its first test ([#365](https://github.com/monumental-archive/.github/pull/365))
+
+### Fixed
+
+- derive the coverage shield, and say blocked where we said permanent ([#362](https://github.com/monumental-archive/.github/pull/362))
+
 ## [1.23.2](https://github.com/monumental-archive/.github/compare/v1.23.1...v1.23.2) - 2026-08-13
 
 ### Fixed
