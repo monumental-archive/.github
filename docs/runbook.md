@@ -66,10 +66,33 @@ written for two moments: wiring a repository in, and a release going wrong.
    `<!-- badges:begin -->`/`<!-- badges:end -->` marker pair to the
    README and run `mise run fix:badges` — the block is derived, never
    pasted (`scaffold/README-badges.md` is the catalogue, `.badge-states`
-   holds the human-step lines, `lint:badges` reddens hand drift, #316);
-   answer the Best Practices form from
-   [`best-practices.md`](best-practices.md) (post-transfer — it binds
-   the repo URL), then set `bestpractices <BP_ID>` in `.badge-states`.
+   holds the human-step lines, `lint:badges` reddens hand drift, #316).
+
+   Then the two registrations, each a human step ending in a
+   `.badge-states` line — **and in both cases the line goes in last**,
+   because `audit:badges` re-asks each issuer whether a worn shield is
+   still true and fails the repo when it disagrees:
+
+   - **REUSE**: `lint:reuse` must be green first — it proves the tree
+     compliant before anyone is asked to certify it. Register at
+     <https://api.reuse.software/register>: name, email, and the
+     project URL **without a scheme**, `github.com/<org>/<repo>` (the
+     form supplies the surrounding `git://` and `.git`; a repo named
+     `.github` is fine). Confirm by email, then wait for the first
+     crawl — the API answers `uninitialised` until it finishes and
+     `compliant` after, about a minute. Only then set
+     `reuse registered`.
+   - **Best Practices**: post-transfer, since the form binds the repo
+     URL. Answer it from [`best-practices.md`](best-practices.md),
+     which carries the form mechanics, the automation-proposal URLs and
+     the `.bestpractices.json` shortcut — so this is a review, not 190
+     clicks. **Reach 100% on the passing section before** setting
+     `bestpractices <BP_ID>`: the audit gates that shield on the
+     issuer's `badge_percentage_0`, so an id set early publishes a
+     shield that reddens the next Monday cron.
+
+   Re-run `mise run fix:badges` after each line lands; both the Best
+   Practices and OSPS Baseline shields are derived from the one id.
 
 ### Continuous (no versions — the artifact's version is its pin set)
 
