@@ -10,4 +10,4 @@
 # releasing with no line here is a red: an unlisted repo is a tag
 # surface nobody is watching.
 .github v1.23.1
-release-lab pending
+release-lab v0.24.2
