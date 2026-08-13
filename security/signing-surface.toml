@@ -1,0 +1,25 @@
+# The org's declared signing surface (#349 S5): one row per predicate
+# type the org signer (monumental-archive/signer sign.yml) is willing to
+# sign beyond its default build-provenance mode, each naming the caller
+# that requires it. The signer's allowlist case statement and this file
+# must agree, and every row must have a live caller — reconciled by
+# audit:signer-surface on the Monday cadence, so "is this type still
+# needed?" is answered mechanically, and answered again next year when
+# the answer has changed and nobody is looking. A capability with no
+# live caller outlived its justification: verification_summary/v1 sat
+# on the allowlist from #264 (when the verifier took over signing its
+# own verdicts) until #349 finding 6 noticed — the exact staleness this
+# file exists to make impossible.
+#
+# NOT rows here: build provenance (the signer's default mode, no
+# predicate-type input) and the types jobs sign under their OWN
+# identities — verification_summary/v1 (verify-release.yml, verdicts
+# and enrichment), release-decision/v1 (publish.yml's commit point,
+# #349 S1), and the source emitter's two types (source-attest, its
+# own header enumerates them) — those never pass through the signer's
+# allowlist.
+
+[[surface]]
+type = "https://openvex.dev/ns/v0.2.0"
+caller = ".github/workflows/vex-attest.yml"
+reason = "release VEX, assembled by canon tooling in a job that runs no caller code (docs/dependency-track.md)"

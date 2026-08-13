@@ -87,6 +87,8 @@ end to end before `signer` and `.github` founded their chains, and
 
 ## Requirement mapping (v1.2, L1–L3)
 
+<!-- tracks:source:begin -->
+
 | Requirement | Level | Enforcement |
 | --- | --- | --- |
 | Choose an appropriate SCS | 1 | GitHub |
@@ -101,6 +103,8 @@ end to end before `signer` and `.github` founded their chains, and
 | Continuity | 2 | Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md` |
 | Continuous technical controls, documented | 3 | This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint |
 | Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` emitted live in every source VSA since 2026-08-12 (#207) |
+
+<!-- tracks:source:end -->
 
 ## The claims contract: the `ORG_SOURCE_` set, named once
 

@@ -280,6 +280,19 @@ literal):
   one replaced (the same shape as the pre-v1.13.0
   `attestations-vsa-*` asset caveat below).
 
+  **Release tags are signed at the mint** (#349 S4): gitsign puts a
+  keyless x509 signature in the tag object's PGP slot, under the same
+  Sigstore root of trust as everything else. The limit, stated rather
+  than discovered: `git verify-tag` succeeds for a verifier with
+  gitsign configured (`gpg.format=x509`, `gpg.x509.program=gitsign`,
+  identity pinned to the org's workflow SAN and the Actions OIDC
+  issuer), not universally — plain gpg reports the signature as
+  unverifiable, and GitHub's own UI shows these tags as unsigned
+  because it cannot validate gitsign certificates. Tags minted before
+  a repo's epoch in `security/tag-signing-epoch.txt` are immutable but
+  unsigned (the recorded residual in `source-assessment.md`);
+  `audit:release-tags` enforces the epoch forward.
+
   Gate on `verificationResult: PASSED` and `verifiedLevels` instead of
   re-deriving the policy yourself; a consumer who distrusts verdicts
   still has the provenance bundles in the release.

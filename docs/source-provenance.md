@@ -38,21 +38,28 @@ An in-toto Statement/v1 whose subject is the **revision**:
 | `commitTime` | The revision's committer timestamp (ISO 8601) — a git fact, contemporaneous even when the signature is not | `git show -s --format=%cI` |
 | `rulesReadAt` | When the enforcement state was read from the rules API — the moment the `controls` describe | claims stage |
 | `controls[]` | `{property, evidence}` pairs: each live `ORG_SOURCE_` property with the rule content that proves it, matched by content, never by ruleset name. The frozen property table is in [`source-track.md`](source-track.md); a property whose rule is not live is simply absent, which is how a lapse under-claims | claims stage, rules API |
-| `prev` | The chain link: `{revision, noteSha256}` of the previous link, or `null` exactly once (genesis). See "The chain", below | chain walk |
+| `ledgerPrev` | Note version 2 (#349 S3): `{revision, noteSha256}` of the previous **emitted** note — emission order, so healed links extend the tail — or `null` exactly once (genesis). See "The chain", below | ledger tail |
+| `revisionParent` | Note version 2: the revision's git first-parent SHA, or `null` for a root commit — ancestry, semantic only, deliberately separate from `ledgerPrev` | `git rev-parse <rev>^` |
+| `prev` | Note version 1 only (links emitted before the v2 split): `{revision, noteSha256}` of the first-parent parent's link, carrying both meanings at once — which is exactly the overload #349 finding 3 caught. Readers accept both versions | chain walk (legacy) |
 | `canonRef` | The canon commit whose action code and source policy produced this link — always a full SHA (#267 refuses otherwise) | the `uses:` pin resolution |
 | `repaired` | Present only on healed links: `{at: <timestamp>}`, the moment the late link was emitted (#265). See "Healed links" | emit loop |
 
 ## The chain
 
-`prev.revision` is the previous linked revision on first-parent
-history; `prev.noteSha256` is the SHA-256 of the previous link's **raw
-note blob** — the exact bytes in `refs/notes/commits`, so any
-re-encoding is detectable. A `noteSha256` mismatch proves the
-predecessor's note changed after this link was emitted: either the
-note was rewritten (the notes ref is world-readable history; a rewrite
-is visible) or the chain is being presented out of order. The chain is
-founded exactly once by an explicit genesis dispatch (`prev: null`),
-and genesis is refused forever after on that history — a gap is debt,
+The ledger pointer names the previous **emitted** note: `ledgerPrev
+.revision` is the revision whose note this link was signed on top of,
+and `ledgerPrev.noteSha256` is the SHA-256 of that note's **raw blob**
+— the exact bytes in `refs/notes/commits`, so any re-encoding is
+detectable. A `noteSha256` mismatch proves the predecessor's note
+changed after this link was emitted: either the note was rewritten
+(the notes ref is world-readable history; a rewrite is visible) or the
+chain is being presented out of order. Git ancestry travels separately
+in `revisionParent` (and the full parent set in `parents`); in the
+common per-push cadence the two pointers agree, and after a heal they
+legitimately do not — that divergence is the record of the lapse, not
+a defect. The chain is founded exactly once by an explicit genesis
+dispatch (`ledgerPrev: null`; `prev: null` in version-1 notes), and
+genesis is refused forever after on that history — a gap is debt,
 never a re-founding.
 
 Emission is self-healing (#265): every push walks from the pushed
@@ -65,17 +72,20 @@ healed link becomes a leaf nothing points at — `prev` is carrying two
 meanings at once (ledger order and git first-parent ancestry), and a
 healed link cannot satisfy both without rewriting an immutable
 predecessor. Measured on this repo: `e1ad2dde`'s healed link and
-`2b28c903` both name `prev = d52d91b8`, so a tip→genesis `prev` walk
-visits 82 links for 83 revisions, and deleting the healed note would
-break no `noteSha256` anywhere. Two consequences, both recorded rather
-than papered over: the documented verification procedure is
-**per revision** (fetch the revision's own link and verify it), which
-healing fully serves; and **nothing today checks chain linkage** —
-`audit:source-vsa` walks git history for coverage, not `prev` pointers.
-The structural fix is splitting the two meanings (a `version: 2` note
-carrying `ledgerPrev` and `revisionParent`, with linkage then auditable
-to genesis) — deferred in #349 S3, not forgotten. A pre-existing parent
-link is verified against the published identity before anything signs
+`2b28c903` both name `prev = d52d91b8`, so a tip→genesis walk of the
+version-1 chain visits 82 links for 83 revisions, and deleting that
+healed note would break no `noteSha256` anywhere. The version-2 split
+is the structural fix: `ledgerPrev` carries emission order, so a v2
+heal **extends the tail** instead of forking, and `audit:source-vsa`
+now checks two independent properties — **coverage** by walking git
+history, and **linkage** by walking the ledger to genesis, proving
+each step's `noteSha256` against the target's raw note bytes and
+requiring every v2 link to be reachable. The one pre-v2 leaf
+(`e1ad2dde`) is reported by name as known legacy, never silently
+tolerated and never a red: the documented per-revision verification
+procedure fully covers it, and rewriting immutable history to
+re-thread it is exactly what the chain exists to forbid. The ledger
+tail is verified against the published identity before anything signs
 on top of it.
 
 ## Healed links

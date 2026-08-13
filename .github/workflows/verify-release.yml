@@ -624,6 +624,46 @@ jobs:
             exit 1
           fi
 
+          # The release decision (#349 S1): the commit point signed a
+          # release-decision/v1 claim over the release SBOM naming every
+          # proof and its conclusion. Verify it here — under publish.yml's
+          # identity, over the published SBOM asset's bytes — and require
+          # conclusion OPEN for this tag, so the VSA's inputAttestations
+          # carries cryptographic evidence that publication happened
+          # downstream of a decision that opened. A release with no
+          # verifiable decision is refused: that absence is exactly the
+          # v0.20.0 world this predicate exists to make unrepresentable.
+          mkdir -p "${WORKDIR}/sbom-assets"
+          gh release download "v${UNTRUSTED_VERSION}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "*.spdx.json" --dir "${WORKDIR}/sbom-assets"
+          sfile=$(find "${WORKDIR}/sbom-assets" -type f -name "*.spdx.json" | sort | head -1)
+          if [[ -z "${sfile}" ]]; then
+            echo "::error::the release has no SBOM asset — the decision has no subject to verify against"
+            exit 1
+          fi
+          sdigest=$(sha256sum "${sfile}" | cut -d' ' -f1)
+          decision_type="https://monumental-archive.github.io/attestations/release-decision/v1"
+          decision_workflow="monumental-archive/.github/.github/workflows/publish.yml"
+          gh attestation verify "${sfile}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${decision_workflow}" \
+            --deny-self-hosted-runners \
+            --predicate-type "${decision_type}" \
+            --format json > "${WORKDIR}/decision.json"
+          jq -e --arg tag "v${UNTRUSTED_VERSION}" \
+            '.[0].verificationResult.statement.predicate
+             | .conclusion == "OPEN" and .tag == $tag' \
+            "${WORKDIR}/decision.json" > /dev/null || {
+            echo "::error::the release decision does not name conclusion OPEN for this tag — refusing the verdict"
+            exit 1
+          }
+          dsha=$(sha256sum "${WORKDIR}/decision.json" | cut -d' ' -f1)
+          jq -c --arg uri "https://api.github.com/repos/${GITHUB_REPOSITORY}/attestations/sha256:${sdigest}" \
+            --arg sha "${dsha}" \
+            '. + [{uri: $uri, digest: {sha256: $sha}}]' "${atts}" \
+            > "${atts}.tmp" && mv "${atts}.tmp" "${atts}"
+          echo "::notice::release decision verified: OPEN for v${UNTRUSTED_VERSION}"
+
           # jq --arg/--slurpfile does all quoting: nothing caller-
           # controlled is spliced into JSON by hand. Every field below is
           # an output of the checks above; this line is unreachable if

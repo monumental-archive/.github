@@ -20,11 +20,15 @@ now".
 
 ## Producer requirements
 
+<!-- tracks:build:begin -->
+
 | Requirement | Discharged by |
 | --- | --- |
 | Choose an appropriate build platform | GitHub Actions plus the org's signer split — a platform whose control plane the org extended rather than trusted blind; capability assessed in [`build-assessment.md`](build-assessment.md) |
 | Follow a consistent build process | The orchestrator (`publish.yml`): callers declare inputs, never steps; the step order is fixed in the canon and unrearrangeable by a caller; every `uses:` SHA-pinned |
 | Distribute provenance | The attestation store (the same API `gh attestation verify` reads) plus the evidence bundle attached to every release; consumer recipes in [`runbook.md`](runbook.md) |
+
+<!-- tracks:build:end -->
 
 ## Build platform requirements, per level
 

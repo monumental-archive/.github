@@ -133,10 +133,16 @@ evidences ruleset enforcement at attestation time, not the provenance
 of any particular tag object — links are immutable and tags can be
 created later; (3) the sharp edge is break-glass: a hand-minted tag
 leaves no cryptographic trace at all, so the manual ledger line in
-`continuity.md` is load-bearing evidence, not bookkeeping. The close is
-gitsign at the mint (#349 S4) — keyless, the same Sigstore identity as
-everything else — deferred because it touches the irreversible step and
-takes a full lab cycle, not because it is optional.
+`continuity.md` is load-bearing evidence, not bookkeeping. The close —
+gitsign at the mint (#349 S4), keyless, the same Sigstore identity as
+everything else — is BUILT (`tag-release.sh`, the `id-token` grant with
+its capability-boundary marker in `release.yml`, `audit:release-tags`
+over the whole population) and awaits its first lab-proven mint, at
+which point the repo's line in `security/tag-signing-epoch.txt` moves
+from `pending` to the first signed tag and the residual narrows to the
+pre-epoch tags permanently. Because it rewrites the release path's
+irreversible step, the lab cycle is the gate between built and
+production — the same sequence as every release-machinery change.
 
 ## Root of trust
 

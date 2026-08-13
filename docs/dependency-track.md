@@ -7,12 +7,16 @@ the target and the declined doors were decided there and in #121/#122.
 
 ## The target: Level 2, by choice
 
+<!-- tracks:dependency:begin -->
+
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
 | L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`derive-vex.sh` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.20.0, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
+
+<!-- tracks:dependency:end -->
 
 No level demands vulnerability-free. L2 demands *known, decided, and
 written down* — the workflow the org already practised informally, now

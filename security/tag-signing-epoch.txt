@@ -1,0 +1,13 @@
+# First signed release tag per repo (#349 S4): "repo tag", or
+# "repo pending" while no signed tag exists yet. Tags created before a
+# repo's epoch predate the gitsign mint and are legacy by construction —
+# immutable (org-default-tag) but unsigned, exactly the residual
+# source-assessment.md records; audit:release-tags requires a verifying
+# signature only from the epoch tag onward, and requires the App tagger
+# and a source link on the target commit for every v* tag regardless.
+# The lab proves the first signed mint, then this file pins it — the
+# same lab-first sequence as every release-machinery change. A repo
+# releasing with no line here is a red: an unlisted repo is a tag
+# surface nobody is watching.
+.github pending
+release-lab pending

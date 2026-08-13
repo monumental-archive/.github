@@ -1,0 +1,98 @@
+# Per-track requirement mappings AS DATA (#349 S2): one row per
+# upstream requirement, rendered into the track docs by fix:tracks and
+# guarded by lint:tracks. The source rows carry the spec's own
+# requirement names and first levels -- audit:spec-drift compares them
+# against the spec's live tick matrix, the check that would have caught
+# finding 4 (a requirement absent from the mapping) mechanically.
+
+[[source]]
+requirement = "Choose an appropriate SCS"
+level = "1"
+enforcement = "GitHub"
+
+[[source]]
+requirement = "Repository IDs / immutable revision IDs / human-readable diffs"
+level = "1"
+enforcement = "GitHub (git SHAs, PR diffs)"
+
+[[source]]
+requirement = "Source VSAs"
+level = "1"
+enforcement = "**Emitted** per push, all three repos (#207)"
+
+[[source]]
+requirement = "Access control + reliable history"
+level = "2"
+enforcement = "`org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list"
+
+[[source]]
+requirement = "History (SCS): every Named Reference change recorded — when, by whom, new revision ID"
+level = "2"
+enforcement = "Each chain link records the actor, `commitTime`, the revision and its parents, contemporaneously with the push (`source-attest` emit); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped"
+
+[[source]]
+requirement = "Tag immutability"
+level = "2"
+enforcement = "`org-default-tag` ruleset: update/move/delete blocked, all tags, all repos"
+
+[[source]]
+requirement = "Safe expunging process"
+level = "2"
+enforcement = "`docs/expunging.md`"
+
+[[source]]
+requirement = "Identity management"
+level = "2"
+enforcement = "GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change"
+
+[[source]]
+requirement = "Source provenance, contemporaneous"
+level = "2"
+enforcement = "**Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207)"
+
+[[source]]
+requirement = "Continuity"
+level = "2"
+enforcement = "Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md`"
+
+[[source]]
+requirement = "Continuous technical controls, documented"
+level = "3"
+enforcement = "This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint"
+
+[[source]]
+requirement = "Protected named references, org properties"
+level = "3"
+enforcement = "Rulesets as above; `ORG_SOURCE_GATED` emitted live in every source VSA since 2026-08-12 (#207)"
+
+[[build]]
+requirement = "Choose an appropriate build platform"
+discharged_by = "GitHub Actions plus the org's signer split — a platform whose control plane the org extended rather than trusted blind; capability assessed in [`build-assessment.md`](build-assessment.md)"
+
+[[build]]
+requirement = "Follow a consistent build process"
+discharged_by = "The orchestrator (`publish.yml`): callers declare inputs, never steps; the step order is fixed in the canon and unrearrangeable by a caller; every `uses:` SHA-pinned"
+
+[[build]]
+requirement = "Distribute provenance"
+discharged_by = "The attestation store (the same API `gh attestation verify` reads) plus the evidence bundle attached to every release; consumer recipes in [`runbook.md`](runbook.md)"
+
+[[dependency]]
+level = "L1"
+demands = "Inventory: know what you depend on"
+standing = "**Have** — lockfiles committed everywhere, per-release SBOMs on every release"
+
+[[dependency]]
+level = "L2"
+demands = "Known vulnerabilities triaged per release"
+standing = "**Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`derive-vex.sh` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.20.0, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see \"Where L2 is met by construction\""
+
+[[dependency]]
+level = "L3"
+demands = "Producer-controlled locations"
+standing = "**Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need"
+
+[[dependency]]
+level = "L4"
+demands = "Acceptable-risk policy over L3"
+standing = "**Declined (#122)** — sequential on L3"

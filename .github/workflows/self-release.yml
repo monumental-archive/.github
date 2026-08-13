@@ -34,6 +34,10 @@ jobs:
       # release.yml authenticates git-cliff's GitHub API calls with the
       # caller's token, and `contents: read` is the whole grant that buys.
       contents: read
+      # Passed through to release.yml's tag job, where gitsign spends it
+      # on the keyless tag signature (#349 S4) — the callee's
+      # capability-boundary marker carries the argument.
+      id-token: write # gitsign's keyless tag signature (see above)
     uses: ./.github/workflows/release.yml
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
