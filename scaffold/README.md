@@ -10,10 +10,12 @@ footprint of the governance stack:
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
 - `.rumdl.toml` — markdown canon (MD013 exempts code blocks)
 - `ruff.toml` — the Python canon at `select = ["ALL"]` plus preview.
-  Copy it verbatim and keep `target-version` as it stands: the belt does
-  not pin Python, so scripts run on whatever `python3` a machine has, and
-  naming a higher target lets the pyupgrade rules rewrite code into
-  syntax an older interpreter cannot execute. `lint:python` fails the
+  Copy it verbatim. `target-version` must not name a newer Python than
+  the belt's `python` pin — the pyupgrade rules rewrite code into
+  whatever it names, and ruff cannot know what will run the result;
+  `lint:python-target` fails the gate on that drift. Targeting lower is
+  legal, for a repo supporting older interpreters than it develops on.
+  `lint:python` fails the
   gate if Python is tracked without a config — ruff's *default* selection
   is a few dozen rules out of ~900, so a missing config yields a green
   gate that checked almost nothing. Unlike `biome.json`, a nested copy is

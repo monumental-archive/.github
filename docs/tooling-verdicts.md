@@ -90,6 +90,36 @@ path it carries. Measured, not assumed:
   arrive unattended through an automerged bump, and this default is the
   one standing between a `pipx:` install and dependency confusion.
 
+**And the interpreter it was hiding.** uv does not only install packages;
+when the system Python is unsuitable it downloads one. Measured: this
+maintainer's Mac built reuse on a uv-fetched CPython 3.12.13 (macOS ships
+3.9.6, too old), while CI built the same reuse on whatever the runner
+shipped — two interpreters for one tool, neither pinned, neither in
+`mise.lock`, neither in any verdict. "No Python on the belt" was never
+true; there was simply no record of the Python that was there.
+
+`python = "3.14.6"` in `[tools]` plus `UV_NO_MANAGED_PYTHON` and
+`UV_PYTHON_DOWNLOADS = "never"` in `[env]` put it under the same two
+tools as everything else: mise pins and locks it, Renovate bumps it.
+Verified by inspecting the tool venv's `pyvenv.cfg` before and after —
+`home` moves from uv's own tree to the pinned install. The earlier
+objection that this was "a whole runtime for one script" rested on the
+belief that the belt had no interpreter, which was false: the runtime was
+already being fetched, invisibly. Precompiled, so a cold install is about
+four seconds rather than the minutes a source build would cost — and the
+lock coverage turned out to be **full**, not the reduced `core:` tier
+mise's own backend table implies: per-platform checksum, URL and
+`provenance = "github-attestations"`, the same entry an aqua tool gets.
+The interpreter is now the best-attested thing in this whole path.
+
+One consequence worth stating because it looks like a coincidence: with
+the interpreter pinned, `python3` inside a belt task now resolves to it
+on every machine, which turned ruff's `target-version` from a defensive
+floor into a fact. It rose from `py39` to `py314` at zero finding cost,
+and `lint:python-target` now fails the gate if the config ever claims a
+newer Python than the pin — the one direction that produces code the
+runner cannot execute.
+
 Defaults left alone, having been checked rather than assumed:
 `keyring-provider` is already `disabled`, `no-index` false with
 `allow-insecure-host` empty, and `resolution = "highest"` stays — the

@@ -6,16 +6,23 @@
 # pre-1.0 and its minor versions may change lint results by design.
 preview = true
 
-# The oldest interpreter this code must run on, not an aspiration. The
-# belt does not pin Python (a whole runtime for one script), so
-# security/workflow-permissions.py runs on whatever `python3` a machine
-# has — and macOS still ships 3.9.6, which is what this repo's own
-# maintainer machine resolves. Naming a higher target would let the
-# pyupgrade rules rewrite the script into syntax that machine cannot
-# execute. Measured at standup: identical findings from py39 to py314 and
-# zero UP diagnostics at any of them, so the conservative floor costs
-# nothing today and is insurance against the first rewrite that would.
-target-version = "py39"
+# The interpreter this code actually runs on, which is now a fact the belt
+# decides rather than a floor guessed from whatever a machine ships.
+#
+# This started as "py39", reasoned from the belt not pinning Python: the
+# script ran on ambient `python3`, and macOS ships 3.9.6. That premise
+# stopped being true when `python` joined the belt (#82) — mise pins the
+# interpreter, `activate_aggressive` puts it first on PATH, and every
+# caller of this script runs inside a mise task, so `python3` resolves to
+# the pinned build on every machine and in CI alike.
+#
+# `lint:python-target` guards the one direction that breaks things: this
+# may not claim a NEWER Python than the pinned interpreter, because the
+# pyupgrade rules rewrite code into whatever it names, and ruff has no
+# idea what will run the result. Targeting lower stays legal — a repo
+# publishing a library deliberately supports older interpreters than it
+# develops on.
+target-version = "py314"
 
 [lint]
 select = ["ALL"]

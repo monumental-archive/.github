@@ -75,6 +75,20 @@ UV_EXCLUDE_NEWER = "7 days"
 # first index that has the name; the alternatives keep looking and can be
 # convinced to prefer an attacker's copy from elsewhere.
 UV_INDEX_STRATEGY = "first-index"
+# uv may not choose or fetch an interpreter of its own. Without these it
+# does exactly that, silently: a `pipx:` install on a machine whose system
+# Python is too old makes uv download CPython into ~/.local/share/uv/python
+# and build the tool venv there — pinned nowhere, absent from mise.lock,
+# recorded in no verdict. The measured consequence was two different
+# interpreters for one tool: this maintainer's Mac built reuse on uv's
+# downloaded 3.12.13 (macOS ships 3.9.6, too old for it) while CI built the
+# same reuse on whatever the runner happened to ship. That is precisely the
+# "CI and a laptop run different binaries while both look correct" failure
+# activate_aggressive exists to prevent, one layer further down. With these
+# set, uv builds on the interpreter pinned below — verified by inspecting
+# the tool venv's pyvenv.cfg before and after.
+UV_NO_MANAGED_PYTHON = "1"
+UV_PYTHON_DOWNLOADS = "never"
 
 [task_config]
 # Tasks are written in bash (guards use [[ ]] and <<<); the default task
@@ -99,7 +113,8 @@ rumdl = "0.2.52"
 lychee = "0.24.2"
 # Python lint + format in one binary (#82), at `select = ["ALL"]`. Ruff
 # is a standalone Rust binary: it needs no Python interpreter to run, so
-# it lints Python without Python joining the belt. It also closes a real
+# it lints Python whether or not one is pinned. (One now is, but for uv's
+# sake, not ruff's.) It also closes a real
 # hole — security/workflow-permissions.py is the one tracked file in a
 # language no belt tool covered, and it computes the caller/callee
 # permissions join that guards the Build L3 boundary.
@@ -154,6 +169,16 @@ ruff = "0.16.1"
 # backend rides aqua-backed uv (checksummed) — a documented exception in
 # the cargo: class (tooling-verdicts.md).
 "aqua:astral-sh/uv" = "0.12.3"
+# The interpreter every `pipx:` tool venv is built on, pinned here so mise
+# locks it and Renovate bumps it like any other tool rather than uv
+# choosing one per machine (#82). This is not a new cost: a Python was
+# already being fetched, just invisibly and unpinned — the earlier "a whole
+# runtime for one script" objection rested on the belief that the belt
+# had no interpreter, which was false. Precompiled, so it installs in
+# about four seconds rather than the minutes a source build would take.
+# 3.14.6 rather than 3.14.7: the standalone release carrying .7 is six days
+# old and the seven-day floor refuses it.
+python = "3.14.6"
 "pipx:reuse" = { version = "6.2.0", uvx_args = "--with charset-normalizer", pipx_args = "--preinstall charset-normalizer" }
 # Source-track chain verification (audit:source-vsa) and stranger
 # verification of chain links generally — the same binary the emitter's
@@ -305,6 +330,39 @@ if ! git ls-files --error-unmatch "ruff.toml" > /dev/null 2>&1 \
 fi
 xargs ruff check <<<"${files}"
 xargs ruff format --check <<<"${files}"
+'''
+
+[tasks."lint:python-target"]
+description = "ruff's target-version does not claim a newer Python than the pinned interpreter"
+dir = "{{cwd}}"
+# The hazard is one-directional, so the check is too. Ruff's pyupgrade
+# rules rewrite code INTO the syntax of `target-version`; if that names a
+# newer Python than the interpreter the belt pins, the fixer produces a
+# script the runner cannot execute — and it does so on a green gate,
+# because ruff has no idea which interpreter will run the result.
+#
+# Targeting LOWER than the pin is allowed and stays allowed: a repo
+# publishing a library deliberately supports interpreters older than the
+# one it develops on. Only "claims newer than it can run" is a defect.
+run = '''
+files=$(git ls-files "*.py" "*.pyi")
+[[ -n "${files}" ]] || { echo "lint:python-target: no Python tracked, skipped"; exit 0; }
+cfg=$(git ls-files "ruff.toml" ".ruff.toml" | head -1)
+[[ -n "${cfg}" ]] || { echo "lint:python-target: no ruff.toml, skipped (lint:python chases it)"; exit 0; }
+target=$(grep -oE '^target-version[[:space:]]*=[[:space:]]*"py[0-9]+"' "${cfg}" | grep -oE 'py[0-9]+')
+[[ -n "${target}" ]] || { echo "lint:python-target: no target-version set, skipped"; exit 0; }
+actual=$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')
+# Numeric compare on the digits: py39 < py310 lexically is false, which is
+# exactly the trap this check exists to avoid falling into itself.
+t=${target#py}; a=${actual#py}
+tmaj=${t%${t#?}}; tmin=${t#?}
+amaj=${a%${a#?}}; amin=${a#?}
+if (( tmaj > amaj || (tmaj == amaj && 10#${tmin} > 10#${amin}) )); then
+  echo "lint:python-target: ${cfg} targets ${target} but the pinned interpreter is ${actual}" >&2
+  echo "  ruff's pyupgrade rules would rewrite this code into syntax ${actual} cannot execute" >&2
+  exit 1
+fi
+echo "lint:python-target: ${target} <= ${actual}, ok"
 '''
 
 [tasks."fix:python"]
