@@ -8,6 +8,11 @@
 # no work can fix. A repo with a Scorecard shield and no line here is a
 # failure: an unfloored badge is a badge nobody is watching.
 #
+# Two more structural caps, measured 2026-08-13 (#316 addendum D):
+# Pinned-Dependencies is dented by the $/.github/actions/canon
+# self-reference (#165), which Scorecard parses as an unpinned action;
+# Maintained scores 0 for a repo's first 90 days and self-heals.
+#
 # Watermarks, 2026-08-12: the canon read 7 at first probe and 6.9 an
 # hour later after the day's thirty-PR churn recomputed — a tenth
 # inside the structurally-capped checks, so the floor takes the lower

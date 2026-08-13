@@ -54,6 +54,17 @@ a fresh session **started in the target repo's checkout**.
       repo-specific holes
       (`allowed_scopes` in committed.toml, real tools/tasks in
       mise.toml).
+- [ ] **Scorecard preflight** (the policy #83 executes against,
+      formerly #88's ledger): run
+      `scorecard --repo=github.com/<owner>/<repo>` locally before AND
+      after transfer — no repo transfers below the documented ceiling
+      (structural caps recorded there: Packaging −1, Pinned-Deps
+      dented by the `$/` self-reference, `Maintained` time-capped for
+      90 days) — and record the measured score as the repo's row in
+      `security/scorecard-floors.txt`. Not optional diligence: the
+      first `fix:badges` render adds the Scorecard shield, and the
+      Monday audit fails an unfloored shield, so a skipped preflight
+      is a red cron, not a quiet gap.
 - [ ] **Pick and land the licence** (#214): `LICENSE` at the root,
       `LICENSES/<SPDX-ID>.txt`, the expression in `REUSE.toml`. The
       choice is per-repo (Rust convention `MIT OR Apache-2.0`; the
