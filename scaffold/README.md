@@ -9,6 +9,22 @@ footprint of the governance stack:
 - `committed.toml` — conventional-commit canon (add repo `allowed_scopes`)
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
 - `.rumdl.toml` — markdown canon (MD013 exempts code blocks)
+- `biome.json.stub` — the JS/TS/JSON canon at `preset: "all"`, copied to
+  the root as `biome.json`. The `.stub` suffix is load-bearing, exactly
+  as it is for `REUSE.toml.stub`: biome discovers configs by walking the
+  tree regardless of the paths it is given, and a second file named
+  `biome.json` anywhere below the root is a *nested root configuration*
+  that hard-fails every run. Copy it verbatim; the rule set is org
+  policy, not a repo choice, and
+  `lint:biome` fails the gate if biome-parseable files are tracked
+  without it (biome resolves its config from the repo, so a missing file
+  silently downgrades the repo to biome's own defaults). **A repo with a
+  framework adds its `domains` block** — `react`, `next`, `vue`, `test`,
+  `project`, `types` and the rest, each at `"all"`. Domains are the one
+  repo-shaped part: react and solid ship deliberately conflicting rules,
+  so they cannot all be enabled at once, and naming the ones a repo
+  actually uses is a statement of fact about the repo rather than a
+  choice about how strict to be.
 
 **Pick the licence — this is a step, not an afterthought (#214).** The
 choice is per-repo (Rust repos conventionally dual-license

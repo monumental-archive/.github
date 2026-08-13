@@ -32,6 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Line-coverage floor in the gate (`coverage:check`), codecov badge feed off-gate |
 | cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -45,6 +46,81 @@ the org's own tracked scripts, offline, with no network surface.
 *Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
+
+**biome at `preset: "all"`, and the two rules that are not** (#82).
+Adopted as the org's JS/TS/JSON layer: one aqua-backed binary, checksums
+and GitHub attestations on all seven lock platforms, rules compiled in,
+config read as data. Pinned to the explicit `aqua:` backend rather than
+the `biome` short name, which resolves to aqua **and** npm — an npm
+resolution records version only in the lock, no checksum. All 525 rules
+across all eight groups are on, nursery included: nursery is outside
+semver by Biome's own statement, but a pinned version bumped through
+Renovate turns that into a red bump PR, never a surprise in `main`.
+
+Two deliberate departures, both settled against evidence rather than
+taste:
+
+- **`assist/source/useSortedKeys` is off.** It does not fire at Biome's
+  own default assist level — `preset: "all"` is what turns it on — and
+  every peer tool defaults the same way: ESLint's `sort-keys` is off and
+  frozen, Prettier preserves authored order and needs a third-party
+  plugin to sort. The ecosystem's convergent answer for hand-authored
+  config is `sort-package-json`'s: keep the conventional lead keys,
+  sort the bulk underneath. Alphabetising top-to-bottom here put `name`
+  last in the workflow-template metadata and buried `extends` — the line
+  that says what a Renovate config inherits — under a twenty-line
+  `customManagers` block. The fix is safe and automatic, so this is not
+  a migration-cost objection; it is that four independent tools ship the
+  behaviour off. *Reopen:* a repo whose JSON is generated rather than
+  authored, where stable key placement beats reading order.
+- **`indentStyle` is space/2, not Biome's tab default.** Tabs cannot be
+  uniform here: YAML forbids tab indentation by spec, which is 49 of the
+  canon's 153 tracked files. Space is the only setting that can hold
+  across every format, and `lint:shell` already overrides shfmt's own
+  tab default to 2-space for the same reason. Note this is practice
+  plus two tool settings, **not a written convention** — the org has no
+  stated indentation rule, and `.editorconfig` is where one would live
+  if editorconfig-checker lands.
+
+One trap, found by running the standup rather than reading about it: the
+scaffold copy must be `scaffold/biome.json.stub`, never `biome.json`.
+Biome discovers configuration by walking the tree independently of the
+paths it is handed, so a second `biome.json` below the root is a *nested
+root configuration* and every invocation hard-fails — including ones
+that never touch `scaffold/`. Identical in shape to the REUSE stub that
+"parsed as a real nested REUSE.toml" in #316, and the same `.stub`
+suffix is the same cure.
+
+**biome cannot be proven in this repository**, and that is a first. Every
+other belt tool is verified here before anywhere else; the canon has 22
+JSON files and no JavaScript, so `preset: "all"` finds **zero** lint
+violations here by construction — the run that adopted it exercised the
+formatter and one assist action, nothing more. Its linter is exercised
+first in a consumer. Recorded rather than glossed: a green canon gate is
+not evidence about biome's rule set.
+
+**eslint, typescript-eslint and knip stay repo-side** — not a rejection,
+a placement. A flat eslint config is a JS module that imports its plugins
+from the repo's own `node_modules`, and typescript-eslint's type-aware
+rules need the repo's TypeScript program; no central pin can supply
+either, and eslint's peerDependency contract would make a canon bump a
+simultaneous breaking change to every JS repo. `lint:eslint` and
+`lint:knip` belong in the belt as *tasks* on the `lint:fuzz-build`
+pattern — canon-written, skip-clean, assert-with-remedy — while the
+binaries stay build inputs. Biome and eslint are complements, not rivals:
+biome does have type-aware rules since v2 (the `types` and `project`
+domains, behind its Scanner), but far fewer than typescript-eslint, and
+none of eslint's plugin ecosystem. Configure both, switch the overlaps
+off on one side. *Reopen:* nothing pending.
+
+**prettier** — skipped, and recorded because its absence is otherwise
+conspicuous. npm-only in the registry (`npm:prettier`, no aqua package),
+so it would record version-only in the lock and re-admit the npm backend
+one line after markdownlint-cli2 is retired for exactly that. It also
+only formats, so it would need a linter beside it in any case, and biome
+exists to replace it. The one real gap it would have filled: nothing on
+the belt formats YAML — yamllint checks and does not rewrite. *Reopen:*
+an aqua-backed prettier, or YAML formatting becoming worth the backend.
 
 **Renovate `customManagers`: preset and repo arrays concatenate, never
 replace** (#314). The open question that issue punted — whether a repo

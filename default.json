@@ -1,28 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": "Org-wide Renovate preset. Repos extend with: github>monumental-archive/.github#vX.Y.Z",
-  "extends": [
-    "config:best-practices",
-    ":dependencyDashboard"
-  ],
+  "extends": ["config:best-practices", ":dependencyDashboard"],
   "minimumReleaseAge": "7 days",
   "packageRules": [
     {
       "description": "Routine updates merge themselves once aged and green; majors always get a human.",
-      "matchUpdateTypes": [
-        "patch",
-        "minor",
-        "pin",
-        "digest",
-        "pinDigest"
-      ],
+      "matchUpdateTypes": ["patch", "minor", "pin", "digest", "pinDigest"],
       "automerge": true
     },
     {
       "description": "First-party skips the age gate, org-wide: it models third-party supply-chain risk, and applied to our own repos — gated by our own CI — it only guarantees every consumer runs week-stale first-party code (#133, the v0.16.1 VSA failure; the signer digest sat in the same queue). The chore(canon) scope is the other half of a two-config contract (#227): cliff.toml skips it, so a canon-pin bump never justifies a release — in the canon itself that ends the self-bump release loop, and in consumers it stops a lint-config update from burning a version number on an artifact that did not change. The age gate is only half the queue (#290 finding 4): prHourlyLimit/prConcurrentLimit are top-level-only, so Renovate's default throttle (2 PRs/hour) applies to first-party too, and on 2026-08-12 the canon bump AND the signer digest sat rate-limited 12+ hours behind thirty third-party PRs. prPriority puts first-party at the front of every queue slot, and groupName collapses the canon bump and signer digest into one PR consuming one slot — first-party effectively never queues, while the global throttle (worth keeping: the 7-day age gate releases third-party in bursts) stays untouched.",
-      "matchPackageNames": [
-        "monumental-archive/**"
-      ],
+      "matchPackageNames": ["monumental-archive/**"],
       "minimumReleaseAge": "0 days",
       "prPriority": 10,
       "groupName": "first-party canon",
@@ -34,9 +23,7 @@
     {
       "customType": "regex",
       "description": "lefthook remote hooks pin a canon tag; lefthook.yml has no native manager for the ref line (#133).",
-      "managerFilePatterns": [
-        "/(^|/)lefthook\\.yml$/"
-      ],
+      "managerFilePatterns": ["/(^|/)lefthook\\.yml$/"],
       "matchStrings": [
         "git_url: https://github\\.com/monumental-archive/\\.github\\n\\s*ref: (?<currentValue>v[0-9][\\w.+-]*)"
       ],
@@ -46,9 +33,7 @@
     {
       "customType": "regex",
       "description": "The shared-preset reference pins a canon tag; extends: has no native manager for the #tag suffix (#133).",
-      "managerFilePatterns": [
-        "/(^|/)renovate\\.json$/"
-      ],
+      "managerFilePatterns": ["/(^|/)renovate\\.json$/"],
       "matchStrings": [
         "github>monumental-archive/\\.github#(?<currentValue>v[0-9][\\w.+-]*)"
       ],

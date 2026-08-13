@@ -68,6 +68,17 @@ shfmt = "3.13.1"
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.52"
 lychee = "0.24.2"
+# The org's JS/TS/JSON layer (#82), at `preset: "all"` — 525 rules, every
+# group, nursery included. Written as the explicit aqua backend, never the
+# `biome` short name: that name resolves to aqua AND npm, and an npm
+# resolution records version only in the lock — no checksum, no
+# attestation. Biome rules org-wide where it and eslint overlap; eslint
+# and its plugin graph stay repo-side because a flat config imports its
+# plugins from the repo's own node_modules, which no central pin can
+# supply. Unlike every other belt tool this one cannot be proven here:
+# the canon has 22 JSON files and no JavaScript, so its linter is
+# exercised first in a consumer, not in this gate (docs/tooling-verdicts.md).
+"aqua:biomejs/biome" = "2.5.7"
 # Coverage ratchet (docs/runbook.md): repos commit a floor in
 # .coverage-floor and the canonical coverage:check enforces it in the
 # gate — deterministic (local run against a committed number), Rust-only
@@ -140,6 +151,19 @@ depends = [
 ]
 run = "echo 'ci: all gates green'"
 
+[tasks.fix]
+description = "Run every write-mode fixer (the fix:* siblings ci deliberately excludes)"
+dir = "{{cwd}}"
+# The counterpart to `ci`, and deliberately not reachable from it: `ci`
+# proves the tree is already right, this makes it right. Without an
+# aggregate the fixers were N separate commands to remember, so the ones
+# nobody remembered never ran. Same collection semantics as `lint:*`, and
+# the same caveat: mise's `*` matches within ONE colon group, so a repo's
+# `fix:web:types` would be silently uncollected — name fixers with a
+# single colon.
+depends = ["fix:*"]
+run = "echo 'fix: all fixers applied'"
+
 [tasks."hooks:install"]
 description = "Wire this clone's git hooks to lefthook (run once per clone)"
 dir = "{{cwd}}"
@@ -175,6 +199,50 @@ run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then x
 description = "Auto-fix markdown (rumdl)"
 dir = "{{cwd}}"
 run = 'git ls-files "*.md" "*.markdown" | xargs rumdl check --fix'
+
+# The JS/TS/JSON layer (#82). Extension list is the set biome parses
+# WITHOUT an experimental flag: html/vue/svelte/astro need
+# `html.experimentalFullSupportEnabled` and are deliberately out until a
+# repo has them — with `files.ignoreUnknown` left at its false default, an
+# unexpected format is a loud diagnostic rather than a silent pass.
+# `biome ci` is the no-write CI command; --error-on-warnings means an
+# info/warn rule cannot sit in the tree unnoticed, which is what
+# `preset: "all"` is for.
+[tasks."lint:biome"]
+description = "JS/TS/JSON lint + format check + assist (biome, preset: all)"
+dir = "{{cwd}}"
+# A tracked biome.json is REQUIRED once there is anything to check, and is
+# not a style preference: biome reads its config from the repo, so a repo
+# without one silently falls back to biome's own `recommended` defaults —
+# a fraction of the 525 rules — and the gate goes green having enforced
+# something weaker than the org's policy. The belt cannot supply the file
+# centrally (there is no path from the conf.d layer into biome's config
+# resolution), so the belt asserts it instead. Copy scaffold/biome.json.
+run = '''
+files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
+  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
+[[ -n "${files}" ]] || { echo "lint:biome: nothing biome parses is tracked, skipped"; exit 0; }
+if ! git ls-files --error-unmatch "biome.json" > /dev/null 2>&1 \
+  && ! git ls-files --error-unmatch "biome.jsonc" > /dev/null 2>&1; then
+  echo "lint:biome: biome-parseable files are tracked but no biome.json is — copy scaffold/biome.json (#82)" >&2
+  echo "  without it biome silently runs its own recommended defaults, not the org's preset: all" >&2
+  exit 1
+fi
+xargs biome ci --error-on-warnings <<<"${files}"
+'''
+
+[tasks."fix:biome"]
+description = "Rewrite JS/TS/JSON to canonical format and apply safe fixes (biome)"
+dir = "{{cwd}}"
+# Safe fixes only: --unsafe is never wired into a belt task, because an
+# unsafe fix may change behaviour and a fixer must be runnable without
+# reading its diff first.
+run = '''
+files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
+  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
+[[ -n "${files}" ]] || { echo "fix:biome: nothing biome parses is tracked, skipped"; exit 0; }
+xargs biome check --write <<<"${files}"
+'''
 
 [tasks."lint:shell"]
 description = "Shell format check (shfmt: 2-space, simplify, strict layout)"
@@ -2812,7 +2880,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl cargo-deny osv-scanner vexctl reuse; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome cargo-deny osv-scanner vexctl reuse; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
