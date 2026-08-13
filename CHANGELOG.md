@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.24.1](https://github.com/monumental-archive/.github/compare/v1.24.0...v1.24.1) - 2026-08-13
+
+### Documentation
+
+- canon releases first and cheaply; the lab is the full-width proof ([#369](https://github.com/monumental-archive/.github/pull/369))
+
+### Fixed
+
+- drop the decision subject check that refused a correct verdict ([#367](https://github.com/monumental-archive/.github/pull/367))
+
 ## [1.24.0](https://github.com/monumental-archive/.github/compare/v1.23.2...v1.24.0) - 2026-08-13
 
 ### Added
