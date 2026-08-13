@@ -1060,14 +1060,25 @@ while read -r repo; do
         wfr="${wfp%%/*}"
         wfn="${wfp##*/workflows/}"
         wfn="${wfn%/badge.svg}"
-        conc=$(gh api "repos/monumental-archive/${wfr}/actions/workflows/${wfn}/runs?per_page=1&status=completed" \
+        # A badge.svg with no ?branch= renders the DEFAULT branch's
+        # status, so the leg must ask the same question: an unfiltered
+        # run query answers "newest run on any branch", which makes a
+        # red PR-branch run read as a lying shield while the shield is
+        # honestly green (observed on signer during #354, latent since
+        # #322). Default branch read from the API, never assumed main.
+        wfb=$(gh api "repos/monumental-archive/${wfr}" --jq '.default_branch // empty' 2> /dev/null || true)
+        if [[ -z "${wfb}" ]]; then
+          failed="${failed} ${repo}(workflow-shield: could not read ${wfr}'s default branch)"
+          continue
+        fi
+        conc=$(gh api "repos/monumental-archive/${wfr}/actions/workflows/${wfn}/runs?per_page=1&status=completed&branch=${wfb}" \
           --jq '.workflow_runs[0].conclusion // empty' 2> /dev/null || true)
         if [[ -z "${conc}" ]]; then
-          failed="${failed} ${repo}(workflow-shield: ${wfn} has no completed runs — a status badge over nothing)"
+          failed="${failed} ${repo}(workflow-shield: ${wfn} has no completed runs on ${wfb} — a status badge over nothing)"
         elif [[ "${conc}" != "success" ]]; then
-          failed="${failed} ${repo}(workflow-shield: ${wfn} latest completed run is ${conc})"
+          failed="${failed} ${repo}(workflow-shield: ${wfn} latest completed run on ${wfb} is ${conc})"
         else
-          note "${repo}: workflow ${wfn} green"
+          note "${repo}: workflow ${wfn} green on ${wfb}"
         fi
         ;;
       https://img.shields.io/badge/fair--software.eu-*)

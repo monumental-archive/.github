@@ -9,5 +9,5 @@
 # same lab-first sequence as every release-machinery change. A repo
 # releasing with no line here is a red: an unlisted repo is a tag
 # surface nobody is watching.
-.github pending
+.github v1.23.1
 release-lab pending
