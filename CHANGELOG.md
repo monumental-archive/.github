@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.25.0](https://github.com/monumental-archive/.github/compare/v1.24.1...v1.25.0) - 2026-08-13
+
+### Added
+
+- check a consumer's caller grants in its own gate ([#372](https://github.com/monumental-archive/.github/pull/372))
+
 ## [1.24.1](https://github.com/monumental-archive/.github/compare/v1.24.0...v1.24.1) - 2026-08-13
 
 ### Documentation
