@@ -30,13 +30,17 @@
 # every build workflow, the verifier and the attach step atomically. That
 # property is why there is no self-referential SHA to bootstrap.
 #
-# capability-boundary: the `sign` job below declares `id-token: write`,
-# but this file runs no steps of its own — every job here is a `uses:`.
-# The grant exists solely to be passed down to `signer`, which is the only
-# place it is spent, and no job in this file that runs caller code holds
-# it: `build` gets `contents: read` and nothing more. The belt lint is
-# file-scoped rather than job-scoped, so this exception is written down
-# rather than assumed.
+# capability-boundary: several jobs here declare `id-token: write` — the
+# `sign*` jobs, the `verify*`/`vsa*` jobs, and `commit-point`. None of
+# them runs caller-supplied code. The sign and verdict jobs are `uses:`
+# of canon workflows (the grant is passed down to `signer`, which is
+# where it is spent); `commit-point` is defined here with steps that
+# judge other jobs' results and carries its own marker at the job. The
+# jobs that DO run caller-supplied build steps are every `build*` and
+# `repro-build*` job, and they are granted `contents: read` (plus
+# `packages: write` for the image classes) and never `id-token: write`.
+# The belt lint is file-scoped rather than job-scoped, so this exception
+# is written down rather than assumed.
 #
 # `uses:` accepts no expressions — GitHub's context-availability table lists
 # no contexts for `jobs.<job_id>.uses` — so classes are dispatched by an

@@ -6,6 +6,13 @@
 # is missing: that is a regression, and the audit staying red is the
 # point.
 #
+# In particular, do NOT add a release that went public and then lost its
+# verdict to a failed publish run. That is the burned-release state, and
+# audit:attestations already reports it WITHOUT an entry here, derived
+# from the tag's own run history (#378). Adding it by hand would convert
+# a derived fact into an asserted one and hide the next real regression:
+# a verdict missing from a release that published cleanly must stay red.
+#
 # VSA machinery landed in the lab at v0.17.0; earlier releases predate
 # the verdict.
 release-lab@v0.16.1(attestations-vsa-npm.intoto.jsonl)

@@ -541,7 +541,12 @@ dir = "{{cwd}}"
 # VEX documents are deliberately not asserted: statements exist only
 # when decisions do. Releases predating the canon machinery (no
 # publish.yml at the tag) are reported, never failed — the obligation
-# starts when the machinery does.
+# starts when the machinery does. Three report-not-fail categories exist
+# and they are not interchangeable: `legacy` (no machinery at the tag),
+# written-down `debt` (immutable releases that shipped before an
+# obligation existed, asserted by hand in security/attestation-debt.txt),
+# and `burned` (#378 — a verdict absent from a release whose publish run
+# failed, DERIVED from run history and never assertable by hand).
 run = '''
 set -euo pipefail
 org="monumental-archive"
@@ -713,6 +718,41 @@ if [[ -f security/attestation-debt.txt ]]; then
   missing="${kept}"
   [[ -n "${debt}" ]] && echo "audit:attestations: written-down debt (security/attestation-debt.txt):${debt}"
 fi
+# The burned-release category (#378): a verdict absent from a release
+# whose publish run FAILED is the record of a run that died after
+# `attach` made the release public but before the verdict legs ran — not
+# an evidence gap. The VSA is not level-bearing on the Build track (its
+# requirements name provenance and never a VSA; contrast the Source
+# track, where the VSA is constitutive), the release is immutable, and
+# verify-release.yml is workflow_call-only, so there is nothing to
+# re-run. What keeps this from being a mute button is that it is NARROW
+# and DERIVED: it covers only `(vsa:` gaps — a missing SBOM, checksum or
+# class bundle on the same tag still reddens — and only where the tag's
+# own run history shows a failure, which a human cannot assert the way a
+# line can be added to attestation-debt.txt. A verdict missing from a
+# release that published CLEANLY is a real regression and stays red.
+vsa_tags=$(for m in ${missing}; do
+  [[ "${m}" == *"(vsa:"* ]] && printf "%s\n" "${m%%(*}"
+done | sort -u) || true
+burned_tags=""
+while IFS= read -r rt; do
+  [[ -n "${rt}" ]] || continue
+  n=$(gh api "repos/${org}/${rt%%@*}/actions/runs?branch=${rt#*@}&per_page=100" \
+    --jq '[.workflow_runs[] | select(.conclusion == "failure")] | length' 2> /dev/null) || n=0
+  [[ "${n:-0}" -gt 0 ]] && burned_tags="${burned_tags} ${rt}"
+done <<< "${vsa_tags}"
+burned=""
+kept=""
+for m in ${missing}; do
+  rt="${m%%(*}"
+  if [[ "${m}" == *"(vsa:"* && " ${burned_tags} " == *" ${rt} "* ]]; then
+    burned="${burned} ${m}"
+  else
+    kept="${kept} ${m}"
+  fi
+done
+missing="${kept}"
+[[ -n "${burned}" ]] && echo "audit:attestations: verdict absent, publish run failed — burned release, reported not failed (#378):${burned}"
 if [[ -n "${legacy}" ]]; then
   echo "audit:attestations: predate the machinery (reported, not failed):${legacy}"
 fi
