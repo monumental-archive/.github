@@ -30,6 +30,19 @@ honestly blocked on.
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
 
+**shellcheck, retained despite the abandonment flag** (#290 finding 6).
+Renovate's `abandonments:recommended` sweep flags shellcheck (last
+release 2025-08-04) as past the abandonment threshold. Verdict:
+retained, as a written exception rather than a silent one. shellcheck
+is mature and feature-complete — a slow release cadence is its normal,
+not its death — and it is the only engine actionlint can delegate
+`run:` script analysis to, so dropping it would lower the belt's
+enforcement to add none back. The exposure is also small: it parses
+the org's own tracked scripts, offline, with no network surface.
+*Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
+actionlint growing or switching script engines, or a maintained fork
+becoming the community's canonical line.
+
 ## Skipped, with rationale and reopen trigger
 
 - **Allstar / Minder** — continuous org-policy enforcement services.

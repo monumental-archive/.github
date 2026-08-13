@@ -99,7 +99,7 @@ end to end before `signer` and `.github` founded their chains, and
 | Source provenance, contemporaneous | 2 | **Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207) |
 | Continuity | 2 | Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md` |
 | Continuous technical controls, documented | 3 | This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint |
-| Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` proven claimable in the lab pilot |
+| Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` emitted live in every source VSA since 2026-08-12 (#207) |
 
 ## The claims contract: the `ORG_SOURCE_` set, named once
 
@@ -107,9 +107,10 @@ The v1.2 namespace for org-defined control claims in source VSAs. The
 set is *all enforced controls*, enumerated from the live rulesets and
 the belt (read 2026-08-12), not curated. **These names are a public
 contract**: the moment a stranger's policy gates on one, a rename is a
-breaking change. They are frozen here ahead of any emission so the
-emitter, when it exists, implements this table rather than inventing
-names.
+breaking change. They were frozen here ahead of emission so the emitter
+would implement this table rather than invent names; the emitter has
+existed since 2026-08-12 (#207), and all eight properties emit live in
+every chain link.
 
 | Property | Enforcement | Meaning |
 | --- | --- | --- |

@@ -101,12 +101,19 @@ in [`tooling-verdicts.md`](tooling-verdicts.md), not watched.
 ## Build Environment: a section, not a page
 
 Formally **L0 at both layers, by attribution rather than effort**. The
-producer obligations of BuildEnv L1 are implemented — the runner image
-is a named, Renovate-rolled pin; pgrx base images are digest-pinned,
-org-attested (`base-attest.yml`) and verified fail-closed before any
-container runs. What would make those controls a *level* is a signed
-build-image provenance from the image producers, which they do not
-publish, and which building harder here cannot conjure. `base-attest.yml`
+**platform** obligations of BuildEnv L1 are all discharged — the runner
+image is a named, Renovate-rolled pin enforced by `lint:runner-pin`;
+pgrx base images are digest-pinned, org-attested (`base-attest.yml`)
+and verified fail-closed before any container runs. The **producer**
+obligations — generating Build L2+ provenance for the build images
+themselves and allowing its independent verification — are not ours to
+discharge and are unmet upstream, which is exactly why the row is L0:
+a signed build-image provenance from the image producers is what would
+make these controls a *level*, they do not publish one, and building
+harder here cannot conjure it. (#290 finding 1 corrected this
+paragraph, which previously called the discharged obligations the
+producer's — the one page whose job is to keep a claim and its
+refutation in the same place had them inverted.) `base-attest.yml`
 verifies the upstream (unsigned, Build L1) BuildKit provenance names
 the `docker-library` source the pin implies, and signs *that
 verification* under org identity (#212) — the strongest claim

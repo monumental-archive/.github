@@ -994,6 +994,24 @@ if ! git cat-file -e "${sha}^{commit}" 2> /dev/null; then
 fi
 drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
 if [[ -n "${drift}" ]]; then
+  # The post-release window (#290 finding 4, same shape as
+  # audit:canon-pins): a release commit cannot pin itself (#227), so
+  # right after a release the templates lawfully sit at the previous
+  # tag until Renovate's chore(canon) bump lands. Pin at exactly the
+  # previous release, latest tag under 24h old — notice, not red. All
+  # local: tags and their dates are in the clone.
+  pin_tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | head -1)
+  latest_tag=$(git tag --list "v[0-9]*" | sort -V | tail -1)
+  prev_tag=$(git tag --list "v[0-9]*" | sort -V | tail -2 | head -1)
+  if [[ -n "${pin_tag}" && -n "${prev_tag}" && "${pin_tag}" == "${prev_tag}" ]]; then
+    age=$(($(date -u +%s) - $(git log -1 --format=%ct "${latest_tag}")))
+    if [[ "${age}" -lt 86400 ]]; then
+      echo "audit:template-pins: post-release window — pin at ${pin_tag}, ${latest_tag} cut $((age / 3600))h ago"
+      echo "  the vN-1 state is structural (#227); Renovate's chore(canon)"
+      echo "  bump closes it. Red only past the 24h grace (#290)."
+      exit 0
+    fi
+  fi
   echo "audit:template-pins: pin ${sha:0:8} misses shipped canon changes:" >&2
   git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/ | sed "s/^/  /" >&2
   echo "  a repo standing up from the templates would not get these —" >&2
@@ -1013,11 +1031,29 @@ dir = "{{cwd}}"
 # bumpable (shape, offline); this compares each claimed version against
 # the canon's latest tag. Network-bound and time-dependent, so audit:*,
 # never the gate.
+#
+# THE POST-RELEASE WINDOW IS EXPECTED, NOT MALFUNCTION (#290 finding 4).
+# A commit cannot contain its own release SHA (#227), so every canon
+# release vN structurally ships self-references at vN-1, and consumers
+# sit at vN-1 until Renovate's chore(canon) bump lands — which cliff.toml
+# deliberately skips, so the bump never triggers a release of its own.
+# References exactly one release behind, within 24 hours of the latest
+# tag, are therefore the healthy steady state and report as a notice.
+# The 24-hour grace is a ceiling, not the expectation: with prPriority
+# and the first-party group (default.json) the bump lands in one bot
+# cycle plus CI, measured 10-30 minutes; the grace exists so a Monday
+# cron landing just after a Sunday release does not cry wolf. Anything
+# outside the window — more than one release behind, or one behind for
+# over a day — is the real alarm: Renovate paused, misconfigured or
+# dead, the v0.16.1 failure this audit exists to catch.
 run = '''
-latest=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
-  | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V | tail -1)
+tags=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
+  | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
+latest=$(tail -1 <<< "${tags}")
+prev=$(tail -2 <<< "${tags}" | head -1)
 [[ -n "${latest}" ]] || { echo "audit:canon-pins: canon has no tags, skipped"; exit 0; }
 stale=""
+nonprev=0
 found=0
 claims=$(git ls-files "*.yml" "*.yaml" | while IFS= read -r f; do
   grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
@@ -1035,13 +1071,34 @@ while IFS= read -r claim; do
   [[ -n "${claim}" ]] || continue
   found=$((found + 1))
   v="${claim##*:}"
-  [[ "${v}" == "${latest}" ]] || stale="${stale} ${claim}"
+  if [[ "${v}" != "${latest}" ]]; then
+    stale="${stale} ${claim}"
+    [[ "${v}" == "${prev}" && -n "${prev}" ]] || nonprev=1
+  fi
 done <<< "${claims}"
 [[ ${found} -gt 0 ]] || { echo "audit:canon-pins: no canon references, skipped"; exit 0; }
 if [[ -n "${stale}" ]]; then
+  # Exactly one release behind: possibly the expected window. Age the
+  # latest tag via the API (public repo; unauthenticated works) — the
+  # date arithmetic lives in jq because ISO parsing in bash is not
+  # portable between GNU and BSD date.
+  if [[ ${nonprev} -eq 0 ]]; then
+    age=$(gh api "repos/monumental-archive/.github/commits/${latest}" \
+      --jq '((now - (.commit.committer.date | fromdateiso8601)) | floor)' \
+      2> /dev/null || true)
+    if [[ "${age}" =~ ^[0-9]+$ && "${age}" -lt 86400 ]]; then
+      echo "audit:canon-pins: post-release window — references at ${prev}, canon ${latest} cut $((age / 3600))h ago"
+      echo "  the vN-1 state is structural (#227): a commit cannot contain its"
+      echo "  own release SHA, and Renovate's chore(canon) bump closes it in"
+      echo "  one bot cycle. Red only past the 24h grace (#290)."
+      exit 0
+    fi
+  fi
   echo "audit:canon-pins: references behind canon ${latest}:${stale}" >&2
-  echo "  Renovate should have bumped these — check the Renovate dashboard" >&2
-  echo "  and default.json's first-party rules before bumping by hand (#133)." >&2
+  echo "  Outside the expected post-release window (one release behind," >&2
+  echo "  under 24h) — Renovate should have bumped these. Check the" >&2
+  echo "  Renovate dashboard and default.json's first-party rules before" >&2
+  echo "  bumping by hand (#133, #290)." >&2
   exit 1
 fi
 echo "audit:canon-pins: ${found} canon references, all at ${latest}"
@@ -1686,6 +1743,51 @@ if [[ -n "${bad}" ]]; then
   exit 1
 fi
 echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless, released as${released}"
+'''
+
+[tasks."lint:runner-pin"]
+description = "No floating runner labels: every runs-on is a named version pin or a matrix indirection whose values are"
+dir = "{{cwd}}"
+# Found by the #290 audit: the signer's own sign.yml ran ubuntu-latest —
+# the workflow holding `id-token: write`, whose identity every provenance
+# certificate bears — while four documents claimed the runner image was a
+# named pin everywhere. A floating label migrates on GitHub's schedule
+# with no diff, no PR and no Renovate roll, which is exactly what the
+# named pin exists to prevent; Renovate's github-runners manager rolls a
+# named pin as a visible diff. Neither actionlint nor zizmor (pedantic)
+# flags this, so the belt does. Two checks, tracked files only:
+# a runs-on value is either a pinned literal (name-version, optionally
+# suffixed: ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel) or a
+# `${{ matrix.* }}` indirection — and no non-comment line anywhere in a
+# workflow carries a `*-latest` runner label, which is what closes the
+# matrix laundering hole: a floating value reaching runs-on through a
+# matrix include or a bash case arm is the same float with indirection.
+run = '''
+files=$(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" \
+  "workflow-templates/*.yml" "workflow-templates/*.yaml")
+[[ -n "${files}" ]] || { echo "lint:runner-pin: no workflows, skipped"; exit 0; }
+bad=""
+while IFS= read -r f; do
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    v=$(sed -E "s/^[[:space:]]*runs-on:[[:space:]]*//; s/[[:space:]]*#.*$//" <<< "${line}" | tr -d "\"'")
+    case "${v}" in
+      \$\{\{*matrix.*\}\}) ;; # indirection; the value check below covers it
+      *) [[ "${v}" =~ ^[a-z]+-[0-9][a-z0-9.-]*$ ]] \
+        || bad="${bad} ${f}(runs-on: ${v})" ;;
+    esac
+  done <<< "$(grep -hE "^[[:space:]]*runs-on:" "${f}" || true)"
+  float=$(grep -nE "(ubuntu|macos|windows)-latest" "${f}" | grep -vE "^[0-9]+:[[:space:]]*#" || true)
+  [[ -z "${float}" ]] || bad="${bad} ${f}(floating label: $(head -1 <<< "${float}"))"
+done <<< "${files}"
+if [[ -n "${bad}" ]]; then
+  echo "lint:runner-pin: floating or unpinned runner labels:${bad}" >&2
+  echo "  pin every runs-on to a named image version (ubuntu-24.04, not" >&2
+  echo "  ubuntu-latest) — Renovate rolls named pins as visible diffs;" >&2
+  echo "  a floating label migrates with no diff at all (#290)." >&2
+  exit 1
+fi
+echo "lint:runner-pin: every runs-on pinned or matrix-indirected, no floating labels"
 '''
 
 [tasks."lint:canon-pins"]

@@ -147,8 +147,10 @@ The org has two build-environment layers, and **both are formally L0**:
   provenance exists and nothing verifies before instantiation, so L1 is
   structurally out of reach at this layer. The maximum available move is
   made — `ubuntu-24.04` everywhere, a named input Renovate rolls as a
-  visible diff — and the rest is a property of the platform, not of us.
-  Watch #125.
+  visible diff, enforced by `lint:runner-pin` since the #290 audit found
+  the signer itself floating on `ubuntu-latest` while four documents
+  claimed this sentence — and the rest is a property of the platform,
+  not of us. Watch #125.
 - **The pgrx build containers** are stock Docker Official Images
   (`postgres:14`–`18`, bookworm and trixie, digest-pinned in
   `docker/pgrx-base-images.toml`). The org instantiates them, so at this

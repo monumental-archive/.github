@@ -195,6 +195,7 @@ jobs:
               --repo monumental-archive/.github \
               --predicate-type https://monumental-archive.github.io/attestations/base-image-approval/v1 \
               --signer-workflow monumental-archive/.github/.github/workflows/base-attest.yml \
+              --deny-self-hosted-runners \
               > /dev/null
             echo "::notice::approved base: ${ref}"
           done
