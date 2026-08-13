@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.23.0](https://github.com/monumental-archive/.github/compare/v1.22.2...v1.23.0) - 2026-08-13
+
+### Added
+
+- wear the REUSE shield the tree already earned ([#343](https://github.com/monumental-archive/.github/pull/343))
+- wear the best-practices and OSPS baseline shields ([#345](https://github.com/monumental-archive/.github/pull/345))
+
+### Fixed
+
+- strip inline comments so the badge walk reads shields ([#341](https://github.com/monumental-archive/.github/pull/341))
+- report a failed codecov upload instead of passing ([#346](https://github.com/monumental-archive/.github/pull/346))
+
 ## [1.22.2](https://github.com/monumental-archive/.github/compare/v1.22.1...v1.22.2) - 2026-08-13
 
 ### Fixed
