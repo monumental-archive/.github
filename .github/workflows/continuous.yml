@@ -41,6 +41,17 @@ on:
         required: false
         type: string
         default: ""
+      prepare:
+        description: >
+          Script materialising build artifacts into the context before
+          the image build. Same contract as the oci-image class (#295) —
+          this archetype reuses that class's build wholesale, so an input
+          the class takes and this workflow drops is a Dockerfile whose
+          COPY source never gets staged. Empty means the Dockerfile is
+          self-contained.
+        required: false
+        type: string
+        default: ""
       image-title:
         description: >
           org.opencontainers.image.title — editorial only, defaults to the
@@ -133,6 +144,7 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
+      prepare: ${{ inputs.prepare }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
 
