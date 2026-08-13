@@ -637,10 +637,29 @@ while IFS= read -r repo; do
       | grep -E "^sha256:[a-f0-9]{64}$" | head -1) || true
     if [[ -n "${digest:-}" ]]; then
       checked=$((checked + 1))
-      gh attestation verify "oci://ghcr.io/${org}/${repo}@${digest}" \
-        --repo "${org}/${repo}" \
-        --signer-workflow "${org}/signer/.github/workflows/sign.yml" > /dev/null 2>&1 \
-        || missing="${missing} ${repo}@latest(${digest:7:12}:store)"
+      # Full identity pin (#316 finding 9): the expected signer digest is
+      # derived from the producing repo's own sign.yml uses: pins at its
+      # default branch — the verify-signed derivation, never a literal.
+      # Mid-bump a repo can carry one candidate per branch state; the
+      # artifact must verify under one of them. No pins found fails
+      # closed: an org image the org signer cannot vouch for is the
+      # finding, not a skip.
+      pins=$(gh api "repos/${org}/${repo}/contents/.github/workflows" \
+        --jq ".[].name" 2> /dev/null | while IFS= read -r f; do
+          gh api "repos/${org}/${repo}/contents/.github/workflows/${f}" \
+            --jq ".content" 2> /dev/null | base64 -d 2> /dev/null || true
+        done | grep -oE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" \
+        | cut -d@ -f2 | sort -u) || true
+      ok=""
+      while IFS= read -r pin; do
+        [[ -n "${pin}" ]] || continue
+        if gh attestation verify "oci://ghcr.io/${org}/${repo}@${digest}" \
+          --repo "${org}/${repo}" \
+          --signer-workflow "${org}/signer/.github/workflows/sign.yml" \
+          --signer-digest "${pin}" \
+          --deny-self-hosted-runners > /dev/null 2>&1; then ok=1; break; fi
+      done <<< "${pins}"
+      [[ -n "${ok}" ]] || missing="${missing} ${repo}@latest(${digest:7:12}:store)"
     fi
   fi
 done < <(gh api "orgs/${org}/repos" --paginate --jq '.[].name')
@@ -655,6 +674,8 @@ if [[ -f docker/pgrx-base-images.toml ]]; then
     gh attestation verify "oci://${repo_part}@${digest}" \
       --repo "${org}/.github" \
       --predicate-type https://monumental-archive.github.io/attestations/base-image-approval/v1 \
+      --signer-workflow "${org}/.github/.github/workflows/base-attest.yml" \
+      --deny-self-hosted-runners \
       > /dev/null 2>&1 \
       || missing="${missing} base(${ref})"
   done < <(grep -oE "\"[a-z0-9./:-]+@sha256:[a-f0-9]{64}\"" docker/pgrx-base-images.toml | tr -d "\"")
@@ -1271,12 +1292,21 @@ dir = "{{cwd}}"
 # non-deterministic CI (a new CVE fails unrelated PRs) and already enforced
 # org-wide via Dependabot alerts/security updates + Renovate.
 # --exit-code 1: trivy exits 0 on findings by default.
-# --skip-dirs .org-toolbelt: in CI the shared workflows check the canon
-# repo out INTO the workspace, and trivy walks directories rather than
-# tracked files — so without this, every repo's gate re-scans the belt's
-# own Dockerfiles and trips over findings whose .trivyignore lives in the
-# canon repo, not here. The lefthook-remotes trap, in a new costume.
-run = "trivy fs --skip-dirs .org-toolbelt --scanners misconfig,secret --exit-code 1 ."
+# Tracked files only, like every belt linter — but trivy has no file-list
+# mode, so the tracked set is materialised into a scratch tree and the
+# walker runs there. Walking the working tree directly broke twice: the
+# checked-out canon toolbelt (.org-toolbelt, the lefthook-remotes trap in
+# a new costume) and — because ci runs lint:* and test concurrently — a
+# race against cargo rewriting target/, which failed release-lab's gate
+# on files that vanished mid-walk (#316 finding 4). The scratch tree
+# holds only committed paths, so neither class of untracked content can
+# ever be seen. --skip-dirs is gone because there is nothing to skip.
+run = '''
+scratch=$(mktemp -d)
+trap 'rm -rf "${scratch}"' EXIT
+git ls-files -z | cpio -pmd0 --quiet "${scratch}"
+trivy fs --scanners misconfig,secret --exit-code 1 "${scratch}"
+'''
 
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows (actionlint)"
@@ -1339,37 +1369,35 @@ echo "lint:capability-boundary: ok"
 '''
 
 [tasks."lint:signer-pin"]
-description = "Every sign.yml uses: equals the declared signer pin, and no hand-written --signer-digest literal exists (no half-bumps)"
+description = "Every sign.yml uses: agrees on one signer digest, and no second copy or hand-written --signer-digest literal exists"
 dir = "{{cwd}}"
-# The release verifier (verify-release.yml, verdict mode) checks the
-# provenance it opens against the signer commit declared in
-# security/signer.pin. The signer is also pinned as a literal SHA in
-# every `uses:` line — GitHub requires that — so the two can drift: a
-# Renovate bump that moves the uses: lines but not the pin would verify
-# releases against a stale signer, silently. This makes the drift red.
+# A tree states the trusted signer exactly once: the sign.yml@<sha>
+# `uses:` lines, the only representation Renovate manages natively.
+# Everything that needs the expected signer identity — the verify-signed
+# action for consumers, verify-release.yml's verdict mode for the canon —
+# derives it from those lines at run time. This lint keeps the
+# derivation single-valued: all `uses:` lines must carry the same
+# digest, so a partial Renovate bump (some lines moved, some not)
+# reddens the gate instead of leaving the tree disagreeing with itself.
 # Deterministic — reads only tracked files — so it belongs in the gate.
 #
-# Applicability is the declared pin, not the signer reference. Repos that
-# call the signer directly (release-lab's exercise-sign.yml) legitimately
-# carry no security/signer.pin: the file exists so the CANON's verdict
-# has an expected identity to check against, and a consumer has no
-# verdict to render. Requiring it everywhere failed the lab's gate on
-# canon v1.12.0 — a linter that cannot skip cannot be universal. The one
-# case that still fails closed is a tree whose own workflows READ the
-# pin but do not ship it, which is the canon with the file deleted.
-# "Read" means the path on a non-comment line: a comment explaining why
-# a repo carries no pin file was counted as a consumer and reddened a
-# correct tree (#314 finding 2).
+# There used to be a second copy, security/signer.pin, the file the
+# verdict checked against. Its Renovate manager needed a URL package
+# name (git-refs datasource), which the first-party group's
+# `monumental-archive/**` glob could not match, so #296's groupName
+# split the one value into two branches — uses:-only and pin-only —
+# neither of which could pass this lint alone (#316 finding 2; every
+# signer bump since 2026-08-12 reddened). The fix is not re-grouping
+# the copies but deleting the second one: the pin file is gone, the
+# verdict derives from the same uses: lines, and the split state is
+# unrepresentable. Reintroducing the file is refused loudly below.
 #
 # Hand-written `--signer-digest <40-hex>` literals are banned outright
 # (#314 finding 1): the flag is the value a consumer's verification
 # turns on (OID .10), Renovate has no manager for a SHA inside a shell
 # command, and the lab's literal sat frozen at the signer's FIRST commit
 # while its uses: line was bumped twice — every dispatch a guaranteed
-# identity mismatch, silently. No agreement is enforced, because there
-# is nothing to agree: workflows derive the digest from their own
-# sign.yml uses: line via the verify-signed action, and the only
-# representable states are correct ones.
+# identity mismatch, silently.
 run = '''
 files=$(git ls-files ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:signer-pin: no workflows, skipped"; exit 0; }
@@ -1381,52 +1409,27 @@ if [[ -n "${literals}" ]]; then
   echo "  (\$/.github/actions/verify-signed from a canon-owned workflow)" >&2
   exit 1
 fi
+if [[ -f security/signer.pin ]]; then
+  echo "lint:signer-pin: security/signer.pin exists — the second copy of the signer identity was deleted (#316 finding 2)" >&2
+  echo "  the uses: lines are the single statement of the trusted signer; verifiers derive from them" >&2
+  echo "  (a standalone pin file has no Renovate manager the first-party group can match, so it" >&2
+  echo "  bumps on a separate branch that can never pass this lint — the two-branch split)" >&2
+  exit 1
+fi
+readers=$(xargs grep -lE "^[^#]*security/signer\.pin" <<< "${files}" || true)
+if [[ -n "${readers}" ]]; then
+  echo "lint:signer-pin: workflows read security/signer.pin (on a non-comment line) but the file is deleted (#316 finding 2) — derive from the sign.yml uses: pin instead:${readers}" >&2
+  exit 1
+fi
 refs=$(xargs grep -hoE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" <<< "${files}" | sort -u || true)
 [[ -n "${refs}" ]] || { echo "lint:signer-pin: no signer references, skipped"; exit 0; }
-if [[ ! -f security/signer.pin ]]; then
-  consumers=$(xargs grep -lE "^[^#]*security/signer\.pin" <<< "${files}" || true)
-  if [[ -n "${consumers}" ]]; then
-    echo "lint:signer-pin: workflows read security/signer.pin (on a non-comment line) but the file is missing:${consumers}" >&2
-    exit 1
-  fi
-  echo "lint:signer-pin: no signer pin declared here, skipped"; exit 0
-fi
-pin=$(grep -Eo "^[0-9a-f]{40}$" security/signer.pin | head -1)
-if [[ -z "${pin}" ]]; then
-  echo "lint:signer-pin: security/signer.pin holds no 40-hex commit" >&2
+if [[ "$(wc -l <<< "${refs}" | tr -d " ")" != "1" ]]; then
+  echo "lint:signer-pin: sign.yml pinned at more than one digest — a tree states the trusted signer once:" >&2
+  echo "${refs}" >&2
+  echo "  a partial bump left the tree disagreeing with itself; move every uses: line together" >&2
   exit 1
 fi
-# THE FILE HOLDS THE DIGEST AND NOTHING ELSE, and that is load-bearing
-# rather than tidy. Renovate's regex manager replaces the whole matched
-# span, so the file's original form — an eight-line header, a
-# `# renovate: signer-pin` marker, then the digest, with the marker
-# INSIDE the match — destroyed its own marker on the first bump (#279
-# rewrote ten lines to one). Nothing matched afterwards, so every later
-# bump half-landed: the uses: lines moved, the pin did not, and this
-# lint reddened each one until a human patched the file by hand. The
-# contract now is a bare digest matched whole, which makes
-# replace-the-match correct; a header re-added here would break the
-# bumper again, silently, so it is refused loudly instead. Explanation
-# lives in renovate.json and docs/release.md, where nothing rewrites it.
-if [[ "$(wc -l < security/signer.pin | tr -d " ")" != "1" ]] \
-  || [[ "$(cat security/signer.pin)" != "${pin}" ]]; then
-  echo "lint:signer-pin: security/signer.pin must hold the digest and nothing else" >&2
-  echo "  Renovate replaces the whole matched span, so a comment or header" >&2
-  echo "  inside the match is destroyed on the next bump and the manager" >&2
-  echo "  then matches nothing (#279). Document it in renovate.json instead." >&2
-  exit 1
-fi
-bad=""
-while IFS= read -r ref; do
-  [[ -n "${ref}" ]] || continue
-  [[ "${ref##*@}" == "${pin}" ]] || bad="${bad} ${ref}"
-done <<< "${refs}"
-if [[ -n "${bad}" ]]; then
-  echo "lint:signer-pin: sign.yml pinned away from security/signer.pin (${pin}):${bad}" >&2
-  echo "  bump the pin file and the uses: lines together" >&2
-  exit 1
-fi
-echo "lint:signer-pin: all signer references match ${pin}"
+echo "lint:signer-pin: all signer references agree on ${refs##*@}"
 '''
 
 [tasks."lint:input-forwarding"]

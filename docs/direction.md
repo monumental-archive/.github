@@ -73,8 +73,9 @@ defect as one claimed before it was.
 Assert only what strangers can verify. A build-track claim is backed by
 an attestation a stranger checks with `gh attestation verify`; a
 verdict is backed by a signed VSA; a level with an unverifiable half
-(Source and Build Environment, today) is stated with its gap named — as
-L0, not as the level it nearly reaches. Badges follow the same
+(Build Environment, today; Source was the same shape until 2026-08-12)
+is stated with its gap named — as L0, not as the level it nearly
+reaches. Badges follow the same
 rule: they derive from how a repository actually publishes (#88), this
 repository wears the same badges as its consumers, and no badge asserts
 a level this document does not.
