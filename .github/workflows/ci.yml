@@ -112,10 +112,18 @@ jobs:
           mise run coverage:report
           echo "skip=false" >> "${GITHUB_OUTPUT}"
 
+      # fail_ci_if_error: TRUE, deliberately. The job is
+      # continue-on-error, so a broken feed never blocks a merge — but it
+      # must not report clean either. With it false, release-lab's first
+      # upload died inside the CLI ("Failed to run upload-coverage") and
+      # the job went green over it, which is the audit-claims defect this
+      # org refuses everywhere else: a step that read nothing reporting
+      # success (#316). A red badge-feed job means the badge is stale,
+      # which is exactly what it means.
       - name: Upload to Codecov
         if: steps.gen.outputs.skip == 'false'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.codecov-token }}
           files: lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true

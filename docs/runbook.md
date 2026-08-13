@@ -102,7 +102,13 @@ That is the whole wiring.
   sandbox lever (#316): every mint is a real, permanent record, the
   lab's included — a rehearsal that mints test DOIs never proves the
   DOI path.
-- **Codecov**: two grants, deliberately different shapes (#316). The
+- **Codecov**: use the **repository** upload token, not the org-wide
+  global one — the global token does not identify a repo, so the CLI
+  needs an extra org/slug flag the pinned action does not pass, and
+  release-lab's first upload died on exactly that. The repo token is a
+  bare UUID from the repo's Codecov Settings -> Tokens page; paste only
+  the value, never a copied command snippet. Two grants, deliberately
+  different shapes (#316). The
   app (app.codecov.io, "Install Codecov") is installed on the org with
   **Only select repositories** — never all-repos: its grant includes
   WRITE on checks, statuses and pull requests, and a breached-before
