@@ -105,8 +105,11 @@ jobs:
             echo "::notice::no floor or no token; badge upload skipped"
             exit 0
           fi
-          rustup component add llvm-tools-preview 2> /dev/null || true
-          cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+          # The belt task, never a second inline invocation: it carries
+          # the repo's COVERAGE_EXCLUDE set and the llvm-tools assertion,
+          # so the badge feed and the gate ratchet cannot disagree about
+          # what is coverable (#316 — they did, and it reddened main).
+          mise run coverage:report
           echo "skip=false" >> "${GITHUB_OUTPUT}"
 
       - name: Upload to Codecov

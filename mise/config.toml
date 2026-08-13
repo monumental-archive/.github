@@ -1911,6 +1911,34 @@ cargo llvm-cov --workspace --locked ${excludes} --fail-under-lines "${floor}"
 echo "coverage:check: floor ${floor} held${excludes:+ (excluding${excludes//--exclude/})}"
 """
 
+[tasks."coverage:report"]
+description = "Render the lcov report the Codecov badge feed uploads (never the gate)"
+dir = "{{cwd}}"
+# The upload half of the ratchet, as a TASK rather than an inline
+# command in ci.yml — because "which members are coverable" is a
+# property of the repo (COVERAGE_EXCLUDE in its mise.toml), and a
+# second hardcoded --workspace invocation drifted from coverage:check
+# the instant a repo excluded anything: the lab excludes lab-pg (pgrx,
+# needs a live postgres), the badge job did not, and it reddened main
+# on the first push after coverage landed (#316). One task, one
+# exclusion set, same llvm-tools assertion — never a task-time rustup,
+# which races every other task driving the toolchain.
+run = """
+[[ -f .coverage-floor && -f Cargo.toml ]] || {
+  echo "coverage:report: no .coverage-floor, skipped"; exit 0
+}
+if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
+  echo "coverage:report: llvm-tools component missing — declare it with the" >&2
+  echo "  rust pin in mise.toml: rust = { version = \\"1.xx.x\\", components = \\"llvm-tools\\" }" >&2
+  exit 1
+fi
+excludes=""
+for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
+# shellcheck disable=SC2086
+cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
+echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
+"""
+
 [tasks."lint:fuzz-build"]
 description = "Fuzz targets still compile (cargo-fuzz, sanitizer none, stable toolchain); repos without fuzz/ skip clean"
 dir = "{{cwd}}"
