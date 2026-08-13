@@ -289,7 +289,11 @@ anchored at the start with no trailing anchor, so it matches any ref of
 that workflow path. `--signer-digest` pins OID .10 and is what actually
 fixes the signer commit. **Pin both.** Consequence: anyone able to push a
 *branch* in the signer repository mints a matching identity, so the signer
-repo needs its own rulesets.
+repo needs its own rulesets. In workflows the digest is never a literal:
+the `verify-signed` action derives it from the calling workflow's own
+`sign.yml@<sha>` pin — the one Renovate-managed statement of the trusted
+signer in a tree — and `lint:signer-pin` reddens any hand-written
+40-hex `--signer-digest` (#314).
 
 Consumer steps per `verifying-artifacts`: verify the envelope signature;
 match `subject` to the artifact digest; check `predicateType`; look up the

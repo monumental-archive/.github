@@ -43,6 +43,22 @@ the org's own tracked scripts, offline, with no network surface.
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
 
+**Renovate `customManagers`: preset and repo arrays concatenate, never
+replace** (#314). The open question that issue punted — whether a repo
+defining its own `customManagers` while extending `default.json` would
+silently drop the preset's lefthook and preset-ref managers — is
+settled by Renovate's documented merge semantics: `customManagers` is a
+*mergeable* list option, so values "will be added to any existing
+object or array that existed with the same name". A repo's array
+supplements the preset's; nothing is dropped. Verdict: the signer-pin
+manager nonetheless **stays in this repo's `renovate.json`**, because
+`security/signer.pin` is canon-only by design — a consumer has no
+verdict to render, so no pin file, so nothing for the manager to match;
+consumers state the trusted signer once, in the `uses:` line, and the
+`verify-signed` action derives the rest. *Reopen:* a second repo
+legitimately carrying a pin file, or Renovate changing the mergeable
+status of `customManagers`.
+
 ## Skipped, with rationale and reopen trigger
 
 - **Allstar / Minder** — continuous org-policy enforcement services.
