@@ -165,6 +165,26 @@ jobs:
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          # Post-publish resume converges, never clobbers (#316, found on
+          # v1.20.0's first mint): the DOI job runs AFTER publish, so a
+          # mint-only failure (the issuer down) is re-dispatched into a
+          # release that is already published and immutable — where
+          # --clobber's delete is refused with a 422 and the resume dies
+          # before reaching the one job that actually failed. If the
+          # release is out, prove the rebuilt bytes equal the published
+          # bytes and pass through; a mismatch is a real failure, not a
+          # resume.
+          draft=$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)
+          if [[ "${draft}" == "false" ]]; then
+            gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+              --pattern checksums.txt --output published-checksums.txt
+            if ! diff -u published-checksums.txt dist/checksums.txt; then
+              echo "::error::${TAG} is published and immutable but the rebuilt assets differ from the published set — this is not a resume"
+              exit 1
+            fi
+            echo "::notice::${TAG} already published; rebuilt bytes verified identical, converging"
+            exit 0
+          fi
           gh release upload "${TAG}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
           if [[ "${DRY_RUN}" == "true" ]]; then
             echo "::warning::rehearsal: ${TAG} left as a draft, nothing published"
