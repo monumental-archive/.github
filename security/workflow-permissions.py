@@ -12,26 +12,41 @@ compares it against caller grants, so the seam is checked at the PR
 that adds the capability instead of discovered by the first consumer
 release that dies on it.
 
-One derivation site, two consumers: `lint:caller-permissions` (gate)
-checks the canon's own callers and every workflow-templates/ stub;
-`audit:caller-permissions` (Monday cron) downloads each org consumer's
-workflow files and passes them to `check`. Both compare against the
-canon tree this script runs in — i.e. canon HEAD, which answers "will
-this caller break on its next pin bump", the only question a caller
-that shipped atomically with its pin can still fail.
+One derivation site, three callers, all of them `check`. In the
+canon's own gate `lint:caller-permissions` checks its callers and
+every workflow-templates/ stub against this tree, i.e. canon HEAD. In
+a CONSUMER's gate the same lint runs this script out of `.org-canon` —
+the full canon tree ci.yml already places at the pin that repo
+resolved — with `--canon .org-canon`, so requirements come from the
+pinned canon and the consumer's own stubs are what get checked, on the
+pin-bump PR, in the repo being bumped. `audit:caller-permissions`
+(Monday cron) downloads every org consumer's workflow files and passes
+them to `check` against canon HEAD — a forecast of the next bump, the
+only question a caller that shipped atomically with its pin can still
+fail.
+
+The scanner is closed under its own coverage claim: a `uses:` line
+shaped like a canon call that it cannot read, or a recognised call
+whose callee is absent from the canon tree, is a hard failure, never a
+silent skip — an unrecognised call is an unchecked grant, and a green
+line for a check that did not run is the failure class the
+audit-claims contract forbids.
 
 Stdlib only (the gate runner has no pyyaml); the org's workflows are
 written at fixed 2/4/6-space indentation, which is what the scanner
 assumes — the same assumption every belt awk already makes.
 
 Usage:
-  workflow-permissions.py requirements
+  workflow-permissions.py requirements [--canon DIR]
       print `<workflow> <scope> <level>` for each workflow_call
-      workflow in .github/workflows/
-  workflow-permissions.py check [caller-file ...]
+      workflow in DIR/.github/workflows/ (DIR defaults to `.`)
+  workflow-permissions.py check [--canon DIR] [caller-file ...]
       verify every `uses:` job referencing a canon workflow grants at
-      least the callee's requirement; with no arguments, checks the
-      canon's own workflows and workflow-templates/. Exits 1 on any
+      least the callee's requirement, computed from DIR. With no
+      arguments and DIR `.`, checks the canon's own workflows and
+      workflow-templates/; with no arguments and an explicit DIR,
+      checks this repo's .github/workflows/ (consumer mode, where an
+      empty or canon-caller-free set is a clean skip). Exits 1 on any
       under-grant, listing each as file:job missing scope.
 """
 
@@ -50,6 +65,16 @@ USES_RE = re.compile(
         \.github/workflows/([A-Za-z0-9._-]+\.ya?ml)
         (?:@[0-9a-f]{40})?\s*(?:\#.*)?$""",
     re.X,
+)
+# The looser shape of the same target: anything this matches that
+# USES_RE does not (a tag pin, a truncated SHA, a shape the scanner
+# has never seen) is a canon call the check cannot prove, and refusing
+# is the only honest answer. Third-party reusable workflows
+# (`owner/repo/.github/workflows/…`) match neither and are not ours to
+# check.
+CANON_SHAPE_RE = re.compile(
+    r"^\s*uses:\s*(?:\./)?(?:monumental-archive/\.github/)?"
+    r"\.github/workflows/"
 )
 SCOPE_RE = re.compile(r"^\s*([a-z][a-z-]*):\s*(none|read|write)\s*(#.*)?$")
 PERMS_RE = re.compile(r"^(\s*)permissions:\s*(\{\})?\s*(#.*)?$")
@@ -84,9 +109,13 @@ def scan(path):
     in_jobs = False
     perms_indent = None
     perms_into = None
-    for _, line in code_lines(path):
+    for n, line in code_lines(path):
         if not line.strip():
             continue
+        if CANON_SHAPE_RE.match(line) and not USES_RE.search(line):
+            sys.exit(f"FAIL: {path}:{n}: unrecognised canon workflow "
+                     "call — a call the scanner cannot read is an "
+                     "unchecked grant")
         ind = indent_of(line)
         if perms_indent is not None:
             if ind > perms_indent:
@@ -134,7 +163,7 @@ def scan(path):
     return workflow_call, wf_grant, jobs
 
 
-def requirements():
+def requirements(canon="."):
     """scope->level union per workflow_call workflow, keyed by filename.
 
     Union over every job's grant, including `uses:` jobs' restated
@@ -144,7 +173,8 @@ def requirements():
     which the org pins to `{}` everywhere — contributing nothing.
     """
     req = {}
-    for path in sorted(glob.glob(".github/workflows/*.y*ml")):
+    for path in sorted(glob.glob(
+            os.path.join(canon, ".github/workflows/*.y*ml"))):
         is_wc, wf_grant, jobs = scan(path)
         if not is_wc:
             continue
@@ -157,15 +187,22 @@ def requirements():
     return req
 
 
-def check(paths):
-    req = requirements()
+def check(paths, canon="."):
+    req = requirements(canon)
     bad = []
     checked = 0
     for path in paths:
         _, wf_grant, jobs = scan(path)
         for name, j in jobs.items():
             target = j["uses"]
-            if target is None or target not in req:
+            if target is None:
+                continue
+            if target not in req:
+                bad.append(
+                    f"{path}:{name} calls {target}, absent from the "
+                    f"canon tree at {canon} — an unrecognised callee "
+                    "is an unchecked grant"
+                )
                 continue
             checked += 1
             grant = j["perms"] if j["perms"] is not None else (wf_grant or {})
@@ -180,27 +217,48 @@ def check(paths):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("requirements", "check"):
+    argv = sys.argv[1:]
+    if not argv or argv[0] not in ("requirements", "check"):
         sys.exit(__doc__.strip())
-    if sys.argv[1] == "requirements":
-        for wf, union in sorted(requirements().items()):
+    cmd, argv = argv[0], argv[1:]
+    canon = "."
+    if argv[:1] == ["--canon"]:
+        if len(argv) < 2:
+            sys.exit(__doc__.strip())
+        canon, argv = argv[1], argv[2:]
+    if cmd == "requirements":
+        for wf, union in sorted(requirements(canon).items()):
             for scope, lvl in sorted(union.items()):
                 level = [k for k, v in LEVELS.items() if v == lvl][0]
                 print(f"{wf} {scope} {level}")
         return
-    paths = sys.argv[2:]
+    paths = argv
+    consumer = canon != "."
     if not paths:
-        paths = sorted(
-            glob.glob(".github/workflows/*.y*ml")
-            + glob.glob("workflow-templates/*.y*ml")
-        )
-    checked, bad = check(paths)
+        if consumer:
+            paths = sorted(glob.glob(".github/workflows/*.y*ml"))
+            if not paths:
+                print("no workflows, skipped")
+                return
+        else:
+            paths = sorted(
+                glob.glob(".github/workflows/*.y*ml")
+                + glob.glob("workflow-templates/*.y*ml")
+            )
+    checked, bad = check(paths, canon)
     if bad:
         print("caller grants below the callee's computed requirement:",
               file=sys.stderr)
         for b in bad:
             print(f"  {b}", file=sys.stderr)
         sys.exit(1)
+    if consumer and checked == 0:
+        print("no canon callers, skipped")
+        return
+    if consumer:
+        print(f"{checked} caller job(s) checked against the pinned "
+              f"canon at {canon}")
+        return
     print(f"{checked} caller job(s) checked against computed requirements")
 
 
