@@ -1,31 +1,65 @@
 <!--
-The badge block, copied into a repository README at migration. Every
-shield asserts only what a stranger can verify from public evidence
-(.github#88). Replace <repo>, CONCEPT_DOI, <codecov-token-graph>.
-Remove lines that do not apply (e.g. coverage in a Dockerfile-only repo).
--->
+The badge CATALOGUE (#88, #316 finding 5): every shield a repository in
+this organisation could carry, each annotated with what earns it and
+how the Monday audit decides it still tells the truth. This file is
+reference, not a template to paste: the badge block itself is RENDERED
+by `mise run fix:badges` between `badges:begin`/`badges:end` markers in
+the README, from the repository's own tree facts plus the two-word
+states in `.badge-states` — and `lint:badges` reddens a hand-edited
+block. The canon is consumer #1: it wears the subset its own derivation
+resolves, through the same machinery, with no special case.
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/monumental-archive/<repo>/badge)](https://scorecard.dev/viewer/?uri=github.com/monumental-archive/<repo>)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/BP_ID/badge)](https://www.bestpractices.dev/projects/BP_ID)
-[![SLSA 3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
-[![REUSE status](https://api.reuse.software/badge/github.com/monumental-archive/<repo>)](https://api.reuse.software/info/github.com/monumental-archive/<repo>)
-[![coverage](https://codecov.io/gh/monumental-archive/<repo>/branch/main/graph/badge.svg)](https://codecov.io/gh/monumental-archive/<repo>)
-[![DOI](https://zenodo.org/badge/DOI/CONCEPT_DOI.svg)](https://doi.org/CONCEPT_DOI)
-[![fair-software](https://img.shields.io/badge/fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8F%20%E2%97%8F%20%E2%97%8F-green)](https://fair-software.eu)
+Universal shields — derived for every repo:
 
-<!-- Registry-fact shields — include the lines matching the repo's classes:
-crate repos (docs.rs builds automatically on publish):
-[![crates.io](https://img.shields.io/crates/v/CRATE.svg)](https://crates.io/crates/CRATE)
-[![docs.rs](https://img.shields.io/docsrs/CRATE)](https://docs.rs/CRATE)
-npm repos:
-[![npm](https://img.shields.io/npm/v/%40monumental-archive%2FPACKAGE.svg)](https://www.npmjs.com/package/@monumental-archive/PACKAGE)
-oci repos:
-[![ghcr](https://img.shields.io/badge/ghcr.io-monumental--archive%2FIMAGE-blue)](https://github.com/orgs/monumental-archive/packages)
--->
+  workflow status   the repo's own gate; earned by calling ci.yml
+  OpenSSF Scorecard earned by scorecard.yml; audited against the
+                    per-repo ratcheted floor in scorecard-floors.txt
+  SLSA Build L3     the org's claimed tracks, from direction.md's
+  SLSA Source L3    table — the audit parses track and level out of
+  SLSA Dep L2       each shield and matches that row, so a shield can
+                    never outrun the table. BuildEnv is deliberately
+                    unshielded: L0 is the absence of a claim, and a
+                    shield asserting an absence is noise (#316).
+  REUSE status      earned by registering at api.reuse.software (FSFE
+                    login) — `reuse pending` in .badge-states until the
+                    human step lands, then `reuse registered`
+  OpenSSF Best      earned by answering the form from
+  Practices         docs/best-practices.md — `bestpractices pending`
+                    until it binds, then `bestpractices <BP_ID>`
+  OSPS Baseline     hosted by bestpractices.dev alongside the CII badge
+                    (L1–3; #168 watches drift) — joins the render once
+                    a BP_ID exists and the badge URL is confirmed at
+                    registration
+  coverage          earned by a `.coverage-floor` (the ratchet's
+                    number); the canon carries `coverage exemplary`
+                    instead — no data by construction until the kcov
+                    standup, permanent, which is the point of an
+                    exemplar wearing its own machinery
+  DOI               earned by `mint-doi: true` + the concept DOI that
+                    CITATION.cff records after the first mint; renders
+                    pending until the concept exists
+  fair-software     computed, never asserted: five dots for
+                    repository/licence/registry/citation/checklist,
+                    ● only for criteria this repo actually meets —
+                    the static 5/5 image this file used to ship
+                    asserted fullness regardless of truth (#316)
 
-<!-- Passive observers — NO wiring exists or is needed; they index public
+Registry-fact shields — derived from the publish stub's classes, named
+by `.badge-states` lines where a name is not the repo's own
+(`crates <name>`, `npm <name>`, extra `ghcr <name>` per image):
+
+  crates.io + docs.rs   rust-crate classes (docs.rs builds on publish)
+  npm                   wasm-npm classes (@monumental-archive scope)
+  ghcr                  oci-image / pgrx-extension classes — the shield
+                        names the IMAGE and links its package page, and
+                        the audit asks GitHub whether that package
+                        exists (the org packages page returns 200 for
+                        any org and proves nothing, #316 addendum C)
+
+Passive observers — NO wiring exists or is needed; they index public
 repos on their own: deps.dev / OpenSSF criticality score, Libraries.io
 SourceRank, Snyk Advisor, ClearlyDefined (harvests licence facts — our
-SPDX/REUSE metadata is what it reads). Listed so nobody goes looking for
-a switch that does not exist. CLOMonitor is foundation-membership-scoped
-and deliberately out (#88). -->
+SPDX/REUSE metadata is what it reads). Listed so nobody goes looking
+for a switch that does not exist. CLOMonitor is
+foundation-membership-scoped and deliberately out (#88).
+-->

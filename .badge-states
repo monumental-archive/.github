@@ -1,0 +1,13 @@
+# Badge states nothing can derive (#316): the written-down-debt
+# pattern, one line per shield that waits on a human step or is
+# exemplary with no data by construction. Everything else in the badge
+# block is computed by fix:badges from the tree — see
+# scaffold/README-badges.md for the catalogue and the vocabulary.
+# bestpractices: 'pending' until the form binds, then the BP_ID.
+# reuse: 'pending' until FSFE registration, then 'registered'.
+# coverage: 'exemplary' — the canon wears its own coverage machinery
+#   with no data behind it until the kcov standup lands (#316); the
+#   permanence of this line is the point of an exemplar.
+bestpractices pending
+reuse pending
+coverage exemplary

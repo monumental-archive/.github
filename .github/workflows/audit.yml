@@ -286,6 +286,11 @@ jobs:
   badges:
     name: audit / badge truth
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read # README and .badge-states reads across org repos
+      # The anonymous REST endpoint 401s even for public containers
+      # (#316 addendum C, measured), so the existence check needs auth.
+      packages: read # the ghcr leg asks whether the named package exists
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -304,11 +309,14 @@ jobs:
 
       - name: Re-check every shield against its source of truth
         env:
-          # README reads across org repos; the default token reads public
-          # content, and every issuer endpoint is unauthenticated. Red
-          # means a shield asserting something its issuer no longer says
-          # (#215) — a score below its floor, a lost baseline, a
-          # non-compliant REUSE status, or a shield nothing here checks.
+          # README reads across org repos; the default token reads
+          # public content plus (packages: read) the container-package
+          # existence checks. Red means a shield asserting something
+          # its issuer no longer says (#215) — a score below its floor,
+          # a lost baseline, a non-compliant REUSE status, a package or
+          # workflow shield over nothing, a fair-software dot the
+          # evidence contradicts, a badge block not machine-rendered,
+          # or a shield nothing here checks (#316 finding 5).
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:badges
 
