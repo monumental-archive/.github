@@ -14,3 +14,7 @@ repository-code: https://github.com/monumental-archive/.github
 license: 0BSD
 version: 1.21.0
 date-released: 2026-08-13
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.21913604
+    description: The concept DOI of the software.
