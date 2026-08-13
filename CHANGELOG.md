@@ -10,6 +10,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.22.0](https://github.com/monumental-archive/.github/compare/v1.21.0...v1.22.0) - 2026-08-13
+
+### Added
+
+- machine-check REUSE compliance before registration ([#336](https://github.com/monumental-archive/.github/pull/336))
+
+### Documentation
+
+- record the codecov registration model and two scorecard caps ([#334](https://github.com/monumental-archive/.github/pull/334))
+
+### Fixed
+
+- serialise release runs on the workflow, not the commit ([#335](https://github.com/monumental-archive/.github/pull/335))
+
+### Miscellaneous
+
+- record the concept DOI from the first mint ([#331](https://github.com/monumental-archive/.github/pull/331))
+
 ## [1.21.0](https://github.com/monumental-archive/.github/compare/v1.20.0...v1.21.0) - 2026-08-13
 
 ### Added
