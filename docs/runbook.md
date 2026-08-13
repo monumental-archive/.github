@@ -98,6 +98,19 @@ That is the whole wiring.
   sandbox lever (#316): every mint is a real, permanent record, the
   lab's included — a rehearsal that mints test DOIs never proves the
   DOI path.
+- **Codecov**: two grants, deliberately different shapes (#316). The
+  app (app.codecov.io, "Install Codecov") is installed on the org with
+  **Only select repositories** — never all-repos: its grant includes
+  WRITE on checks, statuses and pull requests, and a breached-before
+  third party gets no standing write surface on repos (the signer, the
+  canon) that consume nothing from it. Tick each coverage-adopting
+  repo onto the installation at migration. The upload credential is
+  the org **global upload token** held once as `CODECOV_TOKEN`
+  (`visibility: selected`, tick the repo on — the ZENODO_TOKEN model);
+  keep Codecov's "upload tokens required" setting ON, because
+  tokenless ingest accepts forged reports from anyone. A leak
+  pollutes only the badge feed: the gate's ratchet (`coverage:check`)
+  computes locally and never reads Codecov.
 
 ## Cutting a release
 
