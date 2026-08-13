@@ -104,19 +104,24 @@ on:
         required: false
         type: string
         default: ""
-      consumes-base-images:
+      base-majors:
         description: >
-          Declares that this class's artifacts were built inside the
-          canon's digest-pinned postgres base set, so the enrichment
-          claims those images as resolvedDependencies. Declared by the
-          caller, which knows the artifact class — never inferred from
-          subject shape: the old proxy (image subjects present) missed
+          Comma-separated PG majors whose digest-pinned base images this
+          class's build actually instantiated; the enrichment claims
+          exactly those rows of docker/pgrx-base-images.toml (build and
+          smoke both — every leg runs in each) as resolvedDependencies.
+          Empty (the default) claims nothing: a FROM scratch class has no
+          base, and a signed false dependency is worse than an omitted
+          one (#316 finding 3, which found the previous boolean
+          declaring the ENTIRE pinned set for classes with no base at
+          all). Declared by the caller, which knows the artifact class —
+          never inferred from subject shape: that proxy missed
           pgrx-extension tarballs, file subjects built INSIDE the pinned
           base (#310 finding 4). Consumed in verdict mode; ignored in
           bytes mode.
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: ""
       release-tag:
         description: >
           Declares that file subjects matched by no registry are assets of
@@ -669,7 +674,7 @@ jobs:
         if: inputs.mode == 'verdict'
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
-          CONSUMES_BASE_IMAGES: ${{ inputs.consumes-base-images }}
+          UNTRUSTED_BASE_MAJORS: ${{ inputs.base-majors }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
         run: |
@@ -702,17 +707,26 @@ jobs:
           adddep "toolbelt-lock" \
             "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/mise/mise.lock" \
             "${lock_sha}"
-          # Base-image facts are claimed exactly when the CALLER DECLARES
-          # the class builds inside the pinned base set. #290 finding 5
-          # fixed the over-claim (file-only releases claiming ten postgres
-          # containers) by gating on the release's image subjects — but
-          # that proxy under-claimed in turn: pgrx-extension tarballs are
-          # FILE subjects built INSIDE postgres:*-bookworm (#310 finding
-          # 4). Subject shape cannot decide this, so it is declared where
-          # the class is known — publish.yml's vsa-* call sites, the #306
-          # pattern — and never inferred here. A declaration the pinned
-          # tree cannot honour is a failure, not a silent skip.
-          if [[ "${CONSUMES_BASE_IMAGES}" == "true" ]]; then
+          # Base-image facts are claimed exactly for the majors the
+          # CALLER DECLARES its build instantiated — the same rows of the
+          # pinned mapping the build matrix resolved, build and smoke
+          # both, since every leg runs in each. The history of getting
+          # this wrong is three proxies deep: #290 finding 5 fixed
+          # file-only releases claiming ten postgres containers by gating
+          # on image subjects; that under-claimed pgrx-extension tarballs
+          # built INSIDE the base (#310 finding 4); the boolean that
+          # replaced it emitted the ENTIRE pinned set for every declaring
+          # class, including FROM scratch images with no base at all
+          # (#316 finding 3). Subject shape cannot decide this and
+          # neither can a class-wide boolean — only the per-major
+          # declaration from the call site that ran the matrix (the #306
+          # pattern). A declaration the pinned tree cannot honour is a
+          # failure, not a silent skip.
+          if [[ -n "${UNTRUSTED_BASE_MAJORS// /}" ]]; then
+            if [[ ! "${UNTRUSTED_BASE_MAJORS// /}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+              echo "::error::base-majors must be comma-separated majors, got: ${UNTRUSTED_BASE_MAJORS}"
+              exit 1
+            fi
             if [[ ! -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
               echo "::error::the caller declares base-image consumption but the pinned canon tree carries no docker/pgrx-base-images.toml"
               exit 1
@@ -721,13 +735,22 @@ jobs:
             adddep "pgrx-base-images" \
               "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/docker/pgrx-base-images.toml" \
               "${map_sha}"
-            grep -Eo 'postgres:[A-Za-z0-9.-]+@sha256:[0-9a-f]{64}' \
-              "${CANON_PATH}/docker/pgrx-base-images.toml" > "${RUNNER_TEMP}/base-images.raw"
-            sort -u "${RUNNER_TEMP}/base-images.raw" > "${RUNNER_TEMP}/base-images.list"
-            while IFS= read -r img; do
-              [[ -n "${img}" ]] || continue
-              adddep "pgrx-base" "oci://docker.io/library/${img}" ""
-            done < "${RUNNER_TEMP}/base-images.list"
+            mapping=$(python3 -c '
+          import json, tomllib
+          with open("'"${CANON_PATH}"'/docker/pgrx-base-images.toml", "rb") as f:
+              print(json.dumps(tomllib.load(f)))
+          ')
+            IFS=',' read -ra majors <<< "${UNTRUSTED_BASE_MAJORS// /}"
+            for pg in "${majors[@]}"; do
+              for role in build smoke; do
+                img=$(jq -r --arg pg "${pg}" --arg r "${role}" '.[$r][$pg] // empty' <<< "${mapping}")
+                if [[ -z "${img}" ]]; then
+                  echo "::error::declared base major pg${pg} has no ${role} row in the pinned docker/pgrx-base-images.toml — the declaration cannot be honoured"
+                  exit 1
+                fi
+                adddep "pgrx-base" "oci://docker.io/library/${img}" ""
+              done
+            done
           fi
 
           # The released repository's own lockfiles, at the attested
