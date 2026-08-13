@@ -1111,8 +1111,9 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
       # File subjects, but built INSIDE the pinned postgres base set —
       # the one class where subject shape and base-image consumption
-      # disagree (#310 finding 4).
-      consumes-base-images: true
+      # disagree (#310 finding 4). The claim is per-major: exactly the
+      # mapping rows the build matrix instantiated (#316 finding 3).
+      base-majors: ${{ inputs.pg-majors }}
 
 
   # The image verdicts. No pull-back — content addressing already proves
@@ -1137,7 +1138,9 @@ jobs:
       mode: verdict
       images: ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]', needs.assemble-oci.outputs.image, needs.guard.outputs.version, needs.assemble-oci.outputs.digest) }}
       version: ${{ needs.guard.outputs.version }}
-      consumes-base-images: true
+      # No base-majors: the oci-image class is FROM scratch — a
+      # musl-static binary in an empty image has no base layer, and the
+      # enrichment claims nothing it did not consume (#316 finding 3).
 
   vsa-extension-images:
     name: Assemble and sign extension images VSA
@@ -1155,7 +1158,10 @@ jobs:
       # job reads image, tag and digest and ignores the rest.
       images: ${{ needs.build-extension-images.outputs.images }}
       version: ${{ needs.guard.outputs.version }}
-      consumes-base-images: true
+      # No base-majors: the extension images are FROM scratch + COPY of
+      # the already-built tarballs — the base consumption happened in the
+      # tarball build and is claimed on THAT class's verdict, not here
+      # (#316 finding 3).
 
   # The DOI comes last of all: it cites a release that is already public,
   # proven and signed. Skipped on dry-run (a rehearsal must cite nothing).

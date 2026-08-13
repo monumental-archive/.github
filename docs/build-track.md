@@ -70,7 +70,10 @@ Where the claim rests on a spec carve-out, the carve-out by name:
   every level. The org answers it above the letter with the
   **enrichment companion** (#200): a `build-enrichment/v1` predicate
   computed entirely in the verification control plane (toolbelt lock
-  and base-image digests from the pinned canon tree, the released
+  from the pinned canon tree; base-image digests only for the majors
+  the declaring class's build actually instantiated — a `FROM scratch`
+  class claims none, because a signed false dependency is worse than an
+  omitted one, #316 finding 3; the released
   repo's lockfiles fetched at the attested source revision) and signed
   by the verifier — never tenant fields inside the platform envelope,
   which is the shape the spec's L3 constraint exists to prevent.
