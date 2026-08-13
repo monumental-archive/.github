@@ -676,19 +676,22 @@ jobs:
             exit 1
           fi
           sdigest=$(sha256sum "${sfile}" | cut -d' ' -f1)
-          # The decision's own subject list is the authoritative
-          # enumeration of what it covers (#358 Q6): requiring the
-          # selected SBOM to appear in it makes the selection
-          # self-verifying — a future wrong pick reddens here as a
-          # named mismatch instead of 404ing on a subject the commit
-          # point never signed.
+          # No name check on top of this (#358 Q6, and v1.24.0 measured
+          # the cost of getting it wrong): the decision predicate carries
+          # {tag, classes, conclusion, decidedAt, proofs} and NO subject
+          # enumeration — what the decision covers is the STATEMENT
+          # subject, an in-toto {name, digest} that `gh attestation
+          # verify` above has already checked against this candidate's
+          # own bytes. That digest binding IS the join seam 4 needed, and
+          # it is strictly stronger than any filename comparison. A
+          # v1.24.0 verdict leg that asserted `.predicate.subject`
+          # refused its own correct decision and published the canon
+          # without a source VSA.
           jq -e --arg tag "v${UNTRUSTED_VERSION}" \
-            --arg sbom "$(basename "${sfile}")" \
             '.[0].verificationResult.statement.predicate
-             | .conclusion == "OPEN" and .tag == $tag
-               and (.subject | index($sbom) != null)' \
+             | .conclusion == "OPEN" and .tag == $tag' \
             "${WORKDIR}/decision.json" > /dev/null || {
-            echo "::error::the release decision does not name conclusion OPEN for this tag with this SBOM in its subject — refusing the verdict"
+            echo "::error::the release decision does not name conclusion OPEN for this tag — refusing the verdict"
             exit 1
           }
           dsha=$(sha256sum "${WORKDIR}/decision.json" | cut -d' ' -f1)
