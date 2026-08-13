@@ -154,11 +154,43 @@ Two supported mechanisms, both better than the form:
 - **`.bestpractices.json`** — a file at the repo root (or
   `.project.d/bestpractices.json`) that the badge app reads to propose
   answers. A `?` or `"unknown"` status is ignored entirely, so
-  placeholders are safe. **The canon now carries one**, generated from
-  its own entry with every repo-shaped answer blanked to `?` — copy that
-  file, not `projects/14058.json`, and the `?` entries are exactly the
-  questions the new repo must answer for itself.
+  placeholders are safe. The canon carries its own at the root, and
+  [`scaffold/.bestpractices.json`](../scaffold/.bestpractices.json) is
+  the stub a new repo copies — the `?` entries there are exactly the
+  questions that repo must answer for itself.
   [Spec](https://github.com/ossf/best-practices-badge/blob/main/docs/bestpractices-json.md).
+
+  **Never build one by renaming `projects/<id>.json`.** The download and
+  the input use *different key forms for baseline criteria*, and the
+  mismatch fails silently. The download renders the display ID
+  (`OSPS-AC-01.01_status`); the input whitelist is built from the
+  criteria YAML keys (`osps_ac_01_01_status`) —
+  `Project::PROJECT_PERMITTED_FIELDS`, via
+  `ALL_CRITERIA_STATUS = Criteria.all.map(&:status)`.
+  `CriterionFieldValidator.validate_field_name` returns `nil` on a miss
+  and `RepoJsonDetective` does `next unless field_sym`, so an unrenamed
+  file **drops all 64 baseline criteria without a warning** — the metal
+  series fills, the Baseline series silently does not. It is the same
+  rule the proposal URLs already follow one bullet above; it governs the
+  JSON file too. Lowercase, `-` and `.` both become `_`.
+
+  `lint:bestpractices` guards exactly this in the gate — it is offline
+  and deterministic, so it greps for the display-ID key form and checks
+  the size cap, and deliberately does not parse the JSON (jq is not a
+  belt tool). The remaining limits below are documented, not enforced.
+
+  Three more limits read out of the same source, not guessed:
+
+  - `RepoJsonDetective::MAX_FILE_SIZE = 100_000` — 100 KB, checked
+    against GitHub's reported size *before* download, so an oversized
+    file is skipped entirely rather than truncated.
+  - `Project::MAX_TEXT_LENGTH = 8192` — a longer justification is
+    dropped by `validate_justification`, silently again.
+  - The detective reports `confidence: 3.5`, and
+    `Chief::CONFIDENCE_OVERRIDE` is `4`. **So this file can never
+    overwrite a human-entered answer** — it only fills blank or unknown
+    fields. Clicking **Save (and continue) 🤖** on a hand-tuned entry is
+    therefore safe.
 
   It is **not** a default community health file. GitHub's inheritance
   list is closed (CODE_OF_CONDUCT, CONTRIBUTING, GOVERNANCE, SECURITY,
@@ -169,6 +201,16 @@ Two supported mechanisms, both better than the form:
   app runs automations when you first edit a section, or when you click
   **Save (and continue) 🤖** to re-trigger after changing the file, and
   a human still submits.
+
+  Check it landed rather than assuming, because every failure mode above
+  is silent — after the first edit, the Baseline sections should show
+  answers, not a wall of `?`:
+
+  ```bash
+  curl -sS "https://www.bestpractices.dev/projects/<id>.json" |
+    jq '[to_entries[] | select(.key | test("^OSPS-.*_status"))
+         | select(.value != "?")] | length'
+  ```
 
 ### Three traps in the form itself
 

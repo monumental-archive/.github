@@ -20,19 +20,41 @@ is all rights reserved — the opposite of publishing anything — and
 
 - `.bestpractices.json` — OpenSSF Best Practices pre-fill (#347). The
   badge app reads this file from the repo root and proposes answers, so
-  registering a new repo means reviewing the handful that differ
-  instead of answering ~190 questions by hand. Derived from the canon's
+  registering a new repo starts from ~50 answers already made rather
+  than a blank form — the *majority* still differ per repo and are left
+  as `?`, so treat this as a head start, not a shortcut. Derived from
+  the canon's
   earned entry ([project 14058](https://www.bestpractices.dev/projects/14058)),
   trimmed to answers that are true **org-wide because the controls are
-  inherited** (rulesets, DCO, the gate, signed releases, SBOMs); every
-  repo-varying criterion — everything about builds, tests, coverage,
-  docs, crypto, hardening — is `?`, which the app ignores, so a stale
-  placeholder proposes nothing rather than something false. Two traps
-  the derivation already avoids, recorded so edits keep avoiding them:
-  `build_*` answers must NOT be copied from the canon (N/A there, Met
-  in any repo the repro gate builds), and a consuming repo will
-  legitimately **outscore** the conformance root — that is the design,
-  not a regression.
+  inherited**: the org rulesets and security configuration, the DCO, the
+  shared gate, and the community health files this repository serves as
+  org defaults (SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, GOVERNANCE,
+  SUPPORT). Anything a repo could vary is `?`, which the app ignores, so
+  a stale placeholder proposes nothing rather than something false.
+
+  **Signed releases, SBOMs and attestations are deliberately `?`, not
+  Met.** They are true of the canon and false of a repo on its first
+  day, and a stub that asserts them would have every new repo claim a
+  release it has never cut. Same for the whole `version_*` and
+  `release_notes*` family. Inherited *controls* may be carried; earned
+  *outcomes* may not.
+
+  Three traps the derivation avoids, recorded so edits keep avoiding
+  them:
+
+  - **Baseline criteria must use the `osps_ac_01_01` key form**, never
+    the `OSPS-AC-01.01` form the project download renders. The input
+    whitelist is built from the criteria YAML keys, and a miss is
+    skipped in silence — an unrenamed file drops all 64 Baseline
+    criteria while the metal series fills normally. See
+    [`docs/best-practices.md`](../docs/best-practices.md) for the
+    source references and the one-line check.
+  - `build_*` answers must NOT be copied from the canon (N/A there, Met
+    in any repo the repro gate builds), and each `build_*` criterion
+    hangs on its *own* escape clause — never write "no build system
+    exists".
+  - A consuming repo will legitimately **outscore** the conformance
+    root — that is the design, not a regression.
 
 Conditional stubs, wired per the runbook's "Wiring in a repository"
 section (`docs/runbook.md`): `cliff.toml` and the release/publish

@@ -3079,6 +3079,52 @@ rm -f "${blkfile}"
 echo "fix:badges: rendered $(grep -c "img.shields.io\|scorecard.dev\|codecov.io\|zenodo.org\|badge.svg" <<< "${block}") line(s) into README.md"
 '''
 
+[tasks."lint:bestpractices"]
+description = "`.bestpractices.json` uses key names the badge app accepts; repos without one skip clean"
+dir = "{{cwd}}"
+# The regression guard for a failure that was invisible for a day. The
+# badge app builds its input whitelist from the criteria YAML keys —
+# ALL_CRITERIA_STATUS = Criteria.all.map(&:status), so
+# :osps_ac_01_01_status — while `projects/<id>.json` renders the display
+# ID, OSPS-AC-01.01_status. A file built by editing that download keys
+# every Baseline criterion the wrong way;
+# CriterionFieldValidator.validate_field_name returns nil on a miss and
+# RepoJsonDetective does `next unless field_sym`, so all 64 are skipped
+# with no error and the metal series fills normally. Both of this org's
+# files shipped that way.
+#
+# Deterministic and offline, so gate-legal: it greps for the display-ID
+# key form and checks the size cap. It deliberately does NOT validate
+# JSON syntax, status enums or the 8192-char justification limit — that
+# needs a JSON parser, and jq is not a pinned belt tool (it appears only
+# in network-bound tasks that run on a runner). Those limits are
+# documented in docs/best-practices.md; this guards the one failure that
+# is silent.
+run = '''
+files=$(git ls-files ".bestpractices.json" "*/.bestpractices.json" ".project.d/bestpractices.json")
+[[ -n "${files}" ]] || { echo "lint:bestpractices: no .bestpractices.json, skipped"; exit 0; }
+
+rc=0
+while IFS= read -r f; do
+  bad=$(grep -o '"OSPS-[A-Z][A-Z]-[0-9][0-9]\.[0-9][0-9]_[a-z]*"' "${f}" | sort -u || true)
+  if [[ -n "${bad}" ]]; then
+    echo "lint:bestpractices: ${f}: display-ID keys the badge app silently drops:" >&2
+    sed 's/^/  /' <<< "${bad}" >&2
+    echo "  use the criteria YAML key form instead: osps_ac_01_01_status" >&2
+    rc=1
+  fi
+  size=$(wc -c < "${f}")
+  if (( size > 100000 )); then
+    echo "lint:bestpractices: ${f}: ${size} bytes exceeds MAX_FILE_SIZE (100000);" >&2
+    echo "  the app checks the size before downloading and skips the file entirely" >&2
+    rc=1
+  fi
+done <<< "${files}"
+
+(( rc == 0 )) && echo "lint:bestpractices: $(wc -l <<< "${files}") file(s) clean"
+exit "${rc}"
+'''
+
 [tasks."lint:badges"]
 description = "The README badge block equals what fix:badges derives — asserted shields cannot drift from tree facts"
 dir = "{{cwd}}"
