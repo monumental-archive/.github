@@ -46,6 +46,41 @@ if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
   exit 0
 fi
 
+# Seam 5 of #358: the pgrx upgrade path is derived on the Release PR
+# against the release published AT DERIVATION TIME, and the PR machinery
+# runs before the previous release's publish has finished — so a PR
+# derived inside that window starts its path from a version about to be
+# superseded, and the publish guard (build-pgrx-extension.yml) discovers
+# it only AFTER this tag exists, burning an immutable version number
+# (release-lab v0.24.3, all ten cells). This is the same check moved to
+# the last reversible moment: a stale derivation refuses the MINT, and
+# nothing burns. Same carve-outs as the generator and the publish
+# guard: no extension control files, no previous release, or a previous
+# release that shipped no tarballs for the extension all pass.
+while IFS= read -r control; do
+  [[ -n ${control} ]] || continue
+  name=$(basename "${control}" .control)
+  crate_dir=$(dirname "${control}")
+  prev=$(gh release view --json tagName --jq .tagName 2> /dev/null || true)
+  [[ -n ${prev} && ${prev} == v* ]] || continue
+  prev="${prev#v}"
+  [[ ${prev} != "${version}" ]] || continue
+  shipped=$(gh release view "v${prev}" --json assets --jq \
+    "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))] | length")
+  [[ ${shipped} != "0" ]] || continue
+  upgrade="${crate_dir}/sql/${name}--${prev}--${version}.sql"
+  if [[ ! -f ${upgrade} ]]; then
+    echo "FAIL: refusing to mint ${tag} — no upgrade path ${upgrade} from published v${prev}" >&2
+    echo "  The Release PR derived its path before v${prev} finished publishing" >&2
+    echo "  (#358 seam 5). No tag was minted, so ${version} is NOT burned:" >&2
+    echo "  once the in-flight publish is complete, refresh the derivation via" >&2
+    echo "  the Release-PR leg (a push to the default branch, or the" >&2
+    echo "  release-published trigger) and re-run this job on the refreshed" >&2
+    echo "  release commit." >&2
+    exit 1
+  fi
+done < <(git ls-files '*.control')
+
 # Signed, not merely annotated (#349 S4): gitsign puts a keyless x509
 # signature in the tag object, under the same Sigstore root of trust as
 # every other org signature — so an App-minted tag and a hand-minted

@@ -676,11 +676,19 @@ jobs:
             exit 1
           fi
           sdigest=$(sha256sum "${sfile}" | cut -d' ' -f1)
+          # The decision's own subject list is the authoritative
+          # enumeration of what it covers (#358 Q6): requiring the
+          # selected SBOM to appear in it makes the selection
+          # self-verifying — a future wrong pick reddens here as a
+          # named mismatch instead of 404ing on a subject the commit
+          # point never signed.
           jq -e --arg tag "v${UNTRUSTED_VERSION}" \
+            --arg sbom "$(basename "${sfile}")" \
             '.[0].verificationResult.statement.predicate
-             | .conclusion == "OPEN" and .tag == $tag' \
+             | .conclusion == "OPEN" and .tag == $tag
+               and (.subject | index($sbom) != null)' \
             "${WORKDIR}/decision.json" > /dev/null || {
-            echo "::error::the release decision does not name conclusion OPEN for this tag — refusing the verdict"
+            echo "::error::the release decision does not name conclusion OPEN for this tag with this SBOM in its subject — refusing the verdict"
             exit 1
           }
           dsha=$(sha256sum "${WORKDIR}/decision.json" | cut -d' ' -f1)

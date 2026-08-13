@@ -428,6 +428,35 @@ jobs:
         # spec page is fetched anonymously; no token needed.
         run: mise run audit:spec-drift
 
+  caller-permissions:
+    name: audit / caller permissions
+    runs-on: ubuntu-24.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+
+      - name: Check every consumer grant against canon HEAD's requirements
+        # Seam 2 of #358, org-wide half: a consumer whose uses: grant is
+        # below what a callee's jobs ask for dies as startup_failure on
+        # its next pin bump, and Renovate bumps the SHA without touching
+        # the stub body. A finding is a forecast, not an outage. Public
+        # workflow files only; the default token reads them.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:caller-permissions
+
   badges:
     name: audit / badge truth
     runs-on: ubuntu-24.04

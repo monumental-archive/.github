@@ -88,3 +88,17 @@ issue #266, `generate-sbom.sh`, `repo-baseline.sh` #290 finding 7,
 
 New audits copy this shape from `audit:source-vsa`. Review any checking
 task against both properties before it lands.
+
+## The seam rule (#358)
+
+A shared-workflow **capability change** — anything that alters what a
+caller must grant or how a consumer's release behaves at runtime — is
+done when a release-lab release has exercised it **on a pin carrying
+it**, not when the gate is green. The gate is deterministic by design
+and therefore structurally blind to integration seams: caller
+`permissions:` resolve at startup, attestation lookups at verdict time,
+publish-state derivations at whatever moment they run. #353 closed
+gate-green carrying four seam defects; every one was found by running a
+release and none by a linter. `lint:caller-permissions`,
+`lint:audit-scheduled` and `audit:caller-permissions` guard the seams
+now enumerated; this rule covers the ones not yet named.

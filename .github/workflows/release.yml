@@ -109,9 +109,22 @@ jobs:
 
   release-pr:
     name: Maintain the Release PR
+    # The release-published leg closes seam 5 of #358: this job runs on
+    # the push of ordinary commits, which lands BEFORE the previous
+    # release's publish has finished — so a derivation that reads "the
+    # published release" (the pgrx upgrade path) reads a version about
+    # to be superseded, and nothing re-derived it before merge (measured
+    # on release-lab v0.24.3: derived from v0.24.1 at 11:04, v0.24.2
+    # published at 11:11, merged stale at 15:22). Callers that add
+    # `release: types: [published]` to their stub (the template carries
+    # it) re-run this leg when the in-flight publish lands, so the open
+    # Release PR refreshes itself with the then-true previous version.
+    # The backstop for a merge inside the remaining window is
+    # tag-release.sh, which refuses to mint on a stale path.
     if: >-
-      github.event_name == 'push' &&
-      !startsWith(github.event.head_commit.message, 'chore: release v')
+      (github.event_name == 'push' &&
+      !startsWith(github.event.head_commit.message, 'chore: release v')) ||
+      (github.event_name == 'release' && github.event.action == 'published')
     runs-on: ubuntu-24.04
     permissions:
       # git-cliff calls the GitHub API. The canonical cliff.toml renders
@@ -136,6 +149,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          # On a release-published refresh the payload SHA is the tag's
+          # commit, not the branch head the Release PR is maintained
+          # from — the refresh must derive against the default branch.
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
 
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
