@@ -85,6 +85,52 @@ checksum = "sha256:975a22143262fd27476d19ee00c7af67978426e40e1dee94eed6bbade1cf8
 url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-pc-windows-msvc.tar.gz"
 url_api = "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/assets/471599057"
 
+[[tools."aqua:astral-sh/uv"]]
+version = "0.12.3"
+backend = "aqua:astral-sh/uv"
+
+[tools."aqua:astral-sh/uv"."platforms.linux-arm64"]
+checksum = "sha256:fa513fca1eb2913334c944fe9adbdd410274a1cbe8dd05d03699a9eb85311d4e"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387718"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/uv"."platforms.linux-arm64-musl"]
+checksum = "sha256:fa513fca1eb2913334c944fe9adbdd410274a1cbe8dd05d03699a9eb85311d4e"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387718"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/uv"."platforms.linux-x64"]
+checksum = "sha256:0643b9fb8c9fb27458e709ce6ff939695013c41975ff7b02d3f3b138d8d4bdb3"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387821"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/uv"."platforms.linux-x64-musl"]
+checksum = "sha256:0643b9fb8c9fb27458e709ce6ff939695013c41975ff7b02d3f3b138d8d4bdb3"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387821"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/uv"."platforms.macos-arm64"]
+checksum = "sha256:546f7f8a6c70ff13a3a9d2bc958db3427298cebf3e0cb756f9177133b7068843"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387707"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/uv"."platforms.macos-x64"]
+checksum = "sha256:4c9f52262a14da336e4a42ed24992d12d0c956acde87619e4611d321dffa602b"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387807"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/uv"."platforms.windows-x64"]
+checksum = "sha256:b23350c79e8ad0192b8124af13a0f17e8d4e4549524785e1aef389ae5a06990e"
+url = "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/505387809"
+provenance = "github-attestations"
+
 [[tools."aqua:google/osv-scanner"]]
 version = "2.4.0"
 backend = "aqua:google/osv-scanner"
@@ -428,6 +474,14 @@ url_api = "https://api.github.com/repos/lycheeverse/lychee/releases/assets/40995
 checksum = "sha256:32975d1493ee1a975d6bb41e4fb56fe419cb442ded628bb772ba2e614acfacad"
 url = "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/lycheeverse/lychee/releases/assets/409959491"
+
+[[tools."pipx:reuse"]]
+version = "6.2.0"
+backend = "pipx:reuse"
+
+[tools."pipx:reuse".options]
+pipx_args = "--preinstall charset-normalizer"
+uvx_args = "--with charset-normalizer"
 
 [[tools.rumdl]]
 version = "0.2.52"

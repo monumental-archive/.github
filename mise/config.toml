@@ -91,6 +91,16 @@ lychee = "0.24.2"
 # OpenVEX assembly (vex:new). The statement is the triage record; the
 # signer signs it, blast-radius filters on it.
 "aqua:openvex/vexctl" = "0.4.4"
+# REUSE compliance (#316): the tool the api.reuse.software badge runs,
+# executed in the gate over tracked files so compliance is machine-checked
+# BEFORE registration — "compliant at registration" was an unenforced
+# adjective until three defects shipped past it (an MIT header in a 0BSD
+# tree, a CC0 header with no licence text, and the scaffold stub parsing
+# as a real nested REUSE.toml). PyPI-only, no aqua package: the pipx
+# backend rides aqua-backed uv (checksummed) — a documented exception in
+# the cargo: class (tooling-verdicts.md).
+"aqua:astral-sh/uv" = "0.12.3"
+"pipx:reuse" = { version = "6.2.0", uvx_args = "--with charset-normalizer", pipx_args = "--preinstall charset-normalizer" }
 # Source-track chain verification (audit:source-vsa) and stranger
 # verification of chain links generally — the same binary the emitter's
 # action installs in per-repo runs (docs/source-track.md, #207).
@@ -1969,7 +1979,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl cargo-deny osv-scanner vexctl; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl cargo-deny osv-scanner vexctl reuse; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
@@ -2009,6 +2019,31 @@ if git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 \
   exit 1
 fi
 echo "lint:licence: ok"
+'''
+
+[tasks."lint:reuse"]
+description = "REUSE-spec compliance over tracked files (the lint api.reuse.software will run), pre-registration"
+dir = "{{cwd}}"
+# lint:licence proves a licence was CHOSEN; this proves the tree
+# actually complies with the choice — the gap between the two shipped
+# three defects past every existing check (#316): a per-file MIT header
+# silently overriding a 0BSD tree, a CC0 header with no licence text,
+# and the scaffold stub parsing as a real nested REUSE.toml. "Compliant
+# at registration time" was an unenforced adjective; this is the
+# audit-claims cure, same as lint:citation's. Scratch-tree
+# materialisation (the lint:trivy pattern): reuse walks directories,
+# and the working tree holds .org-toolbelt and build output it must
+# never see. Deterministic, offline, gate-worthy. Guarded on a tracked
+# root REUSE.toml — a repo that has not declared yet skips clean
+# (lint:licence is what chases the declaration).
+run = '''
+git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 || {
+  echo "lint:reuse: no tracked REUSE.toml, skipped"; exit 0
+}
+scratch=$(mktemp -d)
+trap 'rm -rf "${scratch}"' EXIT
+git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
+reuse --root "${scratch}" lint
 '''
 
 [tasks."fix:citation"]
@@ -2195,7 +2230,7 @@ reuse=$(state reuse)
 if [[ "${reuse}" == "registered" ]]; then
   add "[![REUSE status](https://api.reuse.software/badge/github.com/${org_path})](https://api.reuse.software/info/github.com/${org_path})"
 else
-  add "<!-- pending (human step): REUSE — register at api.reuse.software (FSFE login), then set 'reuse registered' in .badge-states and re-run fix:badges -->"
+  add "<!-- pending (human step): REUSE — register at https://api.reuse.software/register (no account: name, email, project URL, confirmation link), then set 'reuse registered' in .badge-states and re-run fix:badges -->"
 fi
 if [[ -f .coverage-floor ]] || [[ "$(state coverage)" == "exemplary" ]]; then
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"

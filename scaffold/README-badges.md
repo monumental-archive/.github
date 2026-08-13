@@ -20,9 +20,12 @@ Universal shields — derived for every repo:
                     never outrun the table. BuildEnv is deliberately
                     unshielded: L0 is the absence of a claim, and a
                     shield asserting an absence is noise (#316).
-  REUSE status      earned by registering at api.reuse.software (FSFE
-                    login) — `reuse pending` in .badge-states until the
-                    human step lands, then `reuse registered`
+  REUSE status      earned by registering at api.reuse.software/register
+                    (no account — name, email, project URL, confirmation
+                    link; `lint:reuse` in the gate proves the tree
+                    compliant BEFORE registering) — `reuse pending` in
+                    .badge-states until the human step lands, then
+                    `reuse registered`
   OpenSSF Best      earned by answering the form from
   Practices         docs/best-practices.md — `bestpractices pending`
                     until it binds, then `bestpractices <BP_ID>`

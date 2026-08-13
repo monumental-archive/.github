@@ -31,6 +31,7 @@ honestly blocked on.
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
 | cargo-llvm-cov + `.coverage-floor` ratchet | Line-coverage floor in the gate (`coverage:check`), codecov badge feed off-gate |
 | cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
+| reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -95,6 +96,21 @@ a natively-managed representation.
   Renovate queues behind a reading list
   ([`dependency-track.md`](dependency-track.md), #122). *Reopen:* a
   second maintainer.
+- **reuse, adjudicated late and the lateness recorded** (#316): the
+  scaffold cited "tool adjudication in #82" — a verdict never made, the
+  cffconvert phantom class — and in the gap three compliance defects
+  shipped past `lint:licence`, which proves only that a licence was
+  chosen. Adopted at 6.2.0: PyPI-only (no aqua package), so the `pipx:`
+  backend rides aqua-backed uv — the second documented exception to
+  aqua-first after `cargo:` — with the `charset-normalizer` extra
+  pinned via `uvx_args`/`pipx_args` (macOS has no `file` bindings; the
+  bare install crashes on import). Runs in the gate over a scratch tree
+  of tracked files, deterministic and offline. Per-file SPDX headers
+  are refused as a matter of design, not tooling: a file inherits the
+  repo's `REUSE.toml` declaration, and a hardcoded header both
+  overrides it and travels wrongly when the file is copied (#214).
+  *Reopen:* an aqua package appearing, or a repo genuinely needing
+  per-file licence variance.
 - **cargo-fuzz, the nightly/sanitizer half** — the adopted entry above
   is deliberately `--sanitizer none` on the repo's pinned STABLE
   toolchain (#316): ASan needs nightly, and a nightly in the gate means

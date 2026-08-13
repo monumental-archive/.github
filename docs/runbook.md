@@ -57,8 +57,12 @@ written for two moments: wiring a repository in, and a release going wrong.
 9. **Score-ready extras**, so the repository badges the day it lands:
    commit a `.coverage-floor` (a bare number; the gate's `coverage:check`
    ratchet enforces it — Silver wants ≥ 80) and pass the `codecov-token`
-   secret to the ci stub for the badge feed; copy `scaffold/REUSE.toml`
-   and licence texts into `LICENSES/`; add the
+   secret to the ci stub for the badge feed; copy
+   `scaffold/REUSE.toml.stub` to the root as `REUSE.toml` (the .stub
+   suffix keeps the placeholder from governing the canon's own tree —
+   any file literally named REUSE.toml rules its subtree) and licence
+   texts into `LICENSES/`; `lint:reuse` then proves real REUSE-spec
+   compliance in the gate, before any registration; add the
    `<!-- badges:begin -->`/`<!-- badges:end -->` marker pair to the
    README and run `mise run fix:badges` — the block is derived, never
    pasted (`scaffold/README-badges.md` is the catalogue, `.badge-states`
