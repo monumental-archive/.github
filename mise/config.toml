@@ -68,6 +68,13 @@ shfmt = "3.13.1"
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.52"
 lychee = "0.24.2"
+# Python lint + format in one binary (#82), at `select = ["ALL"]`. Ruff
+# is a standalone Rust binary: it needs no Python interpreter to run, so
+# it lints Python without Python joining the belt. It also closes a real
+# hole — security/workflow-permissions.py is the one tracked file in a
+# language no belt tool covered, and it computes the caller/callee
+# permissions join that guards the Build L3 boundary.
+ruff = "0.16.1"
 # The org's JS/TS/JSON layer (#82), at `preset: "all"` — 525 rules, every
 # group, nursery included. Written as the explicit aqua backend, never the
 # `biome` short name: that name resolves to aqua AND npm, and an npm
@@ -242,6 +249,46 @@ files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.ct
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "fix:biome: nothing biome parses is tracked, skipped"; exit 0; }
 xargs biome check --write <<<"${files}"
+'''
+
+# Named for the subject, not the tool, matching lint:shell / lint:toml /
+# lint:markdown — ruff covers exactly one language. (lint:biome is
+# tool-named because biome covers five.)
+[tasks."lint:python"]
+description = "Python lint + format check (ruff, select ALL + preview)"
+dir = "{{cwd}}"
+# A tracked ruff config is REQUIRED once Python is tracked, for the same
+# reason lint:biome demands biome.json and with a sharper edge: ruff's
+# DEFAULT selection is E4/E7/E9/F, a few dozen rules out of ~900. Measured
+# at standup on this repo's own script — 48 findings under `ALL`, ZERO
+# under the defaults. A repo that forgets the config does not get a
+# weaker gate, it gets a green one that checked almost nothing.
+run = '''
+files=$(git ls-files "*.py" "*.pyi")
+[[ -n "${files}" ]] || { echo "lint:python: no Python tracked, skipped"; exit 0; }
+if ! git ls-files --error-unmatch "ruff.toml" > /dev/null 2>&1 \
+  && ! git ls-files --error-unmatch ".ruff.toml" > /dev/null 2>&1 \
+  && ! { git ls-files --error-unmatch "pyproject.toml" > /dev/null 2>&1 \
+         && grep -q "^\[tool\.ruff" pyproject.toml; }; then
+  echo "lint:python: Python is tracked but no ruff config is — copy scaffold/ruff.toml (#82)" >&2
+  echo "  without it ruff runs its default E4/E7/E9/F selection, not the org's select = ALL" >&2
+  exit 1
+fi
+xargs ruff check <<<"${files}"
+xargs ruff format --check <<<"${files}"
+'''
+
+[tasks."fix:python"]
+description = "Apply ruff's safe fixes and rewrite Python to canonical format"
+dir = "{{cwd}}"
+# Safe fixes only: --unsafe-fixes is never wired into a belt task, on the
+# same rule as fix:biome — a fixer must be runnable without reading its
+# diff first.
+run = '''
+files=$(git ls-files "*.py" "*.pyi")
+[[ -n "${files}" ]] || { echo "fix:python: no Python tracked, skipped"; exit 0; }
+xargs ruff check --fix <<<"${files}"
+xargs ruff format <<<"${files}"
 '''
 
 [tasks."lint:shell"]
@@ -2880,7 +2927,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome cargo-deny osv-scanner vexctl reuse; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff cargo-deny osv-scanner vexctl reuse; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
