@@ -8,12 +8,25 @@ the org-wide evidence; anything repo-specific is marked.
 The canon's own entry is
 [project 14058](https://www.bestpractices.dev/projects/14058), answered in
 full across all six sections on 2026-08-13 — **it is the worked example,
-and `https://www.bestpractices.dev/projects/14058.json` is the machine
-copy every other repository starts from**. Six sections, not three: the
+and `.bestpractices.json` at this repository's root is the machine copy
+every other repository starts from**. Six sections, not three: the
 metal series (passing, silver, gold) and the OSPS Baseline series
 (baseline-1, -2, -3) are answered on the same entry. Read
 [Form mechanics](#form-mechanics) before touching a form — the ordering
 trap there will redden the Monday audit if you skip it.
+
+Standing at the last re-score: **passing 100% (earned), silver 96%, gold
+70%, baseline-1 100% (earned), baseline-2 100% (earned), baseline-3
+95%.** Treat those as the high-water mark to check against, never as the
+current reading — fetch `projects/14058.json` before asserting a number.
+
+**The entry drifts, and nothing watches it.** It was answered at 08:58Z
+and was wrong by five criteria at 10:10Z, when a single pull request
+shipped `GOVERNANCE.md`, two new `SECURITY.md` sections and
+`CONTRIBUTING.md` item 3. `audit:badges` watches `badge_percentage_0`
+and `lost_*` — it cannot see a document that turns an Unmet criterion
+Met. Until something diffs `.bestpractices.json` against the live entry,
+re-score by hand whenever a change lands that a criterion would notice.
 
 ## Passing
 
@@ -34,18 +47,50 @@ trap there will redden the Monday audit if you skip it.
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
 | `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
-| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 | canonical `coverage:check` ratchet in the gate |
+| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 — **Unmet for the canon**, see the wall below | canonical `coverage:check` ratchet in the gate, which is gated on `.coverage-floor && Cargo.toml` and so skips a bash repo clean |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | git-cliff + App-minted `v*` tags |
+| `version_tags_signed` | Met | the tag objects **are** signed — Sigstore keyless, by the release workflow. See the `no_user` trap below |
+| `governance`, `roles_responsibilities` | Met | [GOVERNANCE.md](../GOVERNANCE.md) — decision model, roles table, succession |
+| `test_policy_mandated`, `tests_documented_added` | Met | CONTRIBUTING.md, "Requirements for acceptable contributions" item 3 |
 | `dco` | Met | `lint:dco` enforces Signed-off-by |
 | `security_review`, `assurance_case` | Met | docs/release.md + slsa-reference.md are the written assurance case |
 | `installation_common`, `external_dependencies` | Met | mise-pinned toolchain; lockfiles everywhere |
+
+### The one wall that is not headcount
+
+Silver stands at 96% on two MUSTs, and **neither is a second maintainer**:
+
+- `regression_tests_added50` — a measurement, not a tool. Every `fix:`
+  commit in the window must be classified as "shipped the check that
+  would have caught it" or not, and ≥ 50% must be yes. Free to close;
+  nobody has done the pass.
+- `test_statement_coverage80` — needs a number, and the number needs a
+  bash coverage tool. `kcov` and `bashcov` are both **404 in the aqua
+  registry**; `bats-core` and `shellspec` are both present. So a *test
+  suite* is belt-legal today (#364) and a *coverage number* is not.
+
+Note the escape hatch does **not** apply: the criterion is conditional on
+"if there is at least one FLOSS tool that can measure this in the
+selected language", and kcov and bashcov are FLOSS tools that measure
+bash. Aqua packaging is *our* constraint, not the criterion's, so N/A
+here would be a false claim. Silver therefore costs exactly one
+decision — may a coverage tool enter the belt without aqua packaging? —
+and that decision is recorded in
+[tooling-verdicts.md](tooling-verdicts.md), not settled here.
 
 ## Gold — walled by headcount, deliberately not claimed
 
 `bus_factor` ≥ 2, `two_person_review`, `contributors_unassociated`: all
 require a second maintainer. Recorded in
 [slsa-reference.md](slsa-reference.md); revisit the moment one exists.
+
+Gold is therefore **unreachable, and caps at 20/23 ≈ 87%** even with
+silver earned and every coverage criterion measured. Two of its criteria
+that once read as walls are not: `code_review_standards` is Met from
+[GOVERNANCE.md](../GOVERNANCE.md#code-review), and `small_tasks` is Met
+whenever an open issue carries `good first issue`. Do not spend on the
+remainder to chase a badge that headcount forbids.
 
 ## Baseline — the same entry, a second shield
 
@@ -55,10 +100,15 @@ its **own** shield at `/projects/<id>/baseline` (a sibling of the metal
 `/baseline-<n>/badge` 404s). `fix:badges` renders both whenever
 `.badge-states` names a BP_ID.
 
-Baseline-1 is winnable solo where Gold is not: the canon reached 100% on
-it at registration. Baseline-2's only blocker is a roles-and-
-responsibilities document, and Baseline-3's are documentation plus one
-headcount criterion (`osps_qa_07_01`, non-author approval). The
+Baseline-1 and Baseline-2 are both winnable solo where Gold is not, and
+both are **earned**: baseline-1 at registration, baseline-2 once
+[GOVERNANCE.md](../GOVERNANCE.md) supplied the roles-and-
+responsibilities document that was its single blocker. Baseline-3's
+documentation blockers are all closed too — support scope and
+end-of-life in [SECURITY.md](../SECURITY.md), the SAST remediation
+threshold in the same file, the collaborator-review policy in
+GOVERNANCE.md, the test policy in CONTRIBUTING.md — leaving it at 95%
+on one headcount criterion (`osps_qa_07_01`, non-author approval). The
 level-bearing facts live in the JSON as
 `badge_percentage_baseline_1..3`, `achieved_baseline_N_at` and
 `lost_baseline_N_at` — the last of which is what `audit:badges` watches
@@ -104,10 +154,41 @@ Two supported mechanisms, both better than the form:
 - **`.bestpractices.json`** — a file at the repo root (or
   `.project.d/bestpractices.json`) that the badge app reads to propose
   answers. A `?` or `"unknown"` status is ignored entirely, so
-  placeholders are safe. This is the org-wide multiplier: take
-  `projects/14058.json`, strip what is not true of the new repo, commit
-  it, and the entry pre-fills instead of being typed.
+  placeholders are safe. **The canon now carries one**, generated from
+  its own entry with every repo-shaped answer blanked to `?` — copy that
+  file, not `projects/14058.json`, and the `?` entries are exactly the
+  questions the new repo must answer for itself.
   [Spec](https://github.com/ossf/best-practices-badge/blob/main/docs/bestpractices-json.md).
+
+  It is **not** a default community health file. GitHub's inheritance
+  list is closed (CODE_OF_CONDUCT, CONTRIBUTING, GOVERNANCE, SECURITY,
+  SUPPORT, FUNDING, issue/PR templates, discussion forms), so a root
+  JSON file in this repository reaches no other repository by itself;
+  the badge app reads it from whichever repo the entry's `repo_url`
+  names. Copying is deliberate, per repo. It only ever *proposes*: the
+  app runs automations when you first edit a section, or when you click
+  **Save (and continue) 🤖** to re-trigger after changing the file, and
+  a human still submits.
+
+### Three traps in the form itself
+
+Each of these cost a wasted round trip on 2026-08-13:
+
+1. **`(URL required)` criteria have no URL box.** Passing
+   `<criterion>_url=` in an automation proposal is silently dropped and
+   the criterion renders a red `?` even sitting at Met. The URL goes
+   **inside the justification text**. Affects `governance`,
+   `roles_responsibilities`, `code_review_standards`, `small_tasks`,
+   `hardened_site`, `hardening`, `bus_factor` and peers.
+2. **Higher levels demand lengthier justifications for criteria already
+   answered below.** `repo_distributed` sat at `Git.` — fine at passing,
+   "Warning: Requires lengthier justification" at gold. A section that
+   reads 100% at its own level can still carry warnings on the level
+   above, so check the gold view even when chasing silver.
+3. **`OSPS-BR-01.02` is a retired criterion stored as the number `0`,**
+   not a status string. It is in `baseline_criteria_retired.yml`
+   (retired v2026.02.19), scores nothing, and must never be copied into
+   a `.bestpractices.json`.
 
 ### Answers that must not be copied between repos
 
@@ -121,6 +202,23 @@ copying the canon's is wrong:
   repository, so it stays N/A here even though the project does build a
   release artifact. A repo whose users must compile something answers
   Met.
+
+  **Give each its own reason; never write "no build system exists".**
+  That sentence is false — one exists — and it sat on the live entry
+  until 2026-08-13 flatly contradicting `build_repeatable`'s "building
+  does occur". The criteria have *different* escape clauses and each
+  justification must cite its own:
+
+  - `build` — clause: requires building *for use*. Consumers
+    reference the workflows by SHA; nothing is compiled to run them.
+  - `build_standard_variables` — clause: *no native binaries*. There
+    is no compiler or linker invocation to pass `CFLAGS` to.
+  - `build_preserve_debug` — clause: no build *or installation*
+    system. Nothing is compiled, so no debug information to strip.
+  - `build_non_recursive` — same clause. The archive build is one
+    `git archive` step, with no subdirectory recursion.
+  - `build_repeatable` / `build_reproducible` — clause: *no building
+    occurs*. Building **does** occur, so these are **Met**.
 - `build_repeatable` / `build_reproducible` — **Met for the canon**,
   and this is the trap that caught the first pass of these answers. See
   below.
@@ -144,11 +242,11 @@ declares it builds a tarball through `build-source`, rebuilds it
 independently through `repro-build-source`, and the repro gate compares
 the two bit for bit before anything is signed or attached. So a
 repository that compiles nothing still has a build, and a reproducible
-one. The canon's v1.22.2 publishes four assets:
+one. The canon's v1.25.0 publishes four assets:
 
 ```text
-github-1.22.2.tar.gz          the built archive
-github-1.22.2.spdx.json       an SPDX SBOM
+github-1.25.0.tar.gz          the built archive
+github-1.25.0.spdx.json       an SPDX SBOM
 checksums.txt                 per-asset digests
 attestations.intoto.jsonl     the Sigstore evidence bundle
 ```
@@ -166,6 +264,27 @@ Check first, every time:
 gh release view "$(gh release list -L1 --json tagName --jq '.[0].tagName')" \
   --json assets --jq '[.assets[].name]'
 ```
+
+### The trap: `no_user` does not mean unsigned
+
+The same failure one layer down. The canon's first answers recorded
+`version_tags_signed` as Unmet because "GitHub reports them unsigned".
+GitHub reports no such thing. The release tags **are** cryptographically
+signed — Sigstore keyless, by the release workflow, the signature
+carried in the tag object itself:
+
+```bash
+sha=$(gh api repos/OWNER/REPO/git/ref/tags/vX.Y.Z --jq .object.sha)
+gh api "repos/OWNER/REPO/git/tags/$sha" \
+  --jq '{reason: .verification.reason, signed: (.verification.signature != null)}'
+```
+
+That returns `reason: "no_user", signed: true`. GitHub resolves
+signatures to GitHub *accounts*, and a keyless workflow identity is not
+an account — so `no_user` means "the signer is not a user here", never
+"there is no signature". Verification is against the Fulcio
+certificate's SAN, exactly as `signed_releases` describes. The commit
+side of this same trap is in [continuity.md](continuity.md).
 
 ### What the badge is worth elsewhere
 
