@@ -43,16 +43,48 @@ three ways, all carrying the same version: workflow pins
 (`github>monumental-archive/.github#vX.Y.Z`). Renovate fans each tag out
 to every consumer (see #133).
 
-**The post-release window (#227, #290).** A commit cannot contain its
-own release SHA, so every release `vN` structurally ships its
+**The post-release window (#227, #290, #310).** A commit cannot contain
+its own release SHA, so every release `vN` structurally ships its
 self-references — and leaves every consumer — at `vN-1` until Renovate's
 `chore(canon)` bump lands. That bump is deliberately release-neutral
 (`cliff.toml` skips the scope, ending the self-bump loop) and reaches
 the front of Renovate's queue via `prPriority` and the first-party
-group in `default.json`, so the window is one bot cycle plus CI —
-measured 10–30 minutes. `audit:canon-pins` and `audit:template-pins`
-know the window: references exactly one release behind within 24 hours
-of the tag report as a notice; anything beyond that is the real alarm
-(Renovate paused or dead, the v0.16.1 failure class). The window never
-reaches zero and no configuration can make it — treat a brief `vN-1`
-reading after a release as the steady state, not drift.
+group in `default.json`, so the window is one bot cycle plus CI.
+
+**One bot cycle is Mend's poll, roughly hourly (#310).** Hosted Renovate
+discovers a new tag on its own schedule; no reference anywhere can move
+faster than the next poll, and no preset content changes the cadence.
+During a release burst a consumer can lawfully read several releases
+behind for under an hour — measured live on 2026-08-13, when three
+releases in 73 minutes left the signer "three behind" and the grouped
+bump PR landed 60 minutes after the last tag. That is why the pin
+audits (`audit:canon-pins`, `audit:template-pins`, `audit:org-pins`)
+grace on **staleness duration, not releases-behind**: the clock starts
+at the earliest tag newer than the stale reference, and only past 24
+hours is the state red (Renovate paused or dead, the v0.16.1 failure
+class). The window never reaches zero and no configuration can make
+it — treat a brief stale reading after a release as the steady state,
+not drift. `audit:org-pins` watches every org repo from the canon's
+own Monday audit, so a genuinely stuck consumer reddens where someone
+looks rather than only inside itself.
+
+## The audit-claims contract (#240, #266, #290, #310)
+
+Every checking task — `audit:*`, `settings/repo-baseline.sh check`, and
+anything that walks a population — must satisfy two properties, learned
+the hard way six separate times (`claims.sh` #240, `audit:source-vsa`
+issue #266, `generate-sbom.sh`, `repo-baseline.sh` #290 finding 7,
+`audit:actions` and the baseline output #310 findings 2–3):
+
+1. **Fail closed on blindness.** If the task cannot establish that it
+   actually looked — token absent, tool degraded to offline, population
+   smaller than the known count — it exits non-zero. A check that
+   quietly does nothing manufactures the impression of coverage.
+2. **State the coverage on success.** A green run prints what it
+   examined — `N subjects across M repos` — so a reader of a green
+   Monday audit sees the population in the output instead of having to
+   reason their way to it. Soundness you have to derive is weaker than
+   a line that says it.
+
+New audits copy this shape from `audit:source-vsa`. Review any checking
+task against both properties before it lands.

@@ -159,4 +159,13 @@ if [[ ${mode} == check ]]; then
       | @tsv' <<< "${packages}")
 fi
 
+# State what was covered on success (#310 finding 2, the audit:source-vsa
+# shape): the population guard above makes a silent pass SOUND, but a
+# reader of a green Monday audit should not have to reason their way to
+# what was checked — the output says it, like this check's three siblings.
+if [[ ${mode} == check && ${drift} -eq 0 ]]; then
+  key_count="$(wc -w <<< "${keys}" | tr -d ' ')"
+  echo "repo-baseline: ${seen_repos} repos checked (${key_count} baseline keys + OIDC sub + signoff + publish env each, plus org packages), no drift"
+fi
+
 exit "${drift}"

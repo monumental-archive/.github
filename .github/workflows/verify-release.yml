@@ -103,6 +103,19 @@ on:
         required: false
         type: string
         default: ""
+      consumes-base-images:
+        description: >
+          Declares that this class's artifacts were built inside the
+          canon's digest-pinned postgres base set, so the enrichment
+          claims those images as resolvedDependencies. Declared by the
+          caller, which knows the artifact class — never inferred from
+          subject shape: the old proxy (image subjects present) missed
+          pgrx-extension tarballs, file subjects built INSIDE the pinned
+          base (#310 finding 4). Consumed in verdict mode; ignored in
+          bytes mode.
+        required: false
+        type: boolean
+        default: false
       release-tag:
         description: >
           Declares that file subjects matched by no registry are assets of
@@ -644,7 +657,7 @@ jobs:
         if: inputs.mode == 'verdict'
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
-          UNTRUSTED_IMAGES: ${{ inputs.images }}
+          CONSUMES_BASE_IMAGES: ${{ inputs.consumes-base-images }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
         run: |
@@ -677,20 +690,21 @@ jobs:
           adddep "toolbelt-lock" \
             "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/mise/mise.lock" \
             "${lock_sha}"
-          # Base-image facts are claimed only when THIS release built
-          # images (#290 finding 5): the guard is the release's own image
-          # subjects — the ones the prove step verified against the
-          # registry — never the canon tree, where the mapping file always
-          # exists. A file-only release claiming ten postgres containers
-          # as resolvedDependencies is a signed over-claim. Granularity is
-          # per-release, not per-image: an image release claims the full
-          # pinned base set its policy tree ran under.
-          built_images=0
-          if [[ -n "${UNTRUSTED_IMAGES//[[:space:]]/}" ]]; then
-            built_images=$(jq -r 'length' <<< "${UNTRUSTED_IMAGES}")
-          fi
-          if [[ "${built_images}" -gt 0 \
-            && -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
+          # Base-image facts are claimed exactly when the CALLER DECLARES
+          # the class builds inside the pinned base set. #290 finding 5
+          # fixed the over-claim (file-only releases claiming ten postgres
+          # containers) by gating on the release's image subjects — but
+          # that proxy under-claimed in turn: pgrx-extension tarballs are
+          # FILE subjects built INSIDE postgres:*-bookworm (#310 finding
+          # 4). Subject shape cannot decide this, so it is declared where
+          # the class is known — publish.yml's vsa-* call sites, the #306
+          # pattern — and never inferred here. A declaration the pinned
+          # tree cannot honour is a failure, not a silent skip.
+          if [[ "${CONSUMES_BASE_IMAGES}" == "true" ]]; then
+            if [[ ! -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
+              echo "::error::the caller declares base-image consumption but the pinned canon tree carries no docker/pgrx-base-images.toml"
+              exit 1
+            fi
             map_sha=$(sha256sum "${CANON_PATH}/docker/pgrx-base-images.toml" | cut -d" " -f1)
             adddep "pgrx-base-images" \
               "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/docker/pgrx-base-images.toml" \

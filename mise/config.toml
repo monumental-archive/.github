@@ -958,11 +958,33 @@ dir = "{{cwd}}"
 # checks that catch a compromised or impersonated action, so they run here
 # on a schedule instead of nowhere. Auditor persona adds secrets-outside-env
 # and misfeature. Needs GH_TOKEN.
+#
+# FAIL CLOSED ON BLINDNESS (#310 finding 3, the claims.sh/#240 pattern):
+# without a token zizmor silently degrades to offline — skipping every
+# audit this task exists to run — and still prints "No findings to
+# report" with exit 0, distinguishable only by a non-fatal WARN
+# (measured on zizmor 1.29.0). So the token is asserted up front, and
+# the offline-degradation WARN is fatal — a token that is present but
+# rejected degrades the same way, and only zizmor knows.
 run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "audit:actions: no workflows, skipped"; exit 0
 }
-zizmor --persona=auditor .github/workflows/
+[[ -n "${GH_TOKEN:-}" ]] || {
+  echo "audit:actions: GH_TOKEN is unset — the offline run skips every" >&2
+  echo "  API-backed audit this task exists for; refusing to pass blind" >&2
+  exit 1
+}
+err=$(mktemp)
+status=0
+zizmor --persona=auditor .github/workflows/ 2> "${err}" || status=$?
+cat "${err}" >&2
+if grep -q "running in offline mode" "${err}"; then
+  echo "audit:actions: zizmor degraded to offline despite GH_TOKEN —" >&2
+  echo "  the online audits did not run; a green result would be blind" >&2
+  exit 1
+fi
+exit "${status}"
 '''
 
 [tasks."audit:template-pins"]
@@ -996,19 +1018,23 @@ drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
 if [[ -n "${drift}" ]]; then
   # The post-release window (#290 finding 4, same shape as
   # audit:canon-pins): a release commit cannot pin itself (#227), so
-  # right after a release the templates lawfully sit at the previous
-  # tag until Renovate's chore(canon) bump lands. Pin at exactly the
-  # previous release, latest tag under 24h old — notice, not red. All
-  # local: tags and their dates are in the clone.
+  # right after a release the templates lawfully sit behind until
+  # Renovate's chore(canon) bump lands. The grace is measured as
+  # STALENESS DURATION, not releases-behind (#310 finding 1): the alarm
+  # is "this pin has been catchable for over a day and nothing caught
+  # it", so the clock starts at the EARLIEST tag newer than the pin — a
+  # burst of releases inside one bot cycle is one short staleness, not
+  # a multi-release alarm, while a week-old lag stays red no matter how
+  # recent the newest tag is. All local: tags and dates are in the clone.
   pin_tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | head -1)
-  latest_tag=$(git tag --list "v[0-9]*" | sort -V | tail -1)
-  prev_tag=$(git tag --list "v[0-9]*" | sort -V | tail -2 | head -1)
-  if [[ -n "${pin_tag}" && -n "${prev_tag}" && "${pin_tag}" == "${prev_tag}" ]]; then
-    age=$(($(date -u +%s) - $(git log -1 --format=%ct "${latest_tag}")))
+  succ_tag=$(git tag --list "v[0-9]*" | sort -V \
+    | awk -v p="${pin_tag}" '$0 == p { getline; print; exit }')
+  if [[ -n "${pin_tag}" && -n "${succ_tag}" ]]; then
+    age=$(($(date -u +%s) - $(git log -1 --format=%ct "${succ_tag}")))
     if [[ "${age}" -lt 86400 ]]; then
-      echo "audit:template-pins: post-release window — pin at ${pin_tag}, ${latest_tag} cut $((age / 3600))h ago"
-      echo "  the vN-1 state is structural (#227); Renovate's chore(canon)"
-      echo "  bump closes it. Red only past the 24h grace (#290)."
+      echo "audit:template-pins: post-release window — pin at ${pin_tag}, stale for $((age / 3600))h (since ${succ_tag})"
+      echo "  the lag is structural (#227); Renovate's chore(canon) bump"
+      echo "  closes it. Red only past the 24h grace (#290, #310)."
       exit 0
     fi
   fi
@@ -1037,23 +1063,26 @@ dir = "{{cwd}}"
 # release vN structurally ships self-references at vN-1, and consumers
 # sit at vN-1 until Renovate's chore(canon) bump lands — which cliff.toml
 # deliberately skips, so the bump never triggers a release of its own.
-# References exactly one release behind, within 24 hours of the latest
-# tag, are therefore the healthy steady state and report as a notice.
-# The 24-hour grace is a ceiling, not the expectation: with prPriority
-# and the first-party group (default.json) the bump lands in one bot
-# cycle plus CI, measured 10-30 minutes; the grace exists so a Monday
-# cron landing just after a Sunday release does not cry wolf. Anything
-# outside the window — more than one release behind, or one behind for
-# over a day — is the real alarm: Renovate paused, misconfigured or
-# dead, the v0.16.1 failure this audit exists to catch.
+#
+# THE GRACE IS STALENESS DURATION, NOT RELEASES-BEHIND (#310 finding 1).
+# Releases-behind is a proxy, the same mistake audit:template-pins names
+# for days-behind: three canon releases cut in 73 minutes made a healthy
+# consumer "three behind" for under an hour — hosted Renovate polls
+# roughly hourly, and no reference can move faster than the next poll —
+# while a pin one release behind for a week is the real v0.16.1 failure.
+# So the alarm is on TIME SPENT CATCHABLE: the clock starts at the
+# EARLIEST tag newer than the stale reference, and only past 24 hours is
+# the state red. The 24-hour ceiling is generous by design — with
+# prPriority and the first-party group (default.json) the bump lands in
+# one bot cycle plus CI, measured 10-30 minutes — and exists so a Monday
+# cron landing just after a Sunday release does not cry wolf. Red means
+# Renovate paused, misconfigured or dead.
 run = '''
 tags=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
   | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
 latest=$(tail -1 <<< "${tags}")
-prev=$(tail -2 <<< "${tags}" | head -1)
 [[ -n "${latest}" ]] || { echo "audit:canon-pins: canon has no tags, skipped"; exit 0; }
 stale=""
-nonprev=0
 found=0
 claims=$(git ls-files "*.yml" "*.yaml" | while IFS= read -r f; do
   grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
@@ -1071,37 +1100,143 @@ while IFS= read -r claim; do
   [[ -n "${claim}" ]] || continue
   found=$((found + 1))
   v="${claim##*:}"
-  if [[ "${v}" != "${latest}" ]]; then
-    stale="${stale} ${claim}"
-    [[ "${v}" == "${prev}" && -n "${prev}" ]] || nonprev=1
-  fi
+  [[ "${v}" != "${latest}" ]] && stale="${stale} ${claim}"
 done <<< "${claims}"
 [[ ${found} -gt 0 ]] || { echo "audit:canon-pins: no canon references, skipped"; exit 0; }
 if [[ -n "${stale}" ]]; then
-  # Exactly one release behind: possibly the expected window. Age the
-  # latest tag via the API (public repo; unauthenticated works) — the
-  # date arithmetic lives in jq because ISO parsing in bash is not
-  # portable between GNU and BSD date.
-  if [[ ${nonprev} -eq 0 ]]; then
-    age=$(gh api "repos/monumental-archive/.github/commits/${latest}" \
+  # Staleness duration per distinct stale version: the age of the
+  # EARLIEST tag newer than it, via the API (public repo; unauthenticated
+  # works) — the date arithmetic lives in jq because ISO parsing in bash
+  # is not portable between GNU and BSD date. An unlookupable age fails
+  # closed: unknown staleness is not fresh.
+  red=0
+  oldest=0
+  for v in $(tr " " "\n" <<< "${stale}" | sed "s|.*:||" | sort -uV); do
+    [[ -n "${v}" ]] || continue
+    succ=$(awk -v p="${v}" '$0 == p { getline; print; exit }' <<< "${tags}")
+    [[ -n "${succ}" ]] || { red=1; continue; }
+    age=$(gh api "repos/monumental-archive/.github/commits/${succ}" \
       --jq '((now - (.commit.committer.date | fromdateiso8601)) | floor)' \
       2> /dev/null || true)
-    if [[ "${age}" =~ ^[0-9]+$ && "${age}" -lt 86400 ]]; then
-      echo "audit:canon-pins: post-release window — references at ${prev}, canon ${latest} cut $((age / 3600))h ago"
-      echo "  the vN-1 state is structural (#227): a commit cannot contain its"
-      echo "  own release SHA, and Renovate's chore(canon) bump closes it in"
-      echo "  one bot cycle. Red only past the 24h grace (#290)."
-      exit 0
-    fi
+    [[ "${age}" =~ ^[0-9]+$ ]] || { red=1; continue; }
+    [[ "${age}" -ge 86400 ]] && red=1
+    [[ "${age}" -gt "${oldest}" ]] && oldest="${age}"
+  done
+  if [[ ${red} -eq 0 ]]; then
+    echo "audit:canon-pins: post-release window — canon at ${latest}, references stale for $((oldest / 3600))h:${stale}"
+    echo "  the lag is structural (#227): a commit cannot contain its own"
+    echo "  release SHA, and Renovate's chore(canon) bump closes it in one"
+    echo "  bot cycle. Red only past the 24h grace (#290, #310)."
+    exit 0
   fi
-  echo "audit:canon-pins: references behind canon ${latest}:${stale}" >&2
-  echo "  Outside the expected post-release window (one release behind," >&2
-  echo "  under 24h) — Renovate should have bumped these. Check the" >&2
-  echo "  Renovate dashboard and default.json's first-party rules before" >&2
-  echo "  bumping by hand (#133, #290)." >&2
+  echo "audit:canon-pins: references behind canon ${latest} for over 24h:${stale}" >&2
+  echo "  Outside the post-release grace — Renovate should have bumped" >&2
+  echo "  these within one bot cycle. Check the Renovate dashboard and" >&2
+  echo "  default.json's first-party rules before bumping by hand" >&2
+  echo "  (#133, #290, #310)." >&2
   exit 1
 fi
 echo "audit:canon-pins: ${found} canon references, all at ${latest}"
+'''
+
+[tasks."audit:org-pins"]
+description = "Every org repo's canon references, checked from the canon (network, canon only)"
+dir = "{{cwd}}"
+# The vantage half of #310 finding 1: audit:canon-pins checks the repo
+# it runs in, so a lagging consumer only reddens an audit inside that
+# consumer — the signer sat three releases behind with the canon's own
+# Monday audit green, because the canon checked only itself. This is
+# the org-wide alarm, run where someone looks: enumerate the POPULATION
+# (the #266 / repo-baseline pattern — a token that sees fewer repos
+# than the org holds is a red run, not a quieter one), shallow-clone
+# each repo, extract its canon references with exactly audit:canon-pins'
+# patterns, and apply the same staleness-duration grace. A repo with no
+# canon references at all is a finding too: every org repo pins the
+# canon by construction (scaffold/), so zero references means the
+# extraction — or the repo — is broken.
+run = '''
+[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -d source-policies ]] || {
+  echo "audit:org-pins: not the canon, skipped"; exit 0
+}
+command -v gh > /dev/null || { echo "audit:org-pins: gh missing" >&2; exit 1; }
+tags=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
+  | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
+latest=$(tail -1 <<< "${tags}")
+[[ -n "${latest}" ]] || { echo "audit:org-pins: canon has no tags, skipped"; exit 0; }
+repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
+expected_repos=3
+seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
+if [[ "${seen_repos}" -ne "${expected_repos}" ]]; then
+  echo "audit:org-pins: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2
+  echo "  an unseen repo is unchecked, not clean (#290 finding 7)." >&2
+  exit 1
+fi
+total=0
+stale=""
+failed=""
+for repo in ${repos}; do
+  dir=$(mktemp -d)
+  git clone -q --depth 1 "https://github.com/monumental-archive/${repo}.git" "${dir}" || {
+    failed="${failed} ${repo}(clone)"; continue
+  }
+  claims=$(cd "${dir}" && git ls-files "*.yml" "*.yaml" | while IFS= read -r f; do
+    grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
+      | grep -oE "# v[0-9][0-9.]*" | sed "s|# |${repo}/${f}:|"
+    if grep -qF "github.com/monumental-archive/.github" "${f}"; then
+      grep -E "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
+        | grep -oE "v[0-9][0-9.]*" | sed "s|^|${repo}/${f}:|"
+    fi
+  done; cd "${dir}" && git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json" \
+    | while IFS= read -r f; do
+    grep -oE "github>monumental-archive/\.github#v[0-9][0-9.]*" "${f}" \
+      | sed "s|.*#|${repo}/${f}:|"
+  done)
+  count=$(grep -c . <<< "${claims}" || true)
+  if [[ "${count}" -eq 0 ]]; then
+    failed="${failed} ${repo}(no canon references)"
+    continue
+  fi
+  total=$((total + count))
+  while IFS= read -r claim; do
+    [[ -n "${claim}" ]] || continue
+    v="${claim##*:}"
+    [[ "${v}" != "${latest}" ]] && stale="${stale} ${claim}"
+  done <<< "${claims}"
+done
+if [[ -n "${failed}" ]]; then
+  echo "audit:org-pins: repos that could not be checked:${failed}" >&2
+  exit 1
+fi
+if [[ -n "${stale}" ]]; then
+  # Same staleness-duration grace as audit:canon-pins (#310 finding 1):
+  # the clock starts at the earliest tag newer than the stale reference;
+  # red only past 24h. Unknown age fails closed.
+  red=0
+  oldest=0
+  for v in $(tr " " "\n" <<< "${stale}" | sed "s|.*:||" | sort -uV); do
+    [[ -n "${v}" ]] || continue
+    succ=$(awk -v p="${v}" '$0 == p { getline; print; exit }' <<< "${tags}")
+    [[ -n "${succ}" ]] || { red=1; continue; }
+    age=$(gh api "repos/monumental-archive/.github/commits/${succ}" \
+      --jq '((now - (.commit.committer.date | fromdateiso8601)) | floor)' \
+      2> /dev/null || true)
+    [[ "${age}" =~ ^[0-9]+$ ]] || { red=1; continue; }
+    [[ "${age}" -ge 86400 ]] && red=1
+    [[ "${age}" -gt "${oldest}" ]] && oldest="${age}"
+  done
+  if [[ ${red} -eq 0 ]]; then
+    echo "audit:org-pins: post-release window — canon at ${latest}, ${total} references across ${seen_repos} repos, stale for $((oldest / 3600))h:${stale}"
+    echo "  hosted Renovate polls roughly hourly; the bump lands in one bot"
+    echo "  cycle (#227, #310). Red only past the 24h grace."
+    exit 0
+  fi
+  echo "audit:org-pins: references behind canon ${latest} for over 24h:${stale}" >&2
+  echo "  Renovate should have bumped these within one bot cycle — check" >&2
+  echo "  that repo's Renovate dashboard and default.json's first-party" >&2
+  echo "  rules before bumping by hand (#133, #290, #310)." >&2
+  exit 1
+fi
+echo "audit:org-pins: ${total} canon references across ${seen_repos} repos, all at ${latest}"
 '''
 
 [tasks."audit:spdx-list"]
