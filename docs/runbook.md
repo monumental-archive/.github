@@ -58,10 +58,14 @@ written for two moments: wiring a repository in, and a release going wrong.
    commit a `.coverage-floor` (a bare number; the gate's `coverage:check`
    ratchet enforces it — Silver wants ≥ 80) and pass the `codecov-token`
    secret to the ci stub for the badge feed; copy `scaffold/REUSE.toml`
-   and licence texts into `LICENSES/`; paste
-   `scaffold/README-badges.md` into the README and fill the ids; answer
-   the Best Practices form from [`best-practices.md`](best-practices.md)
-   (post-transfer — it binds the repo URL).
+   and licence texts into `LICENSES/`; add the
+   `<!-- badges:begin -->`/`<!-- badges:end -->` marker pair to the
+   README and run `mise run fix:badges` — the block is derived, never
+   pasted (`scaffold/README-badges.md` is the catalogue, `.badge-states`
+   holds the human-step lines, `lint:badges` reddens hand drift, #316);
+   answer the Best Practices form from
+   [`best-practices.md`](best-practices.md) (post-transfer — it binds
+   the repo URL), then set `bestpractices <BP_ID>` in `.badge-states`.
 
 ### Continuous (no versions — the artifact's version is its pin set)
 

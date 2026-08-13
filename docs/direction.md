@@ -76,9 +76,14 @@ verdict is backed by a signed VSA; a level with an unverifiable half
 (Build Environment, today; Source was the same shape until 2026-08-12)
 is stated with its gap named — as L0, not as the level it nearly
 reaches. Badges follow the same
-rule: they derive from how a repository actually publishes (#88), this
-repository wears the same badges as its consumers, and no badge asserts
-a level this document does not.
+rule: the catalogue (`scaffold/README-badges.md`) is the superset of
+every shield a repo here could carry, each block is rendered by
+`fix:badges` from the repo's own tree facts and each repo wears the
+honest subset that resolves for it — the canon included, as consumer #1
+of its own machinery, wearing what its derivation yields and nothing it
+hand-asserts (#316). No badge asserts a level this document does not:
+the Monday audit parses track and level out of every SLSA shield and
+matches this table's row.
 
 ## Where the detail lives
 

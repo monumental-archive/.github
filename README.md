@@ -1,14 +1,16 @@
 # .github
 
+<!-- badges:begin -->
+[![ci](https://github.com/monumental-archive/.github/actions/workflows/gate.yml/badge.svg)](https://github.com/monumental-archive/.github/actions/workflows/gate.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/monumental-archive/.github/badge)](https://scorecard.dev/viewer/?uri=github.com/monumental-archive/.github)
-[![SLSA 3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
-
-<!-- Deferred shields, each behind a human step (#88):
-Best Practices — form binds a logged-in account; fill from docs/best-practices.md, then:
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/BP_ID/badge)](https://www.bestpractices.dev/projects/BP_ID)
-REUSE — register the repo at api.reuse.software (FSFE login), then:
-[![REUSE status](https://api.reuse.software/badge/github.com/monumental-archive/.github)](https://api.reuse.software/info/github.com/monumental-archive/.github)
--->
+[![SLSA Build L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
+[![SLSA Source L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)
+[![SLSA Dependencies L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)
+<!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->
+<!-- pending (human step): REUSE — register at api.reuse.software (FSFE login), then set 'reuse registered' in .badge-states and re-run fix:badges -->
+[![coverage](https://codecov.io/gh/monumental-archive/.github/branch/main/graph/badge.svg)](https://codecov.io/gh/monumental-archive/.github)
+[![fair-software](https://img.shields.io/badge/fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20%E2%97%8B%20%E2%97%8B-orange)](https://fair-software.eu)
+<!-- badges:end -->
 
 The governance repository of the Monumental Archive organisation:
 everything shared lives here and nowhere else. Repos carry only what is

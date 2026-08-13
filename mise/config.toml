@@ -818,6 +818,15 @@ dir = "{{cwd}}"
 # report clean), and a Scorecard shield with no floor line fails. The
 # Scorecard leg is a per-repo ratcheted floor (security/
 # scorecard-floors.txt) — regression is the signal, never the absolute.
+#
+# Presence is asserted through the derivation, not re-derived here
+# (#316 finding 5): each repo's badge block must be fix:badges' render
+# (the markers prove it; lint:badges in that repo's own gate proves the
+# render matches its tree), so a shield this walk does not see is one
+# the derivation said does not apply — never one nobody looked for.
+# .badge-states' declared lines (pending a human step / exemplary, no
+# data by construction) are reported by name, so a Monday summary reads
+# as state, not as expected-red noise (dependency-track.md:46).
 run = '''
 [[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -d source-policies ]] || {
   echo "audit:badges: not the canon, skipped"; exit 0
@@ -836,12 +845,30 @@ while read -r repo; do
     continue
   fi
   body=$(base64 -d <<< "${readme}")
+  # Adoption is asserted, not assumed (#316 finding 5): the block must
+  # be fix:badges' render — the repo's own gate (lint:badges) proves
+  # the render matches its tree, so this audit never re-derives; it
+  # only needs the markers to exist to know a missing shield means
+  # "the derivation said not applicable" rather than "nobody looked".
+  if ! grep -q "<!-- badges:begin -->" <<< "${body}"; then
+    failed="${failed} ${repo}(badge block not machine-rendered — no badges:begin marker; presence-blindness is only closed where fix:badges owns the block)"
+    continue
+  fi
+  # Declared states: the debt lines the render could not derive.
+  states=$(gh api "repos/monumental-archive/${repo}/contents/.badge-states" --jq '.content' 2> /dev/null | base64 -d 2> /dev/null | grep -v "^#" || true)
+  while read -r sk sv; do
+    [[ -n "${sk}" ]] || continue
+    case "${sv}" in
+      pending) note "${repo}: ${sk} pending a human step (declared)" ;;
+      exemplary) note "${repo}: ${sk} exemplary, no data by construction (declared)" ;;
+    esac
+  done <<< "${states}"
   # Shields are markdown images; comments are stripped first so a
   # deferred (commented-out) badge line is not audited as live.
   urls=$(sed -e 's/<!--/\n<!--/g' -e 's/-->/-->\n/g' <<< "${body}" | sed '/<!--/,/-->/d' \
     | grep -oE '!\[[^]]*\]\([^)]+\)' | sed -E 's/^!\[[^]]*\]\(([^) ]+).*\)$/\1/' || true)
   if [[ -z "${urls}" ]]; then
-    note "${repo}: no shields, nothing asserted"
+    note "${repo}: markers present, derivation rendered no live shields"
     continue
   fi
   while read -r url; do
@@ -890,13 +917,55 @@ while read -r repo; do
           note "${repo}: reuse compliant"
         fi
         ;;
-      https://img.shields.io/badge/SLSA-Build%20L3-*)
-        # Self-asserted, so its source of truth is the canon's own table:
-        # the shield may claim exactly what direction.md claims.
-        if ! grep -q '^| Build | \*\*L3\*\* | Met' docs/direction.md; then
-          failed="${failed} ${repo}(slsa-shield: direction.md no longer claims Build L3 Met)"
+      https://img.shields.io/badge/SLSA-*)
+        # Self-asserted, so its source of truth is the canon's own
+        # table — one leg parameterised by track (#316 addendum B):
+        # the track and level are parsed OUT OF the shield and matched
+        # against that track's row, so a shield cannot outrun the
+        # table, and a level that ever moves reddens this cron.
+        tl="${url#https://img.shields.io/badge/SLSA-}"
+        tl="${tl%%-*}"
+        track="${tl%\%20*}"
+        level="${tl#*\%20}"
+        if [[ -z "${track}" || ! "${level}" =~ ^L[0-9]$ ]]; then
+          failed="${failed} ${repo}(slsa-shield: unparsable track/level in ${url})"
+        elif ! grep -qE "^\| ${track} \| \*\*${level}\*\* \| (\*\*)?Met" docs/direction.md; then
+          failed="${failed} ${repo}(slsa-shield: direction.md does not claim ${track} ${level} Met)"
         else
-          note "${repo}: SLSA shield matches direction.md"
+          note "${repo}: SLSA ${track} ${level} matches direction.md"
+        fi
+        ;;
+      https://github.com/monumental-archive/*/actions/workflows/*/badge.svg)
+        wfp="${url#https://github.com/monumental-archive/}"
+        wfr="${wfp%%/*}"
+        wfn="${wfp##*/workflows/}"
+        wfn="${wfn%/badge.svg}"
+        conc=$(gh api "repos/monumental-archive/${wfr}/actions/workflows/${wfn}/runs?per_page=1&status=completed" \
+          --jq '.workflow_runs[0].conclusion // empty' 2> /dev/null || true)
+        if [[ -z "${conc}" ]]; then
+          failed="${failed} ${repo}(workflow-shield: ${wfn} has no completed runs — a status badge over nothing)"
+        elif [[ "${conc}" != "success" ]]; then
+          failed="${failed} ${repo}(workflow-shield: ${wfn} latest completed run is ${conc})"
+        else
+          note "${repo}: workflow ${wfn} green"
+        fi
+        ;;
+      https://img.shields.io/badge/fair--software.eu-*)
+        # Computed by fix:badges dot-by-dot; this leg re-checks the
+        # three contingent dots against what the same README shows —
+        # registry (dot 3: any registry shield), citation (dot 4:
+        # CITATION.cff), checklist (dot 5: a live bestpractices
+        # shield). A static 5/5 image fails here (#316 addendum E).
+        dots="${url#*fair--software.eu-}"
+        dots="${dots%-*}"
+        e3="%E2%97%8B"; grep -qE 'img.shields.io/(crates|npm)/|img.shields.io/badge/ghcr' <<< "${urls}" && e3="%E2%97%8F"
+        e4="%E2%97%8B"; gh api "repos/monumental-archive/${repo}/contents/CITATION.cff" > /dev/null 2>&1 && e4="%E2%97%8F"
+        e5="%E2%97%8B"; grep -q 'bestpractices.dev/projects/' <<< "${urls}" && e5="%E2%97%8F"
+        expect="%E2%97%8F%20%E2%97%8F%20${e3}%20${e4}%20${e5}"
+        if [[ "${dots}" != "${expect}" ]]; then
+          failed="${failed} ${repo}(fair-software: dots ${dots} disagree with the repo's own evidence ${expect})"
+        else
+          note "${repo}: fair-software dots agree with the evidence"
         fi
         ;;
       https://zenodo.org/badge/DOI/*)
@@ -926,20 +995,34 @@ while read -r repo; do
           note "${repo}: npm package exists"
         fi
         ;;
-      https://img.shields.io/badge/ghcr.io-*)
-        if ! curl -sfI "https://github.com/orgs/monumental-archive/packages" > /dev/null; then
-          failed="${failed} ${repo}(ghcr: the org packages page is unreachable)"
+      https://img.shields.io/badge/ghcr.io-monumental--archive%2F*)
+        # The shield names an image; ask GitHub whether that package
+        # exists. The old leg HEAD-requested the org packages page,
+        # which returns 200 for ANY org that exists — a check that
+        # reads nothing (#316 addendum C). The anonymous REST endpoint
+        # 401s even for public containers, so this goes through gh;
+        # the cron token carries packages: read for it.
+        img="${url#https://img.shields.io/badge/ghcr.io-monumental--archive%2F}"
+        img="${img%%-blue*}"
+        img="${img//--/-}"
+        if ! gh api "orgs/monumental-archive/packages/container/${img}" > /dev/null 2>&1; then
+          failed="${failed} ${repo}(ghcr: package '${img}' does not exist in the org registry)"
         else
-          note "${repo}: ghcr link live"
+          note "${repo}: ghcr package ${img} exists"
         fi
         ;;
       https://codecov.io/gh/monumental-archive/*/graph/badge.svg | https://codecov.io/gh/monumental-archive/*/branch/*/graph/badge.svg)
         cc="${url#https://codecov.io/gh/monumental-archive/}"
         cc="${cc%%/*}"
-        if ! curl -sf "https://api.codecov.io/api/v2/github/monumental-archive/repos/${cc}" | jq -e '.name' > /dev/null 2>&1; then
-          failed="${failed} ${repo}(codecov: issuer has no data for ${cc})"
-        else
+        if curl -sf "https://api.codecov.io/api/v2/github/monumental-archive/repos/${cc}" | jq -e '.name' > /dev/null 2>&1; then
           note "${repo}: codecov live"
+        elif grep -qE "^coverage[[:space:]]+exemplary$" <<< "${states}"; then
+          # The declared exemplary state (#316): the canon wears its
+          # own coverage machinery with no data behind it until the
+          # kcov standup — a permanent, stated condition, not debt.
+          note "${repo}: codecov has no data — exemplary by declaration"
+        else
+          failed="${failed} ${repo}(codecov: issuer has no data for ${cc} and no declared state covers it)"
         fi
         ;;
       *)
@@ -1304,7 +1387,10 @@ dir = "{{cwd}}"
 run = '''
 scratch=$(mktemp -d)
 trap 'rm -rf "${scratch}"' EXIT
-git ls-files -z | cpio -pmd0 --quiet "${scratch}"
+# rsync, not cpio: BSD cpio refuses to extract through tracked
+# symlinks (the canon's self-* workflow links), GNU cpio does not —
+# rsync -l recreates them identically on both.
+git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 trivy fs --scanners misconfig,secret --exit-code 1 "${scratch}"
 '''
 
@@ -1972,6 +2058,178 @@ if ! diff -u CITATION.cff "${tmp}"; then
   exit 1
 fi
 echo "lint:citation: CITATION.cff agrees with REUSE.toml"
+'''
+
+[tasks."fix:badges"]
+description = "Render the README badge block from the repository's own tree facts (derive, never assert)"
+dir = "{{cwd}}"
+# The canon is consumer #1 (#316 finding 5 and its working session):
+# it publishes badge machinery it must itself consume, and the badge
+# block is where that law was broken — a hand-authored block drifted
+# five shields wide from the template it shipped, with nothing able to
+# notice. So the block is now COMPUTED: every shield is a fact about
+# the tree (the gate → workflow status; scorecard.yml → Scorecard; the
+# publish stub's classes → registry shields; CITATION.cff's concept
+# DOI → the DOI shield; direction.md's tracks → the three SLSA
+# shields), and the only hand-maintained state is .badge-states — the
+# written-down-debt pattern — naming what waits on a human step
+# (`bestpractices pending` → `bestpractices <BP_ID>`, `reuse pending`
+# → `reuse registered`) or is exemplary with no data by construction
+# (`coverage exemplary`, the canon until the kcov standup). If a
+# repo's render needs an `if repo == .github` branch, the design is
+# wrong — there is none. fair-software is computed from the other
+# shields' truth, dot by dot, never the static 5/5 image (#316).
+# Renders between `badges:begin`/`badges:end` markers in README.md;
+# BADGES_OUT renders the block alone to a path, for lint:badges.
+run = '''
+[[ -f REUSE.toml ]] || { echo "fix:badges: no REUSE.toml, no badge surface, skipped"; exit 0; }
+repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+[[ -n "${repo_url}" ]] || { echo "fix:badges: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2; exit 1; }
+repo="${repo_url##*/}"
+org_path="${repo_url#https://github.com/}"
+state() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2; exit}' .badge-states || true; }
+states_extra() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2}' .badge-states || true; }
+block=""
+add() { block="${block}${1}
+"; }
+gate_wf=""
+# A reusable workflow (workflow_call) has no runs of its own to badge —
+# the canon's ci.yml is the gate every OTHER repo badges; its own
+# status lives on gate.yml.
+for wf in ci.yml gate.yml; do
+  [[ -f ".github/workflows/${wf}" ]] || continue
+  grep -qE "^[[:space:]]+workflow_call:" ".github/workflows/${wf}" && continue
+  gate_wf="${wf}"; break
+done
+if [[ -n "${gate_wf}" ]]; then
+  add "[![ci](https://github.com/${org_path}/actions/workflows/${gate_wf}/badge.svg)](https://github.com/${org_path}/actions/workflows/${gate_wf})"
+fi
+if [[ -f .github/workflows/scorecard.yml ]]; then
+  add "[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/${org_path}/badge)](https://scorecard.dev/viewer/?uri=github.com/${org_path})"
+fi
+# The org's claimed tracks; the Monday audit parses each shield and
+# matches it against direction.md's table, so these can never outrun it.
+add "[![SLSA Build L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)"
+add "[![SLSA Source L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)"
+add "[![SLSA Dependencies L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)"
+bp=$(state bestpractices)
+bp_live=""
+if [[ -n "${bp}" && "${bp}" != "pending" ]]; then
+  bp_live=1
+  add "[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/${bp}/badge)](https://www.bestpractices.dev/projects/${bp})"
+else
+  add "<!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->"
+fi
+reuse=$(state reuse)
+if [[ "${reuse}" == "registered" ]]; then
+  add "[![REUSE status](https://api.reuse.software/badge/github.com/${org_path})](https://api.reuse.software/info/github.com/${org_path})"
+else
+  add "<!-- pending (human step): REUSE — register at api.reuse.software (FSFE login), then set 'reuse registered' in .badge-states and re-run fix:badges -->"
+fi
+if [[ -f .coverage-floor ]] || [[ "$(state coverage)" == "exemplary" ]]; then
+  add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
+fi
+cit=""
+[[ -f CITATION.cff ]] && cit=1
+concept=""
+[[ -n "${cit}" ]] && concept=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' CITATION.cff)
+minting=$(git ls-files ".github/workflows/*.y*ml" | xargs grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
+if [[ -n "${concept}" ]]; then
+  add "[![DOI](https://zenodo.org/badge/DOI/${concept}.svg)](https://doi.org/${concept})"
+elif [[ -n "${minting}" ]]; then
+  add "<!-- pending (first mint): DOI — the concept DOI lands in CITATION.cff after the first release mints it; re-run fix:badges -->"
+fi
+classes=""
+for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
+  [[ -f "${f}" ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | head -1 | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")"
+done
+reg_live=""
+if [[ "${classes}" == *rust-crate* ]]; then
+  crate=$(state crates)
+  if [[ -z "${crate}" ]]; then
+    echo "fix:badges: classes include rust-crate but .badge-states names no crate ('crates <name>')" >&2
+    exit 1
+  fi
+  reg_live=1
+  add "[![crates.io](https://img.shields.io/crates/v/${crate}.svg)](https://crates.io/crates/${crate})"
+  add "[![docs.rs](https://img.shields.io/docsrs/${crate})](https://docs.rs/${crate})"
+fi
+if [[ "${classes}" == *wasm-npm* ]]; then
+  pkg=$(state npm)
+  if [[ -z "${pkg}" ]]; then
+    echo "fix:badges: classes include wasm-npm but .badge-states names no package ('npm <name>')" >&2
+    exit 1
+  fi
+  reg_live=1
+  add "[![npm](https://img.shields.io/npm/v/%40monumental-archive%2F${pkg}.svg)](https://www.npmjs.com/package/@monumental-archive/${pkg})"
+fi
+if [[ "${classes}" == *oci-image* || "${classes}" == *pgrx-extension* ]]; then
+  reg_live=1
+  # The shield names the IMAGE and links its package page — an
+  # org-level packages link returns 200 for any org that exists and
+  # proves nothing (#316 addendum C).
+  for img in ${repo} $(states_extra ghcr); do
+    add "[![ghcr ${img}](https://img.shields.io/badge/ghcr.io-monumental--archive%2F${img//-/--}-blue)](https://github.com/orgs/monumental-archive/packages/container/package/${img})"
+  done
+fi
+# fair-software, computed dot by dot: repository, licence, registry,
+# citation, checklist — filled only where this render's own truth
+# fills it. The static 5/5 image asserted fullness regardless (#316).
+d1="%E2%97%8F"; d2="%E2%97%8F"
+d3="%E2%97%8B"; [[ -n "${reg_live}" ]] && d3="%E2%97%8F"
+d4="%E2%97%8B"; [[ -n "${cit}" ]] && d4="%E2%97%8F"
+d5="%E2%97%8B"; [[ -n "${bp_live}" ]] && d5="%E2%97%8F"
+colour="orange"
+[[ "${d3}${d4}${d5}" == "%E2%97%8F%E2%97%8F%E2%97%8F" ]] && colour="green"
+add "[![fair-software](https://img.shields.io/badge/fair--software.eu-${d1}%20${d2}%20${d3}%20${d4}%20${d5}-${colour})](https://fair-software.eu)"
+if [[ -n "${BADGES_OUT:-}" ]]; then
+  printf '%s' "${block}" > "${BADGES_OUT}"
+  echo "fix:badges: rendered block to ${BADGES_OUT}"
+  exit 0
+fi
+[[ -f README.md ]] || { echo "fix:badges: no README.md" >&2; exit 1; }
+if ! grep -q "<!-- badges:begin -->" README.md || ! grep -q "<!-- badges:end -->" README.md; then
+  echo "fix:badges: README.md carries no badges:begin/badges:end markers — add the pair where the block belongs" >&2
+  exit 1
+fi
+# Block delivered via a file: awk -v cannot carry newlines portably
+# (macOS awk refuses them).
+blkfile=$(mktemp)
+printf '%s' "${block}" > "${blkfile}"
+awk -v blkfile="${blkfile}" '
+  /<!-- badges:begin -->/ {print; while ((getline l < blkfile) > 0) print l; skip=1; next}
+  /<!-- badges:end -->/ {skip=0}
+  !skip {print}
+' README.md > README.md.new && mv README.md.new README.md
+rm -f "${blkfile}"
+echo "fix:badges: rendered $(grep -c "img.shields.io\|scorecard.dev\|codecov.io\|zenodo.org\|badge.svg" <<< "${block}") line(s) into README.md"
+'''
+
+[tasks."lint:badges"]
+description = "The README badge block equals what fix:badges derives — asserted shields cannot drift from tree facts"
+dir = "{{cwd}}"
+# The enforcement half: a badge block that can only exist as
+# fix:badges' output cannot silently disagree with the repository it
+# describes, which retires both halves of #316 finding 5 — the canon's
+# five-shield drift (hand-authored block beside a published template)
+# and audit:badges' presence-blindness (a missing shield now means the
+# derivation said it does not apply, because nothing else can produce
+# the block). Repos without the markers skip clean — adoption is a
+# per-repo step the Monday audit reports on org-wide.
+run = '''
+[[ -f README.md && -f REUSE.toml ]] || { echo "lint:badges: no README or REUSE.toml, skipped"; exit 0; }
+if ! grep -q "<!-- badges:begin -->" README.md; then
+  echo "lint:badges: no badges:begin marker, machinery not adopted here yet, skipped"; exit 0
+fi
+tmp=$(mktemp)
+trap 'rm -f "${tmp}" "${tmp}.cur"' EXIT
+BADGES_OUT="${tmp}" mise run fix:badges > /dev/null
+awk '/<!-- badges:begin -->/{f=1; next} /<!-- badges:end -->/{f=0} f' README.md > "${tmp}.cur"
+if ! diff -u "${tmp}.cur" "${tmp}"; then
+  echo "lint:badges: the badge block drifted from the tree's facts — run fix:badges and commit the render" >&2
+  exit 1
+fi
+echo "lint:badges: badge block agrees with the derivation"
 '''
 
 [tasks."lint:release-stub"]
