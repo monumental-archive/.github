@@ -29,10 +29,16 @@ Universal shields — derived for every repo:
   OpenSSF Best      earned by answering the form from
   Practices         docs/best-practices.md — `bestpractices pending`
                     until it binds, then `bestpractices <BP_ID>`
-  OSPS Baseline     hosted by bestpractices.dev alongside the CII badge
-                    (L1–3; #168 watches drift) — joins the render once
-                    a BP_ID exists and the badge URL is confirmed at
-                    registration
+  OSPS Baseline     answered on the same project entry as the CII badge
+                    (L1–3; #168 watches drift) and shielded separately —
+                    the URL, confirmed at registration 2026-08-13, is
+                    /projects/<id>/baseline (a sibling of the metal
+                    /badge, NOT /badge?level= and not per-level: the
+                    image self-reports the highest baseline level
+                    attained, e.g. "openssf baseline v2026.02.19 | 1").
+                    Renders whenever a BP_ID exists; the audit checks it
+                    against achieved_baseline_N_at and the lost_baseline
+                    fields in the project's JSON
   coverage          earned by a `.coverage-floor` (the ratchet's
                     number); the canon carries `coverage exemplary`
                     instead — no data by construction until the kcov

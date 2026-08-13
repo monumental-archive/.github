@@ -6,11 +6,12 @@
 [![SLSA Build L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
 [![SLSA Source L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)
 [![SLSA Dependencies L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)
-<!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14058/badge)](https://www.bestpractices.dev/projects/14058)
+[![OpenSSF Baseline](https://www.bestpractices.dev/projects/14058/baseline)](https://www.bestpractices.dev/projects/14058)
 [![REUSE status](https://api.reuse.software/badge/github.com/monumental-archive/.github)](https://api.reuse.software/info/github.com/monumental-archive/.github)
 [![coverage](https://codecov.io/gh/monumental-archive/.github/branch/main/graph/badge.svg)](https://codecov.io/gh/monumental-archive/.github)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21913604.svg)](https://doi.org/10.5281/zenodo.21913604)
-[![fair-software](https://img.shields.io/badge/fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20%E2%97%8F%20%E2%97%8B-orange)](https://fair-software.eu)
+[![fair-software](https://img.shields.io/badge/fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20%E2%97%8F%20%E2%97%8F-orange)](https://fair-software.eu)
 <!-- badges:end -->
 
 The governance repository of the Monumental Archive organisation:
