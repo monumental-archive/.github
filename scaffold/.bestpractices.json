@@ -201,7 +201,7 @@
   "documentation_current_status": "?",
   "documentation_interface_status": "?",
   "documentation_quick_start_status": "?",
-  "documentation_roadmap_justification": "docs/direction.md is the roadmap and it is unusually explicit about what the project will NOT do: a target table naming the level intended on each SLSA track, the claims policy, and the deliberate ceilings (BuildEnv is held at L0 by choice, Gold-level criteria are not claimed while there is one maintainer). Open items are tracked as issues and the table is the first thing a closing issue updates. https://github.com/monumental-archive/.github/blob/main/docs/direction.md",
+  "documentation_roadmap_justification": "docs/direction.md is the roadmap and it is unusually explicit about what the project will NOT do: a target table naming the level intended on each SLSA track, the claims policy, and the ceilings and why each sits where it does (BuildEnv is L0 by attribution, not by choice: its controls are built, but the signed build-image provenance that would make them a level belongs to producers who do not emit it; Gold-level criteria are not claimed while there is one maintainer). Open items are tracked as issues and the table is the first thing a closing issue updates. https://github.com/monumental-archive/.github/blob/main/docs/direction.md",
   "documentation_roadmap_status": "Met",
   "documentation_security_status": "?",
   "dynamic_analysis_enable_assertions_status": "?",
