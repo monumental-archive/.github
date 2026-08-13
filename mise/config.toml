@@ -111,6 +111,12 @@ shfmt = "3.13.1"
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.52"
 lychee = "0.24.2"
+# JSON on the command line, used by eleven belt tasks — nine audit tasks
+# parsing GitHub API responses, fix:tracks, and lint:bestpractices in the
+# gate. It was a hard dependency of the gate and was never pinned, which
+# is not bad luck: nothing checks. See docs/tooling-verdicts.md for the
+# check that was attempted for that class and why it was abandoned (#82).
+jq = "1.8.2"
 # Python lint + format in one binary (#82), at `select = ["ALL"]`. Ruff
 # is a standalone Rust binary: it needs no Python interpreter to run, so
 # it lints Python whether or not one is pinned. (One now is, but for uv's
@@ -3014,7 +3020,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff cargo-deny osv-scanner vexctl reuse; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq cargo-deny osv-scanner vexctl reuse; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
