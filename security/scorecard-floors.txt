@@ -13,10 +13,21 @@
 # self-reference (#165), which Scorecard parses as an unpinned action;
 # Maintained scores 0 for a repo's first 90 days and self-heals.
 #
+# Signer floored at the LOWER reading, 2026-08-13 (#316): it read 6.9
+# when floored and 6.8 on later recomputes with no tree change and
+# every earnable check at 10 — Pinned-Dependencies, Dangerous-Workflow,
+# Token-Permissions, Vulnerabilities, License and Security-Policy all
+# perfect, the residual being Packaging/Signed-Releases inconclusive,
+# the headcount checks, and SAST normalised to 9 for PR-only scanning.
+# A floor set at an observed HIGH reddens on ordinary recompute drift,
+# which is the "expected-red teaches people to ignore gates" failure,
+# so the policy in this header — floor low, raise only on the 0.3
+# nudge — is applied rather than excepted.
+#
 # Watermarks, 2026-08-12: the canon read 7 at first probe and 6.9 an
 # hour later after the day's thirty-PR churn recomputed — a tenth
 # inside the structurally-capped checks, so the floor takes the lower
 # reading and the ratchet nudge re-raises it when the score recovers.
 .github 6.9
-signer 6.9
+signer 6.8
 release-lab 7.0
