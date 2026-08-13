@@ -33,6 +33,7 @@ honestly blocked on.
 | cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
+| jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 
@@ -48,6 +49,39 @@ the org's own tracked scripts, offline, with no network surface.
 *Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
+
+**jq, and the check for its whole class that was tried and abandoned**
+(#82). jq is pinned at 1.8.2 because eleven belt tasks invoke it — nine
+audit tasks parsing GitHub API responses, `fix:tracks`, and
+`lint:bestpractices` in the gate — and it was never pinned at all. It sat
+in the same position as `python3` and `curl`: a hard dependency of the
+gate, satisfied by whatever the machine happened to have.
+
+The interesting part is why nobody noticed. `lint:belt-available` looks
+like the check that would catch it, and is not: its tool list is
+**hand-maintained**, so it proves the tools someone remembered to list
+are present, and says nothing about the tools a task actually invokes.
+jq was never missed by a check; there was no check.
+
+**The obvious fix does not work, and the attempt is recorded so it is not
+retried blind.** A lint that parses task bodies, extracts invoked
+binaries and asserts each is pinned or explicitly baseline was
+prototyped against this repo. It produced roughly a hundred false
+positives against a handful of real hits: bash keywords (`do`, `esac`,
+`fi`), shell builtins, loop variables, and ordinary English from inside
+`echo` strings are all indistinguishable from commands under a
+first-word regex. Doing it correctly needs a real bash parser, not a
+pattern. The class defect is therefore **open and known**, not closed —
+which is the honest state, and better than a noisy check that would be
+suppressed within a week.
+
+One adjacent observation, recorded rather than acted on: 13 of the
+belt's 72 jq invocations use `-e`. Without it jq exits 0 even when the
+filter yields `null`, so a task reading a field that has moved gets an
+empty value and a green line — the vacuous-success class the
+audit-claims contract exists to forbid. Not blanket-fixable, since many
+of those filters legitimately yield nothing and are checked by the
+surrounding bash; it wants a per-site pass.
 
 **uv, adjudicated late — it entered as an implementation detail and was
 never stood up** (#82). uv arrived inside the `reuse` adoption as "the
