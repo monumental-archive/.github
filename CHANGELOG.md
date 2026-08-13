@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.16.1](https://github.com/monumental-archive/.github/compare/v1.16.0...v1.16.1) - 2026-08-13
+
+### Fixed
+
+- thread prepare through the continuous archetype too ([#302](https://github.com/monumental-archive/.github/pull/302))
+
 ## [1.16.0](https://github.com/monumental-archive/.github/compare/v1.15.1...v1.16.0) - 2026-08-13
 
 ### Added
