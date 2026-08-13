@@ -2363,7 +2363,40 @@ if ! diff <(sort <<< "${pinned}") <(sort <<< "${live}") > /dev/null; then
   echo "  slsa/spec-source-matrix.txt (#349 S2, the #203 lesson)" >&2
   exit 1
 fi
-echo "audit:spec-drift: $(wc -l <<< "${pinned}" | tr -d ' ') requirement(s), matrix unchanged"
+# COVERAGE, the half the comparison above cannot see (#123 finding 3).
+# Comparing live against pinned notices when the SPEC moves; it can
+# never notice a requirement the spec still has and slsa/requirements
+# .toml never mapped — which is precisely what #349 finding 4 was, and
+# this task's own comment used to claim it would have caught. It would
+# not have. So assert the union of every source row's `spec_ids` plus
+# the [[declined]] ids covers every id in the pin, and that no mapping
+# names an id the pin does not have (a renamed anchor left behind).
+command -v taplo > /dev/null || { echo "audit:spec-drift: taplo missing from the belt" >&2; exit 1; }
+reqs=$(taplo get -f slsa/requirements.toml -o json)
+mapped=$(jq -r '[(.source[]? | .spec_ids[]?), (.declined[]? | .spec_id)] | unique[]' <<< "${reqs}")
+uncovered=""
+while IFS= read -r id; do
+  [[ -n "${id}" ]] || continue
+  grep -qxF "${id}" <<< "${mapped}" || uncovered="${uncovered} ${id}"
+done < <(awk '{print $1}' <<< "${pinned}")
+stale=""
+while IFS= read -r id; do
+  [[ -n "${id}" ]] || continue
+  grep -qxF "${id}" <<< "$(awk '{print $1}' <<< "${pinned}")" || stale="${stale} ${id}"
+done <<< "${mapped}"
+if [[ -n "${uncovered}" || -n "${stale}" ]]; then
+  [[ -n "${uncovered}" ]] && {
+    echo "audit:spec-drift: spec requirement(s) neither mapped nor declined:${uncovered}" >&2
+    echo "  add spec_ids to the discharging [[source]] row, or a [[declined]]" >&2
+    echo "  entry naming the decision — silence is the defect (#123 finding 3)" >&2
+  }
+  [[ -n "${stale}" ]] && {
+    echo "audit:spec-drift: mapping names id(s) the spec does not have:${stale}" >&2
+    echo "  an anchor was renamed or removed; re-map against the live page" >&2
+  }
+  exit 1
+fi
+echo "audit:spec-drift: $(wc -l <<< "${pinned}" | tr -d ' ') requirement(s), matrix unchanged, all covered"
 '''
 
 [tasks."fix:tracks"]

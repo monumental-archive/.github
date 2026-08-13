@@ -1,69 +1,99 @@
-# Per-track requirement mappings AS DATA (#349 S2): one row per
-# upstream requirement, rendered into the track docs by fix:tracks and
-# guarded by lint:tracks. The source rows carry the spec's own
-# requirement names and first levels -- audit:spec-drift compares them
-# against the spec's live tick matrix, the check that would have caught
-# finding 4 (a requirement absent from the mapping) mechanically.
+# Per-track requirement mappings AS DATA (#349 S2): rendered into the
+# track docs by fix:tracks and guarded by lint:tracks.
+#
+# Each source row carries `spec_ids`: the <tr id> values in the spec's
+# own requirement tables that the row discharges. They are how
+# audit:spec-drift checks COVERAGE -- that every row in the pinned
+# matrix is either mapped here or declared in [[declined]]. That leg is
+# what finding 4 (a requirement absent from the mapping) actually needed:
+# comparing the live spec against the pin notices when the SPEC moves,
+# and can never notice a requirement the spec still has and this file
+# never mapped. The header here previously claimed the drift check
+# covered that case; it did not, and #123 finding 3 said so.
+#
+# spec_ids are not a bijection: one row may discharge several ids (the
+# repository-ids row) and one id may be discharged by several rows (tag
+# immutability is part of access-and-history). Coverage is the union.
 
 [[source]]
 requirement = "Choose an appropriate SCS"
+spec_ids = ["choose-scs"]
 level = "1"
 enforcement = "GitHub"
 
 [[source]]
 requirement = "Repository IDs / immutable revision IDs / human-readable diffs"
+spec_ids = ["repository-ids", "revision-ids", "human-readable-diff"]
 level = "1"
 enforcement = "GitHub (git SHAs, PR diffs)"
 
 [[source]]
 requirement = "Source VSAs"
+spec_ids = ["source-summary"]
 level = "1"
 enforcement = "**Emitted** per push, all three repos (#207)"
 
 [[source]]
 requirement = "Access control + reliable history"
+spec_ids = ["access-and-history"]
 level = "2"
 enforcement = "`org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list"
 
 [[source]]
 requirement = "History (SCS): every Named Reference change recorded — when, by whom, new revision ID"
+spec_ids = ["history"]
 level = "2"
 enforcement = "Each chain link records the actor, `commitTime`, the revision and its parents, contemporaneously with the push (`source-attest` emit); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped"
 
 [[source]]
 requirement = "Tag immutability"
+spec_ids = ["access-and-history"]
 level = "2"
 enforcement = "`org-default-tag` ruleset: update/move/delete blocked, all tags, all repos"
 
 [[source]]
 requirement = "Safe expunging process"
+spec_ids = ["safe-expunging-process"]
 level = "2"
 enforcement = "`docs/expunging.md`"
 
 [[source]]
 requirement = "Identity management"
+spec_ids = ["identity-management"]
 level = "2"
 enforcement = "GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change"
 
 [[source]]
 requirement = "Source provenance, contemporaneous"
+spec_ids = ["source-provenance"]
 level = "2"
 enforcement = "**Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207)"
 
 [[source]]
 requirement = "Continuity"
+spec_ids = ["continuity"]
 level = "2"
 enforcement = "Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md`"
 
 [[source]]
 requirement = "Continuous technical controls, documented"
+spec_ids = ["technical-controls"]
 level = "3"
 enforcement = "This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint"
 
 [[source]]
 requirement = "Protected named references, org properties"
+spec_ids = ["protected-refs"]
 level = "3"
 enforcement = "Rulesets as above; `ORG_SOURCE_GATED` emitted live in every source VSA since 2026-08-12 (#207)"
+
+# Spec rows the org does not claim, each with the decision that declined
+# it. audit:spec-drift counts these as covered: the point of the coverage
+# check is that no requirement is passed over in SILENCE, not that every
+# requirement is met.
+[[declined]]
+spec_id = "two-party-review"
+reason = "Source L4 — two trusted persons; GitHub will not let a solo maintainer approve their own PR. Declined at one maintainer (#126), reopened the day a second exists"
 
 [[build]]
 requirement = "Choose an appropriate build platform"
