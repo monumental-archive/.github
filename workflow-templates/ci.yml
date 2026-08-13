@@ -18,4 +18,4 @@ concurrency:
 
 jobs:
   ci:
-    uses: monumental-archive/.github/.github/workflows/ci.yml@366e25a05d9fcc9b18ab2537697599fcfe55e3d4 # v1.15.0
+    uses: monumental-archive/.github/.github/workflows/ci.yml@f8e9ebea9043a5176c8b93850d4ac9089052470f # v1.15.1
