@@ -16,6 +16,11 @@ extend-exclude = ["release/spdx-license-data.json"]
 # Signed-Releases check looks for, so it appears verbatim in prose and in
 # the evidence bundle. `typos` reads it as a misspelling of "into".
 intoto = "intoto"
+# `CPY001` is ruff's missing-copyright-notice rule code (the CPY prefix is
+# flake8-copyright). It appears in ruff.toml's ignore list and in the
+# verdict that explains why it is ignored. `typos` reads the prefix as a
+# misspelling of "COPY" — which is, in fairness, exactly what it abbreviates.
+CPY = "CPY"
 
 [default.extend-identifiers]
 # "SHOULDs" — RFC-2119 keyword pluralised, in prose and in commit

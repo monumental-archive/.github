@@ -33,6 +33,7 @@ honestly blocked on.
 | cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
+| ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -46,6 +47,74 @@ the org's own tracked scripts, offline, with no network surface.
 *Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
+
+**ruff at `select = ["ALL"]`, and the one file it was adopted for**
+(#82). One aqua-backed Rust binary that lints *and* formats Python and
+needs no Python interpreter to do it — so the org gains Python coverage
+without Python joining the belt. It was adopted against a real hole, not
+a hypothetical one: `security/workflow-permissions.py` computes the
+caller/callee permissions join that guards the Build L3 boundary, and it
+was the one tracked file in a language no belt tool covered. Nothing
+checked it.
+
+`ALL` in ruff means every *stable* rule; preview rules are excluded from
+it by design, so `preview = true` is what makes ALL mean all — the same
+call as biome's nursery, and mitigated the same way. Ruff is pre-1.0 and
+its **minor versions may change lint results deliberately** (rules
+promoted to stable, behaviour changed), which the pinned-plus-Renovate
+path turns into a red bump PR.
+
+The measurement that justifies `lint:python` demanding a tracked config:
+the same script yields **48 findings under `ALL` and zero under ruff's
+defaults** (E4/E7/E9/F). A repo that forgets `ruff.toml` does not get a
+weaker gate — it gets a green one that looked at almost nothing. Unlike
+biome, a nested `scaffold/ruff.toml` is harmless: ruff's config
+discovery is hierarchical by design, so it needs no `.stub` rename.
+
+Three settings are not preferences:
+
+- **The formatter-incompatible ignore list** (`W191`, `E111`, `E114`,
+  `E117`, `D206`, `D300`, `Q000`–`Q004`, `COM812`, `COM819`, `ISC002`) is
+  published by ruff itself; those rules demand output `ruff format` will
+  not produce, and the formatter warns on every run while they are
+  enabled. Two halves of one tool contradicting each other, not taste.
+  `D203`/`D213` join them for a narrower reason: ruff *already* disables
+  each as one half of a mutually-exclusive pair, so naming them changes
+  no enforcement and only silences two warnings printed on every gate run
+  forever.
+- **`CPY001` is off**, and the reasoning previously on record for the
+  wider policy was weak. "A header travels wrongly when the file is
+  copied" is half-backwards — this repo is uniformly 0BSD and a 0BSD
+  header would stay true anywhere. The real argument is that `lint:reuse`
+  already proves REUSE-spec compliance in the gate, so a per-file header
+  is a second copy of a machine-verified fact: nothing gained, drift to
+  lose, and drift is exactly how an MIT header reached a 0BSD tree
+  (#316). The scaffold sharpens it — those files are copied into repos
+  deliberately licensed differently.
+- **`target-version = "py39"` is a fact, not an aspiration.** The belt
+  does not pin Python, so the script runs on whatever `python3` a machine
+  has, and this repo's own maintainer machine resolves macOS's 3.9.6.
+  Naming a higher target would let the pyupgrade rules rewrite the script
+  into syntax that machine cannot execute. Measured at standup: findings
+  are identical from py39 to py314 with zero UP diagnostics at any of
+  them, so the conservative floor costs nothing today and is insurance
+  against the first rewrite that would.
+
+**`T201` is off** — `print` is the belt's Python CLI's output mechanism,
+not a debugging leftover, and the rule exists to catch strays in library
+code. **`EXE001` was fixed rather than ignored**: the script carried a
+shebang with mode 644. `lint:exec-bits` exists because a missing
+executable bit burned v1.5.0 with exit 126 after an immutable tag — but
+it covers shell only, and ruff extended that hard-won rule to Python and
+immediately found the same defect.
+
+The remaining ~28 findings were fixed, not silenced, and the refactor was
+verified behaviourally rather than by inspection: the pre-change
+`requirements` and `check` outputs were captured and diffed against the
+post-change ones, byte-identical both times. That caught one real bug the
+refactor introduced — collapsing the workflow-level grant with `or`
+silently discarded an explicit `permissions: {}`, because an empty dict
+is falsy and that empty grant is the meaningful org-wide default.
 
 **biome at `preset: "all"`, and the two rules that are not** (#82).
 Adopted as the org's JS/TS/JSON layer: one aqua-backed binary, checksums

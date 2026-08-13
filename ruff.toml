@@ -1,0 +1,62 @@
+# Max enforcement: every stable rule, plus preview. Ruff's `ALL` selector
+# deliberately excludes preview rules, so `preview = true` is what makes
+# ALL actually mean all — the same call as biome's nursery, and the same
+# mitigation: the version is pinned and bumped by Renovate, so an unstable
+# rule change arrives as a red bump PR, never a surprise in main. Ruff is
+# pre-1.0 and its minor versions may change lint results by design.
+preview = true
+
+# The oldest interpreter this code must run on, not an aspiration. The
+# belt does not pin Python (a whole runtime for one script), so
+# security/workflow-permissions.py runs on whatever `python3` a machine
+# has — and macOS still ships 3.9.6, which is what this repo's own
+# maintainer machine resolves. Naming a higher target would let the
+# pyupgrade rules rewrite the script into syntax that machine cannot
+# execute. Measured at standup: identical findings from py39 to py314 and
+# zero UP diagnostics at any of them, so the conservative floor costs
+# nothing today and is insurance against the first rewrite that would.
+target-version = "py39"
+
+[lint]
+select = ["ALL"]
+ignore = [
+  # Ruff's own published formatter-incompatible list: these rules demand
+  # output `ruff format` will not produce, and `ruff format` emits a
+  # warning on every run while they are enabled. Not a preference —
+  # two halves of one tool contradicting each other.
+  "W191",
+  "E111",
+  "E114",
+  "E117",
+  "D206",
+  "D300",
+  "Q000",
+  "Q001",
+  "Q002",
+  "Q003",
+  "Q004",
+  "COM812",
+  "COM819",
+  "ISC002",
+  # Ruff already disables both of these itself: each is one half of a
+  # mutually-exclusive docstring pair (D203/D211, D212/D213) and `ALL`
+  # selects both halves. Naming them changes no enforcement whatsoever —
+  # it only stops ruff printing two "are incompatible" warnings on every
+  # check and every format run, in the gate, forever.
+  "D203",
+  "D213",
+  # Per-file copyright headers are refused org-wide: the licence is
+  # declared once in REUSE.toml and proven in the gate by lint:reuse, so
+  # a header is a second copy of a machine-verified fact with nothing to
+  # gain and drift to lose — which is exactly how an MIT header reached a
+  # 0BSD tree (#316). Scaffold files make it worse: they are copied into
+  # repos that are deliberately licensed differently.
+  "CPY001",
+  # `print` is this tool's output mechanism, not a debugging leftover.
+  # T201 exists to catch strays in library code; the belt's Python is a
+  # CLI check that emits its findings on stdout and stderr by design.
+  "T201",
+]
+
+[format]
+docstring-code-format = true

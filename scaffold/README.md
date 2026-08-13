@@ -9,6 +9,15 @@ footprint of the governance stack:
 - `committed.toml` — conventional-commit canon (add repo `allowed_scopes`)
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
 - `.rumdl.toml` — markdown canon (MD013 exempts code blocks)
+- `ruff.toml` — the Python canon at `select = ["ALL"]` plus preview.
+  Copy it verbatim and keep `target-version` as it stands: the belt does
+  not pin Python, so scripts run on whatever `python3` a machine has, and
+  naming a higher target lets the pyupgrade rules rewrite code into
+  syntax an older interpreter cannot execute. `lint:python` fails the
+  gate if Python is tracked without a config — ruff's *default* selection
+  is a few dozen rules out of ~900, so a missing config yields a green
+  gate that checked almost nothing. Unlike `biome.json`, a nested copy is
+  harmless: ruff's config discovery is hierarchical by design.
 - `biome.json.stub` — the JS/TS/JSON canon at `preset: "all"`, copied to
   the root as `biome.json`. The `.stub` suffix is load-bearing, exactly
   as it is for `REUSE.toml.stub`: biome discovers configs by walking the
