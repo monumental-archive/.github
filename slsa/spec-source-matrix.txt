@@ -1,0 +1,25 @@
+# The SLSA v1.2 source-requirements tick matrix, pinned (#349 S2).
+# One line per <tr id> in the spec page requirement tables:
+# "id tick-count" — the count of level checkmarks, which uniquely
+# determines the requirement first level (4=L1+, 3=L2+, 2=L3+,
+# 1=L4). audit:spec-drift re-extracts this from the live page and
+# reddens on ANY difference: a new requirement, a renamed anchor
+# or a moved level means slsa/requirements.toml needs re-mapping
+# by a human — the check that would have caught the v1.2
+# verified-properties surprise (#203) and the History omission
+# (#349 finding 4) mechanically. Regenerate with the extraction
+# command in the audit task after re-mapping.
+choose-scs 4
+access-and-history 3
+safe-expunging-process 3
+technical-controls 2
+repository-ids 4
+revision-ids 4
+human-readable-diff 4
+source-summary 4
+history 3
+continuity 3
+identity-management 3
+source-provenance 3
+protected-refs 2
+two-party-review 1

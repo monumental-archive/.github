@@ -1,0 +1,29 @@
+# The org's four track rows -- direction.md's table AS DATA (#349 S2).
+# direction.md renders its table from this file (fix:tracks) and
+# lint:tracks reddens hand drift, so the one table other repos conform
+# to cannot disagree with the data the audits read. Edit HERE, then
+# `mise run fix:tracks`; editing the rendered table reddens the gate.
+
+[[track]]
+name = "Build"
+ceiling = "**L3**"
+status = "Met, and verifiable by strangers"
+enforced = "The signer split (`id-token: write` lives only in a repo that runs no caller code — the capability boundary, linted), the reusable gate, App-minted tags, evidence bundles per release"
+
+[[track]]
+name = "Source"
+ceiling = "**L3**"
+status = "**Met**, and verifiable by strangers: every revision on `main` carries a verifying chain link — signed source provenance plus a source VSA naming the `ORG_SOURCE_` properties live at that revision, chained in `refs/notes/commits` — a gap reddens `audit:source-vsa` rather than passing quietly, and the next push heals it with an honest `repaired` marker and a computed level (#265). See `source-track.md` for the level each link claims"
+enforced = "Org-level rulesets: required gate, required signatures, linear history, squash-only, locked `v*` tags, empty bypass lists — read from the rules API at emission time, never from configuration intent"
+
+[[track]]
+name = "Dependencies"
+ceiling = "**L2**"
+status = "Met by construction: the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (see `dependency-track.md`; first exercised on lab v0.20.0 — whose refusal also exposed, and #349 closed, the unwired publish edges)"
+enforced = "Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed dependency-keyed VEX as the only exit"
+
+[[track]]
+name = "Build Environment"
+ceiling = "**L0**"
+status = "**Formally L0** at both layers: L1's verify-before-instantiation obligation is implemented, its signed-build-image-provenance obligation belongs to producers who do not meet it (see `slsa-reference.md`)"
+enforced = "Runner image a named, Renovate-rolled pin, enforced by `lint:runner-pin` (#290 found the signer floating on `ubuntu-latest` while this cell claimed otherwise); pgrx bases digest-pinned, org-attested and verified fail-closed before any container runs"

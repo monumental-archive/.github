@@ -76,26 +76,54 @@ rules_max_epoch=$(jq -r '[.rulesetsUpdatedAt[]?] | max // empty' "${SA_WORK}/cla
 # these scripts also run under macOS's bash 3.2 in the dry run.
 : > "${SA_WORK}/manifest.tsv"
 
+# The ledger tail (#349 S3): the note this run signs on top of. Note
+# version 2 splits what version 1's `prev` carried as one field:
+# `ledgerPrev` is EMISSION order — the previous emitted note, so a
+# healed link extends the tail instead of forking beside a link that
+# already named its git parent — and `revisionParent` is git
+# first-parent ancestry, semantic only. The tail at run start is the
+# nearest noted first-parent ancestor of the pushed revision (the
+# newest pre-run emission: notes are per-push on main, and chain.sh's
+# heal list is exactly the note-less span between that ancestor and
+# the tip); within the loop the tail is the note the loop just wrote.
+# The tail is verified against the published identity before anything
+# signs on top of it — once, here, since every later ledgerPrev target
+# is in the manifest.
+tail_rev=""
+if [[ ${SA_GENESIS:-false} != "true" ]]; then
+  c="${GITHUB_SHA}"
+  while c=$(git rev-parse -q --verify "${c}^" 2> /dev/null); do
+    if git notes show "${c}" > /dev/null 2>&1; then
+      tail_rev="${c}"
+      break
+    fi
+  done
+  if [[ -z ${tail_rev} ]]; then
+    echo "::error::no noted ancestor below ${GITHUB_SHA} and this is not a genesis dispatch — the chain has no tail to extend"
+    exit 1
+  fi
+  [[ ${SA_SKIP_SIGN:-false} == true ]] || verify_link "${tail_rev}"
+fi
+
 while IFS= read -r rev; do
   [[ -n ${rev} ]] || continue
   linkdir="${SA_WORK}/links/${rev}"
   mkdir -p "${linkdir}"
 
-  # The previous link is the first-parent parent: chain.sh's heal list
-  # is oldest-first over a contiguous history, so by this iteration the
-  # parent is either a pre-existing link (verified here, with the
-  # published root of trust, before anything signs against it) or one
-  # this loop just emitted.
-  if [[ ${SA_GENESIS:-false} == "true" ]]; then
-    echo '{"prev": null}' > "${linkdir}/prev.json"
+  # revisionParent: git first-parent, or null for a root commit.
+  parent=$(git rev-parse -q --verify "${rev}^" 2> /dev/null || true)
+  if [[ -n ${parent} ]]; then
+    revision_parent=$(jq -cn --arg p "${parent}" '$p')
   else
-    parent=$(git rev-parse -q --verify "${rev}^")
-    if ! grep -q "^${parent}	" "${SA_WORK}/manifest.tsv"; then
-      [[ ${SA_SKIP_SIGN:-false} == true ]] || verify_link "${parent}"
-    fi
-    prev_sha=$(note_sha "${parent}")
-    jq -n --arg r "${parent}" --arg d "${prev_sha}" \
-      '{prev: {revision: $r, noteSha256: $d}}' > "${linkdir}/prev.json"
+    revision_parent="null"
+  fi
+  # ledgerPrev: the tail note, or null exactly once at genesis.
+  if [[ ${SA_GENESIS:-false} == "true" && -z ${tail_rev} ]]; then
+    echo '{"ledgerPrev": null}' > "${linkdir}/prev.json"
+  else
+    prev_sha=$(note_sha "${tail_rev}")
+    jq -n --arg r "${tail_rev}" --arg d "${prev_sha}" \
+      '{ledgerPrev: {revision: $r, noteSha256: $d}}' > "${linkdir}/prev.json"
   fi
 
   parents=$(git rev-parse "${rev}^@" | jq -Rc . | jq -sc .)
@@ -115,6 +143,7 @@ while IFS= read -r rev; do
     --arg canon "${SA_CANON_REF}" \
     --argjson parents "${parents}" \
     --argjson repaired "${repaired}" \
+    --argjson rparent "${revision_parent}" \
     --slurpfile claims "${SA_WORK}/claims.json" \
     --slurpfile prev "${linkdir}/prev.json" \
     '{
@@ -133,7 +162,8 @@ while IFS= read -r rev; do
         commitTime: $ct,
         rulesReadAt: $claims[0].rulesReadAt,
         controls: $claims[0].controls,
-        prev: $prev[0].prev,
+        ledgerPrev: $prev[0].ledgerPrev,
+        revisionParent: $rparent,
         canonRef: $canon
       } + (if $repaired == null then {} else {repaired: $repaired} end))
     }' > "${linkdir}/provenance.json"
@@ -226,12 +256,14 @@ while IFS= read -r rev; do
     --slurpfile pb "${linkdir}/provenance.bundle.json" \
     --slurpfile vb "${linkdir}/vsa.bundle.json" \
     '{
-      version: 1,
+      version: 2,
       provenance: {statement: $ps, bundle: $pb[0]},
       vsa: {statement: $vs, bundle: $vb[0]}
     }' > "${linkdir}/note.json"
   git notes add -f -F "${linkdir}/note.json" "${rev}"
   printf '%s\t%s\n' "${rev}" "${linkdir}/note.json" >> "${SA_WORK}/manifest.tsv"
+  # This note is now the ledger tail the next iteration extends.
+  tail_rev="${rev}"
 
   healed=""
   [[ ${repaired} != "null" ]] && healed=" (healed)"

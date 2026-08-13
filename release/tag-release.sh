@@ -46,10 +46,25 @@ if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
   exit 0
 fi
 
-# Annotated, so the tag carries an author and a date of its own.
-git tag -a "${tag}" -m "${tag}"
+# Signed, not merely annotated (#349 S4): gitsign puts a keyless x509
+# signature in the tag object, under the same Sigstore root of trust as
+# every other org signature — so an App-minted tag and a hand-minted
+# break-glass tag are distinguishable by inspection instead of by
+# recall, and `git verify-tag` answers for a verifier with gitsign
+# configured (the limit docs/runbook.md states: x509 in the PGP slot is
+# not universal). The push still authenticates as the App, so the
+# sole-bypass tag ruleset holds unchanged. Fail closed: a tag the
+# signer cannot sign is not minted at all — the calling job holds
+# `id-token: write` for exactly this step (the capability-boundary
+# marker in release.yml records why that is safe).
+# No connector configuration: in Actions gitsign takes the ambient
+# OIDC token (ACTIONS_ID_TOKEN_REQUEST_URL), which is the identity the
+# certificate should carry — the workflow, not a human.
+git -c gpg.format=x509 \
+  -c gpg.x509.program=gitsign \
+  tag -s "${tag}" -m "${tag}"
 git push origin "${tag}"
-echo "pushed ${tag}"
+echo "pushed ${tag} (signed)"
 
 # Release notes are the changelog section for this version — the same text
 # reviewers already approved in the Release PR, not a second description of

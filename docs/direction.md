@@ -31,12 +31,16 @@ and are tracked in issues as doors to open later — they are not being
 chased now. A target here is a claim only where a stranger can verify
 it; everywhere else it is labelled as what it is.
 
+<!-- tracks:direction:begin -->
+
 | Track | Ceiling | Status | Enforced by |
 | --- | --- | --- | --- |
 | Build | **L3** | Met, and verifiable by strangers | The signer split (`id-token: write` lives only in a repo that runs no caller code — the capability boundary, linted), the reusable gate, App-minted tags, evidence bundles per release |
 | Source | **L3** | **Met**, and verifiable by strangers: every revision on `main` carries a verifying chain link — signed source provenance plus a source VSA naming the `ORG_SOURCE_` properties live at that revision, chained in `refs/notes/commits` — a gap reddens `audit:source-vsa` rather than passing quietly, and the next push heals it with an honest `repaired` marker and a computed level (#265). See `source-track.md` for the level each link claims | Org-level rulesets: required gate, required signatures, linear history, squash-only, locked `v*` tags, empty bypass lists — read from the rules API at emission time, never from configuration intent |
-| Dependencies | **L2** | Met by construction: the release path refuses to publish with an undecided advisory in its SBOM (see `dependency-track.md`; first exercised on lab v0.19.1, which it blocked) | Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed dependency-keyed VEX as the only exit |
+| Dependencies | **L2** | Met by construction: the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (see `dependency-track.md`; first exercised on lab v0.20.0 — whose refusal also exposed, and #349 closed, the unwired publish edges) | Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed dependency-keyed VEX as the only exit |
 | Build Environment | **L0** | **Formally L0** at both layers: L1's verify-before-instantiation obligation is implemented, its signed-build-image-provenance obligation belongs to producers who do not meet it (see `slsa-reference.md`) | Runner image a named, Renovate-rolled pin, enforced by `lint:runner-pin` (#290 found the signer floating on `ubuntu-latest` while this cell claimed otherwise); pgrx bases digest-pinned, org-attested and verified fail-closed before any container runs |
+
+<!-- tracks:direction:end -->
 
 The Build Environment row is a zero by attribution, not by effort. Its
 controls are built; the *attestation* that would make them a level

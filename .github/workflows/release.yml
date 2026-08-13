@@ -42,11 +42,22 @@ jobs:
     # ordering race between them to serialise. workflow_dispatch is the
     # recovery path: re-run the tag step against a release commit whose
     # first attempt failed — the script refuses anything else.
+    #
+    # capability-boundary: this job holds `id-token: write` for exactly
+    # one step — gitsign minting the keyless signature on the release
+    # tag object (#349 S4). It runs no caller-supplied code: its steps
+    # are the canon's tag-release.sh and git-cliff rendering notes with
+    # the canonical configuration; the caller contributes a tree to
+    # read, never a step to execute. The same case that admitted the
+    # scheduled workflows and verify-release: refusing to sign the tag
+    # in order to protect the identity would leave the release chain's
+    # one unsigned pointer unsigned forever.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-24.04
-    permissions: {}
+    permissions:
+      id-token: write # gitsign keyless tag signature, nothing else
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml

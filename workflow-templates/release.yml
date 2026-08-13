@@ -41,5 +41,6 @@ jobs:
       # through the GitHub API, so the shared workflow needs this; without
       # it the run dies as startup_failure with no jobs and no log.
       contents: read # git-cliff's API calls, and the checkout
+      id-token: write # gitsign's keyless signature on the release tag (#349 S4)
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}

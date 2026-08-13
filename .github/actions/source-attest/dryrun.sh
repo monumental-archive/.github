@@ -117,7 +117,7 @@ jq -e --arg rev "${rev}" '
     and (.parents | type == "array")
     and .actor.login and .commitTime and .rulesReadAt
     and (.controls | type == "array") and .canonRef
-    and has("prev"))
+    and has("ledgerPrev") and has("revisionParent"))
 ' "${link}/provenance.json" > /dev/null || fail "provenance statement shape invalid"
 jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" --arg canon "${SA_CANON_REF}" '
   ._type == "https://in-toto.io/Statement/v1"
@@ -132,7 +132,7 @@ jq -e --arg rev "${rev}" --arg id "${SA_IDENTITY}" --arg canon "${SA_CANON_REF}"
     and .verifiedLevels[0] == "SLSA_SOURCE_LEVEL_3")
 ' "${link}/vsa.json" > /dev/null \
   || fail "VSA shape invalid (the #267 SHOULDs are asserted too), or the full fixture set does not reach SLSA_SOURCE_LEVEL_3"
-jq -e '.version == 1 and .provenance.statement and .provenance.bundle and .vsa.statement and .vsa.bundle' \
+jq -e '.version == 2 and .provenance.statement and .provenance.bundle and .vsa.statement and .vsa.bundle' \
   "${link}/note.json" > /dev/null || fail "chain-link note shape invalid"
 
 # ── Auto-heal (#265): a hole left by a lapsed run is healed by the next
@@ -174,9 +174,15 @@ jq -e '.predicate | has("repaired") | not' "${heal_work}/links/${rev3}/provenanc
 jq -e '.predicate.verifiedLevels[0] == "SLSA_SOURCE_LEVEL_3"' \
   "${heal_work}/links/${rev2}/vsa.json" > /dev/null \
   || fail "healed link with provable ruleset continuity did not reach the target level (#265)"
-jq -e --arg p "${rev2}" '.predicate.prev.revision == $p' \
+jq -e --arg p "${rev2}" '.predicate.ledgerPrev.revision == $p' \
   "${heal_work}/links/${rev3}/provenance.json" > /dev/null \
   || fail "the fresh link does not chain to the just-healed hole (#265)"
+# The v2 split (#349 S3): after a heal the ledger pointer and the git
+# parent AGREE here (the hole is the fresh link's parent), and both
+# fields must say so independently.
+jq -e --arg p "${rev2}" '.predicate.revisionParent == $p' \
+  "${heal_work}/links/${rev3}/provenance.json" > /dev/null \
+  || fail "the fresh link does not name its git first-parent in revisionParent (#349 S3)"
 
 # ── The continuity guard under-claims when it cannot prove (#265): with
 # a contributing ruleset changed AFTER the commits (a future updated_at

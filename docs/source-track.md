@@ -87,12 +87,15 @@ end to end before `signer` and `.github` founded their chains, and
 
 ## Requirement mapping (v1.2, L1–L3)
 
+<!-- tracks:source:begin -->
+
 | Requirement | Level | Enforcement |
 | --- | --- | --- |
 | Choose an appropriate SCS | 1 | GitHub |
 | Repository IDs / immutable revision IDs / human-readable diffs | 1 | GitHub (git SHAs, PR diffs) |
 | Source VSAs | 1 | **Emitted** per push, all three repos (#207) |
 | Access control + reliable history | 2 | `org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list |
+| History (SCS): every Named Reference change recorded — when, by whom, new revision ID | 2 | Each chain link records the actor, `commitTime`, the revision and its parents, contemporaneously with the push (`source-attest` emit); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped |
 | Tag immutability | 2 | `org-default-tag` ruleset: update/move/delete blocked, all tags, all repos |
 | Safe expunging process | 2 | `docs/expunging.md` |
 | Identity management | 2 | GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change |
@@ -100,6 +103,8 @@ end to end before `signer` and `.github` founded their chains, and
 | Continuity | 2 | Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md` |
 | Continuous technical controls, documented | 3 | This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint |
 | Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` emitted live in every source VSA since 2026-08-12 (#207) |
+
+<!-- tracks:source:end -->
 
 ## The claims contract: the `ORG_SOURCE_` set, named once
 

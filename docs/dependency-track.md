@@ -7,12 +7,16 @@ the target and the declined doors were decided there and in #121/#122.
 
 ## The target: Level 2, by choice
 
+<!-- tracks:dependency:begin -->
+
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path itself refuses to publish with an undecided advisory in its SBOM (`derive-vex.sh`, below); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.19.1, which it blocked — see "Where L2 is met by construction" |
+| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`derive-vex.sh` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.20.0, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
+
+<!-- tracks:dependency:end -->
 
 No level demands vulnerability-free. L2 demands *known, decided, and
 written down* — the workflow the org already practised informally, now
@@ -53,7 +57,13 @@ by the lock, so gate eligibility holds.
 ### The cron: `audit:deny` (advisories)
 
 `cargo deny check advisories` — RustSec feed, network-bound, structurally
-outside the gate; Monday cron beside links and settings drift. Every
+outside the gate. It runs on the Monday cadence but NOT in the canon's
+`audit.yml` beside links and settings drift: it is a per-repo
+obligation, so it runs from `repo-audit.yml` via each repo's own
+`audit.yml` stub — which means adoption is per repo and enumerated
+nowhere the way `audit:source-vsa` enumerates chains (#349 finding 8
+holds that open; an `audit:adoption` over the population is the
+recorded follow-up). Every
 `ignore` entry carries a `reason` and must cite the VEX statement that
 records the decision — the config format itself enforces the L2 shape
 (`severity-threshold` and lint-level knobs were removed upstream;
@@ -188,8 +198,13 @@ vulnerability, or not remediate in the given release."*
 This is now a property of the release path itself, on two feeds. The
 `sbom` job in `publish.yml` runs `release/derive-vex.sh` after
 generating the SBOM, which scans it with osv-scanner and **fails the
-release** — before anything builds or publishes — if any gate-class
-advisory in it has no decision for its exact `package@version`. The
+release** if any gate-class advisory in it has no decision for its
+exact `package@version` — and the `commit-point` barrier turns that
+failure into a `needs` edge every publish job waits on, so nothing
+reaches a registry past it. The edge is load-bearing history, not
+belt-and-braces: until #349 finding 1 the ordering was only a race the
+org kept winning, and lab v0.20.0's npm and GHCR uploads went out
+eleven seconds after this very gate went red. The
 same job then runs `audit:deny` against the tagged lock (#211): the
 identical belt task the Monday cron runs, so cargo-deny reads RustSec
 directly (no OSV import lag) and additionally refuses yanked crates,
@@ -198,9 +213,10 @@ carries a reason citing its VEX statement, so the exit is a written
 decision and only its timing moves. Neither leg has a warn path: a
 warning here converts the control into a log line (the #118 rule). A
 Tuesday advisory against a Wednesday release is triaged on Wednesday or
-the release does not happen. The Monday crons (`audit:deny`,
-`audit:blast-radius`) remain as the sweep over *already-published*
-releases, which no release-time gate can cover.
+the release does not happen. The Monday sweeps over *already-published*
+releases — which no release-time gate can cover — remain: `audit:deny`
+from `repo-audit.yml` via each repo's audit stub, and
+`audit:blast-radius` from the canon's own `audit.yml`.
 
 The gate-determinism rule is untouched: it keeps network-bound checks
 out of the **`ci` gate**, and it is right. The release path is already
@@ -208,13 +224,19 @@ network-bound by construction — it publishes to registries and pulls
 the bytes back to prove them — so the OSV feed at release time is the
 same category as `verify-release`. Both legs are lab-proven, and the
 `audit:deny` leg caught a real finding on its first live run: the
-lab's v0.19.1 was blocked before anything built — RUSTSEC-2021-0127,
-`serde_cbor` unmaintained via pgrx itself, RustSec-direct where the
-OSV gate-class filter had not flagged it — and shipped as v0.20.1 only
-behind an `ignore` entry citing the pre-existing
-`security/vex/RUSTSEC-2021-0127.openvex.json` decision. The control,
-the written-decision exit and the roll-forward all behaved exactly as
-designed.
+lab's v0.20.0 release was refused — RUSTSEC-2021-0127, `serde_cbor`
+unmaintained via pgrx itself, RustSec-direct where the OSV gate-class
+filter had not flagged it — and the fix shipped as v0.20.1 only behind
+an `ignore` entry citing the pre-existing
+`security/vex/RUSTSEC-2021-0127.openvex.json` decision. The written-
+decision exit and the roll-forward behaved as designed; the refusal
+did not, in full: the release (attach, VSAs, SBOM asset, DOI) was
+blocked, but the npm package and the GHCR index published anyway,
+because no publish job then carried a `needs` edge to the gate (#349
+finding 1, closed by the `commit-point` barrier). An earlier version
+of this page called the blocked run "v0.19.1", a tag that never
+existed, and claimed it was "blocked before anything built" — both
+corrected here rather than reworded away.
 
 ## Recorded verdicts
 
