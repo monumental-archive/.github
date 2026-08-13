@@ -33,7 +33,7 @@ trap there will redden the Monday audit if you skip it.
 | Criterion | Answer | Evidence |
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
-| `build_repeatable` | Met **where a build occurs** | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. The criterion says to answer N/A where no building occurs, which is the canon's case and any continuous repo's — do not copy Met into a repo that compiles nothing |
+| `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
 | `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 | canonical `coverage:check` ratchet in the gate |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | git-cliff + App-minted `v*` tags |
@@ -114,9 +114,16 @@ Two supported mechanisms, both better than the form:
 The crib above is org-wide evidence, but four answers are repo-shaped and
 copying the canon's is wrong:
 
-- `build_repeatable`, `build`, `build_common_tools`,
-  `installation_standard_variables` — N/A for the canon (nothing is
-  built); Met in any repo that compiles.
+- `build`, `build_common_tools`, `build_floss_tools`,
+  `installation_standard_variables` — N/A for the canon. Note the
+  conditional these hang on: *"if the software **requires building for
+  use**"*. Workflows and tasks are consumed straight from the
+  repository, so it stays N/A here even though the project does build a
+  release artifact. A repo whose users must compile something answers
+  Met.
+- `build_repeatable` / `build_reproducible` — **Met for the canon**,
+  and this is the trap that caught the first pass of these answers. See
+  below.
 - `test_statement_coverage80` / `90`, `test_branch_coverage80` — Unmet
   for the canon (no belt-legal bash coverage tool, see
   [`tooling-verdicts.md`](tooling-verdicts.md)); winnable in Rust repos
@@ -124,6 +131,41 @@ copying the canon's is wrong:
   conformance root**, which should not read as a regression.
 - `dynamic_analysis` — Met only where fuzzing actually runs.
 - Registry and DOI criteria follow the publish stub's `classes:`.
+
+### The trap: "no compiled code" is not "no build"
+
+Answer the build, SBOM and signing criteria from **what the release
+actually publishes**, never from a description of the repository. The
+first pass of the canon's answers got three wrong by reasoning from
+"this repo is configuration, not software" and never opening a release.
+
+`source-archive` is an artifact class like any other. A repo that
+declares it builds a tarball through `build-source`, rebuilds it
+independently through `repro-build-source`, and the repro gate compares
+the two bit for bit before anything is signed or attached. So a
+repository that compiles nothing still has a build, and a reproducible
+one. The canon's v1.22.2 publishes four assets:
+
+```text
+github-1.22.2.tar.gz          the built archive
+github-1.22.2.spdx.json       an SPDX SBOM
+checksums.txt                 per-asset digests
+attestations.intoto.jsonl     the Sigstore evidence bundle
+```
+
+Which makes `build_repeatable` (silver), `build_reproducible` (gold)
+and `osps_qa_02_02` (baseline-3, SBOM) all **Met**, where reasoning from
+the repository's shape had answered N/A to each. N/A and Met both count
+as complete, so the error costs no percentage — it just publishes a
+weaker claim than the evidence supports, which is the wrong direction
+for an entry strangers read.
+
+Check first, every time:
+
+```bash
+gh release view "$(gh release list -L1 --json tagName --jq '.[0].tagName')" \
+  --json assets --jq '[.assets[].name]'
+```
 
 ### What the badge is worth elsewhere
 
