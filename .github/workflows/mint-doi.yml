@@ -34,15 +34,6 @@ on:
         description: Version being released, without the leading v.
         required: true
         type: string
-      base-url:
-        # forwarding: universal
-        description: >
-          Zenodo instance. The default is production; the release lab
-          passes https://sandbox.zenodo.org so rehearsals mint test DOIs
-          against the mirrored API instead of permanent ones.
-        required: false
-        type: string
-        default: https://zenodo.org
     secrets:
       zenodo-token:
         # forwarding: universal
@@ -62,7 +53,13 @@ jobs:
       - name: Deposit, then publish — the DOI names the released bytes
         env:
           ZENODO_TOKEN: ${{ secrets.zenodo-token }}
-          BASE_URL: ${{ inputs.base-url }}
+          # Production, always — there is no sandbox lever (#316): a lab
+          # that rehearses DOIs against sandbox never proves the DOI
+          # path, and the sandbox's mirrored API is where the false
+          # v0.22.1 record hid. A DOI squats no namespace, so rehearsal
+          # releases minting real version DOIs under one concept is the
+          # design, stated in release-lab's README.
+          BASE_URL: https://zenodo.org
           UNTRUSTED_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}

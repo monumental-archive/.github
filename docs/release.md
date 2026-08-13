@@ -334,10 +334,13 @@ requirement doing real work rather than ceremony.
   through Zenodo's REST deposition API — after the release is published,
   after proof, like everything else. (The webhook flip-switch integration
   is deliberately not used: webhooks are Scorecard's one Critical-risk
-  check, and the REST job is token-auth, testable against the sandbox,
-  and in the pipeline where its failure is visible.) `ZENODO_TOKEN` is an
-  organisation secret, `visibility: selected`, sandbox-account token
-  until the first production DOI is wanted.
+  check, and the REST job is token-auth and in the pipeline where its
+  failure is visible.) `ZENODO_TOKEN` is an organisation secret,
+  `visibility: selected`, one production token granted per repo. There
+  is no sandbox lever (#316): the lab's rehearsal releases mint real
+  version DOIs under its one concept record — that pile-up is the
+  design, because a rehearsal against a mirrored sandbox API never
+  proves the path the permanent record takes.
 
 There is one shared build workflow per **artifact class** — `rust-crate`,
 `rust-binary`, `oci-image`, `wasm-npm`, `pgrx-extension` — and callers

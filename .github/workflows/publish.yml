@@ -194,11 +194,6 @@ on:
         required: false
         type: boolean
         default: false
-      zenodo-base-url:
-        description: Zenodo instance; the lab passes the sandbox.
-        required: false
-        type: string
-        default: https://zenodo.org
     secrets:
       app-private-key:
         description: Tag-mint App private key, for publishing the release
@@ -1178,6 +1173,5 @@ jobs:
       contents: read # the minting job downloads the released source
     with:
       version: ${{ needs.guard.outputs.version }}
-      base-url: ${{ inputs.zenodo-base-url }}
     secrets:
       zenodo-token: ${{ secrets.zenodo-token }}
