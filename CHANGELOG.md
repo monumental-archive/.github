@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.20.0](https://github.com/monumental-archive/.github/compare/v1.19.0...v1.20.0) - 2026-08-13
+
+### Added
+
+- stand up coverage and fuzz as belt machinery ([#323](https://github.com/monumental-archive/.github/pull/323))
+- mint the canon's own DOI on self-publish ([#326](https://github.com/monumental-archive/.github/pull/326))
+
+### Fixed
+
+- render date-released unquoted, matching the release stamper ([#327](https://github.com/monumental-archive/.github/pull/327))
+
 ## [1.19.0](https://github.com/monumental-archive/.github/compare/v1.18.0...v1.19.0) - 2026-08-13
 
 ### Added
