@@ -108,8 +108,28 @@ are referenced as
 `mise run ci` locally is exactly what CI runs — same tools, same
 versions, same order, from the same lockfile. Shared-workflow changes are
 exercised by this repo's own `gate.yml` on every PR; the release half is
-exercised from `release-lab` before any production repo moves its
+exercised from `release-lab` before any **production** repo moves its
 pin.
+
+**The canon runs its own release path first, and that is fine** (#367).
+A change to `release.yml`, `publish.yml`, `verify-release.yml` or
+`release/*` cannot be rehearsed in the lab: `lint:canon-pins` forces
+every consumer pin to name a released `# vX.Y.Z`, the publish guard
+takes `refs/tags/v*` only, and `self-publish.yml` passes no `dry-run`.
+So cut the release and let it run — **canon tags are cheap**, exactly
+like lab tags. `self-publish.yml` ships one class (`source-archive`) in
+minutes; a red release costs a version number nobody pins once the
+fix-forward lands. Do not reason about what might break, and never let
+a release-path change sit unreleased to be argued about.
+
+What the canon does **not** prove is breadth: one class is a smoke test.
+`release-lab` publishes `rust-binary,oci-image,wasm-npm,pgrx-extension`
+across PG 14–18 at `dry-run: false` — the full-width proof. So the
+sequence is: **canon release (cheap, first) → lab pin bump and lab
+release (heavy, full width) → production repos.** v1.24.0 is the worked
+example: a verdict-leg check that had never met a real attestation
+refused its own valid decision, the fix shipped as v1.24.1, and the cost
+was one version number.
 
 ## Open items
 

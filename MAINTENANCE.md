@@ -89,16 +89,47 @@ issue #266, `generate-sbom.sh`, `repo-baseline.sh` #290 finding 7,
 New audits copy this shape from `audit:source-vsa`. Review any checking
 task against both properties before it lands.
 
-## The seam rule (#358)
+## The seam rule (#358, corrected by v1.24.0)
 
-A shared-workflow **capability change** — anything that alters what a
-caller must grant or how a consumer's release behaves at runtime — is
-done when a release-lab release has exercised it **on a pin carrying
-it**, not when the gate is green. The gate is deterministic by design
-and therefore structurally blind to integration seams: caller
-`permissions:` resolve at startup, attestation lookups at verdict time,
-publish-state derivations at whatever moment they run. #353 closed
-gate-green carrying four seam defects; every one was found by running a
-release and none by a linter. `lint:caller-permissions`,
-`lint:audit-scheduled` and `audit:caller-permissions` guard the seams
-now enumerated; this rule covers the ones not yet named.
+The gate is deterministic by design and therefore structurally blind to
+integration seams: caller `permissions:` resolve at startup, attestation
+lookups at verdict time, publish-state derivations at whatever moment
+they run. #353 closed gate-green carrying four seam defects; every one
+was found by running a release and none by a linter.
+`lint:caller-permissions`, `lint:audit-scheduled` and
+`audit:caller-permissions` guard the seams now enumerated. For the rest,
+what counts as "done" **depends on who executes the change first**, and
+that is not a choice:
+
+- **Consumer-path changes** (`ci.yml`, the task contract, the toolbelt,
+  hooks, the preset) are done when a release-lab release has exercised
+  them on a pin carrying them, before any production repo moves.
+- **The canon's own release path** (`release.yml`, `publish.yml`,
+  `verify-release.yml`, `release/*`) is executed **by the canon first**,
+  and no amount of rule-writing changes that: `lint:canon-pins` requires
+  every consumer pin to name a released `# vX.Y.Z`, so no repo may pin
+  an untagged canon SHA; the publish guard accepts `refs/tags/v*` only;
+  and `self-publish.yml` passes no `dry-run`. Cut the release and let it
+  run.
+
+That ordering is not a hazard, because **canon tags are cheap** — the
+same way lab tags are. `self-publish.yml` ships one class
+(`source-archive`): a tarball, an SBOM, checksums and a DOI, in minutes.
+A red canon release costs a version number and nothing else; nobody is
+pinned to it once the fix-forward ships, exactly as with a burned lab
+patch. Spend them freely rather than reasoning about what might break.
+
+What the canon's release does **not** prove is breadth. It exercises one
+class, so it is a smoke test of the machinery. `release-lab` publishes
+`rust-binary,oci-image,wasm-npm,pgrx-extension` across PG 14–18 with
+`dry-run: false` — "the full-width proof in substance", as its own stub
+says. So the sequence for a release-path change is: **release the canon
+(cheap, fast, first), then move the lab's pin and cut a lab release
+(heavy, full width), then production repos.** The first tells you it
+runs; the second tells you it works.
+
+v1.24.0 is the worked example: a verdict-leg check that had never met a
+real attestation refused its own valid decision. The commit point held
+nothing back — the proofs themselves had passed — so the release
+published and its VSA was lost. The fix shipped as v1.24.1 and the cost
+was one version number nobody pins.
