@@ -9,7 +9,7 @@
 <!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->
 <!-- pending (human step): REUSE — register at api.reuse.software (FSFE login), then set 'reuse registered' in .badge-states and re-run fix:badges -->
 [![coverage](https://codecov.io/gh/monumental-archive/.github/branch/main/graph/badge.svg)](https://codecov.io/gh/monumental-archive/.github)
-<!-- pending (first mint): DOI — the concept DOI lands in CITATION.cff after the first release mints it; re-run fix:badges -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21913604.svg)](https://doi.org/10.5281/zenodo.21913604)
 [![fair-software](https://img.shields.io/badge/fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20%E2%97%8F%20%E2%97%8B-orange)](https://fair-software.eu)
 <!-- badges:end -->
 
