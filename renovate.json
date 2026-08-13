@@ -1,8 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "github>monumental-archive/.github#v1.25.0"
-  ],
+  "extends": ["github>monumental-archive/.github#v1.25.0"],
   "packageRules": [
     {
       "description": "The pg majors in pgrx-base-images.toml are the support matrix, not staleness: each key deliberately maps to its own major (building 14 against 18 is not an update, it is a different matrix). Only digest and suffix refreshes within each major flow; new majors enter by adding a key, a reviewed change.",
@@ -15,9 +13,7 @@
     {
       "customType": "regex",
       "description": "pgrx base images: keep tag AND digest current together in docker/pgrx-base-images.toml \u2014 a pinned-but-stale base is worse than a floating one",
-      "managerFilePatterns": [
-        "/^docker/pgrx-base-images\\.toml$/"
-      ],
+      "managerFilePatterns": ["/^docker/pgrx-base-images\\.toml$/"],
       "matchStrings": [
         "# renovate: pgrx-base-image\\n\"[0-9]+\" = \"(?<depName>postgres):(?<currentValue>[a-z0-9.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
       ],

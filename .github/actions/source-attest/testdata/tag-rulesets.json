@@ -5,9 +5,7 @@
     "enforcement": "active",
     "conditions": {
       "ref_name": {
-        "include": [
-          "~ALL"
-        ],
+        "include": ["~ALL"],
         "exclude": []
       }
     },
@@ -31,9 +29,7 @@
     "enforcement": "active",
     "conditions": {
       "ref_name": {
-        "include": [
-          "refs/tags/v*"
-        ],
+        "include": ["refs/tags/v*"],
         "exclude": []
       }
     },
