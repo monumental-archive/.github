@@ -94,6 +94,16 @@ on:
         required: false
         type: string
         default: ""
+      prepare:
+        description: >
+          Executable materialising build artifacts into the context before
+          the image build, for the oci-image class — the compile belongs
+          here, in the caller's mise-pinned toolchain, never inside the
+          Dockerfile (#295). Receives the architecture as $1. Runs
+          identically on both repro-gate legs.
+        required: false
+        type: string
+        default: ""
       image-title:
         description: >
           org.opencontainers.image.title, for the image classes. Editorial
@@ -434,6 +444,7 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
+      prepare: ${{ inputs.prepare }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
@@ -451,6 +462,7 @@ jobs:
       dockerfile: ${{ inputs.dockerfile }}
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
+      prepare: ${{ inputs.prepare }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}

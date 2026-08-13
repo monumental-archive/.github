@@ -26,6 +26,14 @@
 #
 # No cache of any kind. A workflow that publishes carries none — everything
 # downstream of it gets signed.
+#
+#   The compile lives OUTSIDE the Dockerfile (#295). The repro gate
+#   measured the containerised cargo build nondeterministic while the
+#   same crates built bit-for-bit under the belt's pinned rust — so the
+#   binary is built by the `prepare` script in the caller's mise-pinned
+#   toolchain, and the Dockerfile stays pure assembly over pinned
+#   inputs. One toolchain, not two; determinism by construction, proven
+#   by the gate.
 name: build-oci-image
 
 on:
@@ -53,6 +61,26 @@ on:
           anything is published, and again on the bytes pulled back from
           the registry. Empty means no smoke test, which is permitted and
           unwise.
+        required: false
+        type: string
+        default: ""
+      prepare:
+        description: >
+          Script materialising build artifacts into the context before the
+          image build, run with the caller's own mise-pinned toolchain
+          under the same reproducibility flags as the rust-binary class.
+          Receives the matrix architecture (amd64|arm64) as $1. This is
+          the correct-by-construction answer to #295: a compile inside
+          BuildKit runs a second toolchain the belt does not pin (the lab
+          ran rust:1.97-slim by tag while the belt's pinned rust built the
+          same crates bit-for-bit), and the repro gate proved that path
+          nondeterministic. With the compile out here, the Dockerfile is
+          pure assembly — a digest-pinned or scratch base plus COPY of
+          bytes this job just built — and nothing nondeterministic remains
+          inside the image build. The repro leg runs the same script,
+          which is what makes the gate a proof of the whole path. Empty
+          means the Dockerfile is self-contained; a Dockerfile that
+          compiles is the #295 failure mode.
         required: false
         type: string
         default: ""
@@ -111,11 +139,45 @@ jobs:
     permissions:
       contents: read
       packages: write # push the per-architecture image by digest
+    env:
+      # The prepare environment, mirrored from build-rust-binary (same
+      # rationale, same flags — see its header): the caller's own pinned
+      # toolchain, nothing global, and reproducibility by construction
+      # rather than by audit. Inert when no prepare script is given.
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_STRIP: "false"
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/build
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Install mise and the caller's pinned toolchain
+        if: inputs.prepare != ''
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          # mise itself is a build input and floats without this pin
+          # (#117: nothing unpinned on an attested path, the installer
+          # included).
+          version: 2026.8.3
+          # No tool cache anywhere downstream of a signature.
+          cache: false
+
+      - name: Materialise build artifacts into the context (prepare)
+        if: inputs.prepare != ''
+        env:
+          ARCH: ${{ matrix.arch }}
+          UNTRUSTED_PREPARE: ${{ inputs.prepare }}
+        run: |
+          set -euo pipefail
+          if [[ ! -x "${UNTRUSTED_PREPARE}" ]]; then
+            echo "::error::prepare ${UNTRUSTED_PREPARE} is not executable"
+            exit 1
+          fi
+          "${UNTRUSTED_PREPARE}" "${ARCH}"
 
       - name: Resolve the image name
         id: name
