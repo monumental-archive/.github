@@ -2234,6 +2234,61 @@ cargo fuzz build -s none
 echo "lint:fuzz-build: $(cargo fuzz list | wc -l | tr -d ' ') target(s) build"
 '''
 
+[tasks."audit:caller-permissions"]
+description = "Org consumers' uses: grants cover canon HEAD's computed requirements (network, canon only)"
+dir = "{{cwd}}"
+# The org-wide half of seam 2 (#358); the local half is
+# lint:caller-permissions. A consumer's stub shipped atomically with
+# its pin, so at its own pinned SHA it is never broken — the only
+# question worth asking weekly is "will the next Renovate bump
+# startup-fail this repo", and that is the comparison against canon
+# HEAD. A finding here is therefore a FORECAST, not an outage: fix the
+# stub before (or with) the pin bump. Renovate cannot do it — it bumps
+# the uses: SHA and nothing else; the stub body is not a dependency.
+# Prerequisite of the #83 transfers: one consumer is what made the
+# v1.23.1 break survivable, and transfers add consumers.
+run = '''
+[[ -f security/workflow-permissions.py ]] || { echo "audit:caller-permissions: not the canon, skipped"; exit 0; }
+command -v gh > /dev/null || { echo "audit:caller-permissions: gh missing" >&2; exit 1; }
+command -v python3 > /dev/null || { echo "audit:caller-permissions: python3 missing" >&2; exit 1; }
+self="${GITHUB_REPOSITORY:-monumental-archive/.github}"
+if ! repos=$(gh api "orgs/monumental-archive/repos" --paginate \
+  --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
+  echo "audit:caller-permissions: could not enumerate org repos — nothing was checked" >&2
+  exit 1
+fi
+work=$(mktemp -d)
+trap 'rm -rf "${work}"' EXIT
+walked=0
+files=""
+for repo in ${repos}; do
+  [[ "monumental-archive/${repo}" == "${self}" ]] && continue
+  walked=$((walked + 1))
+  names=$(gh api "repos/monumental-archive/${repo}/contents/.github/workflows" \
+    --jq '.[] | select(.name | test("\\.ya?ml$")) | .name' 2> /dev/null) || continue
+  mkdir -p "${work}/${repo}"
+  for n in ${names}; do
+    gh api "repos/monumental-archive/${repo}/contents/.github/workflows/${n}" \
+      --jq .content | base64 -d > "${work}/${repo}/${n}"
+    grep -q "monumental-archive/\.github/\.github/workflows/" "${work}/${repo}/${n}" \
+      || { rm "${work}/${repo}/${n}"; continue; }
+    files="${files} ${work}/${repo}/${n}"
+  done
+done
+[[ ${walked} -gt 0 ]] || { echo "audit:caller-permissions: zero repos walked — the enumeration found nothing" >&2; exit 1; }
+if [[ -z "${files}" ]]; then
+  echo "audit:caller-permissions: ${walked} repo(s) walked, no canon consumers found"
+  exit 0
+fi
+if ! python3 security/workflow-permissions.py check ${files}; then
+  echo "audit:caller-permissions: a consumer's grant is below what canon" >&2
+  echo "  HEAD's callee asks for — its next pin bump dies as" >&2
+  echo "  startup_failure. Fix the stub before or with the bump (#358)." >&2
+  exit 1
+fi
+echo "audit:caller-permissions: ${walked} repo(s) walked, every consumer grant covers canon HEAD"
+'''
+
 [tasks."audit:spec-drift"]
 description = "The live SLSA source-requirements matrix still equals the pinned snapshot (network, canon only)"
 dir = "{{cwd}}"
@@ -3170,6 +3225,65 @@ if [[ -n "${bad}" ]]; then
   exit 1
 fi
 echo "lint:nested-permissions: ${checked} workflow(s) with uses: jobs clean"
+'''
+
+[tasks."lint:audit-scheduled"]
+description = "Every audit:* task has a workflow that runs it (a check nobody runs is no check)"
+dir = "{{cwd}}"
+# Seam 1 of #358: which audit legs run was one fact derived at two sites
+# — the task list here and the job list in audit.yml — with no join.
+# Both `audit:release-tags` and `audit:spec-drift` shipped as tasks,
+# were cited in prose as enforcing, and NO workflow ran either (#354,
+# fixed #356). This is the join: red on any audit:* task with no
+# `mise run audit:<name>` occurrence anywhere in .github/workflows/.
+# Deliberately no opt-out row — an unscheduled audit task IS the
+# defect; a task nobody should run should not exist. Linted, not
+# generated: generating audit.yml from the task list would mean
+# templating workflow YAML, and audit legs legitimately carry per-leg
+# permissions and env the task list cannot express.
+run = '''
+[[ -f mise/config.toml ]] || { echo "lint:audit-scheduled: not the canon, skipped"; exit 0; }
+bad=""
+count=0
+for t in $(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/'); do
+  count=$((count + 1))
+  grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
+    || bad="${bad} audit:${t}"
+done
+[[ ${count} -gt 0 ]] || { echo "lint:audit-scheduled: zero audit tasks enumerated — the grep is broken" >&2; exit 1; }
+if [[ -n "${bad}" ]]; then
+  echo "lint:audit-scheduled: audit task(s) no workflow ever runs:${bad}" >&2
+  echo "  schedule each in .github/workflows/ (audit.yml, publish.yml or" >&2
+  echo "  repo-audit.yml) or delete the task — a check nobody runs is a" >&2
+  echo "  claim, not a check (#358 seam 1)." >&2
+  exit 1
+fi
+echo "lint:audit-scheduled: ${count} audit task(s), every one scheduled"
+'''
+
+[tasks."lint:caller-permissions"]
+description = "Every caller of a workflow_call workflow grants its computed permissions requirement"
+dir = "{{cwd}}"
+# Seam 2 of #358: GitHub makes `permissions:` caller-owned, so a shared
+# workflow that gains a capability is a breaking change to every caller
+# — enforced at runtime as startup_failure with no jobs and no log, the
+# worst available enforcement point (canon v1.23.1 added `id-token:
+# write` to release.yml's tag job and release-lab's existing stub died
+# exactly that way). The requirement is statically computable — the
+# union of the callee's job-level grants — and this lint compares it
+# against every in-repo caller and every workflow-templates/ stub at
+# the PR that adds the capability, which is where #353 failed. The
+# org-wide half is audit:caller-permissions. lint:nested-permissions
+# requires the grant to be WRITTEN; this requires it to be SUFFICIENT.
+run = '''
+[[ -f security/workflow-permissions.py ]] || { echo "lint:caller-permissions: not the canon, skipped"; exit 0; }
+command -v python3 > /dev/null || { echo "lint:caller-permissions: python3 missing" >&2; exit 1; }
+if ! python3 security/workflow-permissions.py check; then
+  echo "lint:caller-permissions: see above — grant what the callee's jobs" >&2
+  echo "  ask for at the caller's uses: job (#358 seam 2)." >&2
+  exit 1
+fi
+echo "lint:caller-permissions: ok"
 '''
 
 [tasks."lint:template-pins"]
