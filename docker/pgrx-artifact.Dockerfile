@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Carl Allen
-# SPDX-License-Identifier: MIT
-#
 # The pgrx-extension artifact image: FROM scratch, the extension files and
 # nothing else. No OS packages, no shell, no rebuild cadence to maintain —
 # its CVE surface is structurally empty, and it cannot be used as a base

@@ -1,0 +1,22 @@
+# REUSE.toml stub (spec 3.3): copy to the repo root AS `REUSE.toml` and
+# fill the <angle-bracket> fields; add [[annotations]] blocks for file
+# classes that cannot carry headers. The .stub suffix is load-bearing:
+# the REUSE spec makes any file literally named REUSE.toml govern its
+# whole subtree, so under its real name this placeholder poisoned the
+# canon's own compliance (an unparsable <SPDX expression> over
+# scaffold/, .github#316). `lint:reuse` in the belt runs the real tool
+# over tracked files, so compliance is machine-checked BEFORE the
+# api.reuse.software registration (post-transfer). License texts live
+# in LICENSES/ by SPDX id. Per-file SPDX headers are refused by design:
+# a file inherits the repo's declared licence — a hardcoded header
+# overrides it and travels wrongly when the file is copied (#214).
+version = 1
+SPDX-PackageName = "<repo>"
+SPDX-PackageSupplier = "Carl Allen <carl.allen313@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/monumental-archive/<repo>"
+
+[[annotations]]
+path = ["**/*.lock", "**/.gitignore", "**/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Carl Allen"
+SPDX-License-Identifier = "<SPDX expression>"
