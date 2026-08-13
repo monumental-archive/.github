@@ -85,7 +85,10 @@ on:
           inside the image build. The repro leg runs the same script,
           which is what makes the gate a proof of the whole path. Empty
           means the Dockerfile is self-contained; a Dockerfile that
-          compiles is the #295 failure mode.
+          compiles is the #295 failure mode. The script runs with
+          SOURCE_DATE_EPOCH exported, so a compile that stamps a time
+          reads the released commit's own instead of the clock — which
+          is what the class was actually missing.
         required: false
         type: string
         default: ""
@@ -179,6 +182,18 @@ jobs:
         if: inputs.prepare != ''
         env:
           ARCH: ${{ matrix.arch }}
+          # The determinism inputs the class gives its own build steps, given
+          # to the caller's compile too — measured, not assumed (#295): two
+          # clean `cargo build --release --locked` runs of the same crate
+          # differ without SOURCE_DATE_EPOCH and are byte-identical with it,
+          # because a build script that stamps a time (cc, and anything
+          # embedding a build date) has nothing else to read. This is the
+          # actual root cause of the oci-image class never reproducing: the
+          # in-container build never had the epoch either, so moving the
+          # compile out was necessary but not sufficient. build-rust-binary
+          # exports the same value and reproduces bit for bit, which is what
+          # made the difference measurable in the first place.
+          SOURCE_DATE_EPOCH: ${{ inputs.source-epoch }}
           UNTRUSTED_PREPARE: ${{ inputs.prepare }}
         run: |
           set -euo pipefail
