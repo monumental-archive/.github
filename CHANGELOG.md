@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.19.0](https://github.com/monumental-archive/.github/compare/v1.18.0...v1.19.0) - 2026-08-13
+
+### Added
+
+- derive CITATION.cff from REUSE.toml and mint the DOI from it ([#320](https://github.com/monumental-archive/.github/pull/320))
+- delete the zenodo sandbox lever — every mint is real ([#321](https://github.com/monumental-archive/.github/pull/321))
+- derive the badge block — the canon consumes its own machinery ([#322](https://github.com/monumental-archive/.github/pull/322))
+
+### Fixed
+
+- single-source the signer identity and unstick the gate ([#317](https://github.com/monumental-archive/.github/pull/317))
+- claim only the base images a class actually instantiated ([#319](https://github.com/monumental-archive/.github/pull/319))
+
 ## [1.18.0](https://github.com/monumental-archive/.github/compare/v1.17.0...v1.18.0) - 2026-08-13
 
 ### Added
