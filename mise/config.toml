@@ -178,7 +178,7 @@ ruff = "0.16.1"
 # about four seconds rather than the minutes a source build would take.
 # 3.14.6 rather than 3.14.7: the standalone release carrying .7 is six days
 # old and the seven-day floor refuses it.
-python = "3.14.6"
+python = "3.14.7"
 "pipx:reuse" = { version = "6.2.0", uvx_args = "--with charset-normalizer", pipx_args = "--preinstall charset-normalizer" }
 # Source-track chain verification (audit:source-vsa) and stranger
 # verification of chain links generally — the same binary the emitter's
