@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.16.0](https://github.com/monumental-archive/.github/compare/v1.15.1...v1.16.0) - 2026-08-13
+
+### Added
+
+- move the oci-image compile out of the dockerfile (#295) ([#299](https://github.com/monumental-archive/.github/pull/299))
+
+### Fixed
+
+- correct the seven findings of the #290 audit pass ([#296](https://github.com/monumental-archive/.github/pull/296))
+- repair the signer-pin bumper, which ate its own marker ([#301](https://github.com/monumental-archive/.github/pull/301))
+
 ## [1.15.1](https://github.com/monumental-archive/.github/compare/v1.15.0...v1.15.1) - 2026-08-12
 
 ### Fixed
