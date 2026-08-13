@@ -2077,7 +2077,11 @@ fi
   echo "repository-code: ${repo_url}"
   echo "license: ${lic}"
   echo "version: ${version}"
-  echo "date-released: \"${released}\""
+  # Unquoted deliberately: release/prepare-release.sh's sed rewrites the
+  # whole line unquoted at every release, and the render must byte-match
+  # what the stamper writes or lint:citation reddens every release PR
+  # (measured on canon v1.20.0's).
+  echo "date-released: ${released}"
   if [[ -n "${concept}" ]]; then
     echo "identifiers:"
     echo "  - type: doi"
