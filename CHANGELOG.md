@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.21.0](https://github.com/monumental-archive/.github/compare/v1.20.0...v1.21.0) - 2026-08-13
+
+### Added
+
+- run audit:fuzz from the shared repo audit ([#328](https://github.com/monumental-archive/.github/pull/328))
+
+### Fixed
+
+- converge attach on an immutable release so the mint can resume ([#330](https://github.com/monumental-archive/.github/pull/330))
+
 ## [1.20.0](https://github.com/monumental-archive/.github/compare/v1.19.0...v1.20.0) - 2026-08-13
 
 ### Added
