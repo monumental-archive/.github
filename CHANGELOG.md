@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.17.0](https://github.com/monumental-archive/.github/compare/v1.16.1...v1.17.0) - 2026-08-13
+
+### Added
+
+- declare each input's forwarding class where it is born ([#306](https://github.com/monumental-archive/.github/pull/306))
+
+### Fixed
+
+- give the prepare compile SOURCE_DATE_EPOCH, the real #295 cause ([#308](https://github.com/monumental-archive/.github/pull/308))
+
 ## [1.16.1](https://github.com/monumental-archive/.github/compare/v1.16.0...v1.16.1) - 2026-08-13
 
 ### Fixed
