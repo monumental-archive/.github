@@ -96,8 +96,15 @@ repository: version controlled, public, gated by its own `gate.yml` on
 every pull request, every `uses:` pinned to a full commit SHA under the
 org's `sha_pinning_required` policy, and the Actions allowlist set with
 `verified_allowed: false` so a third-party action cannot run at all. Shared
-workflow changes are proven in `release-lab` before any production repo
-moves its pin. Communications are GitHub's TLS.
+workflow changes are proven in `release-lab` — four artifact classes
+across PG 14–18 — before any production repo moves its pin. Stated
+precisely, because the ordering matters to a reader judging this
+control: a change to the release path executes first in this
+repository's own release, which publishes a single class, and only then
+in the lab at full width. Both are cheap in version numbers by design,
+so the control is not that a change ran somewhere safe first; it is that
+consumers move last, and that every irreversible step sits behind the
+commit point (v1.24.0, #367). Communications are GitHub's TLS.
 
 **Creating build environments.** The control plane does not share a
 filesystem with build environments; caller artifacts reach the signing job

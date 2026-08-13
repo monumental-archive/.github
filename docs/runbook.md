@@ -360,3 +360,15 @@ changes in `release-lab` before any production repo moves its pin. Stub
 pins in `workflow-templates/` advance together to one SHA after merges.
 The lab's cycles are cheap by design: version numbers there are spent
 freely — a red run costs a patch number, never a consumer.
+
+The canon's cycles are cheap the same way. A change to `release.yml`,
+`publish.yml`, `verify-release.yml` or `release/*` runs first in the
+canon's own release and cannot be rehearsed anywhere else: consumers may
+not pin an untagged canon SHA (`lint:canon-pins`), publish refuses any
+ref that is not a `v*` tag, and `self-publish.yml` requests no
+`dry-run`. Cut it and watch. `self-publish.yml` ships one class
+(`source-archive`) in minutes, so a red canon release costs a version
+number and no consumer — spend them as freely as lab patch numbers
+(v1.24.0 published with its verdict leg red; v1.24.1 fixed it, #367).
+The canon proves the machinery runs; the lab, publishing four classes
+across PG 14–18, proves it works.

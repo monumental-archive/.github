@@ -862,4 +862,11 @@ in that repository's history for that day.
 
 Risky release-machinery changes are proven in the **release lab**
 (`release-lab`) before any production repository
-moves.
+moves — but the canon runs them first, and cheaply. A change to this
+machinery cannot be rehearsed elsewhere (a consumer may not pin an
+untagged canon SHA, publish accepts only `v*` tags, and
+`self-publish.yml` requests no `dry-run`), so it is released and
+watched: one class, minutes, a version number nobody pins if it reddens.
+The lab then proves it at full width — four classes across PG 14–18.
+Canon first for "does it run", lab for "does it work", production last.
+See MAINTENANCE.md, "The seam rule".
