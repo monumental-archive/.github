@@ -36,7 +36,7 @@ re-score by hand whenever a change lands that a criterion would notice.
 | FLOSS licence, in LICENSE | Met | per-repo LICENSE (0BSD in the org's own repos), `LICENSES/` + REUSE.toml, enforced by `lint:licence` (#214) |
 | Change control: public VCS, unique versions, release notes | Met | GitHub; semver by git-cliff; CHANGELOG per release |
 | Reporting: issue process, vulnerability process, ack ≤ 14 days | Met | issue forms; SECURITY.md (private reporting, 14-day ack) |
-| Quality: build, automated test suite, new-functionality tests, warnings | Met | `mise run ci` = the cloud gate; clippy/tests enforced; warnings deny |
+| Quality: build, automated test suite, new-functionality tests, warnings | Met | `mise run ci` = the cloud gate: the repo's own `test` task and the `coverage:check` ratchet run the suite, and every belt linter fails the gate on a finding. **The belt runs no clippy or rustfmt task** — a Rust repo's rustc warnings are surfaced by its `test` run, not denied — so answer `warnings_strict` from the tasks that actually run, as release-lab does (Unmet, with the reason). This row read "clippy/tests enforced; warnings deny" until 2026-08-13, which was never true of any repo |
 | Security: secure design knowledge, no unencrypted auth, vuln fix ≤ 60 days | Met | trusted publishing only, no tokens; Dependabot + Renovate |
 | Static analysis | Met | CodeQL default setup (org-enforced) + belt linters |
 | Dynamic analysis (suggested) | Met only where fuzzing exists | cargo-fuzz via the belt's `lint:fuzz-build` + `audit:fuzz` pair, proven in release-lab (#316; edtf adopts at transfer). **Do not claim this for a CI gate.** The criterion's own definition requires a tool that *varies its inputs*, or an automated test suite with ≥ 80% branch coverage — running the software on the same tree every time is neither. CodeQL is *static* by the same document's definition ("without executing it") and belongs under `static_analysis`. Answer Unmet with the reason where neither holds; it is SUGGESTED at passing, so it costs nothing |
@@ -229,8 +229,11 @@ Each of these cost a wasted round trip on 2026-08-13:
    above, so check the gold view even when chasing silver.
 3. **`OSPS-BR-01.02` is a retired criterion stored as the number `0`,**
    not a status string. It is in `baseline_criteria_retired.yml`
-   (retired v2026.02.19), scores nothing, and must never be copied into
-   a `.bestpractices.json`.
+   (retired in the 2026-02-19 Baseline revision), scores nothing, and
+   must never be copied into a `.bestpractices.json`. Written without a
+   leading `v` deliberately: `audit:citations` reads a `vX.Y.Z` in
+   `docs/` as a claim about an org tag, and this is an upstream revision
+   name, not one of ours.
 
 ### Answers that must not be copied between repos
 
