@@ -142,7 +142,9 @@ is checkable regardless of which identity signed it.
 own isolation. `--deny-self-hosted-runners` is part of the published
 verification recipe, so a consumer rejects anything built off-platform.
 The runner image is a named pin (`ubuntu-24.04`) rolled by Renovate as a
-visible diff rather than by GitHub's schedule.
+visible diff rather than by GitHub's schedule, and enforced by
+`lint:runner-pin` — a claim, not a convention, since #290 found the
+signer floating on `ubuntu-latest` with nothing red.
 
 **Persistence between builds.** Ephemerality is GitHub's guarantee; what
 the org adds is the cache rule, because a cache is the one legitimate way

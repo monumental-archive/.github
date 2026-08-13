@@ -320,8 +320,9 @@ Caches are unattested, writable-from-any-branch inputs injected straight
 into the build — cache poisoning is the classic attack provenance does
 not capture. The rule (#117): **caches are permitted only where a human
 is waiting and nothing is signed**. Every path that signs or publishes
-builds cold; the runner image is a named pin (`ubuntu-24.04`, rolled by
-Renovate as a visible diff); the toolchain — components included — is
+builds cold; the runner image is a named pin (`ubuntu-24.04`, rolled
+by Renovate as a visible diff, enforced by `lint:runner-pin`); the
+toolchain — components included — is
 fully installed before any task runs, which is also what retired the
 rustup-race serialization (`wait_for`) from the belt. `lint:cold-attested`
 enforces the rule mechanically: a workflow that uses a cache carries an

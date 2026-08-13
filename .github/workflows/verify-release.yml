@@ -463,6 +463,7 @@ jobs:
                   --bundle "${bfile}" \
                   --repo "${GITHUB_REPOSITORY}" \
                   --signer-workflow "${signer_path}" \
+                  --deny-self-hosted-runners \
                   --predicate-type https://slsa.dev/provenance/v1 \
                   --format json > "${WORKDIR}/result.json"
                 # Identity, to the commit: the certificate's signer digest
@@ -642,6 +643,7 @@ jobs:
         if: inputs.mode == 'verdict'
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_IMAGES: ${{ inputs.images }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
         run: |
@@ -674,7 +676,20 @@ jobs:
           adddep "toolbelt-lock" \
             "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/mise/mise.lock" \
             "${lock_sha}"
-          if [[ -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
+          # Base-image facts are claimed only when THIS release built
+          # images (#290 finding 5): the guard is the release's own image
+          # subjects — the ones the prove step verified against the
+          # registry — never the canon tree, where the mapping file always
+          # exists. A file-only release claiming ten postgres containers
+          # as resolvedDependencies is a signed over-claim. Granularity is
+          # per-release, not per-image: an image release claims the full
+          # pinned base set its policy tree ran under.
+          built_images=0
+          if [[ -n "${UNTRUSTED_IMAGES//[[:space:]]/}" ]]; then
+            built_images=$(jq -r 'length' <<< "${UNTRUSTED_IMAGES}")
+          fi
+          if [[ "${built_images}" -gt 0 \
+            && -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
             map_sha=$(sha256sum "${CANON_PATH}/docker/pgrx-base-images.toml" | cut -d" " -f1)
             adddep "pgrx-base-images" \
               "https://github.com/monumental-archive/.github/blob/${POLICY_REF}/docker/pgrx-base-images.toml" \

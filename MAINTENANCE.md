@@ -42,3 +42,17 @@ three ways, all carrying the same version: workflow pins
 (`@<sha> # vX.Y.Z`), the lefthook remote (`ref: vX.Y.Z`), and the preset
 (`github>monumental-archive/.github#vX.Y.Z`). Renovate fans each tag out
 to every consumer (see #133).
+
+**The post-release window (#227, #290).** A commit cannot contain its
+own release SHA, so every release `vN` structurally ships its
+self-references — and leaves every consumer — at `vN-1` until Renovate's
+`chore(canon)` bump lands. That bump is deliberately release-neutral
+(`cliff.toml` skips the scope, ending the self-bump loop) and reaches
+the front of Renovate's queue via `prPriority` and the first-party
+group in `default.json`, so the window is one bot cycle plus CI —
+measured 10–30 minutes. `audit:canon-pins` and `audit:template-pins`
+know the window: references exactly one release behind within 24 hours
+of the tag report as a notice; anything beyond that is the real alarm
+(Renovate paused or dead, the v0.16.1 failure class). The window never
+reaches zero and no configuration can make it — treat a brief `vN-1`
+reading after a release as the steady state, not drift.
