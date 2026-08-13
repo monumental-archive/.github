@@ -384,7 +384,13 @@ stranger would use, verifies each cryptographically against the org
 signer identity at the commit `security/signer.pin` declares
 (`lint:signer-pin` keeps that file equal to every `sign.yml` `uses:`
 literal, so a half-bump reddens the gate rather than verifying against a
-stale signer), checks `builder.id` names the signer, asserts `buildType`
+stale signer; that file holds the digest and **nothing else**, because
+Renovate's regex manager replaces the whole matched span — the original
+in-file `# renovate: signer-pin` marker sat inside its own match and was
+destroyed by the first bump it served, after which the manager matched
+nothing and every later bump half-landed until a human patched it, so
+`lint:signer-pin` now refuses a header outright), checks `builder.id`
+names the signer, asserts `buildType`
 and `externalParameters` against the run's own identity (#210 — all
 four of `verifying-artifacts`' comparisons), and checks the
 provenance subjects equal the verified manifest exactly. Only then does
