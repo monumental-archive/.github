@@ -97,7 +97,12 @@ lookups at verdict time, publish-state derivations at whatever moment
 they run. #353 closed gate-green carrying four seam defects; every one
 was found by running a release and none by a linter.
 `lint:caller-permissions`, `lint:audit-scheduled` and
-`audit:caller-permissions` guard the seams now enumerated. For the rest,
+`audit:caller-permissions` guard the seams now enumerated — and the
+first of those reaches across the seam rather than stopping at it: a
+consumer's gate computes the requirement from the canon tree ci.yml
+already places at `.org-canon`, so an under-granted stub reddens the
+pin-bump PR in the repo being bumped, not a Monday cron or a 1s
+`startup_failure`. For the rest,
 what counts as "done" **depends on who executes the change first**, and
 that is not a choice:
 

@@ -3272,15 +3272,35 @@ dir = "{{cwd}}"
 # exactly that way). The requirement is statically computable — the
 # union of the callee's job-level grants — and this lint compares it
 # against every in-repo caller and every workflow-templates/ stub at
-# the PR that adds the capability, which is where #353 failed. The
-# org-wide half is audit:caller-permissions. lint:nested-permissions
-# requires the grant to be WRITTEN; this requires it to be SUFFICIENT.
+# the PR that adds the capability, which is where #353 failed.
+# lint:nested-permissions requires the grant to be WRITTEN; this
+# requires it to be SUFFICIENT.
+#
+# TWO BRANCHES, ONE SCANNER. Keyed on where the requirement can be
+# computed from, never on repo identity. In the canon that is this
+# tree: its own callers plus every workflow-templates/ stub. In a
+# consumer, ci.yml already places the FULL canon tree at .org-canon at
+# the same resolution that fetched the shared workflow (#165) — the
+# carrier release/*.sh and security/vex/ already ride — so the script
+# runs out of .org-canon with `--canon .org-canon`: requirements from
+# the pinned canon, this repo's stubs checked against them, on the
+# pin-bump PR, in the repo being bumped. Strictly earlier than
+# audit:caller-permissions, which asks the same question weekly
+# against canon HEAD — a forecast; this reddens the PR where the
+# answer is actionable. Task and script both arrive from one SHA in
+# either branch, so they cannot skew, and everything past the branch —
+# enumeration, skip wording, the refusal to green a canon call it
+# cannot read — lives in the scanner, not re-derived here. Outside CI
+# there is no .org-canon and the lint skips clean: a linter that
+# cannot skip cannot be universal.
 run = '''
-[[ -f security/workflow-permissions.py ]] || { echo "lint:caller-permissions: not the canon, skipped"; exit 0; }
+canon=.
+[[ -f security/workflow-permissions.py ]] || canon=.org-canon
+[[ -f "${canon}/security/workflow-permissions.py" ]] || { echo "lint:caller-permissions: no canon tree, skipped"; exit 0; }
 command -v python3 > /dev/null || { echo "lint:caller-permissions: python3 missing" >&2; exit 1; }
-if ! python3 security/workflow-permissions.py check; then
-  echo "lint:caller-permissions: see above — grant what the callee's jobs" >&2
-  echo "  ask for at the caller's uses: job (#358 seam 2)." >&2
+if ! python3 "${canon}/security/workflow-permissions.py" check --canon "${canon}"; then
+  echo "lint:caller-permissions: see above — grant what the pinned canon's" >&2
+  echo "  callee jobs ask for, at the caller's uses: job (#358 seam 2)." >&2
   exit 1
 fi
 echo "lint:caller-permissions: ok"
