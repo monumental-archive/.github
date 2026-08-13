@@ -1240,6 +1240,26 @@ if [[ -z "${pin}" ]]; then
   echo "lint:signer-pin: security/signer.pin holds no 40-hex commit" >&2
   exit 1
 fi
+# THE FILE HOLDS THE DIGEST AND NOTHING ELSE, and that is load-bearing
+# rather than tidy. Renovate's regex manager replaces the whole matched
+# span, so the file's original form — an eight-line header, a
+# `# renovate: signer-pin` marker, then the digest, with the marker
+# INSIDE the match — destroyed its own marker on the first bump (#279
+# rewrote ten lines to one). Nothing matched afterwards, so every later
+# bump half-landed: the uses: lines moved, the pin did not, and this
+# lint reddened each one until a human patched the file by hand. The
+# contract now is a bare digest matched whole, which makes
+# replace-the-match correct; a header re-added here would break the
+# bumper again, silently, so it is refused loudly instead. Explanation
+# lives in renovate.json and docs/release.md, where nothing rewrites it.
+if [[ "$(wc -l < security/signer.pin | tr -d " ")" != "1" ]] \
+  || [[ "$(cat security/signer.pin)" != "${pin}" ]]; then
+  echo "lint:signer-pin: security/signer.pin must hold the digest and nothing else" >&2
+  echo "  Renovate replaces the whole matched span, so a comment or header" >&2
+  echo "  inside the match is destroyed on the next bump and the manager" >&2
+  echo "  then matches nothing (#279). Document it in renovate.json instead." >&2
+  exit 1
+fi
 bad=""
 while IFS= read -r ref; do
   [[ -n "${ref}" ]] || continue
