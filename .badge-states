@@ -5,11 +5,17 @@
 # scaffold/README-badges.md for the catalogue and the vocabulary.
 # bestpractices: 'pending' until the form binds, then the BP_ID.
 # reuse: 'pending' until FSFE registration, then 'registered'.
-# coverage: 'exemplary' — the canon wears its own coverage machinery
-#   with no data behind it, permanently by verdict: bash coverage has
-#   no tool meeting the belt's priors (kcov is source-only and
-#   Linux-only — tooling-verdicts.md, #316). The permanence of this
-#   line is the point of an exemplar.
+#
+# There is deliberately no coverage line. The canon carried
+# `coverage exemplary` until #347: it rendered a codecov shield that
+# permanently read "unknown", because no bash coverage tool meets the
+# belt's priors (tooling-verdicts.md). The shield told a reader
+# nothing true — worse, it implied the canon is untested, when
+# lint:source-attest drives the real emitter scripts end-to-end
+# against recorded fixtures on every commit. What is missing is
+# measurement, not tests. The coverage shield now renders iff
+# `.coverage-floor` exists, so a repo that cannot measure has no
+# shield; the reason lives in tooling-verdicts.md with its reopen
+# trigger, which is where it survives the shield's removal.
 bestpractices 14058
 reuse registered
-coverage exemplary

@@ -9,7 +9,6 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14058/badge)](https://www.bestpractices.dev/projects/14058)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/14058/baseline)](https://www.bestpractices.dev/projects/14058)
 [![REUSE status](https://api.reuse.software/badge/github.com/monumental-archive/.github)](https://api.reuse.software/info/github.com/monumental-archive/.github)
-[![coverage](https://codecov.io/gh/monumental-archive/.github/branch/main/graph/badge.svg)](https://codecov.io/gh/monumental-archive/.github)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21913604.svg)](https://doi.org/10.5281/zenodo.21913604)
 [![fair-software](https://img.shields.io/badge/fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20%E2%97%8F%20%E2%97%8F-orange)](https://fair-software.eu)
 <!-- badges:end -->

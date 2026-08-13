@@ -127,11 +127,32 @@ a natively-managed representation.
   adopting a test framework) but the tool fails the belt's priors on
   every axis: source-only distribution (v43 ships no binary assets),
   not in aqua, ptrace-based and Linux-only — a coverage number the
-  gate could never reproduce locally on macOS. The canon's coverage
-  shield therefore stays in the declared **exemplary, no data by
-  construction** state permanently — a stated condition, not deferred
-  work. *Reopen:* kcov (or a bash-coverage peer) shipping checksummed
-  cross-platform binaries through aqua.
+  gate could never reproduce locally on macOS. The field is exhausted,
+  not merely unsurveyed: shellspec's `--coverage` **is** kcov
+  underneath, bats has no coverage mechanism at all (the standard
+  pairing is bats + kcov), and bashcov needs a pinned Ruby runtime and
+  gem distribution — a worse supply chain than kcov, not a better one.
+  **This is blocked, not permanent** (#347). The distinction matters
+  and was previously stated the wrong way round: the canon's coverage
+  was recorded as "exemplary, no data by construction — a stated
+  condition, not deferred work", which reads as a ceiling chosen
+  rather than one imposed. A verdict carrying a live reopen trigger is
+  blocked work. Consequences, stated so they are not rediscovered:
+  Best Practices **Silver** wants ≥80% statement coverage and **Gold**
+  90% branch coverage, so the canon cannot earn those criteria until
+  this unblocks; the same applies to signer, and not to release-lab,
+  which is Rust and measures coverage today. The canon's codecov
+  shield was **removed** in #347 rather than left reading "unknown"
+  forever — it implied the canon is untested, when what is missing is
+  measurement and not tests (`lint:source-attest` drives the real
+  emitter scripts end-to-end against recorded fixtures every commit).
+  Removing the shield does not soften the verdict; this entry is where
+  it survives. *Reopen:* kcov (or a bash-coverage peer) shipping
+  checksummed cross-platform binaries through aqua — at which point
+  re-add a `.coverage-floor` and the shield returns by derivation.
+  Note the separable half: **bats and shellspec are both aqua-backed
+  and belt-clean**, so adopting a test framework is not blocked by any
+  of this and is tracked on its own.
 - **cffconvert** — `CITATION.cff` validation. Not needed, and recorded
   now because the scaffold previously cited a verdict that was never
   made (#316): the file is generated — `fix:citation` renders it from
