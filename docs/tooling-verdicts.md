@@ -32,6 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Line-coverage floor in the gate (`coverage:check`), codecov badge feed off-gate |
 | cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
+| uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 
@@ -47,6 +48,58 @@ the org's own tracked scripts, offline, with no network surface.
 *Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
+
+**uv, adjudicated late — it entered as an implementation detail and was
+never stood up** (#82). uv arrived inside the `reuse` adoption as "the
+`pipx:` backend rides aqua-backed uv" and got no verdict of its own,
+which is how the belt ended up with a supply-chain policy that stopped at
+the language boundary without anyone deciding it should. The tool itself
+is not in question — aqua-backed, checksummed, attested, and the reason
+no `pipx` binary is pinned. What needed deciding is the property of the
+path it carries. Measured, not assumed:
+
+- **Hash verification is impossible on this path, and cannot be
+  configured in.** `uv tool install` has no `--require-hashes`; the flag
+  exists only on the `uv pip` layer, which mise does not use. Hashes
+  supplied through `--constraints` **and** through `--with-requirements`
+  are both ignored — each was tested with a deliberately wrong SHA256 and
+  each installed happily, exit 0. So `pipx:` entries record a version and
+  nothing else, and that is a property of the tool, not an oversight in
+  the config. *Reopen:* `uv tool install` gaining hash enforcement, or an
+  aqua package appearing for a pipx-only tool.
+- **A repo-level `uv.toml` cannot help.** uv states it plainly: for
+  `tool` commands, which operate at the user level, local configuration
+  files are ignored and only user-level config is read. So the canon
+  cannot ship a `uv.toml` and have it apply; the only repo-controlled
+  routes are the command line and the environment.
+- **The floor did not reach Python, and now does.** `minimum_release_age
+  = "168h"` governs how mise resolves a tool's own version; it does not
+  reach inside the install, where uv resolves the package's entire
+  transitive closure. Standing up reuse pulled six further packages with
+  no floor and no checksum. `UV_EXCLUDE_NEWER = "7 days"` in the belt's
+  `[env]` closes it, verified two ways: mise's `[env]` demonstrably
+  reaches the install subprocess (an absurd cutoff set there made the
+  install fail), and the value demonstrably bites (at `1825 days`
+  resolution drops to a reuse old enough that its build fails; at
+  `7 days` it resolves 6.2.0 unchanged). uv accepts a **relative
+  duration**, so it tracks with the clock and never needs bumping — which
+  is what makes this workable where a fixed date would have silently
+  frozen resolution.
+- **`UV_INDEX_STRATEGY = "first-index"` is pinned although it is already
+  the default**, on the `ruby.compile` precedent: a default flip would
+  arrive unattended through an automerged bump, and this default is the
+  one standing between a `pipx:` install and dependency confusion.
+
+Defaults left alone, having been checked rather than assumed:
+`keyring-provider` is already `disabled`, `no-index` false with
+`allow-insecure-host` empty, and `resolution = "highest"` stays — the
+conservative-looking `lowest` would pin the closure to ancient releases,
+which is worse. `no-binary` is refused outright: building from source is
+a larger attack surface, not a smaller one.
+
+The timing matters. The belt carries one `pipx:` tool today; **yamllint
+and sqlfluff are both pipx-only and both already agreed**, so this path
+was about to carry three dependency closures instead of one.
 
 **ruff at `select = ["ALL"]`, and the one file it was adopted for**
 (#82). One aqua-backed Rust binary that lints *and* formats Python and

@@ -47,6 +47,35 @@ disable_backends = ["asdf", "ubi"]
 # decision that needs evidence about what actually runs where, and getting
 # it wrong drops a platform silently — the lock simply stops carrying it.
 
+# Environment the belt exports to every mise-run process, including the
+# subprocesses mise itself spawns to INSTALL tools — verified by setting an
+# absurd cutoff here and watching the pipx install fail (#82).
+[env]
+# The org's seven-day release-age floor, extended to Python.
+#
+# `minimum_release_age = "168h"` above governs how mise resolves a tool's
+# own version. It does NOT reach inside a `pipx:` install: mise shells out
+# to `uv tool install <pkg>==<ver>`, and uv then resolves the package's
+# whole transitive closure with no floor at all. Standing up reuse pulled
+# six further packages that way — license-expression, markupsafe,
+# python-debian, python-magic, tomlkit, charset-normalizer — each of which
+# could have been published minutes earlier. The org's stated supply-chain
+# policy simply stopped at the language boundary.
+#
+# uv accepts a relative duration here, not only a fixed date, so this
+# tracks with the clock and never needs bumping — the objection that
+# killed the fixed-date form. Proven to bite: at "1825 days" resolution
+# drops to a reuse old enough that its build fails, at "7 days" it
+# resolves 6.2.0 unchanged.
+UV_EXCLUDE_NEWER = "7 days"
+# Already uv's default, pinned explicitly on the ruby.compile precedent: a
+# default flip would land unattended through an automerged mise or uv
+# bump, and this particular default is the one standing between a
+# `pipx:` install and dependency confusion. "first-index" stops at the
+# first index that has the name; the alternatives keep looking and can be
+# convinced to prefer an attacker's copy from elsewhere.
+UV_INDEX_STRATEGY = "first-index"
+
 [task_config]
 # Tasks are written in bash (guards use [[ ]] and <<<); the default task
 # shell is sh, which is dash on Ubuntu runners and chokes on both.
