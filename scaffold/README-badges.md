@@ -40,10 +40,17 @@ Universal shields — derived for every repo:
                     against achieved_baseline_N_at and the lost_baseline
                     fields in the project's JSON
   coverage          earned by a `.coverage-floor` (the ratchet's
-                    number); the canon carries `coverage exemplary`
-                    instead — no data by construction until the kcov
-                    standup, permanent, which is the point of an
-                    exemplar wearing its own machinery
+                    number). NOT stateful: the shield renders iff that
+                    file exists, so a repo that cannot measure coverage
+                    simply has no coverage shield and needs no line in
+                    .badge-states. The canon carried `coverage
+                    exemplary` until #347, which rendered a codecov
+                    shield that permanently read "unknown" — worse than
+                    nothing, since it implied the canon is untested when
+                    what is missing is measurement, not tests. The
+                    reason and its reopen trigger live in
+                    tooling-verdicts.md, where they survive the shield's
+                    removal
   DOI               earned by `mint-doi: true` + the concept DOI that
                     CITATION.cff records after the first mint; renders
                     pending until the concept exists
