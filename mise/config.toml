@@ -874,11 +874,25 @@ while read -r repo; do
     esac
   done <<< "${states}"
   # Shields are markdown images; comments are stripped first so a
-  # deferred (commented-out) badge line is not audited as live.
-  urls=$(sed -e 's/<!--/\n<!--/g' -e 's/-->/-->\n/g' <<< "${body}" | sed '/<!--/,/-->/d' \
-    | grep -oE '!\[[^]]*\]\([^)]+\)' | sed -E 's/^!\[[^]]*\]\(([^) ]+).*\)$/\1/' || true)
+  # deferred (commented-out) badge line is not audited as live. The
+  # strip must handle a comment that opens and closes on ONE line —
+  # every marker and every pending line is exactly that shape, and a
+  # sed range address cannot end on the line it started on, so the
+  # first `<!-- badges:begin -->` used to swallow every shield down to
+  # the next `-->`: the walk read 25 live shields org-wide as zero and
+  # reported clean. Inline comments are cut in place; only a genuinely
+  # unterminated one opens the multi-line state.
+  urls=$(awk '{
+    while (match($0, /<!--.*-->/)) { $0 = substr($0, 1, RSTART - 1) substr($0, RSTART + RLENGTH) }
+    if (inc) { if (sub(/.*-->/, "")) inc = 0; else next }
+    if (sub(/<!--.*/, "")) inc = 1
+    print
+  }' <<< "${body}" | grep -oE '!\[[^]]*\]\([^)]+\)' | sed -E 's/^!\[[^]]*\]\(([^) ]+).*\)$/\1/' || true)
   if [[ -z "${urls}" ]]; then
-    note "${repo}: markers present, derivation rendered no live shields"
+    # fix:badges renders the three SLSA shields unconditionally, so a
+    # rendered block can never be shield-free: empty means the block
+    # was truncated or the strip ate it, never "nothing applies".
+    failed="${failed} ${repo}(badge block rendered no shields — the derivation always emits the SLSA row, so this block is truncated or unparsable)"
     continue
   fi
   while read -r url; do
@@ -1046,6 +1060,14 @@ done <<< "${repos}"
 if [[ -n "${failed}" ]]; then
   echo "audit:badges: shield defects:${failed}" >&2
   echo "  every shield must agree with its source of truth; fix the fact, the floor, or the badge" >&2
+  exit 1
+fi
+# The same law the legs enforce, applied to the walk itself: a check
+# that read nothing must never report clean. The canon alone renders
+# three SLSA shields, so zero here is always a broken walk, never a
+# quiet org.
+if (( checked == 0 )); then
+  echo "audit:badges: walked the org and checked zero shields — the walk is broken, not the org" >&2
   exit 1
 fi
 echo "audit:badges: ${checked} shield(s) checked, all agree with their issuers"
