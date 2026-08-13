@@ -29,6 +29,8 @@ honestly blocked on.
 | rekor-monitor (org-owned workflow) | Transparency-log watch for forged signer identities — the reason the id-token rule was narrowed |
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
+| cargo-llvm-cov + `.coverage-floor` ratchet | Line-coverage floor in the gate (`coverage:check`), codecov badge feed off-gate |
+| cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -93,6 +95,27 @@ a natively-managed representation.
   Renovate queues behind a reading list
   ([`dependency-track.md`](dependency-track.md), #122). *Reopen:* a
   second maintainer.
+- **cargo-fuzz, the nightly/sanitizer half** — the adopted entry above
+  is deliberately `--sanitizer none` on the repo's pinned STABLE
+  toolchain (#316): ASan needs nightly, and a nightly in the gate means
+  either a second toolchain pin per repo or mid-run rustup — both
+  refused (the coverage:check precedent). libFuzzer without a sanitizer
+  still finds panics, which in memory-safe Rust is the live failure
+  class. Like cargo-pgrx, the `cargo:` backend is a documented
+  exception to aqua-first: version-pinned, no attestations. *Reopen:*
+  an FFI-heavy crate joins the org (ASan then earns its nightly), or
+  cargo-fuzz ships sanitizer support on stable.
+- **kcov (bash coverage for the canon)** — skipped. The instinct was
+  right (#316 addendum: `lint:source-attest` already executes the
+  source-attest scripts end-to-end, so instrumenting what runs beats
+  adopting a test framework) but the tool fails the belt's priors on
+  every axis: source-only distribution (v43 ships no binary assets),
+  not in aqua, ptrace-based and Linux-only — a coverage number the
+  gate could never reproduce locally on macOS. The canon's coverage
+  shield therefore stays in the declared **exemplary, no data by
+  construction** state permanently — a stated condition, not deferred
+  work. *Reopen:* kcov (or a bash-coverage peer) shipping checksummed
+  cross-platform binaries through aqua.
 - **cffconvert** — `CITATION.cff` validation. Not needed, and recorded
   now because the scaffold previously cited a verdict that was never
   made (#316): the file is generated — `fix:citation` renders it from

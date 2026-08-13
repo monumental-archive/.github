@@ -16,7 +16,7 @@ Answers below are the org-wide evidence; anything repo-specific is marked.
 | Quality: build, automated test suite, new-functionality tests, warnings | Met | `mise run ci` = the cloud gate; clippy/tests enforced; warnings deny |
 | Security: secure design knowledge, no unencrypted auth, vuln fix ≤ 60 days | Met | trusted publishing only, no tokens; Dependabot + Renovate |
 | Static analysis | Met | CodeQL default setup (org-enforced) + belt linters |
-| Dynamic analysis (suggested) | Met where fuzzing exists | cargo-fuzz (edtf); otherwise answer "not applicable" honestly |
+| Dynamic analysis (suggested) | Met where fuzzing exists | cargo-fuzz via the belt's `lint:fuzz-build` + `audit:fuzz` pair, proven in release-lab (#316; edtf adopts at transfer); otherwise answer "not applicable" honestly |
 
 ## Silver — the MUSTs that need real answers
 

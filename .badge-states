@@ -6,8 +6,10 @@
 # bestpractices: 'pending' until the form binds, then the BP_ID.
 # reuse: 'pending' until FSFE registration, then 'registered'.
 # coverage: 'exemplary' — the canon wears its own coverage machinery
-#   with no data behind it until the kcov standup lands (#316); the
-#   permanence of this line is the point of an exemplar.
+#   with no data behind it, permanently by verdict: bash coverage has
+#   no tool meeting the belt's priors (kcov is source-only and
+#   Linux-only — tooling-verdicts.md, #316). The permanence of this
+#   line is the point of an exemplar.
 bestpractices pending
 reuse pending
 coverage exemplary

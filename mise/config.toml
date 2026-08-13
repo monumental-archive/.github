@@ -1889,9 +1889,76 @@ if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; the
   echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
   exit 1
 fi
-cargo llvm-cov --workspace --locked --fail-under-lines "${floor}"
-echo "coverage:check: floor ${floor} held"
+# COVERAGE_EXCLUDE ([env] in the repo's mise.toml): workspace members
+# whose tests cannot run on the gate runner — the lab's lab-pg needs a
+# live postgres and is excluded from `test` for the same reason (#316);
+# a floor task that hard-codes --workspace fails on exactly the repos
+# the machinery was built for.
+excludes=""
+for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
+# shellcheck disable=SC2086
+cargo llvm-cov --workspace --locked ${excludes} --fail-under-lines "${floor}"
+echo "coverage:check: floor ${floor} held${excludes:+ (excluding${excludes//--exclude/})}"
 """
+
+[tasks."lint:fuzz-build"]
+description = "Fuzz targets still compile (cargo-fuzz, sanitizer none, stable toolchain); repos without fuzz/ skip clean"
+dir = "{{cwd}}"
+# The deterministic half of the fuzz machinery (#316): a fuzz target
+# that no longer compiles is dead code wearing a Scorecard point, and
+# nothing else would notice until the Monday run. Building with
+# `--sanitizer none` is the load-bearing choice: it works on the repo's
+# own PINNED STABLE toolchain, so the gate needs no nightly — no
+# mid-run rustup, no network resolution, no second toolchain pin.
+# libFuzzer without a sanitizer still surfaces panics, which in a
+# memory-safe crate is the failure class that exists; ASan-on-nightly
+# is the reopen for FFI-heavy code (tooling-verdicts.md). Running the
+# targets is time-bound and non-deterministic, so it lives in
+# audit:fuzz, never here — the gate stays deterministic.
+# cargo-fuzz is asserted with a remedy, never installed mid-run — the
+# coverage:check/llvm-tools pattern.
+run = '''
+[[ -d fuzz && -f fuzz/Cargo.toml ]] || { echo "lint:fuzz-build: no fuzz/, skipped"; exit 0; }
+if ! command -v cargo-fuzz > /dev/null; then
+  echo "lint:fuzz-build: fuzz/ exists but cargo-fuzz is missing — pin it as a build input:" >&2
+  echo "  mise.toml: \"cargo:cargo-fuzz\" = \"<version>\" (installed before tasks, never mid-run)" >&2
+  exit 1
+fi
+if [[ ! -f fuzz/Cargo.lock ]]; then
+  echo "lint:fuzz-build: fuzz/Cargo.lock is not committed — an unlocked fuzz build is not deterministic" >&2
+  exit 1
+fi
+cargo fuzz build -s none
+echo "lint:fuzz-build: $(cargo fuzz list | wc -l | tr -d ' ') target(s) build"
+'''
+
+[tasks."audit:fuzz"]
+description = "Run every fuzz target for a bounded interval (network/time-bound, never the gate)"
+dir = "{{cwd}}"
+# The runtime half (#316): each target runs under libFuzzer for a
+# bounded wall-clock slice on the pinned stable toolchain (sanitizer
+# none — see lint:fuzz-build for why). A crash or panic fails the
+# audit with the reproducer path in the log; the in-tree corpus
+# (fuzz/corpus/<target>/, committed) seeds each run and grows locally —
+# commit interesting finds deliberately, the cron never pushes.
+# audit:*, structurally: runtime fuzzing is time-bound and
+# non-deterministic, exactly what the deterministic gate excludes.
+run = '''
+[[ -d fuzz && -f fuzz/Cargo.toml ]] || { echo "audit:fuzz: no fuzz/, skipped"; exit 0; }
+command -v cargo-fuzz > /dev/null || { echo "audit:fuzz: cargo-fuzz missing (pin cargo:cargo-fuzz in mise.toml)" >&2; exit 1; }
+secs="${FUZZ_SECONDS:-60}"
+failed=""
+while IFS= read -r target; do
+  [[ -n "${target}" ]] || continue
+  echo "audit:fuzz: ${target} for ${secs}s"
+  cargo fuzz run -s none "${target}" -- -max_total_time="${secs}" || failed="${failed} ${target}"
+done < <(cargo fuzz list)
+if [[ -n "${failed}" ]]; then
+  echo "audit:fuzz: crashing target(s):${failed} — reproducers under fuzz/artifacts/" >&2
+  exit 1
+fi
+echo "audit:fuzz: all targets ran ${secs}s clean"
+'''
 
 [tasks."lint:belt-available"]
 description = "Every belt tool actually resolves — a missing belt must fail loudly, not lint nothing"
