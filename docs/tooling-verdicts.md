@@ -81,17 +81,17 @@ across every workflow and composite action, **no comment lies about its
 SHA and nothing is pinned to a release younger than seven days.** The
 only finding is the signer.
 
-**The signer publishes no versions.** Every reference to
-`monumental-archive/signer` is SHA-pinned and commented `# main`, which
-is the only honest comment available — the repo has zero tags and zero
-releases, verified. `.pinact.yaml` ignores it, and the rule is broader
-than it should be for a recorded reason: the self-healing form would key
-on the comment, but pinact's expressions expose only `ActionName`,
+**The signer is permanently unpublished, and that is correct.** Every
+reference to `monumental-archive/signer` is SHA-pinned and commented
+`# main`. The repo has zero tags and zero releases by design and will
+keep having them, so there is no version for a comment to name: the SHA
+is the whole identity and `# main` says only which line it came from.
+`.pinact.yaml` carries a standing exemption for it — not a TODO, and not
+narrowable, because pinact's expressions expose only `ActionName`,
 `ActionRepoOwner` and `ActionVersion`, and for a pinned reference
-`ActionVersion` is the SHA. Tested — `ActionVersion == "main"` never
-matches, and `Comment`/`ActionVersionComment` are not variables. So the
-exception cannot narrow itself. The real fix is upstream: give the signer
-releases, and delete the rule rather than adjust it.
+`ActionVersion` is the SHA rather than the comment (tested;
+`Comment`/`ActionVersionComment` are not variables). Since the exemption
+is permanent, its breadth costs nothing.
 
 **zizmor was never pointed at the composite actions.** It audits
 `action.yml` files and flags unpinned `uses:` in them exactly as it does

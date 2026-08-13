@@ -14,10 +14,11 @@ version: 3
 # than two to drift apart.
 
 rules:
-  # The signer is pinned by immutable SHA and commented `# main`, which is
-  # the only honest comment available to it: monumental-archive/signer
-  # publishes no tags and no releases at all — verified at standup, zero
-  # of each — so there is no version for the comment to name.
+  # The signer is pinned by immutable SHA and commented `# main`, and that
+  # is its permanent correct state, not a gap. monumental-archive/signer
+  # is never published — no tags, no releases, by design — so there is no
+  # version for a comment to name and never will be. The SHA is the whole
+  # identity; `# main` says only which line it came from.
   #
   # This rule is broader than it should be, deliberately rather than by
   # oversight. The self-healing form would key on the comment — ignore
@@ -26,12 +27,9 @@ rules:
   # reference ActionVersion is the SHA, not the comment. Tested at
   # standup: an `ActionVersion == "main"` condition never matches, and
   # `Comment` / `ActionVersionComment` are not variables at all. So the
-  # exception cannot narrow itself, and it will keep applying even if the
-  # signer starts tagging.
-  #
-  # The real fix is upstream: give the signer releases, at which point its
-  # callers carry `# vX.Y.Z` like every other pin and this rule should be
-  # deleted outright rather than adjusted.
+  # exception cannot narrow itself — which costs nothing here, because
+  # the signer is permanently unpublished and the rule is permanently
+  # right. It is a standing exemption, not a TODO.
   - ignore: true
     conditions:
       - expr: |
