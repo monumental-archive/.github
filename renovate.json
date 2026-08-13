@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "github>monumental-archive/.github#v1.23.2"
+    "github>monumental-archive/.github#v1.24.1"
   ],
   "packageRules": [
     {
