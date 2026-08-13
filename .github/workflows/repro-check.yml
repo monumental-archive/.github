@@ -102,6 +102,9 @@ jobs:
       targets: ${{ inputs.target }}
       ref: ${{ needs.resolve.outputs.tag }}
       exclude: ${{ inputs.exclude }}
+      # Stated, not omitted: this is a comparator rebuild — the subjects
+      # are compared, never shipped, so there is nothing to smoke.
+      smoke-test: ""
 
   rebuild-extension:
     name: Rebuild the release (extension)
@@ -116,6 +119,8 @@ jobs:
       crate-dir: ${{ inputs.extension-crate-dir }}
       pg-majors: ${{ inputs.pg-major }}
       ref: ${{ needs.resolve.outputs.tag }}
+      # Stated, not omitted: comparator rebuild, nothing to smoke.
+      smoke-test: ""
 
   compare:
     name: Same bytes, or say so loudly

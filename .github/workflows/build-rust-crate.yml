@@ -13,10 +13,12 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       exclude:
+        # forwarding: universal
         description: >
           Comma-separated workspace members this class must not touch —
           the pgrx-extension crate above all, which builds only inside
@@ -26,6 +28,7 @@ on:
         type: string
         default: ""
       repro:
+        # forwarding: discretionary — the repro leg sets it; omission means a first build
         description: >
           Rebuild leg of the repro gate (#118): build and hash the same
           bytes, upload NO release-* artifact (the gate needs only the

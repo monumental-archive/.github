@@ -15,12 +15,14 @@ on:
   workflow_call:
     inputs:
       package:
+        # forwarding: universal
         description: >
           The npm package as name@version, from the build's output — the
           resumability probe needs the real name.
         required: true
         type: string
       artifact-name:
+        # forwarding: universal
         description: Actions artifact holding the packed tarball.
         required: false
         type: string

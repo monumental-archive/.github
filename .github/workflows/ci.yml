@@ -17,6 +17,7 @@ on:
   workflow_call:
     secrets:
       codecov-token:
+        # forwarding: discretionary — only repos with coverage carry the secret
         description: >
           Codecov upload token, for the coverage badge. Optional: absent,
           the coverage job skips clean. The gate's coverage RATCHET does

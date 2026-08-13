@@ -44,6 +44,7 @@
 name: publish
 
 on:
+  # forwarding-default: discretionary — consumer surface; the defaults are the API, callers state only what they use
   workflow_call:
     inputs:
       classes:

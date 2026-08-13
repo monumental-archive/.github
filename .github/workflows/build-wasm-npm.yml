@@ -30,15 +30,18 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       crate-dir:
+        # forwarding: universal
         description: Directory of the wasm crate, relative to the repo root.
         required: false
         type: string
         default: "."
       npm-scope:
+        # forwarding: universal
         description: >
           npm scope (without the @) the package publishes under. Empty
           means unscoped. Scoped is canon for this organisation: the
@@ -48,6 +51,7 @@ on:
         type: string
         default: ""
       repro:
+        # forwarding: discretionary — the repro leg sets it; omission means a first build
         description: >
           Rebuild leg of the repro gate (#118): build and hash the same
           bytes, upload NO release-* artifact (the gate needs only the

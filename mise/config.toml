@@ -1273,6 +1273,133 @@ fi
 echo "lint:signer-pin: all signer references match ${pin}"
 '''
 
+[tasks."lint:input-forwarding"]
+description = "Every local caller forwards every universal input its callee declares (#305)"
+dir = "{{cwd}}"
+# The #299 failure class: two callers of one reusable workflow disagree
+# about which inputs they forward, and omitting an optional input is
+# legal YAML — actionlint validates it, zizmor has no opinion, and only
+# the caller the PR happened to exercise goes red. The contract is
+# therefore declared where each input is BORN, not at the call sites
+# that consume it: every input and secret of a locally-called
+# `workflow_call` workflow carries a `# forwarding: universal` (every
+# local caller must set the key — any value, literals included) or
+# `# forwarding: discretionary — <reason>` marker, and an unmarked
+# input fails closed, so the classification #299 silently skipped is
+# structurally unskippable. Consumer-surface workflows whose defaults
+# ARE the API may declare `# forwarding-default: discretionary` once,
+# file-level; a file-level default is never allowed to be universal.
+# The marker lives in a comment because GitHub's workflow_call schema
+# rejects extension fields — the platform ceiling, not a preference.
+#
+# Interlock: this lint forces the forwarding line; actionlint, ahead of
+# it in the same gate, forces the caller-surface declaration any
+# `${{ inputs.* }}` it forwards refers to. The chain closes only with
+# both — do not "simplify" either away.
+#
+# Scope is local `uses: ./` call sites only: cross-repo callers pin by
+# SHA and never reach the class builds directly. Indentation-keyed
+# parsing is defensible because actionlint guarantees well-formed YAML
+# and the canon's two-space style ahead of this in the same gate.
+# Deterministic, tracked files only — belongs in `ci`. The error line
+# format is fix:input-forwarding's parsing API; change them together.
+run = '''
+files=$(git ls-files ".github/workflows/*.y*ml")
+[[ -n "${files}" ]] || { echo "lint:input-forwarding: no workflows, skipped"; exit 0; }
+grep -l "uses: ./.github/workflows/" ${files} > /dev/null 2>&1 || {
+  echo "lint:input-forwarding: no local reusable-workflow callers, skipped"; exit 0
+}
+awk '
+FNR == 1 { split(FILENAME, P, "/"); base = P[length(P)]; in_wc = 0; sect = ""; curkey = ""; in_jobs = 0; job = ""; mode = "" }
+/^[^ ]/ { in_wc = 0; sect = ""; in_jobs = ($0 ~ /^jobs:/); job = ""; mode = "" }
+/^  workflow_call:/ { if (!in_jobs) { in_wc = 1; sect = ""; next } }
+in_wc && /^  [^ ]/ { in_wc = 0; sect = "" }
+/# forwarding-default: discretionary/ { fdef[base] = 1 }
+in_wc && /^    inputs:/ { sect = "input"; curkey = ""; next }
+in_wc && /^    secrets:/ { sect = "secret"; curkey = ""; next }
+in_wc && /^    [^ ]/ { sect = ""; curkey = "" }
+in_wc && sect != "" && /^      [A-Za-z0-9_-]+:/ {
+  curkey = $1; sub(/:.*/, "", curkey)
+  ndecl++; dbase[ndecl] = base; dkind[ndecl] = sect; dname[ndecl] = curkey; dclass[ndecl] = ""
+  last[base SUBSEP sect SUBSEP curkey] = ndecl
+}
+in_wc && sect != "" && curkey != "" && /# forwarding: universal/ { dclass[last[base SUBSEP sect SUBSEP curkey]] = "universal" }
+in_wc && sect != "" && curkey != "" && /# forwarding: discretionary/ { dclass[last[base SUBSEP sect SUBSEP curkey]] = "discretionary" }
+in_jobs && /^  [A-Za-z0-9_-]+:/ { job = $1; sub(/:.*/, "", job); mode = "" }
+in_jobs && job != "" && /^    uses: \.\/\.github\/workflows\// {
+  callee = $2; sub(/^\.\/\.github\/workflows\//, "", callee)
+  ncall++; cfile[ncall] = FILENAME; cjob[ncall] = job; cbase[ncall] = callee; called[callee] = 1
+}
+in_jobs && job != "" && /^    with:/ { mode = "input"; next }
+in_jobs && job != "" && /^    secrets: inherit/ { inherited[FILENAME SUBSEP job] = 1; mode = ""; next }
+in_jobs && job != "" && /^    secrets:/ { mode = "secret"; next }
+in_jobs && job != "" && /^    [^ ]/ { mode = "" }
+in_jobs && job != "" && mode != "" && /^      [A-Za-z0-9_-]+:/ {
+  k = $1; sub(/:.*/, "", k); fwd[FILENAME SUBSEP job SUBSEP mode SUBSEP k] = 1
+}
+END {
+  fail = 0
+  for (i = 1; i <= ndecl; i++)
+    if (dclass[i] == "" && called[dbase[i]] && !fdef[dbase[i]]) {
+      printf "lint:input-forwarding: %s %s in %s carries no forwarding marker\n", dkind[i], dname[i], dbase[i] > "/dev/stderr"
+      fail = 1
+    }
+  for (j = 1; j <= ncall; j++)
+    for (i = 1; i <= ndecl; i++) {
+      if (dbase[i] != cbase[j] || dclass[i] != "universal") continue
+      if (dkind[i] == "secret" && inherited[cfile[j] SUBSEP cjob[j]]) continue
+      if (!fwd[cfile[j] SUBSEP cjob[j] SUBSEP dkind[i] SUBSEP dname[i]]) {
+        printf "lint:input-forwarding: %s:%s does not forward universal %s %s of %s\n", cfile[j], cjob[j], dkind[i], dname[i], dbase[i] > "/dev/stderr"
+        fail = 1
+      }
+    }
+  if (fail) exit 1
+  print "lint:input-forwarding: every universal input is forwarded at every local call site"
+}
+' ${files}
+'''
+
+[tasks."fix:input-forwarding"]
+description = "Insert the missing universal forwarding lines lint:input-forwarding demands"
+dir = "{{cwd}}"
+# The write-mode sibling (#305): universal forwarding lines are
+# machine-written, never hand-authored — drift can only exist as an
+# uncommittable dirty tree. Consumes the lint's error lines as its API
+# (change the formats together) and inserts `key: ${{ inputs.key }}` /
+# `key: ${{ secrets.key }}` at the top of the offending job's block.
+# The inserted expression is the mechanical guess: review it (the right
+# value may be a `needs.*` output or a literal), and declare the input
+# on the caller's own surface if actionlint then reddens — that
+# interlock is the other half of the chain.
+run = '''
+{% raw %}
+missing=$(mise run lint:input-forwarding 2>&1 | awk '
+/does not forward universal/ {
+  for (i = 4; i < NF; i++)
+    if ($i == "forward" && $(i + 1) == "universal") print $(i - 3), $(i + 2), $(i + 3)
+}' || true)
+if [[ -z "${missing}" ]]; then
+  echo "fix:input-forwarding: nothing to fix"; exit 0
+fi
+while read -r loc kind key; do
+  [[ -n "${loc}" ]] || continue
+  file="${loc%%:*}"; jobname="${loc##*:}"
+  if [[ "${kind}" == "secret" ]]; then
+    blk="secrets:"; val='${{ secrets.'"${key}"' }}'
+  else
+    blk="with:"; val='${{ inputs.'"${key}"' }}'
+  fi
+  awk -v job="${jobname}" -v key="${key}" -v blk="${blk}" -v val="${val}" '
+  { print }
+  /^  [A-Za-z0-9_-]+:/ { cur = $1; sub(/:.*/, "", cur) }
+  cur == job && $0 ~ "^    " blk "$" && !done { printf "      %s: %s\n", key, val; done = 1 }
+  ' "${file}" > "${file}.fix-tmp" && mv "${file}.fix-tmp" "${file}"
+  echo "fix:input-forwarding: ${file}:${jobname} += ${key}"
+done <<< "${missing}"
+echo "fix:input-forwarding: review the inserted expressions; rerun mise run lint:input-forwarding and lint:actions"
+{% endraw %}
+'''
+
 [tasks."lint:source-attest"]
 description = "Dry-run the source emitter end-to-end short of signing (#236)"
 dir = "{{cwd}}"
