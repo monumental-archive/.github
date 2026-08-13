@@ -456,6 +456,20 @@ stranger will pull, never of a local twin.
 Both rules were arrived at independently in three repositories before
 being promoted here.
 
+**The compile lives outside the Dockerfile** (#295). The repro gate
+measured the containerised cargo build nondeterministic — while the
+rust-binary class built the identical crates bit-for-bit under the
+belt's pinned toolchain in the same runs. The distinction was never
+the code; it was the second, tag-pinned toolchain inside BuildKit.
+So the oci-image class takes a `prepare` script: the binary is built
+natively per architecture in the caller's mise-pinned toolchain,
+under the same reproducibility flags as the rust-binary class, and
+the Dockerfile is pure assembly — a digest-pinned or `scratch` base
+plus a COPY of bytes the job just built. Nothing nondeterministic
+remains inside the image build, the repro leg runs the same script,
+and one toolchain serves both classes. A Dockerfile that compiles is
+the failure mode, not a style choice.
+
 ### Image metadata: one map, resolved once
 
 Every image the org publishes carries the `org.opencontainers.image.*`
