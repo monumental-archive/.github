@@ -14,9 +14,17 @@ on:
 
 permissions: {}
 
-# Never cancel a release mid-flight; queue instead. Keyed per commit.
+# Never cancel a release mid-flight; queue instead — and the group is the
+# WORKFLOW, never the commit. The Release PR machinery works on two fixed
+# branches (release/next, release-staging/next), so per-commit keying
+# serialised nothing: two pushes to main in quick succession ran two
+# release jobs at once, the second recreated the staging ref under the
+# first, and the first died mid-script on a 403 (measured in release-lab,
+# 2026-08-13 — two merges four minutes apart). The canon's own
+# self-release.yml always keyed on the workflow; this template disagreed
+# with it unnoticed, because the canon does not consume this file.
 concurrency:
-  group: release-${{ github.sha }}
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
