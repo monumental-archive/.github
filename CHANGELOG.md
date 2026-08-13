@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.23.1](https://github.com/monumental-archive/.github/compare/v1.23.0...v1.23.1) - 2026-08-13
+
+### Documentation
+
+- record how the badge registrations actually work ([#351](https://github.com/monumental-archive/.github/pull/351))
+
+### Fixed
+
+- floor the signer at its lower scorecard reading ([#348](https://github.com/monumental-archive/.github/pull/348))
+- close #349 and the #347 doc surface — barrier, blind-audit repairs, full S-series ([#353](https://github.com/monumental-archive/.github/pull/353))
+
 ## [1.23.0](https://github.com/monumental-archive/.github/compare/v1.22.2...v1.23.0) - 2026-08-13
 
 ### Added
