@@ -149,7 +149,11 @@ roll-forward.
   clobbering it (#316). Releases published by a canon older than the
   converge path cannot resume past publish — their DOI rolls forward to
   the next version, which is why the canon's concept record starts at
-  v1.21.0 and not v1.20.0.
+  v1.21.0 and not v1.20.0, and skips v1.22.0 (the concept-resolution
+  redirect bug, #316). A dispatch runs the tree AT THE TAG, so a fix on
+  main never reaches an already-tagged release: version DOIs are not
+  contiguous by design, the concept DOI covers the software, and the
+  next release carries the fix.
 - **Gate red on the release PR**: fix on main; the release PR refreshes
   itself on the next push. Never edit the release branch by hand.
 - **A cell of a matrix class failed**: `fail-fast: false` means the other

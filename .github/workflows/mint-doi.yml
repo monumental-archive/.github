@@ -140,9 +140,18 @@ jobs:
               echo "::error::CITATION.cff concept DOI '${concept_doi}' does not end in a Zenodo record id"
               exit 1
             fi
-            latest=$(api "${BASE_URL}/api/records/${concept_recid}" | jq -r '.id // empty')
-            if [[ -z "${latest}" ]]; then
-              echo "::error::the concept record ${concept_recid} resolves to no latest version"
+            # A PUBLIC read that REDIRECTS: the concept record 302s to its
+            # latest version, so this needs -L — and deliberately not the
+            # api() helper, which carries the token: credentials are never
+            # sent through a redirect for a read that needs none. Measured
+            # on canon v1.22.0, the first release where a recorded concept
+            # existed (both earlier mints were first-mints taking the other
+            # branch): the helper returned the HTML redirect body, jq died
+            # on it, and the DOI was lost after the commitment point (#316).
+            latest=$(curl -sSfL "${BASE_URL}/api/records/${concept_recid}/versions/latest" \
+              | jq -r '.id // empty') || true
+            if [[ ! "${latest}" =~ ^[0-9]+$ ]]; then
+              echo "::error::the concept record ${concept_recid} did not resolve to a latest version id (got '${latest:-nothing}')"
               exit 1
             fi
             newv=$(api -X POST "${BASE_URL}/api/deposit/depositions/${latest}/actions/newversion")
