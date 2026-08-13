@@ -1109,6 +1109,10 @@ jobs:
       subjects: ${{ needs.build-extension.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
+      # File subjects, but built INSIDE the pinned postgres base set —
+      # the one class where subject shape and base-image consumption
+      # disagree (#310 finding 4).
+      consumes-base-images: true
 
 
   # The image verdicts. No pull-back — content addressing already proves
@@ -1133,6 +1137,7 @@ jobs:
       mode: verdict
       images: ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]', needs.assemble-oci.outputs.image, needs.guard.outputs.version, needs.assemble-oci.outputs.digest) }}
       version: ${{ needs.guard.outputs.version }}
+      consumes-base-images: true
 
   vsa-extension-images:
     name: Assemble and sign extension images VSA
@@ -1150,6 +1155,7 @@ jobs:
       # job reads image, tag and digest and ignores the rest.
       images: ${{ needs.build-extension-images.outputs.images }}
       version: ${{ needs.guard.outputs.version }}
+      consumes-base-images: true
 
   # The DOI comes last of all: it cites a release that is already public,
   # proven and signed. Skipped on dry-run (a rehearsal must cite nothing).

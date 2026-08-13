@@ -117,6 +117,35 @@ jobs:
         # silently costing a release its evidence (the v0.16.1 VSA).
         run: mise run audit:canon-pins
 
+  org-pins:
+    name: audit / org-wide canon pin freshness
+    runs-on: ubuntu-24.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+
+      - name: Check every org repo's canon references from the canon
+        env:
+          # Repo enumeration only; the clones and tag reads are public.
+          # Red means a consumer's canon references have been catchable
+          # for over a day and Renovate has not caught them — the alarm
+          # audit:canon-pins can only raise inside the lagging repo
+          # itself, raised here where someone looks (#310 finding 1).
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:org-pins
+
   spdx-list:
     name: audit / spdx list freshness
     runs-on: ubuntu-24.04
