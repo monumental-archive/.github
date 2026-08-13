@@ -176,7 +176,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
-      run: |
+      run: | # zizmor: ignore[github-env]
         set -euo pipefail
         export MISE_GLOBAL_CONFIG_FILE="${SA_CANON_ROOT}/mise/config.toml"
         export MISE_TRUSTED_CONFIG_PATHS="${SA_CANON_ROOT}"
@@ -194,6 +194,16 @@ runs:
           echo "::warning::cosign install failed (attempt ${attempt}), retrying"
           sleep $((attempt * 10))
         done
+        # The audit is right in general and wrong here, so this is a
+        # written exception rather than a silent one. github-env fires
+        # because a GITHUB_PATH write can let an attacker prepend a
+        # directory and shadow a later command. The value here is
+        # `dirname "$(mise which cosign)"` — mise's own install tree,
+        # derived from the locked toolbelt, with no input reaching it;
+        # zizmor rates its own confidence Low for exactly that reason.
+        # Removing the write means teaching chain.sh and emit.sh to
+        # resolve cosign themselves, which is a larger change than the
+        # scope widening that surfaced this (#82).
         dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
 
     - name: Fetch the chain and verify the previous link

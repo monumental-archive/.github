@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/suzuki-shunsuke/pinact/refs/heads/main/json-schema/pinact.json
+#
+# pinact enforces the half of the org's pinning convention nothing else
+# did. CLAUDE.md requires every `uses:` to carry "a full commit SHA with a
+# trailing version comment"; zizmor's unpinned-uses proves the SHA and is
+# blind to the comment, and lint:canon-pins reads canon references only.
+# The comment is what a human and Renovate both read to judge whether a
+# pin is current, so an absent or untrue one is a real defect.
+version: 3
+
+# min_age is deliberately NOT set here. The org's seven-day floor lives on
+# audit:action-pins' command line instead, so it holds in consumer repos
+# that carry no .pinact.yaml at all, and so the number has one home rather
+# than two to drift apart.
+
+rules:
+  # The signer is pinned by immutable SHA and commented `# main`, which is
+  # the only honest comment available to it: monumental-archive/signer
+  # publishes no tags and no releases at all — verified at standup, zero
+  # of each — so there is no version for the comment to name.
+  #
+  # This rule is broader than it should be, deliberately rather than by
+  # oversight. The self-healing form would key on the comment — ignore
+  # only while it reads `main` — but pinact's expressions expose only
+  # ActionName, ActionRepoOwner and ActionVersion, and for a pinned
+  # reference ActionVersion is the SHA, not the comment. Tested at
+  # standup: an `ActionVersion == "main"` condition never matches, and
+  # `Comment` / `ActionVersionComment` are not variables at all. So the
+  # exception cannot narrow itself, and it will keep applying even if the
+  # signer starts tagging.
+  #
+  # The real fix is upstream: give the signer releases, at which point its
+  # callers carry `# vX.Y.Z` like every other pin and this rule should be
+  # deleted outright rather than adjusted.
+  - ignore: true
+    conditions:
+      - expr: |
+          ActionName matches "^monumental-archive/signer/"

@@ -34,6 +34,7 @@ honestly blocked on.
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
+| pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 
@@ -49,6 +50,80 @@ the org's own tracked scripts, offline, with no network surface.
 *Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
+
+**pinact, and the two gaps it exposed on the way in** (#82). CLAUDE.md
+requires every `uses:` to carry "a full commit SHA with a trailing
+version comment". Only the first half was enforced: zizmor's
+`unpinned-uses` proves the SHA and is blind to what follows it, and
+`lint:canon-pins` reads canon references only — so a third-party action
+pinned to a bare SHA with no comment at all passed every check the org
+had. The comment is what a human and Renovate read to judge whether a pin
+is current, so its absence is a defect and a comment that *lies* is a
+worse one.
+
+Three legs, split by what each needs:
+
+- `lint:action-pins` — `-fix=false -no-api`, so it asserts a
+  40-character SHA and the presence of a comment while asking GitHub
+  nothing. Deterministic and offline, therefore gate-eligible.
+- `audit:action-pins` — `--verify-comment` resolves each SHA back to its
+  tag to prove the comment is true, and `--min-age 7` carries the org's
+  release-age floor to the one layer that lacked it (`minimum_release_age`
+  governs mise tools, `UV_EXCLUDE_NEWER` Python dependencies, actions had
+  nothing). Both need the API and both move with the clock, so both are
+  Monday-cron work.
+- `fix:actions` — the fixer nine other `fix:*` tasks had and action pins
+  did not. `--update` is deliberately unwired: bumping pins is Renovate's
+  job and a fixer that also upgraded would fight it.
+
+Measured at standup, the belt's existing discipline is genuinely good:
+across every workflow and composite action, **no comment lies about its
+SHA and nothing is pinned to a release younger than seven days.** The
+only finding is the signer.
+
+**The signer publishes no versions.** Every reference to
+`monumental-archive/signer` is SHA-pinned and commented `# main`, which
+is the only honest comment available — the repo has zero tags and zero
+releases, verified. `.pinact.yaml` ignores it, and the rule is broader
+than it should be for a recorded reason: the self-healing form would key
+on the comment, but pinact's expressions expose only `ActionName`,
+`ActionRepoOwner` and `ActionVersion`, and for a pinned reference
+`ActionVersion` is the SHA. Tested — `ActionVersion == "main"` never
+matches, and `Comment`/`ActionVersionComment` are not variables. So the
+exception cannot narrow itself. The real fix is upstream: give the signer
+releases, and delete the rule rather than adjust it.
+
+**zizmor was never pointed at the composite actions.** It audits
+`action.yml` files and flags unpinned `uses:` in them exactly as it does
+workflows; the belt simply invoked it on `.github/workflows/` alone, so
+`.github/actions/source-attest/action.yml` carried a live third-party
+reference no check in the org could see. Widening the scope is one line —
+and it surfaced a pre-existing `github-env` finding on the
+`dirname "$(mise which cosign)" >> "${GITHUB_PATH}"` line. That is a
+written exception now rather than a silent one: the audit is right in
+general (a GITHUB_PATH write can shadow a later command) and wrong here,
+because the value comes from mise's own locked install tree with no input
+reaching it — zizmor rates its own confidence Low for that reason.
+Removing the write means teaching `chain.sh` and `emit.sh` to resolve
+cosign themselves, which is larger than the scope change that found it.
+
+**A defect class this standup found in the belt itself, partly fixed.**
+mise runs task bodies without `set -e`, so a task whose failure signal is
+a tool's exit status silently passes if anything follows that tool. Two
+shipped tasks were broken this way and are now fixed: `lint:python` ran
+`ruff check` then `ruff format --check`, so a lint error was masked by
+the formatter passing — verified by introducing a real violation and
+watching the gate stay green — and the pinact legs had the same shape
+with a trailing `echo`. All the tasks in this pass now open with
+`set -euo pipefail`.
+
+The general form is **open**: 43 belt tasks end with a trailing echo, and
+while most are safe because they signal failure with explicit `exit 1`,
+at least one pre-existing task is not — `lint:fuzz-build` runs
+`cargo fuzz build` and then echoes, so a failed fuzz build would go
+green. The clean fix is `[task_config] shell = "bash -euo pipefail -c"`,
+which repairs all 61 task bodies at once, but it changes the semantics of
+every one of them and wants its own pass rather than riding along here.
 
 **jq, and the check for its whole class that was tried and abandoned**
 (#82). jq is pinned at 1.8.2 because eleven belt tasks invoke it — nine

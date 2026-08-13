@@ -407,6 +407,10 @@ url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.1
 url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536775"
 provenance = "cosign"
 
+[[tools."aqua:suzuki-shunsuke/pinact"]]
+version = "4.1.1"
+backend = "aqua:suzuki-shunsuke/pinact"
+
 [[tools."aqua:taiki-e/cargo-llvm-cov"]]
 version = "0.8.7"
 backend = "aqua:taiki-e/cargo-llvm-cov"
