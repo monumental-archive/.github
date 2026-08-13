@@ -84,14 +84,16 @@ That is the whole wiring.
   `publish.yml` / `publish`, allow `npm publish`) and "Require 2FA and
   disallow tokens".
 - **Zenodo**: `ZENODO_TOKEN` is an organisation secret with
-  `visibility: selected` — tick the repository onto it rather than
-  minting per-repo tokens (the value is a sandbox-account token until
-  the first production DOI is wanted; swapping to a production token,
-  scopes `deposit:write` + `deposit:actions`, is one `gh secret set`).
-  Pass `mint-doi: true` + the secret in the publish stub. The pipeline
-  mints the DOI **after** the release publishes — never the flip-switch
-  webhook integration (no token auth). The lab proves against
-  sandbox.zenodo.org; production zenodo.org is the workflow default.
+  `visibility: selected` — one production token (scopes `deposit:write`
+  and `deposit:actions`), granted per repo at migration by ticking the
+  repository onto it, never per-repo tokens. Pass `mint-doi: true` +
+  the secret in the publish stub, and render `CITATION.cff` first
+  (`fix:citation` — the record's licence and creators come from it).
+  The pipeline mints the DOI **after** the release publishes — never
+  the flip-switch webhook integration (no token auth). There is no
+  sandbox lever (#316): every mint is a real, permanent record, the
+  lab's included — a rehearsal that mints test DOIs never proves the
+  DOI path.
 
 ## Cutting a release
 
