@@ -20,10 +20,12 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       base-url:
+        # forwarding: universal
         description: >
           Zenodo instance. The default is production; the release lab
           passes https://sandbox.zenodo.org so rehearsals mint test DOIs
@@ -33,6 +35,7 @@ on:
         default: https://zenodo.org
     secrets:
       zenodo-token:
+        # forwarding: universal
         description: Zenodo personal access token (deposit:write + deposit:actions)
         required: true
 

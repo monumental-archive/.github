@@ -75,6 +75,7 @@
 name: verify-release
 
 on:
+  # forwarding-default: discretionary — multi-mode verifier; each mode consumes its own input subset
   workflow_call:
     inputs:
       subjects:

@@ -15,6 +15,7 @@ on:
   workflow_call:
     inputs:
       exclude:
+        # forwarding: universal
         description: >
           Comma-separated workspace members this class must not touch —
           the same list the build declared.

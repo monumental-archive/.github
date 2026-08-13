@@ -249,6 +249,50 @@ So:
   discovered in an unlogged failure. `lint:nested-permissions` enforces
   it.
 
+### An input's forwarding class is declared where it is born
+
+Two archetypes reuse each class build wholesale, and GitHub gives a
+caller no way to say "forward everything" — every `with:` block is a
+hand-copied list, and omitting an optional input is legal YAML that
+`actionlint` validates and `zizmor` has no opinion on. That is the #299
+failure class: a `prepare` input added to the oci-image build was
+forwarded by `publish.yml`'s two legs and missed by `continuous.yml`,
+and the divergence surfaced as a red run on a board, found by a human —
+the detection method this org keeps trying to retire (#305).
+
+The contract is therefore declared **once, at the declaration**, not at
+the call sites that consume it. Every input and secret of a
+locally-called `workflow_call` workflow carries a forwarding class:
+
+- `# forwarding: universal` — every local caller must set the key. Any
+  value counts, literals included: the repro leg's `repro: true` and
+  repro-check's `smoke-test: ""` both satisfy it, and both *say* what
+  they mean instead of leaning on a default.
+- `# forwarding: discretionary — <reason>` — omission is legal; the
+  default is the contract. Orchestrator-owned knobs (`repro`, `dry-run`,
+  `ref`) live here.
+
+An **unmarked input fails the gate**, so the classification #299
+silently skipped is structurally unskippable at authoring time.
+Consumer-surface workflows whose defaults *are* the API (`publish.yml`,
+`verify-release.yml`) declare `# forwarding-default: discretionary`
+once, file-level; a file-level default is never allowed to be universal.
+The marker is a comment because GitHub's `workflow_call` schema rejects
+extension fields — the platform ceiling, not a preference; the same
+trade the `capability-boundary:` marker already makes.
+
+`lint:input-forwarding` enforces both halves in `ci` — deterministic,
+tracked files only. `fix:input-forwarding` is its write-mode sibling:
+missing universal forwarding lines are machine-written, never
+hand-authored, so drift can only exist as an uncommittable dirty tree.
+Two interlocks close the chain, and neither may be "simplified" away:
+the lint forces the forwarding line while **actionlint**, ahead of it in
+the same gate, forces the caller-surface declaration any forwarded
+`${{ inputs.* }}` refers to; and the lint's error-line format is the fix
+task's parsing API, so the two change together. Scope is local
+`uses: ./` call sites only — cross-repo consumers pin the archetype
+entry points and never reach the class builds directly.
+
 ### The capability split
 
 The boundary is between **jobs that run caller-supplied code and jobs that

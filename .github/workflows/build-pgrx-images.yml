@@ -24,19 +24,23 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       crate-dir:
+        # forwarding: universal
         description: Directory of the extension crate (names the image).
         required: true
         type: string
       pg-majors:
+        # forwarding: universal
         description: PG majors, matching what build-pgrx-extension built.
         required: false
         type: string
         default: 14,15,16,17,18
       facts:
+        # forwarding: universal
         description: >
           The resolved facts map (JSON, org.opencontainers.image.* keys)
           from the orchestrator's facts job — the same map every image
@@ -49,16 +53,19 @@ on:
         required: true
         type: string
       source-epoch:
+        # forwarding: universal
         description: >
           Committer epoch of the released commit, for SOURCE_DATE_EPOCH.
         required: true
         type: string
       dry-run:
+        # forwarding: discretionary — rehearsal is versioned-only; continuous has no gate to rehearse
         description: Rehearsal — assemble and prove locally, push nothing.
         required: false
         type: boolean
         default: false
       repro:
+        # forwarding: discretionary — the repro leg sets it; omission means a first build
         description: >
           Rebuild leg of the repro gate (#118): assemble and push the
           per-major indexes by digest exactly like the first build (a

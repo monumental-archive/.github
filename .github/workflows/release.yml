@@ -29,6 +29,7 @@ on:
   workflow_call:
     secrets:
       app-private-key:
+        # forwarding: universal
         description: Tag-mint App private key
         required: true
 

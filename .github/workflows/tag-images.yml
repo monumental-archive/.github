@@ -17,6 +17,7 @@ on:
   workflow_call:
     inputs:
       images:
+        # forwarding: universal
         description: >
           JSON array of {image, tag, digest} — the untagged lowercase
           ghcr.io reference, the tag to apply, and the index digest the

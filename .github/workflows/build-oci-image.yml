@@ -40,20 +40,24 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       dockerfile:
+        # forwarding: universal
         description: Path to the Dockerfile, relative to the context.
         required: false
         type: string
         default: Dockerfile
       context:
+        # forwarding: universal
         description: Build context directory.
         required: false
         type: string
         default: "."
       smoke-test:
+        # forwarding: universal
         description: >
           Script proving the image does the one thing it exists to do —
           booted, extensions loaded, server answering. Receives the image
@@ -65,6 +69,7 @@ on:
         type: string
         default: ""
       prepare:
+        # forwarding: universal
         description: >
           Script materialising build artifacts into the context before the
           image build, run with the caller's own mise-pinned toolchain
@@ -85,6 +90,7 @@ on:
         type: string
         default: ""
       facts:
+        # forwarding: universal
         description: >
           The resolved facts map (JSON, org.opencontainers.image.* keys)
           from the orchestrator's facts job. Builds consume it — as config
@@ -96,6 +102,7 @@ on:
         required: true
         type: string
       source-epoch:
+        # forwarding: universal
         description: >
           Committer epoch of the released commit, resolved beside the
           facts. Exported as SOURCE_DATE_EPOCH, which BuildKit propagates
@@ -105,11 +112,13 @@ on:
         required: true
         type: string
       dry-run:
+        # forwarding: discretionary — rehearsal is versioned-only; continuous has no gate to rehearse
         description: Rehearsal — build and prove, push nothing.
         required: false
         type: boolean
         default: false
       repro:
+        # forwarding: discretionary — the repro leg sets it; omission means a first build
         description: >
           Rebuild leg of the repro gate (#118): build and push by digest
           exactly like the first build (digest pushes are idempotent — a

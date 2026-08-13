@@ -25,14 +25,17 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       crate-dir:
+        # forwarding: universal
         description: Directory of the extension crate, relative to the root.
         required: true
         type: string
       pg-majors:
+        # forwarding: universal
         description: >
           Comma-separated PG majors to build. The plan job refuses anything
           the base-image mapping does not carry — a typo must fail the
@@ -41,6 +44,7 @@ on:
         type: string
         default: 14,15,16,17,18
       smoke-test:
+        # forwarding: universal
         description: >
           Script proving the packaged extension does the one thing it
           exists to do, run INSIDE a stock postgres container of each
@@ -51,6 +55,7 @@ on:
         type: string
         default: ""
       ref:
+        # forwarding: discretionary — only the repro-check comparator rebuilds at a foreign ref
         description: >
           Ref of the caller repository to build; empty means the
           triggering commit. Exists for the reproducibility audit.
@@ -58,6 +63,7 @@ on:
         type: string
         default: ""
       repro:
+        # forwarding: discretionary — the repro leg sets it; omission means a first build
         description: >
           Rebuild leg of the repro gate (#118): build and hash the same
           bytes, upload NO release-* artifact, skip the smoke tests, and

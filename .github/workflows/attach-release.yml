@@ -27,16 +27,19 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       dry-run:
+        # forwarding: universal
         description: Rehearsal — attach the bundle, leave the release a draft.
         required: false
         type: boolean
         default: false
     secrets:
       app-private-key:
+        # forwarding: universal
         description: Tag-mint App private key
         required: true
 

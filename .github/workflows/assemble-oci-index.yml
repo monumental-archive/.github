@@ -16,10 +16,12 @@ on:
   workflow_call:
     inputs:
       version:
+        # forwarding: universal
         description: Version being released, without the leading v.
         required: true
         type: string
       smoke-test:
+        # forwarding: universal
         description: >
           Script proving the image does its one job, run on the bytes
           pulled back from the registry by digest. Empty skips it.
@@ -27,6 +29,7 @@ on:
         type: string
         default: ""
       facts:
+        # forwarding: universal
         description: >
           The resolved facts map (JSON, org.opencontainers.image.* keys)
           from the orchestrator's facts job — annotations for the index,
