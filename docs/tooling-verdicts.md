@@ -93,6 +93,14 @@ a natively-managed representation.
   Renovate queues behind a reading list
   ([`dependency-track.md`](dependency-track.md), #122). *Reopen:* a
   second maintainer.
+- **cffconvert** — `CITATION.cff` validation. Not needed, and recorded
+  now because the scaffold previously cited a verdict that was never
+  made (#316): the file is generated — `fix:citation` renders it from
+  `REUSE.toml`, `lint:citation` diffs the committed file against a
+  fresh render — so the generator is its own validator, and a schema
+  checker would only re-verify constants the generator wrote. *Reopen:*
+  hand-authored CFF fields beyond `title`, or a consumer requiring CFF
+  features the generator does not emit.
 - **ClusterFuzzLite** — unnecessary for any targeted score, with a
   real cost surface ([`slsa-reference.md`](slsa-reference.md)).
   *Reopen:* fuzzing becomes a target (Best Practices beyond the

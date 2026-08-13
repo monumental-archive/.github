@@ -1858,6 +1858,122 @@ fi
 echo "lint:licence: ok"
 '''
 
+[tasks."fix:citation"]
+description = "Render CITATION.cff from REUSE.toml (licence, authors, repository) plus the preserved human fields"
+dir = "{{cwd}}"
+# CFF has no extends:, so shared has to mean DERIVED (#316 findings 1+6,
+# one fix): REUSE.toml is the single root for licence and authorship,
+# and every field of CITATION.cff except two is a fact read from it or a
+# constant. The two human fields — title, and the concept-DOI identifier
+# recorded after the first mint — are preserved on regeneration, as are
+# version and date-released, which release/prepare-release.sh stamps.
+# mint-doi.yml reads the rendered file for licence and creators, so the
+# permanent record can no longer contradict the tree that produced it
+# (the v0.22.1 sandbox record said MIT for a 0BSD repo, credited to a
+# machine account — both fields were fallbacks nothing checked).
+# CITATION_OUT overrides the output path; lint:citation renders through
+# it to prove the committed file agrees without writing the tree.
+#
+# authors is the one field that is a claim about people rather than a
+# fact about a tree: derived from SPDX-PackageSupplier, honest at one
+# maintainer, and wants a real answer at two — the bus_factor wall.
+run = '''
+out="${CITATION_OUT:-CITATION.cff}"
+[[ -f REUSE.toml ]] || { echo "fix:citation: no REUSE.toml, nothing to derive from"; exit 0; }
+lic=$(grep -h "SPDX-License-Identifier" REUSE.toml | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | sort -u)
+if [[ -z "${lic}" || "${lic}" == "<SPDX expression>" ]]; then
+  echo "fix:citation: REUSE.toml declares no licence expression — fill it first (lint:licence)" >&2
+  exit 1
+fi
+if [[ "$(wc -l <<< "${lic}" | tr -d " ")" != "1" ]]; then
+  echo "fix:citation: REUSE.toml carries more than one licence expression — one citation cannot state two:" >&2
+  echo "${lic}" >&2
+  exit 1
+fi
+supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+person="${supplier%% <*}"
+if [[ -z "${person}" ]]; then
+  echo "fix:citation: REUSE.toml carries no SPDX-PackageSupplier — the citation needs an author" >&2
+  exit 1
+fi
+family="${person##* }"
+given="${person% "${family}"}"
+repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+[[ -n "${repo_url}" ]] || { echo "fix:citation: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2; exit 1; }
+title="${repo_url##*/}"; version="0.0.0"; released=$(git log -1 --format=%cs 2> /dev/null || date -u +%F)
+concept=""
+if [[ -f CITATION.cff ]]; then
+  t=$(sed -n "s/^title: //p" CITATION.cff | head -1); [[ -n "${t}" ]] && title="${t}"
+  v=$(sed -n "s/^version: //p" CITATION.cff | head -1); [[ -n "${v}" ]] && version="${v}"
+  d=$(sed -n 's/^date-released: "\{0,1\}\([0-9-]*\)"\{0,1\}$/\1/p' CITATION.cff | head -1); [[ -n "${d}" ]] && released="${d}"
+  concept=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' CITATION.cff)
+fi
+{
+  echo "# Derived file (#316): fix:citation renders licence, authors and"
+  echo "# repository-code from REUSE.toml; the release pipeline stamps"
+  echo "# version and date-released; title and the concept-DOI identifier"
+  echo "# are the two human fields, preserved on regeneration."
+  echo "# lint:citation reddens hand drift. Edit REUSE.toml, not this."
+  echo "cff-version: 1.2.0"
+  echo "message: If you use this software, please cite it using these metadata."
+  echo "title: ${title}"
+  echo "type: software"
+  echo "authors:"
+  echo "  - family-names: ${family}"
+  echo "    given-names: ${given}"
+  echo "repository-code: ${repo_url}"
+  echo "license: ${lic}"
+  echo "version: ${version}"
+  echo "date-released: \"${released}\""
+  if [[ -n "${concept}" ]]; then
+    echo "identifiers:"
+    echo "  - type: doi"
+    echo "    value: ${concept}"
+    echo "    description: The concept DOI of the software."
+  fi
+} > "${out}"
+echo "fix:citation: rendered ${out} (licence ${lic}, author ${person})"
+'''
+
+[tasks."lint:citation"]
+description = "CITATION.cff agrees with its sources, and a DOI-minting repo carries one"
+dir = "{{cwd}}"
+# The enforcement half of the derivation (#316 finding 6): "citable" was
+# an unenforced adjective — release-lab passed mint-doi: true with no
+# CITATION.cff and every layer degraded quietly (the stub lint never
+# looked, prepare-release.sh skipped its stamping, mint-doi fell back to
+# crediting the machine account). Three silent skips and a published
+# record wrong twice over. This lint is the audit-claims contract
+# applied here: a repo whose release stub requests DOI minting MUST
+# carry the file, and a carried file MUST byte-equal what fix:citation
+# renders from its sources. Deterministic, tracked files only, skips
+# clean where neither condition applies — a linter that cannot skip
+# cannot be universal.
+run = '''
+minting=$(git ls-files ".github/workflows/*.y*ml" | xargs grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
+if [[ ! -f CITATION.cff ]]; then
+  if [[ -n "${minting}" ]]; then
+    echo "lint:citation: mint-doi: true with no CITATION.cff — a citable repo carries its citation (#316 finding 6):" >&2
+    echo "${minting}" >&2
+    echo "  run fix:citation (REUSE.toml is the source), commit the render" >&2
+    exit 1
+  fi
+  echo "lint:citation: no CITATION.cff and no mint-doi request, skipped"; exit 0
+fi
+if [[ ! -f REUSE.toml ]]; then
+  echo "lint:citation: CITATION.cff exists but REUSE.toml (its source of truth) does not" >&2
+  exit 1
+fi
+tmp=$(mktemp)
+trap 'rm -f "${tmp}"' EXIT
+CITATION_OUT="${tmp}" mise run fix:citation > /dev/null
+if ! diff -u CITATION.cff "${tmp}"; then
+  echo "lint:citation: CITATION.cff drifted from its sources — edit REUSE.toml (or the human fields) and run fix:citation" >&2
+  exit 1
+fi
+echo "lint:citation: CITATION.cff agrees with REUSE.toml"
+'''
+
 [tasks."lint:release-stub"]
 description = "A versioned repo carries the canonical release stubs (cliff.toml implies publish.yml + release.yml)"
 dir = "{{cwd}}"
