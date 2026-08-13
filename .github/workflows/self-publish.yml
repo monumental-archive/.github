@@ -35,6 +35,13 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       classes: source-archive
+      # The canon cites itself (#316): a versioned, tagged, SBOM'd,
+      # signed release, and the only repo in the org that would
+      # otherwise not carry a DOI. Licence and creators come from the
+      # derived CITATION.cff; ZENODO_TOKEN must be ticked onto this
+      # repo (org secret, selected visibility) before the first minting
+      # release merges, or the mint job reddens a published release.
+      mint-doi: true
     permissions:
       # The FULL union the orchestrator's jobs declare, not just the jobs
       # this class runs: GitHub validates the called workflow's grants at
@@ -50,3 +57,4 @@ jobs:
       packages: write # oci-image class jobs declare it; unused here
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
+      zenodo-token: ${{ secrets.ZENODO_TOKEN }}
