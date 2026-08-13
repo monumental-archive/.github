@@ -21,7 +21,7 @@ ruleset edit is never routine.
 - required signatures
 - required status check `ci / ci`, strict (branch must be current)
 - pull request required; stale reviews dismissed on push; review threads
-  must be resolved; allowed merge methods `squash` and `rebase`
+  must be resolved; allowed merge method `squash` only
 - `bypass_actors` empty
 
 **`org-default-tag`** — all tags, every repo: no creation-time lock, but
@@ -99,12 +99,12 @@ and an exemption for yourself is the common way to score zero on it while
 believing the branch is protected. `current_user_can_bypass: "never"` —
 the org owner is bound too.
 
-**Merge methods are `squash` and `rebase` only**: `required_linear_history`
-blocks merge commits, so allowing the merge-commit button would offer a
-method that always fails at merge time. (Whether `rebase` should also go —
+**The merge method is `squash` only**: `required_linear_history` blocks
+merge commits anyway, and `rebase` went when the Source track stood up —
 squash-only is what makes "every revision reachable from a protected
-branch was approved" claimable as an `ORG_SOURCE_` property — is a #120
-decision.)
+branch was approved" claimable as an `ORG_SOURCE_` property (decided
+under #120, enforced since 2026-08-10; continuity-ledger Boundary B is
+defined by this narrowing).
 
 **`required_signatures` and the tag rules earn no Scorecard points** —
 there is no probe for either. They are here because the attestation chain

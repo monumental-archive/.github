@@ -425,15 +425,18 @@ the subjects, then opens the evidence it is about to summarise: it
 fetches
 the attestation bundles for every verified digest from the same API a
 stranger would use, verifies each cryptographically against the org
-signer identity at the commit `security/signer.pin` declares
-(`lint:signer-pin` keeps that file equal to every `sign.yml` `uses:`
-literal, so a half-bump reddens the gate rather than verifying against a
-stale signer; that file holds the digest and **nothing else**, because
-Renovate's regex manager replaces the whole matched span — the original
-in-file `# renovate: signer-pin` marker sat inside its own match and was
-destroyed by the first bump it served, after which the manager matched
-nothing and every later bump half-landed until a human patched it, so
-`lint:signer-pin` now refuses a header outright), checks `builder.id`
+signer identity derived from the canon tree's own `sign.yml@<sha>`
+`uses:` pins — the tree's single statement of the trusted signer, the
+same derivation the `verify-signed` action performs (#314). There is
+deliberately no second copy: the former `security/signer.pin` file
+needed its own Renovate regex manager, whose URL package name the
+first-party group could not match, so every signer bump split into two
+branches — `uses:`-only and pin-only — neither able to pass
+`lint:signer-pin` alone (#316 finding 2; before that, the manager's
+in-file marker destroyed itself on its first bump, #279). The lint now
+enforces that every `uses:` line agrees on one digest and refuses the
+pin file's reintroduction, so the split state is unrepresentable. It
+then checks `builder.id`
 names the signer, asserts `buildType`
 and `externalParameters` against the run's own identity (#210 — all
 four of `verifying-artifacts`' comparisons), and checks the

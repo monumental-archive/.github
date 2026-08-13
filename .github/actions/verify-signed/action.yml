@@ -12,10 +12,13 @@
 # against the reviewed, Renovate-bumped static text of the calling
 # workflow — intent, not echo. And it is lag-proof by the same token:
 # mid-fan-out, when a consumer's `uses:` is legitimately ahead of the
-# canon's `security/signer.pin` (the N-1 steady state, #227), the derived
-# digest still equals what the certificate carries, because both come
-# from the same tree. Binding to the pin file instead would go red on a
-# correct tree — measured live while #314 was being written.
+# canon's own pins (the N-1 steady state, #227), the derived digest
+# still equals what the certificate carries, because both come from the
+# same tree. Binding to a canon-held value instead would go red on a
+# correct tree — measured live while #314 was being written, and the
+# reason the canon's former security/signer.pin file is gone (#316
+# finding 2): the canon's verdict now derives from its own uses: lines
+# exactly as this action derives from the caller's.
 #
 # The file is fetched through the contents API at GITHUB_WORKFLOW_SHA —
 # the exact commit whose text GitHub already trusted enough to execute —

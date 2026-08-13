@@ -11,7 +11,8 @@
 #                    attestation bundles for every verified digest from
 #                    the same API a stranger would use, verifies each
 #                    against the org signer identity at the pinned commit
-#                    (security/signer.pin in the canon tree), checks the
+#                    (derived from the canon tree's own sign.yml uses:
+#                    pin), checks the
 #                    provenance subjects equal the verified manifest,
 #                    asserts buildType and externalParameters against this
 #                    run's own identity (all four of verifying-artifacts'
@@ -369,7 +370,7 @@ jobs:
 
       # The ref the caller pinned, read from the same $/ resolution that
       # fetched this workflow — it names the exact canon tree (workflows,
-      # scripts, toolbelt, signer pin) that rendered this verdict, which
+      # scripts, toolbelt, signer identity) that rendered this verdict, which
       # is what a VSA's policy URI is for. Never re-derived: the two prior
       # carriers disagreed with the resolution or could not be written at
       # all (#158, #165).
@@ -402,14 +403,25 @@ jobs:
             exit 1
           fi
 
-          # The signer identity this verdict verifies against comes from
-          # the canon tree the SAME resolution delivered — one pin, one
-          # tree, no second derivation. lint:signer-pin keeps this file
-          # equal to every sign.yml uses: literal, so a half-bump reddens
-          # the gate instead of verifying against a stale signer.
-          pin=$(grep -Eo '^[0-9a-f]{40}$' "${CANON_PATH}/security/signer.pin" | head -1)
+          # The signer identity this verdict verifies against is derived
+          # from the canon tree the SAME resolution delivered — the
+          # sign.yml@<sha> uses: lines are the tree's only statement of
+          # the trusted signer (#314's verify-signed pattern; the
+          # separate security/signer.pin copy was deleted in #316 finding
+          # 2, where the two copies split into two Renovate branches
+          # neither of which could go green). lint:signer-pin keeps every
+          # uses: line equal, so the derivation is single-valued; a tree
+          # that disagrees with itself fails here rather than guessing.
+          refs=$(grep -rhoE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' \
+            "${CANON_PATH}/.github/workflows/" || true)
+          pin=$(cut -d@ -f2 <<< "${refs}" | sort -u || true)
           if [[ -z "${pin}" ]]; then
-            echo "::error::security/signer.pin holds no 40-hex commit — cannot verify the signer"
+            echo "::error::the canon tree pins no sign.yml uses: — nothing to derive the signer identity from"
+            exit 1
+          fi
+          pin_count=$(wc -l <<< "${pin}" || true)
+          if [[ "${pin_count// /}" != "1" ]]; then
+            echo "::error::the canon tree pins sign.yml at more than one digest — a tree states the trusted signer once: ${pin//$'\n'/ }"
             exit 1
           fi
           signer_path="monumental-archive/signer/.github/workflows/sign.yml"

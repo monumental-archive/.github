@@ -151,8 +151,9 @@ gh attestation verify <artifact> --owner monumental-archive \
 ```
 
 That recipe is for a human at a terminal, where `<signer-commit>` is
-looked up fresh each time — from the canon's `security/signer.pin`, or
-from the `sign.yml@<sha>` pin in the tree that produced the release.
+looked up fresh each time — from the `sign.yml@<sha>` `uses:` pin in the
+tree that produced the release, the tree's one statement of the trusted
+signer.
 **In a workflow, never write the digest as a literal**: nothing bumps a
 SHA inside a shell command, so it drifts from the `uses:` pin the
 certificate will actually carry — the #314 failure, a literal frozen at

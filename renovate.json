@@ -14,20 +14,6 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "signer pin: security/signer.pin declares the commit every sign.yml uses: pins, so the release verifier checks against the same tree that signed — bump it in the same PR as the uses: lines or lint:signer-pin reddens the gate. The match is a bare digest and the file holds nothing else, deliberately: a regex manager replaces the WHOLE matched span, so the original marker-based match ('# renovate: signer-pin\\n<digest>') destroyed its own marker on the first bump (#279 rewrote the 10-line file to one line), after which nothing matched and every later bump half-landed — uses: moved, the pin did not, and lint:signer-pin reddened each one. Matching the entire meaningful content makes replace-the-match the correct operation instead of a destructive one; lint:signer-pin asserts the file shape this depends on.",
-      "managerFilePatterns": [
-        "/^security/signer\\.pin$/"
-      ],
-      "matchStrings": [
-        "(?<currentDigest>[0-9a-f]{40})"
-      ],
-      "currentValueTemplate": "main",
-      "depNameTemplate": "monumental-archive/signer",
-      "packageNameTemplate": "https://github.com/monumental-archive/signer",
-      "datasourceTemplate": "git-refs"
-    },
-    {
-      "customType": "regex",
       "description": "pgrx base images: keep tag AND digest current together in docker/pgrx-base-images.toml \u2014 a pinned-but-stale base is worse than a floating one",
       "managerFilePatterns": [
         "/^docker/pgrx-base-images\\.toml$/"
