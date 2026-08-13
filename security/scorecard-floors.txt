@@ -36,6 +36,10 @@
 # a scanner defect, not a watermark, so it does not set the floor; and
 # a single low reading is not evidence of regression (the lesson #347
 # records against this file's own header).
-.github 6.9
+# The canon ratcheted 6.9 -> 7.1 on the 2026-08-13 10:19 reading of 7.2
+# (#347): the nudge fired ("well above floor — raise"). Floored a tenth
+# under the reading, per the drift observation above — the same rule
+# release-lab was ratcheted by, not a fresh judgement.
+.github 7.1
 signer 6.8
 release-lab 7.4

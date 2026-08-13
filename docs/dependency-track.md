@@ -272,6 +272,20 @@ corrected here rather than reworded away.
 - trivy over `ghcr.io/monumental-archive/release-lab`: 79 packages
   (78 deb + 1 oci), 0 versionless, 10 with base-layer findings — and 0
   language-specific files, the cargo-auditable gap measured.
+  **Superseded by construction, 2026-08-13 (#347/#354):** that image
+  was `FROM debian:trixie-slim`. #295 moved the compile out of the
+  Dockerfile and the image is now `FROM scratch` over a musl-static
+  binary, so the same scan reads **6 packages, 0 deb**. The Debian
+  population that motivated the OS-package triage class below left the
+  published surface with it — the class still governs correctly, it
+  simply has nothing to govern in this repo today. Re-measured at the
+  same time: the `lab-pg` extension images are OCI **artifact
+  carriers** (`*-artifact` tags), 93 packages, 90 cargo + 1 oci, also
+  0 deb; bookworm and trixie are the pgrx build and smoke bases and
+  are never published. Every package in the shipped extension image
+  appears in the release SBOM, so blast-radius coverage holds by
+  containment — a measured fact about today's build, not an invariant
+  anything enforces.
 - GitHub dependency-graph export of the same repo: 236 packages, 2
   versionless — the replaced mechanism's defect, measured.
 - Tool availability: cargo-deny 0.20.2 (aqua), osv-scanner 2.4.0 (aqua;

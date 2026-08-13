@@ -1147,11 +1147,6 @@ while read -r repo; do
         cc="${cc%%/*}"
         if curl -sf "https://api.codecov.io/api/v2/github/monumental-archive/repos/${cc}" | jq -e '.name' > /dev/null 2>&1; then
           note "${repo}: codecov live"
-        elif grep -qE "^coverage[[:space:]]+exemplary$" <<< "${states}"; then
-          # The declared exemplary state (#316): the canon wears its
-          # own coverage machinery with no data behind it until the
-          # kcov standup — a permanent, stated condition, not debt.
-          note "${repo}: codecov has no data — exemplary by declaration"
         else
           failed="${failed} ${repo}(codecov: issuer has no data for ${cc} and no declared state covers it)"
         fi
@@ -2890,8 +2885,10 @@ dir = "{{cwd}}"
 # shields), and the only hand-maintained state is .badge-states — the
 # written-down-debt pattern — naming what waits on a human step
 # (`bestpractices pending` → `bestpractices <BP_ID>`, `reuse pending`
-# → `reuse registered`) or is exemplary with no data by construction
-# (`coverage exemplary`, the canon until the kcov standup). If a
+# → `reuse registered`). The coverage shield is not stateful: it
+# renders iff `.coverage-floor` exists, so a repo that cannot measure
+# coverage simply has no coverage shield rather than a declared one
+# over no data (#347). If a
 # repo's render needs an `if repo == .github` branch, the design is
 # wrong — there is none. fair-software is computed from the other
 # shields' truth, dot by dot, never the static 5/5 image (#316).
@@ -2948,7 +2945,7 @@ if [[ "${reuse}" == "registered" ]]; then
 else
   add "<!-- pending (human step): REUSE — register at https://api.reuse.software/register (no account: name, email, project URL, confirmation link), then set 'reuse registered' in .badge-states and re-run fix:badges -->"
 fi
-if [[ -f .coverage-floor ]] || [[ "$(state coverage)" == "exemplary" ]]; then
+if [[ -f .coverage-floor ]]; then
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
 fi
 cit=""
