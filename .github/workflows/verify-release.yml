@@ -636,20 +636,46 @@ jobs:
           mkdir -p "${WORKDIR}/sbom-assets"
           gh release download "v${UNTRUSTED_VERSION}" --repo "${GITHUB_REPOSITORY}" \
             --pattern "*.spdx.json" --dir "${WORKDIR}/sbom-assets"
-          sfile=$(find "${WORKDIR}/sbom-assets" -type f -name "*.spdx.json" | sort | head -1)
-          if [[ -z "${sfile}" ]]; then
+          sboms=$(find "${WORKDIR}/sbom-assets" -type f -name "*.spdx.json")
+          if [[ -z "${sboms}" ]]; then
             echo "::error::the release has no SBOM asset — the decision has no subject to verify against"
             exit 1
           fi
-          sdigest=$(sha256sum "${sfile}" | cut -d' ' -f1)
           decision_type="https://monumental-archive.github.io/attestations/release-decision/v1"
           decision_workflow="monumental-archive/.github/.github/workflows/publish.yml"
-          gh attestation verify "${sfile}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --signer-workflow "${decision_workflow}" \
-            --deny-self-hosted-runners \
-            --predicate-type "${decision_type}" \
-            --format json > "${WORKDIR}/decision.json"
+          # Find the SBOM the commit point actually decided over, rather
+          # than assuming there is only one. A release class that ships
+          # its own SBOM (the oci class publishes `*-image.spdx.json`)
+          # puts a second asset in this pattern, and `sort | head -1`
+          # picked it: `-` sorts before `.`, so the image SBOM won and
+          # the decision lookup 404'd on a subject the commit point never
+          # signed (#354, measured on release-lab v0.24.2 — the canon
+          # publishes exactly one SBOM, so self-application could not
+          # reach it). Selecting by attestation rather than by filename
+          # is not the weaker test: a candidate only wins by carrying a
+          # decision signed by publish.yml over its own bytes, which no
+          # added asset can forge. Two winners is ambiguity, not success.
+          sfile=""
+          while IFS= read -r cand; do
+            [[ -n "${cand}" ]] || continue
+            gh attestation verify "${cand}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${decision_workflow}" \
+              --deny-self-hosted-runners \
+              --predicate-type "${decision_type}" \
+              --format json > "${WORKDIR}/decision.candidate.json" 2> /dev/null || continue
+            if [[ -n "${sfile}" ]]; then
+              echo "::error::more than one SBOM asset carries a release decision — ambiguous, refusing the verdict"
+              exit 1
+            fi
+            sfile="${cand}"
+            mv "${WORKDIR}/decision.candidate.json" "${WORKDIR}/decision.json"
+          done <<< "${sboms}"
+          if [[ -z "${sfile}" ]]; then
+            echo "::error::no SBOM asset carries a verifiable release decision — refusing the verdict"
+            exit 1
+          fi
+          sdigest=$(sha256sum "${sfile}" | cut -d' ' -f1)
           jq -e --arg tag "v${UNTRUSTED_VERSION}" \
             '.[0].verificationResult.statement.predicate
              | .conclusion == "OPEN" and .tag == $tag' \
