@@ -125,6 +125,14 @@ roll-forward.
   publish step is resumable — a crate/package/tag already on the registry
   is a completed step, not a failure. Re-dispatch on the tag and it
   converges.
+- **Failed AFTER publish** (the DOI mint is the only job downstream of
+  the commitment point — e.g. Zenodo down, v1.20.0's first mint):
+  re-dispatch on the tag; attach proves the rebuilt bytes equal the
+  published set and passes through the immutable release instead of
+  clobbering it (#316). Releases published by a canon older than the
+  converge path cannot resume past publish — their DOI rolls forward to
+  the next version, which is why the canon's concept record starts at
+  v1.21.0 and not v1.20.0.
 - **Gate red on the release PR**: fix on main; the release PR refreshes
   itself on the next push. Never edit the release branch by hand.
 - **A cell of a matrix class failed**: `fail-fast: false` means the other
