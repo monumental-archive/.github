@@ -21,6 +21,10 @@
 # would push a chain missing its own newest links.
 set -euo pipefail
 
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${SA_WORK:?SA_WORK must be set by guard-identity, the first step of the action}"
+
 cd "${SA_WORK}/repo"
 
 if [[ ! -s "${SA_WORK}/manifest.tsv" ]]; then

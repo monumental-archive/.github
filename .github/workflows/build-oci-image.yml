@@ -197,12 +197,11 @@ jobs:
           UNTRUSTED_PREPARE: ${{ inputs.prepare }}
         run: |
           set -euo pipefail
-          if [[ ! -x "${UNTRUSTED_PREPARE}" ]]; then
+          if [[ ! -x ${UNTRUSTED_PREPARE} ]]; then
             echo "::error::prepare ${UNTRUSTED_PREPARE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_PREPARE}" "${ARCH}"
-
       - name: Resolve the image name
         id: name
         run: |
@@ -212,7 +211,6 @@ jobs:
           # three minutes into a release.
           image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           echo "image=${image}" >> "${GITHUB_OUTPUT}"
-
       - name: Create a container-driver builder
         run: |
           set -euo pipefail
@@ -225,7 +223,6 @@ jobs:
           # No --driver-opt cache settings and no registry mirror: this
           # workflow publishes, so it carries no cache of any kind.
           docker buildx create --use --name org-oci --driver docker-container
-
       - name: Build for testing, loaded and unpublished
         env:
           ARCH: ${{ matrix.arch }}
@@ -249,7 +246,6 @@ jobs:
             "${LABELS[@]}" \
             --load --tag "oci-under-test:${ARCH}" \
             "${UNTRUSTED_CONTEXT}"
-
       - name: Smoke the loaded image
         if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:
@@ -257,12 +253,11 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
-          if [[ ! -x "${UNTRUSTED_SMOKE}" ]]; then
+          if [[ ! -x ${UNTRUSTED_SMOKE} ]]; then
             echo "::error::smoke-test ${UNTRUSTED_SMOKE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_SMOKE}" "oci-under-test:${ARCH}"
-
       - name: Push by digest
         id: push
         if: ${{ !inputs.dry-run }}
@@ -316,7 +311,7 @@ jobs:
             --metadata-file /tmp/meta.json \
             "${UNTRUSTED_CONTEXT}"
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
-          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::no digest from the push"
             exit 1
           fi
@@ -327,7 +322,6 @@ jobs:
           mkdir -p /tmp/digests
           printf '%s' "${digest}" > "/tmp/digests/${ARCH}"
           echo "::notice::${ARCH} pushed as ${digest}"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.dry-run }}
         with:

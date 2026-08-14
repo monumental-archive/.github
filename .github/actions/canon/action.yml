@@ -43,7 +43,7 @@ runs:
             # is the running commit by definition. Anything else here is
             # a resolution shape this action does not understand —
             # refuse rather than guess.
-            if [[ "${GITHUB_REPOSITORY}" != "monumental-archive/.github" ]]; then
+            if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
               echo "::error::canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon self-call"
               exit 1
             fi

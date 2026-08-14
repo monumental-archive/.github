@@ -248,7 +248,7 @@ jobs:
           UNTRUSTED_CLASSES: ${{ inputs.classes }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+          if [[ ${GITHUB_REF} != refs/tags/v* ]]; then
             echo "::error::publish runs on v* tags only, got ${GITHUB_REF}"
             echo "::error::dispatching from a branch would attest a moving pointer"
             exit 1
@@ -270,7 +270,6 @@ jobs:
           version="${GITHUB_REF#refs/tags/v}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
-
   # Every fact the image classes will assert — OCI annotations and config
   # labels — is resolved HERE, once, before anything is built, and the
   # builds consume the map without deriving anything. One resolution per
@@ -977,11 +976,11 @@ jobs:
           check() { # class, first, rebuild
             local class="${1}" a="${2}" b="${3}"
             case ",${CLASSES// /}," in *",${class},"*) ;; *) return 0 ;; esac
-            if [[ -z "${a}" || -z "${b}" ]]; then
+            if [[ -z ${a} || -z ${b} ]]; then
               echo "::error::${class}: a build produced no subjects — an empty proof is not a proof"
               exit 1
             fi
-            if [[ "${a}" != "${b}" ]]; then
+            if [[ ${a} != "${b}" ]]; then
               echo "::error::${class}: the rebuild does not reproduce the first build bit for bit"
               diff <(printf '%s\n' "${a}") <(printf '%s\n' "${b}") || true
               exit 1
@@ -996,7 +995,6 @@ jobs:
           check wasm-npm "${WASM_A}" "${WASM_B}"
           check pgrx-extension "${EXT_A}" "${EXT_B}"
           echo "FILE_COMPARED=${compared}" >> "${GITHUB_ENV}"
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: ${{ contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
         with:
@@ -1029,13 +1027,19 @@ jobs:
         run: |
           set -euo pipefail
           compared="${FILE_COMPARED:-0}"
-          if [[ "${DRY_RUN}" != "true" ]]; then
+          if [[ ${DRY_RUN} != "true" ]]; then
             case ",${CLASSES// /}," in
               *,oci-image,*)
                 for arch in oci-a/*; do
-                  [[ -f "${arch}" ]] || { echo "::error::oci-image: no per-arch digests to compare"; exit 1; }
+                  [[ -f ${arch} ]] || {
+                    echo "::error::oci-image: no per-arch digests to compare"
+                    exit 1
+                  }
                   b="oci-b/$(basename "${arch}")"
-                  [[ -f "${b}" ]] || { echo "::error::oci-image: rebuild produced no $(basename "${arch}") digest"; exit 1; }
+                  [[ -f ${b} ]] || {
+                    echo "::error::oci-image: rebuild produced no $(basename "${arch}") digest"
+                    exit 1
+                  }
                   if ! cmp -s "${arch}" "${b}"; then
                     echo "::error::oci-image: $(basename "${arch}") digest differs — the rebuild does not reproduce the image"
                     exit 1
@@ -1049,11 +1053,18 @@ jobs:
             case ",${CLASSES// /}," in
               *,pgrx-extension,*)
                 for f in pgrx-a/*.json; do
-                  [[ -f "${f}" ]] || { echo "::error::pgrx images: no index digests to compare"; exit 1; }
+                  [[ -f ${f} ]] || {
+                    echo "::error::pgrx images: no index digests to compare"
+                    exit 1
+                  }
                   b="pgrx-b/$(basename "${f}")"
-                  [[ -f "${b}" ]] || { echo "::error::pgrx images: rebuild produced no $(basename "${f}")"; exit 1; }
-                  da=$(jq -r .digest "${f}"); db=$(jq -r .digest "${b}")
-                  if [[ "${da}" != "${db}" ]]; then
+                  [[ -f ${b} ]] || {
+                    echo "::error::pgrx images: rebuild produced no $(basename "${f}")"
+                    exit 1
+                  }
+                  da=$(jq -r .digest "${f}")
+                  db=$(jq -r .digest "${b}")
+                  if [[ ${da} != "${db}" ]]; then
                     echo "::error::pgrx images: $(basename "${f}" .json) index differs (${da} vs ${db})"
                     exit 1
                   fi
@@ -1069,7 +1080,6 @@ jobs:
             exit 1
           fi
           echo "::notice::repro gate: ${compared} class comparison(s) reproduced"
-
   # The commitment barrier (#349 finding 1). Both proofs are class-
   # independent — the SBOM/triage job runs for every release, and the
   # repro gate derives its own required build set from `inputs.classes` —
@@ -1115,7 +1125,7 @@ jobs:
             name="${p%:*}" result="${p##*:}"
             proofs=$(jq -c --arg n "${name}" --arg r "${result}" \
               '. + [{name: $n, result: $r}]' <<< "${proofs}")
-            if [[ "${result}" != "success" ]]; then
+            if [[ ${result} != "success" ]]; then
               echo "::error::${name} is '${result}' — absence of a proof is never a proof"
               fail=1
             fi
@@ -1134,7 +1144,6 @@ jobs:
               decidedAt: $at, proofs: $proofs}' \
             > "${RUNNER_TEMP}/decision-predicate.json"
           echo "::notice::commit point open: every required proof succeeded"
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-sbom
@@ -1154,7 +1163,6 @@ jobs:
             echo "::error::the sbom artifact is empty — a decision over nothing decides nothing"
             exit 1
           }
-
       - name: Sign the decision under this workflow's identity
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

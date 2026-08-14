@@ -14,6 +14,13 @@
 # errored or paginated away would assert controls nobody checked.
 set -euo pipefail
 
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${SA_WORK:?SA_WORK must be set by guard-identity}"
+: "${SA_CANON_ROOT:?SA_CANON_ROOT must be set by guard-identity}"
+: "${SA_CANON_REF:?SA_CANON_REF must be set by guard-identity}"
+: "${GITHUB_REPOSITORY:?}"
+
 # SA_RULES_FIXTURE_DIR is the dry run's seam (#236): recorded API
 # responses replace the live read, the derivation logic is the same
 # bytes — the point is exercising THIS file without a runner, not a
@@ -22,7 +29,7 @@ if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
   branch_rules=$(cat "${SA_RULES_FIXTURE_DIR}/branch-rules.json")
 else
   [[ -n ${GH_TOKEN:-} ]] || {
-    echo "::error::no GH_TOKEN in the environment — the claims stage must be handed the source-attest environment's read token (#240)"
+    echo "::error::no GH_TOKEN in the environment — the claims stage must be handed the source-attest environment read token (#240)"
     exit 1
   }
   branch_rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/main" --paginate) || {
@@ -43,13 +50,15 @@ add() { # property, evidence-json
 # ORG_SOURCE_HISTORY_PROTECTED: deletion + non-fast-forward blocked,
 # linear history required.
 hist=$(jq -c '[.[] | select(.type == "deletion" or .type == "non_fast_forward" or .type == "required_linear_history")]' <<< "${branch_rules}")
-if [[ $(jq '[.[].type] | unique | length' <<< "${hist}") -eq 3 ]]; then
+hist_types=$(jq '[.[].type] | unique | length' <<< "${hist}")
+if [[ ${hist_types} -eq 3 ]]; then
   add ORG_SOURCE_HISTORY_PROTECTED "${hist}"
 fi
 
 # ORG_SOURCE_SIGNED: required_signatures.
 sig=$(jq -c '[.[] | select(.type == "required_signatures")]' <<< "${branch_rules}")
-if [[ $(jq length <<< "${sig}") -ge 1 ]]; then
+sig_rules=$(jq length <<< "${sig}")
+if [[ ${sig_rules} -ge 1 ]]; then
   add ORG_SOURCE_SIGNED "${sig}"
 fi
 
@@ -61,7 +70,8 @@ gated=$(jq -c '[.[] | select(.type == "required_status_checks")
   | select([.parameters.required_status_checks[]?
       | select(.context == "ci / ci" and .integration_id == 15368)] | length > 0)]' <<< "${branch_rules}")
 gated_live=false
-if [[ $(jq length <<< "${gated}") -ge 1 ]]; then
+gated_rules=$(jq length <<< "${gated}")
+if [[ ${gated_rules} -ge 1 ]]; then
   add ORG_SOURCE_GATED "${gated}"
   gated_live=true
 fi
@@ -71,7 +81,8 @@ fi
 pr=$(jq -c '[.[] | select(.type == "pull_request")
   | select(.parameters.required_review_thread_resolution == true)
   | select(.parameters.allowed_merge_methods == ["squash"])]' <<< "${branch_rules}")
-if [[ $(jq length <<< "${pr}") -ge 1 ]]; then
+pr_rules=$(jq length <<< "${pr}")
+if [[ ${pr_rules} -ge 1 ]]; then
   add ORG_SOURCE_REVIEWED_THREADS "${pr}"
 fi
 
@@ -104,7 +115,7 @@ else
   tag_rulesets="[]"
   for id in ${tag_ids}; do
     detail=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}") || {
-      echo "::error::ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment's read token (#240)"
+      echo "::error::ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment read token (#240)"
       exit 1
     }
     tag_rulesets=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${tag_rulesets}")
@@ -118,13 +129,14 @@ else
   branch_ruleset_details="[]"
   for id in ${branch_ids}; do
     detail=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}") || {
-      echo "::error::branch ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment's read token (#240)"
+      echo "::error::branch ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment read token (#240)"
       exit 1
     }
     branch_ruleset_details=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${branch_ruleset_details}")
   done
 fi
-[[ $(jq length <<< "${tag_rulesets}") -ge 1 ]] || {
+tag_ruleset_count=$(jq length <<< "${tag_rulesets}")
+[[ ${tag_ruleset_count} -ge 1 ]] || {
   echo "::error::no active tag rulesets visible — the org tag rulesets exist (docs/source-track.md), so this token cannot see them; refusing to claim from a blind read (#240)"
   exit 1
 }
@@ -136,7 +148,8 @@ imm=$(jq -c '[.[] | select((.conditions.ref_name.include == ["~ALL"])
   and ([.rules[].type] | contains(["update", "deletion", "non_fast_forward"]))
   and (.bypass_actors == []))
   | {id, rules: [.rules[].type], conditions}]' <<< "${tag_rulesets}")
-if [[ $(jq length <<< "${imm}") -ge 1 ]]; then
+imm_rules=$(jq length <<< "${imm}")
+if [[ ${imm_rules} -ge 1 ]]; then
   add ORG_SOURCE_TAG_IMMUTABLE "${imm}"
 fi
 
@@ -146,7 +159,8 @@ minted=$(jq -c '[.[] | select((.conditions.ref_name.include == ["refs/tags/v*"])
   and ([.rules[].type] | contains(["creation"]))
   and (.bypass_actors == [{actor_id: 4534781, actor_type: "Integration", bypass_mode: "always"}]))
   | {id, rules: [.rules[].type], conditions, bypass_actors}]' <<< "${tag_rulesets}")
-if [[ $(jq length <<< "${minted}") -ge 1 ]]; then
+minted_rules=$(jq length <<< "${minted}")
+if [[ ${minted_rules} -ge 1 ]]; then
   add ORG_SOURCE_RELEASE_TAG_MINTED "${minted}"
 fi
 
@@ -182,4 +196,5 @@ read_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 jq -n --argjson c "${claims}" --arg t "${read_at}" --argjson u "${updated_epochs}" \
   '{rulesReadAt: $t, rulesetsUpdatedAt: $u, controls: $c}' \
   > "${SA_WORK}/claims.json"
-echo "::notice::claims: $(jq -r '[.controls[].property] | join(", ")' "${SA_WORK}/claims.json")"
+properties=$(jq -r '[.controls[].property] | join(", ")' "${SA_WORK}/claims.json")
+echo "::notice::claims: ${properties}"

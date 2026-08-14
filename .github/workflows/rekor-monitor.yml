@@ -94,7 +94,6 @@ jobs:
             --once=true \
             --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
             --config "${config}"
-
       - name: Save the advanced checkpoint
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -1,3 +1,6 @@
+# shellcheck shell=bash
+# Sourced, never executed, so it carries no shebang; the directive is
+# how shellcheck learns the dialect (#82).
 # Shared helpers for the source-attest scripts (#265). Sourced, not
 # executed: chain.sh discovers what needs a link, emit.sh signs links,
 # and both need the same three answers about a revision's note —
@@ -8,6 +11,8 @@
 # A link is a note that parses as a chain link (version + provenance +
 # vsa) — the seed notes and unrelated annotations are not links.
 is_link() {
+  # shellcheck disable=SC2312  # a missing note IS the false answer here;
+  # the masked exit status is the predicate's semantics, not a lost error.
   git notes show "${1}" 2> /dev/null \
     | jq -e '.version and .provenance.bundle and .vsa.bundle' > /dev/null 2>&1
 }
@@ -18,17 +23,29 @@ is_link() {
 note_sha() {
   local obj
   obj=$(git notes list "${1}")
-  git cat-file blob "${obj}" | sha256sum | cut -d" " -f1
+  local blob
+  blob=$(git cat-file blob "${obj}")
+  local sum
+  sum=$(printf '%s' "${blob}" | sha256sum)
+  cut -d" " -f1 <<< "${sum}"
 }
 
 # Verify the link at revision $1 against the pinned org identity — the
 # same check a stranger runs with the published root of trust, nothing
 # more. Dies with a named error rather than returning: extending a
 # chain past a link that fails the contract is never a fallback.
+
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${SA_WORK:?SA_WORK must be set by guard-identity}"
+: "${SA_IDENTITY:?SA_IDENTITY must be set by guard-identity}"
+: "${SA_ISSUER:?SA_ISSUER must be set by guard-identity}"
 verify_link() {
   local rev="${1}" note
   note=$(git notes show "${rev}")
-  jq -r '.provenance.statement' <<< "${note}" | base64 -d > "${SA_WORK}/prev-statement.json"
+  local statement
+  statement=$(jq -r '.provenance.statement' <<< "${note}")
+  base64 -d <<< "${statement}" > "${SA_WORK}/prev-statement.json"
   jq -c '.provenance.bundle' <<< "${note}" > "${SA_WORK}/prev-bundle.json"
   cosign verify-blob \
     --bundle "${SA_WORK}/prev-bundle.json" \

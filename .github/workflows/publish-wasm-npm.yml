@@ -89,7 +89,7 @@ jobs:
           need="11.5.1"
           have=$(npm --version)
           lowest=$(printf '%s\n' "${need}" "${have}" | sort -V | head -1)
-          if [[ "${lowest}" != "${need}" ]]; then
+          if [[ ${lowest} != "${need}" ]]; then
             echo "::error::npm ${have} < ${need}; trusted publishing needs ${need}+ — bump the pin in this repository's mise config"
             exit 1
           fi
@@ -101,7 +101,7 @@ jobs:
           fi
           tarball=$(compgen -G "dist/*.tgz")
           count=$(wc -l <<< "${tarball}")
-          if [[ "${count}" -ne 1 ]]; then
+          if [[ ${count} -ne 1 ]]; then
             echo "::error::expected exactly one tarball, found ${count}"
             exit 1
           fi

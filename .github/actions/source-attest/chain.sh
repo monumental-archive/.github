@@ -23,7 +23,14 @@
 # Everything here is git plumbing against a scratch clone — no checkout
 # of a working tree, nothing from the attested repository is executed.
 set -euo pipefail
+
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${SA_WORK:?SA_WORK must be set by guard-identity}"
+: "${SA_GENESIS:?SA_GENESIS must be set (true|false)}"
+: "${GITHUB_SHA:?}"
 # shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 scratch="${SA_WORK}/repo"
@@ -58,6 +65,7 @@ holes=()
 genesis_found=""
 c="${GITHUB_SHA}"
 while [[ -n ${c} ]]; do
+  # shellcheck disable=SC2310  # predicate, manages its own exit status
   if is_link "${c}"; then
     if git notes show "${c}" | jq -r '.provenance.statement' | base64 -d \
       | jq -e '.predicate.prev == null' > /dev/null 2>&1; then
@@ -72,7 +80,10 @@ done
 
 if [[ ${SA_GENESIS} == "true" ]]; then
   if [[ -n ${genesis_found} ]] || ((${#holes[@]} < 1)) || [[ ${holes[0]} != "${GITHUB_SHA}" ]] \
-    || ((${#holes[@]} != $(git rev-list --first-parent --count "${GITHUB_SHA}"))); then
+    || {
+      walked=$(git rev-list --first-parent --count "${GITHUB_SHA}")
+      ((${#holes[@]} != walked))
+    }; then
     # Any link on the walked history — genesis or not — refuses a
     # re-founding: a full-history walk that stopped early, or that
     # collected fewer holes than there are revisions, saw a link.
@@ -93,7 +104,7 @@ fi
 # parent linked by the time its turn comes.
 : > "${SA_WORK}/heal.list"
 for ((i = ${#holes[@]} - 1; i >= 0; i--)); do
-  echo "${holes[$i]}" >> "${SA_WORK}/heal.list"
+  echo "${holes[${i}]}" >> "${SA_WORK}/heal.list"
 done
 
 count=$(wc -l < "${SA_WORK}/heal.list" | tr -d " ")

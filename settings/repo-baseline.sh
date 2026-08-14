@@ -13,6 +13,9 @@ org="monumental-archive"
 # True when the repo carries publish.yml as an ENTRY workflow (tag-triggered
 # caller stub), false when absent or when it is a reusable — the canon
 # repo's publish.yml is `workflow_call` and must not grow an environment.
+# shellcheck disable=SC2310  # deliberate predicate: it manages its own exit
+# status (`|| return 1`, then the grep result), so the set -e suspension that
+# calling it in an `if` causes has nothing to suspend.
 publish_yml_is_entry() {
   local content
   content="$(gh api "repos/${org}/${1}/contents/.github/workflows/publish.yml" \
@@ -70,6 +73,7 @@ for repo in ${repos}; do
       # attest, which is the one place a pause is unsafe). Entry, not
       # reusable: this repo's own publish.yml is the shared workflow_call
       # workflow, and the canon repo publishes nothing.
+      # shellcheck disable=SC2310  # publish_yml_is_entry manages its own exit status
       if publish_yml_is_entry "${repo}"; then
         gh api -X PUT "repos/${org}/${repo}/environments/publish" > /dev/null
       fi
@@ -91,6 +95,7 @@ for repo in ${repos}; do
         echo "drift: ${repo} OIDC sub claim is not immutable (${immutable})"
         drift=1
       fi
+      # shellcheck disable=SC2310  # publish_yml_is_entry manages its own exit status
       if publish_yml_is_entry "${repo}" \
         && ! gh api "repos/${org}/${repo}/environments/publish" \
           > /dev/null 2>&1; then
@@ -143,6 +148,9 @@ if [[ ${mode} == check ]]; then
     drift=1
     packages='[]'
   fi
+  # shellcheck disable=SC2312  # process substitution: capturing first would
+  # turn an empty result into one blank line, which is a worse bug than the
+  # masked status. The producing command is git/jq over local state.
   while IFS=$'\t' read -r name visibility repo_private; do
     [[ -n ${name} ]] || continue
     if [[ ${repo_private} == "false" && ${visibility} != "public" ]]; then

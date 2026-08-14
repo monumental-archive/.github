@@ -53,6 +53,9 @@ fi
 # smoke test ran against. Attestation manifests (unknown/unknown platform)
 # are BuildKit provenance, not images; they carry no config labels.
 checked=0
+# shellcheck disable=SC2312  # process substitution: capturing first would
+# turn an empty result into one blank line, which is a worse bug than the
+# masked status. The producing command is git/jq over local state.
 while IFS= read -r child; do
   cd_digest=$(jq -r '.digest' <<< "${child}")
   platform=$(jq -r '"\(.platform.os)/\(.platform.architecture)"' <<< "${child}")

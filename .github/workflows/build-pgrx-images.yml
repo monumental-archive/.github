@@ -111,7 +111,7 @@ jobs:
           fi
           include="[]"
           for pg in "${majors[@]}"; do
-            if [[ ! "${pg}" =~ ^[0-9]+$ ]]; then
+            if [[ ! ${pg} =~ ^[0-9]+$ ]]; then
               echo "::error::${pg} is not a PG major"
               exit 1
             fi
@@ -123,7 +123,6 @@ jobs:
             echo "matrix=${matrix}"
             echo "expected=${expected}"
           } >> "${GITHUB_OUTPUT}"
-
   image:
     name: Assemble and prove the pg${{ matrix.pg }} artifact image
     needs: plan
@@ -155,14 +154,13 @@ jobs:
           name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
           for arch in amd64 arm64; do
             tarball="tarballs/${name}-${UNTRUSTED_VERSION}-pg${PG}-linux-${arch}.tar.gz"
-            if [[ ! -f "${tarball}" ]]; then
+            if [[ ! -f ${tarball} ]]; then
               echo "::error::missing ${tarball} — the extension build did not produce this cell"
               exit 1
             fi
             mkdir -p "staged/${arch}"
             tar -xzf "${tarball}" -C "staged/${arch}"
           done
-
       - name: Resolve the image name
         id: name
         env:
@@ -172,7 +170,6 @@ jobs:
           base=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '[:upper:]' '[:lower:]')
           owner=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           echo "image=ghcr.io/${owner}/${base}" >> "${GITHUB_OUTPUT}"
-
       - name: Create a container-driver builder
         run: docker buildx create --use --name org-pgrx --driver docker-container
 
@@ -195,7 +192,7 @@ jobs:
           pair=$(printf '%s\n%s' "0.12" "${v}")
           ordered=$(sort -V <<< "${pair}")
           floor=$(head -1 <<< "${ordered}")
-          if [[ -z "${v}" ]] || [[ "${floor}" != "0.12" ]]; then
+          if [[ -z ${v} ]] || [[ ${floor} != "0.12" ]]; then
             echo "::error::buildx ${v:-unknown} < 0.12: index annotations would be dropped silently"
             exit 1
           fi
@@ -230,7 +227,7 @@ jobs:
             --metadata-file /tmp/meta.json \
             .
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
-          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::no index digest from the push"
             exit 1
           fi
@@ -245,7 +242,6 @@ jobs:
             --arg tag "${UNTRUSTED_VERSION}-pg${PG}-artifact" \
             '{pg: $pg, image: $image, tag: $tag, digest: $digest}' > "/tmp/digests/pg${PG}.json"
           echo "::notice::pg${PG} index ${digest}"
-
       - name: Prove the pushed image the way a consumer uses it
         if: ${{ !inputs.dry-run && !inputs.repro }}
         env:
@@ -279,7 +275,6 @@ jobs:
               psql -c \"CREATE EXTENSION ${ext};\"
             "
           '
-
       - name: Assert the published metadata equals the facts
         if: ${{ !inputs.dry-run && !inputs.repro }}
         env:
@@ -293,7 +288,6 @@ jobs:
           DIGEST=$(jq -r .digest "/tmp/digests/pg${PG}.json")
           export DIGEST
           .org-canon/release/assert-image-facts.sh
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.dry-run }}
         with:
@@ -327,7 +321,7 @@ jobs:
           expected_count=$(jq -r 'length' <<< "${EXPECTED}")
           images=$(jq -sc '.' digests/*.json)
           got=$(jq -r 'length' <<< "${images}")
-          if [[ "${got}" != "${expected_count}" ]]; then
+          if [[ ${got} != "${expected_count}" ]]; then
             echo "::error::${got} image digests for ${expected_count} planned majors; refusing a partial set"
             exit 1
           fi

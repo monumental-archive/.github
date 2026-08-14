@@ -92,13 +92,13 @@ jobs:
           # generator's: these reads parse what the generator writes.
           name_lines=$(grep -A1 '^[[:space:]]*- family-names:' cff.yaml \
             | paste - - | sed -E 's/.*family-names: *"?([^"]*)"?.*given-names: *"?([^"]*)"?.*/\1, \2/' || true)
-          if [[ -z "${name_lines}" ]]; then
+          if [[ -z ${name_lines} ]]; then
             echo "::error::CITATION.cff carries no authors — the record credits people, never an account name"
             exit 1
           fi
           creators=$(printf '%s\n' "${name_lines}" | jq -R '{name: .}' | jq -sc '.')
           licence=$(sed -n 's/^license: //p' cff.yaml | head -1)
-          if [[ ! "${licence}" =~ ^[A-Za-z0-9.+-]+$ ]]; then
+          if [[ ! ${licence} =~ ^[A-Za-z0-9.+-]+$ ]]; then
             echo "::error::CITATION.cff license '${licence}' is not a single SPDX id — Zenodo's vocabulary holds ids, not expressions"
             exit 1
           fi
@@ -119,13 +119,13 @@ jobs:
           # can never mis-resolve the concept or split the citation
           # record (#316 addendum A).
           concept_doi=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' cff.yaml)
-          if [[ -z "${concept_doi}" ]]; then
+          if [[ -z ${concept_doi} ]]; then
             # First mint. Refuse if a submitted deposition already bears
             # this title — a concept the tree failed to record; minting
             # again would split the citation record permanently.
             listing=$(api "${BASE_URL}/api/deposit/depositions?q=title:%22${repo##*/}%22&size=10")
             existing=$(jq -r --arg t "${title}" '[.[] | select(.title == $t and .submitted == true)] | length' <<< "${listing}")
-            if [[ "${existing}" != "0" ]]; then
+            if [[ ${existing} != "0" ]]; then
               echo "::error::a submitted deposition already bears this title but CITATION.cff records no concept DOI — record it under identifiers: before minting again"
               exit 1
             fi
@@ -136,7 +136,7 @@ jobs:
             # previous files, which are removed so the deposit is exactly
             # this release.
             concept_recid="${concept_doi##*.}"
-            if [[ ! "${concept_recid}" =~ ^[0-9]+$ ]]; then
+            if [[ ! ${concept_recid} =~ ^[0-9]+$ ]]; then
               echo "::error::CITATION.cff concept DOI '${concept_doi}' does not end in a Zenodo record id"
               exit 1
             fi
@@ -150,7 +150,7 @@ jobs:
             # on it, and the DOI was lost after the commitment point (#316).
             latest=$(curl -sSfL "${BASE_URL}/api/records/${concept_recid}/versions/latest" \
               | jq -r '.id // empty') || true
-            if [[ ! "${latest}" =~ ^[0-9]+$ ]]; then
+            if [[ ! ${latest} =~ ^[0-9]+$ ]]; then
               echo "::error::the concept record ${concept_recid} did not resolve to a latest version id (got '${latest:-nothing}')"
               exit 1
             fi
@@ -160,7 +160,7 @@ jobs:
             depself=$(jq -r .links.self <<< "${dep}")
             file_ids=$(jq -r '.files[].id' <<< "${dep}")
             while IFS= read -r f; do
-              if [[ -n "${f}" ]]; then
+              if [[ -n ${f} ]]; then
                 api -X DELETE "${depself}/files/${f}" > /dev/null
               fi
             done <<< "${file_ids}"
@@ -176,7 +176,7 @@ jobs:
           published=$(api -X POST "${publish}")
           doi=$(jq -r '.doi' <<< "${published}")
           concept=$(jq -r '.conceptdoi // "first release — concept DOI equals this version"' <<< "${published}")
-          if [[ -z "${doi}" || "${doi}" == "null" ]]; then
+          if [[ -z ${doi} || ${doi} == "null" ]]; then
             echo "::error::publish returned no DOI"
             exit 1
           fi
@@ -185,7 +185,7 @@ jobs:
             echo
             echo "- version: \`${doi}\`"
             echo "- concept: \`${concept}\`"
-            if [[ -z "${concept_doi}" ]]; then
+            if [[ -z ${concept_doi} ]]; then
               echo
               echo "**First mint** — record the concept DOI in CITATION.cff"
               echo "(\`identifiers:\`, via fix:citation's preserved field) before"

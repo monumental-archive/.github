@@ -101,6 +101,11 @@ else
     "" | null | NOASSERTION | NONE | OTHER)
       fail "no derivable licence: no manifest, and the API answered '${license:-nothing}' for ${revision}"
       ;;
+    *)
+      # A real SPDX id. Validated against the grammar and the vendored id
+      # lists below — this branch exists so an unrecognised value cannot
+      # fall out of the case unremarked.
+      ;;
   esac
 fi
 

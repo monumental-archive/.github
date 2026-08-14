@@ -211,11 +211,11 @@ jobs:
               exit 1
               ;;
           esac
-          if [[ "${UNTRUSTED_MODE}" == "verdict" && "${DRY_RUN}" == "true" ]]; then
+          if [[ ${UNTRUSTED_MODE} == "verdict" && ${DRY_RUN} == "true" ]]; then
             echo "::error::a rehearsal must never assemble a PASSED verdict"
             exit 1
           fi
-          if [[ -n "${UNTRUSTED_RELEASE_TAG}" && ! "${UNTRUSTED_RELEASE_TAG}" =~ ^v[0-9A-Za-z.+-]+$ ]]; then
+          if [[ -n ${UNTRUSTED_RELEASE_TAG} && ! ${UNTRUSTED_RELEASE_TAG} =~ ^v[0-9A-Za-z.+-]+$ ]]; then
             echo "::error::release-tag is not a plausible release tag"
             exit 1
           fi
@@ -230,16 +230,16 @@ jobs:
           count=0
           while IFS= read -r line; do
             line="${line%$'\r'}"
-            [[ -n "${line}" ]] || continue
+            [[ -n ${line} ]] || continue
             count=$((count + 1))
-            if [[ ! "${line}" =~ ${record} ]]; then
+            if [[ ! ${line} =~ ${record} ]]; then
               # Not echoed: the line is caller-controlled.
               echo "::error::subject line ${count} is not a sha256sum record"
               exit 1
             fi
             digest="${line%% *}"
             name="${line##*  }"
-            if [[ "${DRY_RUN}" == "true" ]]; then
+            if [[ ${DRY_RUN} == "true" ]]; then
               echo "${digest}  ${name}" >> "${out}"
               echo "::warning::rehearsal: ${name} was NOT proved against a registry"
               continue
@@ -252,11 +252,12 @@ jobs:
             case "${name}" in
               *.crate)
                 crate="${name%-*}"
-                ver="${name##*-}"; ver="${ver%.crate}"
+                ver="${name##*-}"
+                ver="${ver%.crate}"
                 url="https://static.crates.io/crates/${crate}/${crate}-${ver}.crate"
                 ;;
               *.tgz)
-                if [[ -z "${UNTRUSTED_NPM_PACKAGE}" ]]; then
+                if [[ -z ${UNTRUSTED_NPM_PACKAGE} ]]; then
                   echo "::error::${name} is an npm tarball but no npm-package was declared"
                   exit 1
                 fi
@@ -264,7 +265,7 @@ jobs:
                 # LAST @ so scoped names survive.
                 pkg="${UNTRUSTED_NPM_PACKAGE%@*}"
                 ver="${UNTRUSTED_NPM_PACKAGE##*@}"
-                if [[ -z "${pkg}" || -z "${ver}" || "${pkg}" == "${UNTRUSTED_NPM_PACKAGE}" ]]; then
+                if [[ -z ${pkg} || -z ${ver} || ${pkg} == "${UNTRUSTED_NPM_PACKAGE}" ]]; then
                   echo "::error::npm-package must be name@version, got ${UNTRUSTED_NPM_PACKAGE}"
                   exit 1
                 fi
@@ -276,7 +277,7 @@ jobs:
                 # refused — never guessed from the filename. Publishing is
                 # what makes this URL exist AND what makes it immutable,
                 # so this leg only runs post-publish.
-                if [[ -z "${UNTRUSTED_RELEASE_TAG}" ]]; then
+                if [[ -z ${UNTRUSTED_RELEASE_TAG} ]]; then
                   echo "::error::${name}: no registry claims this subject type and no release-tag was declared"
                   exit 1
                 fi
@@ -295,12 +296,12 @@ jobs:
               echo "fetch of ${name} not ready (attempt ${attempt}), retrying"
               sleep $((attempt * 5))
             done
-            if [[ -z "${fetched}" ]]; then
+            if [[ -z ${fetched} ]]; then
               echo "::error::${name}: the published bytes could not be fetched"
               exit 1
             fi
             actual=$(sha256sum "${workdir}/${name}" | cut -d' ' -f1)
-            if [[ "${actual}" != "${digest}" ]]; then
+            if [[ ${actual} != "${digest}" ]]; then
               echo "::error::${name}: built ${digest}, registry served ${actual}"
               exit 1
             fi
@@ -314,7 +315,7 @@ jobs:
           # the subject name the signer attested (sign.yml, image mode)
           # and the coverage equality below compares names exactly.
           imgcount=0
-          if [[ -n "${UNTRUSTED_IMAGES//[[:space:]]/}" ]]; then
+          if [[ -n ${UNTRUSTED_IMAGES//[[:space:]]/} ]]; then
             if ! jq -e 'type == "array" and length > 0 and all(.[];
                 (.image | type == "string") and (.tag | type == "string")
                 and (.digest | type == "string"))' \
@@ -328,19 +329,19 @@ jobs:
               <<< "${UNTRUSTED_IMAGES}" > "${workdir}/images.tsv"
             while IFS=$'\t' read -r image tag idigest; do
               imgcount=$((imgcount + 1))
-              if [[ ! "${image}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
+              if [[ ! ${image} =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
                 echo "::error::image ${imgcount} is not a lowercase ghcr.io reference"
                 exit 1
               fi
-              if [[ ! "${tag}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              if [[ ! ${tag} =~ ^[A-Za-z0-9._-]+$ ]]; then
                 echo "::error::image ${imgcount} has an implausible tag"
                 exit 1
               fi
-              if [[ ! "${idigest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              if [[ ! ${idigest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
                 echo "::error::image ${imgcount} digest is not sha256:<64 lowercase hex>"
                 exit 1
               fi
-              if [[ "${DRY_RUN}" == "true" ]]; then
+              if [[ ${DRY_RUN} == "true" ]]; then
                 echo "${idigest#sha256:}  ${image}" >> "${out}"
                 echo "::warning::rehearsal: ${image}:${tag} was NOT resolved against the registry"
                 continue
@@ -353,7 +354,7 @@ jobs:
               docker buildx imagetools inspect "${image}:${tag}" \
                 --format '{{json .Manifest}}' > "${workdir}/tag-manifest.json"
               resolved=$(jq -r '.digest' "${workdir}/tag-manifest.json")
-              if [[ "${resolved}" != "${idigest}" ]]; then
+              if [[ ${resolved} != "${idigest}" ]]; then
                 echo "::error::${image}:${tag} resolves to ${resolved}, attested ${idigest}"
                 exit 1
               fi
@@ -372,7 +373,6 @@ jobs:
             echo "SUBJECTS_EOF"
           } >> "${GITHUB_OUTPUT}"
           echo "::notice::${count} file subject(s) and ${imgcount} image subject(s) proved"
-
       # The ref the caller pinned, read from the same $/ resolution that
       # fetched this workflow — it names the exact canon tree (workflows,
       # scripts, toolbelt, signer identity) that rendered this verdict, which
@@ -395,7 +395,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ ! "${UNTRUSTED_VERSION}" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+          if [[ ! ${UNTRUSTED_VERSION} =~ ^[0-9A-Za-z.+-]+$ ]]; then
             echo "::error::version is not a plausible version string"
             exit 1
           fi
@@ -403,7 +403,7 @@ jobs:
           # expression came back empty (#158). The carrier is the $/
           # resolution now, but a signed verdict naming no policy must
           # never recur — refuse rather than render.
-          if [[ -z "${POLICY_REF}" ]]; then
+          if [[ -z ${POLICY_REF} ]]; then
             echo "::error::POLICY_REF is empty — refusing a verdict with no policy"
             exit 1
           fi
@@ -420,12 +420,12 @@ jobs:
           refs=$(grep -rhoE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' \
             "${CANON_PATH}/.github/workflows/" || true)
           pin=$(cut -d@ -f2 <<< "${refs}" | sort -u || true)
-          if [[ -z "${pin}" ]]; then
+          if [[ -z ${pin} ]]; then
             echo "::error::the canon tree pins no sign.yml uses: — nothing to derive the signer identity from"
             exit 1
           fi
           pin_count=$(wc -l <<< "${pin}" || true)
-          if [[ "${pin_count// /}" != "1" ]]; then
+          if [[ ${pin_count// /} != "1" ]]; then
             echo "::error::the canon tree pins sign.yml at more than one digest — a tree states the trusted signer once: ${pin//$'\n'/ }"
             exit 1
           fi
@@ -434,10 +434,11 @@ jobs:
           manifest="${WORKDIR}/verified.sha256"
           bundles="${WORKDIR}/bundles"
           mkdir -p "${bundles}"
-          covered="${WORKDIR}/covered"      # subject lines proven by verified provenance
-          seen="${WORKDIR}/seen-bundles"    # bundle digests already verified
+          covered="${WORKDIR}/covered"   # subject lines proven by verified provenance
+          seen="${WORKDIR}/seen-bundles" # bundle digests already verified
           atts="${WORKDIR}/input-attestations.json"
-          : > "${covered}"; : > "${seen}"
+          : > "${covered}"
+          : > "${seen}"
           echo '[]' > "${atts}"
 
           # Iterate over a copy: the subset check greps the manifest while
@@ -445,7 +446,7 @@ jobs:
           # read/write hazard even when both are reads (SC2094).
           cp "${manifest}" "${WORKDIR}/manifest-iter"
           while IFS= read -r line; do
-            [[ -n "${line}" ]] || continue
+            [[ -n ${line} ]] || continue
             digest="${line%% *}"
             name="${line##*  }"
             api="repos/${GITHUB_REPOSITORY}/attestations/sha256:${digest}"
@@ -462,19 +463,19 @@ jobs:
               echo "attestation fetch for ${name} not ready (attempt ${attempt}), retrying"
               sleep $((attempt * 5))
             done
-            if [[ -z "${fetched}" ]]; then
+            if [[ -z ${fetched} ]]; then
               echo "::error::${name}: no attestation retrievable for sha256:${digest}"
               exit 1
             fi
             while IFS= read -r bundle; do
-              [[ -n "${bundle}" ]] || continue
+              [[ -n ${bundle} ]] || continue
               # Only build provenance is the evidence this verdict
               # summarises; other predicate types over the same subject
               # (the VSA itself, VEX) are claims, not evidence.
               ptype=$(printf '%s' "${bundle}" \
                 | jq -r '.dsseEnvelope.payload' | base64 -d \
                 | jq -r '.predicateType')
-              [[ "${ptype}" == "https://slsa.dev/provenance/v1" ]] || continue
+              [[ ${ptype} == "https://slsa.dev/provenance/v1" ]] || continue
               bsha=$(printf '%s' "${bundle}" | sha256sum | cut -d' ' -f1)
               bfile="${bundles}/${bsha}.json"
               if ! grep -qx "${bsha}" "${seen}"; then
@@ -503,14 +504,14 @@ jobs:
                 cert_digest=$(jq -r \
                   '.[0].verificationResult.signature.certificate.buildSignerDigest // empty' \
                   "${WORKDIR}/result.json")
-                if [[ "${cert_digest}" != "${pin}" ]]; then
+                if [[ ${cert_digest} != "${pin}" ]]; then
                   echo "::error::${name}: provenance signed at '${cert_digest}', pin is '${pin}'"
                   exit 1
                 fi
                 builder=$(jq -r \
                   '.[0].verificationResult.statement.predicate.runDetails.builder.id // empty' \
                   "${WORKDIR}/result.json")
-                if [[ "${builder}" != "https://github.com/${signer_path}@"* ]]; then
+                if [[ ${builder} != "https://github.com/${signer_path}@"* ]]; then
                   echo "::error::${name}: builder.id does not name the org signer"
                   exit 1
                 fi
@@ -536,7 +537,7 @@ jobs:
                 buildtype=$(jq -r \
                   '.[0].verificationResult.statement.predicate.buildDefinition.buildType // empty' \
                   "${WORKDIR}/result.json")
-                if [[ "${buildtype}" != "https://actions.github.io/buildtypes/workflow/v1" ]]; then
+                if [[ ${buildtype} != "https://actions.github.io/buildtypes/workflow/v1" ]]; then
                   echo "::error::${name}: buildType is not the GitHub Actions buildType"
                   exit 1
                 fi
@@ -548,7 +549,7 @@ jobs:
                   '.[0].verificationResult.statement.predicate.buildDefinition.externalParameters
                    | keys[] | select(. != "workflow" and . != "inputs")' \
                   "${WORKDIR}/result.json")
-                if [[ -n "${unrecognized}" ]]; then
+                if [[ -n ${unrecognized} ]]; then
                   # Not echoed: the field name is attacker-controlled.
                   echo "::error::${name}: externalParameters carries an unrecognised field"
                   exit 1
@@ -566,10 +567,10 @@ jobs:
                   | {
                     IFS=$'\t' read -r wf_repo wf_ref wf_path
                     fail=""
-                    [[ "${wf_repo}" == "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" ]] || fail="repository"
-                    [[ "${wf_ref}" == "${GITHUB_REF}" ]] || fail="${fail} ref"
-                    [[ "${wf_path}" == "${expected_path}" ]] || fail="${fail} path"
-                    if [[ -n "${fail}" ]]; then
+                    [[ ${wf_repo} == "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" ]] || fail="repository"
+                    [[ ${wf_ref} == "${GITHUB_REF}" ]] || fail="${fail} ref"
+                    [[ ${wf_path} == "${expected_path}" ]] || fail="${fail} path"
+                    if [[ -n ${fail} ]]; then
                       # Field names only; the values are attacker-controlled.
                       echo "::error::${name}: externalParameters.workflow does not match this run:${fail}"
                       exit 1
@@ -602,7 +603,7 @@ jobs:
           # ...and no verified subject the provenance does not cover: the
           # union of statement subjects must equal the manifest exactly.
           missing=$(grep -vxFf "${covered}" "${manifest}" || true)
-          if [[ -n "${missing}" ]]; then
+          if [[ -n ${missing} ]]; then
             echo "::error::a verified subject has no verified provenance covering it"
             exit 1
           fi
@@ -614,12 +615,12 @@ jobs:
 
           # policy.digest pins WHICH canon tree rendered this verdict. The
           # ref may be a tag; the commit is the digest the spec wants.
-          if [[ "${POLICY_REF}" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ ${POLICY_REF} =~ ^[0-9a-f]{40}$ ]]; then
             policy_sha="${POLICY_REF}"
           else
             policy_sha=$(gh api "repos/monumental-archive/.github/commits/${POLICY_REF}" --jq '.sha')
           fi
-          if [[ ! "${policy_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ ! ${policy_sha} =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::could not resolve the policy ref to a commit"
             exit 1
           fi
@@ -637,7 +638,7 @@ jobs:
           gh release download "v${UNTRUSTED_VERSION}" --repo "${GITHUB_REPOSITORY}" \
             --pattern "*.spdx.json" --dir "${WORKDIR}/sbom-assets"
           sboms=$(find "${WORKDIR}/sbom-assets" -type f -name "*.spdx.json")
-          if [[ -z "${sboms}" ]]; then
+          if [[ -z ${sboms} ]]; then
             echo "::error::the release has no SBOM asset — the decision has no subject to verify against"
             exit 1
           fi
@@ -657,21 +658,21 @@ jobs:
           # added asset can forge. Two winners is ambiguity, not success.
           sfile=""
           while IFS= read -r cand; do
-            [[ -n "${cand}" ]] || continue
+            [[ -n ${cand} ]] || continue
             gh attestation verify "${cand}" \
               --repo "${GITHUB_REPOSITORY}" \
               --signer-workflow "${decision_workflow}" \
               --deny-self-hosted-runners \
               --predicate-type "${decision_type}" \
               --format json > "${WORKDIR}/decision.candidate.json" 2> /dev/null || continue
-            if [[ -n "${sfile}" ]]; then
+            if [[ -n ${sfile} ]]; then
               echo "::error::more than one SBOM asset carries a release decision — ambiguous, refusing the verdict"
               exit 1
             fi
             sfile="${cand}"
             mv "${WORKDIR}/decision.candidate.json" "${WORKDIR}/decision.json"
           done <<< "${sboms}"
-          if [[ -z "${sfile}" ]]; then
+          if [[ -z ${sfile} ]]; then
             echo "::error::no SBOM asset carries a verifiable release decision — refusing the verdict"
             exit 1
           fi
@@ -725,7 +726,6 @@ jobs:
           # run just re-proved — the same lines, no re-derivation.
           cp "${manifest}" "${RUNNER_TEMP}/vsa-subjects.sha256"
           echo "::notice::verdict assembled: ${opened} attestation(s) opened and verified"
-
       # The verdict signs ITSELF (#264): the predicate above is an output
       # of the checks this job just ran, and the certificate this step
       # mints names this file — so "who computed this verdict" is a
@@ -778,13 +778,13 @@ jobs:
           }
           distinct=$(sort -u "${WORKDIR}/source-revisions")
           count=$(wc -l <<< "${distinct}" | tr -d ' ')
-          if [[ "${count}" -ne 1 ]]; then
+          if [[ ${count} -ne 1 ]]; then
             echo "::error::verified bundles disagree on the source revision — one release, one revision, or no claim"
             while IFS= read -r r; do echo "::error::  ${r}"; done <<< "${distinct}"
             exit 1
           fi
           src="${distinct}"
-          if [[ ! "${src}" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ ! ${src} =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::the verified provenance carries no source gitCommit — enrichment would claim nothing"
             exit 1
           fi
@@ -792,7 +792,7 @@ jobs:
           deps='[]'
           adddep() { # name, uri, sha256 (empty = digestless oci entry)
             local entry
-            if [[ -n "${3}" ]]; then
+            if [[ -n ${3} ]]; then
               entry=$(jq -cn --arg n "${1}" --arg u "${2}" --arg d "${3}" \
                 '{name: $n, uri: $u, digest: {sha256: $d}}')
             else
@@ -822,8 +822,8 @@ jobs:
           # declaration from the call site that ran the matrix (the #306
           # pattern). A declaration the pinned tree cannot honour is a
           # failure, not a silent skip.
-          if [[ -n "${UNTRUSTED_BASE_MAJORS// /}" ]]; then
-            if [[ ! "${UNTRUSTED_BASE_MAJORS// /}" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+          if [[ -n ${UNTRUSTED_BASE_MAJORS// /} ]]; then
+            if [[ ! ${UNTRUSTED_BASE_MAJORS// /} =~ ^[0-9]+(,[0-9]+)*$ ]]; then
               echo "::error::base-majors must be comma-separated majors, got: ${UNTRUSTED_BASE_MAJORS}"
               exit 1
             fi
@@ -844,7 +844,7 @@ jobs:
             for pg in "${majors[@]}"; do
               for role in build smoke; do
                 img=$(jq -r --arg pg "${pg}" --arg r "${role}" '.[$r][$pg] // empty' <<< "${mapping}")
-                if [[ -z "${img}" ]]; then
+                if [[ -z ${img} ]]; then
                   echo "::error::declared base major pg${pg} has no ${role} row in the pinned docker/pgrx-base-images.toml — the declaration cannot be honoured"
                   exit 1
                 fi
@@ -881,7 +881,6 @@ jobs:
             }' > "${RUNNER_TEMP}/enrichment-predicate.json"
           depcount=$(jq length <<< "${deps}")
           echo "::notice::enrichment assembled: ${depcount} resolved dependencies"
-
       - name: Sign the enrichment under this workflow's own identity
         if: inputs.mode == 'verdict'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

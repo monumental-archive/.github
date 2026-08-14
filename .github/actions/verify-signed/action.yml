@@ -65,20 +65,20 @@ runs:
         path="${path%@refs/*}"
         digest=$(gh api \
           "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_WORKFLOW_SHA}" \
-          --jq '.content' | base64 -d |
-          grep -oE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' |
-          cut -d@ -f2 | sort -u)
-        if [[ -z "${digest}" ]]; then
+          --jq '.content' | base64 -d \
+          | grep -oE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' \
+          | cut -d@ -f2 | sort -u)
+        if [[ -z ${digest} ]]; then
           echo "::error::${path} at ${GITHUB_WORKFLOW_SHA} pins no sign.yml uses: — nothing to derive --signer-digest from (call verify-signed from the workflow that calls the signer)"
           exit 1
         fi
-        if [[ "$(wc -l <<< "${digest}" | tr -d ' ')" != "1" ]]; then
+        digest_lines=$(wc -l <<< "${digest}")
+        if [[ ${digest_lines// /} != "1" ]]; then
           echo "::error::${path} pins sign.yml at more than one digest — a tree states the trusted signer once: ${digest//$'\n'/ }"
           exit 1
         fi
         echo "signer digest, derived from ${path}: ${digest}"
         echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
-
     - name: Verify each artifact under both identity flags
       shell: bash
       env:

@@ -40,6 +40,10 @@
 # dist/*.spdx.json, writes dist/<base>-<VERSION>.vex.openvex.json.
 set -euo pipefail
 
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${GITHUB_REPOSITORY:?}"
+
 [[ -n ${VERSION:-} ]] || {
   echo "::error::VERSION is required"
   exit 1
@@ -74,6 +78,7 @@ if [[ -d ${vexdir} ]]; then
       | select(test("^pkg:.*/[^/@]+@.+$") | not)] | .[]')
   if [[ -n ${bad} ]]; then
     echo "::error::decision product is not a pkg:<type>/…/<name>@<version> purl:"
+    # shellcheck disable=SC2001  # per-LINE prefix; ${x//} cannot do this legibly
     sed "s/^/  /" <<< "${bad}"
     exit 1
   fi
@@ -117,7 +122,8 @@ done
 # from this one expression.
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 release_purl="pkg:github/${GITHUB_REPOSITORY}@v${VERSION}"
-joined=$(jq -cn --argjson findings "$(cat "${all}")" --argjson decisions "${decisions}" '
+all_findings=$(cat "${all}")
+joined=$(jq -cn --argjson findings "${all_findings}" --argjson decisions "${decisions}" '
   {
     matched: [$findings[] as $f | $decisions[]
       | select(.vuln == $f.id and .name == $f.name and .version == $f.version)],
@@ -131,7 +137,8 @@ joined=$(jq -cn --argjson findings "$(cat "${all}")" --argjson decisions "${deci
 n_matched=$(jq '.matched | length' <<< "${joined}")
 n_reported=$(jq '.reported | length' <<< "${joined}")
 
-if [[ $(jq '.undecided | length' <<< "${joined}") -ne 0 ]]; then
+undecided=$(jq '.undecided | length' <<< "${joined}")
+if [[ ${undecided} -ne 0 ]]; then
   echo "::error::undecided advisories in this release's SBOM — triage before release (docs/dependency-track.md):"
   jq -r '.undecided[] | "  \(.id)  \(.name)@\(.version)"' <<< "${joined}"
   echo "::error::record each decision in the canon's security/vex/, keyed by package@version"
@@ -164,4 +171,6 @@ jq -n --argjson joined "${joined}" \
   echo "::error::derivation produced nothing despite ${n_matched} match(es)"
   exit 1
 }
+# shellcheck disable=SC2312  # diagnostic output only; a failure here
+# degrades a log line, it does not change what is written or decided.
 echo "::notice::derived VEX: $(jq '.statements | length' "${out}") statement(s) over ${release_purl} (${out##*/}); ${n_reported} base-layer finding(s) on the rebuild cadence"

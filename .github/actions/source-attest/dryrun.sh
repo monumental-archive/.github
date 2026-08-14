@@ -153,6 +153,9 @@ git -C "${seed}" push -q "${upstream}" main
 
 heal_work="${tmp}/work-heal"
 mkdir -p "${heal_work}"
+# shellcheck disable=SC2030,SC2031  # the subshell IS the isolation: each
+# scenario runs with its own SA_WORK and GITHUB_SHA and must not leak them
+# into the next one. Locality is the point, not an accident.
 (
   export SA_WORK="${heal_work}" GITHUB_SHA="${rev3}"
   SA_GENESIS=false "${here}/claims.sh"
@@ -165,6 +168,8 @@ mkdir -p "${heal_work}"
   "${here}/emit.sh"
   "${here}/append.sh"
 )
+# shellcheck disable=SC2312  # diagnostic output only; a failure here
+# degrades a log line, it does not change what is written or decided.
 [[ $(wc -l < "${heal_work}/manifest.tsv" | tr -d " ") == 2 ]] \
   || fail "the heal run did not emit exactly the hole and the pushed revision (#265)"
 jq -e '.predicate.repaired.at' "${heal_work}/links/${rev2}/provenance.json" > /dev/null \
@@ -206,6 +211,7 @@ mkdir -p "${guard2_work}"
   # The stand-in remote never received the heal run's links (its push
   # was --dry-run), so this run heals rev2 and rev3 again — now with an
   # unprovable horizon.
+  # shellcheck disable=SC2031  # deliberate: each scenario subshell owns its own state
   export SA_WORK="${guard2_work}" SA_GENESIS=false GITHUB_SHA="${rev4}" \
     SA_RULES_FIXTURE_DIR="${future}"
   "${here}/claims.sh"

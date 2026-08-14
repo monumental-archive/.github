@@ -86,7 +86,7 @@ runs:
             ;;
         esac
         expected="${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
-        if [[ "${GITHUB_WORKFLOW_REF}" != "${expected}" ]]; then
+        if [[ ${GITHUB_WORKFLOW_REF} != "${expected}" ]]; then
           echo "::error::source-attest invoked from '${GITHUB_WORKFLOW_REF}' — the emitter runs only under the reserved identity '${expected}' (docs/source-assessment.md)"
           exit 1
         fi
@@ -99,7 +99,7 @@ runs:
             canon_ref="$(basename "${root}")"
             ;;
           *)
-            if [[ "${GITHUB_REPOSITORY}" != "monumental-archive/.github" ]]; then
+            if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
               echo "::error::source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon self-call"
               exit 1
             fi
@@ -119,7 +119,6 @@ runs:
           echo "SA_IDENTITY=https://github.com/${expected}"
           echo "SA_ISSUER=https://token.actions.githubusercontent.com"
         } >> "${GITHUB_ENV}"
-
     # cosign comes from the toolbelt, not from sigstore's installer
     # action: the belt pin carries per-platform checksums and provenance
     # verification (mise `locked_verify_provenance`), which is the org's
@@ -138,8 +137,8 @@ runs:
       run: |
         set -euo pipefail
         "${GITHUB_ACTION_PATH}/claims.sh"
-        echo "claims=$(base64 -w0 "${SA_WORK}/claims.json")" >> "${GITHUB_OUTPUT}"
-
+        claims_b64=$(base64 -w0 "${SA_WORK}/claims.json")
+        echo "claims=${claims_b64}" >> "${GITHUB_OUTPUT}"
     # Attest stage: the claims payload crosses the job boundary as
     # data and is shape-checked before anything downstream reads it.
     - name: Receive and validate the claims payload
@@ -162,7 +161,6 @@ runs:
           echo "::error::the claims payload does not have the shape claims.sh emits — refusing to sign it"
           exit 1
         }
-
     - name: Install mise
       if: ${{ inputs.stage == 'attest' }}
       uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
