@@ -92,8 +92,8 @@ a version comment — "main" is not a version, which is exactly why it
 errors — so the condition exempts the one permanent situation (a signer
 reference with no version to name) and nothing else. A signer reference
 that ever carried a real version comment falls straight back under the
-check, truthfulness included; verified by planting a false `# v9.9.9` on
-one and watching the audit catch it.
+check, truthfulness included; verified by planting a false version
+comment on one and watching the audit catch it.
 
 Recorded because the first attempt got it wrong: the variable is
 `VersionComment`, and guessing at `Comment` and `ActionVersionComment`
@@ -126,13 +126,28 @@ watching the gate stay green — and the pinact legs had the same shape
 with a trailing `echo`. All the tasks in this pass now open with
 `set -euo pipefail`.
 
-The general form is **open**: 43 belt tasks end with a trailing echo, and
-while most are safe because they signal failure with explicit `exit 1`,
-at least one pre-existing task is not — `lint:fuzz-build` runs
-`cargo fuzz build` and then echoes, so a failed fuzz build would go
-green. The clean fix is `[task_config] shell = "bash -euo pipefail -c"`,
-which repairs all 61 task bodies at once, but it changes the semantics of
-every one of them and wants its own pass rather than riding along here.
+The general form is **open, and the obvious one-line cure does not
+work.** `[task_config] shell = "bash -euo pipefail -c"` would repair all
+61 bodies at once, and it breaks at least one existing task:
+`audit:citations` builds its list of cited versions from a pipeline of
+chained `grep`s, and a `grep` that matches nothing exits 1, which under
+`pipefail` kills the task. Measured either side of the change — clean
+under the current shell, red under the strict one.
+
+Worth recording how nearly that was missed. A first comparison run showed
+that task failing under *both* shells, which read as "pre-existing, not
+caused by the change", and the flip was briefly treated as cleared. It
+was failing for an unrelated reason at the time — a fake version string
+this very document had introduced as an example, which `audit:citations`
+correctly flagged as a version cited in docs and tagged nowhere. Fixing
+that unmasked the real result. A confounded control looks exactly like a
+clean one.
+
+So the cure is per-task, not global: each body that lets a command fail
+harmlessly needs to say so explicitly before the shell can be tightened.
+Until then the belt keeps a class of check that can go green without
+having checked, and the tasks in this pass carry `set -euo pipefail`
+individually.
 
 **jq, and the check for its whole class that was tried and abandoned**
 (#82). jq is pinned at 1.8.2 because eleven belt tasks invoke it — nine

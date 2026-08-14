@@ -2567,7 +2567,7 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "audit:action-pins: no workflows or actions, skipped"; exit 0; }
-xargs pinact run -fix=false --verify-comment --min-age 7 <<<"${files}"
+xargs pinact run -fix=false --verify-comment --verify-min-age <<<"${files}"
 echo "audit:action-pins: ok"
 '''
 

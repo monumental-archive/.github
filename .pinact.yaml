@@ -8,10 +8,14 @@
 # pin is current, so an absent or untrue one is a real defect.
 version: 3
 
-# min_age is deliberately NOT set here. The org's seven-day floor lives on
-# audit:action-pins' command line instead, so it holds in consumer repos
-# that carry no .pinact.yaml at all, and so the number has one home rather
-# than two to drift apart.
+min_age:
+  value: 7
+
+# The org's seven-day release-age floor, on the layer that lacked it.
+# It lives HERE rather than on audit:action-pins' command line because
+# pinact ranks a CLI --min-age above any rule, which would make the
+# first-party exemption below unreachable — found by the audit reddening
+# on the canon's own self-pin the day after v1.25.0 shipped.
 
 rules:
   # The signer is pinned by immutable SHA and commented `# main`, and that
@@ -31,3 +35,16 @@ rules:
     conditions:
       - expr: |
           ActionName matches "^monumental-archive/signer/" && VersionComment == ""
+
+  # First-party references are exempt from the release-age floor, because
+  # the org deliberately fans them out at zero age: a canon release is
+  # meant to reach every consumer immediately, which is the whole point of
+  # the Renovate zero-age rule for `monumental-archive/**`. Without this
+  # the audit reds every Monday after a canon release — caught exactly
+  # that way, flagging the canon's own v1.25.0 self-pin the day after it
+  # shipped. Scoped to min_age only: first-party pins still must be SHAs
+  # and still must carry truthful version comments.
+  - min_age: 0
+    conditions:
+      - expr: |
+          ActionRepoOwner == "monumental-archive"
