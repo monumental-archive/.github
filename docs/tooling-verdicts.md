@@ -34,6 +34,7 @@ honestly blocked on.
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
+| pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 
@@ -49,6 +50,104 @@ the org's own tracked scripts, offline, with no network surface.
 *Reopen:* a shellcheck CVE, aqua dropping or freezing the package,
 actionlint growing or switching script engines, or a maintained fork
 becoming the community's canonical line.
+
+**pinact, and the two gaps it exposed on the way in** (#82). CLAUDE.md
+requires every `uses:` to carry "a full commit SHA with a trailing
+version comment". Only the first half was enforced: zizmor's
+`unpinned-uses` proves the SHA and is blind to what follows it, and
+`lint:canon-pins` reads canon references only — so a third-party action
+pinned to a bare SHA with no comment at all passed every check the org
+had. The comment is what a human and Renovate read to judge whether a pin
+is current, so its absence is a defect and a comment that *lies* is a
+worse one.
+
+Three legs, split by what each needs:
+
+- `lint:action-pins` — `-fix=false -no-api`, so it asserts a
+  40-character SHA and the presence of a comment while asking GitHub
+  nothing. Deterministic and offline, therefore gate-eligible.
+- `audit:action-pins` — `--verify-comment` resolves each SHA back to its
+  tag to prove the comment is true, and `--min-age 7` carries the org's
+  release-age floor to the one layer that lacked it (`minimum_release_age`
+  governs mise tools, `UV_EXCLUDE_NEWER` Python dependencies, actions had
+  nothing). Both need the API and both move with the clock, so both are
+  Monday-cron work.
+- `fix:actions` — the fixer nine other `fix:*` tasks had and action pins
+  did not. `--update` is deliberately unwired: bumping pins is Renovate's
+  job and a fixer that also upgraded would fight it.
+
+Measured at standup, the belt's existing discipline is genuinely good:
+across every workflow and composite action, **no comment lies about its
+SHA and nothing is pinned to a release younger than seven days.** The
+only finding is the signer.
+
+**The signer is permanently unpublished, and that is correct.** Every
+reference to `monumental-archive/signer` is SHA-pinned and commented
+`# main`. The repo has zero tags and zero releases by design and will
+keep having them, so there is no version for a comment to name: the SHA
+is the whole identity and `# main` says only which line it came from.
+`.pinact.yaml` carries a standing exemption for it, scoped as narrowly as
+the tool allows: `VersionComment == ""`. pinact does not count `# main` as
+a version comment — "main" is not a version, which is exactly why it
+errors — so the condition exempts the one permanent situation (a signer
+reference with no version to name) and nothing else. A signer reference
+that ever carried a real version comment falls straight back under the
+check, truthfulness included; verified by planting a false version
+comment on one and watching the audit catch it.
+
+Recorded because the first attempt got it wrong: the variable is
+`VersionComment`, and guessing at `Comment` and `ActionVersionComment`
+produced expression errors that were mistaken for "the comment is not
+exposed at all". It is exposed, and it is documented in the project's
+`docs/config.md` — which was reachable all along; a single 404 on the
+docs *site* was taken for its absence.
+
+**zizmor was never pointed at the composite actions.** It audits
+`action.yml` files and flags unpinned `uses:` in them exactly as it does
+workflows; the belt simply invoked it on `.github/workflows/` alone, so
+`.github/actions/source-attest/action.yml` carried a live third-party
+reference no check in the org could see. Widening the scope is one line —
+and it surfaced a pre-existing `github-env` finding on the
+`dirname "$(mise which cosign)" >> "${GITHUB_PATH}"` line. That is a
+written exception now rather than a silent one: the audit is right in
+general (a GITHUB_PATH write can shadow a later command) and wrong here,
+because the value comes from mise's own locked install tree with no input
+reaching it — zizmor rates its own confidence Low for that reason.
+Removing the write means teaching `chain.sh` and `emit.sh` to resolve
+cosign themselves, which is larger than the scope change that found it.
+
+**A defect class this standup found in the belt itself, partly fixed.**
+mise runs task bodies without `set -e`, so a task whose failure signal is
+a tool's exit status silently passes if anything follows that tool. Two
+shipped tasks were broken this way and are now fixed: `lint:python` ran
+`ruff check` then `ruff format --check`, so a lint error was masked by
+the formatter passing — verified by introducing a real violation and
+watching the gate stay green — and the pinact legs had the same shape
+with a trailing `echo`. All the tasks in this pass now open with
+`set -euo pipefail`.
+
+The general form is **open, and the obvious one-line cure does not
+work.** `[task_config] shell = "bash -euo pipefail -c"` would repair all
+61 bodies at once, and it breaks at least one existing task:
+`audit:citations` builds its list of cited versions from a pipeline of
+chained `grep`s, and a `grep` that matches nothing exits 1, which under
+`pipefail` kills the task. Measured either side of the change — clean
+under the current shell, red under the strict one.
+
+Worth recording how nearly that was missed. A first comparison run showed
+that task failing under *both* shells, which read as "pre-existing, not
+caused by the change", and the flip was briefly treated as cleared. It
+was failing for an unrelated reason at the time — a fake version string
+this very document had introduced as an example, which `audit:citations`
+correctly flagged as a version cited in docs and tagged nowhere. Fixing
+that unmasked the real result. A confounded control looks exactly like a
+clean one.
+
+So the cure is per-task, not global: each body that lets a command fail
+harmlessly needs to say so explicitly before the shell can be tightened.
+Until then the belt keeps a class of check that can go green without
+having checked, and the tasks in this pass carry `set -euo pipefail`
+individually.
 
 **jq, and the check for its whole class that was tried and abandoned**
 (#82). jq is pinned at 1.8.2 because eleven belt tasks invoke it — nine

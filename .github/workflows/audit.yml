@@ -68,6 +68,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:actions
 
+  action-pins:
+    name: audit / action pin comments and age
+    runs-on: ubuntu-24.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+
+      - name: Verify pin comments and release age
+        env:
+          # pinact resolves each pinned SHA back to its tag to prove the
+          # version comment tells the truth, and reads publish dates for
+          # the release-age floor. Both are public reads, so the default
+          # token suffices. The gate's offline leg (lint:action-pins)
+          # cannot do either — it can only see that a comment exists.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise run audit:action-pins
+
   template-pins:
     name: audit / template pin staleness
     runs-on: ubuntu-24.04

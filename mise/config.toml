@@ -117,6 +117,13 @@ lychee = "0.24.2"
 # is not bad luck: nothing checks. See docs/tooling-verdicts.md for the
 # check that was attempted for that class and why it was abandoned (#82).
 jq = "1.8.2"
+# The other half of the pinning convention (#82). CLAUDE.md requires every
+# `uses:` to carry a full SHA AND a trailing version comment; zizmor's
+# unpinned-uses proves the SHA and cannot see the comment, and
+# lint:canon-pins reads canon references only. pinact closes that, brings
+# the seven-day floor to the one layer without it, and supplies the fixer
+# nine other fix:* tasks had and action pins did not.
+"aqua:suzuki-shunsuke/pinact" = "4.1.1"
 # Python lint + format in one binary (#82), at `select = ["ALL"]`. Ruff
 # is a standalone Rust binary: it needs no Python interpreter to run, so
 # it lints Python whether or not one is pinned. (One now is, but for uv's
@@ -286,6 +293,7 @@ dir = "{{cwd}}"
 # centrally (there is no path from the conf.d layer into biome's config
 # resolution), so the belt asserts it instead. Copy scaffold/biome.json.
 run = '''
+set -euo pipefail
 files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "lint:biome: nothing biome parses is tracked, skipped"; exit 0; }
@@ -305,6 +313,7 @@ dir = "{{cwd}}"
 # unsafe fix may change behaviour and a fixer must be runnable without
 # reading its diff first.
 run = '''
+set -euo pipefail
 files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "fix:biome: nothing biome parses is tracked, skipped"; exit 0; }
@@ -324,6 +333,7 @@ dir = "{{cwd}}"
 # under the defaults. A repo that forgets the config does not get a
 # weaker gate, it gets a green one that checked almost nothing.
 run = '''
+set -euo pipefail
 files=$(git ls-files "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "lint:python: no Python tracked, skipped"; exit 0; }
 if ! git ls-files --error-unmatch "ruff.toml" > /dev/null 2>&1 \
@@ -371,6 +381,47 @@ fi
 echo "lint:python-target: ${target} <= ${actual}, ok"
 '''
 
+[tasks."lint:action-pins"]
+description = "Every `uses:` carries a version comment beside its SHA (pinact, offline)"
+dir = "{{cwd}}"
+# The comment half of the pinning convention. zizmor's unpinned-uses
+# proves the SHA and is blind to what follows it; lint:canon-pins reads
+# canon references only; so `uses: foo/bar@<sha>` with no comment at all
+# passed every check the org had, while CLAUDE.md required one. The
+# comment is what a human and Renovate read to judge whether a pin is
+# current, so its absence is a real defect and not a style point.
+#
+# -no-api keeps this deterministic and offline, which is what makes it
+# gate-eligible: it asserts a 40-character SHA and a comment, and asks
+# GitHub nothing. Whether the comment is TRUE needs the API and lives in
+# audit:action-pins.
+#
+# Tracked files only, and composite actions included: pinact's own
+# discovery covers .github/workflows only, so action.yml files would go
+# unchecked exactly as they did under zizmor's old scope.
+run = '''
+set -euo pipefail
+files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+[[ -n "${files}" ]] || { echo "lint:action-pins: no workflows or actions, skipped"; exit 0; }
+xargs pinact run -fix=false -no-api <<<"${files}"
+echo "lint:action-pins: ok"
+'''
+
+[tasks."fix:actions"]
+description = "Pin every `uses:` to a SHA and write its version comment (pinact)"
+dir = "{{cwd}}"
+# The fixer nine other fix:* tasks had and action pins did not — pinning
+# by hand meant looking up a commit and pasting it. Network-bound, which
+# is fine: fix:* never runs in the gate. --update is deliberately NOT
+# wired in; bumping pins is Renovate's job, and a fixer that also
+# upgraded would fight it.
+run = '''
+set -euo pipefail
+files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+[[ -n "${files}" ]] || { echo "fix:actions: no workflows or actions, skipped"; exit 0; }
+xargs pinact run <<<"${files}"
+'''
+
 [tasks."fix:python"]
 description = "Apply ruff's safe fixes and rewrite Python to canonical format"
 dir = "{{cwd}}"
@@ -378,6 +429,7 @@ dir = "{{cwd}}"
 # same rule as fix:biome — a fixer must be runnable without reading its
 # diff first.
 run = '''
+set -euo pipefail
 files=$(git ls-files "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "fix:python: no Python tracked, skipped"; exit 0; }
 xargs ruff check --fix <<<"${files}"
@@ -413,7 +465,19 @@ dir = "{{cwd}}"
 # internet. Pedantic, no severity floor: every actionable finding fails.
 # The auditor persona (includes likely false positives) lives in
 # audit:actions for human-run reviews, not the gate.
-run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then zizmor --offline --persona=pedantic .github/workflows/; else echo "lint:zizmor: no workflows, skipped"; fi'
+# Scope covers composite actions, not just workflows. zizmor audits
+# `action.yml` files and flags unpinned `uses:` in them exactly as it does
+# for workflows — it had simply never been pointed at them, so
+# .github/actions/source-attest/action.yml carried a live third-party
+# reference that no check in the org could see (#82).
+run = '''
+paths=""
+compgen -G ".github/workflows/*.y*ml" > /dev/null && paths=".github/workflows/"
+[[ -d .github/actions ]] && paths="${paths} .github/actions/"
+[[ -n "${paths}" ]] || { echo "lint:zizmor: no workflows or actions, skipped"; exit 0; }
+# shellcheck disable=SC2086
+zizmor --offline --persona=pedantic ${paths}
+'''
 
 [tasks."lint:dco"]
 description = "Every commit carries a Developer Certificate of Origin sign-off"
@@ -2482,6 +2546,31 @@ cargo fuzz build -s none
 echo "lint:fuzz-build: $(cargo fuzz list | wc -l | tr -d ' ') target(s) build"
 '''
 
+[tasks."audit:action-pins"]
+description = "Version comments tell the truth, and no action pin is younger than the release-age floor (network)"
+dir = "{{cwd}}"
+# The two halves lint:action-pins cannot do offline, both needing the
+# GitHub API and both time-varying, so both belong here rather than in
+# the gate.
+#
+# --verify-comment resolves each pinned SHA and checks it really is the
+# version the comment claims. Nothing else in the org can catch a comment
+# that lies, and a lying comment is worse than a missing one: it tells
+# every reviewer and Renovate that a pin is something it is not.
+#
+# --min-age carries the org's seven-day floor to the layer that lacked
+# it. minimum_release_age governs mise tools and UV_EXCLUDE_NEWER governs
+# Python dependencies; an action pin could name a release minutes old.
+# Passed on the command line, not in .pinact.yaml, so it holds in
+# consumer repos that carry no config and so the number has one home.
+run = '''
+set -euo pipefail
+files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+[[ -n "${files}" ]] || { echo "audit:action-pins: no workflows or actions, skipped"; exit 0; }
+xargs pinact run -fix=false --verify-comment --verify-min-age <<<"${files}"
+echo "audit:action-pins: ok"
+'''
+
 [tasks."audit:caller-permissions"]
 description = "Org consumers' uses: grants cover canon HEAD's computed requirements (network, canon only)"
 dir = "{{cwd}}"
@@ -3020,7 +3109,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq cargo-deny osv-scanner vexctl reuse; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq pinact cargo-deny osv-scanner vexctl reuse; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
