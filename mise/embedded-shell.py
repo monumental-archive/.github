@@ -22,20 +22,29 @@ Deterministic and offline: shfmt and shellcheck both read only the bytes
 handed to them.
 """
 
+# Running shfmt and shellcheck IS this file's job, so the subprocess rules
+# have nothing to warn about here: every argv is a fixed tool name plus a
+# temporary path this file just wrote, nothing from the repository reaches
+# a command line, and the tools resolve through the belt's PATH, which
+# activate_aggressive puts ahead of anything a machine happens to ship.
 from __future__ import annotations
 
 import argparse
 import re
-import subprocess
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # `run: |` and `run: |-`, at any indent, list item or not.
 RUN_RE = re.compile(r"^(\s*)(- )?run: \|-?\s*$")
 # A `shell:` key on the same step selects the interpreter. Only bash-family
 # blocks are shell at all — `shell: python` is a different language.
 SHELL_RE = re.compile(r"^\s*shell:\s*([a-z0-9 {}$.-]+)\s*$")
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 
@@ -51,6 +60,10 @@ SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 #           substituted before the shell ever sees it
 # Diverging here would mean the belt reporting findings on `run:` blocks
 # that lint:actions calls clean, on the same lines.
+# gcc format is <file>:<line>:<col>: <level>: <message> — five fields, so a
+# usable record has at least four after one split-limited partition.
+GCC_FIELDS = 4
+
 SHELLCHECK_EXCLUDE = "SC1091,SC2194,SC2050,SC2153,SC2154,SC2157,SC2043"
 
 
@@ -74,14 +87,14 @@ def step_shell(lines: list[str], run_idx: int, indent: int) -> str:
     return "bash"
 
 
-def blocks(path: Path):
+def blocks(path: Path) -> Iterator[tuple[int, str]]:
     """Yield (first_body_line_number, dedented_source) per `run:` block.
 
     Yields:
         One tuple per block whose interpreter is bash-family.
 
     """
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     i = 0
     while i < len(lines):
         m = RUN_RE.match(lines[i])
@@ -113,7 +126,7 @@ def rewrite(path: Path) -> int:
         The number of blocks rewritten.
 
     """
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     out: list[str] = []
     i = 0
     changed = 0
@@ -140,9 +153,13 @@ def rewrite(path: Path) -> int:
             continue
         pad = min(len(x) - len(x.lstrip()) for x in body if x.strip())
         src = "\n".join(x[pad:] if x.strip() else "" for x in body) + "\n"
+        # ruff: ignore[subprocess-without-shell-equals-true]
         r = subprocess.run(
-            [*SHFMT, "-"], input="#!/usr/bin/env bash\n" + src,
-            capture_output=True, text=True,
+            [*SHFMT, "-"],
+            input="#!/usr/bin/env bash\n" + src,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if r.returncode != 0 or not r.stdout:
             out.extend(body)
@@ -154,7 +171,7 @@ def rewrite(path: Path) -> int:
         out.extend((" " * pad + x) if x.strip() else "" for x in formatted)
         changed += 1
     if changed:
-        path.write_text("\n".join(out) + "\n")
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
     return changed
 
 
@@ -168,7 +185,10 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
     out: list[str] = []
     for lineno, src in blocks(path):
         with tempfile.NamedTemporaryFile(
-            "w", suffix=".sh", delete=False, encoding="utf-8",
+            "w",
+            suffix=".sh",
+            delete=False,
+            encoding="utf-8",
         ) as tmp:
             # The shebang is what makes shfmt and shellcheck agree on the
             # dialect; GitHub runs `run:` blocks under bash by default.
@@ -176,10 +196,17 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
             name = tmp.name
         try:
             if fmt:
-                r = subprocess.run([*SHFMT, "-d", name], capture_output=True, text=True)
+                # ruff: ignore[subprocess-without-shell-equals-true]
+                r = subprocess.run(
+                    [*SHFMT, "-d", name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 if r.stdout.strip():
                     out.append(f"{path}:{lineno}: run: block is not shfmt-formatted")
             if lint:
+                # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
                 r = subprocess.run(
                     [
                         "shellcheck",
@@ -192,11 +219,12 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
                     ],
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
                 for line in r.stdout.splitlines():
                     # gcc format is <file>:<line>:<col>: <level>: <msg>
                     parts = line.split(":", 3)
-                    if len(parts) < 4 or not parts[1].isdigit():
+                    if len(parts) < GCC_FIELDS or not parts[1].isdigit():
                         continue
                     # -1 for the shebang this wrapper added.
                     real = lineno + int(parts[1]) - 2
