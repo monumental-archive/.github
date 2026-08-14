@@ -86,12 +86,21 @@ reference to `monumental-archive/signer` is SHA-pinned and commented
 `# main`. The repo has zero tags and zero releases by design and will
 keep having them, so there is no version for a comment to name: the SHA
 is the whole identity and `# main` says only which line it came from.
-`.pinact.yaml` carries a standing exemption for it — not a TODO, and not
-narrowable, because pinact's expressions expose only `ActionName`,
-`ActionRepoOwner` and `ActionVersion`, and for a pinned reference
-`ActionVersion` is the SHA rather than the comment (tested;
-`Comment`/`ActionVersionComment` are not variables). Since the exemption
-is permanent, its breadth costs nothing.
+`.pinact.yaml` carries a standing exemption for it, scoped as narrowly as
+the tool allows: `VersionComment == ""`. pinact does not count `# main` as
+a version comment — "main" is not a version, which is exactly why it
+errors — so the condition exempts the one permanent situation (a signer
+reference with no version to name) and nothing else. A signer reference
+that ever carried a real version comment falls straight back under the
+check, truthfulness included; verified by planting a false `# v9.9.9` on
+one and watching the audit catch it.
+
+Recorded because the first attempt got it wrong: the variable is
+`VersionComment`, and guessing at `Comment` and `ActionVersionComment`
+produced expression errors that were mistaken for "the comment is not
+exposed at all". It is exposed, and it is documented in the project's
+`docs/config.md` — which was reachable all along; a single 404 on the
+docs *site* was taken for its absence.
 
 **zizmor was never pointed at the composite actions.** It audits
 `action.yml` files and flags unpinned `uses:` in them exactly as it does

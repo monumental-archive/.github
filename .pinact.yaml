@@ -20,17 +20,14 @@ rules:
   # version for a comment to name and never will be. The SHA is the whole
   # identity; `# main` says only which line it came from.
   #
-  # This rule is broader than it should be, deliberately rather than by
-  # oversight. The self-healing form would key on the comment — ignore
-  # only while it reads `main` — but pinact's expressions expose only
-  # ActionName, ActionRepoOwner and ActionVersion, and for a pinned
-  # reference ActionVersion is the SHA, not the comment. Tested at
-  # standup: an `ActionVersion == "main"` condition never matches, and
-  # `Comment` / `ActionVersionComment` are not variables at all. So the
-  # exception cannot narrow itself — which costs nothing here, because
-  # the signer is permanently unpublished and the rule is permanently
-  # right. It is a standing exemption, not a TODO.
+  # Scoped as narrowly as the tool allows. `VersionComment` is empty
+  # here — pinact does not count `# main` as a version comment, since
+  # "main" is not a version, which is exactly why it errors. So the
+  # condition exempts the one situation that is permanent (a signer
+  # reference with no version to name) and nothing else: a signer
+  # reference that ever carried a real version comment would fall
+  # straight back under the check, comment truthfulness included.
   - ignore: true
     conditions:
       - expr: |
-          ActionName matches "^monumental-archive/signer/"
+          ActionName matches "^monumental-archive/signer/" && VersionComment == ""
