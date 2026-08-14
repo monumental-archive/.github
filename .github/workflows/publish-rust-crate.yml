@@ -78,10 +78,9 @@ jobs:
           flags=""
           IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
           for m in "${members[@]}"; do
-            if [[ -n "${m}" ]]; then flags="${flags} --exclude ${m}"; fi
+            if [[ -n ${m} ]]; then flags="${flags} --exclude ${m}"; fi
           done
           echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
-
       - name: Publish
         # Resumable: a crate already at this version is a completed step,
         # not a failure. crates.io is yank-only, so re-running a partly

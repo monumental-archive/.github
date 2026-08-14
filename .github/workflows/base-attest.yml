@@ -90,7 +90,8 @@ jobs:
           set -euo pipefail
           # The runner's python: tomllib is stdlib, and the belt has no
           # business here — this job reads one file and emits a matrix.
-          include=$(python3 - << 'EOF'
+          include=$(
+            python3 - << 'EOF'
           import json, tomllib
           with open("docker/pgrx-base-images.toml", "rb") as f:
               t = tomllib.load(f)
@@ -109,14 +110,13 @@ jobs:
           EOF
           )
           count=$(jq "length" <<< "${include}" || true)
-          if [[ "${count}" == "0" ]]; then
+          if [[ ${count} == "0" ]]; then
             echo "::error::no pinned base images found — an empty approval set approves nothing"
             exit 1
           fi
           matrix=$(jq -c '{include: .}' <<< "${include}")
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
           jq -r '.[] | "::notice::will attest \(.role) pg\(.pg): \(.ref)"' <<< "${include}"
-
   attest:
     name: Attest ${{ matrix.role }} base pg${{ matrix.pg }}
     needs: plan
@@ -146,7 +146,6 @@ jobs:
           set -euo pipefail
           docker manifest inspect "${REF}" > /dev/null
           echo "::notice::${REF} resolves"
-
       - name: Verify the upstream provenance names this source (#212)
         # Docker Official Images carry BuildKit in-toto provenance
         # (slsa.dev/provenance/v0.2) as attestation manifests — unsigned,
@@ -167,7 +166,7 @@ jobs:
           docker buildx imagetools inspect "docker.io/library/${REF}" \
             --format '{{json .Provenance}}' > provenance-map.json
           count=$(jq 'length' provenance-map.json)
-          if [[ "${count}" == "0" || "${count}" == "null" ]]; then
+          if [[ ${count} == "0" || ${count} == "null" ]]; then
             echo "::error::${REF}: upstream publishes no provenance — refusing to verify nothing"
             exit 1
           fi
@@ -195,7 +194,6 @@ jobs:
           }' provenance-map.json > upstream.json
           platforms=$(jq -r '.platforms | length' upstream.json)
           echo "::notice::${REF}: upstream provenance verified across ${platforms} platform(s)"
-
       - name: Write the verification predicate
         env:
           ROLE: ${{ matrix.role }}
@@ -212,7 +210,6 @@ jobs:
               pinSource: $source, pinRevision: $revision,
               upstreamProvenance: ($upstream[0] + {verified: true})}' \
             > predicate.json
-
       - name: Attest the expected hash under the org identity
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
-          if [[ ! "${tag}" =~ ^v[0-9] ]]; then
+          if [[ ! ${tag} =~ ^v[0-9] ]]; then
             echo "::error::latest release tag ${tag} is not a v* release"
             exit 1
           fi
@@ -85,7 +85,6 @@ jobs:
             echo "version=${tag#v}"
           } >> "${GITHUB_OUTPUT}"
           echo "::notice::proving ${tag} reproduces"
-
   # The genuine article: the class workflow itself, pointed at the tag.
   # One job per class because `uses:` takes no expressions; exactly one
   # runs, and compare takes whichever produced subjects.
@@ -141,17 +140,17 @@ jobs:
           status=0
           count=0
           while IFS= read -r line; do
-            [[ -n "${line}" ]] || continue
+            [[ -n ${line} ]] || continue
             count=$((count + 1))
             name="${line##*  }"
             digest="${line%% *}"
             published=$(grep -F "  ${name}" <<< "${PUBLISHED}" || true)
-            if [[ -z "${published}" ]]; then
+            if [[ -z ${published} ]]; then
               echo "::error::${name}: rebuilt but absent from the published checksums"
               status=1
               continue
             fi
-            if [[ "${published%% *}" != "${digest}" ]]; then
+            if [[ ${published%% *} != "${digest}" ]]; then
               echo "::error::${name}: published ${published%% *}, rebuilt ${digest}"
               status=1
             else
@@ -167,7 +166,6 @@ jobs:
             exit 1
           fi
           echo "::notice::${TAG}: ${count} archive(s) reproduced bit-for-bit"
-
       - name: File an issue on failure
         if: failure()
         env:

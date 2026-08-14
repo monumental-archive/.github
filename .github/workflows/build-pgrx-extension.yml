@@ -116,7 +116,7 @@ jobs:
           for pg in "${majors[@]}"; do
             build=$(jq -r --arg pg "${pg}" '.build[$pg] // empty' <<< "${mapping}")
             smoke=$(jq -r --arg pg "${pg}" '.smoke[$pg] // empty' <<< "${mapping}")
-            if [[ -z "${build}" || -z "${smoke}" ]]; then
+            if [[ -z ${build} || -z ${smoke} ]]; then
               echo "::error::pg${pg} has no digest-pinned base image in docker/pgrx-base-images.toml"
               exit 1
             fi
@@ -130,7 +130,7 @@ jobs:
             done
           done
           dupes=$(jq -r '[.[] | "\(.pg)-\(.arch)"] | length - (unique | length)' <<< "${include}")
-          if [[ "${dupes}" != "0" ]]; then
+          if [[ ${dupes} != "0" ]]; then
             echo "::error::duplicate PG major requested"
             exit 1
           fi
@@ -195,8 +195,10 @@ jobs:
         run: |
           set -euo pipefail
           for ref in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
-            repo="${ref%%@*}"; repo="${repo%%:*}"; digest="${ref##*@}"
-            [[ "${repo}" == */* ]] || repo="docker.io/library/${repo}"
+            repo="${ref%%@*}"
+            repo="${repo%%:*}"
+            digest="${ref##*@}"
+            [[ ${repo} == */* ]] || repo="docker.io/library/${repo}"
             gh attestation verify "oci://${repo}@${digest}" \
               --repo monumental-archive/.github \
               --predicate-type https://monumental-archive.github.io/attestations/base-image-approval/v1 \
@@ -205,7 +207,6 @@ jobs:
               > /dev/null
             echo "::notice::approved base: ${ref}"
           done
-
       - name: Resolve the caller's build-input pins
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
@@ -236,7 +237,7 @@ jobs:
           rust=$(jq -r .rust <<< "${pins}")
           pgrx=$(jq -r .pgrx <<< "${pins}")
           auditable=$(jq -r .auditable <<< "${pins}")
-          if [[ -z "${rust}" || -z "${pgrx}" || -z "${auditable}" ]]; then
+          if [[ -z ${rust} || -z ${pgrx} || -z ${auditable} ]]; then
             echo "::error::rust, cargo:cargo-pgrx and cargo:cargo-auditable must be pinned in this repository's mise config; they are build inputs of the pgrx-extension class"
             exit 1
           fi
@@ -245,7 +246,6 @@ jobs:
             echo "PGRX_VERSION=${pgrx}"
             echo "AUDITABLE_VERSION=${auditable}"
           } >> "${GITHUB_ENV}"
-
       - name: Refuse a tag whose version disagrees with the manifests
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -264,11 +264,10 @@ jobs:
               v = w["workspace"]["package"]["version"]
           print(v)
           ')
-          if [[ "${manifest}" != "${UNTRUSTED_VERSION}" ]]; then
+          if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
             echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
-
       - name: Refuse a control file that strands existing installations
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -284,12 +283,12 @@ jobs:
           # stranding every existing installation at ALTER EXTENSION
           # UPDATE, so its absence refuses the release.
           prev=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName 2> /dev/null || true)
-          if [[ -z "${prev}" || "${prev}" != v* ]]; then
+          if [[ -z ${prev} || ${prev} != v* ]]; then
             echo "::notice::no previous release; first publish needs no upgrade path"
             exit 0
           fi
           prev="${prev#v}"
-          if [[ "${prev}" == "${UNTRUSTED_VERSION}" ]]; then
+          if [[ ${prev} == "${UNTRUSTED_VERSION}" ]]; then
             echo "::notice::re-run of ${prev}; upgrade path not applicable"
             exit 0
           fi
@@ -301,17 +300,16 @@ jobs:
           shipped=$(gh release view "v${prev}" --repo "${GITHUB_REPOSITORY}" \
             --json assets --jq \
             "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))] | length")
-          if [[ "${shipped}" == "0" ]]; then
+          if [[ ${shipped} == "0" ]]; then
             echo "::notice::v${prev} shipped no ${name} tarballs; first publish of this extension, no upgrade path needed"
             exit 0
           fi
           upgrade="${UNTRUSTED_CRATE_DIR}/sql/${name}--${prev}--${UNTRUSTED_VERSION}.sql"
-          if [[ ! -f "${upgrade}" ]]; then
+          if [[ ! -f ${upgrade} ]]; then
             echo "::error::no upgrade path ${upgrade} from published ${prev} — existing installations would be stranded"
             exit 1
           fi
           echo "::notice::upgrade path ${prev} -> ${UNTRUSTED_VERSION} present"
-
       - name: Build, test and package inside the target Postgres
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -407,25 +405,26 @@ jobs:
                 chmod -R a+rX /out/pkgroot /out/cnpgroot
               '\''
             '
-
       - name: Assert the glibc floor
         run: |
           set -euo pipefail
           so=$(find /tmp/out/pkgroot -name '*.so' -type f | head -n 1)
-          [[ -n "${so}" ]] || { echo "::error::no shared library packaged"; exit 1; }
+          [[ -n ${so} ]] || {
+            echo "::error::no shared library packaged"
+            exit 1
+          }
           worst=$(readelf --dyn-syms --wide "${so}" \
             | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -uV | tail -1 || true)
-          if [[ -z "${worst}" ]]; then
+          if [[ -z ${worst} ]]; then
             echo "::notice::no versioned glibc symbols (static or unusual link)"
             exit 0
           fi
           highest=$(printf '%s\n' "GLIBC_${GLIBC_FLOOR}" "${worst}" | sort -V | tail -1)
-          if [[ "${highest}" != "GLIBC_${GLIBC_FLOOR}" ]]; then
+          if [[ ${highest} != "GLIBC_${GLIBC_FLOOR}" ]]; then
             echo "::error::${so##*/} needs ${worst}, above the ${GLIBC_FLOOR} floor the class guarantees"
             exit 1
           fi
           echo "::notice::glibc ceiling ${worst} within floor ${GLIBC_FLOOR}"
-
       - name: Smoke the package on both distros
         if: ${{ !inputs.repro }}
         env:
@@ -463,7 +462,6 @@ jobs:
                 fi
               '
           done
-
       - name: Execute the upgrade from the previous release
         # Behavioural, like the smoke: proven once, on the first build.
         if: ${{ !inputs.repro }}
@@ -481,7 +479,7 @@ jobs:
           # fresh-install smokes above are then the whole story.
           name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
           prev=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName 2> /dev/null || true)
-          if [[ -z "${prev}" || "${prev}" != v* || "${prev#v}" == "${UNTRUSTED_VERSION}" ]]; then
+          if [[ -z ${prev} || ${prev} != v* || ${prev#v} == "${UNTRUSTED_VERSION}" ]]; then
             echo "::notice::no previous release; upgrade execution skipped"
             exit 0
           fi
@@ -529,7 +527,6 @@ jobs:
               "
             '
           echo "::notice::pg${PG}/${ARCH}: ${prev} -> ${UNTRUSTED_VERSION} upgrade executed"
-
       - name: Archive, normalised
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -542,7 +539,6 @@ jobs:
           tar --sort=name --owner=0 --group=0 --numeric-owner \
             --mtime="@${epoch}" -C /tmp/out -cf - pkgroot cnpgroot \
             | gzip -n > "dist/${name}-${UNTRUSTED_VERSION}-pg${PG}-linux-${ARCH}.tar.gz"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.repro && 'repro-' || '' }}extension-pg${{ matrix.pg }}-${{ matrix.arch }}
@@ -577,7 +573,7 @@ jobs:
           cell_list=$(jq -r '.[]' <<< "${EXPECTED}")
           cells=()
           while IFS= read -r c; do
-            if [[ -n "${c}" ]]; then cells+=("${c}"); fi
+            if [[ -n ${c} ]]; then cells+=("${c}"); fi
           done <<< "${cell_list}"
           for c in "${cells[@]}"; do
             pg="${c%-*}"
@@ -600,7 +596,6 @@ jobs:
             echo "SUBJECTS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:

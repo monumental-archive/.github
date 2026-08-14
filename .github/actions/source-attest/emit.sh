@@ -39,7 +39,20 @@
 # verified statement — never recomputed from live state, which by then
 # is a different moment.
 set -euo pipefail
+
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${SA_WORK:?SA_WORK must be set by guard-identity}"
+: "${SA_CANON_ROOT:?SA_CANON_ROOT must be set by guard-identity}"
+: "${SA_CANON_REF:?SA_CANON_REF must be set by guard-identity}"
+: "${SA_IDENTITY:?SA_IDENTITY must be set by guard-identity}"
+: "${SA_ISSUER:?SA_ISSUER must be set by guard-identity}"
+: "${SA_ACTOR:?SA_ACTOR must be set by the calling step}"
+: "${SA_ACTOR_ID:?SA_ACTOR_ID must be set by the calling step}"
+: "${GITHUB_REPOSITORY:?}"
+: "${GITHUB_SHA:?}"
 # shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 prov_type="https://monumental-archive.github.io/attestations/source-provenance/v1"
@@ -130,7 +143,8 @@ while IFS= read -r rev; do
   commit_time=$(git show -s --format=%cI "${rev}")
   repaired="null"
   if [[ ${rev} != "${GITHUB_SHA}" ]]; then
-    repaired=$(jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{at: $at}')
+    repaired_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    repaired=$(jq -cn --arg at "${repaired_at}" '{at: $at}')
   fi
 
   jq -n \
@@ -201,6 +215,8 @@ while IFS= read -r rev; do
   if ! jq -en --argjson req "${required}" --argjson has "${present}" \
     '$req - $has == []' > /dev/null; then
     level="SLSA_SOURCE_LEVEL_2"
+    # shellcheck disable=SC2312  # diagnostic output only; a failure here
+    # degrades a log line, it does not change what is written or decided.
     echo "::warning::${rev}: required properties missing: $(jq -rn --argjson req "${required}" --argjson has "${present}" '($req - $has) | join(", ")') — under-claiming ${level}"
   elif [[ ${repaired} != "null" ]]; then
     commit_epoch=$(git log -1 --format=%ct "${rev}")
@@ -250,9 +266,13 @@ while IFS= read -r rev; do
 
   # The note is assembled here — the same iteration that signed its
   # contents — and added locally; append.sh owns the push.
+  # Captured, not inlined: a failed base64 inside the argument would
+  # attest an empty statement rather than abort (#82).
+  provenance_b64=$(base64 -w0 < "${linkdir}/provenance.json")
+  vsa_b64=$(base64 -w0 < "${linkdir}/vsa.json")
   jq -n \
-    --arg ps "$(base64 -w0 < "${linkdir}/provenance.json")" \
-    --arg vs "$(base64 -w0 < "${linkdir}/vsa.json")" \
+    --arg ps "${provenance_b64}" \
+    --arg vs "${vsa_b64}" \
     --slurpfile pb "${linkdir}/provenance.bundle.json" \
     --slurpfile vb "${linkdir}/vsa.bundle.json" \
     '{

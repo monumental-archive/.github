@@ -132,7 +132,7 @@ jobs:
               '. + [{target: $t, runner: $r}]' <<< "${include}")
           done
           dupes=$(jq -r '[.[].target] | length - (unique | length)' <<< "${include}")
-          if [[ "${dupes}" != "0" ]]; then
+          if [[ ${dupes} != "0" ]]; then
             echo "::error::duplicate target requested"
             exit 1
           fi
@@ -141,7 +141,6 @@ jobs:
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
           echo "expected=${expected}" >> "${GITHUB_OUTPUT}"
           jq -r '.[] | "::notice::will build \(.target) on \(.runner)"' <<< "${include}"
-
   build:
     name: Build and smoke ${{ matrix.target }}
     needs: plan
@@ -196,14 +195,13 @@ jobs:
         run: |
           set -euo pipefail
           rustup target add "${TARGET}"
-          if [[ "${TARGET}" == *-linux-musl ]]; then
+          if [[ ${TARGET} == *-linux-musl ]]; then
             # Unconditional on the Linux legs: pure Rust self-links without
             # it, but a C dependency can arrive transitively in any PR, and
             # identical environments beat conditional ones.
             sudo apt-get update -qq
             sudo apt-get install -y -qq musl-tools
           fi
-
       - name: Resolve the exclusion flags
         env:
           UNTRUSTED_EXCLUDE: ${{ inputs.exclude }}
@@ -212,10 +210,9 @@ jobs:
           flags=""
           IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
           for m in "${members[@]}"; do
-            if [[ -n "${m}" ]]; then flags="${flags} --exclude ${m}"; fi
+            if [[ -n ${m} ]]; then flags="${flags} --exclude ${m}"; fi
           done
           echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
-
       - name: Refuse a tag whose version disagrees with the manifest
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -224,15 +221,14 @@ jobs:
           meta=$(cargo metadata --no-deps --format-version 1)
           manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
           versions=$(wc -l <<< "${manifest}")
-          if [[ "${versions}" -ne 1 ]]; then
+          if [[ ${versions} -ne 1 ]]; then
             echo "::error::workspace members disagree on version; canon is [workspace.package] inheritance"
             exit 1
           fi
-          if [[ "${manifest}" != "${UNTRUSTED_VERSION}" ]]; then
+          if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
             echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
-
       - name: Test on the target
         env:
           TARGET: ${{ matrix.target }}
@@ -243,7 +239,6 @@ jobs:
           # the property the shipped binary claims.
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           cargo test --workspace --locked --target "${TARGET}" ${EXCLUDE_FLAGS}
-
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
@@ -267,7 +262,6 @@ jobs:
           # surface of the artifact itself (docs/dependency-track.md).
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           cargo auditable build --workspace --locked --release --target "${TARGET}" ${EXCLUDE_FLAGS}
-
       - name: Stage the binaries
         id: stage
         env:
@@ -284,7 +278,7 @@ jobs:
             <<< "${meta}")
           bins=()
           while IFS= read -r b; do
-            if [[ -n "${b}" ]]; then bins+=("${b}"); fi
+            if [[ -n ${b} ]]; then bins+=("${b}"); fi
           done <<< "${bin_list}"
           if ((${#bins[@]} == 0)); then
             echo "::error::no bin targets in this workspace — rust-binary is the wrong class"
@@ -292,14 +286,13 @@ jobs:
           fi
           for b in "${bins[@]}"; do
             src="target/${TARGET}/release/${b}"
-            if [[ ! -x "${src}" ]]; then
+            if [[ ! -x ${src} ]]; then
               echo "::error::expected binary ${src} was not produced"
               exit 1
             fi
             cp "${src}" "staged/${b}"
           done
           echo "count=${#bins[@]}" >> "${GITHUB_OUTPUT}"
-
       - name: Smoke the binaries
         if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:
@@ -307,12 +300,11 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
-          if [[ ! -x "${UNTRUSTED_SMOKE}" ]]; then
+          if [[ ! -x ${UNTRUSTED_SMOKE} ]]; then
             echo "::error::smoke-test ${UNTRUSTED_SMOKE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_SMOKE}" "${PWD}/staged" "${TARGET}"
-
       - name: Archive, normalised
         env:
           TARGET: ${{ matrix.target }}
@@ -330,7 +322,6 @@ jobs:
           mkdir -p dist
           "${tar}" --sort=name --owner=0 --group=0 --numeric-owner \
             --mtime="@${epoch}" -C staged -cf - . | gzip -n > "dist/${name}.tar.gz"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.repro && 'repro-' || '' }}binary-${{ matrix.target }}
@@ -371,7 +362,7 @@ jobs:
           target_list=$(jq -r '.[]' <<< "${EXPECTED}")
           targets=()
           while IFS= read -r t; do
-            if [[ -n "${t}" ]]; then targets+=("${t}"); fi
+            if [[ -n ${t} ]]; then targets+=("${t}"); fi
           done <<< "${target_list}"
           for t in "${targets[@]}"; do
             matches=(./*-"${t}".tar.gz)
@@ -392,7 +383,6 @@ jobs:
             echo "SUBJECTS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:

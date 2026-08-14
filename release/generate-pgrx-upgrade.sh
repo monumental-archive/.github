@@ -57,6 +57,9 @@ emit() {
 # directory holding a checked-in <ext>.control file. No control files, no
 # extension crates, nothing to derive — skip clean, per belt convention.
 controls=()
+# shellcheck disable=SC2312  # process substitution: capturing first would
+# turn an empty result into one blank line, which is a worse bug than the
+# masked status. The producing command is git/jq over local state.
 while IFS= read -r tracked_control; do
   [[ -n ${tracked_control} ]] && controls+=("${tracked_control}")
 done < <(git ls-files '*.control')
@@ -136,7 +139,8 @@ for control in "${controls[@]}"; do
   shipped=$(gh release view "v${prev}" --repo "${GITHUB_REPOSITORY}" \
     --json assets --jq \
     "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))]")
-  if [[ $(jq 'length' <<< "${shipped}") == "0" ]]; then
+  shipped_count=$(jq 'length' <<< "${shipped}")
+  if [[ ${shipped_count} == "0" ]]; then
     echo "v${prev} shipped no ${name} tarballs; first publish of this extension, no upgrade path needed"
     continue
   fi
@@ -624,6 +628,7 @@ EOSH
   # Hand ownership back from inside the same image (already pulled, so no
   # extra network) rather than reaching for sudo, which this script should
   # not need and would not have outside a runner.
+  # shellcheck disable=SC2312  # id(1) on the local uid cannot meaningfully fail
   docker run --rm --volume "${work}:/work" "${build_image}" \
     chown -R "$(id -u):$(id -g)" /work
   rm -rf "${work}"

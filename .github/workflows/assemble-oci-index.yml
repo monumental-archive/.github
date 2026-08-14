@@ -109,15 +109,15 @@ jobs:
           pair=$(printf '%s\n%s' "0.12" "${v}")
           ordered=$(sort -V <<< "${pair}")
           floor=$(head -1 <<< "${ordered}")
-          if [[ -z "${v}" ]] || [[ "${floor}" != "0.12" ]]; then
+          if [[ -z ${v} ]] || [[ ${floor} != "0.12" ]]; then
             echo "::error::buildx ${v:-unknown} < 0.12: index annotations would be dropped silently"
             exit 1
           fi
           image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          AMD=$(cat digests/amd64 2>/dev/null || echo "")
-          ARM=$(cat digests/arm64 2>/dev/null || echo "")
+          AMD=$(cat digests/amd64 2> /dev/null || echo "")
+          ARM=$(cat digests/arm64 2> /dev/null || echo "")
           for d in "${AMD}" "${ARM}"; do
-            if [[ ! "${d}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            if [[ ! ${d} =~ ^sha256:[0-9a-f]{64}$ ]]; then
               echo "::error::a per-architecture digest is missing; refusing to tag a partial image"
               exit 1
             fi
@@ -134,14 +134,13 @@ jobs:
             "${image}@${AMD}" "${image}@${ARM}"
           index=$(docker buildx imagetools inspect "${image}:${UNTRUSTED_VERSION}" \
             --format '{{json .Manifest}}' | jq -r '.digest')
-          if [[ ! "${index}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if [[ ! ${index} =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::no index digest"
             exit 1
           fi
           echo "image=${image}" >> "${GITHUB_OUTPUT}"
           echo "digest=${index}" >> "${GITHUB_OUTPUT}"
           echo "::notice::index ${index}"
-
       - name: Pull the published bytes back and smoke them
         if: inputs.smoke-test != ''
         env:
@@ -154,7 +153,6 @@ jobs:
           # point is to prove the exact bytes that were published.
           docker pull "${IMAGE}@${INDEX}"
           "${UNTRUSTED_SMOKE}" "${IMAGE}@${INDEX}"
-
       - name: Assert the published metadata equals the facts
         env:
           IMAGE: ${{ steps.assemble.outputs.image }}
@@ -192,7 +190,6 @@ jobs:
             --severity HIGH,CRITICAL --format table "${IMAGE}@${INDEX}" \
             | tee -a "${GITHUB_STEP_SUMMARY}"
           echo '```' >> "${GITHUB_STEP_SUMMARY}"
-
       - name: Generate the image SBOM from the published bytes
         env:
           IMAGE: ${{ steps.assemble.outputs.image }}
@@ -217,15 +214,17 @@ jobs:
           out="/tmp/sbom/${base}-${v}-image.spdx.json"
           trivy image --config /dev/null --format spdx-json \
             --output "${out}" "${IMAGE}@${INDEX}"
-          [[ -s "${out}" ]] || { echo "::error::image SBOM export produced nothing"; exit 1; }
+          [[ -s ${out} ]] || {
+            echo "::error::image SBOM export produced nothing"
+            exit 1
+          }
           purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
           bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator | select(test("@") | not)] | length' "${out}")
-          if [[ "${purls}" -eq 0 || "${bare}" -ne 0 ]]; then
+          if [[ ${purls} -eq 0 || ${bare} -ne 0 ]]; then
             echo "::error::image SBOM has ${purls} PURLs, ${bare} versionless — a versionless PURL is invisible to every scanner"
             exit 1
           fi
           echo "::notice::image SBOM: ${purls} versioned PURLs"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-sbom-image

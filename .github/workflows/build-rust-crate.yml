@@ -92,10 +92,9 @@ jobs:
           flags=""
           IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
           for m in "${members[@]}"; do
-            if [[ -n "${m}" ]]; then flags="${flags} --exclude ${m}"; fi
+            if [[ -n ${m} ]]; then flags="${flags} --exclude ${m}"; fi
           done
           echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
-
       - name: Refuse a tag whose version disagrees with the manifest
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -104,21 +103,19 @@ jobs:
           meta=$(cargo metadata --no-deps --format-version 1)
           manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
           versions=$(wc -l <<< "${manifest}")
-          if [[ "${versions}" -ne 1 ]]; then
+          if [[ ${versions} -ne 1 ]]; then
             echo "::error::workspace members disagree on version; canon is [workspace.package] inheritance"
             exit 1
           fi
-          if [[ "${manifest}" != "${UNTRUSTED_VERSION}" ]]; then
+          if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
             echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
-
       - name: Test
         run: |
           set -euo pipefail
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           cargo test --workspace --locked ${EXCLUDE_FLAGS}
-
       - name: Package
         # Verification is ON here, deliberately: this is the job that is
         # allowed to build. `cargo package` extracts the tarball and
@@ -131,7 +128,6 @@ jobs:
           set -euo pipefail
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           cargo package --workspace --locked ${EXCLUDE_FLAGS}
-
       - name: Compute the subject manifest
         id: hash
         run: |
@@ -144,7 +140,6 @@ jobs:
             echo "SUBJECTS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:

@@ -83,11 +83,14 @@ jobs:
           mkdir -p dist
           found=0
           for dir in bundle/attestation-bundle-*/; do
-            [[ -d "${dir}" ]] || continue
+            [[ -d ${dir} ]] || continue
             class=$(basename "${dir}")
             class="${class#attestation-bundle-}"
             src=$(find "${dir}" -type f | head -n 1)
-            [[ -n "${src}" ]] || { echo "::error::empty bundle for ${class}"; exit 1; }
+            [[ -n ${src} ]] || {
+              echo "::error::empty bundle for ${class}"
+              exit 1
+            }
             mv "${src}" "dist/attestations-${class}.intoto.jsonl"
             found=$((found + 1))
           done
@@ -101,13 +104,13 @@ jobs:
             # umbrella name, which is the same `*.intoto.jsonl` pattern
             # Scorecard recognises and SLSA's naming SHOULD asks for.
             flat=$(find bundle -maxdepth 1 -type f 2> /dev/null | head -n 1)
-            if [[ -n "${flat}" ]]; then
+            if [[ -n ${flat} ]]; then
               mv "${flat}" "dist/attestations.intoto.jsonl"
               found=1
             fi
           fi
           if ((found == 0)); then
-            if [[ "${DRY_RUN}" == "true" ]]; then
+            if [[ ${DRY_RUN} == "true" ]]; then
               # An oci-only rehearsal signs nothing: its signer runs only
               # against a really-pushed digest. Loud, never silent.
               echo "::warning::rehearsal: no Sigstore bundle to attach"
@@ -117,7 +120,6 @@ jobs:
             fi
           fi
           echo "::notice::${found} attestation bundle(s) attached"
-
       - name: Assert the SBOM arrived
         run: |
           set -euo pipefail
@@ -133,23 +135,21 @@ jobs:
           # shipped SBOM-less with everything green. Names are dot-proofed
           # at generation now; this assertion is the backstop.
           n=$(find dist -maxdepth 1 -name "*.spdx.json" | wc -l | tr -d " ")
-          if [[ "${n}" -eq 0 ]]; then
+          if [[ ${n} -eq 0 ]]; then
             echo "::error::no SBOM in dist — the sbom job should have delivered one"
             exit 1
           fi
           hidden=$(find dist -maxdepth 1 -name ".*" -type f | wc -l | tr -d " ")
-          if [[ "${hidden}" -ne 0 ]]; then
+          if [[ ${hidden} -ne 0 ]]; then
             echo "::error::dotfile in dist — dist/* globs and the checksum loop would silently skip it"
             exit 1
           fi
           echo "::notice::${n} SBOM(s) in the bundle"
-
       - name: Checksum everything that ships
         run: |
           set -euo pipefail
           cd dist
           sha256sum ./* | sed 's| \./| |' > checksums.txt
-
       - name: Mint the publishing token
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -175,7 +175,7 @@ jobs:
           # bytes and pass through; a mismatch is a real failure, not a
           # resume.
           draft=$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)
-          if [[ "${draft}" == "false" ]]; then
+          if [[ ${draft} == "false" ]]; then
             gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
               --pattern checksums.txt --output published-checksums.txt
             if ! diff -u published-checksums.txt dist/checksums.txt; then
@@ -186,7 +186,7 @@ jobs:
             exit 0
           fi
           gh release upload "${TAG}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
-          if [[ "${DRY_RUN}" == "true" ]]; then
+          if [[ ${DRY_RUN} == "true" ]]; then
             echo "::warning::rehearsal: ${TAG} left as a draft, nothing published"
             exit 0
           fi

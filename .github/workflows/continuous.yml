@@ -82,12 +82,11 @@ jobs:
       - name: Check the ref
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+          if [[ ${GITHUB_REF} == refs/tags/* ]]; then
             echo "::error::continuous publishes from branches and schedules only, got ${GITHUB_REF}"
             exit 1
           fi
           echo "::notice::continuous publish from ${GITHUB_REF}"
-
   # Same resolver, same rules as the versioned facts job in publish.yml —
   # the archetype difference is one flag: the continuous map simply never
   # contains `version`, because this stream has none. It runs no caller

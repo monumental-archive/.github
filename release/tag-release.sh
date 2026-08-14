@@ -22,6 +22,8 @@ else
   version=$(git log -1 --pretty=%s | sed -nE 's/^chore: release v([0-9][^ ]*).*/\1/p')
   if [[ -z ${version} ]]; then
     echo "FAIL: no manifest, and HEAD's subject names no release version" >&2
+    # shellcheck disable=SC2312  # diagnostic output only; a failure here
+    # degrades a log line, it does not change what is written or decided.
     echo "  subject: $(git log -1 --pretty=%s)" >&2
     exit 1
   fi
@@ -57,6 +59,9 @@ fi
 # nothing burns. Same carve-outs as the generator and the publish
 # guard: no extension control files, no previous release, or a previous
 # release that shipped no tarballs for the extension all pass.
+# shellcheck disable=SC2312  # process substitution: capturing first would
+# turn an empty result into one blank line, which is a worse bug than the
+# masked status. The producing command is git/jq over local state.
 while IFS= read -r control; do
   [[ -n ${control} ]] || continue
   name=$(basename "${control}" .control)

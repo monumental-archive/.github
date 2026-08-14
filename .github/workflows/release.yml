@@ -106,7 +106,6 @@ jobs:
           git remote set-url origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           .org-canon/release/tag-release.sh
-
   release-pr:
     name: Maintain the Release PR
     # The release-published leg closes seam 5 of #358: this job runs on

@@ -52,15 +52,15 @@ jobs:
           jq -r '.[] | [.image, .tag, .digest] | @tsv' \
             <<< "${UNTRUSTED_IMAGES}" > /tmp/images.tsv
           while IFS=$'\t' read -r image tag digest; do
-            if [[ ! "${image}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
+            if [[ ! ${image} =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
               echo "::error::not a lowercase ghcr.io reference"
               exit 1
             fi
-            if [[ ! "${tag}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            if [[ ! ${tag} =~ ^[A-Za-z0-9._-]+$ ]]; then
               echo "::error::implausible tag"
               exit 1
             fi
-            if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
               echo "::error::digest is not sha256:<64 lowercase hex>"
               exit 1
             fi
@@ -86,7 +86,7 @@ jobs:
             # byte the index the repro gate compared.
             resolved=$(docker buildx imagetools inspect "${image}:${tag}" \
               --format '{{json .Manifest}}' | jq -r '.digest')
-            if [[ "${resolved}" != "${digest}" ]]; then
+            if [[ ${resolved} != "${digest}" ]]; then
               echo "::error::${image}:${tag} resolves to ${resolved}, gated ${digest}"
               exit 1
             fi

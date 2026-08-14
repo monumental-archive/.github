@@ -19,6 +19,12 @@
 # restored. --dry-run never updates the remote.
 set -euo pipefail
 
+# Inputs, declared so the contract is explicit and a missing one fails
+# by name instead of expanding to nothing (#82).
+: "${SA_WORK:?SA_WORK must be set by guard-identity}"
+: "${GH_TOKEN:?GH_TOKEN must be set (the source-attest environment read token)}"
+: "${GITHUB_SHA:?}"
+
 cd "${SA_WORK}/repo"
 fail() {
   echo "::error::preflight: ${1}"
@@ -36,6 +42,7 @@ orig=$(git rev-parse refs/notes/commits) \
   || fail "refs/notes/commits is absent from the scratch repo after chain.sh"
 git notes add -f -m "source-attest preflight — never pushed" "${GITHUB_SHA}" \
   || fail "could not annotate ${GITHUB_SHA} in the scratch repo"
+# shellcheck disable=SC2312  # cannot meaningfully fail (printf/id on local state)
 git -c http.extraheader="AUTHORIZATION: basic $(printf "x-access-token:%s" "${GH_TOKEN}" | base64 -w0)" \
   push -q --dry-run origin refs/notes/commits:refs/notes/commits \
   || fail "notes push dry-run rejected — the token cannot write refs/notes/commits (needs contents: write) or the ref moved underneath the run"

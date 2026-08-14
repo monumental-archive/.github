@@ -26,7 +26,8 @@ base="${base#.}"
 mkdir -p dist
 out="dist/${base}-${VERSION}.spdx.json"
 
-if [[ -n "$(git ls-files 'Cargo.lock' '*/Cargo.lock')" ]]; then
+cargo_locks=$(git ls-files 'Cargo.lock' '*/Cargo.lock')
+if [[ -n ${cargo_locks} ]]; then
   trivy fs --config /dev/null --format spdx-json --output "${out}" .
   mode="lock-derived"
 else

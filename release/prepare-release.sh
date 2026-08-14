@@ -96,7 +96,8 @@ fi
 # date of the release candidate, not wall-clock time.
 if [[ -f CITATION.cff ]]; then
   sed -i.bak "s|^version: .*\$|version: ${version}|" CITATION.cff
-  sed -i.bak "s|^date-released: .*\$|date-released: $(git log -1 --format=%cs)|" CITATION.cff
+  released=$(git log -1 --format=%cs)
+  sed -i.bak "s|^date-released: .*\$|date-released: ${released}|" CITATION.cff
   rm -f CITATION.cff.bak
   files="${files} CITATION.cff"
 fi

@@ -66,7 +66,7 @@ jobs:
           # merge would pile duplicate attestations onto old digests. On
           # dispatch (or an unusable before-sha) the most recently
           # committed statement is the recovery target.
-          if [[ -n "${BEFORE:-}" ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
+          if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
             files=$(git diff --name-only --diff-filter=AM "${BEFORE}..HEAD" \
               -- "security/vex/*.openvex.json")
           else
@@ -74,14 +74,14 @@ jobs:
               -- "security/vex/*.openvex.json")
           fi
           files=$(grep -v "^$" <<< "${files}" || true)
-          if [[ -z "${files}" ]]; then
+          if [[ -z ${files} ]]; then
             echo "any=false" >> "${GITHUB_OUTPUT}"
             echo "::notice::no changed statements"
             exit 0
           fi
           n=$(wc -l <<< "${files}")
           n="${n//[[:space:]]/}"
-          if [[ "${n}" -ne 1 ]]; then
+          if [[ ${n} -ne 1 ]]; then
             echo "::error::more than one VEX document changed — one decision per merge, like one release per PR"
             exit 1
           fi
@@ -102,7 +102,7 @@ jobs:
           pairs=$(jq -r '.statements[].products[]?["@id"] // empty
             | capture("^pkg:.*/(?<name>[^/@]+)@(?<version>.+)$")
             | [.name, .version] | @tsv' "${f}" | sort -u)
-          if [[ -z "${pairs}" ]]; then
+          if [[ -z ${pairs} ]]; then
             echo "::error::${f}: no product parses as pkg:<type>/…/<name>@<version>"
             exit 1
           fi
@@ -112,11 +112,11 @@ jobs:
           # failed walk must kill the run, never mask as an empty loop.
           repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
           while read -r repo; do
-            [[ -n "${repo}" ]] || continue
+            [[ -n ${repo} ]] || continue
             tags=$(gh api "repos/monumental-archive/${repo}/releases" --paginate \
               --jq '.[] | select(.draft | not) | .tag_name')
             while read -r tag; do
-              [[ -n "${tag}" ]] || continue
+              [[ -n ${tag} ]] || continue
               dir=$(mktemp -d)
               gh release download "${tag}" --repo "monumental-archive/${repo}" \
                 --pattern "*.spdx.json" --dir "${dir}" 2> /dev/null || true
@@ -149,7 +149,7 @@ jobs:
               matched="${matched}${repo}@${tag} "
             done <<< "${tags}"
           done <<< "${repos}"
-          if [[ -z "${subjects//[[:space:]]/}" ]]; then
+          if [[ -z ${subjects//[[:space:]]/} ]]; then
             echo "::error::${f}: no published release ships a named package@version — a claim bound to nothing is not signed; merge the decision after blast-radius shows an affected release, or let the next release derive it"
             exit 1
           fi
@@ -164,7 +164,6 @@ jobs:
             echo "any=true"
           } >> "${GITHUB_OUTPUT}"
           echo "::notice::signing ${f} over ${count} subject(s)"
-
   sign-vex:
     name: Sign the statement
     needs: plan
