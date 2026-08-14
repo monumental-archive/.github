@@ -178,64 +178,64 @@ url_api = "https://api.github.com/repos/biomejs/biome/releases/assets/501376679"
 provenance = "github-attestations"
 
 [[tools."aqua:google/osv-scanner"]]
-version = "2.4.0"
+version = "2.5.0"
 backend = "aqua:google/osv-scanner"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-arm64"]
-checksum = "sha256:44e580752910f0ff36ec99aff59af20f65df1e859aa31e5605a8f0d055b496e9"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_arm64"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242338"
+checksum = "sha256:fe152e1a546af223e6c557cc3111a8bb3e5dc02fcbf7dbe95d26567c0f0041f2"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_linux_arm64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695126"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-arm64".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-arm64-musl"]
-checksum = "sha256:44e580752910f0ff36ec99aff59af20f65df1e859aa31e5605a8f0d055b496e9"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_arm64"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242338"
+checksum = "sha256:fe152e1a546af223e6c557cc3111a8bb3e5dc02fcbf7dbe95d26567c0f0041f2"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_linux_arm64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695126"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-arm64-musl".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-x64"]
-checksum = "sha256:15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242336"
+checksum = "sha256:edcfc41d257db36148f065055655fe3fcfc434b0b423ea67468a84c207524e0c"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_linux_amd64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695129"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-x64".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-x64-musl"]
-checksum = "sha256:15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242336"
+checksum = "sha256:edcfc41d257db36148f065055655fe3fcfc434b0b423ea67468a84c207524e0c"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_linux_amd64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695129"
 
 [tools."aqua:google/osv-scanner"."platforms.linux-x64-musl".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [tools."aqua:google/osv-scanner"."platforms.macos-arm64"]
-checksum = "sha256:9ca3185ad63e9ab54f7cb90f46a7362be02d80e37f0123d095a54355ea202f5d"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_darwin_arm64"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242387"
+checksum = "sha256:fff5a2e351b7f0a60001e87cbf862e82fb82e2792d368b533fec7a5865a73da2"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_darwin_arm64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695168"
 
 [tools."aqua:google/osv-scanner"."platforms.macos-arm64".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [tools."aqua:google/osv-scanner"."platforms.macos-x64"]
-checksum = "sha256:088119325156321c34c456ac3703d6013538fd71cbac82b891ab34db491e4d66"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_darwin_amd64"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242389"
+checksum = "sha256:baef4f4a4ce2924a9241869c36d4bd9d6c04b632cae6637a0f6347ab9272eb16"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_darwin_amd64"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695127"
 
 [tools."aqua:google/osv-scanner"."platforms.macos-x64".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [tools."aqua:google/osv-scanner"."platforms.windows-x64"]
-checksum = "sha256:0cdd113610126d5dfd5e12ad0e0b4f3e879291ff19bb43b0c52ed2f2c2df1a37"
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_windows_amd64.exe"
-url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/451242340"
+checksum = "sha256:4342285bd8be36b9f113468f3eea86e7900befbcd19ca8dc6ac4f0f6cbe7c362"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_windows_amd64.exe"
+url_api = "https://api.github.com/repos/google/osv-scanner/releases/assets/504695166"
 
 [tools."aqua:google/osv-scanner"."platforms.windows-x64".provenance.slsa]
-url = "https://github.com/google/osv-scanner/releases/download/v2.4.0/multiple.intoto.jsonl"
+url = "https://github.com/google/osv-scanner/releases/download/v2.5.0/multiple.intoto.jsonl"
 
 [[tools."aqua:openvex/vexctl"]]
 version = "0.4.4"
