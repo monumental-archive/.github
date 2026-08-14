@@ -162,7 +162,7 @@ ruff = "0.16.1"
 # Blast-radius scanning over published SBOMs (audit:blast-radius). The
 # aqua registry lags upstream by one release at standup (2.5.0 exists);
 # the pin advances via Renovate like everything else.
-"aqua:google/osv-scanner" = "2.4.0"
+"aqua:google/osv-scanner" = "2.5.0"
 # OpenVEX assembly (vex:new). The statement is the triage record; the
 # signer signs it, blast-radius filters on it.
 "aqua:openvex/vexctl" = "0.4.4"
