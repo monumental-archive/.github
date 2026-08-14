@@ -131,7 +131,7 @@ jq = "1.8.2"
 # hole — security/workflow-permissions.py is the one tracked file in a
 # language no belt tool covered, and it computes the caller/callee
 # permissions join that guards the Build L3 boundary.
-ruff = "0.16.1"
+ruff = "0.16.2"
 # The org's JS/TS/JSON layer (#82), at `preset: "all"` — 525 rules, every
 # group, nursery included. Written as the explicit aqua backend, never the
 # `biome` short name: that name resolves to aqua AND npm, and an npm
