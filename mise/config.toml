@@ -227,6 +227,19 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# Unused Rust dependencies (#403): every dependency in Cargo.toml must
+# be imported somewhere, or carry a written ignored entry under
+# [package.metadata.cargo-machete] with a reason. Static analysis, no
+# cargo/rustc needed, so the gate run is deterministic and touches
+# nothing. --with-metadata is deliberately NOT used in the gate: it
+# shells out to cargo metadata --all-features and can rewrite
+# Cargo.lock — a gate must not mutate the tree it is judging. Not in
+# the aqua registry (404 at standup); the github: backend delivers the
+# upstream binary with its published sha256 into the lock — the
+# closest-to-policy path without aqua. Like biome and golangci-lint,
+# unprovable here: the canon tracks no Rust, so it is exercised first
+# in a consumer (docs/tooling-verdicts.md).
+"github:bnjbvr/cargo-machete" = "v0.9.2"
 # Dockerfile lint (#403): every hadolint rule at maximum reach —
 # --failure-threshold style fails on ALL severities including style,
 # and RUN lines get shellcheck via hadolint itself. Overlap with trivy
@@ -330,6 +343,23 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."lint:machete"]
+description = "No unused Rust dependencies (cargo-machete, static)"
+dir = "{{cwd}}"
+# Static: parses Cargo.toml and greps source, needs no toolchain, so
+# unlike lint:deny there is no cargo-missing failure mode — the binary
+# is the belt's. A false positive (renamed crate, macro-only use) gets
+# a written [package.metadata.cargo-machete] ignored entry beside the
+# dependency it excuses, never a task-level skip. Exit 2 is a
+# processing error and fails like everything else.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files "Cargo.toml" "*/Cargo.toml")
+[[ -n "${manifests}" ]] || { echo "lint:machete: no Cargo.toml tracked, skipped"; exit 0; }
+cargo-machete
+echo "lint:machete: no unused dependencies"
+'''
 
 [tasks."lint:hadolint"]
 description = "Dockerfile lint, every severity fails (hadolint --failure-threshold style)"
