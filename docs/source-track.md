@@ -58,6 +58,22 @@ its own; `audit:source-vsa` is the alarm while it is in one. Field
 semantics for healed links live in
 [`source-provenance.md`](source-provenance.md).
 
+**Ledger forks heal through the same path** (#434, the one that taught
+this one). A lost-update race in the emitter's fetch–append–push loop
+can leave a link whose `ledgerPrev.noteSha256` names note bytes no
+surviving notes tree contains — the emitter hashed a predecessor note
+that then lost the notes push race to a re-emission. Every correct
+walk refuses such a link, and no future push repairs it on its own,
+because the revision already carries a note. The heal is deliberate:
+delete the forked tip note from `refs/notes/commits` and push the
+notes ref, turning the fork into an ordinary hole; the next push to
+`main` re-emits it with the `repaired` marker, a computed level, and a
+`ledgerPrev` hashed from the note that actually exists. The deletion
+removes only the defective link — its revision, and every claim about
+it, returns healed one push later. The race itself is closed
+structurally in the `stele emit` port, where the predecessor hash is
+computed inside the push attempt that wins (stele#3).
+
 **release-lab's first five links claim `SLSA_SOURCE_LEVEL_2`, and stay
 that way.** They were emitted before the claims job held a token that
 could read org-level tag-ruleset details, so `ORG_SOURCE_TAG_IMMUTABLE`
