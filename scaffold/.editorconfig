@@ -53,3 +53,11 @@ indent_style = tab
 # tightest cap its content admits.
 [*.{yml,yaml}]
 max_line_length = 130
+
+# Standalone shell matches the embedded cap: run: blocks are already
+# held to 130 through yamllint, and a standalone script held to a
+# LOOSER bar than the same code pasted into a workflow would be
+# incoherent — the lint:shell reasoning, other direction. Markdown and
+# Python need no row here: rumdl and ruff already cap them.
+[*.sh]
+max_line_length = 130

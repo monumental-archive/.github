@@ -111,6 +111,8 @@ count=$(wc -l < "${SA_WORK}/heal.list" | tr -d " ")
 if ((count == 0)); then
   echo "::notice::every revision since genesis already carries a link — nothing to emit"
 elif ((count > 1)); then
-  echo "::warning::healing $((count - 1)) unattested revision(s) left by earlier lapses — see the repaired marker in their provenance"
+  emsg="healing $((count - 1)) unattested revision(s) left by earlier lapses"
+  emsg+=" — see the repaired marker in their provenance"
+  echo "::warning::${emsg}"
 fi
 echo "::notice::genesis at ${genesis_found}; ${count} revision(s) to link"

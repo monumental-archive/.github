@@ -594,7 +594,9 @@ su -w PG,NAME,PREV,NEW postgres -s /bin/bash -c '
   psql -d upgraded -tA -v ext="${NAME}" -f /work/snapshot.sql > /tmp/upgraded.snap
   psql -d fresh -tA -v ext="${NAME}" -f /work/snapshot.sql > /tmp/fresh.snap
   if ! diff -u /tmp/upgraded.snap /tmp/fresh.snap; then
-    echo "::error::upgraded ${NAME} catalog differs from a fresh ${NEW} install — the derived script is unsound; see the diff above"
+    emsg="::error::upgraded ${NAME} catalog differs from a fresh ${NEW} install — the derived script is"
+    emsg+=" unsound; see the diff above"
+    echo "${emsg}"
     exit 1
   fi
   echo "proof: ${NAME} ${PREV} -> ${NEW} upgraded catalog identical to fresh install"

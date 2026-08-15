@@ -35,8 +35,10 @@ command -v cosign > /dev/null 2>&1 \
   || fail "cosign is not on PATH — the belt install step did not deliver it"
 cosign version > /dev/null 2>&1 \
   || fail "cosign is on PATH but not executable"
+emsg="no usable committer identity in the scratch repo — the contract"
+emsg+=" identity chain.sh declares is missing (docs/source-assessment.md, storage)"
 git var GIT_COMMITTER_IDENT > /dev/null 2>&1 \
-  || fail "no usable committer identity in the scratch repo — the contract identity chain.sh declares is missing (docs/source-assessment.md, storage)"
+  || fail "${emsg}"
 
 orig=$(git rev-parse refs/notes/commits) \
   || fail "refs/notes/commits is absent from the scratch repo after chain.sh"
@@ -45,7 +47,11 @@ git notes add -f -m "source-attest preflight — never pushed" "${GITHUB_SHA}" \
 # shellcheck disable=SC2312  # cannot meaningfully fail (printf/id on local state)
 git -c http.extraheader="AUTHORIZATION: basic $(printf "x-access-token:%s" "${GH_TOKEN}" | base64 -w0)" \
   push -q --dry-run origin refs/notes/commits:refs/notes/commits \
-  || fail "notes push dry-run rejected — the token cannot write refs/notes/commits (needs contents: write) or the ref moved underneath the run"
+  || {
+    emsg="notes push dry-run rejected — the token cannot write"
+    emsg+=" refs/notes/commits (needs contents: write) or the ref moved underneath the run"
+    fail "${emsg}"
+  }
 git update-ref refs/notes/commits "${orig}"
 
 echo "::notice::preflight ok — identity, cosign and the notes push are all proven"

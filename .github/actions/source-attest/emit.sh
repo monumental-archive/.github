@@ -64,7 +64,9 @@ vsa_type="https://slsa.dev/verification_summary/v1"
 # broken, which is refused rather than guessed around — emit.sh holds no
 # token to resolve refs with, on purpose.
 if [[ ! ${SA_CANON_REF} =~ ^[0-9a-f]{40}$ ]]; then
-  echo "::error::canon ref '${SA_CANON_REF}' is not a commit SHA — the emitter must be pinned by full SHA so the VSA can carry policy.digest (#267)"
+  emsg="::error::canon ref '${SA_CANON_REF}' is not a commit SHA — the emitter must be pinned by full SHA so"
+  emsg+=" the VSA can carry policy.digest (#267)"
+  echo "${emsg}"
   exit 1
 fi
 
@@ -199,7 +201,9 @@ while IFS= read -r rev; do
       --certificate-identity "${SA_IDENTITY}" \
       --certificate-oidc-issuer "${SA_ISSUER}" \
       "${linkdir}/provenance.json" > /dev/null 2>&1 || {
-      echo "::error::the provenance just signed does not verify against ${SA_IDENTITY} — the certificate identity is not the published contract"
+      emsg="::error::the provenance just signed does not verify against ${SA_IDENTITY} — the certificate"
+      emsg+=" identity is not the published contract"
+      echo "${emsg}"
       exit 1
     }
   fi
@@ -217,12 +221,17 @@ while IFS= read -r rev; do
     level="SLSA_SOURCE_LEVEL_2"
     # shellcheck disable=SC2312  # diagnostic output only; a failure here
     # degrades a log line, it does not change what is written or decided.
-    echo "::warning::${rev}: required properties missing: $(jq -rn --argjson req "${required}" --argjson has "${present}" '($req - $has) | join(", ")') — under-claiming ${level}"
+    missing=$(jq -rn --argjson req "${required}" --argjson has "${present}" \
+      '($req - $has) | join(", ")')
+    echo "::warning::${rev}: required properties missing: ${missing} — under-claiming ${level}"
   elif [[ ${repaired} != "null" ]]; then
     commit_epoch=$(git log -1 --format=%ct "${rev}")
     if [[ -z ${rules_max_epoch} ]] || ((rules_max_epoch >= commit_epoch)); then
       level="SLSA_SOURCE_LEVEL_2"
-      echo "::warning::${rev}: healed link, and ruleset continuity across the gap is unprovable (a contributing ruleset changed after the commit, or no change times were readable) — under-claiming ${level}"
+      emsg="::warning::${rev}: healed link, and ruleset continuity across the gap is unprovable"
+      emsg+=" (a contributing ruleset changed after the commit, or no change times were readable) —"
+      emsg+=" under-claiming ${level}"
+      echo "${emsg}"
     fi
   fi
 

@@ -236,4 +236,6 @@ fi
 grep -q "genesis refused" <<< "${out}" \
   || fail "genesis was refused but without its named error"
 
-echo "lint:source-attest: ok — read guards refuse blindness, a lapse under-claims, emitter dry run clean, holes heal with honest markers and computed levels, genesis stays refused, push negotiated"
+emsg="lint:source-attest: ok — read guards refuse blindness, a lapse under-claims, emitter dry run clean,"
+emsg+=" holes heal with honest markers and computed levels, genesis stays refused, push negotiated"
+echo "${emsg}"

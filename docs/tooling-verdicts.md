@@ -595,8 +595,13 @@ too: `[*.go]` is `indent_style = unset`, because ec's line-based check
 cannot distinguish code indentation from bytes inside Go raw string
 literals and reds space-indented test fixtures gofumpt must leave
 verbatim — measured on stele, the org's first Go consumer, invisible
-from the canon which tracks no Go. *Reopen:* ec growing a
-formatter-aware indent check.
+from the canon which tracks no Go. The line-length deferral was later
+completed for the one uncovered format: `[*.sh]` carries
+`max_line_length = 130`, matching the cap embedded shell already gets
+through yamllint — a standalone script held to a looser bar than the
+same code in a `run:` block would be incoherent (35 lines conformed;
+markdown and Python need no row, rumdl and ruff cap them). *Reopen:*
+ec growing a formatter-aware indent check.
 
 **gitleaks, and why two secret scanners is a split rather than a
 duplicate** (#403). The issue's one demand for this item was to state

@@ -52,7 +52,9 @@ verify_link() {
     --certificate-identity "${SA_IDENTITY}" \
     --certificate-oidc-issuer "${SA_ISSUER}" \
     "${SA_WORK}/prev-statement.json" > /dev/null 2>&1 || {
-    echo "::error::link at ${rev} does not verify against ${SA_IDENTITY} — refusing to extend a chain that fails the published root of trust"
+    emsg="::error::link at ${rev} does not verify against ${SA_IDENTITY} — refusing to extend a chain that"
+    emsg+=" fails the published root of trust"
+    echo "${emsg}"
     exit 1
   }
   jq -e --arg c "${rev}" '.subject[0].digest.gitCommit == $c' \
