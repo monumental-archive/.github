@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.29.1](https://github.com/monumental-archive/.github/compare/v1.29.0...v1.29.1) - 2026-08-15
+
+### Fixed
+
+- read the trusted root without a pipeline the pipefail kills ([#438](https://github.com/monumental-archive/.github/pull/438))
+
 ## [1.29.0](https://github.com/monumental-archive/.github/compare/v1.28.1...v1.29.0) - 2026-08-15
 
 ### Added
