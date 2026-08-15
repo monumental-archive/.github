@@ -43,6 +43,7 @@ honestly blocked on.
 | editorconfig-checker (`aqua:`, binary `ec`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
+| cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -633,6 +634,24 @@ intersect, and each catches classes the other has no rule for.
 *Reopen:* a label-schema convention (`--require-label`), if the org
 ever standardises OCI image labels beyond what the release path
 already stamps.
+
+**cargo-machete, static in the gate, metadata mode kept out of it**
+(#403). Every Cargo.toml dependency must be imported somewhere or carry
+a written `[package.metadata.cargo-machete] ignored` entry beside the
+dependency it excuses — the written-exception culture, never a
+task-level skip. Two rulings. First, the gate runs WITHOUT
+`--with-metadata`: that flag shells out to `cargo metadata
+--all-features` and can rewrite Cargo.lock, and a gate must not mutate
+the tree it judges — the imprecision cost is bounded exactly by those
+written ignored entries. Second, the backend: not in the aqua registry
+(404 at standup), but upstream publishes per-platform tarballs with
+sha256s, so the `github:` backend delivers the upstream binary
+lock-checksummed across all seven platforms — the closest-to-policy
+path without aqua, and the belt's first use of it. Like biome and
+golangci-lint this tool is **unprovable in the canon** (no Rust
+tracked; `lint:machete` skips clean here) and is exercised first in a
+consumer. *Reopen:* an aqua-registry package appearing (move the pin),
+or machete growing a no-write metadata mode (reconsider precision).
 
 ## Skipped, with rationale and reopen trigger
 
