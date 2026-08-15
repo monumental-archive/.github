@@ -10,4 +10,4 @@
 # Remove the line the day the chain is founded; a stale entry is drift
 # the Monday audit cannot see, so entries carry their removal condition.
 #
-# (No entries: all three org repositories are activated.)
+stele standup in progress (#392) — remove when the source-attest environment holds SOURCE_RULES_TOKEN and the genesis dispatch founds the chain

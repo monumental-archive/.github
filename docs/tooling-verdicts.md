@@ -37,6 +37,8 @@ honestly blocked on.
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
+| golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
+| govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -354,6 +356,54 @@ post-change ones, byte-identical both times. That caught one real bug the
 refactor introduced — collapsing the workflow-level grant with `or`
 silently discarded an explicit `permissions: {}`, because an empty dict
 is falsy and that empty grant is the meaningful org-wide default.
+
+**golangci-lint at `default: all`, and the disables that are not**
+(#392). The Go layer, stood up docs-first for the stele standup: the
+full 105-linter catalogue was read from the pinned binary itself
+(`help linters`, v2.12.2) and the v2 reference config, and every
+departure from `all` carries a written reason in
+`scaffold/.golangci.yml` — the reasons live beside the keys they
+govern, deliberately, so a copied config carries its own record. The
+disables fall in exactly three classes, none of them reach: one winner
+per rule family (five complexity linters → gocognit; misspell → the
+belt's typos; nakedret vacuous under nonamedreturns), rules wrong for
+this org permanently (per-file headers → the reuse verdict; forbidigo →
+the ruff `T201` shape; exhaustruct → the decode layer distinguishes
+absent from zero by omission; tagliatelle → tag names are spec facts),
+and blank-line style with no defect story (wsl, nlreturn). Everything
+else is on, including every library-specific linter — one that finds no
+library finds nothing, and costs nothing.
+
+Three settings are not preferences: `nolintlint` requires every
+`//nolint` to name its linter and carry a reason — the disabled-rule
+law at line granularity; `depguard` bans `encoding/json` outside
+`internal/jsonx`, because a decoder that turns absent into zero is
+hostile in a tool that asserts facts are present and no linter can see
+it (a data property, made a lint the id-token way); and
+`max-issues-per-linter`/`max-same-issues` are 0 — a capped report reads
+as complete when it is not.
+
+Like biome, **golangci-lint cannot be proven in this repository**: the
+canon tracks no Go, so `lint:go` skips clean here by construction and
+the rule set is exercised first in stele. Recorded rather than glossed,
+the biome precedent exactly. `lint:go` requires a tracked
+`.golangci.yml` once Go is tracked — golangci-lint's default selection
+is five linters of ~105, the ruff-defaults trap re-measured in a new
+tool.
+
+**govulncheck, and the third backend exception** (#392). No upstream
+binary releases and no aqua package exist, so the `go:` backend builds
+it from a pinned source version with the repo's own pinned toolchain —
+the documented exception class `cargo:` and `pipx:` established,
+repo-side like cargo-fuzz because building it needs the toolchain only
+Go repos pin. It earns the slot over feed-matching alternatives by
+being call-graph aware: it reds only when a vulnerable function is
+REACHABLE from the module's code, which is the precision the VEX triage
+wants as input. Network-bound against <https://vuln.go.dev>, so
+`audit:go-vulns`, never the gate; osv-scanner still reads go modules in
+`audit:blast-radius`, and the two answer different questions (shipped
+SBOMs vs source reachability). *Reopen:* upstream shipping attested
+binaries, or an aqua package appearing.
 
 **biome at `preset: "all"`, and the two rules that are not** (#82).
 Adopted as the org's JS/TS/JSON layer: one aqua-backed binary, checksums

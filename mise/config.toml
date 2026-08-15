@@ -212,6 +212,21 @@ python = "3.14.7"
 # verification of chain links generally — the same binary the emitter's
 # action installs in per-repo runs (docs/source-track.md, #207).
 "aqua:sigstore/cosign" = "3.1.3"
+# The Go layer (#392): one aqua-backed binary — checksums and GitHub
+# artifact attestations verified at install — carrying ~105 lint
+# analyzers plus the formatters (gofumpt with extra rules, gci). Like
+# biome, this tool cannot be proven in this repository: the canon
+# tracks no Go, so its rule set is exercised first in a consumer
+# (stele) — recorded in docs/tooling-verdicts.md. The org's enable
+# policy is `default: all` with per-rule written disables, carried in
+# scaffold/.golangci.yml; lint:go refuses a Go repo that lacks the
+# config, because golangci-lint's DEFAULT selection is five linters of
+# ~105 — the ruff-defaults trap in a new costume. govulncheck is
+# deliberately NOT here: it needs a go toolchain to build (no upstream
+# binary releases, no aqua package), so it is a repo-side build input
+# via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
+# it with the remedy.
+"aqua:golangci/golangci-lint" = "2.12.2"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -659,6 +674,110 @@ command -v cargo > /dev/null || {
 }
 cargo fetch --locked
 cargo deny check advisories
+'''
+
+[tasks."lint:go"]
+description = "Go lint + format check (golangci-lint, default: all + curated disables)"
+dir = "{{cwd}}"
+# The Go half of the language layer (#392). golangci-lint analyzes
+# PACKAGES via the go toolchain, not a file list — `git ls-files` cannot
+# feed it. That is safe against the lefthook-cache trap anyway: go
+# package loading ignores dot-directories, so nothing under .git/ is
+# reachable, and an untracked .go file inside a tracked package is a
+# build input the compiler would also see — hiding it from the linter
+# would be lying to ourselves, not hygiene.
+#
+# A tracked .golangci.yml is REQUIRED once Go is tracked, the
+# ruff/biome rule with the same sharp edge: golangci-lint's default
+# selection is five linters out of ~105, so a repo that forgets the
+# config gets a green gate that checked almost nothing. Copy
+# scaffold/.golangci.yml — the org policy is `default: all` with
+# per-rule written disables, and v2 `run` also reports the enabled
+# formatters (gofumpt extra-rules, gci) as findings, so format drift
+# reds here too.
+#
+# Multi-module trees are linted per go.mod, because golangci-lint
+# resolves one module context per invocation.
+run = '''
+set -euo pipefail
+mods=$(git ls-files "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "lint:go: no go.mod tracked, skipped"; exit 0; }
+# A repo with a go.mod has go pinned as a build input; go absent is a
+# broken toolchain, and skipping would be the vacuous-success failure.
+command -v go > /dev/null || {
+  echo "lint:go: go.mod present but go missing — pin go in mise.toml" >&2
+  exit 1
+}
+command -v golangci-lint > /dev/null || {
+  echo "lint:go: golangci-lint missing from the belt" >&2
+  exit 1
+}
+if ! git ls-files --error-unmatch ".golangci.yml" > /dev/null 2>&1; then
+  echo "lint:go: Go is tracked but no .golangci.yml is — copy scaffold/.golangci.yml (#392)" >&2
+  echo "  without it golangci-lint runs its five default linters, not the org's default: all" >&2
+  exit 1
+fi
+count=0
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  count=$((count + 1))
+  (cd "$(dirname "${m}")" && golangci-lint run)
+done <<< "${mods}"
+echo "lint:go: ${count} module(s) linted and format-checked"
+'''
+
+[tasks."fix:go"]
+description = "Apply golangci-lint's auto-fixes and rewrite Go to canonical format (gofumpt, gci)"
+dir = "{{cwd}}"
+# The write-mode sibling. `run --fix` applies only fixes the analyzers
+# themselves mark safe, and `fmt` applies the formatters — the same
+# no-unsafe rule as fix:biome and fix:python: a fixer must be runnable
+# without reading its diff first.
+run = '''
+set -euo pipefail
+mods=$(git ls-files "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "fix:go: no go.mod tracked, skipped"; exit 0; }
+command -v go > /dev/null || {
+  echo "fix:go: go.mod present but go missing — pin go in mise.toml" >&2
+  exit 1
+}
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  (cd "$(dirname "${m}")" && golangci-lint run --fix && golangci-lint fmt)
+done <<< "${mods}"
+'''
+
+[tasks."audit:go-vulns"]
+description = "Go vulnerability scan, call-graph aware (govulncheck — network, not in ci)"
+dir = "{{cwd}}"
+# audit:*, not lint:*: govulncheck fetches https://vuln.go.dev at run
+# time, and a new advisory fails unrelated work — a property of the
+# feed, not the diff. Call-graph aware, so strictly more precise than
+# dependency matching: it reds only when a vulnerable FUNCTION is
+# reachable from this module's code, which is the honesty the VEX
+# triage wants as input. govulncheck is a repo-side build input (the
+# cargo-fuzz pattern — it has no binary releases and no aqua package,
+# so the go: backend builds it from a pinned source version with the
+# repo's own pinned toolchain); asserted with the remedy, never
+# installed mid-run.
+run = '''
+set -euo pipefail
+mods=$(git ls-files "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "audit:go-vulns: no go.mod tracked, skipped"; exit 0; }
+command -v go > /dev/null || {
+  echo "audit:go-vulns: go.mod present but go missing — pin go in mise.toml" >&2
+  exit 1
+}
+command -v govulncheck > /dev/null || {
+  echo "audit:go-vulns: govulncheck missing — pin it as a build input:" >&2
+  echo "  mise.toml: \"go:golang.org/x/vuln/cmd/govulncheck\" = \"<version>\"" >&2
+  exit 1
+}
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  (cd "$(dirname "${m}")" && govulncheck ./...)
+done <<< "${mods}"
+echo "audit:go-vulns: no reachable vulnerabilities"
 '''
 
 [tasks."audit:blast-radius"]
@@ -1800,7 +1919,7 @@ tags=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9
 latest=$(tail -1 <<< "${tags}")
 [[ -n "${latest}" ]] || { echo "audit:org-pins: canon has no tags, skipped"; exit 0; }
 repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
-expected_repos=3
+expected_repos=4
 seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
 if [[ "${seen_repos}" -ne "${expected_repos}" ]]; then
   echo "audit:org-pins: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2
@@ -2542,13 +2661,36 @@ dir = "{{cwd}}"
 # the run is local; the Codecov upload (the badge) lives in ci.yml as a
 # separate non-blocking job.
 run = """
-[[ -f .coverage-floor && -f Cargo.toml ]] || {
+[[ -f .coverage-floor ]] && [[ -f Cargo.toml || -f go.mod ]] || {
   echo "coverage:check: no .coverage-floor, skipped"; exit 0
 }
 floor=$(tr -d '[:space:]' < .coverage-floor)
 if [[ ! "${floor}" =~ ^[0-9]+(\\.[0-9]+)?$ ]]; then
   echo "coverage:check: .coverage-floor is not a number: ${floor}" >&2
   exit 1
+fi
+# The Go leg (#392): `go test -coverprofile` plus `go tool cover -func`
+# — both in the pinned toolchain, no extra component to assert. The
+# ratchet semantics are identical to the Rust leg's: committed floor,
+# local measurement, merge refused below it. No COVERAGE_EXCLUDE analog
+# yet — the first Go repo that needs one adds it deliberately.
+if [[ -f go.mod && ! -f Cargo.toml ]]; then
+  command -v go > /dev/null || {
+    echo "coverage:check: go.mod present but go missing — pin go in mise.toml" >&2
+    exit 1
+  }
+  go test ./... -coverprofile=coverage.txt -covermode=atomic
+  pct=$(go tool cover -func=coverage.txt | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
+  [[ -n "${pct}" ]] || {
+    echo "coverage:check: could not read a total from the profile — a check that reads nothing must not pass" >&2
+    exit 1
+  }
+  if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
+    echo "coverage:check: ${pct}% is below the committed floor ${floor}%" >&2
+    exit 1
+  fi
+  echo "coverage:check: floor ${floor} held (${pct}%)"
+  exit 0
 fi
 if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
   echo "coverage:check: llvm-tools component missing — declare it with the" >&2
@@ -2581,9 +2723,22 @@ dir = "{{cwd}}"
 # exclusion set, same llvm-tools assertion — never a task-time rustup,
 # which races every other task driving the toolchain.
 run = """
-[[ -f .coverage-floor && -f Cargo.toml ]] || {
+[[ -f .coverage-floor ]] && [[ -f Cargo.toml || -f go.mod ]] || {
   echo "coverage:report: no .coverage-floor, skipped"; exit 0
 }
+# Go leg (#392): the profile go test writes IS the upload format —
+# Codecov parses Go coverprofiles natively, so the report is the
+# measurement, with no converter to drift. ci.yml selects the filename
+# by repo shape (coverage.txt for Go, lcov.info for Rust).
+if [[ -f go.mod && ! -f Cargo.toml ]]; then
+  command -v go > /dev/null || {
+    echo "coverage:report: go.mod present but go missing — pin go in mise.toml" >&2
+    exit 1
+  }
+  go test ./... -coverprofile=coverage.txt -covermode=atomic > /dev/null
+  echo "coverage:report: coverage.txt written"
+  exit 0
+fi
 if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
   echo "coverage:report: llvm-tools component missing — declare it with the" >&2
   echo "  rust pin in mise.toml: rust = { version = \\"1.xx.x\\", components = \\"llvm-tools\\" }" >&2
@@ -3197,7 +3352,7 @@ dir = "{{cwd}}"
 # This canary asserts the layer itself is present.
 run = '''
 missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq pinact cargo-deny osv-scanner vexctl reuse; do
+for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq pinact cargo-deny osv-scanner vexctl reuse golangci-lint; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
 done
 if [[ -n "${missing}" ]]; then
