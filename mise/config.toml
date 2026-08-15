@@ -227,6 +227,17 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# Secret scanning at commit depth (#403): `gitleaks git` reads history
+# via git log -p, so it is tracked-only by construction and reaches
+# every commit, not just the tip. The overlap with trivy is a split,
+# not a duplicate: trivy's secret scanner guards ARTIFACTS (Dockerfile
+# context and published image layers, docs/dependency-track.md);
+# gitleaks guards SOURCE at commit depth — a secret committed and then
+# deleted is invisible to every tip scanner and still live to anyone
+# who clones. No config file: gitleaks' default ruleset IS its maximum
+# (the opposite of the ruff/biome default trap), so a config exists
+# only once a real finding demands a written allowlist.
+"aqua:gitleaks/gitleaks" = "8.30.1"
 # Whole-file hygiene against .editorconfig (#403): the org's ONE written
 # indentation rule lives in .editorconfig and this enforces it — six
 # properties (charset, end_of_line, insert_final_newline, indent_style,
@@ -312,6 +323,31 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."lint:gitleaks"]
+description = "Secret scan at commit depth, full history (gitleaks git)"
+dir = "{{cwd}}"
+# `git` mode, never `dir`: history scanning is tracked-only by
+# construction (no walker to wander into .git/lefthook caches), reaches
+# secrets that were committed and deleted — invisible to every
+# tip-of-tree scanner, still live to anyone who clones — and is
+# deterministic over the commit set. --redact because a CI log line
+# printing the matched secret would itself be a disclosure in a public
+# repo. No config file by design: gitleaks' DEFAULT ruleset is its
+# maximum, so requiring a config would invert the ruff/biome trap — a
+# .gitleaks.toml appears only when a real finding demands a written
+# allowlist, and an unexplained one is a finding in review.
+# A red here is a rotation, then an ignore: the secret is in history,
+# so removing it from the tip fixes nothing — rotate the credential,
+# record the dead finding's fingerprint in .gitleaksignore with a
+# comment naming the rotation.
+run = '''
+set -euo pipefail
+git rev-parse --git-dir > /dev/null 2>&1 || {
+  echo "lint:gitleaks: not a git repository, skipped"; exit 0
+}
+gitleaks git --redact --no-banner .
+'''
 
 [tasks."lint:editorconfig"]
 description = "Whole-file hygiene against .editorconfig (editorconfig-checker)"

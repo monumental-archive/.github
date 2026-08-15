@@ -41,6 +41,7 @@ honestly blocked on.
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
 | editorconfig-checker (`aqua:`, binary `ec`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
+| gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -586,6 +587,31 @@ conformed: two `gh issue create --body` one-liners over 130 columns
 tab-indented because git itself writes tabs — declared as such rather
 than reformatted, on the fixture-is-not-evidence rule. *Reopen:* ec
 growing a formatter-aware indent check.
+
+**gitleaks, and why two secret scanners is a split rather than a
+duplicate** (#403). The issue's one demand for this item was to state
+the overlap with `trivy --scanners secret` explicitly, so: trivy's
+secret scanner guards **artifacts** — the Dockerfile context in
+`lint:trivy` and published image layers in the release path — at the
+surface those artifacts present; gitleaks guards **source at commit
+depth** via `gitleaks git`, which reads `git log -p`, so a secret
+committed and then deleted — invisible to every tip-of-tree scanner,
+still live to anyone who clones — is found. Neither reaches the
+other's blind spot; retiring either would open one.
+
+Standup rulings. `git` mode over `dir` mode: history scanning is
+tracked-only by construction, so the lefthook-cache walker rule is
+satisfied without a file list, and the scan is deterministic over the
+commit set (353 commits, 1.9 MB, ~1 s, zero findings at adoption).
+`--redact` because a public CI log printing the matched secret would
+itself be the disclosure. **No config file, by design**: gitleaks'
+default ruleset is its maximum, the exact opposite of the ruff/biome
+weak-default trap, so `lint:gitleaks` requires no config and an
+unexplained `.gitleaks.toml` appearing in a repo is itself a review
+finding — the file exists only when a real finding demanded a written
+allowlist. A red is a rotation first, then a fingerprint in
+`.gitleaksignore` naming the rotation: the secret is in history, so
+tip edits fix nothing. *Reopen:* nothing pending.
 
 ## Skipped, with rationale and reopen trigger
 
