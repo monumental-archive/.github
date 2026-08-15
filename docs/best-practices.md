@@ -67,17 +67,22 @@ Silver stands at 96% on two MUSTs, and **neither is a second maintainer**:
   nobody has done the pass.
 - `test_statement_coverage80` — needs a number, and the number needs a
   bash coverage tool. `kcov` and `bashcov` are both **404 in the aqua
-  registry**; `bats-core` and `shellspec` are both present. So a *test
-  suite* is belt-legal today (#364) and a *coverage number* is not.
+  registry**, so no belt-legal tool can measure the canon today.
 
 Note the escape hatch does **not** apply: the criterion is conditional on
 "if there is at least one FLOSS tool that can measure this in the
 selected language", and kcov and bashcov are FLOSS tools that measure
 bash. Aqua packaging is *our* constraint, not the criterion's, so N/A
-here would be a false claim. Silver therefore costs exactly one
-decision — may a coverage tool enter the belt without aqua packaging? —
-and that decision is recorded in
-[tooling-verdicts.md](tooling-verdicts.md), not settled here.
+here would be a false claim.
+
+The wall is therefore the **language**, not a packaging decision. It
+comes down with #392 (decided 2026-08-15): the canon's bash moves to a
+Go tool in its own repo, `go test -cover` supplies the number, and the
+canon gains a `.coverage-floor` like any Rust repo — see #398 for the
+retirement of this section and the criteria it gates. Until then this
+row stays honestly Unmet. A bash test framework was considered as the
+separable half and **refused** (#364): it would neither produce a
+number — the criterion needs coverage, not tests — nor survive the port.
 
 ## Gold — walled by headcount, deliberately not claimed
 
