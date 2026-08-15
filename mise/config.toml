@@ -227,6 +227,14 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# YAML lint (#403): full rule inventory at error, policy in .yamllint.yaml.
+# PyPI-only — no aqua package (404 in the registry; pure Python, no binary
+# releases) — so the SECOND pipx: exception after reuse, riding
+# checksummed uv under the same UV_* floor env above. Pinned here BEFORE
+# the first install: a one-off `mise install` writes a bare lock entry
+# with zero platforms, which works locally and fails CI with "No lockfile
+# URL found".
+"pipx:yamllint" = "1.38.0"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -298,6 +306,34 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."lint:yaml"]
+description = "YAML lint (yamllint, full rule inventory at error + --strict)"
+dir = "{{cwd}}"
+# A tracked yamllint config is REQUIRED once YAML is tracked — the
+# ruff/biome/golangci trap in a fourth costume: without one yamllint
+# falls back to its own `default` preset, a fraction of the org policy,
+# and the gate goes green having enforced something weaker. The belt
+# cannot supply the file centrally (yamllint discovers upward from the
+# file, not through mise's conf.d layer), so the belt asserts it. Copy
+# scaffold/.yamllint.yaml. No fix:* sibling exists to wire: yamllint
+# ships no writer, so findings are hand edits by design.
+# Tracked files only — yamllint's own discovery is never used, on the
+# standing lefthook-cache rule.
+run = '''
+set -euo pipefail
+files=$(git ls-files "*.yml" "*.yaml")
+[[ -n "${files}" ]] || { echo "lint:yaml: no YAML tracked, skipped"; exit 0; }
+if ! git ls-files --error-unmatch ".yamllint.yaml" > /dev/null 2>&1 \
+  && ! git ls-files --error-unmatch ".yamllint" > /dev/null 2>&1 \
+  && ! git ls-files --error-unmatch ".yamllint.yml" > /dev/null 2>&1; then
+  echo "lint:yaml: YAML is tracked but no .yamllint.yaml is — copy scaffold/.yamllint.yaml (#403)" >&2
+  echo "  without it yamllint runs its default preset, not the org's full-inventory policy" >&2
+  exit 1
+fi
+xargs yamllint --strict <<<"${files}"
+echo "lint:yaml: $(wc -l <<<"${files}" | tr -d " ") file(s) linted"
+'''
 
 [tasks."fix:markdown"]
 description = "Auto-fix markdown (rumdl)"
@@ -2160,6 +2196,13 @@ awk '
     gsub(/ /, "", s); needs[job] = s; next
   }
   /^    needs: [a-z]/ { needs[job] = $2; next }
+  # Block-style needs lists: the only form the tree carries since the
+  # yamllint standup (#403) — its brackets rule forbids non-empty flow
+  # sequences, so the flow branches above are kept only as parser
+  # completeness.
+  /^    needs:$/ { nblock = 1; needs[job] = ""; next }
+  nblock && /^      - / { needs[job] = needs[job] (needs[job] == "" ? "" : ",") $2; next }
+  nblock { nblock = 0 }
   /^      id-token: write/ { idtok[job] = 1 }
   /^      contents: write/ { cwrite[job] = 1 }
   /needs\.commit-point\.result == .success./ { testscp[job] = 1 }

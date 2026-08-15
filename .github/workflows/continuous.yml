@@ -18,9 +18,10 @@
 # but this file runs no steps of its own — every job is a `uses:`. The
 # grant exists solely to be passed to `signer`, and the build job that
 # runs caller code holds `contents: read` + `packages: write` only.
+---
 name: continuous
 
-on:
+"on":
   workflow_call:
     inputs:
       dockerfile:
@@ -32,7 +33,7 @@ on:
         description: Build context directory.
         required: false
         type: string
-        default: "."
+        default: .
       smoke-test:
         description: >
           Script proving the image does the one thing it exists to do.
@@ -130,7 +131,9 @@ jobs:
 
   build:
     name: Build image
-    needs: [guard, facts]
+    needs:
+      - guard
+      - facts
     uses: ./.github/workflows/build-oci-image.yml
     permissions:
       # Restated, not inherited — the startup_failure trap.
@@ -154,7 +157,10 @@ jobs:
   # assemble simply run back to back here.
   assemble:
     name: Assemble the image index
-    needs: [guard, facts, build]
+    needs:
+      - guard
+      - facts
+      - build
     uses: ./.github/workflows/assemble-oci-index.yml
     permissions:
       contents: read # checkout of the caller
@@ -176,3 +182,4 @@ jobs:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
+...

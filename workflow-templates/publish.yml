@@ -6,11 +6,13 @@
 # workflow filename, taken from the OIDC `workflow_ref` claim rather than
 # `job_workflow_ref`. Renaming this file breaks trusted publishing, and
 # nothing local goes red when it happens.
+---
 name: publish
 
-on:
+"on":
   push:
-    tags: [v*]
+    tags:
+      - v*
   # Resume path. ALWAYS dispatch with --ref <tag>: the shared guard refuses
   # anything that is not a tag, because a branch ref would attest a moving
   # pointer and Sigstore is append-only.
@@ -41,3 +43,4 @@ jobs:
       packages: write # oci-image pushes to GHCR; harmless if unused
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
+...

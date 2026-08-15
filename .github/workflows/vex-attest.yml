@@ -23,12 +23,15 @@
 # NEXT release of each affected repository, derived into that release's
 # own VEX asset (release/derive-vex.sh); this workflow is what makes the
 # decision public and verifiable now rather than at the next release.
+---
 name: vex-attest
 
-on:
+"on":
   push:
-    branches: [main]
-    paths: [security/vex/*.openvex.json]
+    branches:
+      - main
+    paths:
+      - security/vex/*.openvex.json
   workflow_dispatch: {}
 
 permissions: {}
@@ -150,7 +153,9 @@ jobs:
             done <<< "${tags}"
           done <<< "${repos}"
           if [[ -z ${subjects//[[:space:]]/} ]]; then
-            echo "::error::${f}: no published release ships a named package@version — a claim bound to nothing is not signed; merge the decision after blast-radius shows an affected release, or let the next release derive it"
+            emsg="${f}: no published release ships a named package@version — a claim bound to nothing is not signed; merge"
+            emsg+=" the decision after blast-radius shows an affected release, or let the next release derive it"
+            echo "::error::${emsg}"
             exit 1
           fi
           echo "::notice::affected releases: ${matched}"
@@ -178,3 +183,4 @@ jobs:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the claim
       artifact-metadata: write # the signer creates the storage record
+...

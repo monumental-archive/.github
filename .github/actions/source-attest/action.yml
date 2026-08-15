@@ -33,6 +33,7 @@
 #     verifying it against the pinned identity — the L2+ requirement.
 #   - The chain verifies its previous link before appending; a missing
 #     genesis fails loudly rather than re-founding the chain.
+---
 name: source-attest
 description: >-
   Emit signed source provenance and a source VSA for the pushed
@@ -87,7 +88,9 @@ runs:
         esac
         expected="${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
         if [[ ${GITHUB_WORKFLOW_REF} != "${expected}" ]]; then
-          echo "::error::source-attest invoked from '${GITHUB_WORKFLOW_REF}' — the emitter runs only under the reserved identity '${expected}' (docs/source-assessment.md)"
+          emsg="source-attest invoked from '${GITHUB_WORKFLOW_REF}' — the emitter runs only under the reserved identity"
+          emsg+=" '${expected}' (docs/source-assessment.md)"
+          echo "::error::${emsg}"
           exit 1
         fi
         # The action tree IS a canon tree: `uses:` fetched the whole
@@ -100,7 +103,9 @@ runs:
             ;;
           *)
             if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
-              echo "::error::source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon self-call"
+              emsg="source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
+              emsg+=" self-call"
+              echo "::error::${emsg}"
               exit 1
             fi
             canon_ref="${GITHUB_SHA}"
@@ -149,7 +154,9 @@ runs:
       run: |
         set -euo pipefail
         [[ -n ${SA_CLAIMS_B64} ]] || {
-          echo "::error::stage 'attest' requires the claims payload from the claims job — wire this input to needs.claims.outputs.claims (#240)"
+          emsg="stage 'attest' requires the claims payload from the claims job — wire this input to"
+          emsg+=" needs.claims.outputs.claims (#240)"
+          echo "::error::${emsg}"
           exit 1
         }
         base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"
@@ -239,3 +246,4 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: ${GITHUB_ACTION_PATH}/append.sh
+...

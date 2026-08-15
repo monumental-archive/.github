@@ -62,9 +62,10 @@
 # violated: on lab v0.20.0 the SBOM/triage gate failed at 18:26:58 and
 # npm publish started eleven seconds later, because nothing publish-side
 # depended on it — the graph raced and the org had merely been winning.
+---
 name: publish
 
-on:
+"on":
   # forwarding-default: discretionary — consumer surface; the defaults are the API, callers state only what they use
   workflow_call:
     inputs:
@@ -107,7 +108,7 @@ on:
         description: Build context, for the oci-image class.
         required: false
         type: string
-        default: "."
+        default: .
       smoke-test:
         description: >
           Executable proving the image does its one job, for the oci-image
@@ -163,7 +164,7 @@ on:
         description: Directory of the wasm crate, for the wasm-npm class.
         required: false
         type: string
-        default: "."
+        default: .
       exclude:
         description: >
           Comma-separated workspace members the rust-crate and rust-binary
@@ -443,7 +444,10 @@ jobs:
   # phase: publish
   publish-crates:
     name: Publish crates
-    needs: [guard, build, commit-point]
+    needs:
+      - guard
+      - build
+      - commit-point
     # Post-barrier, pre-verify: the registry upload is the class's
     # irreversible step (crates.io is yank-only), so it waits on the
     # commit point — which holds the bit-for-bit proof (#118) AND the
@@ -460,7 +464,9 @@ jobs:
   # phase: build
   build-oci:
     name: Build image
-    needs: [guard, facts]
+    needs:
+      - guard
+      - facts
     if: contains(inputs.classes, 'oci-image')
     uses: ./.github/workflows/build-oci-image.yml
     permissions:
@@ -480,7 +486,9 @@ jobs:
   # phase: build
   repro-build-oci:
     name: Rebuild image (repro)
-    needs: [guard, facts]
+    needs:
+      - guard
+      - facts
     if: contains(inputs.classes, 'oci-image')
     uses: ./.github/workflows/build-oci-image.yml
     permissions:
@@ -503,7 +511,11 @@ jobs:
   # phase: publish
   assemble-oci:
     name: Assemble the image index
-    needs: [guard, facts, build-oci, commit-point]
+    needs:
+      - guard
+      - facts
+      - build-oci
+      - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
     uses: ./.github/workflows/assemble-oci-index.yml
     permissions:
@@ -539,12 +551,19 @@ jobs:
   # phase: attest
   verify:
     name: Verify published bytes
-    needs: [guard, build, publish-crates]
+    needs:
+      - guard
+      - build
+      - publish-crates
     # Post-publish: the registry pull-back needs the bytes to be on the
     # registry, which now happens downstream of the repro gate (#118). A
     # dry-run excuses the skipped publish — the verifier passes the
     # manifest through unchanged.
-    if: ${{ !cancelled() && needs.build.result == 'success' && contains(inputs.classes, 'rust-crate') && (needs.publish-crates.result == 'success' || inputs.dry-run) }}
+    if: ${{
+        !cancelled() && needs.build.result == 'success'
+        && contains(inputs.classes, 'rust-crate')
+        && (needs.publish-crates.result == 'success' || inputs.dry-run)
+      }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
       # The full verifier set: verify-release declares its verdict-mode
@@ -599,7 +618,10 @@ jobs:
   # phase: attest
   vsa:
     name: Assemble and sign VSA
-    needs: [guard, verify, attach]
+    needs:
+      - guard
+      - verify
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -650,7 +672,9 @@ jobs:
   # phase: attest
   sign-binaries:
     name: Sign binaries
-    needs: [build-binary, commit-point]
+    needs:
+      - build-binary
+      - commit-point
     # The Sigstore entry is append-only — an irreversible step, so it
     # sits downstream of the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-binary') }}
@@ -696,7 +720,9 @@ jobs:
   # phase: attest
   sign-source:
     name: Sign source archive
-    needs: [build-source, commit-point]
+    needs:
+      - build-source
+      - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'source-archive') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@da65e70b9da20afb33360ee3573d15bb9615f2bf # main
     with:
@@ -738,7 +764,10 @@ jobs:
   # phase: publish
   publish-wasm:
     name: Publish wasm package
-    needs: [guard, build-wasm, commit-point]
+    needs:
+      - guard
+      - build-wasm
+      - commit-point
     # Post-gate: npm's unpublish window closes after 72 hours, so the
     # upload waits on the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
@@ -753,8 +782,14 @@ jobs:
   # phase: attest
   verify-wasm:
     name: Verify published wasm bytes
-    needs: [build-wasm, publish-wasm]
-    if: ${{ !cancelled() && needs.build-wasm.result == 'success' && contains(inputs.classes, 'wasm-npm') && (needs.publish-wasm.result == 'success' || inputs.dry-run) }}
+    needs:
+      - build-wasm
+      - publish-wasm
+    if: ${{
+        !cancelled() && needs.build-wasm.result == 'success'
+        && contains(inputs.classes, 'wasm-npm')
+        && (needs.publish-wasm.result == 'success' || inputs.dry-run)
+      }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
       # The full verifier set — see the note on `verify` above (#264).
@@ -787,7 +822,11 @@ jobs:
   # phase: attest
   vsa-wasm:
     name: Assemble and sign wasm VSA
-    needs: [guard, build-wasm, verify-wasm, attach]
+    needs:
+      - guard
+      - build-wasm
+      - verify-wasm
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -800,7 +839,6 @@ jobs:
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
       npm-package: ${{ needs.build-wasm.outputs.package }}
       version: ${{ needs.guard.outputs.version }}
-
 
   # phase: build
   build-extension:
@@ -835,7 +873,9 @@ jobs:
   # phase: attest
   sign-extensions:
     name: Sign extension tarballs
-    needs: [build-extension, commit-point]
+    needs:
+      - build-extension
+      - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@da65e70b9da20afb33360ee3573d15bb9615f2bf # main
     with:
@@ -852,7 +892,10 @@ jobs:
   # phase: build
   build-extension-images:
     name: Build extension images
-    needs: [guard, build-extension, facts]
+    needs:
+      - guard
+      - build-extension
+      - facts
     if: contains(inputs.classes, 'pgrx-extension')
     uses: ./.github/workflows/build-pgrx-images.yml
     permissions:
@@ -873,7 +916,10 @@ jobs:
     # Both image builds stage from the SAME release-extensions artifact
     # (the first build's), so the compare isolates image-layer
     # nondeterminism; tarball equality is the gate's own extension leg.
-    needs: [guard, build-extension, facts]
+    needs:
+      - guard
+      - build-extension
+      - facts
     if: contains(inputs.classes, 'pgrx-extension')
     uses: ./.github/workflows/build-pgrx-images.yml
     permissions:
@@ -894,8 +940,13 @@ jobs:
   # phase: publish
   tag-extension-images:
     name: Tag extension images
-    needs: [build-extension-images, commit-point]
-    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+    needs:
+      - build-extension-images
+      - commit-point
+    if: ${{
+        !cancelled() && needs.commit-point.result == 'success'
+        && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run
+      }}
     uses: ./.github/workflows/tag-images.yml
     permissions:
       packages: write # PUT each gated manifest under its tag
@@ -905,8 +956,13 @@ jobs:
   # phase: attest
   sign-extension-images:
     name: Sign extension image pg${{ matrix.pg }}
-    needs: [build-extension-images, tag-extension-images]
-    if: ${{ !cancelled() && needs.tag-extension-images.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+    needs:
+      - build-extension-images
+      - tag-extension-images
+    if: ${{
+        !cancelled() && needs.tag-extension-images.result == 'success'
+        && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run
+      }}
     strategy:
       fail-fast: false
       matrix:
@@ -941,17 +997,40 @@ jobs:
   # phase: prove
   repro-gate:
     name: Repro gate
-    needs: [guard, build, repro-build, build-oci, repro-build-oci, build-binary, repro-build-binary, build-source, repro-build-source, build-wasm, repro-build-wasm, build-extension, repro-build-extension, build-extension-images, repro-build-extension-images]
+    needs:
+      - guard
+      - build
+      - repro-build
+      - build-oci
+      - repro-build-oci
+      - build-binary
+      - repro-build-binary
+      - build-source
+      - repro-build-source
+      - build-wasm
+      - repro-build-wasm
+      - build-extension
+      - repro-build-extension
+      - build-extension-images
+      - repro-build-extension-images
     if: >-
       ${{
         !cancelled() && needs.guard.result == 'success'
         && !contains(join(needs.*.result, ','), 'failure')
         && (!contains(inputs.classes, 'rust-crate') || (needs.build.result == 'success' && needs.repro-build.result == 'success'))
-        && (!contains(inputs.classes, 'oci-image') || (needs.build-oci.result == 'success' && needs.repro-build-oci.result == 'success'))
-        && (!contains(inputs.classes, 'rust-binary') || (needs.build-binary.result == 'success' && needs.repro-build-binary.result == 'success'))
-        && (!contains(inputs.classes, 'source-archive') || (needs.build-source.result == 'success' && needs.repro-build-source.result == 'success'))
-        && (!contains(inputs.classes, 'wasm-npm') || (needs.build-wasm.result == 'success' && needs.repro-build-wasm.result == 'success'))
-        && (!contains(inputs.classes, 'pgrx-extension') || (needs.build-extension.result == 'success' && needs.repro-build-extension.result == 'success' && needs.build-extension-images.result == 'success' && needs.repro-build-extension-images.result == 'success'))
+        && (!contains(inputs.classes, 'oci-image')
+          || (needs.build-oci.result == 'success' && needs.repro-build-oci.result == 'success'))
+        && (!contains(inputs.classes, 'rust-binary')
+          || (needs.build-binary.result == 'success' && needs.repro-build-binary.result == 'success'))
+        && (!contains(inputs.classes, 'source-archive')
+          || (needs.build-source.result == 'success' && needs.repro-build-source.result == 'success'))
+        && (!contains(inputs.classes, 'wasm-npm')
+          || (needs.build-wasm.result == 'success' && needs.repro-build-wasm.result == 'success'))
+        && (!contains(inputs.classes, 'pgrx-extension')
+          || (needs.build-extension.result == 'success'
+            && needs.repro-build-extension.result == 'success'
+            && needs.build-extension-images.result == 'success'
+            && needs.repro-build-extension-images.result == 'success'))
       }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1102,7 +1181,10 @@ jobs:
   # phase: commit-point
   commit-point:
     name: Commit point — every proof, or nothing publishes
-    needs: [guard, sbom, repro-gate]
+    needs:
+      - guard
+      - sbom
+      - repro-gate
     if: ${{ !cancelled() && needs.guard.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1186,7 +1268,16 @@ jobs:
   # phase: attest
   attach:
     name: Attach evidence and publish
-    needs: [guard, sbom, sign, sign-image, sign-binaries, sign-source, sign-wasm, sign-extensions, sign-extension-images]
+    needs:
+      - guard
+      - sbom
+      - sign
+      - sign-image
+      - sign-binaries
+      - sign-source
+      - sign-wasm
+      - sign-extensions
+      - sign-extension-images
     if: >-
       ${{
         !cancelled() && needs.guard.result == 'success'
@@ -1197,7 +1288,9 @@ jobs:
         && (!contains(inputs.classes, 'rust-binary') || needs.sign-binaries.result == 'success')
         && (!contains(inputs.classes, 'source-archive') || needs.sign-source.result == 'success')
         && (!contains(inputs.classes, 'wasm-npm') || needs.sign-wasm.result == 'success')
-        && (!contains(inputs.classes, 'pgrx-extension') || (needs.sign-extensions.result == 'success' && (needs.sign-extension-images.result == 'success' || inputs.dry-run)))
+        && (!contains(inputs.classes, 'pgrx-extension')
+          || (needs.sign-extensions.result == 'success'
+            && (needs.sign-extension-images.result == 'success' || inputs.dry-run)))
       }}
     uses: ./.github/workflows/attach-release.yml
     permissions: {} # it publishes with the App token, not GITHUB_TOKEN
@@ -1218,7 +1311,10 @@ jobs:
   # phase: attest
   vsa-binaries:
     name: Assemble and sign binaries VSA
-    needs: [guard, build-binary, attach]
+    needs:
+      - guard
+      - build-binary
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'rust-binary') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -1232,11 +1328,13 @@ jobs:
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
 
-
   # phase: attest
   vsa-source:
     name: Assemble and sign source VSA
-    needs: [guard, build-source, attach]
+    needs:
+      - guard
+      - build-source
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'source-archive') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -1250,11 +1348,13 @@ jobs:
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
 
-
   # phase: attest
   vsa-extensions:
     name: Assemble and sign extensions VSA
-    needs: [guard, build-extension, attach]
+    needs:
+      - guard
+      - build-extension
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -1273,7 +1373,6 @@ jobs:
       # mapping rows the build matrix instantiated (#316 finding 3).
       base-majors: ${{ inputs.pg-majors }}
 
-
   # The image verdicts. No pull-back — content addressing already proves
   # the bytes; what the verdict job proves is the mutable half, that the
   # tag the release advertises resolves in the registry to the attested
@@ -1285,7 +1384,10 @@ jobs:
   # phase: attest
   vsa-image:
     name: Assemble and sign image VSA
-    needs: [guard, assemble-oci, attach]
+    needs:
+      - guard
+      - assemble-oci
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -1295,7 +1397,10 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
-      images: ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]', needs.assemble-oci.outputs.image, needs.guard.outputs.version, needs.assemble-oci.outputs.digest) }}
+      images: >-
+        ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]',
+        needs.assemble-oci.outputs.image, needs.guard.outputs.version,
+        needs.assemble-oci.outputs.digest) }}
       version: ${{ needs.guard.outputs.version }}
       # No base-majors: the oci-image class is FROM scratch — a
       # musl-static binary in an empty image has no base layer, and the
@@ -1304,7 +1409,10 @@ jobs:
   # phase: attest
   vsa-extension-images:
     name: Assemble and sign extension images VSA
-    needs: [guard, build-extension-images, attach]
+    needs:
+      - guard
+      - build-extension-images
+      - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
     uses: ./.github/workflows/verify-release.yml
     permissions:
@@ -1328,7 +1436,9 @@ jobs:
   # phase: attest
   doi:
     name: Mint the version DOI
-    needs: [guard, attach]
+    needs:
+      - guard
+      - attach
     # !cancelled() + explicit attach check: the implicit success() looks
     # THROUGH attach to its legitimately-skipped class ancestors and goes
     # false — the same transitive quirk attach's own condition exists for.
@@ -1341,3 +1451,4 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
     secrets:
       zenodo-token: ${{ secrets.zenodo-token }}
+...

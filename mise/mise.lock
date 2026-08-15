@@ -713,6 +713,10 @@ backend = "pipx:reuse"
 pipx_args = "--preinstall charset-normalizer"
 uvx_args = "--with charset-normalizer"
 
+[[tools."pipx:yamllint"]]
+version = "1.38.0"
+backend = "pipx:yamllint"
+
 [[tools.python]]
 version = "3.14.7"
 backend = "core:python"

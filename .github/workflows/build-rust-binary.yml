@@ -20,9 +20,10 @@
 #   would destroy the cargo-auditable section), archives normalised.
 #
 # No cache of any kind: everything downstream of this job gets signed.
+---
 name: build-rust-binary
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -249,7 +250,9 @@ jobs:
           # asserted, never installed here; an unpinned install on a
           # release leg is a runner mutation.
           command -v cargo-auditable > /dev/null || {
-            echo "::error::cargo-auditable missing — pin cargo:cargo-auditable in this repository's mise config; it is a build input of the rust-binary class"
+            emsg="cargo-auditable missing — pin cargo:cargo-auditable in this repository's mise config; it is a build input"
+            emsg+=" of the rust-binary class"
+            echo "::error::${emsg}"
             exit 1
           }
           # SOURCE_DATE_EPOCH is the released commit's own time, so the same
@@ -334,7 +337,9 @@ jobs:
   # them — refuses a missing leg and emits the one subject manifest.
   collect:
     name: Collect and refuse a partial set
-    needs: [plan, build]
+    needs:
+      - plan
+      - build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions: {}
@@ -389,3 +394,4 @@ jobs:
           name: release-binaries
           path: dist/*.tar.gz
           if-no-files-found: error
+...

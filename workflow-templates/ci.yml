@@ -2,12 +2,14 @@
 # (linters, versions, enforcement) arrives via the shared workflow and the
 # toolbelt it pins. Update the SHA when moving to a newer gate; once the
 # .github repo cuts releases, Renovate manages this pin like any other.
+---
 name: gate
 
-on:
-  pull_request:
+"on":
+  pull_request: {}
   push:
-    branches: [$default-branch]
+    branches:
+      - $default-branch
 
 permissions:
   contents: read
@@ -27,3 +29,4 @@ jobs:
       # the one gate finding).
       contents: read # checkout of this repo and of the toolbelt
     uses: monumental-archive/.github/.github/workflows/ci.yml@a0d05f53b7a937ea96bbeeed0f6f69e67a94df9d # v1.26.2
+...

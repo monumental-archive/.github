@@ -7,9 +7,10 @@
 #   The registry publish lives in publish-rust-crate.yml (#118): the
 #   repro gate sits between build and upload, so the irreversible step
 #   cannot share a workflow with the build it gates.
+---
 name: build-rust-crate
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -146,4 +147,4 @@ jobs:
           name: release-crates
           path: target/package/*.crate
           if-no-files-found: error
-
+...

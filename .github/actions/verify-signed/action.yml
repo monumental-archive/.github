@@ -28,6 +28,7 @@
 # the workflow that carries the sign.yml `uses:` line, not from a local
 # reusable workflow it delegates to; a tree with no reference (or with
 # conflicting references) fails loudly rather than guessing.
+---
 name: verify-signed
 description: >-
   Verify artifacts against the org signer, deriving --signer-digest from
@@ -69,12 +70,16 @@ runs:
           | grep -oE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' \
           | cut -d@ -f2 | sort -u)
         if [[ -z ${digest} ]]; then
-          echo "::error::${path} at ${GITHUB_WORKFLOW_SHA} pins no sign.yml uses: — nothing to derive --signer-digest from (call verify-signed from the workflow that calls the signer)"
+          emsg="${path} at ${GITHUB_WORKFLOW_SHA} pins no sign.yml uses: — nothing to derive --signer-digest from (call"
+          emsg+=" verify-signed from the workflow that calls the signer)"
+          echo "::error::${emsg}"
           exit 1
         fi
         digest_lines=$(wc -l <<< "${digest}")
         if [[ ${digest_lines// /} != "1" ]]; then
-          echo "::error::${path} pins sign.yml at more than one digest — a tree states the trusted signer once: ${digest//$'\n'/ }"
+          emsg="${path} pins sign.yml at more than one digest — a tree states the trusted signer once:"
+          emsg+=" ${digest//$'\n'/ }"
+          echo "::error::${emsg}"
           exit 1
         fi
         echo "signer digest, derived from ${path}: ${digest}"
@@ -101,3 +106,4 @@ runs:
             --signer-digest "${DIGEST}" \
             --deny-self-hosted-runners
         done
+...

@@ -12,13 +12,14 @@
 # with its evidence and published on proof, exactly like every other
 # versioned repository. (Source-track attestations — the git-notes kind —
 # remain #120's standup: contemporaneous with pushes, not release-time.)
+---
 name: self-release
 
-on:
+"on":
   push:
-    branches: [main]
-  workflow_dispatch:
-
+    branches:
+      - main
+  workflow_dispatch: {}
 permissions: {}
 
 # Serialise, never cancel: a run that is minting a tag must not be killed
@@ -41,3 +42,4 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
+...

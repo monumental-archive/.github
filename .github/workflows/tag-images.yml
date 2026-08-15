@@ -11,9 +11,10 @@
 # against ghcr.io — and it holds no id-token; `packages: write` is the
 # only capability, spent on manifest PUTs to names the digests already
 # live under.
+---
 name: tag-images
 
-on:
+"on":
   workflow_call:
     inputs:
       images:
@@ -92,3 +93,4 @@ jobs:
             fi
             echo "::notice::${image}:${tag} -> ${digest}"
           done < /tmp/images.tsv
+...

@@ -1,14 +1,14 @@
 # Scheduled, network-touching checks — everything the deterministic gate
 # deliberately excludes. Failures here page via the Actions UI/notifications
 # rather than blocking merges.
+---
 name: audit
 
-on:
+"on":
   schedule:
     # Mondays 06:00 UTC — after a weekend of link rot and repo drift.
-    - cron: "0 6 * * 1"
-  workflow_dispatch:
-
+    - cron: 0 6 * * 1
+  workflow_dispatch: {}
 permissions:
   contents: read
 
@@ -553,3 +553,4 @@ jobs:
 
       - name: Check every repo against the baseline
         run: ./settings/repo-baseline.sh check
+...

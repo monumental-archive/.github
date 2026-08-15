@@ -11,9 +11,10 @@
 # derivation to disagree (#165; the prior carriers, a runtime context
 # var and a release-time stamp, both failed — #158, #164). No inputs,
 # by design — zero caller-controlled expansion.
+---
 name: ci
 
-on:
+"on":
   workflow_call:
     secrets:
       codecov-token:
@@ -84,7 +85,9 @@ jobs:
           fi
           printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${RUNNER_TEMP}/squash-subject"
           if ! committed --commit-file "${RUNNER_TEMP}/squash-subject"; then
-            echo "::error::the PR title becomes the permanent squash subject (plus ' (#${PR_NUMBER})') and it fails the commit canon — fix the TITLE, not a commit"
+            emsg="the PR title becomes the permanent squash subject (plus ' (#${PR_NUMBER})') and it fails the commit canon"
+            emsg+=" — fix the TITLE, not a commit"
+            echo "::error::${emsg}"
             exit 1
           fi
           echo "squash-subject: title mints a conforming subject"
@@ -159,3 +162,4 @@ jobs:
           # coverage.txt — Codecov parses both natively (#392).
           files: ${{ hashFiles('go.mod') != '' && 'coverage.txt' || 'lcov.info' }}
           fail_ci_if_error: true
+...

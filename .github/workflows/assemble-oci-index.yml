@@ -10,9 +10,10 @@
 # Everything downstream of the tag is unchanged from the original
 # manifest job: pull-back smoke by digest, facts equality, the
 # report-only scan, and the image SBOM from the published bytes.
+---
 name: assemble-oci-index
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -219,7 +220,8 @@ jobs:
             exit 1
           }
           purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
-          bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator | select(test("@") | not)] | length' "${out}")
+          bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
+            | .referenceLocator | select(test("@") | not)] | length' "${out}")
           if [[ ${purls} -eq 0 || ${bare} -ne 0 ]]; then
             echo "::error::image SBOM has ${purls} PURLs, ${bare} versionless — a versionless PURL is invisible to every scanner"
             exit 1
@@ -231,3 +233,4 @@ jobs:
           path: /tmp/sbom/
           if-no-files-found: error
           retention-days: 7
+...

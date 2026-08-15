@@ -18,9 +18,10 @@
 # The runnable convenience image deliberately does not exist in canon:
 # its CVE posture would be its base's, refreshable only by a release —
 # the exact failure ma-db's own-the-installation decision documents.
+---
 name: build-pgrx-images
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -217,13 +218,15 @@ jobs:
           # --provenance=false / --sbom=false / rewrite-timestamp=true:
           # the determinism set, measured in the lab's first gate run —
           # see build-oci-image.yml's push step for the full argument.
+          outspec="type=image,name=${IMAGE},push-by-digest=true"
+          outspec+=",name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true"
           docker buildx build \
             --file .org-canon/docker/pgrx-artifact.Dockerfile \
             --platform linux/amd64,linux/arm64 \
             "${LABELS[@]}" \
             "${ANNOS[@]}" \
             --provenance=false --sbom=false \
-            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true" \
+            --output "${outspec}" \
             --metadata-file /tmp/meta.json \
             .
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
@@ -298,7 +301,9 @@ jobs:
 
   collect:
     name: Collect the signing matrix
-    needs: [plan, image]
+    needs:
+      - plan
+      - image
     if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -327,3 +332,4 @@ jobs:
           fi
           echo "images=${images}" >> "${GITHUB_OUTPUT}"
           jq -r '.[] | "::notice::pg\(.pg) \(.digest)"' <<< "${images}"
+...

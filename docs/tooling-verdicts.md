@@ -39,6 +39,7 @@ honestly blocked on.
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
+| yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -285,9 +286,10 @@ conservative-looking `lowest` would pin the closure to ancient releases,
 which is worse. `no-binary` is refused outright: building from source is
 a larger attack surface, not a smaller one.
 
-The timing matters. The belt carries one `pipx:` tool today; **yamllint
-and sqlfluff are both pipx-only and both already agreed**, so this path
-was about to carry three dependency closures instead of one.
+The timing matters. When this was written the belt carried one `pipx:`
+tool; **yamllint (now landed, #403) and sqlfluff are both pipx-only and
+both already agreed**, so this path was about to carry three dependency
+closures instead of one — which is exactly what it now does.
 
 **ruff at `select = ["ALL"]`, and the one file it was adopted for**
 (#82). One aqua-backed Rust binary that lints *and* formats Python and
@@ -497,6 +499,63 @@ lines, like every consumer, and `verify-release.yml` derives the
 verdict identity from them. The merge-semantics fact stands for any
 future custom manager. *Reopen:* a value that genuinely cannot live in
 a natively-managed representation.
+
+**yamllint, full inventory, the tree conforming to the tool** (#403).
+Stood up greenfield from the tool's own documentation — every rule in
+the inventory enabled, preset warnings raised to error, and the gate
+runs `--strict` so a warning could not hide regardless. The starting
+tree measured 642 findings and every one was conformed away rather than
+configured away: `---`/`...` document markers on all 52 bare files,
+`on:` → `"on":` (it *is* a boolean; the quoted key is better YAML, not
+appeasement), bare triggers → `{}` (an honest empty mapping where
+`empty-values` rightly forbids null), 54 flow sequences and 5 flow
+mappings rewritten to block style, redundant quotes dropped, and every
+over-length line rewrapped by hand.
+
+The exceptions were adjudicated one by one against a zero-exceptions
+default, and three survive, each with a reason about the rule or a
+measured external constraint:
+
+- **`key-ordering` disabled** — alphabetical keys destroy semantic
+  order (`on`/`permissions`/`jobs`). The same ruling as taplo's
+  `reorder_keys` and biome's `useSortedKeys`. *Reopen:* never; this is
+  a category call.
+- **`indentation.check-multi-line-strings: false`** — it applies YAML
+  indentation rules to the bash inside `run:` blocks. The reason is
+  about reach, which normally means the layout is wrong, so it carries
+  a filed retirement trigger: #398 turns it on once the shell leaves
+  `run:` blocks.
+- **`comments.min-spaces-from-content: 1`, not the default 2** —
+  pinact writes exactly one space before its version comment and is
+  not configurable; measured on the tree, a belt-internal conflict.
+  *Reopen:* pinact growing a spacing option.
+- **`line-length: max: 130` is derived, not chosen** — the mandatory
+  pin format (`uses: <path>@<40-char-sha> # vX.Y.Z`, enforced by
+  `lint:action-pins`) produces unbreakable lines measured at up to 127
+  characters, and the trailing comment defeats both
+  `allow-non-breakable-*` exemptions. Sprinkling ~150 `disable-line`
+  directives was rejected as policy-as-confetti. 130 is the tightest
+  cap the mandatory format admits; per-language columns tighter than
+  this belong to `.editorconfig`, which can express per-type caps.
+
+Two consequences worth recording. First, the `brackets` rule's
+flow-to-block rewrite broke `lint:release-phases`, whose awk parser
+read only flow-style `needs:` lists — the parser learned block
+sequences rather than the tree keeping flow style, because the org
+conforms to the tool, not the tool to a parser. Second, yamllint lints
+its own config, which therefore also carries `---`/`...`.
+
+`lint:yaml` requires a tracked `.yamllint.yaml` once YAML is tracked —
+the ruff/biome/golangci trap in a fourth costume: without a config
+yamllint silently falls back to its `default` preset, a fraction of the
+org policy, on a green gate. Copy `scaffold/.yamllint.yaml`. No `fix:*`
+sibling exists to wire: yamllint ships no writer, so conformance is
+hand edits by design (prettier's verdict already records the YAML
+formatting gap). pipx-only — no aqua package exists (404 in the
+registry; pure Python, no binary releases) — making it the second
+`pipx:` exception after reuse, riding checksummed uv under the same
+`UV_*` floor environment, pinned in `[tools]` before first install so
+the lock entry is never bare.
 
 ## Skipped, with rationale and reopen trigger
 

@@ -3,11 +3,13 @@
 # the App-minted v* tag and draft release, all via the shared workflow.
 # Phase 2 (this repository's own publish workflow, triggered by the tag)
 # builds, proves and signs. See docs/release.md in monumental-archive/.github.
+---
 name: release
 
-on:
+"on":
   push:
-    branches: [$default-branch]
+    branches:
+      - $default-branch
   # Refresh the open Release PR when a publish completes: the PR is
   # created before the previous release finishes publishing, so any
   # derivation that reads "the published release" (the pgrx upgrade
@@ -15,7 +17,8 @@ on:
   # (#358 seam 5). Harmless for repos with no such derivation — the
   # refresh recomputes the same content.
   release:
-    types: [published]
+    types:
+      - published
   # Recovery path: re-run the tag step against a release commit whose first
   # attempt failed. The shared workflow refuses anything else.
   workflow_dispatch: {}
@@ -52,3 +55,4 @@ jobs:
       id-token: write # gitsign's keyless signature on the release tag (#349 S4)
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
+...

@@ -21,9 +21,10 @@
 #                      filename SLSA's distributing-provenance SHOULD asks
 #                      for. One convention satisfies both.
 #   checksums.txt      so a consumer can check bytes without tooling.
+---
 name: attach-release
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -179,7 +180,9 @@ jobs:
             gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
               --pattern checksums.txt --output published-checksums.txt
             if ! diff -u published-checksums.txt dist/checksums.txt; then
-              echo "::error::${TAG} is published and immutable but the rebuilt assets differ from the published set — this is not a resume"
+              emsg="${TAG} is published and immutable but the rebuilt assets differ from the published set — this is not a"
+              emsg+=" resume"
+              echo "::error::${emsg}"
               exit 1
             fi
             echo "::notice::${TAG} already published; rebuilt bytes verified identical, converging"
@@ -195,3 +198,4 @@ jobs:
           # tag, commit and asset digests at the same moment.
           gh release edit "${TAG}" --draft=false --repo "${GITHUB_REPOSITORY}"
           echo "::notice::published ${TAG}"
+...

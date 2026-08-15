@@ -9,9 +9,10 @@
 # `job_workflow_ref`), and `environment: publish` resolves against the
 # caller — both facts measured before the original split
 # (docs/slsa-reference.md).
+---
 name: publish-wasm-npm
 
-on:
+"on":
   workflow_call:
     inputs:
       package:
@@ -90,7 +91,9 @@ jobs:
           have=$(npm --version)
           lowest=$(printf '%s\n' "${need}" "${have}" | sort -V | head -1)
           if [[ ${lowest} != "${need}" ]]; then
-            echo "::error::npm ${have} < ${need}; trusted publishing needs ${need}+ — bump the pin in this repository's mise config"
+            emsg="npm ${have} < ${need}; trusted publishing needs ${need}+ — bump the pin in this repository's mise"
+            emsg+=" config"
+            echo "::error::${emsg}"
             exit 1
           fi
           # Resumable: a version already on the registry is a completed
@@ -113,3 +116,4 @@ jobs:
           # tried to git-clone dist/<name>.tgz as a repository. Found by
           # the v0.14.0 run.
           npm publish "./${tarball}" --provenance --access public
+...

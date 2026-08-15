@@ -10,17 +10,18 @@
 # The publish job may hold `id-token: write` under the org's narrowed rule:
 # it is a standalone scheduled workflow that runs no caller-supplied code —
 # scorecard scans the repository; it does not build it.
+---
 name: scorecard
 
-on:
+"on":
   schedule:
     # Tuesdays 06:00 UTC — the day after the Monday audit, so a finding
     # from one does not mask the other.
-    - cron: "0 6 * * 2"
+    - cron: 0 6 * * 2
   push:
-    branches: [main]
-  workflow_dispatch:
-
+    branches:
+      - main
+  workflow_dispatch: {}
 permissions: {}
 
 # One analysis at a time; a fresher push supersedes a stale queued one.
@@ -54,3 +55,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           sarif_file: results.sarif
+...

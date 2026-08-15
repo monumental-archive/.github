@@ -12,9 +12,10 @@
 # under test; the per-target archives already differ from each other by
 # construction. audit-shaped, never in a gate: it takes minutes of
 # compile time and proves a property of the release, not of a diff.
+---
 name: repro-check
 
-on:
+"on":
   workflow_call:
     inputs:
       class:
@@ -123,8 +124,14 @@ jobs:
 
   compare:
     name: Same bytes, or say so loudly
-    needs: [resolve, rebuild, rebuild-extension]
-    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.rebuild.result == 'success' || needs.rebuild-extension.result == 'success') }}
+    needs:
+      - resolve
+      - rebuild
+      - rebuild-extension
+    if: ${{
+        !cancelled() && needs.resolve.result == 'success'
+        && (needs.rebuild.result == 'success' || needs.rebuild-extension.result == 'success')
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -176,3 +183,4 @@ jobs:
           gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "repro-check: ${TAG} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
             --body "The reproducibility audit rebuilt ${TAG} with the class workflow and the digests differ from the release's checksums.txt — a build input has escaped the pinning. Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+...

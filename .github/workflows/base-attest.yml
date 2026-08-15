@@ -47,11 +47,13 @@
 # attestations over the digests found there. Same standing as
 # scorecard.yml and rekor-monitor.yml: a standalone scheduled workflow
 # whose identity the attestation is supposed to bear.
+---
 name: base-attest
 
-on:
+"on":
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - docker/pgrx-base-images.toml
       # Changing the approval machinery re-runs it — and lands the first
@@ -59,9 +61,8 @@ on:
       - .github/workflows/base-attest.yml
   schedule:
     # Mondays 05:20 UTC, before audit.yml's sweep reads the results.
-    - cron: "20 5 * * 1"
-  workflow_dispatch:
-
+    - cron: 20 5 * * 1
+  workflow_dispatch: {}
 permissions: {}
 
 # One approval run at a time: a Renovate roll landing mid-schedule must
@@ -181,7 +182,9 @@ jobs:
             to_entries | length > 0 and all(.[];
               (.value.SLSA.invocation.configSource.uri // "")
               | startswith($pre) and endswith($suf))' provenance-map.json > /dev/null || {
-            echo "::error::${REF}: a platform's provenance does not name docker-library/postgres at ${PG}/${suite} — refusing to attest a verification that failed"
+            emsg="${REF}: a platform's provenance does not name docker-library/postgres at ${PG}/${suite} — refusing to"
+            emsg+=" attest a verification that failed"
+            echo "::error::${emsg}"
             exit 1
           }
           # The facts the predicate carries: the upstream source revision
@@ -217,3 +220,4 @@ jobs:
           subject-digest: ${{ matrix.digest }}
           predicate-type: https://monumental-archive.github.io/attestations/base-image-approval/v1
           predicate-path: predicate.json
+...
