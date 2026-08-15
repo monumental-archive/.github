@@ -111,8 +111,8 @@ runs:
             canon_ref="${GITHUB_SHA}"
             ;;
         esac
-        if [[ ! -f "${root}/source-policies/default.json" ]]; then
-          echo "::error::resolved canon tree at '${root}' has no source-policies/default.json"
+        if [[ ! -f "${root}/slsa/verify-policy.json" ]]; then
+          echo "::error::resolved canon tree at '${root}' has no slsa/verify-policy.json"
           exit 1
         fi
         work="${RUNNER_TEMP}/source-attest"
@@ -176,7 +176,7 @@ runs:
         cache: false
         install: false
 
-    - name: Install the belt's cosign
+    - name: Install the belt's cosign and go
       if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
@@ -191,7 +191,7 @@ runs:
         # window; the auto-heal in chain.sh is what makes losing it
         # recoverable.
         for attempt in 1 2 3 4 5; do
-          mise install "aqua:sigstore/cosign" && break
+          mise install "aqua:sigstore/cosign" go && break
           if [[ "${attempt}" == 5 ]]; then
             echo "::error::could not install cosign after ${attempt} attempts"
             exit 1
@@ -210,14 +210,32 @@ runs:
         # resolve cosign themselves, which is a larger change than the
         # scope widening that surfaced this (#82).
         dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
+        dirname "$(mise which go)" >> "${GITHUB_PATH}"
 
-    - name: Fetch the chain and verify the previous link
+    # The scratch clone is orchestration: which refs exist locally is
+    # this action's fetch, and stele refuses to network on its own. The
+    # committer identity is part of the storage contract (the author of
+    # every chain-link note lands in a world-readable ledger
+    # permanently) and stele reads it from the clone's local config,
+    # deliberately — a runner has no global identity at all.
+    - name: Prepare the scratch clone
       if: ${{ inputs.stage == 'attest' }}
       shell: bash
-      env:
-        SA_GENESIS: ${{ inputs.genesis }}
-      run: ${GITHUB_ACTION_PATH}/chain.sh
-
+      run: |
+        set -euo pipefail
+        scratch="${SA_WORK}/repo"
+        git init -q "${scratch}"
+        git -C "${scratch}" config user.name "source-attest"
+        git -C "${scratch}" config user.email "source-attest@monumental-archive.github.io"
+        # SA_REMOTE_URL is a test seam: a file-protocol stand-in repo
+        # replaces the network, nothing else changes.
+        git -C "${scratch}" remote add origin "${SA_REMOTE_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
+        # Public repos, anonymous fetch; stele's push authenticates.
+        git -C "${scratch}" fetch -q origin "+refs/heads/main:refs/heads/main" \
+          "+refs/notes/commits:refs/notes/commits" || {
+          echo "::error::could not fetch main and refs/notes/commits — the notes ref must exist (seeded org-wide, #202)"
+          exit 1
+        }
     # Signing mints Rekor entries; the push is the last step. Prove the
     # environment can carry the run to completion BEFORE anything
     # irreversible — no orphan log entries for links that never land.
@@ -228,22 +246,49 @@ runs:
         GH_TOKEN: ${{ github.token }}
       run: ${GITHUB_ACTION_PATH}/preflight.sh
 
-    - name: Emit and sign the provenance, derive and sign the VSA
+    # The emitter is `stele emit chain` (stele#21): discovery, the
+    # heal walk, link assembly, signing via the belt's cosign, the
+    # stranger's-inputs self-verify, and the compare-and-swap ledger
+    # append — one engine, the same digest function the verify walk
+    # proves against (.github#434 made unrepresentable). stele runs
+    # from the pinned module through the checksummed proxy, the same
+    # bootstrap as audit:source-vsa, until the go-binary release class
+    # lands (stele#7). The trusted root is fetched from the endpoint
+    # `gh attestation verify` trusts; stele takes it as an input
+    # deliberately (the trust boundary is the caller's to state).
+    - name: Emit the chain links and push the ledger
       if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         SA_ACTOR: ${{ github.actor }}
         SA_ACTOR_ID: ${{ github.actor_id }}
-        # emit.sh branches on genesis too (#265) — the first live heal
-        # run died on exactly this env being scoped to chain.sh only,
-        # a gap the dry run masked by exporting it globally.
         SA_GENESIS: ${{ inputs.genesis }}
-      run: ${GITHUB_ACTION_PATH}/emit.sh
-
-    - name: Append the link and push the notes ref
-      if: ${{ inputs.stage == 'attest' }}
-      shell: bash
-      env:
         GH_TOKEN: ${{ github.token }}
-      run: ${GITHUB_ACTION_PATH}/append.sh
+      run: |
+        set -euo pipefail
+        command -v go > /dev/null || {
+          echo "::error::go is not on the runner"
+          exit 1
+        }
+        stele_pin="github.com/monumental-archive/stele/cmd/stele@3af8d30b0016028f74bab9adc85ae465505272cf"
+        root=$(mktemp)
+        gh attestation trusted-root | head -1 > "${root}"
+        [[ -s ${root} ]] || {
+          echo "::error::empty trusted root from gh"
+          exit 1
+        }
+        genesis=()
+        [[ ${SA_GENESIS} == "true" ]] && genesis=(--genesis)
+        go run "${stele_pin}" emit chain \
+          --policy "${SA_CANON_ROOT}/slsa/verify-policy.json" \
+          --trusted-root "${root}" \
+          --repo "${GITHUB_REPOSITORY}" \
+          --git-dir "${SA_WORK}/repo" \
+          --rev "${GITHUB_SHA}" \
+          --claims "${SA_WORK}/claims.json" \
+          --actor "${SA_ACTOR}" \
+          --actor-id "${SA_ACTOR_ID}" \
+          --canon-digest "${SA_CANON_REF}" \
+          --policy-uri "https://github.com/monumental-archive/.github/blob/${SA_CANON_REF}/slsa/verify-policy.json" \
+          ${genesis[@]+"${genesis[@]}"}
 ...
