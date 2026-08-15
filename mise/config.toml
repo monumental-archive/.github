@@ -227,6 +227,17 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# Semver honesty for published crates (#403): the public API is checked
+# against the latest release on crates.io. audit:*, NEVER lint:* — the
+# baseline is fetched from the registry at run time, and the gate is
+# deterministic by rule; #403's close-condition wording said lint:<tool>,
+# and this is the recorded deviation, forced by the older rule. No aqua
+# package and no upstream checksum assets, so the github: backend locks
+# a trust-on-first-use checksum — weaker than aqua's published sums,
+# recorded as such in docs/tooling-verdicts.md. Needs cargo+rustdoc at
+# run time (repo-side toolchain, the lint:deny shape). Like the other
+# Rust tools, unprovable in the canon — no Rust tracked.
+"github:obi1kenobi/cargo-semver-checks" = "v0.50.0"
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must
 # be imported somewhere, or carry a written ignored entry under
 # [package.metadata.cargo-machete] with a reason. Static analysis, no
@@ -343,6 +354,35 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."audit:semver"]
+description = "Public API vs the latest published release (cargo-semver-checks — network, not in ci)"
+dir = "{{cwd}}"
+# audit:*, not lint:*: the baseline is whatever crates.io currently
+# publishes, which is remote state — a red can arrive with no local
+# change, a property of the registry, not the diff. The release path is
+# where this bites hardest (a major-worthy API break shipping as a
+# minor), so a red here means: fix the API or bump the major in the
+# next release — never both silently. Guarded on a publishable crate:
+# publish = false workspaces have no registry baseline to diverge from.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files "Cargo.toml" "*/Cargo.toml")
+[[ -n "${manifests}" ]] || { echo "audit:semver: no Cargo.toml tracked, skipped"; exit 0; }
+command -v cargo > /dev/null || {
+  echo "audit:semver: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+publishable=0
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  grep -q '^\[package\]' "${m}" || continue
+  grep -q '^publish[[:space:]]*=[[:space:]]*false' "${m}" && continue
+  publishable=1
+done <<< "${manifests}"
+[[ ${publishable} -eq 1 ]] || { echo "audit:semver: no publishable crate, skipped"; exit 0; }
+cargo-semver-checks check-release
+'''
 
 [tasks."lint:machete"]
 description = "No unused Rust dependencies (cargo-machete, static)"

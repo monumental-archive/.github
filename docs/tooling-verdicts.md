@@ -44,6 +44,7 @@ honestly blocked on.
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
+| cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -652,6 +653,27 @@ golangci-lint this tool is **unprovable in the canon** (no Rust
 tracked; `lint:machete` skips clean here) and is exercised first in a
 consumer. *Reopen:* an aqua-registry package appearing (move the pin),
 or machete growing a no-write metadata mode (reconsider precision).
+
+**cargo-semver-checks as `audit:semver`, and the recorded deviation
+from #403's wording** (#403). The issue's close condition says every
+tool gets a `lint:<tool>` task in the gate; this one cannot: the
+baseline it checks against is whatever crates.io currently publishes,
+fetched at run time, and "the gate is deterministic" is a
+rule-that-must-not-be-broken — a red that can arrive with no local
+change is a property of the feed, the exact class `audit:*` exists
+for. So it rides `repo-audit.yml` beside `audit:deny` on the Monday
+cron, per repo. A red means the public API diverged from the latest
+release beyond what the next version number admits: fix the API or
+bump the major — never both silently. Guarded to publishable crates
+(`publish = false` has no registry baseline). Backend honesty: no aqua
+package and, unlike machete, no upstream checksum assets either — the
+`github:` backend locks a trust-on-first-use checksum, weaker than a
+publisher-stated sum, recorded here rather than glossed. Needs
+cargo+rustdoc at run time (repo-side toolchain, the `lint:deny`
+shape). Unprovable in the canon — no Rust. *Reopen:* an aqua package
+or upstream sha256 assets appearing; or the release path growing a
+pre-tag semver leg so the break is caught at the version decision
+rather than the Monday after.
 
 ## Skipped, with rationale and reopen trigger
 
