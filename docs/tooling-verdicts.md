@@ -116,37 +116,60 @@ reaching it — zizmor rates its own confidence Low for that reason.
 Removing the write means teaching `chain.sh` and `emit.sh` to resolve
 cosign themselves, which is larger than the scope change that found it.
 
-**A defect class this standup found in the belt itself, partly fixed.**
-mise runs task bodies without `set -e`, so a task whose failure signal is
-a tool's exit status silently passes if anything follows that tool. Two
-shipped tasks were broken this way and are now fixed: `lint:python` ran
-`ruff check` then `ruff format --check`, so a lint error was masked by
-the formatter passing — verified by introducing a real violation and
-watching the gate stay green — and the pinact legs had the same shape
-with a trailing `echo`. All the tasks in this pass now open with
-`set -euo pipefail`.
+**A defect class this standup found in the belt itself, now closed.**
+mise ran task bodies without `set -e`, so a task whose failure signal is
+a tool's exit status silently passed if anything followed that tool.
+`lint:python` ran `ruff check` then `ruff format --check`, so a lint
+error was masked by the formatter passing — verified by introducing a
+real violation and watching the gate stay green — and the pinact legs
+had the same shape with a trailing `echo`.
 
-The general form is **open, and the obvious one-line cure does not
-work.** `[task_config] shell = "bash -euo pipefail -c"` would repair all
-61 bodies at once, and it breaks at least one existing task:
-`audit:citations` builds its list of cited versions from a pipeline of
-chained `grep`s, and a `grep` that matches nothing exits 1, which under
-`pipefail` kills the task. Measured either side of the change — clean
-under the current shell, red under the strict one.
+The cure is **global**: `[task_config] shell = "bash -euo pipefail -c"`.
+All 78 bodies inherit it and none carries a `set` line of its own.
 
-Worth recording how nearly that was missed. A first comparison run showed
-that task failing under *both* shells, which read as "pre-existing, not
-caused by the change", and the flip was briefly treated as cleared. It
-was failing for an unrelated reason at the time — a fake version string
-this very document had introduced as an example, which `audit:citations`
-correctly flagged as a version cited in docs and tagged nowhere. Fixing
-that unmasked the real result. A confounded control looks exactly like a
-clean one.
+This entry previously recorded the opposite — "the obvious one-line cure
+does not work" and "the cure is per-task, not global" — and the
+correction is worth keeping, because the measurement behind it was
+right and only the conclusion drawn from it was wrong. The measurement
+showed that flipping the shell reddens `audit:citations`. That is not
+evidence the flag is wrong; it is the flag doing its job. Running the
+whole set afterwards settled it:
 
-So the cure is per-task, not global: each body that lets a command fail
-harmlessly needs to say so explicitly before the shell can be tightened.
-Until then the belt keeps a class of check that can go green without
-having checked, and the tasks in this pass carry `set -euo pipefail`
+| Task | old shell | strict | verdict |
+| --- | --- | --- | --- |
+| `audit:attestations` | red | red | pre-existing |
+| `audit:actions` | red | red | pre-existing (GH_TOKEN unset locally) |
+| `audit:template-pins` | red | red | pre-existing (pins behind canon) |
+| `audit:citations` | green | red | the one real regression |
+
+One task out of 78. A static scan had flagged 25 as candidates and
+nearly all were already guarded or happened to hold on this tree, which
+is exactly why the question was settled by running every task rather
+than by reading them.
+
+`audit:citations` collects with `xargs grep`, and **grep exits 1 for
+"matched nothing"** — a legitimate answer, not an error. Both collectors
+now end `|| true` with the reason beside them. Isolated rather than
+guessed: the version collector matches 17 and exits 0, the run-URL
+collector matches nothing and exits 1, because the docs cite no Actions
+runs today.
+
+The direction matters and is the general rule, not a detail of this
+change. Strict-by-default with a named exception at each genuine site
+beats a permissive default plus a preamble in every body: the second is
+the same reading with a worse result — unsafe by default, opt-in, and no
+way to prove every body was covered. Only 11 of 78 had remembered. A
+rule you have to remember to apply is not a rule.
+
+Worth recording how nearly the measurement was missed. A first
+comparison run showed `audit:citations` failing under *both* shells,
+which read as "pre-existing, not caused by the change", and the flip was
+briefly treated as cleared. It was failing for an unrelated reason at
+the time — a fake version string this very document had introduced as an
+example, which `audit:citations` correctly flagged as a version cited in
+docs and tagged nowhere. Fixing that unmasked the real result. A
+confounded control looks exactly like a clean one, which is why the
+settling run controlled every failure against the old shell
 individually.
 
 **jq, and the check for its whole class that was tried and abandoned**
