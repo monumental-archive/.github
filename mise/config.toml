@@ -2341,6 +2341,36 @@ dir = "{{cwd}}"
 # cliff.toml (the continuous archetype, this repo) skip clean.
 run = 'if [[ -f cliff.toml ]]; then echo "next: $(git cliff --bumped-version)"; git cliff --bump --unreleased --strip all; else echo "release:preview: no cliff.toml, skipped"; fi'
 
+[tasks."lint:gate-stub"]
+description = "A gate stub's trigger set must be closed over the gate's inputs (#427)"
+dir = "{{cwd}}"
+# The squash-subject check reads the PR title, and the merge targets the
+# base — both change only on `edited`, which the default pull_request
+# types omit, so a caller on defaults holds stale verdicts (#427). The
+# trigger lives in each caller's stub where the shared workflow cannot
+# reach it, and Renovate manages the stub's pin, never its YAML — so
+# this lint is the fan-out: it rides the pin bump Renovate does deliver
+# and turns a stale stub red in that repo's own gate, fix in the
+# message. Deterministic — parses tracked files only — so gate-eligible.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "lint:gate-stub: no workflows, skipped"; exit 0
+}
+bad=""
+for f in .github/workflows/*.y*ml; do
+  grep -qE "uses:[[:space:]]*(monumental-archive/\.github/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
+  grep -qE "^[[:space:]]*pull_request" "${f}" || continue
+  grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
+done
+if [[ -n "${bad}" ]]; then
+  echo "lint:gate-stub: gate caller's pull_request trigger lacks the edited type," >&2
+  echo "  so title/base edits keep a stale verdict (#427). Set" >&2
+  echo "  types: [opened, synchronize, reopened, edited] in:${bad}" >&2
+  exit 1
+fi
+echo "lint:gate-stub: ok"
+'''
+
 [tasks."lint:capability-boundary"]
 description = "No caller-code workflow may hold a signing identity (SLSA L3 boundary)"
 dir = "{{cwd}}"
