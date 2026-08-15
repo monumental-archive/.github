@@ -15,6 +15,13 @@ lockfile = true
 # coverage:check asserts llvm-tools rather than installing it.
 # rust = { version = "1.xx.x", components = "llvm-tools" }
 # "cargo:cargo-auditable" = "0.7.5"
+# Go repos: the toolchain, plus govulncheck as a build input (no
+# upstream binaries, no aqua package — the go: backend builds it from a
+# pinned source version; audit:go-vulns asserts it, #392). The hermetic
+# build env below the pins is stele's precedent: vendored deps only, no
+# proxy, no cgo, no toolchain auto-download.
+# go = "1.xx.x"
+# "go:golang.org/x/vuln/cmd/govulncheck" = "v1.x.x"
 
 [tasks.test]
 run = "echo TODO: this repo has no tests yet && exit 1"

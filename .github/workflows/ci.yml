@@ -100,7 +100,8 @@ jobs:
           HAS_TOKEN: ${{ secrets.codecov-token != '' }}
         run: |
           set -euo pipefail
-          if [[ ! -f .coverage-floor || ! -f Cargo.toml || ${HAS_TOKEN} != "true" ]]; then
+          if [[ ! -f .coverage-floor || ${HAS_TOKEN} != "true" ]] \
+            || [[ ! -f Cargo.toml && ! -f go.mod ]]; then
             echo "skip=true" >> "${GITHUB_OUTPUT}"
             echo "::notice::no floor or no token; badge upload skipped"
             exit 0
@@ -124,5 +125,8 @@ jobs:
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.codecov-token }}
-          files: lcov.info
+          # The filename is the task's contract, selected by repo shape:
+          # the Rust leg renders lcov.info, the Go leg's coverprofile is
+          # coverage.txt — Codecov parses both natively (#392).
+          files: ${{ hashFiles('go.mod') != '' && 'coverage.txt' || 'lcov.info' }}
           fail_ci_if_error: true

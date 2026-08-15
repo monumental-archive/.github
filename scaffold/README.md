@@ -36,6 +36,16 @@ footprint of the governance stack:
   so they cannot all be enabled at once, and naming the ones a repo
   actually uses is a statement of fact about the repo rather than a
   choice about how strict to be.
+- `.golangci.yml` — the Go canon (#392): golangci-lint v2 at
+  `default: all` with per-rule written disables, gofumpt (extra rules)
+  and gci as formatters, and the depguard ban on `encoding/json`
+  outside `internal/jsonx`. Copy it and fill the two `<module-path>`
+  holes. `lint:go` fails the gate if Go is tracked without it —
+  golangci-lint's default selection is five linters of ~105, so a
+  missing config yields a green gate that checked almost nothing (the
+  ruff trap, again). govulncheck rides repo-side: pin
+  `"go:golang.org/x/vuln/cmd/govulncheck"` in `mise.toml` (the
+  cargo-fuzz pattern; `audit:go-vulns` asserts it with the remedy).
 
 **Pick the licence — this is a step, not an afterthought (#214).** The
 choice is per-repo (Rust repos conventionally dual-license
