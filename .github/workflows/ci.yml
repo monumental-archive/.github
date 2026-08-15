@@ -61,6 +61,35 @@ jobs:
           version: 2026.8.3
           cache: false
 
+      # PRs squash-merge, and the PERMANENT commit subject is the PR
+      # title with GitHub's " (#N)" appended — a subject lint:commits
+      # structurally cannot see, because it walks the branch's commits
+      # and the squash subject exists only at merge. That is how an
+      # 84-character subject reached main past a 72-column ceiling
+      # (v1.26.0's belt merge): every branch commit was clean, the
+      # title was not, and nothing looked. Compose the subject the
+      # merge will mint and hold it to the same tool and config the
+      # branch commits answer to. Values via env, never ${{ }} into
+      # shell (the injection rule).
+      - name: The squash subject is the PR title — hold it to the commit canon
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f committed.toml ]]; then
+            echo "squash-subject: no committed.toml in this repo, skipped"
+            exit 0
+          fi
+          printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${RUNNER_TEMP}/squash-subject"
+          if ! committed --commit-file "${RUNNER_TEMP}/squash-subject"; then
+            echo "::error::the PR title becomes the permanent squash subject (plus ' (#${PR_NUMBER})') and it fails the commit canon — fix the TITLE, not a commit"
+            exit 1
+          fi
+          echo "squash-subject: title mints a conforming subject"
+      # (no blank line above: lint:shell-embedded captures trailing
+      # blanks into the run: block and shfmt refuses them)
       - name: Run the gate
         run: mise run ci
 
