@@ -29,7 +29,9 @@ if [[ -n ${SA_RULES_FIXTURE_DIR:-} ]]; then
   branch_rules=$(cat "${SA_RULES_FIXTURE_DIR}/branch-rules.json")
 else
   [[ -n ${GH_TOKEN:-} ]] || {
-    echo "::error::no GH_TOKEN in the environment — the claims stage must be handed the source-attest environment read token (#240)"
+    emsg="::error::no GH_TOKEN in the environment — the claims stage must be handed the source-attest"
+    emsg+=" environment read token (#240)"
+    echo "${emsg}"
     exit 1
   }
   branch_rules=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/main" --paginate) || {
@@ -49,7 +51,8 @@ add() { # property, evidence-json
 
 # ORG_SOURCE_HISTORY_PROTECTED: deletion + non-fast-forward blocked,
 # linear history required.
-hist=$(jq -c '[.[] | select(.type == "deletion" or .type == "non_fast_forward" or .type == "required_linear_history")]' <<< "${branch_rules}")
+hist=$(jq -c '[.[] | select(.type == "deletion" or .type == "non_fast_forward"
+  or .type == "required_linear_history")]' <<< "${branch_rules}")
 hist_types=$(jq '[.[].type] | unique | length' <<< "${hist}")
 if [[ ${hist_types} -eq 3 ]]; then
   add ORG_SOURCE_HISTORY_PROTECTED "${hist}"
@@ -115,7 +118,9 @@ else
   tag_rulesets="[]"
   for id in ${tag_ids}; do
     detail=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}") || {
-      echo "::error::ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment read token (#240)"
+      emsg="::error::ruleset ${id} is listed but its details are unreadable — the token cannot see org-level"
+      emsg+=" ruleset content; the claims job needs the source-attest environment read token (#240)"
+      echo "${emsg}"
       exit 1
     }
     tag_rulesets=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${tag_rulesets}")
@@ -129,7 +134,9 @@ else
   branch_ruleset_details="[]"
   for id in ${branch_ids}; do
     detail=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${id}") || {
-      echo "::error::branch ruleset ${id} is listed but its details are unreadable — the token cannot see org-level ruleset content; the claims job needs the source-attest environment read token (#240)"
+      emsg="::error::branch ruleset ${id} is listed but its details are unreadable — the token cannot see"
+      emsg+=" org-level ruleset content; the claims job needs the source-attest environment read token (#240)"
+      echo "${emsg}"
       exit 1
     }
     branch_ruleset_details=$(jq -c --argjson d "${detail}" '. + [$d]' <<< "${branch_ruleset_details}")
@@ -137,7 +144,9 @@ else
 fi
 tag_ruleset_count=$(jq length <<< "${tag_rulesets}")
 [[ ${tag_ruleset_count} -ge 1 ]] || {
-  echo "::error::no active tag rulesets visible — the org tag rulesets exist (docs/source-track.md), so this token cannot see them; refusing to claim from a blind read (#240)"
+  emsg="::error::no active tag rulesets visible — the org tag rulesets exist (docs/source-track.md), so this"
+  emsg+=" token cannot see them; refusing to claim from a blind read (#240)"
+  echo "${emsg}"
   exit 1
 }
 

@@ -173,7 +173,9 @@ fi
 # what was checked — the output says it, like this check's three siblings.
 if [[ ${mode} == check && ${drift} -eq 0 ]]; then
   key_count="$(wc -w <<< "${keys}" | tr -d ' ')"
-  echo "repo-baseline: ${seen_repos} repos checked (${key_count} baseline keys + OIDC sub + signoff + publish env each, plus org packages), no drift"
+  emsg="repo-baseline: ${seen_repos} repos checked"
+  emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env each, plus org packages), no drift"
+  echo "${emsg}"
 fi
 
 exit "${drift}"

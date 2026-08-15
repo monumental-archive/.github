@@ -205,8 +205,10 @@ PYEOF
 if [[ -n ${repository_field} ]]; then
   normalised="${repository_field%/}"
   normalised="${normalised%.git}"
+  emsg="manifest repository '${repository_field}' != '${source_url}'"
+  emsg+=" — update the repository field (stale after a transfer)"
   [[ ${normalised} == "${source_url}" ]] \
-    || fail "manifest repository '${repository_field}' != '${source_url}' — update the repository field (stale after a transfer)"
+    || fail "${emsg}"
 fi
 
 # --- editorial facts: caller input, derived default, omit when absent -----
@@ -250,7 +252,8 @@ jq -e '
   || fail "a fact is empty, padded, or carries control characters: ${facts}"
 
 # Provenance keys must all be present (editorial may be omitted).
-required='["org.opencontainers.image.source","org.opencontainers.image.revision","org.opencontainers.image.created","org.opencontainers.image.licenses"]'
+required='["org.opencontainers.image.source","org.opencontainers.image.revision",'
+required+='"org.opencontainers.image.created","org.opencontainers.image.licenses"]'
 [[ ${ARCHETYPE} == versioned ]] \
   && required=$(jq -c '. + ["org.opencontainers.image.version"]' <<< "${required}")
 jq -e --argjson req "${required}" 'keys as $k | $req | all(. as $r | $k | index($r) != null)' \

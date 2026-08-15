@@ -42,7 +42,8 @@ fi
 }
 packages=$(jq '.packages | length' "${out}")
 purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
-bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator | select(test("@") | not)] | length' "${out}")
+bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
+  | .referenceLocator | select(test("@") | not)] | length' "${out}")
 if [[ ${packages} -eq 0 ]]; then
   echo "::error::SBOM has zero packages — an empty inventory asserts nothing"
   exit 1

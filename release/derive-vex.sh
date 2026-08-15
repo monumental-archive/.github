@@ -146,7 +146,9 @@ if [[ ${undecided} -ne 0 ]]; then
 fi
 
 if [[ ${n_matched} -eq 0 ]]; then
-  echo "::notice::no decided advisories apply to this release; no VEX document to derive (${n_reported} base-layer finding(s) on the rebuild cadence)"
+  emsg="::notice::no decided advisories apply to this release; no VEX document to derive"
+  emsg+=" (${n_reported} base-layer finding(s) on the rebuild cadence)"
+  echo "${emsg}"
   exit 0
 fi
 
@@ -173,4 +175,7 @@ jq -n --argjson joined "${joined}" \
 }
 # shellcheck disable=SC2312  # diagnostic output only; a failure here
 # degrades a log line, it does not change what is written or decided.
-echo "::notice::derived VEX: $(jq '.statements | length' "${out}") statement(s) over ${release_purl} (${out##*/}); ${n_reported} base-layer finding(s) on the rebuild cadence"
+emsg="derived VEX: $(jq '.statements | length' "${out}") statement(s)"
+emsg+=" over ${release_purl} (${out##*/});"
+emsg+=" ${n_reported} base-layer finding(s) on the rebuild cadence"
+echo "::notice::${emsg}"

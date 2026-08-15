@@ -42,21 +42,37 @@ for wf in ci.yml gate.yml; do
   break
 done
 if [[ -n ${gate_wf} ]]; then
-  add "[![ci](https://github.com/${org_path}/actions/workflows/${gate_wf}/badge.svg)](https://github.com/${org_path}/actions/workflows/${gate_wf})"
+  emsg="[![ci](https://github.com/${org_path}/actions/workflows/${gate_wf}/badge.svg)]"
+  emsg+="(https://github.com/${org_path}/actions/workflows/${gate_wf})"
+  add "${emsg}"
 fi
 if [[ -f .github/workflows/scorecard.yml ]]; then
-  add "[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/${org_path}/badge)](https://scorecard.dev/viewer/?uri=github.com/${org_path})"
+  emsg="[![OpenSSF"
+  emsg+=" Scorecard](https://api.scorecard.dev/projects/github.com/${org_path}/badge)]"
+  emsg+="(https://scorecard.dev/viewer/?uri=github.com/${org_path})"
+  add "${emsg}"
 fi
 # The org's claimed tracks; the Monday audit parses each shield and
 # matches it against direction.md's table, so these can never outrun it.
-add "[![SLSA Build L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)"
-add "[![SLSA Source L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)"
-add "[![SLSA Dependencies L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)"
+emsg="[![SLSA Build"
+emsg+=" L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)]"
+emsg+="(https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)"
+add "${emsg}"
+emsg="[![SLSA Source"
+emsg+=" L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)]"
+emsg+="(https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)"
+add "${emsg}"
+emsg="[![SLSA Dependencies"
+emsg+=" L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)]"
+emsg+="(https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)"
+add "${emsg}"
 bp=$(state bestpractices)
 bp_live=""
 if [[ -n ${bp} && ${bp} != "pending" ]]; then
   bp_live=1
-  add "[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/${bp}/badge)](https://www.bestpractices.dev/projects/${bp})"
+  emsg="[![OpenSSF Best"
+  emsg+=" Practices](https://www.bestpractices.dev/projects/${bp}/badge)](https://www.bestpractices.dev/projects/${bp})"
+  add "${emsg}"
   # The Baseline series is a second shield on the same entry, not a
   # variant of the first: /projects/<id>/baseline is a sibling of
   # /badge, and the image self-reports the highest level attained
@@ -64,13 +80,21 @@ if [[ -n ${bp} && ${bp} != "pending" ]]; then
   # ?series= are ignored, /baseline-<n>/badge 404s.
   add "[![OpenSSF Baseline](https://www.bestpractices.dev/projects/${bp}/baseline)](https://www.bestpractices.dev/projects/${bp})"
 else
-  add "<!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->"
+  emsg="<!-- pending (human step): OpenSSF Best Practices — answer the form from docs/best-practices.md, then"
+  emsg+=" set 'bestpractices <BP_ID>' in .badge-states and re-run fix:badges -->"
+  add "${emsg}"
 fi
 reuse=$(state reuse)
 if [[ ${reuse} == "registered" ]]; then
-  add "[![REUSE status](https://api.reuse.software/badge/github.com/${org_path})](https://api.reuse.software/info/github.com/${org_path})"
+  emsg="[![REUSE"
+  emsg+=" status](https://api.reuse.software/badge/github.com/${org_path})]"
+  emsg+="(https://api.reuse.software/info/github.com/${org_path})"
+  add "${emsg}"
 else
-  add "<!-- pending (human step): REUSE — register at https://api.reuse.software/register (no account: name, email, project URL, confirmation link), then set 'reuse registered' in .badge-states and re-run fix:badges -->"
+  emsg="<!-- pending (human step): REUSE — register at https://api.reuse.software/register"
+  emsg+=" (no account: name, email, project URL, confirmation link), then set 'reuse registered' in"
+  emsg+=" .badge-states and re-run fix:badges -->"
+  add "${emsg}"
 fi
 if [[ -f .coverage-floor ]]; then
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
@@ -83,11 +107,14 @@ minting=$(git ls-files ".github/workflows/*.y*ml" | xargs grep -lE "^[^#]*mint-d
 if [[ -n ${concept} ]]; then
   add "[![DOI](https://zenodo.org/badge/DOI/${concept}.svg)](https://doi.org/${concept})"
 elif [[ -n ${minting} ]]; then
-  add "<!-- pending (first mint): DOI — the concept DOI lands in CITATION.cff after the first release mints it; re-run fix:badges -->"
+  emsg="<!-- pending (first mint): DOI — the concept DOI lands in CITATION.cff after the first release mints"
+  emsg+=" it; re-run fix:badges -->"
+  add "${emsg}"
 fi
 classes=""
 for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
-  [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | head -1 | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")"
+  [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | head -1 \
+    | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")"
 done
 reg_live=""
 if [[ ${classes} == *rust-crate* ]]; then
@@ -107,7 +134,9 @@ if [[ ${classes} == *wasm-npm* ]]; then
     exit 1
   fi
   reg_live=1
-  add "[![npm](https://img.shields.io/npm/v/%40monumental-archive%2F${pkg}.svg)](https://www.npmjs.com/package/@monumental-archive/${pkg})"
+  emsg="[![npm](https://img.shields.io/npm/v/%40monumental-archive%2F${pkg}.svg)]"
+  emsg+="(https://www.npmjs.com/package/@monumental-archive/${pkg})"
+  add "${emsg}"
 fi
 if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* ]]; then
   reg_live=1
@@ -115,7 +144,10 @@ if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* ]]; then
   # org-level packages link returns 200 for any org that exists and
   # proves nothing (#316 addendum C).
   for img in ${repo} $(states_extra ghcr); do
-    add "[![ghcr ${img}](https://img.shields.io/badge/ghcr.io-monumental--archive%2F${img//-/--}-blue)](https://github.com/orgs/monumental-archive/packages/container/package/${img})"
+    emsg="[![ghcr"
+    emsg+=" ${img}](https://img.shields.io/badge/ghcr.io-monumental--archive%2F${img//-/--}-blue)]"
+    emsg+="(https://github.com/orgs/monumental-archive/packages/container/package/${img})"
+    add "${emsg}"
   done
 fi
 # fair-software, computed dot by dot: repository, licence, registry,
@@ -131,7 +163,9 @@ d5="%E2%97%8B"
 [[ -n ${bp_live} ]] && d5="%E2%97%8F"
 colour="orange"
 [[ "${d3}${d4}${d5}" == "%E2%97%8F%E2%97%8F%E2%97%8F" ]] && colour="green"
-add "[![fair-software](https://img.shields.io/badge/fair--software.eu-${d1}%20${d2}%20${d3}%20${d4}%20${d5}-${colour})](https://fair-software.eu)"
+emsg="[![fair-software](https://img.shields.io/badge/fair--software.eu-${d1}%20${d2}%20${d3}%20${d4}%20${d5}-${colour})]"
+emsg+="(https://fair-software.eu)"
+add "${emsg}"
 if [[ -n ${BADGES_OUT:-} ]]; then
   printf '%s' "${block}" > "${BADGES_OUT}"
   echo "fix:badges: rendered block to ${BADGES_OUT}"
