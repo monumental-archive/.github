@@ -306,6 +306,15 @@ python = "3.14.7"
 #     omit them and `ci` skips them (optional depends).
 #   - Belt linters guard for applicability and exit 0 when a repo has
 #     nothing for them to check. A linter that can't skip can't be universal.
+#   - Every enumerating `git ls-files` walk excludes ':!vendor/**':
+#     vendored dependency trees are upstream's code, linted by their
+#     upstreams — the belt checks the repo's OWN code. Measured on
+#     stele, the org's first repo with a committed vendor/ (the go mod
+#     vendor law): bash-portability red on x/sys's codegen scripts,
+#     exec-bits on eight upstream .sh modes, shell on shfmt-formatting
+#     upstream trees — none of them the repo's defects. Existence
+#     probes (--error-unmatch, the licence emptiness check) and the
+#     repro full-tree copies deliberately keep the whole tree.
 #   - Write-mode siblings live under `fix:*`, never run by `ci`.
 [tasks.ci]
 description = "The gate: everything the org enforces, plus this repo's tasks"
@@ -352,17 +361,17 @@ dir = "{{cwd}}"
 # No schema catalogs in the gate: catalog resolution is a network fetch.
 # Tracked files only: taplo's own walker wanders into .git (lefthook's
 # remote cache lives there) and has no exclude flag.
-run = 'files=$(git ls-files "*.toml"); if [[ -n "${files}" ]]; then xargs taplo fmt --check --diff <<<"${files}" && xargs taplo lint <<<"${files}"; else echo "lint:toml: no TOML tracked, skipped"; fi'
+run = 'files=$(git ls-files ":!vendor/**" "*.toml"); if [[ -n "${files}" ]]; then xargs taplo fmt --check --diff <<<"${files}" && xargs taplo lint <<<"${files}"; else echo "lint:toml: no TOML tracked, skipped"; fi'
 
 [tasks."fix:toml"]
 description = "Rewrite TOML to canonical format (taplo)"
 dir = "{{cwd}}"
-run = 'git ls-files "*.toml" | xargs taplo fmt'
+run = 'git ls-files ":!vendor/**" "*.toml" | xargs taplo fmt'
 
 [tasks."lint:markdown"]
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
-run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+run = 'files=$(git ls-files ":!vendor/**" "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
 
 [tasks."lint:sql"]
 description = "SQL lint + format check (sqlfluff, all core rules)"
@@ -376,7 +385,7 @@ dir = "{{cwd}}"
 # scaffold/.sqlfluff. Tracked files only, on the standing rule.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.sql")
+files=$(git ls-files ':!vendor/**' "*.sql")
 [[ -n "${files}" ]] || { echo "lint:sql: no SQL tracked, skipped"; exit 0; }
 if ! git ls-files --error-unmatch ".sqlfluff" > /dev/null 2>&1; then
   echo "lint:sql: SQL is tracked but no .sqlfluff is — copy scaffold/.sqlfluff (#403)" >&2
@@ -395,7 +404,7 @@ dir = "{{cwd}}"
 # only its own rule fixes, the same class as fix:python's safe fixes.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.sql")
+files=$(git ls-files ':!vendor/**' "*.sql")
 [[ -n "${files}" ]] || { echo "fix:sql: no SQL tracked, skipped"; exit 0; }
 xargs sqlfluff fix --force <<<"${files}"
 '''
@@ -412,7 +421,7 @@ dir = "{{cwd}}"
 # publish = false workspaces have no registry baseline to diverge from.
 run = '''
 set -euo pipefail
-manifests=$(git ls-files "Cargo.toml" "*/Cargo.toml")
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 [[ -n "${manifests}" ]] || { echo "audit:semver: no Cargo.toml tracked, skipped"; exit 0; }
 command -v cargo > /dev/null || {
   echo "audit:semver: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
@@ -440,7 +449,7 @@ dir = "{{cwd}}"
 # processing error and fails like everything else.
 run = '''
 set -euo pipefail
-manifests=$(git ls-files "Cargo.toml" "*/Cargo.toml")
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 [[ -n "${manifests}" ]] || { echo "lint:machete: no Cargo.toml tracked, skipped"; exit 0; }
 cargo-machete
 echo "lint:machete: no unused dependencies"
@@ -460,7 +469,7 @@ dir = "{{cwd}}"
 # finding. Tracked files only; same glob family as lint:from-digests.
 run = '''
 set -euo pipefail
-files=$(git ls-files "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*" "*/Dockerfile.*")
+files=$(git ls-files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*" "*/Dockerfile.*")
 [[ -n "${files}" ]] || { echo "lint:hadolint: no Dockerfile tracked, skipped"; exit 0; }
 xargs hadolint --failure-threshold style --no-color <<<"${files}"
 echo "lint:hadolint: $(wc -l <<<"${files}" | tr -d " ") Dockerfile(s) clean at style threshold"
@@ -513,7 +522,7 @@ dir = "{{cwd}}"
 # other belt tool covers. The binary is named `ec` by aqua.
 run = '''
 set -euo pipefail
-files=$(git ls-files)
+files=$(git ls-files ':!vendor/**')
 [[ -n "${files}" ]] || { echo "lint:editorconfig: empty tree, skipped"; exit 0; }
 if ! git ls-files --error-unmatch ".editorconfig" > /dev/null 2>&1; then
   echo "lint:editorconfig: no .editorconfig tracked — copy scaffold/.editorconfig (#403)" >&2
@@ -539,7 +548,7 @@ dir = "{{cwd}}"
 # standing lefthook-cache rule.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.yml" "*.yaml")
+files=$(git ls-files ':!vendor/**' "*.yml" "*.yaml")
 [[ -n "${files}" ]] || { echo "lint:yaml: no YAML tracked, skipped"; exit 0; }
 if ! git ls-files --error-unmatch ".yamllint.yaml" > /dev/null 2>&1 \
   && ! git ls-files --error-unmatch ".yamllint" > /dev/null 2>&1 \
@@ -555,7 +564,7 @@ echo "lint:yaml: $(wc -l <<<"${files}" | tr -d " ") file(s) linted"
 [tasks."fix:markdown"]
 description = "Auto-fix markdown (rumdl)"
 dir = "{{cwd}}"
-run = 'git ls-files "*.md" "*.markdown" | xargs rumdl check --fix'
+run = 'git ls-files ":!vendor/**" "*.md" "*.markdown" | xargs rumdl check --fix'
 
 # The JS/TS/JSON layer (#82). Extension list is the set biome parses
 # WITHOUT an experimental flag: html/vue/svelte/astro need
@@ -577,7 +586,7 @@ dir = "{{cwd}}"
 # resolution), so the belt asserts it instead. Copy scaffold/biome.json.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
+files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "lint:biome: nothing biome parses is tracked, skipped"; exit 0; }
 if ! git ls-files --error-unmatch "biome.json" > /dev/null 2>&1 \
@@ -597,7 +606,7 @@ dir = "{{cwd}}"
 # reading its diff first.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
+files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "fix:biome: nothing biome parses is tracked, skipped"; exit 0; }
 xargs biome check --write <<<"${files}"
@@ -617,7 +626,7 @@ dir = "{{cwd}}"
 # weaker gate, it gets a green one that checked almost nothing.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.py" "*.pyi")
+files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "lint:python: no Python tracked, skipped"; exit 0; }
 if ! git ls-files --error-unmatch "ruff.toml" > /dev/null 2>&1 \
   && ! git ls-files --error-unmatch ".ruff.toml" > /dev/null 2>&1 \
@@ -644,9 +653,9 @@ dir = "{{cwd}}"
 # publishing a library deliberately supports interpreters older than the
 # one it develops on. Only "claims newer than it can run" is a defect.
 run = '''
-files=$(git ls-files "*.py" "*.pyi")
+files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "lint:python-target: no Python tracked, skipped"; exit 0; }
-cfg=$(git ls-files "ruff.toml" ".ruff.toml" | head -1)
+cfg=$(git ls-files ':!vendor/**' "ruff.toml" ".ruff.toml" | head -1)
 [[ -n "${cfg}" ]] || { echo "lint:python-target: no ruff.toml, skipped (lint:python chases it)"; exit 0; }
 target=$(grep -oE '^target-version[[:space:]]*=[[:space:]]*"py[0-9]+"' "${cfg}" | grep -oE 'py[0-9]+')
 [[ -n "${target}" ]] || { echo "lint:python-target: no target-version set, skipped"; exit 0; }
@@ -684,7 +693,7 @@ dir = "{{cwd}}"
 # unchecked exactly as they did under zizmor's old scope.
 run = '''
 set -euo pipefail
-files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "lint:action-pins: no workflows or actions, skipped"; exit 0; }
 xargs pinact run -fix=false -no-api <<<"${files}"
 echo "lint:action-pins: ok"
@@ -700,7 +709,7 @@ dir = "{{cwd}}"
 # upgraded would fight it.
 run = '''
 set -euo pipefail
-files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "fix:actions: no workflows or actions, skipped"; exit 0; }
 xargs pinact run <<<"${files}"
 '''
@@ -713,7 +722,7 @@ dir = "{{cwd}}"
 # diff first.
 run = '''
 set -euo pipefail
-files=$(git ls-files "*.py" "*.pyi")
+files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "fix:python: no Python tracked, skipped"; exit 0; }
 xargs ruff check --fix <<<"${files}"
 xargs ruff format <<<"${files}"
@@ -738,7 +747,7 @@ dir = "{{cwd}}"
 # live in .shellcheckrc so they are declared once.
 run = '''
 set -euo pipefail
-files=$(git ls-files | xargs shfmt --find)
+files=$(git ls-files ':!vendor/**' | xargs shfmt --find)
 [[ -n "${files}" ]] || { echo "lint:shell: no shell tracked, skipped"; exit 0; }
 xargs shfmt -i 2 -bn -ci -sr -s -d <<<"${files}"
 xargs shellcheck <<<"${files}"
@@ -768,7 +777,7 @@ dir = "{{cwd}}"
 # audits read run: content and cannot follow a script call.
 run = '''
 set -euo pipefail
-files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "lint:shell-embedded: no workflows or actions, skipped"; exit 0; }
 helper=mise/embedded-shell.py
 [[ -f "${helper}" ]] || helper=.org-canon/mise/embedded-shell.py
@@ -780,7 +789,7 @@ python3 "${helper}" ${files}
 [tasks."fix:shell"]
 description = "Rewrite shell to canonical format (shfmt)"
 dir = "{{cwd}}"
-run = 'git ls-files | xargs shfmt --find | xargs shfmt -i 2 -bn -ci -sr -s -w'
+run = 'git ls-files ":!vendor/**" | xargs shfmt --find | xargs shfmt -i 2 -bn -ci -sr -s -w'
 
 [tasks."lint:commits"]
 description = "Conventional-commit check for the branch (committed)"
@@ -859,7 +868,7 @@ dir = "{{cwd}}"
 # release died at run time with exit 126 — after the tag, which is
 # immutable, so the version was burned. Nothing else checks a mode.
 run = '''
-files=$(git ls-files "*.sh")
+files=$(git ls-files ':!vendor/**' "*.sh")
 [[ -n "${files}" ]] || { echo "lint:exec-bits: no shell scripts tracked, skipped"; exit 0; }
 bad=""
 while IFS= read -r f; do
@@ -891,7 +900,7 @@ dir = "{{cwd}}"
 # same category as fetching the toolchain. Advisories are deliberately
 # NOT here: RustSec is a moving feed, so they live in audit:deny.
 run = '''
-locks=$(git ls-files "Cargo.lock" "*/Cargo.lock")
+locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
 [[ -n "${locks}" ]] || { echo "lint:deny: no Cargo.lock tracked, skipped"; exit 0; }
 # A repo with a lock has rust pinned as a build input; cargo absent is a
 # broken toolchain, and skipping would be the vacuous-success failure.
@@ -915,7 +924,7 @@ dir = "{{cwd}}"
 # a reason and cites the VEX statement recording the decision — the L2
 # exit is a written decision, never an override.
 run = '''
-locks=$(git ls-files "Cargo.lock" "*/Cargo.lock")
+locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
 [[ -n "${locks}" ]] || { echo "audit:deny: no Cargo.lock tracked, skipped"; exit 0; }
 command -v cargo > /dev/null || {
   echo "audit:deny: Cargo.lock present but cargo missing — pin rust in mise.toml" >&2
@@ -953,7 +962,7 @@ dir = "{{cwd}}"
 # resolves one module context per invocation.
 run = '''
 set -euo pipefail
-mods=$(git ls-files "go.mod" "*/go.mod" "*/*/go.mod")
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
 [[ -n "${mods}" ]] || { echo "lint:go: no go.mod tracked, skipped"; exit 0; }
 # A repo with a go.mod has go pinned as a build input; go absent is a
 # broken toolchain, and skipping would be the vacuous-success failure.
@@ -988,7 +997,7 @@ dir = "{{cwd}}"
 # without reading its diff first.
 run = '''
 set -euo pipefail
-mods=$(git ls-files "go.mod" "*/go.mod" "*/*/go.mod")
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
 [[ -n "${mods}" ]] || { echo "fix:go: no go.mod tracked, skipped"; exit 0; }
 command -v go > /dev/null || {
   echo "fix:go: go.mod present but go missing — pin go in mise.toml" >&2
@@ -1015,7 +1024,7 @@ dir = "{{cwd}}"
 # installed mid-run.
 run = '''
 set -euo pipefail
-mods=$(git ls-files "go.mod" "*/go.mod" "*/*/go.mod")
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
 [[ -n "${mods}" ]] || { echo "audit:go-vulns: no go.mod tracked, skipped"; exit 0; }
 command -v go > /dev/null || {
   echo "audit:go-vulns: go.mod present but go missing — pin go in mise.toml" >&2
@@ -1941,7 +1950,7 @@ dir = "{{cwd}}"
 # renamed heading is the common way a link rots while still returning
 # 200. Enabled at zero cost — measured on this tree at adoption, it adds
 # no findings.
-run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress --include-fragments --exclude "%3Crepo%3E|BP_ID|CONCEPT_DOI" <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
+run = 'files=$(git ls-files ":!vendor/**" "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress --include-fragments --exclude "%3Crepo%3E|BP_ID|CONCEPT_DOI" <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
 
 [tasks."audit:actions"]
 description = "zizmor online + auditor persona — the audits the gate cannot run"
@@ -2078,14 +2087,14 @@ latest=$(tail -1 <<< "${tags}")
 [[ -n "${latest}" ]] || { echo "audit:canon-pins: canon has no tags, skipped"; exit 0; }
 stale=""
 found=0
-claims=$(git ls-files "*.yml" "*.yaml" | while IFS= read -r f; do
+claims=$(git ls-files ':!vendor/**' "*.yml" "*.yaml" | while IFS= read -r f; do
   grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
     | grep -oE "# v[0-9][0-9.]*" | sed "s|# |${f}:|"
   if grep -qF "github.com/monumental-archive/.github" "${f}"; then
     grep -E "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
       | grep -oE "v[0-9][0-9.]*" | sed "s|^|${f}:|"
   fi
-done; git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json" \
+done; git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json" \
   | while IFS= read -r f; do
   grep -oE "github>monumental-archive/\.github#v[0-9][0-9.]*" "${f}" \
     | sed "s|.*#|${f}:|"
@@ -2187,14 +2196,14 @@ for repo in ${repos}; do
   git clone -q --depth 1 "https://github.com/monumental-archive/${repo}.git" "${dir}" || {
     failed="${failed} ${repo}(clone)"; continue
   }
-  claims=$(cd "${dir}" && git ls-files "*.yml" "*.yaml" | while IFS= read -r f; do
+  claims=$(cd "${dir}" && git ls-files ':!vendor/**' "*.yml" "*.yaml" | while IFS= read -r f; do
     grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
       | grep -oE "# v[0-9][0-9.]*" | sed "s|# |${repo}/${f}:|"
     if grep -qF "github.com/monumental-archive/.github" "${f}"; then
       grep -E "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
         | grep -oE "v[0-9][0-9.]*" | sed "s|^|${repo}/${f}:|"
     fi
-  done; cd "${dir}" && git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json" \
+  done; cd "${dir}" && git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json" \
     | while IFS= read -r f; do
     grep -oE "github>monumental-archive/\.github#v[0-9][0-9.]*" "${f}" \
       | sed "s|.*#|${repo}/${f}:|"
@@ -2514,7 +2523,7 @@ dir = "{{cwd}}"
 # while its uses: line was bumped twice — every dispatch a guaranteed
 # identity mismatch, silently.
 run = '''
-files=$(git ls-files ".github/workflows/*.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:signer-pin: no workflows, skipped"; exit 0; }
 literals=$(xargs grep -nE -- "--signer-digest[[:space:]]+[0-9a-f]{40}" <<< "${files}" || true)
 if [[ -n "${literals}" ]]; then
@@ -2578,7 +2587,7 @@ dir = "{{cwd}}"
 # Deterministic, tracked files only — belongs in `ci`. The error line
 # format is fix:input-forwarding's parsing API; change them together.
 run = '''
-files=$(git ls-files ".github/workflows/*.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:input-forwarding: no workflows, skipped"; exit 0; }
 grep -l "uses: ./.github/workflows/" ${files} > /dev/null 2>&1 || {
   echo "lint:input-forwarding: no local reusable-workflow callers, skipped"; exit 0
@@ -2709,7 +2718,7 @@ dir = "{{cwd}}"
 # lint globs .github/workflows/ only, which is exactly the blind spot
 # that let the bad `uses:` through.
 run = '''
-files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "lint:actions-allowed: no workflows or actions, skipped"; exit 0; }
 # github_owned_allowed=true covers the actions/ and github/ orgs.
 # verified_allowed=false — a Marketplace verification badge is a
@@ -2808,7 +2817,7 @@ dir = "{{cwd}}"
 # a pin here never goes stale. Exempt: `FROM scratch` and references to
 # named build stages. Tracked files only, like every belt linter.
 run = '''
-files=$(git ls-files "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*")
+files=$(git ls-files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*")
 [[ -n "${files}" ]] || { echo "lint:from-digests: no Dockerfiles tracked, skipped"; exit 0; }
 bad=""
 while IFS= read -r f; do
@@ -3061,7 +3070,7 @@ dir = "{{cwd}}"
 # consumer repos that carry no config and so the number has one home.
 run = '''
 set -euo pipefail
-files=$(git ls-files ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "audit:action-pins: no workflows or actions, skipped"; exit 0; }
 xargs pinact run -fix=false --verify-comment --verify-min-age <<<"${files}"
 echo "audit:action-pins: ok"
@@ -3412,7 +3421,7 @@ fail=""
 # the task. Load-bearing for the run-URL collector especially: it matches
 # nothing on this tree today, which is exactly how the strict shell
 # surfaced it (#82 finding 2).
-cited=$(git ls-files "docs/*.md" | xargs grep -h -E "v[0-9]+\.[0-9]+\.[0-9]+" \
+cited=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -h -E "v[0-9]+\.[0-9]+\.[0-9]+" \
   | grep -v "schema v[0-9]" \
   | grep -hoE "(^|[^/\"A-Za-z0-9.])v[0-9]+\.[0-9]+\.[0-9]+($|[^-A-Za-z0-9])" \
   | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | sort -uV) || true
@@ -3423,7 +3432,7 @@ while IFS= read -r v; do
   grep -qxF "${v}" <<< "${tags}" || fail="${fail}
   version cited in docs/ exists as a tag in no org repo: ${v}"
 done <<< "${cited}"
-runs=$(git ls-files "docs/*.md" \
+runs=$(git ls-files ':!vendor/**' "docs/*.md" \
   | xargs grep -hoE "github\.com/monumental-archive/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u) || true
 rn=0
 while IFS= read -r r; do
@@ -3640,7 +3649,7 @@ dir = "{{cwd}}"
 # and no licence is exactly the defect, never an exemption.
 run = '''
 [[ -n "$(git ls-files | head -1)" ]] || { echo "lint:licence: no tracked files, skipped"; exit 0; }
-lic=$(git ls-files "LICENSE" "LICENSE.*" "LICENSES/*")
+lic=$(git ls-files ':!vendor/**' "LICENSE" "LICENSE.*" "LICENSES/*")
 if [[ -z "${lic}" ]]; then
   echo "lint:licence: no tracked LICENSE or LICENSES/ — every repo carries its own licence (#214)" >&2
   echo "  with no licence the default is all rights reserved, the opposite of the intent" >&2
@@ -3775,7 +3784,7 @@ dir = "{{cwd}}"
 # clean where neither condition applies — a linter that cannot skip
 # cannot be universal.
 run = '''
-minting=$(git ls-files ".github/workflows/*.y*ml" | xargs grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
+minting=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" | xargs grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
 if [[ ! -f CITATION.cff ]]; then
   if [[ -n "${minting}" ]]; then
     echo "lint:citation: mint-doi: true with no CITATION.cff — a citable repo carries its citation (#316 finding 6):" >&2
@@ -3852,7 +3861,7 @@ dir = "{{cwd}}"
 # documented in docs/best-practices.md; this guards the one failure that
 # is silent.
 run = '''
-files=$(git ls-files ".bestpractices.json" "*/.bestpractices.json" ".project.d/bestpractices.json")
+files=$(git ls-files ':!vendor/**' ".bestpractices.json" "*/.bestpractices.json" ".project.d/bestpractices.json")
 [[ -n "${files}" ]] || { echo "lint:bestpractices: no .bestpractices.json, skipped"; exit 0; }
 
 rc=0
@@ -4200,7 +4209,7 @@ dir = "{{cwd}}"
 # matrix laundering hole: a floating value reaching runs-on through a
 # matrix include or a bash case arm is the same float with indirection.
 run = '''
-files=$(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" \
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
   "workflow-templates/*.yml" "workflow-templates/*.yaml")
 [[ -n "${files}" ]] || { echo "lint:runner-pin: no workflows, skipped"; exit 0; }
 bad=""
@@ -4242,7 +4251,7 @@ dir = "{{cwd}}"
 run = '''
 bad=""
 found=0
-files=$(git ls-files "*.yml" "*.yaml")
+files=$(git ls-files ':!vendor/**' "*.yml" "*.yaml")
 if [[ -n "${files}" ]]; then
   while IFS= read -r f; do
     while IFS= read -r line; do
@@ -4259,14 +4268,14 @@ while IFS= read -r f; do
   found=$((found + 1))
   grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
     || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
-done < <(git ls-files "lefthook.yml" "*/lefthook.yml")
+done < <(git ls-files ':!vendor/**' "lefthook.yml" "*/lefthook.yml")
 while IFS= read -r f; do
   [[ -n "${f}" ]] || continue
   grep -qF "github>monumental-archive/.github" "${f}" || continue
   found=$((found + 1))
   grep -qE "github>monumental-archive/\.github#v[0-9]" "${f}" \
     || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
-done < <(git ls-files "renovate.json" "*/renovate.json" ".github/renovate.json")
+done < <(git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json")
 # The fourth surface is a prohibition: no workflow step may clone the
 # canon with actions/checkout, at any ref. Canon content reaches a job
 # only through `uses: $/.github/actions/canon` — GitHub's
@@ -4282,7 +4291,7 @@ while IFS= read -r f; do
   found=$((found + checkouts))
   [[ "${checkouts}" -eq 0 ]] \
     || bad="${bad} ${f}(${checkouts} canon checkout(s) — use \$/.github/actions/canon)"
-done < <(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml")
+done < <(git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml")
 [[ ${found} -gt 0 ]] || { echo "lint:canon-pins: no canon references, skipped"; exit 0; }
 if [[ -n "${bad}" ]]; then
   echo "lint:canon-pins: unversioned canon references:${bad}" >&2
@@ -4312,7 +4321,7 @@ dir = "{{cwd}}"
 # Comment lines are skipped so that documenting a forbidden form (as the
 # signer now does) is not itself a violation.
 run = '''
-files=$(git ls-files | xargs shfmt --find 2>/dev/null; git ls-files ".github/workflows/*.y*ml")
+files=$(git ls-files ':!vendor/**' | xargs shfmt --find 2>/dev/null; git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:bash-portability: nothing to check, skipped"; exit 0; }
 # ${v,,} ${v^^} ${v,} ${v^} — case modification, bash 4.0
 # declare -A / typeset -A — associative arrays, bash 4.0
