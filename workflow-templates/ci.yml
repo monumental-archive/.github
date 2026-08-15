@@ -6,7 +6,16 @@
 name: gate
 
 "on":
-  pull_request: {}
+  # `edited` is load-bearing: the shared gate lints the squash subject
+  # from the PR title, and title/base changes arrive only as `edited`
+  # events — without it a fixed title stays red and a broken one stays
+  # green (.github#427). Do not slim back to the default types.
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   push:
     branches:
       - $default-branch
