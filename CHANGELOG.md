@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.26.1](https://github.com/monumental-archive/.github/compare/v1.26.0...v1.26.1) - 2026-08-15
+
+### Fixed
+
+- carry the stele proof run back into the scaffold ([#405](https://github.com/monumental-archive/.github/pull/405))
+
 ## [1.26.0](https://github.com/monumental-archive/.github/compare/v1.25.0...v1.26.0) - 2026-08-15
 
 ### Added
