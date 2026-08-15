@@ -208,10 +208,17 @@ ruff = "0.16.2"
 # old and the seven-day floor refuses it.
 python = "3.14.7"
 "pipx:reuse" = { version = "6.2.0", uvx_args = "--with charset-normalizer", pipx_args = "--preinstall charset-normalizer" }
-# Source-track chain verification (audit:source-vsa) and stranger
-# verification of chain links generally — the same binary the emitter's
-# action installs in per-repo runs (docs/source-track.md, #207).
+# The chain-link emitter's signing half (source-attest emit.sh) —
+# sign-blob and its read-back. Verification left for stele at the
+# verify cutover (stele#3); this pin retires with the emitter when the
+# emit port lands.
 "aqua:sigstore/cosign" = "3.1.3"
+# The go toolchain, pinned like every other tool: audit:source-vsa runs
+# stele from the pinned module through the checksummed proxy
+# (byte-identical modules or a failed build), the bootstrap stele's
+# CLAUDE.md records — no release class needed for `go run`. Version
+# matches stele's own pin; GOTOOLCHAIN=local there refuses drift.
+go = "1.26.5"
 # The Go layer (#392): one aqua-backed binary — checksums and GitHub
 # artifact attestations verified at install — carrying ~105 lint
 # analyzers plus the formatters (gofumpt with extra rules, gci). Like
@@ -1490,23 +1497,43 @@ dir = "{{cwd}}"
 # The source track's coverage audit (#207): the emitter is per-push, so
 # a lapse leaves a hole in the chain rather than going red anywhere —
 # this is the cadence that finds the holes, the attestation-debt pattern
-# for evidence gaps. For every org repo with a founded chain, walk main
-# from the genesis link to the tip and assert each revision carries a
-# link whose VSA verifies against that repo's pinned identity — the
-# published root-of-trust contract, checked with exactly a stranger's
-# inputs. The audit enumerates the POPULATION, not the enrolled set
-# (#266): a repo with a main branch and no founded chain is a FINDING
-# unless security/source-attest-optout.txt names it with a reason —
-# an unactivated repo is otherwise silent by construction, the SBOM
-# gap in a different track. "Deliberate and lab-first" survives as a
-# written exception, never as silence.
+# for evidence gaps. The audit enumerates the POPULATION, not the
+# enrolled set (#266): a repo with a main branch and no founded chain is
+# a FINDING unless security/source-attest-optout.txt names it with a
+# reason — an unactivated repo is otherwise silent by construction, the
+# SBOM gap in a different track. "Deliberate and lab-first" survives as
+# a written exception, never as silence.
+#
+# The verification itself is `stele verify level` (stele#3): the link
+# walk, hole detection, the ledger linkage walk and the computed source
+# level, one engine per repo, the same binary a stranger runs. The
+# ~170 lines of cosign/jq this body used to carry are deleted, and with
+# them the two defects the port's shadow found in them: the
+# newline-stripped ledger digest (.github#434 — the emitter's copy and
+# this walker's copy of "the" digest had drifted) and the v1-shaped
+# genesis test that ended the ledger walk at the first version-2 note
+# it met. Population enumeration and the opt-out contract stay here:
+# they are orchestration, not verification.
+#
+# stele runs from the pinned module through the checksummed proxy —
+# byte-identical modules or a failed build, go.sum discipline without a
+# release class (the bootstrap in stele's CLAUDE.md; the go-binary
+# release class replaces this pin when it lands). The trusted root is
+# fetched from the same endpoint `gh attestation verify` trusts; stele
+# takes it as an input deliberately (the trust boundary is the
+# caller's to state, stele#19 tracks fetching it in-tool).
 run = '''
 [[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -d source-policies ]] || {
   echo "audit:source-vsa: not the canon, skipped"; exit 0
 }
-command -v cosign > /dev/null || { echo "audit:source-vsa: cosign missing from the belt" >&2; exit 1; }
 command -v gh > /dev/null || { echo "audit:source-vsa: gh missing" >&2; exit 1; }
-issuer="https://token.actions.githubusercontent.com"
+command -v go > /dev/null || { echo "audit:source-vsa: go missing from the belt" >&2; exit 1; }
+stele_pin="github.com/monumental-archive/stele/cmd/stele@ffbf1b1542b9952860b751030ffecb1347ad9d60"
+policy="slsa/verify-policy.json"
+[[ -f "${policy}" ]] || { echo "audit:source-vsa: ${policy} missing" >&2; exit 1; }
+root=$(mktemp)
+gh attestation trusted-root | head -1 > "${root}"
+[[ -s "${root}" ]] || { echo "audit:source-vsa: empty trusted root from gh" >&2; exit 1; }
 repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
 failed=""
 checked=0
@@ -1528,43 +1555,10 @@ while read -r repo; do
     fi
     continue
   }
-  san="https://github.com/monumental-archive/${repo}/.github/workflows/source-attest.yml@refs/heads/main"
-  # Walk first-parent from the tip; the genesis link (prev: null) ends
-  # the walk. Revisions between links are the holes this audit reports.
-  holes=""
-  links=0
-  c=$(git -C "${dir}" rev-parse refs/sa/main)
-  lstart=""
-  while [[ -n "${c}" ]]; do
-    note=$(git -C "${dir}" notes show "${c}" 2> /dev/null || true)
-    if jq -e '.version and .provenance.bundle' <<< "${note}" > /dev/null 2>&1; then
-      links=$((links + 1))
-      jq -r '.provenance.statement' <<< "${note}" | base64 -d > "${dir}/st.json"
-      jq -c '.provenance.bundle' <<< "${note}" > "${dir}/pb.json"
-      jq -r '.vsa.statement' <<< "${note}" | base64 -d > "${dir}/vsa.json"
-      jq -c '.vsa.bundle' <<< "${note}" > "${dir}/vb.json"
-      for pair in "pb.json st.json" "vb.json vsa.json"; do
-        set -- ${pair}
-        cosign verify-blob --bundle "${dir}/${1}" \
-          --certificate-identity "${san}" --certificate-oidc-issuer "${issuer}" \
-          "${dir}/${2}" > /dev/null 2>&1 || failed="${failed} ${repo}@${c}(${1%.json})"
-      done
-      jq -e --arg c "${c}" '.subject[0].digest.gitCommit == $c' "${dir}/st.json" \
-        > /dev/null || failed="${failed} ${repo}@${c}(subject)"
-      checked=$((checked + 1))
-      [[ -n "${lstart}" ]] || lstart="${c}"
-      # Genesis ends the walk. The key must be PRESENT and null: an
-      # absent key also reads as null in jq, and version-2 links carry
-      # ledgerPrev instead of prev — testing bare null would end the
-      # walk at the first v2 link and call the truncation clean.
-      jq -e '.predicate | (has("ledgerPrev") and .ledgerPrev == null)
-        or (has("prev") and .prev == null)' "${dir}/st.json" > /dev/null && break
-    else
-      [[ ${links} -gt 0 ]] && holes="${holes} ${c}"
-    fi
-    c=$(git -C "${dir}" rev-parse -q --verify "${c}^" 2> /dev/null || true)
-  done
-  if [[ ${links} -eq 0 ]]; then
+  # An empty ledger is an unactivated repo, the population rule's case —
+  # judged here against the opt-out file, before the engine (which would
+  # refuse it as an evidence failure, the wrong verdict for absence).
+  if [[ -z "$(git -C "${dir}" notes list 2> /dev/null)" ]]; then
     if opted_out "${repo}"; then
       echo "audit:source-vsa: ${repo}: no chain founded, opted out (${optout})"
     else
@@ -1572,75 +1566,13 @@ while read -r repo; do
     fi
     continue
   fi
-  if [[ -n "${holes}" ]]; then
-    n=$(wc -w <<< "${holes}")
-    failed="${failed} ${repo}(${n// /} unattested revision(s) since genesis:${holes})"
+  if go run "${stele_pin}" verify level \
+    --policy "${policy}" --trusted-root "${root}" \
+    --repo "monumental-archive/${repo}" --git-dir "${dir}" --ref refs/sa/main; then
+    checked=$((checked + 1))
+  else
+    failed="${failed} ${repo}(chain refused — the walk's own output names the defect)"
   fi
-  # LINKAGE, the property nothing checked before #349 S3 — independent
-  # of coverage: walk the LEDGER from the tip-most note to genesis via
-  # ledgerPrev (v2) / prev (v1), proving each step's noteSha256 against
-  # the target's raw note bytes. Every note must be reachable; a
-  # version-1 note left unreachable by a pre-v2 heal is the known
-  # legacy fork, reported as a named notice, while an unreachable
-  # version-2 note is a red — the v2 emitter appends at the tail, so a
-  # v2 leaf means the ledger forked again.
-  # Only chain-link notes are ledger members: the seeded plain-text
-  # note (runbook activation step) and anything else non-JSON is
-  # scaffolding, not a link, and never counts as reachable or leaked.
-  members=""
-  total=0
-  while IFS= read -r r; do
-    [[ -n "${r}" ]] || continue
-    git -C "${dir}" notes show "${r}" 2> /dev/null       | jq -e '.version and .provenance.bundle' > /dev/null 2>&1 || continue
-    members="${members} ${r}"
-    total=$((total + 1))
-  done < <(git -C "${dir}" notes list | awk '{print $2}')
-  cur="${lstart}"
-  visited=""
-  steps=0
-  while [[ -n "${cur}" ]]; do
-    if grep -qF " ${cur}" <<< " ${visited}"; then
-      failed="${failed} ${repo}(ledger cycle at ${cur})"
-      break
-    fi
-    visited="${visited} ${cur}"
-    steps=$((steps + 1))
-    note=$(git -C "${dir}" notes show "${cur}" 2> /dev/null) || {
-      failed="${failed} ${repo}(ledger names ${cur} but no note exists there)"
-      break
-    }
-    st=$(jq -r '.provenance.statement' <<< "${note}" | base64 -d)
-    tgt=$(jq -c '.predicate.ledgerPrev // .predicate.prev' <<< "${st}")
-    if [[ "${tgt}" == "null" ]]; then
-      cur=""
-      break
-    fi
-    trev=$(jq -r '.revision' <<< "${tgt}")
-    tsha=$(jq -r '.noteSha256' <<< "${tgt}")
-    obj=$(git -C "${dir}" notes list "${trev}" 2> /dev/null) || {
-      failed="${failed} ${repo}(ledger step ${cur} names ${trev}, which has no note)"
-      break
-    }
-    actual=$(git -C "${dir}" cat-file blob "${obj}" | sha256sum | cut -d" " -f1)
-    if [[ "${actual}" != "${tsha}" ]]; then
-      failed="${failed} ${repo}(ledger hash mismatch: ${cur} names ${trev} at ${tsha}, note is ${actual})"
-      break
-    fi
-    cur="${trev}"
-  done
-  if [[ -z "${cur}" && ${steps} -lt ${total} ]]; then
-    # Unreachable link notes: v1 legacy leaves are named, v2 leaves red.
-    for rev in ${members}; do
-      grep -qF " ${rev}" <<< "${visited} " && continue
-      ver=$(git -C "${dir}" notes show "${rev}" 2> /dev/null | jq -r '.version')
-      if [[ "${ver}" == "1" ]]; then
-        echo "audit:source-vsa: ${repo}: v1 link at ${rev} is off the ledger (pre-v2 healed fork, known legacy — #349 finding 3)"
-      else
-        failed="${failed} ${repo}(v${ver} link at ${rev} is unreachable from the ledger — the v2 ledger must not fork)"
-      fi
-    done
-  fi
-  echo "audit:source-vsa: ${repo}: ${links} link(s) verified, ledger walk ${steps}/${total}"
 done <<< "${repos}"
 if [[ -n "${failed}" ]]; then
   echo "audit:source-vsa: chain defects:${failed}" >&2
@@ -1648,7 +1580,7 @@ if [[ -n "${failed}" ]]; then
   echo "  against the repo's pinned source-attest identity (docs/source-track.md)" >&2
   exit 1
 fi
-echo "audit:source-vsa: ${checked} link(s) checked across activated repos"
+echo "audit:source-vsa: ${checked} repo(s) verified end to end"
 '''
 
 [tasks."audit:badges"]

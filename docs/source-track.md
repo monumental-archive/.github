@@ -58,21 +58,27 @@ its own; `audit:source-vsa` is the alarm while it is in one. Field
 semantics for healed links live in
 [`source-provenance.md`](source-provenance.md).
 
-**Ledger forks heal through the same path** (#434, the one that taught
-this one). A lost-update race in the emitter's fetch–append–push loop
-can leave a link whose `ledgerPrev.noteSha256` names note bytes no
-surviving notes tree contains — the emitter hashed a predecessor note
-that then lost the notes push race to a re-emission. Every correct
-walk refuses such a link, and no future push repairs it on its own,
-because the revision already carries a note. The heal is deliberate:
-delete the forked tip note from `refs/notes/commits` and push the
-notes ref, turning the fork into an ordinary hole; the next push to
-`main` re-emits it with the `repaired` marker, a computed level, and a
-`ledgerPrev` hashed from the note that actually exists. The deletion
-removes only the defective link — its revision, and every claim about
-it, returns healed one push later. The race itself is closed
-structurally in the `stele emit` port, where the predecessor hash is
-computed inside the push attempt that wins (stele#3).
+**Ledger forks: the #434 record, corrected.** The first diagnosis — a
+lost-update race in the emitter's fetch–append–push loop — was wrong,
+and the heal it prescribed made things worse: re-emission through the
+same emitter minted one more bad link. The actual defect is a digest
+disagreement. The ledger contract is SHA-256 over the note blob bytes
+exactly as git stores them, trailing newline included; a formatting
+pass (#393, 2026-08-14) rewrote the emitter's copy of that computation
+into command substitution, which strips the trailing newline, so every
+link emitted since names predecessor bytes that exist nowhere. The
+walker's copy still hashed the stored bytes — two copies of "the"
+digest, drifted, with no test comparing them. Every correct walk
+refuses such links; all 32 defective links across the org match the
+stripped-form hash exactly, and repositories without a post-#393 push
+are clean only by inactivity. The heal is deferred, deliberately: the
+bash emitter is not being fixed, because `stele emit` replaces it
+(stele#3) — one digest function shared by the emit and verify legs,
+the note read back from the object store and hashed as git kept it,
+and the predecessor hash computed inside the push attempt that wins.
+When it lands, the defective links are deleted and re-emitted with the
+`repaired` marker; until then the chains on affected repositories stay
+red in every correct verifier, and that red is the system working.
 
 **release-lab's first five links claim `SLSA_SOURCE_LEVEL_2`, and stay
 that way.** They were emitted before the claims job held a token that
