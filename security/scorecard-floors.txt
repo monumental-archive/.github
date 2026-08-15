@@ -43,3 +43,4 @@
 .github 7.1
 signer 6.8
 release-lab 7.4
+stele 6.2
