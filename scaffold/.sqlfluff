@@ -1,0 +1,11 @@
+# The org sqlfluff policy (#403). sqlfluff's default rule set is its
+# maximum — every core rule on — so this file exists for the one thing
+# the tool refuses to guess: the dialect. postgres org-wide; the only
+# SQL the org ships runs in PostgreSQL (pgrx extensions,
+# monumental-archive-db). Copy to the repo root as .sqlfluff.
+# templater = raw: SQL in this org is DDL/migrations, not Jinja
+# templates — a templater that expands nothing can also corrupt
+# nothing.
+[sqlfluff]
+dialect = postgres
+templater = raw

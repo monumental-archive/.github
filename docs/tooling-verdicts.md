@@ -45,6 +45,7 @@ honestly blocked on.
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
+| sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -680,6 +681,24 @@ shape). Unprovable in the canon — no Rust. *Reopen:* an aqua package
 or upstream sha256 assets appearing; or the release path growing a
 pre-tag semver leg so the break is caught at the version decision
 rather than the Monday after.
+
+**sqlfluff, the third `pipx:` exception, provable only in
+monumental-archive-db** (#403). PyPI-only — no aqua package — so it
+rides checksummed uv under the `UV_*` floor environment like reuse and
+yamllint, closing the count this doc predicted when the uv layer was
+built. sqlfluff's default rule set is its maximum (gitleaks' shape,
+not ruff's), so `scaffold/.sqlfluff` exists for exactly one thing the
+tool refuses to guess: the dialect — postgres org-wide, the only SQL
+the org ships. `templater = raw`: org SQL is DDL/migrations, not
+Jinja, and a templater that expands nothing can corrupt nothing.
+`lint:sql` is subject-named (one language, the lint:python rule) and
+still asserts the config so the remedy is named, though a missing
+config here fails loud rather than green. `fix:sql` is the write-mode
+sibling; `--force` is its non-interactive flag, not an unsafe-fix
+mode. **Zero SQL in the canon** — the task skips clean here, and the
+rule set is exercised first in monumental-archive-db, stated outright
+like biome, golangci-lint and the Rust pair. *Reopen:* Jinja-templated
+SQL appearing anywhere in the org (revisit the raw templater).
 
 ## Skipped, with rationale and reopen trigger
 
