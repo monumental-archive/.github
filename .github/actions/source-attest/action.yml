@@ -272,7 +272,10 @@ runs:
         }
         stele_pin="github.com/monumental-archive/stele/cmd/stele@3af8d30b0016028f74bab9adc85ae465505272cf"
         root=$(mktemp)
-        gh attestation trusted-root | head -1 > "${root}"
+        # No pipeline: under pipefail, head closing the pipe after one
+        # line kills gh with SIGPIPE and the step dies at 141.
+        gh attestation trusted-root > "${root}.all"
+        head -1 "${root}.all" > "${root}"
         [[ -s ${root} ]] || {
           echo "::error::empty trusted root from gh"
           exit 1
