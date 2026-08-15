@@ -93,7 +93,22 @@ UV_PYTHON_DOWNLOADS = "never"
 [task_config]
 # Tasks are written in bash (guards use [[ ]] and <<<); the default task
 # shell is sh, which is dash on Ubuntu runners and chokes on both.
-shell = "bash -c"
+#
+# -euo pipefail, not a bare `bash -c` (#82 finding 2). Without it a task
+# whose failure signal is a tool's exit status passes if anything follows
+# it: `lint:python` shipped that way, running `ruff check` then
+# `ruff format --check`, where a lint error was masked by the formatter
+# passing. That class of defect is invisible — the check goes green
+# having not checked.
+#
+# This is the DEFAULT, and the few commands that are genuinely allowed to
+# fail say so at the site with `|| true` and a reason. That direction
+# matters: the alternative considered was leaving the shell permissive
+# and adding `set -euo pipefail` to each of the 78 bodies by hand, which
+# is the same reading with a worse result — an unsafe default, opt-in,
+# and no way to prove every body was covered. A rule you have to remember
+# to apply is not a rule.
+shell = "bash -euo pipefail -c"
 
 [tools]
 actionlint = "1.7.12"
@@ -2975,10 +2990,17 @@ for repo in ${repos}; do
 ${t}"
 done
 fail=""
+# `|| true` on both collectors, and it is not a shrug: grep exits 1 for
+# "matched nothing", which is a legitimate answer here — docs citing no
+# versions, or no Actions runs, is a state this audit must survive rather
+# than crash on. Under the belt's `-o pipefail` shell that 1 would kill
+# the task. Load-bearing for the run-URL collector especially: it matches
+# nothing on this tree today, which is exactly how the strict shell
+# surfaced it (#82 finding 2).
 cited=$(git ls-files "docs/*.md" | xargs grep -h -E "v[0-9]+\.[0-9]+\.[0-9]+" \
   | grep -v "schema v[0-9]" \
   | grep -hoE "(^|[^/\"A-Za-z0-9.])v[0-9]+\.[0-9]+\.[0-9]+($|[^-A-Za-z0-9])" \
-  | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | sort -uV)
+  | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | sort -uV) || true
 vn=0
 while IFS= read -r v; do
   [[ -n "${v}" ]] || continue
@@ -2987,7 +3009,7 @@ while IFS= read -r v; do
   version cited in docs/ exists as a tag in no org repo: ${v}"
 done <<< "${cited}"
 runs=$(git ls-files "docs/*.md" \
-  | xargs grep -hoE "github\.com/monumental-archive/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u)
+  | xargs grep -hoE "github\.com/monumental-archive/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u) || true
 rn=0
 while IFS= read -r r; do
   [[ -n "${r}" ]] || continue
@@ -3862,8 +3884,9 @@ echo "lint:canon-pins: ${found} canon references, all versioned"
 description = "No bash 4+ syntax: it runs on the runner and not on a Mac"
 dir = "{{cwd}}"
 # GitHub runners ship bash 5; macOS ships bash 3.2.57 and always will,
-# because bash 4 changed licence. The toolbelt sets `shell = "bash -c"`, so
-# every task and every release script is expected to run in both places.
+# because bash 4 changed licence. The toolbelt sets
+# `shell = "bash -euo pipefail -c"`, so every task and every release
+# script is expected to run in both places.
 #
 # A bash-4-ism therefore passes CI and fails on the machine the code is
 # written on — which is worse than failing everywhere, because it silently
