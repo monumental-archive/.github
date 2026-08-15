@@ -4,7 +4,20 @@
 name: gate
 
 "on":
-  pull_request: {}
+  # The trigger set must be closed over the gate's inputs. The squash-
+  # subject check reads the PR TITLE and the merge targets the BASE —
+  # both change only on `edited`, which the default types omit, so a
+  # title fixed (or broken) after the last push kept its stale verdict
+  # (#427). Payload stays the only source: on `edited` it carries the
+  # new title, deterministically. Do not slim this back to defaults,
+  # and do not skip body-only edits via event.changes — a skipped
+  # required check counts as passing.
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   push:
     branches:
       - main
