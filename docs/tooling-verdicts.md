@@ -42,6 +42,7 @@ honestly blocked on.
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
 | editorconfig-checker (`aqua:`, binary `ec`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
+| hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -612,6 +613,26 @@ finding — the file exists only when a real finding demanded a written
 allowlist. A red is a rotation first, then a fingerprint in
 `.gitleaksignore` naming the rotation: the secret is in history, so
 tip edits fix nothing. *Reopen:* nothing pending.
+
+**hadolint at `--failure-threshold style`, one Dockerfile, guarded
+everywhere else** (#403). The canon tracks exactly one Dockerfile
+(`docker/pgrx-artifact.Dockerfile`) and it was clean at the maximum
+threshold on the adoption run — so unlike yamllint this standup
+conformed nothing, it raised the bar for whatever comes. The threshold
+is the ruling: hadolint's default (`info`) exits clean on style
+findings, the same silent-sitting-warning class biome's
+`--error-on-warnings` exists to prevent. RUN lines get shellcheck
+through hadolint itself — the mirror-the-solver rule, not a second
+extraction. No `.hadolint.yaml`, same shape as gitleaks: the default
+rule set is the maximum, a config only weakens (ignores) or adds label
+schema, and an unexplained one is a review finding. The trivy overlap
+is a split, stated: trivy's misconfig scanner runs the AVD policy
+family (root user, exposed ports classes); hadolint runs the DL
+best-practice family plus shell analysis inside RUN — they barely
+intersect, and each catches classes the other has no rule for.
+*Reopen:* a label-schema convention (`--require-label`), if the org
+ever standardises OCI image labels beyond what the release path
+already stamps.
 
 ## Skipped, with rationale and reopen trigger
 

@@ -227,6 +227,13 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# Dockerfile lint (#403): every hadolint rule at maximum reach —
+# --failure-threshold style fails on ALL severities including style,
+# and RUN lines get shellcheck via hadolint itself. Overlap with trivy
+# stated in docs/tooling-verdicts.md: trivy runs policy checks
+# (misconfig), hadolint runs best-practice + shell analysis — the DL
+# and AVD rule families barely intersect. aqua-backed.
+"aqua:hadolint/hadolint" = "2.15.1"
 # Secret scanning at commit depth (#403): `gitleaks git` reads history
 # via git log -p, so it is tracked-only by construction and reaches
 # every commit, not just the tip. The overlap with trivy is a split,
@@ -323,6 +330,26 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."lint:hadolint"]
+description = "Dockerfile lint, every severity fails (hadolint --failure-threshold style)"
+dir = "{{cwd}}"
+# --failure-threshold style: the default (info) lets style findings sit
+# in the tree unnoticed, which is what preset-max belts exist to
+# prevent — the same reasoning as biome's --error-on-warnings. RUN
+# lines get shellcheck through hadolint itself, mirroring the tool that
+# already solved embedded-shell extraction rather than reinventing it.
+# No .hadolint.yaml: like gitleaks, hadolint's default rule set is its
+# maximum, so a config exists only to weaken (ignores) or to add label
+# schema — neither is wanted, and an unexplained config is a review
+# finding. Tracked files only; same glob family as lint:from-digests.
+run = '''
+set -euo pipefail
+files=$(git ls-files "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*" "*/Dockerfile.*")
+[[ -n "${files}" ]] || { echo "lint:hadolint: no Dockerfile tracked, skipped"; exit 0; }
+xargs hadolint --failure-threshold style --no-color <<<"${files}"
+echo "lint:hadolint: $(wc -l <<<"${files}" | tr -d " ") Dockerfile(s) clean at style threshold"
+'''
 
 [tasks."lint:gitleaks"]
 description = "Secret scan at commit depth, full history (gitleaks git)"
