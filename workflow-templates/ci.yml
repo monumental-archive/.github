@@ -18,4 +18,12 @@ concurrency:
 
 jobs:
   ci:
+    permissions:
+      # Stated, not inherited: a `uses:` job takes the WORKFLOW-level
+      # default, never the caller's ambient grant, so a shared workflow
+      # that gains a permission kills silent callers as startup_failure
+      # (the gate.yml convention; lint:nested-permissions enforces it —
+      # measured on stele's standup, where this template's silence was
+      # the one gate finding).
+      contents: read # checkout of this repo and of the toolbelt
     uses: monumental-archive/.github/.github/workflows/ci.yml@9d7bb8eb4f40c304257ae58b1314d7778aa6a69f # v1.25.0

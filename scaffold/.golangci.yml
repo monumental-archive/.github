@@ -1,6 +1,6 @@
 # The Go lint canon (#392): golangci-lint v2, `default: all` with
 # per-rule written disables. Copy to the repo root as `.golangci.yml`
-# and fill the two <module-path> holes; `lint:go` fails the gate if Go
+# and fill the <module-path> holes; `lint:go` fails the gate if Go
 # is tracked without this file, because golangci-lint's default
 # selection is five linters of ~105 — a green gate that checked almost
 # nothing (the ruff-defaults trap).
@@ -70,6 +70,9 @@ linters:
     # call it highly opinionated.
     - wsl_v5 # blank-line style beyond the formatter, no defect story
     - nlreturn # same family as wsl_v5, same reason
+    # ---- deprecated, successor already governed above ----
+    - wsl # deprecated since v2.2.0; wsl_v5 is the successor and is disabled on its merits
+    - gomodguard # deprecated since v2.12.0; gomodguard_v2 is the successor and stays on
   settings:
     depguard:
       rules:
@@ -115,15 +118,13 @@ linters:
       require-specific: true
   exclusions:
     generated: strict
+    # warn-unused keeps this section honest: an exclusion no finding
+    # needs is itself flagged, so speculative carve-outs cannot
+    # accumulate. There are deliberately no rules yet — the first one
+    # to earn its place will likely be dupl on _test.go (table tests
+    # duplicate scaffolding by design), added when it actually fires.
     warn-unused: true
-    rules:
-      # Table tests duplicate scaffolding BY DESIGN — the guard-branch
-      # requirement (#392) mandates a table per guard, and dupl's token
-      # window reads sibling tables as clones. Scoped to _test.go only;
-      # production duplication still reds.
-      - path: _test\.go
-        linters:
-          - dupl
+    rules: []
 
 formatters:
   enable:
