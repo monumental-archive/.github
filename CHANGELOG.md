@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.27.0](https://github.com/monumental-archive/.github/compare/v1.26.2...v1.27.0) - 2026-08-15
+
+### Added
+
+- stand up yamllint at full inventory (#403) ([#413](https://github.com/monumental-archive/.github/pull/413))
+- adopt editorconfig-checker (#403) ([#416](https://github.com/monumental-archive/.github/pull/416))
+- adopt gitleaks at commit depth (#403) ([#417](https://github.com/monumental-archive/.github/pull/417))
+- adopt hadolint at style threshold (#403) ([#418](https://github.com/monumental-archive/.github/pull/418))
+- adopt cargo-machete, static, github backend (#403) ([#419](https://github.com/monumental-archive/.github/pull/419))
+- adopt cargo-semver-checks as a repo audit (#403) ([#420](https://github.com/monumental-archive/.github/pull/420))
+- adopt sqlfluff, third pipx exception (#403) ([#422](https://github.com/monumental-archive/.github/pull/422))
+
+### Fixed
+
+- refresh stale postgres digest pins ([#415](https://github.com/monumental-archive/.github/pull/415))
+- unset ec indent_style for Go — raw literals red (#403) ([#421](https://github.com/monumental-archive/.github/pull/421))
+
 ## [1.26.2](https://github.com/monumental-archive/.github/compare/v1.26.1...v1.26.2) - 2026-08-15
 
 ### Fixed

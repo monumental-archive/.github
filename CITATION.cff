@@ -12,7 +12,7 @@ authors:
     given-names: Carl
 repository-code: https://github.com/monumental-archive/.github
 license: 0BSD
-version: 1.26.2
+version: 1.27.0
 date-released: 2026-08-15
 identifiers:
   - type: doi
