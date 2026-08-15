@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.28.1](https://github.com/monumental-archive/.github/compare/v1.28.0...v1.28.1) - 2026-08-15
+
+### Fixed
+
+- exclude vendor trees from every enumerating ls-files walk ([#429](https://github.com/monumental-archive/.github/pull/429))
+
+### Miscellaneous
+
+- untrack the compiled embedded-shell bytecode ([#426](https://github.com/monumental-archive/.github/pull/426))
+
 ## [1.28.0](https://github.com/monumental-archive/.github/compare/v1.27.0...v1.28.0) - 2026-08-15
 
 ### Added
