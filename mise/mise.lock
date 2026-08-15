@@ -915,6 +915,10 @@ backend = "pipx:reuse"
 pipx_args = "--preinstall charset-normalizer"
 uvx_args = "--with charset-normalizer"
 
+[[tools."pipx:sqlfluff"]]
+version = "4.3.0"
+backend = "pipx:sqlfluff"
+
 [[tools."pipx:yamllint"]]
 version = "1.38.0"
 backend = "pipx:yamllint"

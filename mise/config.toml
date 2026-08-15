@@ -227,6 +227,15 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# SQL lint + format check (#403): the THIRD pipx: exception after reuse
+# and yamllint — PyPI-only, no aqua package, riding checksummed uv
+# under the same UV_* floor env. All core rules on (sqlfluff's default
+# IS its maximum rule set); the config a repo must track exists to
+# declare the DIALECT, which sqlfluff refuses to guess — postgres
+# org-wide, the only SQL the org ships (pgrx extensions,
+# monumental-archive-db). Zero SQL in the canon: like biome, golangci
+# and the Rust pair, exercised first in a consumer.
+"pipx:sqlfluff" = "4.3.0"
 # Semver honesty for published crates (#403): the public API is checked
 # against the latest release on crates.io. audit:*, NEVER lint:* — the
 # baseline is fetched from the registry at run time, and the gate is
@@ -354,6 +363,42 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."lint:sql"]
+description = "SQL lint + format check (sqlfluff, all core rules)"
+dir = "{{cwd}}"
+# Subject-named like lint:python — sqlfluff covers one language. A
+# tracked .sqlfluff is REQUIRED once SQL is tracked, but for the
+# opposite reason to ruff/biome: sqlfluff's default rule set is its
+# maximum, and the config exists because the tool refuses to guess a
+# DIALECT — a repo without one gets a loud error, never a weak green.
+# The belt asserts it anyway so the remedy is named. Copy
+# scaffold/.sqlfluff. Tracked files only, on the standing rule.
+run = '''
+set -euo pipefail
+files=$(git ls-files "*.sql")
+[[ -n "${files}" ]] || { echo "lint:sql: no SQL tracked, skipped"; exit 0; }
+if ! git ls-files --error-unmatch ".sqlfluff" > /dev/null 2>&1; then
+  echo "lint:sql: SQL is tracked but no .sqlfluff is — copy scaffold/.sqlfluff (#403)" >&2
+  echo "  sqlfluff refuses to guess a dialect; the org's is postgres" >&2
+  exit 1
+fi
+xargs sqlfluff lint <<<"${files}"
+echo "lint:sql: $(wc -l <<<"${files}" | tr -d " ") file(s) linted"
+'''
+
+[tasks."fix:sql"]
+description = "Apply sqlfluff's fixes and rewrite SQL to canonical form"
+dir = "{{cwd}}"
+# The write-mode sibling, never in the gate. --force is the
+# non-interactive mode, not an unsafe-fix flag: sqlfluff fix applies
+# only its own rule fixes, the same class as fix:python's safe fixes.
+run = '''
+set -euo pipefail
+files=$(git ls-files "*.sql")
+[[ -n "${files}" ]] || { echo "fix:sql: no SQL tracked, skipped"; exit 0; }
+xargs sqlfluff fix --force <<<"${files}"
+'''
 
 [tasks."audit:semver"]
 description = "Public API vs the latest published release (cargo-semver-checks — network, not in ci)"
