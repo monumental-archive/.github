@@ -10,6 +10,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.26.0](https://github.com/monumental-archive/.github/compare/v1.25.0...v1.26.0) - 2026-08-15
+
+### Added
+
+- adopt biome at preset all as the js/ts/json layer ([#385](https://github.com/monumental-archive/.github/pull/385))
+- adopt ruff at select ALL and clear the python it found ([#387](https://github.com/monumental-archive/.github/pull/387))
+- adopt pinact and point zizmor at the composite actions ([#391](https://github.com/monumental-archive/.github/pull/391))
+- stand up the go layer — lint:go, coverage leg, govulncheck (#392) ([#404](https://github.com/monumental-archive/.github/pull/404))
+
+### Dependencies
+
+- update dependency python to v3.14.7 ([#389](https://github.com/monumental-archive/.github/pull/389))
+- update dependency aqua:google/osv-scanner to v2.5.0 ([#395](https://github.com/monumental-archive/.github/pull/395))
+- update dependency ruff to v0.16.2 ([#396](https://github.com/monumental-archive/.github/pull/396))
+
+### Documentation
+
+- seed .bestpractices.json and correct the crib's stale claims ([#375](https://github.com/monumental-archive/.github/pull/375))
+- correct the badge catalogue's stale coverage entry ([#382](https://github.com/monumental-archive/.github/pull/382))
+- revoke the bash test framework and record the belt-shell verdict ([#399](https://github.com/monumental-archive/.github/pull/399))
+- correct the set -e verdict, which now contradicts the belt ([#402](https://github.com/monumental-archive/.github/pull/402))
+
+### Fixed
+
+- rename the baseline keys the JSON pre-fill silently dropped ([#379](https://github.com/monumental-archive/.github/pull/379))
+- report a burned release instead of reddening the audit forever ([#380](https://github.com/monumental-archive/.github/pull/380))
+- stop citing an upstream revision as if it were an org tag ([#381](https://github.com/monumental-archive/.github/pull/381))
+- state BuildEnv L0 as attribution rather than a chosen ceiling ([#383](https://github.com/monumental-archive/.github/pull/383))
+- make the spec-drift audit check coverage, not just movement ([#384](https://github.com/monumental-archive/.github/pull/384))
+- carry the release-age floor into python, and adjudicate uv ([#388](https://github.com/monumental-archive/.github/pull/388))
+- pin jq, a gate dependency that never was ([#390](https://github.com/monumental-archive/.github/pull/390))
+- lint and format every line of shell, wherever it lives ([#393](https://github.com/monumental-archive/.github/pull/393))
+- stop lint:badges nesting mise, which made the gate unrunnable ([#394](https://github.com/monumental-archive/.github/pull/394))
+- verify link fragments, and say why trivy skips licences ([#400](https://github.com/monumental-archive/.github/pull/400))
+- make every task fail on error, by default ([#401](https://github.com/monumental-archive/.github/pull/401))
+
 ## [1.25.0](https://github.com/monumental-archive/.github/compare/v1.24.1...v1.25.0) - 2026-08-13
 
 ### Added
