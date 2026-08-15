@@ -6,6 +6,7 @@
 # blind to the comment, and lint:canon-pins reads canon references only.
 # The comment is what a human and Renovate both read to judge whether a
 # pin is current, so an absent or untrue one is a real defect.
+---
 version: 3
 
 min_age:
@@ -48,3 +49,4 @@ rules:
     conditions:
       - expr: |
           ActionRepoOwner == "monumental-archive"
+...

@@ -34,9 +34,10 @@
 #   toolchain, and the Dockerfile stays pure assembly over pinned
 #   inputs. One toolchain, not two; determinism by construction, proven
 #   by the gate.
+---
 name: build-oci-image
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -55,7 +56,7 @@ on:
         description: Build context directory.
         required: false
         type: string
-        default: "."
+        default: .
       smoke-test:
         # forwarding: universal
         description: >
@@ -303,11 +304,13 @@ jobs:
           # is lost. rewrite-timestamp=true clamps layer mtimes to
           # SOURCE_DATE_EPOCH — RUN and COPY otherwise record the
           # build's own clock into the layer bytes.
+          outspec="type=image,name=${IMAGE},push-by-digest=true"
+          outspec+=",name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true"
           docker buildx build \
             --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
             "${LABELS[@]}" \
             --provenance=false --sbom=false \
-            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true" \
+            --output "${outspec}" \
             --metadata-file /tmp/meta.json \
             "${UNTRUSTED_CONTEXT}"
           digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
@@ -329,4 +332,4 @@ jobs:
           path: /tmp/digests/
           if-no-files-found: error
           retention-days: 1
-
+...

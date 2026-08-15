@@ -13,11 +13,11 @@
 # settings drift) runs in the canon's own audit.yml; this workflow carries
 # only the checks that must run against each repo's own tree. No inputs,
 # by design — zero caller-controlled expansion.
+---
 name: repo-audit
 
-on:
-  workflow_call:
-
+"on":
+  workflow_call: {}
 permissions:
   contents: read
 
@@ -103,3 +103,4 @@ jobs:
       # gate (#392). A repo with no go.mod skips clean.
       - name: Check reachable Go vulnerabilities
         run: mise run audit:go-vulns
+...

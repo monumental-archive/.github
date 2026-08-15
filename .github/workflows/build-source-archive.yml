@@ -9,9 +9,10 @@
 # produces the same tarball. The job proves that rather than assuming it —
 # it builds twice and refuses a digest mismatch, the repro-check property
 # at build time.
+---
 name: build-source-archive
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -103,3 +104,4 @@ jobs:
           name: release-source
           path: dist/*.tar.gz
           if-no-files-found: error
+...

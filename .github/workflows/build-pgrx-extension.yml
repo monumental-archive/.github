@@ -19,9 +19,10 @@
 #
 # rust and cargo-pgrx are CALLER BUILD INPUTS, pinned in the caller's own
 # mise config. No cache of any kind: everything downstream is signed.
+---
 name: build-pgrx-extension
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -238,7 +239,9 @@ jobs:
           pgrx=$(jq -r .pgrx <<< "${pins}")
           auditable=$(jq -r .auditable <<< "${pins}")
           if [[ -z ${rust} || -z ${pgrx} || -z ${auditable} ]]; then
-            echo "::error::rust, cargo:cargo-pgrx and cargo:cargo-auditable must be pinned in this repository's mise config; they are build inputs of the pgrx-extension class"
+            emsg="rust, cargo:cargo-pgrx and cargo:cargo-auditable must be pinned in this repository's mise config; they"
+            emsg+=" are build inputs of the pgrx-extension class"
+            echo "::error::${emsg}"
             exit 1
           fi
           {
@@ -548,7 +551,9 @@ jobs:
 
   collect:
     name: Collect and refuse a partial set
-    needs: [plan, build]
+    needs:
+      - plan
+      - build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions: {}
@@ -602,3 +607,4 @@ jobs:
           name: release-extensions
           path: dist/*.tar.gz
           if-no-files-found: error
+...

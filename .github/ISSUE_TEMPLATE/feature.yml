@@ -1,6 +1,8 @@
+---
 name: Feature request
 description: Something the project should do
-labels: ["enhancement"]
+labels:
+  - enhancement
 body:
   - type: textarea
     id: problem
@@ -16,3 +18,4 @@ body:
       description: What you would like to happen. Alternatives welcome.
     validations:
       required: true
+...

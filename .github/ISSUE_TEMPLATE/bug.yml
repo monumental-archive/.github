@@ -1,6 +1,8 @@
+---
 name: Bug report
 description: Something behaves incorrectly
-labels: ["bug"]
+labels:
+  - bug
 body:
   - type: textarea
     id: what
@@ -24,3 +26,4 @@ body:
       description: Release version or commit SHA you observed this on.
     validations:
       required: true
+...

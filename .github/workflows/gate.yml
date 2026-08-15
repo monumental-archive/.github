@@ -1,11 +1,13 @@
 # This repo eats its own gate: every PR runs the reusable workflow at the
 # PR's own ref (local uses: needs no pin — it is the code under review).
+---
 name: gate
 
-on:
-  pull_request:
+"on":
+  pull_request: {}
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -25,3 +27,4 @@ jobs:
       # Saying it here makes the contract a diff rather than a mystery.
       contents: read # checkout of this repo and of the toolbelt
     uses: ./.github/workflows/ci.yml
+...

@@ -24,9 +24,10 @@
 # this is the FIRST mint: guarded by asserting no submitted deposition
 # already bears the title, and the summary tells the human to record
 # the minted concept DOI in CITATION.cff before the next release.
+---
 name: mint-doi
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -85,7 +86,9 @@ jobs:
           # on "does the file exist", not "did the decoder choke".
           if ! content=$(gh api "repos/${repo}/contents/CITATION.cff?ref=${TAG}" --jq .content 2> /dev/null) \
             || ! printf '%s\n' "${content}" | base64 -d > cff.yaml; then
-            echo "::error::no CITATION.cff at ${TAG} — a DOI-minting repo derives one from REUSE.toml (fix:citation; lint:citation gates this upstream)"
+            emsg="no CITATION.cff at ${TAG} — a DOI-minting repo derives one from REUSE.toml (fix:citation; lint:citation"
+            emsg+=" gates this upstream)"
+            echo "::error::${emsg}"
             exit 1
           fi
           # The file is fix:citation's render, so its format is the
@@ -99,10 +102,13 @@ jobs:
           creators=$(printf '%s\n' "${name_lines}" | jq -R '{name: .}' | jq -sc '.')
           licence=$(sed -n 's/^license: //p' cff.yaml | head -1)
           if [[ ! ${licence} =~ ^[A-Za-z0-9.+-]+$ ]]; then
-            echo "::error::CITATION.cff license '${licence}' is not a single SPDX id — Zenodo's vocabulary holds ids, not expressions"
+            emsg="CITATION.cff license '${licence}' is not a single SPDX id — Zenodo's vocabulary holds ids, not"
+            emsg+=" expressions"
+            echo "::error::${emsg}"
             exit 1
           fi
-          desc="Release ${TAG} of ${repo}. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release."
+          desc="Release ${TAG} of ${repo}. Built, proven and signed by the monumental-archive"
+          desc+=" release pipeline; verification instructions ship with the GitHub release."
           metadata=$(jq -nc \
             --arg title "${title}" \
             --arg desc "${desc}" \
@@ -126,7 +132,9 @@ jobs:
             listing=$(api "${BASE_URL}/api/deposit/depositions?q=title:%22${repo##*/}%22&size=10")
             existing=$(jq -r --arg t "${title}" '[.[] | select(.title == $t and .submitted == true)] | length' <<< "${listing}")
             if [[ ${existing} != "0" ]]; then
-              echo "::error::a submitted deposition already bears this title but CITATION.cff records no concept DOI — record it under identifiers: before minting again"
+              emsg="a submitted deposition already bears this title but CITATION.cff records no concept DOI — record it"
+              emsg+=" under identifiers: before minting again"
+              echo "::error::${emsg}"
               exit 1
             fi
             dep=$(api -X POST "${BASE_URL}/api/deposit/depositions" \
@@ -151,7 +159,9 @@ jobs:
             latest=$(curl -sSfL "${BASE_URL}/api/records/${concept_recid}/versions/latest" \
               | jq -r '.id // empty') || true
             if [[ ! ${latest} =~ ^[0-9]+$ ]]; then
-              echo "::error::the concept record ${concept_recid} did not resolve to a latest version id (got '${latest:-nothing}')"
+              emsg="the concept record ${concept_recid} did not resolve to a latest version id (got"
+              emsg+=" '${latest:-nothing}')"
+              echo "::error::${emsg}"
               exit 1
             fi
             newv=$(api -X POST "${BASE_URL}/api/deposit/depositions/${latest}/actions/newversion")
@@ -193,3 +203,4 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "::notice::DOI ${doi} (concept ${concept})"
+...

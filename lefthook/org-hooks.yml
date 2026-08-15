@@ -11,6 +11,7 @@
 #         - lefthook/org-hooks.yml
 # Then once per clone: lefthook install
 
+---
 pre-commit:
   # Mid-merge/rebase trees are legitimately inconsistent; don't fail there.
   skip:
@@ -41,3 +42,4 @@ pre-push:
   jobs:
     - name: ci
       run: mise run ci
+...

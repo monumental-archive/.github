@@ -13,11 +13,13 @@
 # workflow_ref), and the source-archive class touches no registry — the
 # only consumer of this run's identity is the signer, which pins the
 # reusable workflow path, not the caller filename.
+---
 name: self-publish
 
-on:
+"on":
   push:
-    tags: [v*]
+    tags:
+      - v*
   # Resume path. ALWAYS dispatch with --ref <tag>: the shared guard refuses
   # anything that is not a tag, because a branch ref would attest a moving
   # pointer and Sigstore is append-only.
@@ -58,3 +60,4 @@ jobs:
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
       zenodo-token: ${{ secrets.ZENODO_TOKEN }}
+...

@@ -10,6 +10,7 @@
 #
 # Requires runner >= 2.336.0 ($/ shipped 2026-07-30). A rollback fails
 # loudly at workflow parse, in canon's own gate first.
+---
 name: canon
 description: >-
   Link the canon tree this run resolved to .org-canon and name the
@@ -44,7 +45,9 @@ runs:
             # a resolution shape this action does not understand —
             # refuse rather than guess.
             if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
-              echo "::error::canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon self-call"
+              emsg="canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
+              emsg+=" self-call"
+              echo "::error::${emsg}"
               exit 1
             fi
             ref="${GITHUB_SHA}"
@@ -57,3 +60,4 @@ runs:
         ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
         echo "canon resolved: ${ref} at ${root}"
         echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+...

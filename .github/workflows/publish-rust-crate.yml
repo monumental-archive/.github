@@ -9,9 +9,10 @@
 # `job_workflow_ref`), and `environment: publish` resolves against the
 # caller — both facts measured before the original split
 # (docs/slsa-reference.md).
+---
 name: publish-rust-crate
 
-on:
+"on":
   workflow_call:
     inputs:
       exclude:
@@ -116,3 +117,4 @@ jobs:
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           CARGO_REGISTRY_TOKEN="${token}" \
             cargo publish --workspace --locked --no-verify ${EXCLUDE_FLAGS}
+...

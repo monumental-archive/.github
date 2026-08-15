@@ -24,9 +24,10 @@
 # publishing, naming the CALLER's workflow — a second, independent evidence
 # path beside the org's Sigstore identity (docs/slsa-reference.md: the two
 # are documented, not unified).
+---
 name: build-wasm-npm
 
-on:
+"on":
   workflow_call:
     inputs:
       version:
@@ -39,7 +40,7 @@ on:
         description: Directory of the wasm crate, relative to the repo root.
         required: false
         type: string
-        default: "."
+        default: .
       npm-scope:
         # forwarding: universal
         description: >
@@ -122,7 +123,9 @@ jobs:
           # exists to prevent.
           for tool in wasm-pack node npm; do
             command -v "${tool}" > /dev/null || {
-              echo "::error::${tool} not found — pin it in this repository's mise config; it is a build input of the wasm-npm class"
+              emsg="${tool} not found — pin it in this repository's mise config; it is a build input of the"
+              emsg+=" wasm-npm class"
+              echo "::error::${emsg}"
               exit 1
             }
           done
@@ -186,7 +189,10 @@ jobs:
           norm="${repo_url#git+}"
           norm="${norm%.git}"
           if [[ ${norm} != "${want}" ]]; then
-            echo "::error::package.json repository is '${repo_url}', npm provenance requires '${want}' — set repository = \"${want}\" in the crate's Cargo.toml (canon: [workspace.package] repository with repository.workspace = true)"
+            emsg="package.json repository is '${repo_url}', npm provenance requires '${want}' — set repository ="
+            emsg+=" \"${want}\" in the crate's Cargo.toml (canon: [workspace.package] repository with repository.workspace ="
+            emsg+=" true)"
+            echo "::error::${emsg}"
             exit 1
           fi
           if [[ ${version} != "${UNTRUSTED_VERSION}" ]]; then
@@ -214,4 +220,4 @@ jobs:
           name: npm-package
           path: dist/*.tgz
           if-no-files-found: error
-
+...

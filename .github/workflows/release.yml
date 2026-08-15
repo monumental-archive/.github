@@ -23,9 +23,10 @@
 # contents only. The default GITHUB_TOKEN is never used for either — its
 # pushes and PRs trigger no workflows, and a release that silently triggers
 # nothing looks exactly like a success.
+---
 name: release
 
-on:
+"on":
   workflow_call:
     secrets:
       app-private-key:
@@ -215,3 +216,4 @@ jobs:
             ${{ steps.prepare.outputs.files }}
             ${{ steps.upgrade.outputs.files }}
         run: .org-canon/release/open-release-pr.sh
+...

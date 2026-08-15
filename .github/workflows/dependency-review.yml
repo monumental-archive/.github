@@ -7,9 +7,10 @@
 # content changes are gated, remediation never is), but it is not the `ci`
 # required check, so an advisory-database outage stalls nothing but the
 # PR that actually adds a dependency.
+---
 name: dependency-review
 
-on:
+"on":
   workflow_call: {}
 
 permissions: {}
@@ -34,3 +35,4 @@ jobs:
           # Licence policy is a separate, deliberate decision (belt item
           # `lint:deny`); this workflow gates vulnerabilities only.
           comment-summary-in-pr: on-failure
+...

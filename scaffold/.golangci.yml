@@ -12,6 +12,7 @@
 # disable below is the first kind. nolintlint enforces the same law at
 # line granularity: a `//nolint` without a named linter and a reason is
 # itself a finding.
+---
 version: "2"
 
 linters:
@@ -107,7 +108,8 @@ linters:
         - fieldalignment
     staticcheck:
       # The default profile excludes several ST style checks; all means all.
-      checks: ["all"]
+      checks:
+        - all
     gocritic:
       enable-all: true
     nolintlint:
@@ -153,3 +155,4 @@ issues:
   # everything" when it did not).
   max-issues-per-linter: 0
   max-same-issues: 0
+...

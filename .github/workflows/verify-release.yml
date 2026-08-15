@@ -73,9 +73,10 @@
 #                      the proof asserted here is that the tag resolves
 #                      in the registry to the attested index digest. The
 #                      policy claims exactly that, nothing more.
+---
 name: verify-release
 
-on:
+"on":
   # forwarding-default: discretionary — multi-mode verifier; each mode consumes its own input subset
   workflow_call:
     inputs:
@@ -426,7 +427,9 @@ jobs:
           fi
           pin_count=$(wc -l <<< "${pin}" || true)
           if [[ ${pin_count// /} != "1" ]]; then
-            echo "::error::the canon tree pins sign.yml at more than one digest — a tree states the trusted signer once: ${pin//$'\n'/ }"
+            emsg="the canon tree pins sign.yml at more than one digest — a tree states the trusted signer once:"
+            emsg+=" ${pin//$'\n'/ }"
+            echo "::error::${emsg}"
             exit 1
           fi
           signer_path="monumental-archive/signer/.github/workflows/sign.yml"
@@ -828,7 +831,9 @@ jobs:
               exit 1
             fi
             if [[ ! -f "${CANON_PATH}/docker/pgrx-base-images.toml" ]]; then
-              echo "::error::the caller declares base-image consumption but the pinned canon tree carries no docker/pgrx-base-images.toml"
+              emsg="the caller declares base-image consumption but the pinned canon tree carries no"
+              emsg+=" docker/pgrx-base-images.toml"
+              echo "::error::${emsg}"
               exit 1
             fi
             map_sha=$(sha256sum "${CANON_PATH}/docker/pgrx-base-images.toml" | cut -d" " -f1)
@@ -845,7 +850,9 @@ jobs:
               for role in build smoke; do
                 img=$(jq -r --arg pg "${pg}" --arg r "${role}" '.[$r][$pg] // empty' <<< "${mapping}")
                 if [[ -z ${img} ]]; then
-                  echo "::error::declared base major pg${pg} has no ${role} row in the pinned docker/pgrx-base-images.toml — the declaration cannot be honoured"
+                  emsg="declared base major pg${pg} has no ${role} row in the pinned docker/pgrx-base-images.toml — the"
+                  emsg+=" declaration cannot be honoured"
+                  echo "::error::${emsg}"
                   exit 1
                 fi
                 adddep "pgrx-base" "oci://docker.io/library/${img}" ""
@@ -888,3 +895,4 @@ jobs:
           subject-checksums: ${{ runner.temp }}/vsa-subjects.sha256
           predicate-type: https://monumental-archive.github.io/attestations/build-enrichment/v1
           predicate-path: ${{ runner.temp }}/enrichment-predicate.json
+...

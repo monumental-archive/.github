@@ -4,7 +4,9 @@
 # which is what the canon/toolbelt checkouts ride). Ignore exactly that
 # false positive and nothing else; drop this when actionlint learns the
 # property.
+---
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
-      - 'property "job_workflow_sha" is not defined in object type'
+      - property "job_workflow_sha" is not defined in object type
+...

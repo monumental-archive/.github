@@ -28,16 +28,16 @@
 # not writable from pull requests, and the worst a stale or lost
 # checkpoint causes is re-scanning a log range — the monitor's consistency
 # proof runs from whatever checkpoint it is given.
+---
 name: rekor-monitor
 
-on:
+"on":
   schedule:
     # Twice daily. The monitor advances from its stored checkpoint, so no
     # interval loses log entries — a shorter one only shortens the window
     # between a forged issuance and its issue being filed.
-    - cron: "17 5,17 * * *"
-  workflow_dispatch:
-
+    - cron: 17 5,17 * * *
+  workflow_dispatch: {}
 permissions: {}
 
 concurrency:
@@ -112,3 +112,4 @@ jobs:
           gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "rekor-monitor: failure or unexpected signer issuance (run ${GITHUB_RUN_ID})" \
             --body "The Rekor identity monitor failed or matched an unexpected certificate for the signer identity. Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+...
