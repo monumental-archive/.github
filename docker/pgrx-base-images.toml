@@ -10,27 +10,27 @@
 
 [build]
 # renovate: pgrx-base-image
-"14" = "postgres:14-bookworm@sha256:f819dd96de74db3de87d13f0a4fbcdfbdc4f4ca37ed6e0807bf73848170eae3d"
+"14" = "postgres:14-bookworm@sha256:90bf57b1075a7f70b6592a50659a2aaf2adacd2d7da5752e479449cc9d758721"
 # renovate: pgrx-base-image
-"15" = "postgres:15-bookworm@sha256:e8db9bd3e9e1751eb639fb17be53cc6d1b62a322adf75b99e791767a7a16ce69"
+"15" = "postgres:15-bookworm@sha256:cf7f8fb958c63e62875e30645dc4819ff0243a923f3c709e752b99dedd40bfcd"
 # renovate: pgrx-base-image
-"16" = "postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+"16" = "postgres:16-bookworm@sha256:60f4761b9035e0b8d5218f701a8c3382f641bf12b1604822574cf5be3baeb537"
 # renovate: pgrx-base-image
-"17" = "postgres:17-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f"
+"17" = "postgres:17-bookworm@sha256:84560e3b9c6874893fc4e2854f5dc3e7c1a37bc9d1dfd7a8c641310ae22ba5ad"
 # renovate: pgrx-base-image
-"18" = "postgres:18-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382"
+"18" = "postgres:18-bookworm@sha256:7d2695c3aa88e792e8b3b233e7e4adb296a20412c6c0ca361e3edaaacfada108"
 
 [smoke]
 # renovate: pgrx-base-image
-"14" = "postgres:14-trixie@sha256:2f439458ab6a57a925825ae14f9d06910e4fe4a41c8d4a0ae06397e65b707e1b"
+"14" = "postgres:14-trixie@sha256:c2066c4a9e3abb59cba7cd43244ae93d5f2a7d56c330dd9c3548e884ac7f1896"
 # renovate: pgrx-base-image
-"15" = "postgres:15-trixie@sha256:6eb0add3b77c081df18aa518ce43df58fdcc40f2e6d868a6fd08038dc7acd425"
+"15" = "postgres:15-trixie@sha256:0dda651c259bfe50e2bcc28ca23d1fcca772fa90b0210803aa7b97379ccf4e85"
 # renovate: pgrx-base-image
-"16" = "postgres:16-trixie@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b"
+"16" = "postgres:16-trixie@sha256:11a9d238fbb48bab14599c57e41123254452b1a2d93c6c8595bce96f346bd082"
 # renovate: pgrx-base-image
-"17" = "postgres:17-trixie@sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317"
+"17" = "postgres:17-trixie@sha256:e42539a54ee3e82e21f19d7eded61b579869585f86b90b5e851ff0d3dd8b4001"
 # renovate: pgrx-base-image
-"18" = "postgres:18-trixie@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636"
+"18" = "postgres:18-trixie@sha256:7157393f508fd8eb46119937fab39813783fe3e7d4c6316c45c12ce2ea25e61d"
 
 # The glibc floor the [build] images guarantee, asserted per-build with
 # readelf: an extension whose symbols exceed this fails the release
