@@ -1548,7 +1548,13 @@ dir = "{{cwd}}"
 # resolves them to real requests and 404s. Excluded by exact token, not
 # by skipping scaffold files wholesale: the scaffold's REAL links still
 # deserve the check.
-run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress --exclude "%3Crepo%3E|BP_ID|CONCEPT_DOI" <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
+# --include-fragments: without it lychee verifies that a page exists and
+# never that the `#anchor` on the end of the link points at anything, so
+# every deep link into a heading was half-checked (#82 max audit). A
+# renamed heading is the common way a link rots while still returning
+# 200. Enabled at zero cost — measured on this tree at adoption, it adds
+# no findings.
+run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs lychee --no-progress --include-fragments --exclude "%3Crepo%3E|BP_ID|CONCEPT_DOI" <<<"${files}"; else echo "audit:links: no markdown tracked, skipped"; fi'
 
 [tasks."audit:actions"]
 description = "zizmor online + auditor persona — the audits the gate cannot run"
@@ -1885,6 +1891,15 @@ dir = "{{cwd}}"
 # diff. Vulnerability scanning is deliberately absent from the gate — it is
 # non-deterministic CI (a new CVE fails unrelated PRs) and already enforced
 # org-wide via Dependabot alerts/security updates + Renovate.
+# The license scanner is off for a different reason, recorded because its
+# absence otherwise reads as an oversight (#82 max audit): licences are
+# already answered twice on the belt — lint:reuse runs the tool the
+# api.reuse.software badge runs, over tracked files, and cargo-deny's
+# licenses half decides the Rust closure from the lock. Trivy would be a
+# third opinion on a question two checks already answer, and a heuristic
+# one: it infers from package metadata and file text, where REUSE is
+# declarative. One winner per rule family, so the family already has two
+# and does not need a third.
 # --exit-code 1: trivy exits 0 on findings by default.
 # Tracked files only, like every belt linter — but trivy has no file-list
 # mode, so the tracked set is materialised into a scratch tree and the
