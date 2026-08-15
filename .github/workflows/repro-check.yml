@@ -180,7 +180,10 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
+          body="The reproducibility audit rebuilt ${TAG} with the class workflow and the digests"
+          body+=" differ from the release's checksums.txt — a build input has escaped the pinning."
+          body+=" Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "repro-check: ${TAG} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
-            --body "The reproducibility audit rebuilt ${TAG} with the class workflow and the digests differ from the release's checksums.txt — a build input has escaped the pinning. Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            --body "${body}"
 ...
