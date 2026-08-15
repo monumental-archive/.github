@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.29.0](https://github.com/monumental-archive/.github/compare/v1.28.1...v1.29.0) - 2026-08-15
+
+### Added
+
+- lint gate stubs for trigger closure over gate inputs ([#432](https://github.com/monumental-archive/.github/pull/432))
+- audit:source-vsa verifies through stele, the verify cutover ([#436](https://github.com/monumental-archive/.github/pull/436))
+- cut the emitter and verdict assembly over to stele emit ([#437](https://github.com/monumental-archive/.github/pull/437))
+
+### Documentation
+
+- document the ledger-fork heal path ([#435](https://github.com/monumental-archive/.github/pull/435))
+
+### Fixed
+
+- trigger on edited so title and base changes re-run the gate ([#430](https://github.com/monumental-archive/.github/pull/430))
+
 ## [1.28.1](https://github.com/monumental-archive/.github/compare/v1.28.0...v1.28.1) - 2026-08-15
 
 ### Fixed
