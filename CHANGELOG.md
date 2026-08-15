@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.28.0](https://github.com/monumental-archive/.github/compare/v1.27.0...v1.28.0) - 2026-08-15
+
+### Added
+
+- cap standalone shell at 130 columns (#403) ([#423](https://github.com/monumental-archive/.github/pull/423))
+
 ## [1.27.0](https://github.com/monumental-archive/.github/compare/v1.26.2...v1.27.0) - 2026-08-15
 
 ### Added
