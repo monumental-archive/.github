@@ -212,14 +212,15 @@ roll-forward.
   (the published bytes are still the attested ones); diagnose before the
   next release.
 - **`audit:source-vsa` red on a ledger fork** (a link's
-  `ledgerPrev.noteSha256` matches no note that exists — #434): delete
-  the forked note and let the next push heal it. `git fetch origin
-  "+refs/notes/commits:refs/notes/commits" && git notes remove <rev> &&
-  git push origin refs/notes/commits`, then merge anything to `main` —
-  the emitter re-links `<rev>` with the `repaired` marker and a
-  `ledgerPrev` hashed from real bytes (`source-track.md`, ledger
-  forks). Never re-found the chain; the fork is one bad link, not a
-  broken history.
+  `ledgerPrev.noteSha256` matches no note that exists — #434): do NOT
+  delete-and-repush. The defect is the retired bash emitter's own
+  digest (it hashed the note minus its trailing newline —
+  `source-track.md`, ledger forks), so a heal routed through it mints
+  another bad link; that is how .github gained its 24th. The red is
+  correct and stays until the `stele emit` port lands and the
+  defective links are deleted and re-emitted through it (stele#3).
+  Never re-found the chain; the fork is bad links, not a broken
+  history.
 - **`startup_failure`, no jobs, no log**: a permissions elevation or an
   Actions-allowlist rejection. Check: does every `uses:` job restate its
   callee's permissions; is every action on the org allowlist (including
