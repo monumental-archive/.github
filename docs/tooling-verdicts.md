@@ -588,8 +588,14 @@ max_line_length). The three real findings it did surface were
 conformed: two `gh issue create --body` one-liners over 130 columns
 (now variable builds) and the gitconfig fixture, which is *correctly*
 tab-indented because git itself writes tabs — declared as such rather
-than reformatted, on the fixture-is-not-evidence rule. *Reopen:* ec
-growing a formatter-aware indent check.
+than reformatted, on the fixture-is-not-evidence rule. "Indent SIZE is
+enforced per language by its owner" turned out to cover indent STYLE
+too: `[*.go]` is `indent_style = unset`, because ec's line-based check
+cannot distinguish code indentation from bytes inside Go raw string
+literals and reds space-indented test fixtures gofumpt must leave
+verbatim — measured on stele, the org's first Go consumer, invisible
+from the canon which tracks no Go. *Reopen:* ec growing a
+formatter-aware indent check.
 
 **gitleaks, and why two secret scanners is a split rather than a
 duplicate** (#403). The issue's one demand for this item was to state

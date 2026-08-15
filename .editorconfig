@@ -24,9 +24,19 @@ indent_size = 4
 [*.rs]
 indent_size = 4
 
-# gofmt's output is tab-indented; fighting it would red every Go file.
+# Go's indentation is owned wholesale by gofumpt (lint:go), which
+# enforces tab-indented code the way ruff owns Python's layout. ec's
+# indent_style check is line-based and cannot distinguish code
+# indentation from bytes inside raw string literals, so under
+# `tab` it reds every space-indented fixture a Go test carries —
+# content gofumpt itself is required to leave verbatim. The reason is
+# about the check, not its reach: the same measured class as the
+# task-wide -disable-indent-size. Style stays enforced by the
+# language's owner; ec keeps charset, EOL, final-newline and
+# trailing-whitespace for Go files. Measured on stele, the org's
+# first Go consumer — the canon tracks no Go and could not see it.
 [*.go]
-indent_style = tab
+indent_style = unset
 
 [{Makefile,*.mk,makefile}]
 indent_style = tab
