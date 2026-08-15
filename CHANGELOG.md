@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.26.2](https://github.com/monumental-archive/.github/compare/v1.26.1...v1.26.2) - 2026-08-15
+
+### Fixed
+
+- gate the squash subject like a commit ([#411](https://github.com/monumental-archive/.github/pull/411))
+
+### Miscellaneous
+
+- record stele's scorecard floor ([#407](https://github.com/monumental-archive/.github/pull/407))
+- stele's source chain is founded — retire the optout row ([#409](https://github.com/monumental-archive/.github/pull/409))
+
 ## [1.26.1](https://github.com/monumental-archive/.github/compare/v1.26.0...v1.26.1) - 2026-08-15
 
 ### Fixed
