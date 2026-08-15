@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   publish:
-    uses: monumental-archive/.github/.github/workflows/continuous.yml@a0d05f53b7a937ea96bbeeed0f6f69e67a94df9d # v1.26.2
+    uses: monumental-archive/.github/.github/workflows/continuous.yml@57567c83e045322dce25b49608d6a86eb807689a # v1.27.0
     with:
       smoke-test: scripts/image-smoke.sh
     permissions:
