@@ -117,11 +117,13 @@ and the level and properties are then read back out of the verified
 statement — never recomputed from live state, which by then is a
 different moment.
 
-- `verifiedLevels[0]` — the source level: the policy's target when
-  every `required_properties` name in
-  `source-policies/<repo-or-default>.json` appears in
-  `controls[].property` (and, for healed links, the continuity guard
-  passes); `SLSA_SOURCE_LEVEL_2` otherwise.
+- `verifiedLevels[0]` — the source level: the branch's target when
+  every required property in `slsa/verify-policy.json`
+  (`source.protectedBranches`, `since`-gated against the commit time)
+  appears in `controls[].property` (and, for healed links, the
+  continuity guard passes); the policy's `underclaimLevel` otherwise.
+  The computation is stele's, shared with its verifier by
+  construction.
 - `verifiedLevels[1..]` — every `controls[].property`, verbatim: the
   `ORG_SOURCE_` properties are claimable exactly because the
   provenance records the rule content that proves each one.

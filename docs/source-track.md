@@ -212,10 +212,12 @@ starts at that revision.
 
 ## Activation checklist
 
-The machinery landed with #207: the canon's `source-attest` action,
-`source-policies/` (the org policy, `since` times from the ledger
-above), the activated `workflow-templates/source-attest.yml`, and the
-`audit:source-vsa` Monday walk. Activation is per repo, lab first:
+The machinery landed with #207: the canon's `source-attest` action
+(since the stele#24 cutover, a thin orchestration around `stele emit
+chain`; the org policy is `slsa/verify-policy.json`, `since` times
+from the ledger above), the activated
+`workflow-templates/source-attest.yml`, and the `audit:source-vsa`
+Monday walk. Activation is per repo, lab first:
 
 1. Create the repo's `source-attest` environment holding
    `SOURCE_RULES_TOKEN`: a fine-grained read-only PAT that can read

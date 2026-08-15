@@ -385,7 +385,7 @@ jobs:
         if: inputs.mode == 'verdict'
         uses: $/.github/actions/canon
 
-      - name: Open the evidence and assemble the verdict
+      - name: Verify the release and render the verdict (stele emit vsa)
         id: verdict
         if: inputs.mode == 'verdict'
         env:
@@ -408,16 +408,19 @@ jobs:
             echo "::error::POLICY_REF is empty — refusing a verdict with no policy"
             exit 1
           fi
+          command -v go > /dev/null || {
+            echo "::error::go is not on the runner"
+            exit 1
+          }
 
           # The signer identity this verdict verifies against is derived
           # from the canon tree the SAME resolution delivered — the
           # sign.yml@<sha> uses: lines are the tree's only statement of
-          # the trusted signer (#314's verify-signed pattern; the
-          # separate security/signer.pin copy was deleted in #316 finding
-          # 2, where the two copies split into two Renovate branches
-          # neither of which could go green). lint:signer-pin keeps every
-          # uses: line equal, so the derivation is single-valued; a tree
-          # that disagrees with itself fails here rather than guessing.
+          # the trusted signer (#314's verify-signed pattern).
+          # lint:signer-pin keeps every uses: line equal, so the
+          # derivation is single-valued; a tree that disagrees with
+          # itself fails here rather than guessing. Tree-shaped, so it
+          # stays in the workflow; everything verb-shaped moved to stele.
           refs=$(grep -rhoE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' \
             "${CANON_PATH}/.github/workflows/" || true)
           pin=$(cut -d@ -f2 <<< "${refs}" | sort -u || true)
@@ -430,189 +433,6 @@ jobs:
             emsg="the canon tree pins sign.yml at more than one digest — a tree states the trusted signer once:"
             emsg+=" ${pin//$'\n'/ }"
             echo "::error::${emsg}"
-            exit 1
-          fi
-          signer_path="monumental-archive/signer/.github/workflows/sign.yml"
-
-          manifest="${WORKDIR}/verified.sha256"
-          bundles="${WORKDIR}/bundles"
-          mkdir -p "${bundles}"
-          covered="${WORKDIR}/covered"   # subject lines proven by verified provenance
-          seen="${WORKDIR}/seen-bundles" # bundle digests already verified
-          atts="${WORKDIR}/input-attestations.json"
-          : > "${covered}"
-          : > "${seen}"
-          echo '[]' > "${atts}"
-
-          # Iterate over a copy: the subset check greps the manifest while
-          # the loop reads it, and one file in both roles reads like a
-          # read/write hazard even when both are reads (SC2094).
-          cp "${manifest}" "${WORKDIR}/manifest-iter"
-          while IFS= read -r line; do
-            [[ -n ${line} ]] || continue
-            digest="${line%% *}"
-            name="${line##*  }"
-            api="repos/${GITHUB_REPOSITORY}/attestations/sha256:${digest}"
-            # The same API a stranger queries: fetching from the store —
-            # not this run's artifact — also proves the attestation was
-            # persisted. Retried: the signer finished moments ago.
-            fetched=""
-            for attempt in 1 2 3 4 5; do
-              if gh api "${api}" --jq '.attestations[].bundle' > "${WORKDIR}/raw-bundles.jsonl" 2> /dev/null \
-                && [[ -s "${WORKDIR}/raw-bundles.jsonl" ]]; then
-                fetched=1
-                break
-              fi
-              echo "attestation fetch for ${name} not ready (attempt ${attempt}), retrying"
-              sleep $((attempt * 5))
-            done
-            if [[ -z ${fetched} ]]; then
-              echo "::error::${name}: no attestation retrievable for sha256:${digest}"
-              exit 1
-            fi
-            while IFS= read -r bundle; do
-              [[ -n ${bundle} ]] || continue
-              # Only build provenance is the evidence this verdict
-              # summarises; other predicate types over the same subject
-              # (the VSA itself, VEX) are claims, not evidence.
-              ptype=$(printf '%s' "${bundle}" \
-                | jq -r '.dsseEnvelope.payload' | base64 -d \
-                | jq -r '.predicateType')
-              [[ ${ptype} == "https://slsa.dev/provenance/v1" ]] || continue
-              bsha=$(printf '%s' "${bundle}" | sha256sum | cut -d' ' -f1)
-              bfile="${bundles}/${bsha}.json"
-              if ! grep -qx "${bsha}" "${seen}"; then
-                printf '%s' "${bundle}" > "${bfile}"
-                # The cryptographic check: this exact bundle, over this
-                # exact artifact, signed by the org signer. gh rebuilds
-                # the Sigstore trust root and walks the chain; a verdict
-                # field is written only after it passes. A file subject
-                # is the bytes the prove step pulled back; an image
-                # subject is addressed oci:// at the digest whose tag
-                # binding the prove step just verified.
-                case "${name}" in
-                  ghcr.io/*) target="oci://${name}@sha256:${digest}" ;;
-                  *) target="${WORKDIR}/${name}" ;;
-                esac
-                gh attestation verify "${target}" \
-                  --bundle "${bfile}" \
-                  --repo "${GITHUB_REPOSITORY}" \
-                  --signer-workflow "${signer_path}" \
-                  --deny-self-hosted-runners \
-                  --predicate-type https://slsa.dev/provenance/v1 \
-                  --format json > "${WORKDIR}/result.json"
-                # Identity, to the commit: the certificate's signer digest
-                # must be the pinned signer tree, and builder.id must name
-                # the signer file — the L3 legs a run CAN measure.
-                cert_digest=$(jq -r \
-                  '.[0].verificationResult.signature.certificate.buildSignerDigest // empty' \
-                  "${WORKDIR}/result.json")
-                if [[ ${cert_digest} != "${pin}" ]]; then
-                  echo "::error::${name}: provenance signed at '${cert_digest}', pin is '${pin}'"
-                  exit 1
-                fi
-                builder=$(jq -r \
-                  '.[0].verificationResult.statement.predicate.runDetails.builder.id // empty' \
-                  "${WORKDIR}/result.json")
-                if [[ ${builder} != "https://github.com/${signer_path}@"* ]]; then
-                  echo "::error::${name}: builder.id does not name the org signer"
-                  exit 1
-                fi
-                # Fold, don't survive (#349 finding 7): result.json is
-                # overwritten every iteration, so any cross-bundle claim
-                # must be accumulated here and asserted after the loop.
-                # Every bundle's attested source revision lands in one
-                # file; enrichment later requires the set to have
-                # exactly one member instead of trusting whichever
-                # bundle the loop verified last.
-                jq -r '.[0].verificationResult.statement.predicate.buildDefinition
-                  .resolvedDependencies[0].digest.gitCommit // "MISSING"' \
-                  "${WORKDIR}/result.json" >> "${WORKDIR}/source-revisions"
-                # The other two of verifying-artifacts' four comparisons
-                # (#210): the CLI covers builder identity and source repo
-                # by flag but has nothing for buildType or
-                # externalParameters, so both are asserted here, over the
-                # SAME statement the verify call just returned. Every
-                # expectation is derived from this run's own identity —
-                # the provenance was minted in this workflow run, so the
-                # run is the expectation, and it cannot drift from
-                # reality because it is read from reality.
-                buildtype=$(jq -r \
-                  '.[0].verificationResult.statement.predicate.buildDefinition.buildType // empty' \
-                  "${WORKDIR}/result.json")
-                if [[ ${buildtype} != "https://actions.github.io/buildtypes/workflow/v1" ]]; then
-                  echo "::error::${name}: buildType is not the GitHub Actions buildType"
-                  exit 1
-                fi
-                # The buildType defines exactly two externalParameters
-                # keys, workflow and inputs. The spec says REJECT
-                # unrecognised fields, not ignore them: an unknown key is
-                # where unofficial behaviour hides.
-                unrecognized=$(jq -r \
-                  '.[0].verificationResult.statement.predicate.buildDefinition.externalParameters
-                   | keys[] | select(. != "workflow" and . != "inputs")' \
-                  "${WORKDIR}/result.json")
-                if [[ -n ${unrecognized} ]]; then
-                  # Not echoed: the field name is attacker-controlled.
-                  echo "::error::${name}: externalParameters carries an unrecognised field"
-                  exit 1
-                fi
-                # workflow identity: repository, ref and path must equal
-                # this run's own. GITHUB_WORKFLOW_REF is
-                # "<owner>/<repo>/<path>@<ref>" — the caller's entry
-                # workflow, which is the same top-level run the signer
-                # ran in.
-                expected_path="${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY}"/}"
-                expected_path="${expected_path%@*}"
-                jq -r '.[0].verificationResult.statement.predicate.buildDefinition.externalParameters.workflow
-                  | [.repository // "", .ref // "", .path // ""] | @tsv' \
-                  "${WORKDIR}/result.json" \
-                  | {
-                    IFS=$'\t' read -r wf_repo wf_ref wf_path
-                    fail=""
-                    [[ ${wf_repo} == "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" ]] || fail="repository"
-                    [[ ${wf_ref} == "${GITHUB_REF}" ]] || fail="${fail} ref"
-                    [[ ${wf_path} == "${expected_path}" ]] || fail="${fail} path"
-                    if [[ -n ${fail} ]]; then
-                      # Field names only; the values are attacker-controlled.
-                      echo "::error::${name}: externalParameters.workflow does not match this run:${fail}"
-                      exit 1
-                    fi
-                  }
-                # No subject the manifest does not claim: the statement's
-                # subject set must be a subset of what this run verified.
-                jq -r '.[0].verificationResult.statement.subject[]
-                  | "\(.digest.sha256)  \(.name)"' "${WORKDIR}/result.json" \
-                  > "${WORKDIR}/stmt-subjects"
-                while IFS= read -r sline; do
-                  if ! grep -qxF "${sline}" "${manifest}"; then
-                    echo "::error::provenance covers a subject this run did not verify"
-                    exit 1
-                  fi
-                  echo "${sline}" >> "${covered}"
-                done < "${WORKDIR}/stmt-subjects"
-                echo "${bsha}" >> "${seen}"
-                # Appended HERE, inside the verification of this bundle —
-                # the list and the checks are the same iteration, which is
-                # what makes inputAttestations complete by construction.
-                jq -c --arg uri "https://api.github.com/${api}" --arg sha "${bsha}" \
-                  '. + [{uri: $uri, digest: {sha256: $sha}}]' "${atts}" \
-                  > "${atts}.tmp" && mv "${atts}.tmp" "${atts}"
-                echo "verified provenance ${bsha} (via ${name})"
-              fi
-            done < "${WORKDIR}/raw-bundles.jsonl"
-          done < "${WORKDIR}/manifest-iter"
-
-          # ...and no verified subject the provenance does not cover: the
-          # union of statement subjects must equal the manifest exactly.
-          missing=$(grep -vxFf "${covered}" "${manifest}" || true)
-          if [[ -n ${missing} ]]; then
-            echo "::error::a verified subject has no verified provenance covering it"
-            exit 1
-          fi
-          opened=$(jq 'length' "${atts}")
-          if ((opened == 0)); then
-            echo "::error::no provenance opened — a verdict over nothing is not a verdict"
             exit 1
           fi
 
@@ -628,107 +448,60 @@ jobs:
             exit 1
           fi
 
-          # The release decision (#349 S1): the commit point signed a
-          # release-decision/v1 claim over the release SBOM naming every
-          # proof and its conclusion. Verify it here — under publish.yml's
-          # identity, over the published SBOM asset's bytes — and require
-          # conclusion OPEN for this tag, so the VSA's inputAttestations
-          # carries cryptographic evidence that publication happened
-          # downstream of a decision that opened. A release with no
-          # verifiable decision is refused: that absence is exactly the
-          # v0.20.0 world this predicate exists to make unrepresentable.
+          # The decision candidates: the release's SBOM assets, hashed
+          # into a manifest. WHICH one carries the decision is stele's
+          # by-attestation selection, not a filename guess (#354).
           mkdir -p "${WORKDIR}/sbom-assets"
           gh release download "v${UNTRUSTED_VERSION}" --repo "${GITHUB_REPOSITORY}" \
             --pattern "*.spdx.json" --dir "${WORKDIR}/sbom-assets"
-          sboms=$(find "${WORKDIR}/sbom-assets" -type f -name "*.spdx.json")
-          if [[ -z ${sboms} ]]; then
+          (cd "${WORKDIR}/sbom-assets" && sha256sum ./*.spdx.json | sed 's|\./||' > "${WORKDIR}/sboms.sha256")
+          if [[ ! -s "${WORKDIR}/sboms.sha256" ]]; then
             echo "::error::the release has no SBOM asset — the decision has no subject to verify against"
             exit 1
           fi
-          decision_type="https://monumental-archive.github.io/attestations/release-decision/v1"
-          decision_workflow="monumental-archive/.github/.github/workflows/publish.yml"
-          # Find the SBOM the commit point actually decided over, rather
-          # than assuming there is only one. A release class that ships
-          # its own SBOM (the oci class publishes `*-image.spdx.json`)
-          # puts a second asset in this pattern, and `sort | head -1`
-          # picked it: `-` sorts before `.`, so the image SBOM won and
-          # the decision lookup 404'd on a subject the commit point never
-          # signed (#354, measured on release-lab v0.24.2 — the canon
-          # publishes exactly one SBOM, so self-application could not
-          # reach it). Selecting by attestation rather than by filename
-          # is not the weaker test: a candidate only wins by carrying a
-          # decision signed by publish.yml over its own bytes, which no
-          # added asset can forge. Two winners is ambiguity, not success.
-          sfile=""
-          while IFS= read -r cand; do
-            [[ -n ${cand} ]] || continue
-            gh attestation verify "${cand}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --signer-workflow "${decision_workflow}" \
-              --deny-self-hosted-runners \
-              --predicate-type "${decision_type}" \
-              --format json > "${WORKDIR}/decision.candidate.json" 2> /dev/null || continue
-            if [[ -n ${sfile} ]]; then
-              echo "::error::more than one SBOM asset carries a release decision — ambiguous, refusing the verdict"
-              exit 1
-            fi
-            sfile="${cand}"
-            mv "${WORKDIR}/decision.candidate.json" "${WORKDIR}/decision.json"
-          done <<< "${sboms}"
-          if [[ -z ${sfile} ]]; then
-            echo "::error::no SBOM asset carries a verifiable release decision — refusing the verdict"
-            exit 1
-          fi
-          sdigest=$(sha256sum "${sfile}" | cut -d' ' -f1)
-          # No name check on top of this (#358 Q6, and v1.24.0 measured
-          # the cost of getting it wrong): the decision predicate carries
-          # {tag, classes, conclusion, decidedAt, proofs} and NO subject
-          # enumeration — what the decision covers is the STATEMENT
-          # subject, an in-toto {name, digest} that `gh attestation
-          # verify` above has already checked against this candidate's
-          # own bytes. That digest binding IS the join seam 4 needed, and
-          # it is strictly stronger than any filename comparison. A
-          # v1.24.0 verdict leg that asserted `.predicate.subject`
-          # refused its own correct decision and published the canon
-          # without a source VSA.
-          jq -e --arg tag "v${UNTRUSTED_VERSION}" \
-            '.[0].verificationResult.statement.predicate
-             | .conclusion == "OPEN" and .tag == $tag' \
-            "${WORKDIR}/decision.json" > /dev/null || {
-            echo "::error::the release decision does not name conclusion OPEN for this tag — refusing the verdict"
+
+          # Everything verb-shaped — the store fetch, the four
+          # verifying-artifacts comparisons, subject coverage equality,
+          # the source-revision fold, the release decision, and the
+          # predicate render — is `stele emit vsa` (stele#21): the
+          # predicate is a method on the verdict type, so a PASSED
+          # predicate cannot exist unearned (#208 as a compile-time
+          # fact). stele runs from the pinned module through the
+          # checksummed proxy, the audit:source-vsa bootstrap, until the
+          # go-binary release class lands (stele#7).
+          stele_pin="github.com/monumental-archive/stele/cmd/stele@3af8d30b0016028f74bab9adc85ae465505272cf"
+          root=$(mktemp)
+          gh attestation trusted-root | head -1 > "${root}"
+          [[ -s ${root} ]] || {
+            echo "::error::empty trusted root from gh"
             exit 1
           }
-          dsha=$(sha256sum "${WORKDIR}/decision.json" | cut -d' ' -f1)
-          jq -c --arg uri "https://api.github.com/repos/${GITHUB_REPOSITORY}/attestations/sha256:${sdigest}" \
-            --arg sha "${dsha}" \
-            '. + [{uri: $uri, digest: {sha256: $sha}}]' "${atts}" \
-            > "${atts}.tmp" && mv "${atts}.tmp" "${atts}"
-          echo "::notice::release decision verified: OPEN for v${UNTRUSTED_VERSION}"
+          go run "${stele_pin}" emit vsa \
+            --policy "${CANON_PATH}/slsa/verify-policy.json" \
+            --trusted-root "${root}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --tag "v${UNTRUSTED_VERSION}" \
+            --subjects "${WORKDIR}/verified.sha256" \
+            --sboms "${WORKDIR}/sboms.sha256" \
+            --signer-digest "${pin}" \
+            --canon-digest "${policy_sha}" \
+            --policy-uri "https://github.com/monumental-archive/.github/blob/${policy_sha}/slsa/verify-policy.json" \
+            --out "${RUNNER_TEMP}/vsa-predicate.json" | tee "${WORKDIR}/emit-vsa.log"
 
-          # jq --arg/--slurpfile does all quoting: nothing caller-
-          # controlled is spliced into JSON by hand. Every field below is
-          # an output of the checks above; this line is unreachable if
-          # any of them failed.
-          # Rendered through the shared assembler (#267): one file owns
-          # the VSA field set for both of the org's VSA kinds, so a field
-          # added for one cannot fail to appear in the other. The build
-          # verdict's extra — inputAttestations — is merged on top.
-          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          base=$(jq -cn \
-            --arg verifier "https://github.com/monumental-archive/.github/.github/workflows/verify-release.yml" \
-            --arg time "${now}" \
-            --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
-            --arg policyUri "https://github.com/monumental-archive/.github/tree/${POLICY_REF}" \
-            --arg policySha "${policy_sha}" \
-            --arg result "PASSED" \
-            --argjson levels '["SLSA_BUILD_LEVEL_3"]' \
-            -f "${CANON_PATH}/release/vsa-predicate.jq")
-          jq -cn --argjson base "${base}" --slurpfile atts "${atts}" \
-            '$base + {inputAttestations: $atts[0]}' > "${RUNNER_TEMP}/vsa-predicate.json"
+          # The fold's single answer, stated by stele for the enrichment
+          # step — never re-derived from whichever bundle survived a
+          # loop (#349 finding 7).
+          src=$(sed -n 's/^emit: source revision //p' "${WORKDIR}/emit-vsa.log")
+          if [[ ! ${src} =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::stele did not state the folded source revision"
+            exit 1
+          fi
+          echo "src=${src}" >> "${GITHUB_OUTPUT}"
+
           # The subjects the verdict covers are exactly the manifest this
           # run just re-proved — the same lines, no re-derivation.
-          cp "${manifest}" "${RUNNER_TEMP}/vsa-subjects.sha256"
-          echo "::notice::verdict assembled: ${opened} attestation(s) opened and verified"
+          cp "${WORKDIR}/verified.sha256" "${RUNNER_TEMP}/vsa-subjects.sha256"
+          echo "::notice::verdict rendered by stele emit vsa"
       # The verdict signs ITSELF (#264): the predicate above is an output
       # of the checks this job just ran, and the certificate this step
       # mints names this file — so "who computed this verdict" is a
@@ -767,28 +540,16 @@ jobs:
           UNTRUSTED_BASE_MAJORS: ${{ inputs.base-majors }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
+          SRC: ${{ steps.verdict.outputs.src }}
         run: |
           set -euo pipefail
           # The attested source revision, as the FOLD of every provenance
-          # this run verified — never the loop's survivor. The subset and
-          # coverage checks prove subject equality, not that all bundles
-          # name one revision, and the attestation store can serve a
-          # byte-identical digest provenance from an earlier release
-          # (#349 finding 7): agreement is asserted, not assumed.
-          [[ -s "${WORKDIR}/source-revisions" ]] || {
-            echo "::error::no source revisions were accumulated — enrichment has no evidence to fold"
-            exit 1
-          }
-          distinct=$(sort -u "${WORKDIR}/source-revisions")
-          count=$(wc -l <<< "${distinct}" | tr -d ' ')
-          if [[ ${count} -ne 1 ]]; then
-            echo "::error::verified bundles disagree on the source revision — one release, one revision, or no claim"
-            while IFS= read -r r; do echo "::error::  ${r}"; done <<< "${distinct}"
-            exit 1
-          fi
-          src="${distinct}"
+          # the verdict verified — stated by stele emit vsa, whose
+          # verdict refuses any disagreement between bundles, never the
+          # survivor of a loop (#349 finding 7).
+          src="${SRC}"
           if [[ ! ${src} =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::the verified provenance carries no source gitCommit — enrichment would claim nothing"
+            echo "::error::the verdict step stated no source revision — enrichment would claim nothing"
             exit 1
           fi
 
