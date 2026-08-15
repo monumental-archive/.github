@@ -40,6 +40,7 @@ honestly blocked on.
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
+| editorconfig-checker (`aqua:`, binary `ec`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
@@ -437,10 +438,9 @@ taste:
   uniform here: YAML forbids tab indentation by spec, which is 49 of the
   canon's 153 tracked files. Space is the only setting that can hold
   across every format, and `lint:shell` already overrides shfmt's own
-  tab default to 2-space for the same reason. Note this is practice
-  plus two tool settings, **not a written convention** — the org has no
-  stated indentation rule, and `.editorconfig` is where one would live
-  if editorconfig-checker lands.
+  tab default to 2-space for the same reason. This was practice plus
+  two tool settings until #403 item 2: the written convention now
+  lives in `.editorconfig`, enforced by `lint:editorconfig`.
 
 One trap, found by running the standup rather than reading about it: the
 scaffold copy must be `scaffold/biome.json.stub`, never `biome.json`.
@@ -556,6 +556,36 @@ registry; pure Python, no binary releases) — making it the second
 `pipx:` exception after reuse, riding checksummed uv under the same
 `UV_*` floor environment, pinned in `[tools]` before first install so
 the lock entry is never bare.
+
+**editorconfig-checker, and the `.editorconfig` it lands with** (#403).
+The point of doing it second: the file is the org's first *written*
+indentation rule — until now 2-space was practice plus two tool
+settings, a gap this doc recorded under biome. Per-type sections defer
+to the formatter that owns each language (ruff/rustfmt 4, gofmt tab,
+Makefiles and git-written config files tab), and the per-type
+`max_line_length` caps live here because yamllint's single global knob
+could not express them. biome reads the file natively
+(`useEditorconfig` defaults to true in 2.x); shfmt deliberately does
+NOT — any shfmt flag disables its editorconfig reading and `-s`
+(simplify) has no editorconfig key, so `lint:shell` keeps its flags
+authoritative and `.editorconfig` states the same facts for editors;
+drift between the two cannot land silently because both are enforced in
+the gate.
+
+One check is off, with the reason about the check:
+`-disable-indent-size`. ec's indent test is "leading spaces are a
+multiple of N" and cannot know continuation alignment — measured at
+standup, 73 of 76 findings were ec disagreeing with ruff-formatted
+Python, shfmt-formatted shell, rumdl-clean markdown continuations and
+yamllint-clean YAML. Indent *size* is enforced per language by its
+owner; ec keeps the checks nothing else covers (indent_style, charset,
+end_of_line, insert_final_newline, trim_trailing_whitespace,
+max_line_length). The three real findings it did surface were
+conformed: two `gh issue create --body` one-liners over 130 columns
+(now variable builds) and the gitconfig fixture, which is *correctly*
+tab-indented because git itself writes tabs — declared as such rather
+than reformatted, on the fixture-is-not-evidence rule. *Reopen:* ec
+growing a formatter-aware indent check.
 
 ## Skipped, with rationale and reopen trigger
 

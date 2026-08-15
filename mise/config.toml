@@ -227,6 +227,12 @@ python = "3.14.7"
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
 "aqua:golangci/golangci-lint" = "2.12.2"
+# Whole-file hygiene against .editorconfig (#403): the org's ONE written
+# indentation rule lives in .editorconfig and this enforces it — six
+# properties (charset, end_of_line, insert_final_newline, indent_style,
+# indent_size, trim_trailing_whitespace) plus per-type max_line_length.
+# aqua-backed: checksums, binary releases, no install script.
+"aqua:editorconfig-checker/editorconfig-checker" = "3.11.1"
 # YAML lint (#403): full rule inventory at error, policy in .yamllint.yaml.
 # PyPI-only — no aqua package (404 in the registry; pure Python, no binary
 # releases) — so the SECOND pipx: exception after reuse, riding
@@ -306,6 +312,39 @@ run = 'git ls-files "*.toml" | xargs taplo fmt'
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = 'files=$(git ls-files "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+
+[tasks."lint:editorconfig"]
+description = "Whole-file hygiene against .editorconfig (editorconfig-checker)"
+dir = "{{cwd}}"
+# The enforcement half of the org's one written indentation rule. A
+# tracked .editorconfig is REQUIRED (the config-required trap, fifth
+# costume: without the file every check silently vacuously passes).
+# Tracked files only, passed as arguments — ec's own git-aware walker is
+# not used, on the standing lefthook-cache rule.
+#
+# -disable-indent-size, with the reason about the CHECK: ec's indent
+# test is "leading spaces are a multiple of N" and cannot know
+# continuation alignment, so it fights every formatter that owns a
+# language's layout — measured at standup: 73 of 76 findings were ec
+# disagreeing with ruff-formatted Python, shfmt-formatted shell,
+# rumdl-clean markdown list continuations, and yamllint-clean YAML.
+# Indent SIZE is enforced per language by its owner (ruff, shfmt, taplo,
+# biome, yamllint, rumdl); ec still enforces indent_style (a tab in a
+# space file), charset, end_of_line, insert_final_newline,
+# trim_trailing_whitespace and per-type max_line_length — the checks no
+# other belt tool covers. The binary is named `ec` by aqua.
+run = '''
+set -euo pipefail
+files=$(git ls-files)
+[[ -n "${files}" ]] || { echo "lint:editorconfig: empty tree, skipped"; exit 0; }
+if ! git ls-files --error-unmatch ".editorconfig" > /dev/null 2>&1; then
+  echo "lint:editorconfig: no .editorconfig tracked — copy scaffold/.editorconfig (#403)" >&2
+  echo "  without it every editorconfig-checker check vacuously passes" >&2
+  exit 1
+fi
+xargs ec -disable-indent-size <<<"${files}"
+echo "lint:editorconfig: $(wc -l <<<"${files}" | tr -d " ") file(s) checked"
+'''
 
 [tasks."lint:yaml"]
 description = "YAML lint (yamllint, full rule inventory at error + --strict)"

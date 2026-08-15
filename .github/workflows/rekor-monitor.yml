@@ -109,7 +109,10 @@ jobs:
           set -euo pipefail
           # A monitoring failure and an identity finding land the same way:
           # loudly. The run log carries the distinction.
+          body="The Rekor identity monitor failed or matched an unexpected certificate for the"
+          body+=" signer identity. Read the run:"
+          body+=" ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "rekor-monitor: failure or unexpected signer issuance (run ${GITHUB_RUN_ID})" \
-            --body "The Rekor identity monitor failed or matched an unexpected certificate for the signer identity. Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            --body "${body}"
 ...
