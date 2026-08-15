@@ -508,12 +508,64 @@ a natively-managed representation.
   measurement and not tests (`lint:source-attest` drives the real
   emitter scripts end-to-end against recorded fixtures every commit).
   Removing the shield does not soften the verdict; this entry is where
-  it survives. *Reopen:* kcov (or a bash-coverage peer) shipping
-  checksummed cross-platform binaries through aqua — at which point
-  re-add a `.coverage-floor` and the shield returns by derivation.
-  Note the separable half: **bats and shellspec are both aqua-backed
-  and belt-clean**, so adopting a test framework is not blocked by any
-  of this and is tracked on its own.
+  it survives. *Reopen:* **the canon's bash goes away** (#392, decided
+  2026-08-15 — a Go tool in its own repo), at which point `go test
+  -cover` supplies the number, the canon gains a `.coverage-floor` and
+  the shield returns by derivation. That, not aqua packaging, is now the
+  live trigger: kcov shipping checksummed cross-platform binaries would
+  also unblock it, but nobody is waiting on that. The retirement of this
+  entry and everything that hangs off it is tracked in #398.
+  Note what was **revoked** here: this entry previously recorded a
+  separable half — that bats and shellspec are both aqua-backed and
+  belt-clean, so adopting a bash test framework was not blocked by any
+  of this. That standup (#364) is closed and both tools are refused. A
+  test framework for code that is being ported is a fourth thing to
+  port, and in Go the question is `go test`. The defect class #364
+  named — skip-clean guards are the least exercised code in the org and
+  a guard that skips when it should run looks exactly like success —
+  is real and survives its closure, carried into #392 as a table-test
+  requirement.
+- **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
+  bodies)** — skipped, and recorded because the gap it would close is
+  real and will otherwise be rediscovered. `mise/config.toml` holds 78
+  task bodies, **~2409 lines of bash**, and every belt linter that could
+  read it is structurally blind: `lint:toml` lints the *container*
+  (taplo exits **0** on a task body containing an unclosed `[[`, a
+  missing `fi` and `rm -rf $UNQUOTED` — a TOML string is a string under
+  every configuration, so this is not a config gap and cannot be closed
+  by one); `lint:shell` selects with `shfmt --find`, which identifies by
+  shebang or extension and returns zero hits for the file;
+  `lint:shell-embedded` globs workflows and composite actions only; and
+  `lint:bash-portability` reads the same two sources. The census in #392
+  was short by this whole population — ~8001 lines of bash org-wide, not
+  5316. It is skipped anyway, because building it would mean a **third**
+  extractor after `embedded-shell.py` and actionlint's own shellcheck
+  delegation, and writing a parser to un-hide our code from our own
+  tools is evidence the layout is wrong rather than a task to complete.
+  #392 deletes the need for all three. Measured before deciding, so the
+  probe is not written again (#397): at the `.shellcheckrc` bar the run
+  reports 194 findings and 70 of 78 bodies not shfmt-clean, but **three
+  sampled findings were all false positives** — `audit:badges`
+  SC2221/SC2222 are alternatives within one branch routing to identical
+  code, `fix:input-forwarding`'s parse errors came from feeding tera's
+  `{% raw %}` markers to shellcheck, and `audit:blast-radius` SC2034 is
+  the trailing field of `read -r id name ver where class kind`, required
+  or `class` absorbs the last column. The state is *unmeasured*, not
+  known-buggy. The untriaged remainder — 161 SC2312 (masked return
+  values) and 11 SC2249 (`case` with no default branch), against 11 of
+  78 bodies carrying `set -euo pipefail` — stays live as #82 finding 2.
+  Constraints if one is ever written regardless: strip tera `{% raw %}`;
+  extract through a real TOML parse (two bodies use `"""` and carry
+  `\\.` and `\\"`) with a separate line scan for anchors, since
+  `tomllib` gives no line numbers; 13 tasks use single-line `run =`
+  forms that shfmt would restructure into block form; and pass
+  `--enable=all --external-sources` explicitly, because `.shellcheckrc`
+  is not picked up for files written to a temp directory. One suspicion
+  tested and disproved: shfmt and shellcheck do **not** conflict on
+  unquoted `${var}` inside `[[ ]]` — shellcheck exits 0 on shfmt's
+  preferred form. *Reopen:* #392 stalling, at which point the honest
+  interim is triaging the SC2312 and SC2249 sets by hand, still not
+  building the linter.
 - **cffconvert** — `CITATION.cff` validation. Not needed, and recorded
   now because the scaffold previously cited a verdict that was never
   made (#316): the file is generated — `fix:citation` renders it from
