@@ -109,8 +109,9 @@ pgrx = tools.get("cargo:cargo-pgrx", "")
 # a second, nightly toolchain beside the stable one so audit:fuzz can run
 # AddressSanitizer (.github#445). mise puts the FIRST entry on PATH, and
 # that is the toolchain this build must use; reading the list whole sent
-# the entire JSON array to rustup as a version and reddened release-lab's
-# Release PR on the first run after it declared one.
+# the entire JSON array to rustup as a version and reddened the lab
+# Release PR on the first run after it declared one. No apostrophes in
+# here: this block is a single-quoted python -c argument.
 if isinstance(rust, list): rust = rust[0] if rust else ""
 if isinstance(rust, dict): rust = rust.get("version", "")
 print(json.dumps({"rust": rust, "pgrx": pgrx}))
