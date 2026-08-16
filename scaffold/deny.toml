@@ -27,10 +27,20 @@ allow = [
 
 [bans]
 # A `*` requirement is an unpinned intention — deny. Duplicate transitive
-# versions are endemic and outside any one repo's control — warn, the one
-# deliberately non-maximal setting (reasoned in docs/dependency-track.md).
+# versions are a gate failure too (#445): the tree is a thing the repo
+# resolves, not a thing it tolerates. Where upstream genuinely forces a
+# duplicate, the exit is a written `[[bans.skip]]` entry citing the
+# upstream issue — a decision recorded once, in the repo whose tree it
+# describes, never a standing warning nobody reads.
+#
+# This is the org's ONLY statement of the duplicate policy.
+# `clippy::multiple_crate_versions` says the same thing and is allowed in
+# the canon's clippy.toml for exactly that reason (docs/dependency-track.md):
+# its allow-list is canon-owned and org-wide, so one repo's unavoidable
+# duplicate would silently exempt every other repo. One policy, one home,
+# at the layer that can describe a single tree.
 wildcards = "deny"
-multiple-versions = "warn"
+multiple-versions = "deny"
 
 [sources]
 # Where dependencies come from is a gated invariant: crates.io only.

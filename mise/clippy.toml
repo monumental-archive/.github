@@ -1,0 +1,99 @@
+# The org's clippy configuration — one file, every repo (#445).
+#
+# Delivered by `lint:rust` through CLIPPY_CONF_DIR, which clippy searches
+# FIRST and which suppresses any repo-local clippy.toml entirely (proven:
+# with CLIPPY_CONF_DIR set, a repo file containing an invalid key is not
+# read at all). That is the point — these knobs are org policy, and a
+# repo that could drop its own clippy.toml beside its Cargo.toml could
+# lower them silently. `lint:rust` refuses a tracked repo-local
+# clippy.toml for the same reason the belt refuses an unexplained
+# .gitleaks.toml.
+#
+# WHAT BELONGS HERE: only settings clippy cannot express as a lint level.
+# Levels live in `lint:rust`'s flags, stated as the GROUP minus named
+# exclusions so a toolchain bump arrives with its new lints already
+# enforced.
+#
+# THE RULE THIS FILE FOLLOWS: take the tool's maximum on every boolean
+# that gates a whole check, and do NOT strip upstream's curated default
+# LISTS. `doc-valid-idents`, `allowed-idents-below-min-chars`,
+# `ignore-interior-mutability` and friends are correctness and ergonomic
+# carve-outs upstream maintains, not laxness dials — emptying them
+# invents org policy rather than raising enforcement. Thresholds are the
+# same category and stay at clippy's defaults: a number we chose is our
+# opinion, not the tool's maximum.
+
+# Suppresses ~19 lints wherever the fix would be a breaking change for a
+# downstream crate. Off, because the org already governs breakage with
+# machinery built for it — `audit:semver` (cargo-semver-checks) reads the
+# published baseline on the Monday cron, and the release canon gates the
+# version. A lint is advice; the semver check is the refusal. Leaving
+# this at its default would mean public API — the code most worth
+# linting — is the least linted code in the repo.
+avoid-breaking-exported-api = false
+
+# Documentation lints stop at the `pub` boundary by default. Private
+# items are where the panics and the unstated invariants live.
+check-private-items = true
+
+# Test code is code. Both of these default to skipping `#[cfg(test)]`.
+check-incompatible-msrv-in-tests = true
+allow-large-stack-frames-in-tests = false
+
+# `unwrap`/`expect` in a const is still an unwrap. Both default to a free
+# pass for compile-time evaluation.
+allow-expect-in-consts = false
+allow-unwrap-in-consts = false
+
+# Field-order suggestions on struct construction. Upstream defaults this
+# off because a reorder can change semantics when initialisers have side
+# effects — so the SUGGESTION is not always applicable, but the finding
+# always is. Adjudicated on a case-by-case basis like any other, with
+# `#[expect(..., reason = "...")]` where the reorder would move a side
+# effect.
+check-inconsistent-struct-field-initializers = true
+
+# Every remaining knob whose non-default value strictly enables more
+# linting and nothing else.
+accept-comment-above-attributes = false
+accept-comment-above-statement = false
+allow-comparison-to-zero = false
+allow-exact-repetitions = false
+allow-mixed-uninlined-format-args = false
+enforce-iter-loop-reborrow = true
+lint-commented-code = true
+suppress-restriction-lint-in-const = true
+upper-case-acronyms-aggressive = true
+warn-on-all-wildcard-imports = true
+warn-unsafe-macro-metavars-in-private-macros = true
+
+# Item ordering, checked within groupings as well as between them.
+module-items-ordered-within-groupings = "all"
+
+# A KEY THIS FILE DOES NOT RECOGNISE IS A HARD ERROR, which is the
+# safety net for the one direction this file cannot self-extend: clippy's
+# online configuration reference documents MASTER, not the toolchain a
+# repo pins, and `min-ident-chars-lint-trait-impl` was set here from
+# those docs and rejected by 1.97.1 on the first real run. So a knob that
+# upstream removes or renames fails loudly at the next bump. A knob
+# upstream ADDS with a permissive default is the gap: nothing here grows
+# on its own, unlike the lint levels in `lint:rust`, which are stated as
+# groups precisely so they do (docs/tooling-verdicts.md).
+
+# NOT SET, deliberately:
+#
+# `msrv` — clippy defaults it to Cargo.toml's `rust-version`, which is
+# where a crate's MSRV belongs and where cargo, docs.rs and consumers
+# already read it. Setting a number here would be a second source that
+# can disagree with the manifest.
+#
+# `excessive-nesting-threshold` — clippy ships it at 0, which means
+# `clippy::excessive_nesting` is enabled by our flags but inert. Any
+# other value is a number the org invented, not the tool's maximum, so
+# the lint stays enabled and silent until someone argues a threshold
+# (docs/tooling-verdicts.md).
+#
+# `allowed-duplicate-crates` — the duplicate policy is stated once, in
+# scaffold/deny.toml at `multiple-versions = "deny"`. This file is
+# org-wide, so an entry here would exempt every repo from a rule only one
+# of them broke (docs/dependency-track.md).

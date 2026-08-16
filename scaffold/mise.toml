@@ -12,8 +12,12 @@ lockfile = true
 # pgrx-extension class only and must equal the pgrx crate dependency.
 # Components ride the toolchain pin so they install before any task runs
 # — task-time rustup races parallel tasks (the v0.18.0 lesson);
-# coverage:check asserts llvm-tools rather than installing it.
-# rust = { version = "1.xx.x", components = "llvm-tools" }
+# coverage:check asserts llvm-tools and lint:rust asserts clippy rather
+# than installing them. All three are REQUIRED, not optional: mise
+# installs rust through rustup and inherits whatever profile the machine
+# already has, so on a minimal-profile runner clippy and rustfmt are
+# simply absent and their gates cannot run (#445).
+# rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }
 # "cargo:cargo-auditable" = "0.7.5"
 # Go repos: the toolchain, plus govulncheck as a build input (no
 # upstream binaries, no aqua package — the go: backend builds it from a
