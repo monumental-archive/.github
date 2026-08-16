@@ -51,6 +51,23 @@ disable_backends = ["asdf", "ubi"]
 # subprocesses mise itself spawns to INSTALL tools — verified by setting an
 # absurd cutoff here and watching the pipx install fail (#82).
 [env]
+# WHERE THE BELT IS, resolved once here so no task ever resolves it again.
+#
+# Every config that only a belt tool reads is delivered FROM the canon at
+# run time rather than copied into each repo — so there is no second copy
+# to drift, and nothing to write a drift check about. That was impossible
+# until this line: mise has no template for a global config's own
+# directory ({{config_root}} is the home directory for one), so tasks
+# had begun carrying their own resolution blocks. Six of them, at the
+# point this replaced them.
+#
+# Both carriers, one expression: CI sets MISE_GLOBAL_CONFIG_FILE to the
+# canon tree that `$/.github/actions/canon` linked; locally the belt is a
+# ~/.config/mise/conf.d symlink into a checkout. The symlink's NAME is not
+# assumed — the belt is identified by a file only the belt has, so a
+# machine that named it something else still works. Empty when the belt
+# did not arrive, which `lint:belt-available` already fails on.
+ORG_BELT_DIR = "{{ exec(command='d=\"${MISE_GLOBAL_CONFIG_FILE:-}\"; [ -n \"$d\" ] || for f in \"${XDG_CONFIG_HOME:-$HOME/.config}\"/mise/conf.d/*.toml; do t=$(readlink \"$f\" 2>/dev/null || echo \"$f\"); [ -f \"$(dirname \"$t\")/clippy.toml\" ] && d=\"$t\" && break; done; [ -n \"$d\" ] && cd \"$(dirname \"$d\")\" && pwd') }}"
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
@@ -360,7 +377,7 @@ dir = "{{cwd}}"
 # Locale stays `en` (accepts en-US and en-GB): the org register convention
 # is en-US in code and en-GB in prose, which no per-file locale can split.
 # Repo-specific jargon goes in that repo's own _typos.toml (extend-words).
-run = "typos"
+run = 'typos -c "${ORG_BELT_DIR}/typos.toml"'
 
 [tasks."lint:toml"]
 description = "TOML format check + lint (taplo)"
@@ -702,7 +719,7 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "lint:action-pins: no workflows or actions, skipped"; exit 0; }
-xargs pinact run -fix=false -no-api <<<"${files}"
+xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" -fix=false -no-api <<<"${files}"
 echo "lint:action-pins: ok"
 '''
 
@@ -718,7 +735,7 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "fix:actions: no workflows or actions, skipped"; exit 0; }
-xargs pinact run <<<"${files}"
+xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" <<<"${files}"
 '''
 
 [tasks."fix:python"]
@@ -786,9 +803,11 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "lint:shell-embedded: no workflows or actions, skipped"; exit 0; }
-helper=mise/embedded-shell.py
-[[ -f "${helper}" ]] || helper=.org-canon/mise/embedded-shell.py
-[[ -f "${helper}" ]] || { echo "lint:shell-embedded: no canon tree, skipped"; exit 0; }
+# From the belt, like every other canon-owned input. This used to try
+# mise/ then .org-canon/ and SKIP CLEAN when it found neither — so a
+# consumer running the gate locally checked no embedded shell at all and
+# said nothing. ORG_BELT_DIR resolves in both worlds (#445).
+helper="${ORG_BELT_DIR}/embedded-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
 python3 "${helper}" ${files}
 '''
@@ -921,6 +940,28 @@ command -v cargo > /dev/null || {
 }
 cargo fetch --locked
 cargo deny check bans licenses sources
+# An exception that outlives its cause is the failure `#[expect]` was
+# chosen to prevent everywhere else, and cargo-deny does not have that
+# property: a `skip`/`skip-tree` entry matching nothing is silent
+# (measured). So necessity is tested rather than assumed — each declared
+# skip is removed in turn and the check re-run. A variant that still
+# passes proves its entry does nothing, and the gate names it. The
+# helper resolves from the belt, which is where the org's policy lives;
+# a repo running without the canon cannot quietly skip this.
+helper="${ORG_BELT_DIR}/deny-skips.py"
+stale=""
+while IFS=$'\t' read -r name variant; do
+  [[ -n "${name}" ]] || continue
+  if cargo deny --config "${variant}" check bans > /dev/null 2>&1; then
+    stale="${stale} ${name}"
+  fi
+done < <(python3 "${helper}" deny.toml)
+if [[ -n "${stale}" ]]; then
+  echo "lint:deny: duplicate-version skip no longer needed:${stale}" >&2
+  echo "  the check passes without it, so the upstream lag it was written for is over" >&2
+  echo "  delete the entry from deny.toml — an exception that outlives its cause is not a decision" >&2
+  exit 1
+fi
 '''
 
 [tasks."audit:deny"]
@@ -1041,28 +1082,7 @@ fi
 # own directory ({{config_root}} is the home directory for a global
 # config), so both carriers are read here — and an unresolvable belt is
 # fatal, because clippy would otherwise silently run at its own defaults.
-belt=""
-if [[ -n "${MISE_GLOBAL_CONFIG_FILE:-}" ]]; then
-  belt=$(cd "$(dirname "${MISE_GLOBAL_CONFIG_FILE}")" > /dev/null 2>&1 && pwd) || belt=""
-fi
-if [[ -z "${belt}" || ! -f "${belt}/clippy.toml" ]]; then
-  belt=""
-  for f in "${XDG_CONFIG_HOME:-${HOME}/.config}"/mise/conf.d/*.toml; do
-    [[ -e "${f}" ]] || continue
-    target=$(readlink "${f}" 2> /dev/null) || target=""
-    [[ -n "${target}" ]] || target="${f}"
-    d=$(cd "$(dirname "${target}")" > /dev/null 2>&1 && pwd) || continue
-    if [[ -f "${d}/clippy.toml" ]]; then belt="${d}"; break; fi
-  done
-fi
-if [[ -z "${belt}" ]]; then
-  echo "lint:rust: cannot locate the canon's clippy.toml — the belt did not arrive" >&2
-  echo "  CI: MISE_GLOBAL_CONFIG_FILE unset or the canon checkout is missing" >&2
-  echo "  locally: no ~/.config/mise/conf.d symlink into a canon checkout" >&2
-  echo "  (running clippy without it would lint at clippy's defaults, not the org's)" >&2
-  exit 1
-fi
-export CLIPPY_CONF_DIR="${belt}"
+export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 out=""
 fmt_out=""
 trap 'rm -f "${out}" "${fmt_out}"' EXIT
@@ -1106,7 +1126,7 @@ fi
 # `cargo fmt` reads it from there.
 fmt_out=$(mktemp)
 fmt_status=0
-cargo fmt --all --check -- --config-path "${belt}/rustfmt.toml" > "${fmt_out}" 2>&1 || fmt_status=$?
+cargo fmt --all --check -- --config-path "${ORG_BELT_DIR}/rustfmt.toml" > "${fmt_out}" 2>&1 || fmt_status=$?
 # Both of rustfmt's config failure modes are WARNINGS that exit 0
 # (measured): an unknown key, and a nightly-only option on a stable
 # toolchain. Either formats to a weaker standard behind a green gate, so
@@ -1211,32 +1231,14 @@ if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
   echo "fix:rust: clippy component missing — declare it with the rust pin in mise.toml" >&2
   exit 1
 fi
-belt=""
-if [[ -n "${MISE_GLOBAL_CONFIG_FILE:-}" ]]; then
-  belt=$(cd "$(dirname "${MISE_GLOBAL_CONFIG_FILE}")" > /dev/null 2>&1 && pwd) || belt=""
-fi
-if [[ -z "${belt}" || ! -f "${belt}/clippy.toml" ]]; then
-  belt=""
-  for f in "${XDG_CONFIG_HOME:-${HOME}/.config}"/mise/conf.d/*.toml; do
-    [[ -e "${f}" ]] || continue
-    target=$(readlink "${f}" 2> /dev/null) || target=""
-    [[ -n "${target}" ]] || target="${f}"
-    d=$(cd "$(dirname "${target}")" > /dev/null 2>&1 && pwd) || continue
-    if [[ -f "${d}/clippy.toml" ]]; then belt="${d}"; break; fi
-  done
-fi
-[[ -n "${belt}" ]] || {
-  echo "fix:rust: cannot locate the canon's clippy.toml — the belt did not arrive" >&2
-  exit 1
-}
-export CLIPPY_CONF_DIR="${belt}"
+export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 if ! rustup component list --installed 2> /dev/null | grep -q "^rustfmt"; then
   echo "fix:rust: rustfmt component missing — declare it with the rust pin in mise.toml" >&2
   exit 1
 fi
 # Format first: clippy --fix rewrites source, and handing it canonically
 # formatted input keeps its edits from arriving pre-mangled.
-cargo fmt --all -- --config-path "${belt}/rustfmt.toml"
+cargo fmt --all -- --config-path "${ORG_BELT_DIR}/rustfmt.toml"
 echo "fix:rust: formatted"
 features="${CLIPPY_FEATURES:---all-features}"
 cargo fetch --locked
@@ -3366,7 +3368,7 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
 [[ -n "${files}" ]] || { echo "audit:action-pins: no workflows or actions, skipped"; exit 0; }
-xargs pinact run -fix=false --verify-comment --verify-min-age <<<"${files}"
+xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" -fix=false --verify-comment --verify-min-age <<<"${files}"
 echo "audit:action-pins: ok"
 '''
 
@@ -3923,6 +3925,15 @@ if ! rustup toolchain list 2> /dev/null | grep -q "^${FUZZ_TOOLCHAIN}"; then
   echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
   exit 1
 fi
+# --careful implies -Zbuild-std, which rebuilds the standard library from
+# source and fails without rust-src. Asserted with a remedy rather than
+# discovered halfway through a build, the llvm-tools/clippy pattern.
+if ! rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/null | grep -q "^rust-src"; then
+  echo "audit:fuzz: the nightly lacks rust-src, which --careful needs (it implies -Zbuild-std)" >&2
+  echo "  components ride the pin, so declare them there rather than adding them by hand:" >&2
+  echo "    rust = [\"1.xx.x\", { version = \"${FUZZ_TOOLCHAIN}\", components = \"rust-src\" }]" >&2
+  exit 1
+fi
 secs="${FUZZ_SECONDS:-60}"
 failed=""
 while IFS= read -r target; do
@@ -3948,6 +3959,15 @@ dir = "{{cwd}}"
 # the gate goes green having checked nothing — the vacuous-success failure.
 # This canary asserts the layer itself is present.
 run = '''
+# The belt's own location, exported once by [env] and used by every task
+# that delivers a canon-owned config. Empty means the belt did not
+# arrive, which is this canary's whole job to say (#445).
+if [[ -z "${ORG_BELT_DIR:-}" || ! -f "${ORG_BELT_DIR}/config.toml" ]]; then
+  echo "lint:belt-available: ORG_BELT_DIR is unset or not a canon tree" >&2
+  echo "  CI: MISE_GLOBAL_CONFIG_FILE not set, or the canon checkout is missing" >&2
+  echo "  locally: no ~/.config/mise/conf.d symlink into a canon checkout" >&2
+  exit 1
+fi
 missing=""
 for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq pinact cargo-deny osv-scanner vexctl reuse golangci-lint; do
   command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
@@ -4295,7 +4315,13 @@ done
 lock="mise.lock"
 [[ "${cfg}" == */* ]] && lock="${cfg%/*}/mise.lock"
 [[ -f "${lock}" ]] || { echo "lint:toolbelt-lock: no ${lock}, skipped"; exit 0; }
-keys=$(sed -n "/^\\[tools\\]/,/^\\[/p" "${cfg}" | grep -vE "^(#|\\[|$)" | grep "=" | cut -d= -f1 | tr -d " \"")
+# Anchored at column 0, because a tool may be pinned as an ARRAY of
+# versions — `rust = [{ version = "1.97.1", ... }, "nightly-..."]`, which
+# is how a repo declares a second toolchain for audit:fuzz (#445). taplo
+# indents those entries, so an unanchored `cut -d= -f1` read each one as
+# a tool named `{version` and reported them missing from the lock. Found
+# by release-lab being the first repo to use the form.
+keys=$(sed -n "/^\\[tools\\]/,/^\\[/p" "${cfg}" | grep -E "^\"?[A-Za-z0-9_:./@-]+\"?[[:space:]]*=" | cut -d= -f1 | tr -d " \"")
 # A verification loop that processes zero items and reports success is the
 # check announcing that it checked nothing. Fail instead.
 [[ -n "${keys}" ]] || { echo "lint:toolbelt-lock: no tools parsed from ${cfg}" >&2; exit 1; }

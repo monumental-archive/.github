@@ -1,4 +1,10 @@
-# Repo-specific vocabulary for `typos` (belt task `lint:typos`).
+# The ORG's vocabulary for `typos`, delivered from the belt (#445).
+#
+# `lint:typos` passes this with `-c`, and typos MERGES it with whatever
+# `_typos.toml` the repo has (measured: a word allowed in either passes,
+# a word in neither still fails). So this file carries what is true
+# org-wide and a repo keeps adding its own jargon locally — the one-home
+# rule without taking away the thing that is legitimately per-repo.
 #
 # The belt runs locale `en`, which accepts en-US and en-GB. This file is
 # only for jargon the dictionary cannot know about — not for spelling
