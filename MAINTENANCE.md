@@ -27,6 +27,13 @@ with no change of its own.
   automerge classes, age gates, custom managers. Narrowing automerge or
   removing a manager consumers rely on is breaking.
 
+Also part of the surface: the belt's own tool configs — `mise/clippy.toml`,
+`mise/rustfmt.toml`, `mise/pinact.yaml`, `mise/typos.toml` — and
+`ORG_BELT_DIR`, the `[env]` variable every repo uses to reach them.
+These are CONSUMED LIVE at the pinned SHA, not copied, so a change to one
+lands in every repo on its next pin bump and is breaking in exactly the
+way a workflow change is (#445).
+
 Not part of the surface: `scaffold/` and `workflow-templates/` (copied
 once, never consumed live), `profile/`, community health files, docs,
 and this repository's own gate plumbing (`gate.yml`, `self-release.yml`,

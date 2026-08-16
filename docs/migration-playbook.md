@@ -47,6 +47,14 @@ a fresh session **started in the target repo's checkout**.
 
 ## Phase 2 — scaffold and toolchain (session, in-repo)
 
+- [ ] Do NOT copy a config the belt delivers. Anything only a belt tool
+      reads — clippy, rustfmt, pinact, typos — is passed to the tool from
+      the canon at run time via `ORG_BELT_DIR`, so a repo carries no copy
+      to drift and gets the current one at its pinned SHA (#445). The
+      stubs below are the files something OUTSIDE the belt reads: editors
+      (`.editorconfig`), GitHub (`renovate.json`), the commit-msg hook
+      (`committed.toml`), the release script (`cliff.toml`), or the repo's
+      own identity and policy (licences, `REUSE.toml`, `deny.toml`).
 - [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
       always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the
       runbook's wiring section says so — CITATION.cff is rendered by
@@ -94,8 +102,9 @@ a fresh session **started in the target repo's checkout**.
 
 - [ ] `mise run ci` — fix everything it finds. Belt linters run at max;
       the repo conforms to the tools, never the reverse. Repo-specific
-      exceptions (`_typos.toml` jargon, actionlint config-variables) are
-      added only where a finding is genuinely wrong, each with a comment.
+      exceptions are added only where a finding is genuinely wrong, each
+      with a comment. A repo's own `_typos.toml` still works for domain
+      jargon — typos merges it with the org vocabulary the belt passes.
 - [ ] SHA-pin every `uses:` in existing workflows (the org requires
       full-SHA pins; unpinned workflows fail at startup).
 - [ ] Replace the repo's CI workflow with the six-line caller stub from
