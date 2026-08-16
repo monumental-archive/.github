@@ -232,6 +232,10 @@ jobs:
           rust = tools.get("rust", "")
           pgrx = tools.get("cargo:cargo-pgrx", "")
           auditable = tools.get("cargo:cargo-auditable", "")
+          # A list means a repo declared a second (nightly) toolchain for
+          # audit:fuzz; mise puts the first on PATH and that is the one
+          # this build uses (.github#445).
+          if isinstance(rust, list): rust = rust[0] if rust else ""
           if isinstance(rust, dict): rust = rust.get("version", "")
           print(json.dumps({"rust": rust, "pgrx": pgrx, "auditable": auditable}))
           ')
