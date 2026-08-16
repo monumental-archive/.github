@@ -199,6 +199,45 @@ a number the org invented rather than the tool's maximum, so it stays
 enabled and silent until someone argues a threshold. *Reopen:* a nesting
 depth the org actually wants to refuse.
 
+**Config delivery: the belt hands its own configs to its own tools**
+(#445). A config only a belt tool reads lives in `mise/` and is passed to
+the tool by the task — `CLIPPY_CONF_DIR`, `--config-path`, `--config` —
+rather than copied into every repo. Copies were the older shape, and
+`MAINTENANCE.md` describes their weakness exactly: the scaffold is
+"copied once, never consumed live", so a scaffold improvement reaches no
+existing repo and nothing compares a repo's copy to it. Measured rather
+than feared: release-lab was missing EIGHT scaffold files for five
+releases, found only by running a newer belt against it. The fix is
+deletion, not detection — a repo with no copy has nothing to drift, and
+no check needed writing.
+
+What made it possible: mise has no template for a global config's own
+directory (`{{config_root}}` is the home directory for one), so tasks had
+begun carrying private resolution blocks — six of them. `ORG_BELT_DIR` is
+computed once in the belt's `[env]` via `exec()`, covering both carriers
+(CI's `MISE_GLOBAL_CONFIG_FILE`, the local `conf.d` symlink) in one
+expression, identifying the belt by a file only the belt has so a
+differently-named symlink still resolves. 28ms per invocation.
+
+The boundary, stated once: **who reads the file.** An editor
+(`.editorconfig`, and the language configs whose LSPs read them), GitHub
+(`renovate.json`), a git hook (`committed.toml`, which the commit-msg
+hook runs outside mise's env), the release script (`cliff.toml`), or the
+repo itself (`deny.toml`'s skips, licences, `REUSE.toml`) — those stay in
+the repo. Everything else is delivered. *Reopen:* the language configs
+(ruff, biome, golangci, sqlfluff, yamllint) are the live question — one
+home versus in-editor linting on a fresh checkout.
+
+**Duplicate-version skips now expire** (#445). cargo-deny is silent about
+a `skip`/`skip-tree` entry that matches nothing, so an exception written
+for an upstream lag outlives it by however long nobody looks — the
+failure `#[expect]` exists to prevent. `lint:deny` removes each declared
+skip in turn and re-runs; a variant that still passes proves its entry is
+dead and the gate names it. `mise/deny-skips.py` emits the variants, by
+line-based removal rather than a TOML round trip, because the comment on
+a skip IS the decision and a serialiser drops it. It found a real one on
+its first run: release-lab had a `pgrx` skip subsumed by `pgrx-tests`.
+
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
 release 2025-08-04) as past the abandonment threshold. Verdict:
