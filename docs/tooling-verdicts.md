@@ -219,7 +219,17 @@ computed once in the belt's `[env]` via `exec()`, covering both carriers
 expression, identifying the belt by a file only the belt has so a
 differently-named symlink still resolves. 28ms per invocation.
 
-The boundary, stated once: **who reads the file.** An editor
+The boundary, stated once: **who reads the file, and whose content it
+is.** Nine configs are delivered — clippy, rustfmt, pinact, typos, ruff,
+biome, yamllint, rumdl, sqlfluff. Two stay repo-side for content rather
+than readership: `deny.toml`'s skips describe one tree, and
+`.golangci.yml` names the module path in gci's import prefix (plus
+wrapcheck globs for that module's own packages in stele) — proven by
+delivering it and watching stele's imports go red against a config
+carrying another repo's identity. biome additionally forced a rename:
+it walks the tree and treats any `biome.json` below the root as a nested
+root config that hard-fails, so the belt's copy is `biome-org.json`, a
+name its discovery ignores. Otherwise: An editor
 (`.editorconfig`, and the language configs whose LSPs read them), GitHub
 (`renovate.json`), a git hook (`committed.toml`, which the commit-msg
 hook runs outside mise's env), the release script (`cliff.toml`), or the

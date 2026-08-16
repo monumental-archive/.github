@@ -5,12 +5,16 @@ root at creation or migration time — they are the *entire* per-repo
 footprint of the governance stack.
 
 What is deliberately NOT here: the config of any tool only the belt runs.
-clippy, rustfmt, pinact and typos are configured from `mise/` and passed
+clippy, rustfmt, pinact, typos, ruff, biome, yamllint, rumdl and
+sqlfluff are configured from `mise/` and passed
 to the tool by the task that runs it (`ORG_BELT_DIR`, #445), so a repo
 carries nothing to drift and gets the current rules at the canon SHA it
 pins. Everything below is here because something OUTSIDE the belt reads
 it — an editor, GitHub, a git hook, the release script — or because its
-content is genuinely per-repo, like `deny.toml`'s skips. A repo may still
+CONTENT is genuinely per-repo. `deny.toml`'s skips describe one tree;
+`.golangci.yml` names the module path (gci's import prefix) and, in
+stele, wrapcheck globs for that module's own packages. The belt can
+deliver a config; it cannot invent a repo's identity. A repo may still
 keep its own `_typos.toml` for domain jargon: typos merges it with the
 org vocabulary the belt supplies.
 

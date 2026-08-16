@@ -395,7 +395,7 @@ run = 'git ls-files ":!vendor/**" "*.toml" | xargs taplo fmt'
 [tasks."lint:markdown"]
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
-run = 'files=$(git ls-files ":!vendor/**" "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
+run = 'files=$(git ls-files ":!vendor/**" "*.md" "*.markdown"); if [[ -n "${files}" ]]; then xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" <<<"${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi'
 
 [tasks."lint:sql"]
 description = "SQL lint + format check (sqlfluff, all core rules)"
@@ -411,12 +411,7 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.sql")
 [[ -n "${files}" ]] || { echo "lint:sql: no SQL tracked, skipped"; exit 0; }
-if ! git ls-files --error-unmatch ".sqlfluff" > /dev/null 2>&1; then
-  echo "lint:sql: SQL is tracked but no .sqlfluff is — copy scaffold/.sqlfluff (#403)" >&2
-  echo "  sqlfluff refuses to guess a dialect; the org's is postgres" >&2
-  exit 1
-fi
-xargs sqlfluff lint <<<"${files}"
+xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<<"${files}"
 echo "lint:sql: $(wc -l <<<"${files}" | tr -d " ") file(s) linted"
 '''
 
@@ -430,7 +425,7 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.sql")
 [[ -n "${files}" ]] || { echo "fix:sql: no SQL tracked, skipped"; exit 0; }
-xargs sqlfluff fix --force <<<"${files}"
+xargs sqlfluff fix --config "${ORG_BELT_DIR}/sqlfluff.cfg" --force <<<"${files}"
 '''
 
 [tasks."audit:semver"]
@@ -574,21 +569,14 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.yml" "*.yaml")
 [[ -n "${files}" ]] || { echo "lint:yaml: no YAML tracked, skipped"; exit 0; }
-if ! git ls-files --error-unmatch ".yamllint.yaml" > /dev/null 2>&1 \
-  && ! git ls-files --error-unmatch ".yamllint" > /dev/null 2>&1 \
-  && ! git ls-files --error-unmatch ".yamllint.yml" > /dev/null 2>&1; then
-  echo "lint:yaml: YAML is tracked but no .yamllint.yaml is — copy scaffold/.yamllint.yaml (#403)" >&2
-  echo "  without it yamllint runs its default preset, not the org's full-inventory policy" >&2
-  exit 1
-fi
-xargs yamllint --strict <<<"${files}"
+xargs yamllint -c "${ORG_BELT_DIR}/yamllint.yaml" --strict <<<"${files}"
 echo "lint:yaml: $(wc -l <<<"${files}" | tr -d " ") file(s) linted"
 '''
 
 [tasks."fix:markdown"]
 description = "Auto-fix markdown (rumdl)"
 dir = "{{cwd}}"
-run = 'git ls-files ":!vendor/**" "*.md" "*.markdown" | xargs rumdl check --fix'
+run = 'git ls-files ":!vendor/**" "*.md" "*.markdown" | xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" --fix'
 
 # The JS/TS/JSON layer (#82). Extension list is the set biome parses
 # WITHOUT an experimental flag: html/vue/svelte/astro need
@@ -613,13 +601,7 @@ set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "lint:biome: nothing biome parses is tracked, skipped"; exit 0; }
-if ! git ls-files --error-unmatch "biome.json" > /dev/null 2>&1 \
-  && ! git ls-files --error-unmatch "biome.jsonc" > /dev/null 2>&1; then
-  echo "lint:biome: biome-parseable files are tracked but no biome.json is — copy scaffold/biome.json (#82)" >&2
-  echo "  without it biome silently runs its own recommended defaults, not the org's preset: all" >&2
-  exit 1
-fi
-xargs biome ci --error-on-warnings <<<"${files}"
+xargs biome ci --config-path "${ORG_BELT_DIR}/biome-org.json" --error-on-warnings <<<"${files}"
 '''
 
 [tasks."fix:biome"]
@@ -633,7 +615,7 @@ set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "fix:biome: nothing biome parses is tracked, skipped"; exit 0; }
-xargs biome check --write <<<"${files}"
+xargs biome check --config-path "${ORG_BELT_DIR}/biome-org.json" --write <<<"${files}"
 '''
 
 # Named for the subject, not the tool, matching lint:shell / lint:toml /
@@ -652,16 +634,8 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "lint:python: no Python tracked, skipped"; exit 0; }
-if ! git ls-files --error-unmatch "ruff.toml" > /dev/null 2>&1 \
-  && ! git ls-files --error-unmatch ".ruff.toml" > /dev/null 2>&1 \
-  && ! { git ls-files --error-unmatch "pyproject.toml" > /dev/null 2>&1 \
-         && grep -q "^\[tool\.ruff" pyproject.toml; }; then
-  echo "lint:python: Python is tracked but no ruff config is — copy scaffold/ruff.toml (#82)" >&2
-  echo "  without it ruff runs its default E4/E7/E9/F selection, not the org's select = ALL" >&2
-  exit 1
-fi
-xargs ruff check <<<"${files}"
-xargs ruff format --check <<<"${files}"
+xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" <<<"${files}"
+xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" --check <<<"${files}"
 '''
 
 [tasks."lint:python-target"]
@@ -679,8 +653,14 @@ dir = "{{cwd}}"
 run = '''
 files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "lint:python-target: no Python tracked, skipped"; exit 0; }
-cfg=$(git ls-files ':!vendor/**' "ruff.toml" ".ruff.toml" | head -1)
-[[ -n "${cfg}" ]] || { echo "lint:python-target: no ruff.toml, skipped (lint:python chases it)"; exit 0; }
+# The belt's ruff config, not a repo's: since #445 lint:python passes it
+# with --config, so a repo has none to find and looking for one here made
+# this check skip clean — the vacuous skip it exists to prevent.
+cfg="${ORG_BELT_DIR}/ruff.toml"
+[[ -f "${cfg}" ]] || {
+  echo "lint:python-target: the belt's ruff.toml is missing — the belt did not arrive" >&2
+  exit 1
+}
 target=$(grep -oE '^target-version[[:space:]]*=[[:space:]]*"py[0-9]+"' "${cfg}" | grep -oE 'py[0-9]+')
 [[ -n "${target}" ]] || { echo "lint:python-target: no target-version set, skipped"; exit 0; }
 actual=$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')
@@ -748,8 +728,8 @@ run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n "${files}" ]] || { echo "fix:python: no Python tracked, skipped"; exit 0; }
-xargs ruff check --fix <<<"${files}"
-xargs ruff format <<<"${files}"
+xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" --fix <<<"${files}"
+xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" <<<"${files}"
 '''
 
 [tasks."lint:shell"]
@@ -1297,6 +1277,10 @@ command -v golangci-lint > /dev/null || {
   echo "lint:go: golangci-lint missing from the belt" >&2
   exit 1
 }
+# The one language config that stays repo-side: it names the module path
+# (gci's import prefix) and, in stele, wrapcheck globs for that module's
+# own packages. Per-repo CONTENT, like deny.toml's skips — the belt can
+# deliver a config, not invent a repo's identity (#445).
 if ! git ls-files --error-unmatch ".golangci.yml" > /dev/null 2>&1; then
   echo "lint:go: Go is tracked but no .golangci.yml is — copy scaffold/.golangci.yml (#392)" >&2
   echo "  without it golangci-lint runs its five default linters, not the org's default: all" >&2

@@ -28,12 +28,17 @@ shared lives here and nowhere else. Five layers:
    `workflow-templates/`.
 2. **The toolbelt** (`mise/`): `config.toml` + `mise.lock`, and beside
    them the configs of the tools only the belt runs — `clippy.toml`,
-   `rustfmt.toml`, `pinact.yaml`, `typos.toml` — plus the helpers tasks
-   call. Those configs are DELIVERED, never copied: `ORG_BELT_DIR` is
-   computed once in the belt's `[env]` and every task passes the file to
-   its tool, so no repo carries a second copy that can drift (#445). The
-   test for whether a config lives here is who reads it: a file an editor,
-   GitHub, or a git hook reads stays in the repo. The universal tool
+   `rustfmt.toml`, `pinact.yaml`, `typos.toml`, `ruff.toml`,
+   `biome-org.json`, `yamllint.yaml`, `rumdl.toml`, `sqlfluff.cfg` —
+   plus the helpers tasks call. Those configs are DELIVERED, never
+   copied: `ORG_BELT_DIR` is computed once in the belt's `[env]` and
+   every task passes the file to its tool, so no repo carries a second
+   copy that can drift (#445). The
+   test for whether a config lives here is who reads it and whose it is:
+   a file GitHub, a git hook or the release script reads stays in the
+   repo, and so does one whose CONTENT is per-repo — `deny.toml`'s skips,
+   `.golangci.yml`'s module path. The belt delivers a config; it cannot
+   invent a repo's identity. The universal tool
    layer every repo and every machine consumes — exact pins, per-platform
    checksums, GitHub attestations. Consumed locally via a
    `~/.config/mise/conf.d` symlink and in CI via `MISE_GLOBAL_CONFIG_FILE`.
