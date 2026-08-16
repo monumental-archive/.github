@@ -946,7 +946,7 @@ cargo deny check advisories
 '''
 
 [tasks."lint:rust"]
-description = "Rust lint (clippy: every group, restriction minus named contradictions); repos without Cargo.toml skip clean"
+description = "Rust lint + format check (clippy at every group, restriction minus named contradictions; rustfmt at its stable maximum)"
 dir = "{{cwd}}"
 # The Rust half of the language layer (#445). clippy compiles PACKAGES
 # through cargo, not a file list, so `git ls-files` cannot feed it — the
@@ -1026,10 +1026,12 @@ if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
 fi
 # The knobs are org policy, so a repo-local clippy.toml is a silent
 # lowering of them — the unexplained .gitleaks.toml ruling.
-local_conf=$(git ls-files "clippy.toml" ".clippy.toml" "*/clippy.toml" "*/.clippy.toml")
+local_conf=$(git ls-files "clippy.toml" ".clippy.toml" "*/clippy.toml" "*/.clippy.toml" \
+  "rustfmt.toml" ".rustfmt.toml" "*/rustfmt.toml" "*/.rustfmt.toml")
 if [[ -n "${local_conf}" ]]; then
-  echo "lint:rust: repo-local clippy configuration is not the org's:${local_conf}" >&2
-  echo "  the knobs live in the canon's mise/clippy.toml and arrive through CLIPPY_CONF_DIR" >&2
+  echo "lint:rust: repo-local Rust tool configuration is not the org's:${local_conf}" >&2
+  echo "  the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml," >&2
+  echo "  delivered through CLIPPY_CONF_DIR and rustfmt's --config-path" >&2
   echo "  a setting this repo genuinely needs is argued into the canon, not kept locally" >&2
   exit 1
 fi
@@ -1061,6 +1063,65 @@ if [[ -z "${belt}" ]]; then
   exit 1
 fi
 export CLIPPY_CONF_DIR="${belt}"
+out=""
+fmt_out=""
+trap 'rm -f "${out}" "${fmt_out}"' EXIT
+# The rustfmt leg, first because it is seconds against clippy's minutes.
+# rustfmt is a rustup component of the repo's own pin exactly like clippy,
+# asserted with a remedy and never installed.
+if ! rustup component list --installed 2> /dev/null | grep -q "^rustfmt"; then
+  echo "lint:rust: rustfmt component missing — declare it with the rust pin in mise.toml:" >&2
+  echo "  rust = { version = \\"1.xx.x\\", components = \\"clippy,rustfmt,llvm-tools\\" }" >&2
+  exit 1
+fi
+# Formatting suppression, held to the same standard as clippy's — except
+# that rustfmt's attribute takes no reason and has no `#[expect]`
+# analogue, so it can never retire itself. A whole-file `#![rustfmt::skip]`
+# is refused outright, and a narrow one states why in the marker-comment
+# idiom `lint:capability-boundary` already uses.
+skips=""
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  if grep -qE "^[[:space:]]*#!\\[rustfmt::skip" "${f}"; then
+    skips="${skips} ${f}(whole-file)"
+    continue
+  fi
+  if grep -qE "^[[:space:]]*#\\[rustfmt::skip" "${f}" && ! grep -q "rustfmt-skip:" "${f}"; then
+    skips="${skips} ${f}(no marker)"
+  fi
+done <<< "$(git ls-files ':!vendor/**' "*.rs")"
+if [[ -n "${skips}" ]]; then
+  echo "lint:rust: formatting suppressed without a written decision:${skips}" >&2
+  echo "  #![rustfmt::skip] exempts an entire file — never allowed" >&2
+  echo "  #[rustfmt::skip] must carry a '// rustfmt-skip: <why>' marker above it" >&2
+  echo "  rustfmt has no #[expect] analogue, so the comment is the only thing a reviewer sees" >&2
+  exit 1
+fi
+# `cargo fmt` rather than a tracked-file list — the lint:go deviation with
+# the argument running the other way. rustfmt walks each target's module
+# tree, so a .rs file no crate references is never visited; but a file no
+# crate references is not a build input either, and rustc cannot see it
+# any more than rustfmt can. Feeding `git ls-files` would also mean
+# choosing an edition here, when Cargo.toml states it per crate and
+# `cargo fmt` reads it from there.
+fmt_out=$(mktemp)
+fmt_status=0
+cargo fmt --all --check -- --config-path "${belt}/rustfmt.toml" > "${fmt_out}" 2>&1 || fmt_status=$?
+# Both of rustfmt's config failure modes are WARNINGS that exit 0
+# (measured): an unknown key, and a nightly-only option on a stable
+# toolchain. Either formats to a weaker standard behind a green gate, so
+# the warnings are the check and the exit code is only half of it.
+if grep -q "^Warning" "${fmt_out}"; then
+  cat "${fmt_out}" >&2
+  echo "lint:rust: rustfmt warned — an ignored option means a weaker format, silently" >&2
+  exit 1
+fi
+if [[ ${fmt_status} -ne 0 ]]; then
+  cat "${fmt_out}" >&2
+  echo "lint:rust: formatting differs from the org's — run 'mise run fix:rust'" >&2
+  exit 1
+fi
+echo "lint:rust: formatting clean"
 # The one suppression clippy itself cannot forbid: a crate-level allow of
 # a whole group silences every flag above and exits 0 (measured — even
 # `-F` only warns about it). A narrow, reasoned
@@ -1096,7 +1157,6 @@ for m in ${CLIPPY_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
 features="${CLIPPY_FEATURES:---all-features}"
 cargo fetch --locked
 out=$(mktemp)
-trap 'rm -f "${out}"' EXIT
 status=0
 # shellcheck disable=SC2086
 cargo clippy --workspace --all-targets ${features} --locked ${excludes} -- \
@@ -1170,6 +1230,14 @@ fi
   exit 1
 }
 export CLIPPY_CONF_DIR="${belt}"
+if ! rustup component list --installed 2> /dev/null | grep -q "^rustfmt"; then
+  echo "fix:rust: rustfmt component missing — declare it with the rust pin in mise.toml" >&2
+  exit 1
+fi
+# Format first: clippy --fix rewrites source, and handing it canonically
+# formatted input keeps its edits from arriving pre-mangled.
+cargo fmt --all -- --config-path "${belt}/rustfmt.toml"
+echo "fix:rust: formatted"
 features="${CLIPPY_FEATURES:---all-features}"
 cargo fetch --locked
 # shellcheck disable=SC2086

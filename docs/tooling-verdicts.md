@@ -47,6 +47,7 @@ honestly blocked on.
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus nine named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml` — plus `fix:rust` |
+| rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 
 **clippy, and the three things standing it up settled** (#445). The
 belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
@@ -95,6 +96,72 @@ hard error, leaving `#[expect]`, which errors the moment it stops being
 needed. `lint:rust` additionally greps tracked sources for crate-level
 group suppression, which is policing rather than construction, and is
 named as such.
+
+**rustfmt, and why its maximum is smaller than it looks** (#445). The
+format half of `lint:rust`, sharing the task with clippy on the
+lint:go/lint:python precedent — one language, one subject-named task.
+
+*The ceiling is stable's, and that is the whole design.* Nearly every
+rustfmt option that would tighten anything is nightly-only:
+`error_on_line_overflow`, `error_on_unformatted`, `wrap_comments`,
+`comment_width`, `format_strings`, `format_code_in_doc_comments`,
+`normalize_comments`, `normalize_doc_attributes`, `imports_granularity`,
+`group_imports`, `reorder_impl_items`, `format_macro_matchers`,
+`condense_wildcard_suffixes` — and `required_version`, which would have
+pinned the formatter itself. What remains stable is mostly already at
+maximum by default, because rustfmt's defaults *are* the Rust Style
+Guide. So the org's config is short by necessity, not by restraint.
+
+*Two fail-open surfaces, both measured, both turned into checks.* An
+unknown key in `rustfmt.toml` is a warning with **exit 0**, and a
+nightly-only option on a stable toolchain is a warning with **exit 0**
+(`Warning: can't set wrap_comments = true, unstable features are only
+available in nightly channel`). Either one formats to a weaker standard
+behind a green gate, so `lint:rust` fails on any rustfmt warning rather
+than trusting the exit code. This also caught `hex_literal_case`, which
+the online reference lists as stable and 1.97.1 rejects — the reference
+documents master, not any released toolchain, exactly as it did for the
+clippy config. The option is wanted and blocked until it is stable in a
+toolchain the org pins.
+
+*`style_edition = "2024"` is the one setting that fixes a defect rather
+than tightening taste.* rustfmt invoked directly defaults to style
+edition 2015 while `cargo fmt` infers it from Cargo.toml, so the same
+file formats two ways depending on how it was called — upstream's own
+README warns about it. Pinned, both agree, and every repo formats to the
+current Style Guide whatever edition its crate declares.
+
+*Suppression is held to clippy's standard, minus the mechanism.*
+`#[rustfmt::skip]` takes no reason and has no `#[expect]` analogue, so it
+can never retire itself. A whole-file `#![rustfmt::skip]` is refused
+outright; a narrow one must carry a `// rustfmt-skip: <why>` marker, the
+idiom `lint:capability-boundary` already uses. All four states — a
+formatting diff, a whole-file skip, an unmarked skip, and a marked one —
+were run against a throwaway crate before this landed, because a check
+that cannot go red is a claim.
+
+*`cargo fmt` rather than tracked files*, which inverts the belt's usual
+rule. rustfmt walks each target's module tree, so a `.rs` file no crate
+references is never visited — but such a file is not a build input
+either, and rustc cannot see it any more than rustfmt can. Feeding
+`git ls-files` would additionally mean choosing an edition in the belt,
+when Cargo.toml states it per crate and `cargo fmt` reads it there.
+
+**The nightly question, open and deliberately not answered here.**
+Adopting a pinned nightly would unlock rustfmt's unstable options and,
+more importantly, cargo-fuzz's sanitizers — the actual gap behind "already
+on the belt, not at maximum" (#445). mise can pin a dated nightly
+(`rust = { version = "nightly-2026-07-20", ... }` installs and locks), so
+determinism survives; a bare `nightly` would not, and is excluded by the
+gate rule. The two tools pull differently, though. Fuzzing is per-repo
+and belongs to `audit:fuzz` on the cron, so nightly there is opt-in by
+the repos that fuzz and never touches the gate — which also lets
+`lint:fuzz-build` become a lint that only reads (#374). A formatter is
+org-wide-or-nothing: a half-nightly org formats to two standards with
+nothing red. Costs on both: a dated nightly is not Renovate-bumpable, so
+it would be the org's only hand-maintained version pin. *Reopen:* the
+cargo-fuzz standup, where the payoff is finding memory bugs rather than
+wrapping comments.
 
 **Two gaps recorded rather than closed.** clippy cannot be belt-pinned:
 it is a rustup component of each repo's own toolchain, so repos can in
