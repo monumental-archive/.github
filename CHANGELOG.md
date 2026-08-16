@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.31.0](https://github.com/monumental-archive/.github/compare/v1.30.0...v1.31.0) - 2026-08-16
+
+### Added
+
+- deliver tool configs from the canon, not copies ([#451](https://github.com/monumental-archive/.github/pull/451))
+
 ## [1.30.0](https://github.com/monumental-archive/.github/compare/v1.29.1...v1.30.0) - 2026-08-16
 
 ### Added
