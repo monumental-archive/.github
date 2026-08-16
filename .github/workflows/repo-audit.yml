@@ -94,12 +94,29 @@ jobs:
           version: 2026.8.3
           cache: false
 
-      # Bounded libFuzzer runs on the repo's pinned stable toolchain
-      # (sanitizer none — the lint:fuzz-build rationale). Time-bound and
-      # non-deterministic, so it lives here, never the gate (#316). A
-      # repo with no fuzz/ skips clean.
+      # Bounded libFuzzer runs under AddressSanitizer — cargo-fuzz's own
+      # default — on the nightly the repo declares as FUZZ_TOOLCHAIN
+      # (#445). Time-bound and non-deterministic, so it lives here, never
+      # the gate (#316); the gate's lint:fuzz-build still proves the
+      # targets compile, on stable. A repo with no fuzz/ skips clean.
       - name: Run every fuzz target for a bounded interval
         run: mise run audit:fuzz
+
+      # A crash the cron cannot hand back is a crash nobody can act on:
+      # libFuzzer writes the reproducing input to fuzz/artifacts/ and the
+      # runner is ephemeral, so before this the audit reported a path on a
+      # machine that no longer existed. Failure only — a clean run has
+      # nothing to keep, and the corpus is deliberately NOT uploaded:
+      # it is human-curated in-tree, and shipping machine-generated inputs
+      # back would invite merging what nobody reviewed (#445).
+      - name: Keep the reproducer when a target crashes
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ github.run_id }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
 
   go-vulns:
     name: audit / go vulnerabilities

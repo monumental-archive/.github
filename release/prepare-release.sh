@@ -88,6 +88,18 @@ if [[ ${source} == "cargo-workspace" ]]; then
     cargo update --workspace --offline 2> /dev/null || cargo update --workspace
     files="${files} Cargo.lock"
   fi
+  # fuzz/ is its own cargo workspace by cargo-fuzz convention, with its own
+  # lockfile that path-depends on the crate being released. Left alone it
+  # names the superseded version after every release, which is what made
+  # lint:fuzz-build rewrite it on the next local gate run — four releases of
+  # drift accumulated in the lab before anyone looked (#374). The lint now
+  # refuses a stale fuzz lockfile instead of silently repairing it, so
+  # refreshing it here is what keeps the Release PR green.
+  if [[ -f fuzz/Cargo.lock ]]; then
+    cargo update --workspace --manifest-path fuzz/Cargo.toml --offline 2> /dev/null \
+      || cargo update --workspace --manifest-path fuzz/Cargo.toml
+    files="${files} fuzz/Cargo.lock"
+  fi
   cargo metadata --format-version 1 --no-deps > /dev/null
 fi
 
