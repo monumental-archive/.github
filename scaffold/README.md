@@ -2,7 +2,17 @@
 
 The canonical stubs a repo needs to join the org. Copy these to the repo
 root at creation or migration time — they are the *entire* per-repo
-footprint of the governance stack:
+footprint of the governance stack.
+
+What is deliberately NOT here: the config of any tool only the belt runs.
+clippy, rustfmt, pinact and typos are configured from `mise/` and passed
+to the tool by the task that runs it (`ORG_BELT_DIR`, #445), so a repo
+carries nothing to drift and gets the current rules at the canon SHA it
+pins. Everything below is here because something OUTSIDE the belt reads
+it — an editor, GitHub, a git hook, the release script — or because its
+content is genuinely per-repo, like `deny.toml`'s skips. A repo may still
+keep its own `_typos.toml` for domain jargon: typos merges it with the
+org vocabulary the belt supplies.
 
 - `renovate.json` — extends the org preset
 - `lefthook.yml` — pulls the org git hooks by remote

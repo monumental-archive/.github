@@ -57,7 +57,9 @@ The policy, maximally defensible:
   forces a duplicate, the exit is a written `[[bans.skip]]` entry citing
   the upstream issue: an exception with a name and a reason, in one
   place, exactly like the advisory `ignore` entries that cite their VEX
-  statements.
+  statements. Since #445 that exception also EXPIRES: `lint:deny` removes
+  each skip in turn and re-runs, so an entry that has stopped doing
+  anything fails the gate by name rather than sitting there forever.
 
   **This file is the org's only statement of that policy.**
   `clippy::multiple_crate_versions` (cargo group) asserts the same rule

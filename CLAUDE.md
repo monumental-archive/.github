@@ -26,7 +26,14 @@ shared lives here and nowhere else. Five layers:
    community health files (SECURITY, CONTRIBUTING, CODE_OF_CONDUCT,
    SUPPORT, issue forms, PR template), `profile/README.md`, and
    `workflow-templates/`.
-2. **The toolbelt** (`mise/config.toml` + `mise.lock`): the universal tool
+2. **The toolbelt** (`mise/`): `config.toml` + `mise.lock`, and beside
+   them the configs of the tools only the belt runs — `clippy.toml`,
+   `rustfmt.toml`, `pinact.yaml`, `typos.toml` — plus the helpers tasks
+   call. Those configs are DELIVERED, never copied: `ORG_BELT_DIR` is
+   computed once in the belt's `[env]` and every task passes the file to
+   its tool, so no repo carries a second copy that can drift (#445). The
+   test for whether a config lives here is who reads it: a file an editor,
+   GitHub, or a git hook reads stays in the repo. The universal tool
    layer every repo and every machine consumes — exact pins, per-platform
    checksums, GitHub attestations. Consumed locally via a
    `~/.config/mise/conf.d` symlink and in CI via `MISE_GLOBAL_CONFIG_FILE`.
@@ -51,7 +58,9 @@ shared lives here and nowhere else. Five layers:
    recorded and explained in that doc; deliberately no JSON mirror),
    `security/` (the enforced org security configuration), `settings/`
    (repo baseline + check/apply
-   script), `scaffold/` (the four stubs a new repo copies), and
+   script), `scaffold/` (the stubs a new repo copies — the files
+   something OUTSIDE the belt reads, so a belt-delivered config is
+   deliberately absent from it), and
    `default.json` (the org Renovate preset; this repo's own config is
    `renovate.json`).
 
