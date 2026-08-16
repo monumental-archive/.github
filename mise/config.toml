@@ -921,6 +921,43 @@ command -v cargo > /dev/null || {
 }
 cargo fetch --locked
 cargo deny check bans licenses sources
+# An exception that outlives its cause is the failure `#[expect]` was
+# chosen to prevent everywhere else, and cargo-deny does not have that
+# property: a `skip`/`skip-tree` entry matching nothing is silent
+# (measured). So necessity is tested rather than assumed — each declared
+# skip is removed in turn and the check re-run. A variant that still
+# passes proves its entry does nothing, and the gate names it. The
+# helper resolves from the belt, which is where the org's policy lives;
+# a repo running without the canon cannot quietly skip this.
+helper=""
+if [[ -n "${MISE_GLOBAL_CONFIG_FILE:-}" ]]; then
+  helper="$(dirname "${MISE_GLOBAL_CONFIG_FILE}")/deny-skips.py"
+fi
+if [[ ! -f "${helper}" ]]; then
+  for f in "${XDG_CONFIG_HOME:-${HOME}/.config}"/mise/conf.d/*.toml; do
+    [[ -e "${f}" ]] || continue
+    target=$(readlink "${f}" 2> /dev/null) || target="${f}"
+    d=$(cd "$(dirname "${target}")" > /dev/null 2>&1 && pwd) || continue
+    if [[ -f "${d}/deny-skips.py" ]]; then helper="${d}/deny-skips.py"; break; fi
+  done
+fi
+[[ -f "${helper}" ]] || {
+  echo "lint:deny: cannot locate the canon's deny-skips.py — the belt did not arrive" >&2
+  exit 1
+}
+stale=""
+while IFS=$'\t' read -r name variant; do
+  [[ -n "${name}" ]] || continue
+  if cargo deny --config "${variant}" check bans > /dev/null 2>&1; then
+    stale="${stale} ${name}"
+  fi
+done < <(python3 "${helper}" deny.toml)
+if [[ -n "${stale}" ]]; then
+  echo "lint:deny: duplicate-version skip no longer needed:${stale}" >&2
+  echo "  the check passes without it, so the upstream lag it was written for is over" >&2
+  echo "  delete the entry from deny.toml — an exception that outlives its cause is not a decision" >&2
+  exit 1
+fi
 '''
 
 [tasks."audit:deny"]
@@ -3923,6 +3960,15 @@ if ! rustup toolchain list 2> /dev/null | grep -q "^${FUZZ_TOOLCHAIN}"; then
   echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
   exit 1
 fi
+# --careful implies -Zbuild-std, which rebuilds the standard library from
+# source and fails without rust-src. Asserted with a remedy rather than
+# discovered halfway through a build, the llvm-tools/clippy pattern.
+if ! rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/null | grep -q "^rust-src"; then
+  echo "audit:fuzz: the nightly lacks rust-src, which --careful needs (it implies -Zbuild-std)" >&2
+  echo "  components ride the pin, so declare them there rather than adding them by hand:" >&2
+  echo "    rust = [\"1.xx.x\", { version = \"${FUZZ_TOOLCHAIN}\", components = \"rust-src\" }]" >&2
+  exit 1
+fi
 secs="${FUZZ_SECONDS:-60}"
 failed=""
 while IFS= read -r target; do
@@ -4295,7 +4341,13 @@ done
 lock="mise.lock"
 [[ "${cfg}" == */* ]] && lock="${cfg%/*}/mise.lock"
 [[ -f "${lock}" ]] || { echo "lint:toolbelt-lock: no ${lock}, skipped"; exit 0; }
-keys=$(sed -n "/^\\[tools\\]/,/^\\[/p" "${cfg}" | grep -vE "^(#|\\[|$)" | grep "=" | cut -d= -f1 | tr -d " \"")
+# Anchored at column 0, because a tool may be pinned as an ARRAY of
+# versions — `rust = [{ version = "1.97.1", ... }, "nightly-..."]`, which
+# is how a repo declares a second toolchain for audit:fuzz (#445). taplo
+# indents those entries, so an unanchored `cut -d= -f1` read each one as
+# a tool named `{version` and reported them missing from the lock. Found
+# by release-lab being the first repo to use the form.
+keys=$(sed -n "/^\\[tools\\]/,/^\\[/p" "${cfg}" | grep -E "^\"?[A-Za-z0-9_:./@-]+\"?[[:space:]]*=" | cut -d= -f1 | tr -d " \"")
 # A verification loop that processes zero items and reports success is the
 # check announcing that it checked nothing. Fail instead.
 [[ -n "${keys}" ]] || { echo "lint:toolbelt-lock: no tools parsed from ${cfg}" >&2; exit 1; }

@@ -61,3 +61,17 @@ max_line_length = 130
 # Python need no row here: rumdl and ruff already cap them.
 [*.sh]
 max_line_length = 130
+
+# A fuzzing corpus is machine-generated binary input, not source: the
+# files have no encoding, no line endings and no final newline by
+# construction, and libFuzzer rewrites them on every run. Checking them
+# as text fails a repo for the shape of its own evidence — the Go
+# raw-string lesson (#403, #421) in a second costume. Scoped to the one
+# path cargo-fuzz owns, so nothing else loses the rules (#445).
+[fuzz/corpus/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset

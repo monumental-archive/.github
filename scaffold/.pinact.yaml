@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/suzuki-shunsuke/pinact/refs/heads/main/json-schema/pinact.json
+#
+# COPY THIS VERBATIM into any repo that references the signer or pins a
+# first-party action — which is every release-capable repo in the org.
+# Both rules below are org policy, not repo preference, and without them
+# `lint:action-pins` fails on a reference that is permanently correct
+# (found conforming release-lab, canon #445): the canon carried this file
+# and the scaffold did not, so a consumer hit the wall on its next canon
+# bump. It is a copied file rather than a belt-delivered one only because
+# pinact is invoked in three tasks and locating the belt in each would
+# mean a sixth copy of the same resolution block — recorded as the gap it
+# is in docs/tooling-verdicts.md, not as a preference.
+#
+# pinact enforces the half of the org's pinning convention nothing else
+# did. CLAUDE.md requires every `uses:` to carry "a full commit SHA with a
+# trailing version comment"; zizmor's unpinned-uses proves the SHA and is
+# blind to the comment, and lint:canon-pins reads canon references only.
+# The comment is what a human and Renovate both read to judge whether a
+# pin is current, so an absent or untrue one is a real defect.
+---
+version: 3
+
+min_age:
+  value: 7
+
+# The org's seven-day release-age floor, on the layer that lacked it.
+# It lives HERE rather than on audit:action-pins' command line because
+# pinact ranks a CLI --min-age above any rule, which would make the
+# first-party exemption below unreachable — found by the audit reddening
+# on the canon's own self-pin the day after v1.25.0 shipped.
+
+rules:
+  # The signer is pinned by immutable SHA and commented `# main`, and that
+  # is its permanent correct state, not a gap. monumental-archive/signer
+  # is never published — no tags, no releases, by design — so there is no
+  # version for a comment to name and never will be. The SHA is the whole
+  # identity; `# main` says only which line it came from.
+  #
+  # Scoped as narrowly as the tool allows. `VersionComment` is empty
+  # here — pinact does not count `# main` as a version comment, since
+  # "main" is not a version, which is exactly why it errors. So the
+  # condition exempts the one situation that is permanent (a signer
+  # reference with no version to name) and nothing else: a signer
+  # reference that ever carried a real version comment would fall
+  # straight back under the check, comment truthfulness included.
+  - ignore: true
+    conditions:
+      - expr: |
+          ActionName matches "^monumental-archive/signer/" && VersionComment == ""
+
+  # First-party references are exempt from the release-age floor, because
+  # the org deliberately fans them out at zero age: a canon release is
+  # meant to reach every consumer immediately, which is the whole point of
+  # the Renovate zero-age rule for `monumental-archive/**`. Without this
+  # the audit reds every Monday after a canon release — caught exactly
+  # that way, flagging the canon's own v1.25.0 self-pin the day after it
+  # shipped. Scoped to min_age only: first-party pins still must be SHAs
+  # and still must carry truthful version comments.
+  - min_age: 0
+    conditions:
+      - expr: |
+          ActionRepoOwner == "monumental-archive"
+...
