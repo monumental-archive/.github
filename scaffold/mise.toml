@@ -29,7 +29,12 @@ lockfile = true
 # hand — the one in the org that is. cargo-fuzz itself is a repo-side
 # build input: no upstream binaries and no aqua package, so the cargo:
 # backend builds it with the toolchain above (the govulncheck pattern).
-# rust = ["1.xx.x", "nightly-YYYY-MM-DD"]
+# rust-src on the nightly is not optional: audit:fuzz runs `--careful`,
+# which implies -Zbuild-std and rebuilds the standard library from source.
+# rust = [
+#   { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" },
+#   { version = "nightly-YYYY-MM-DD", components = "rust-src" },
+# ]
 # "cargo:cargo-fuzz" = "0.13.2"
 # Go repos: the toolchain, plus govulncheck as a build input (no
 # upstream binaries, no aqua package — the go: backend builds it from a
