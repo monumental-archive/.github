@@ -1020,7 +1020,7 @@ command -v cargo > /dev/null || {
 # toolchain (measured twice on the lab's v0.18.0 release PR, #117).
 if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
   echo "lint:rust: clippy component missing — declare it with the rust pin in mise.toml:" >&2
-  echo "  rust = { version = \\"1.xx.x\\", components = \\"clippy,rustfmt,llvm-tools\\" }" >&2
+  echo "  rust = { version = \"1.xx.x\", components = \"clippy,rustfmt,llvm-tools\" }" >&2
   echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
   exit 1
 fi
@@ -1071,7 +1071,7 @@ trap 'rm -f "${out}" "${fmt_out}"' EXIT
 # asserted with a remedy and never installed.
 if ! rustup component list --installed 2> /dev/null | grep -q "^rustfmt"; then
   echo "lint:rust: rustfmt component missing — declare it with the rust pin in mise.toml:" >&2
-  echo "  rust = { version = \\"1.xx.x\\", components = \\"clippy,rustfmt,llvm-tools\\" }" >&2
+  echo "  rust = { version = \"1.xx.x\", components = \"clippy,rustfmt,llvm-tools\" }" >&2
   exit 1
 fi
 # Formatting suppression, held to the same standard as clippy's — except
@@ -1140,7 +1140,7 @@ if [[ -n "${blanket}" ]]; then
   echo "lint:rust: crate-level suppression of a whole clippy group:${blanket}" >&2
   echo "  a group allow silences every level this task sets and the gate still goes green" >&2
   echo "  suppress one lint at the narrowest scope instead, with a reason:" >&2
-  echo "    #[expect(clippy::the_lint, reason = \\"why this code is right as written\\")]" >&2
+  echo "    #[expect(clippy::the_lint, reason = \"why this code is right as written\")]" >&2
   echo "  an expect fails once it stops being needed; an allow rots silently" >&2
   exit 1
 fi
@@ -3323,8 +3323,26 @@ if [[ ! -f fuzz/Cargo.lock ]]; then
   echo "lint:fuzz-build: fuzz/Cargo.lock is not committed — an unlocked fuzz build is not deterministic" >&2
   exit 1
 fi
+# A LINT MUST NOT WRITE (#374). `fuzz/` is its own cargo workspace with its
+# own lockfile that path-depends on the parent crate, so `cargo fuzz build`
+# re-resolves and REWRITES fuzz/Cargo.lock whenever the parent version has
+# moved — silently repairing the very thing it is inspecting, which means a
+# stale fuzz lockfile was structurally unreportable. cargo-fuzz exposes no
+# --locked of its own, so the staleness is proven first with a command that
+# cannot write: `cargo metadata --locked` fails if the lockfile would have
+# to change. Only once it is proven current does the build run, and a build
+# over a current lockfile has nothing to rewrite. Measured on release-lab,
+# where the committed lock named lab-core 0.24.1 against a 0.24.4
+# workspace — four releases of drift that this check turns red.
+if ! cargo metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null 2>&1; then
+  echo "lint:fuzz-build: fuzz/Cargo.lock is stale — it would be rewritten by the build" >&2
+  echo "  fuzz/ is its own workspace: its lock names the parent crate's version and" >&2
+  echo "  the release script refreshes it (release/prepare-release.sh)" >&2
+  echo "  fix locally with: cargo update --workspace --manifest-path fuzz/Cargo.toml" >&2
+  exit 1
+fi
 cargo fuzz build -s none
-echo "lint:fuzz-build: $(cargo fuzz list | wc -l | tr -d ' ') target(s) build"
+echo "lint:fuzz-build: $(cargo fuzz list | wc -l | tr -d ' ') target(s) build, lockfile current"
 '''
 
 [tasks."audit:action-pins"]
@@ -3863,29 +3881,63 @@ echo "audit:signer-surface: ${n} declared type(s), allowlist and callers agree"
 [tasks."audit:fuzz"]
 description = "Run every fuzz target for a bounded interval (network/time-bound, never the gate)"
 dir = "{{cwd}}"
-# The runtime half (#316): each target runs under libFuzzer for a
-# bounded wall-clock slice on the pinned stable toolchain (sanitizer
-# none — see lint:fuzz-build for why). A crash or panic fails the
-# audit with the reproducer path in the log; the in-tree corpus
-# (fuzz/corpus/<target>/, committed) seeds each run and grows locally —
-# commit interesting finds deliberately, the cron never pushes.
-# audit:*, structurally: runtime fuzzing is time-bound and
-# non-deterministic, exactly what the deterministic gate excludes.
+# The runtime half (#316), at cargo-fuzz's own defaults since #445:
+# AddressSanitizer, which is what `-s address` means and what the tool
+# does when you say nothing. The org ran `-s none` until 2026-08-16 —
+# below the tool's DEFAULT, not merely below its maximum — because ASan
+# needs `-Zsanitizer=address` and so a nightly toolchain, and the gate
+# must not need one. Splitting the two halves settles it: the gate's
+# lint:fuzz-build still proves targets COMPILE on the pinned stable with
+# no sanitizer, while the sanitized run lives here, on the cron, outside
+# the gate, in the repos that actually fuzz. `--careful` comes with it:
+# std rebuilt with debug assertions and extra const-UB and init checks.
+#
+# WHAT THIS IS AND IS NOT. A bounded weekly run from a committed corpus
+# is a smoke test, not a proof — fuzzing is sampling, and no arrangement
+# of it is correct by construction. A campaign that accumulates would be
+# standing infrastructure, which the org does not run by choice, so the
+# corpus (fuzz/corpus/<target>/, committed) is curated by humans and the
+# cron never pushes. docs/best-practices.md answers `dynamic_analysis`
+# accordingly and refuses to claim it for a CI gate.
+#
+# The nightly is DECLARED by the repo, never discovered: a task that used
+# ASan where a nightly happened to exist and fell back silently otherwise
+# would vary its enforcement by machine, which is the failure this belt
+# closes everywhere else.
 run = '''
 [[ -d fuzz && -f fuzz/Cargo.toml ]] || { echo "audit:fuzz: no fuzz/, skipped"; exit 0; }
 command -v cargo-fuzz > /dev/null || { echo "audit:fuzz: cargo-fuzz missing (pin cargo:cargo-fuzz in mise.toml)" >&2; exit 1; }
+if [[ -z "${FUZZ_TOOLCHAIN:-}" ]]; then
+  echo "audit:fuzz: FUZZ_TOOLCHAIN is not declared — sanitized fuzzing needs a nightly toolchain" >&2
+  echo "  AddressSanitizer is cargo-fuzz's default and needs -Zsanitizer, so stable cannot run it" >&2
+  echo "  declare BOTH toolchains in this repo's mise.toml (mise holds and locks both):" >&2
+  echo "    [tools]" >&2
+  echo "    rust = [\"1.xx.x\", \"nightly-YYYY-MM-DD\"]" >&2
+  echo "    [env]" >&2
+  echo "    FUZZ_TOOLCHAIN = \"nightly-YYYY-MM-DD\"" >&2
+  echo "  a dated nightly, never bare 'nightly' — a moving channel is not a pinned input" >&2
+  exit 1
+fi
+if ! rustup toolchain list 2> /dev/null | grep -q "^${FUZZ_TOOLCHAIN}"; then
+  echo "audit:fuzz: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
+  echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
+  exit 1
+fi
 secs="${FUZZ_SECONDS:-60}"
 failed=""
 while IFS= read -r target; do
   [[ -n "${target}" ]] || continue
-  echo "audit:fuzz: ${target} for ${secs}s"
-  cargo fuzz run -s none "${target}" -- -max_total_time="${secs}" || failed="${failed} ${target}"
+  echo "audit:fuzz: ${target} for ${secs}s under AddressSanitizer (${FUZZ_TOOLCHAIN})"
+  RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo fuzz run -s address --careful "${target}" \
+    -- -max_total_time="${secs}" || failed="${failed} ${target}"
 done < <(cargo fuzz list)
 if [[ -n "${failed}" ]]; then
-  echo "audit:fuzz: crashing target(s):${failed} — reproducers under fuzz/artifacts/" >&2
+  echo "audit:fuzz: crashing target(s):${failed}" >&2
+  echo "  the reproducer is fuzz/artifacts/<target>/crash-<hash>, uploaded by repo-audit.yml" >&2
+  echo "  replay it with: cargo fuzz run <target> fuzz/artifacts/<target>/crash-<hash>" >&2
   exit 1
 fi
-echo "audit:fuzz: all targets ran ${secs}s clean"
+echo "audit:fuzz: all targets ran ${secs}s clean under ASan"
 '''
 
 [tasks."lint:belt-available"]

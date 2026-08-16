@@ -78,6 +78,16 @@ a fresh session **started in the target repo's checkout**.
 - [ ] Delete tooling the survey retired. A repo carries no config for
       any belt tool unless it genuinely diverges — divergence is a
       documented exception, not a preference.
+- [ ] **If the repo fuzzes** (a tracked `fuzz/`, as edtf and iiif-server
+      already have), declare the dated nightly beside the stable pin and
+      name it — `rust = ["1.xx.x", "nightly-YYYY-MM-DD"]` plus
+      `FUZZ_TOOLCHAIN` in `[env]` (#445). AddressSanitizer is
+      cargo-fuzz's default and needs `-Zsanitizer`, so `audit:fuzz`
+      refuses to run without it rather than quietly fuzzing unsanitized.
+      The gate is unaffected: `lint:fuzz-build` compiles the targets on
+      stable. What to fuzz is the repo's call and nobody else's — the
+      belt enforces how fuzzing runs, never which functions deserve a
+      target, the same division as `coverage:check` and its floor.
 - [ ] `mise trust && mise install && mise run hooks:install`.
 
 ## Phase 3 — make the gate green (session, in-repo)

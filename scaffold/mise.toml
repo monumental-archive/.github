@@ -19,6 +19,18 @@ lockfile = true
 # simply absent and their gates cannot run (#445).
 # rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }
 # "cargo:cargo-auditable" = "0.7.5"
+# Repos that FUZZ (a tracked fuzz/ directory) declare a second, DATED
+# nightly beside the stable one — mise holds and locks both — because
+# AddressSanitizer is cargo-fuzz's default and needs -Zsanitizer, which
+# stable refuses. audit:fuzz selects it by name and never guesses, so a
+# missing declaration fails loudly instead of quietly fuzzing without a
+# sanitizer (#445). Bare "nightly" is a moving channel and not a pinned
+# input; it also cannot be Renovate-bumped, so this pin is maintained by
+# hand — the one in the org that is. cargo-fuzz itself is a repo-side
+# build input: no upstream binaries and no aqua package, so the cargo:
+# backend builds it with the toolchain above (the govulncheck pattern).
+# rust = ["1.xx.x", "nightly-YYYY-MM-DD"]
+# "cargo:cargo-fuzz" = "0.13.2"
 # Go repos: the toolchain, plus govulncheck as a build input (no
 # upstream binaries, no aqua package — the go: backend builds it from a
 # pinned source version; audit:go-vulns asserts it, #392). The hermetic
@@ -26,6 +38,16 @@ lockfile = true
 # proxy, no cgo, no toolchain auto-download.
 # go = "1.xx.x"
 # "go:golang.org/x/vuln/cmd/govulncheck" = "v1.x.x"
+
+# [env]
+# Which nightly audit:fuzz runs the sanitized targets under. Declared,
+# never discovered: a task that used ASan wherever a nightly happened to
+# exist would enforce differently on different machines. Must match the
+# dated nightly in the rust pin above (#445).
+# FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"
+# How long each fuzz target runs on the cron. 60s is the floor, not the
+# recommendation — upstream's own CI example uses 300.
+# FUZZ_SECONDS = "300"
 
 [tasks.test]
 run = "echo TODO: this repo has no tests yet && exit 1"

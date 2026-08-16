@@ -30,7 +30,7 @@ honestly blocked on.
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
 | cargo-llvm-cov + `.coverage-floor` ratchet | Line-coverage floor in the gate (`coverage:check`), codecov badge feed off-gate |
-| cargo-fuzz (`cargo:` backend, sanitizer none) | Fuzz targets: build proof in the gate (`lint:fuzz-build`), bounded runs on the cron (`audit:fuzz`) |
+| cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
@@ -904,16 +904,32 @@ SQL appearing anywhere in the org (revisit the raw templater).
   overrides it and travels wrongly when the file is copied (#214).
   *Reopen:* an aqua package appearing, or a repo genuinely needing
   per-file licence variance.
-- **cargo-fuzz, the nightly/sanitizer half** — the adopted entry above
-  is deliberately `--sanitizer none` on the repo's pinned STABLE
-  toolchain (#316): ASan needs nightly, and a nightly in the gate means
-  either a second toolchain pin per repo or mid-run rustup — both
-  refused (the coverage:check precedent). libFuzzer without a sanitizer
-  still finds panics, which in memory-safe Rust is the live failure
-  class. Like cargo-pgrx, the `cargo:` backend is a documented
-  exception to aqua-first: version-pinned, no attestations. *Reopen:*
-  an FFI-heavy crate joins the org (ASan then earns its nightly), or
-  cargo-fuzz ships sanitizer support on stable.
+- **cargo-fuzz's sanitizers — REOPENED AND ADOPTED, 2026-08-16 (#445).**
+  This entry read "deliberately `--sanitizer none` on the pinned STABLE
+  toolchain (#316)", on the reasoning that ASan needs nightly and a
+  nightly in the gate means either a second toolchain pin or mid-run
+  rustup, both refused. The reasoning held; the conclusion was drawn one
+  step too wide. **`-s address` is cargo-fuzz's own DEFAULT**, so the org
+  was running the tool below its default rather than below its maximum —
+  a harder thing to justify. What resolves it is splitting by task class
+  rather than by tool: `lint:fuzz-build` stays in the gate, on stable,
+  `-s none`, proving only that targets still COMPILE — a compile check
+  needs no sanitizer — while the sanitized run moves entirely to
+  `audit:fuzz` on the Monday cron, where fuzzing already belonged. The
+  gate therefore never sees a nightly, and the second toolchain lands
+  only in repos that actually fuzz, declared in their own mise.toml.
+  Measured before adopting: mise holds and locks both toolchains
+  (`rust = ["1.97.1", "nightly-2026-07-20"]`), `RUSTUP_TOOLCHAIN`
+  selects between them without fighting mise, and the lab's real target
+  ran 11.7M executions in 13s under ASan. `--careful` rides along (std
+  rebuilt with debug assertions and extra const-UB checks). Costs, stated
+  plainly: a dated nightly is **581 MB** beside stable's 1.9 GB and
+  cannot be Renovate-bumped, making it the one hand-maintained version
+  pin in the org. Bare `nightly` is refused outright — a moving channel
+  is not a pinned input. The `cargo:` backend remains a documented
+  aqua-first exception: version-pinned, no attestations. *Reopen:*
+  cargo-fuzz shipping sanitizer support on stable, which would delete the
+  nightly entirely.
 - **kcov (bash coverage for the canon)** — skipped. The instinct was
   right (#316 addendum: `lint:source-attest` already executes the
   source-attest scripts end-to-end, so instrumenting what runs beats
