@@ -945,6 +945,252 @@ cargo fetch --locked
 cargo deny check advisories
 '''
 
+[tasks."lint:rust"]
+description = "Rust lint (clippy: every group, restriction minus named contradictions); repos without Cargo.toml skip clean"
+dir = "{{cwd}}"
+# The Rust half of the language layer (#445). clippy compiles PACKAGES
+# through cargo, not a file list, so `git ls-files` cannot feed it — the
+# lint:go situation exactly, and safe for the same reason: an untracked
+# .rs file inside a tracked crate is a build input rustc would also see.
+#
+# LEVELS ARE STATED AS GROUPS MINUS NAMED EXCLUSIONS, never as a list of
+# lints to enable. The two forms measure identically today (97 findings
+# on release-lab either way) and fail in opposite directions. An enable
+# list is fail-OPEN: the restriction group grew by N lints in the last
+# toolchain bump, none of them are in our list, and enforcement quietly
+# fails to grow. The exclusion form is fail-CLOSED: a new lint arrives
+# already enforced with no canon edit, and if one of the excluded names
+# is ever renamed away the exclusion stops applying, the contradiction
+# fires, and the gate goes red where someone will read it.
+#
+# THE NINE EXCLUSIONS ARE MECHANICAL CONTRADICTIONS, not taste. clippy's
+# own book says the restriction group must not be enabled wholesale
+# because its lints contradict each other; these are the pairs where
+# obeying one lint is disobeying another, each ruled toward the
+# idiomatic form (docs/tooling-verdicts.md carries the full reasoning):
+#   implicit_return          — contradicts style's needless_return
+#   question_mark_used       — contradicts style's question_mark
+#   self_named_module_files  — pairs with mod_module_files; the org
+#                              enforces self-named layout, the 2018 idiom
+#   pub_with_shorthand       — the name is inverted: this lint BANS
+#                              `pub(crate)`. The org keeps the shorthand,
+#                              so pub_without_shorthand is the one on
+#   semicolon_outside_block  — pairs with semicolon_inside_block
+#   separated_literal_suffix — the org writes 1_u32, so the lint that
+#                              bans it is off and unseparated_* is on
+#   big_endian_bytes,        — all three on bans every byte conversion;
+#   little_endian_bytes        the org bans only target-dependent
+#                              _ne_bytes, because explicit endianness is
+#                              what reproducibility requires
+#   inline_asm_x86_intel_syntax — Rust's own asm! default is Intel
+#
+# blanket_clippy_restriction_lints fires because we enable the group on
+# purpose; allowed with that as its reason. multiple_crate_versions is
+# allowed because the duplicate policy is stated once, in the repo's
+# deny.toml at `multiple-versions = "deny"` — this file is org-wide, so
+# an exception here would exempt every repo (docs/dependency-track.md).
+#
+# `-D warnings` also denies rustc's own warn-by-default lints, which is
+# the point: it is what makes the org answer `warnings_strict` truthfully
+# (docs/best-practices.md). It rides `--` rather than RUSTFLAGS, which
+# the clippy book's CI page suggests, because `--` args reach only
+# workspace members through RUSTC_WORKSPACE_WRAPPER — RUSTFLAGS would
+# apply to every dependency and invalidate the whole build cache.
+#
+# Deterministic: the outcome is a function of the tree, the lock and the
+# pinned toolchain. `cargo fetch --locked` first, the lint:deny
+# precedent — fetching pinned inputs is the same category as fetching the
+# toolchain.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n "${manifests}" ]] || { echo "lint:rust: no Cargo.toml tracked, skipped"; exit 0; }
+# A repo with a Cargo.toml has rust pinned as a build input; cargo absent
+# is a broken toolchain, and skipping would be the vacuous-success
+# failure.
+command -v cargo > /dev/null || {
+  echo "lint:rust: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+# clippy is a rustup COMPONENT of the repo's own pin, not a belt binary.
+# mise installs rust through rustup and inherits whatever profile the
+# machine already has, so on a minimal profile clippy is simply absent
+# and this task would lint nothing. Asserted with a remedy, never
+# installed: a task-time rustup races every other task driving the
+# toolchain (measured twice on the lab's v0.18.0 release PR, #117).
+if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
+  echo "lint:rust: clippy component missing — declare it with the rust pin in mise.toml:" >&2
+  echo "  rust = { version = \\"1.xx.x\\", components = \\"clippy,rustfmt,llvm-tools\\" }" >&2
+  echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
+  exit 1
+fi
+# The knobs are org policy, so a repo-local clippy.toml is a silent
+# lowering of them — the unexplained .gitleaks.toml ruling.
+local_conf=$(git ls-files "clippy.toml" ".clippy.toml" "*/clippy.toml" "*/.clippy.toml")
+if [[ -n "${local_conf}" ]]; then
+  echo "lint:rust: repo-local clippy configuration is not the org's:${local_conf}" >&2
+  echo "  the knobs live in the canon's mise/clippy.toml and arrive through CLIPPY_CONF_DIR" >&2
+  echo "  a setting this repo genuinely needs is argued into the canon, not kept locally" >&2
+  exit 1
+fi
+# Locate the canon's clippy.toml. CI sets MISE_GLOBAL_CONFIG_FILE to it;
+# locally the belt arrives as a ~/.config/mise/conf.d symlink into a
+# canon checkout. No mise template variable resolves the config file's
+# own directory ({{config_root}} is the home directory for a global
+# config), so both carriers are read here — and an unresolvable belt is
+# fatal, because clippy would otherwise silently run at its own defaults.
+belt=""
+if [[ -n "${MISE_GLOBAL_CONFIG_FILE:-}" ]]; then
+  belt=$(cd "$(dirname "${MISE_GLOBAL_CONFIG_FILE}")" > /dev/null 2>&1 && pwd) || belt=""
+fi
+if [[ -z "${belt}" || ! -f "${belt}/clippy.toml" ]]; then
+  belt=""
+  for f in "${XDG_CONFIG_HOME:-${HOME}/.config}"/mise/conf.d/*.toml; do
+    [[ -e "${f}" ]] || continue
+    target=$(readlink "${f}" 2> /dev/null) || target=""
+    [[ -n "${target}" ]] || target="${f}"
+    d=$(cd "$(dirname "${target}")" > /dev/null 2>&1 && pwd) || continue
+    if [[ -f "${d}/clippy.toml" ]]; then belt="${d}"; break; fi
+  done
+fi
+if [[ -z "${belt}" ]]; then
+  echo "lint:rust: cannot locate the canon's clippy.toml — the belt did not arrive" >&2
+  echo "  CI: MISE_GLOBAL_CONFIG_FILE unset or the canon checkout is missing" >&2
+  echo "  locally: no ~/.config/mise/conf.d symlink into a canon checkout" >&2
+  echo "  (running clippy without it would lint at clippy's defaults, not the org's)" >&2
+  exit 1
+fi
+export CLIPPY_CONF_DIR="${belt}"
+# The one suppression clippy itself cannot forbid: a crate-level allow of
+# a whole group silences every flag above and exits 0 (measured — even
+# `-F` only warns about it). A narrow, reasoned
+# `#[expect(clippy::x, reason = "...")]` is the exception mechanism, and
+# restriction's allow_attributes + allow_attributes_without_reason —
+# both enabled by the group — make it the ONLY one that compiles.
+groups="all|pedantic|nursery|cargo|restriction|style|complexity|perf|correctness|suspicious"
+blanket=""
+while IFS= read -r f; do
+  [[ -n "${f}" ]] || continue
+  if grep -qE "^[[:space:]]*#!\\[(allow|expect)\\([^]]*clippy::(${groups})\\b" "${f}"; then
+    blanket="${blanket} ${f}"
+  fi
+done <<< "$(git ls-files ':!vendor/**' "*.rs")"
+if [[ -n "${blanket}" ]]; then
+  echo "lint:rust: crate-level suppression of a whole clippy group:${blanket}" >&2
+  echo "  a group allow silences every level this task sets and the gate still goes green" >&2
+  echo "  suppress one lint at the narrowest scope instead, with a reason:" >&2
+  echo "    #[expect(clippy::the_lint, reason = \\"why this code is right as written\\")]" >&2
+  echo "  an expect fails once it stops being needed; an allow rots silently" >&2
+  exit 1
+fi
+# Members that cannot build on a gate runner are declared, never implied:
+# reading `default-members` instead would let a repo drop a crate from
+# linting by editing an unrelated field. CLIPPY_EXCLUDE is the
+# COVERAGE_EXCLUDE pattern ([env] in the repo's mise.toml), written down
+# where a reviewer sees it.
+excludes=""
+for m in ${CLIPPY_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
+# CLIPPY_FEATURES lets a repo whose features are mutually exclusive say
+# so; everything else gets --all-features, because an unlinted feature is
+# unlinted code.
+features="${CLIPPY_FEATURES:---all-features}"
+cargo fetch --locked
+out=$(mktemp)
+trap 'rm -f "${out}"' EXIT
+status=0
+# shellcheck disable=SC2086
+cargo clippy --workspace --all-targets ${features} --locked ${excludes} -- \
+  -D warnings \
+  -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
+  -D clippy::restriction \
+  -A clippy::blanket_clippy_restriction_lints \
+  -A clippy::multiple_crate_versions \
+  -A clippy::implicit_return \
+  -A clippy::question_mark_used \
+  -A clippy::self_named_module_files \
+  -A clippy::pub_with_shorthand \
+  -A clippy::semicolon_outside_block \
+  -A clippy::separated_literal_suffix \
+  -A clippy::big_endian_bytes \
+  -A clippy::little_endian_bytes \
+  -A clippy::inline_asm_x86_intel_syntax 2>&1 | tee "${out}" || status=$?
+# A lint name rustc does not recognise is warning E0602, and `-D
+# warnings` cannot reach it: it is emitted by the command-line parser
+# before lint levels apply, so `-D unknown_lints` and `-D
+# renamed_and_removed_lints` both still exit 0 (measured). With levels
+# stated as exclusions a stale name fails closed anyway — the lint it
+# excluded starts firing — but the run must say WHY rather than leave a
+# maintainer reading a contradiction that looks like a false positive.
+if grep -qE "E0602|has been renamed to" "${out}"; then
+  echo "lint:rust: a lint name above is unknown to this toolchain (see E0602/renamed above)" >&2
+  echo "  clippy renamed or removed it — update the exclusion list in mise/config.toml" >&2
+  exit 1
+fi
+[[ ${status} -eq 0 ]] || exit "${status}"
+echo "lint:rust: clean at every group (restriction minus 9 named contradictions)"
+'''
+
+[tasks."fix:rust"]
+description = "Apply clippy's machine-applicable suggestions (write mode, never in the gate)"
+dir = "{{cwd}}"
+# The write-mode sibling. `cargo clippy --fix` implies --no-deps and
+# --all-targets, and refuses to run against uncommitted work unless told
+# otherwise — which is the right default for a tool that rewrites source,
+# so the refusal is left in place and a dirty tree is the caller's to
+# resolve. Only a subset of lints is machine-applicable; the rest are the
+# author's judgement, which is why this is a sibling and not a gate.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n "${manifests}" ]] || { echo "fix:rust: no Cargo.toml tracked, skipped"; exit 0; }
+command -v cargo > /dev/null || {
+  echo "fix:rust: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
+  echo "fix:rust: clippy component missing — declare it with the rust pin in mise.toml" >&2
+  exit 1
+fi
+belt=""
+if [[ -n "${MISE_GLOBAL_CONFIG_FILE:-}" ]]; then
+  belt=$(cd "$(dirname "${MISE_GLOBAL_CONFIG_FILE}")" > /dev/null 2>&1 && pwd) || belt=""
+fi
+if [[ -z "${belt}" || ! -f "${belt}/clippy.toml" ]]; then
+  belt=""
+  for f in "${XDG_CONFIG_HOME:-${HOME}/.config}"/mise/conf.d/*.toml; do
+    [[ -e "${f}" ]] || continue
+    target=$(readlink "${f}" 2> /dev/null) || target=""
+    [[ -n "${target}" ]] || target="${f}"
+    d=$(cd "$(dirname "${target}")" > /dev/null 2>&1 && pwd) || continue
+    if [[ -f "${d}/clippy.toml" ]]; then belt="${d}"; break; fi
+  done
+fi
+[[ -n "${belt}" ]] || {
+  echo "fix:rust: cannot locate the canon's clippy.toml — the belt did not arrive" >&2
+  exit 1
+}
+export CLIPPY_CONF_DIR="${belt}"
+features="${CLIPPY_FEATURES:---all-features}"
+cargo fetch --locked
+# shellcheck disable=SC2086
+cargo clippy --fix ${features} --locked -- \
+  -D warnings \
+  -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
+  -D clippy::restriction \
+  -A clippy::blanket_clippy_restriction_lints \
+  -A clippy::multiple_crate_versions \
+  -A clippy::implicit_return \
+  -A clippy::question_mark_used \
+  -A clippy::self_named_module_files \
+  -A clippy::pub_with_shorthand \
+  -A clippy::semicolon_outside_block \
+  -A clippy::separated_literal_suffix \
+  -A clippy::big_endian_bytes \
+  -A clippy::little_endian_bytes \
+  -A clippy::inline_asm_x86_intel_syntax
+echo "fix:rust: applied what is machine-applicable — the rest is judgement"
+'''
+
 [tasks."lint:go"]
 description = "Go lint + format check (golangci-lint, default: all + curated disables)"
 dir = "{{cwd}}"

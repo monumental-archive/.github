@@ -44,11 +44,30 @@ The policy, maximally defensible:
 - **sources**: crates.io only. `unknown-registry = "deny"`,
   `unknown-git = "deny"` — where dependencies come from is a gated
   invariant, and a git dependency is a decision, not a default.
-- **bans**: `wildcards = "deny"`; `multiple-versions = "warn"` — the one
-  deliberately non-maximal setting. Transitive duplicate versions are
-  endemic to the ecosystem and outside any repo's control; a gate that is
-  expected-red teaches people to ignore gates. A decision, not a
-  deferral.
+- **bans**: `wildcards = "deny"`; `multiple-versions = "deny"`. This read
+  `"warn"` until 2026-08-16 — the org's one deliberately non-maximal
+  setting, on the reasoning that transitive duplicates are endemic and
+  outside any repo's control, and that an expected-red gate teaches
+  people to ignore gates. Raised with the clippy standup (#445), which
+  brought a second tool stating the same policy and made the
+  contradiction visible: an expected-red gate is a gate nobody reads, but
+  a *warning* nobody reads is the same failure with no ratchet at all.
+  The tree is something a repo resolves — by aligning its own
+  constraints, or by waiting on the upstream bump. Where upstream truly
+  forces a duplicate, the exit is a written `[[bans.skip]]` entry citing
+  the upstream issue: an exception with a name and a reason, in one
+  place, exactly like the advisory `ignore` entries that cite their VEX
+  statements.
+
+  **This file is the org's only statement of that policy.**
+  `clippy::multiple_crate_versions` (cargo group) asserts the same rule
+  and is therefore allowed in the canon's `clippy.toml`, with the reason
+  recorded there. It is not a weakening: the two tools differ in *where
+  their exception lists live*. `deny.toml` is per-repo, so a skip
+  describes the one tree it belongs to; the canon's `clippy.toml` is a
+  single file shared org-wide, so recording a duplicate there would
+  silently exempt every other repo from a rule they never broke. One
+  policy, one home, at the layer that can describe a single tree.
 
 `cargo fetch --locked` precedes the check: fetching pinned inputs is the
 same category as fetching the toolchain — the result is fully determined
@@ -259,8 +278,10 @@ corrected here rather than reworded away.
   that most of L4's letter already runs for its own reasons: the 7-day
   `minimumReleaseAge` is a quarantine period, and OSV's
   malicious-package data rides `audit:blast-radius`.
-- **`multiple-versions = "warn"`**: the one non-maximal enforcement
-  setting, reasoned above.
+- **`multiple-versions`**: was the one non-maximal enforcement setting;
+  raised to `deny` on 2026-08-16 with the clippy standup (#445). The org
+  now has no deliberately non-maximal dependency setting. Reasoned
+  above, including why the rule is stated here and not in clippy.
 - **Hermetic ingestion** is the build track's business (#119), not this
   track's.
 

@@ -46,6 +46,91 @@ honestly blocked on.
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
+| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus nine named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml` — plus `fix:rust` |
+
+**clippy, and the three things standing it up settled** (#445). The
+belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
+was reached by running the tool rather than reading about it.
+
+*Levels are stated as groups minus exclusions, never as a list of lints
+to enable.* Both forms measure identically today — 97 findings on
+release-lab either way — and they fail in opposite directions. A list of
+lints to enable is fail-open: when a toolchain bump adds restriction
+lints, they are absent from the list, so enforcement quietly fails to
+grow and nothing goes red. Stated as `-D clippy::restriction` minus named
+exclusions it is fail-closed: a new lint arrives already enforced with no
+canon edit, and a name that upstream renames away stops excluding
+anything, so the contradiction it was hiding fires and the gate reddens
+where someone reads it. The same reasoning should govern any future belt
+list.
+
+*The nine exclusions are mechanical, not taste.* clippy's own book says
+the restriction group must not be enabled wholesale, because its lints
+contradict each other — enabling it as a group even makes clippy lint
+you for doing so (`blanket_clippy_restriction_lints`, allowed here with
+exactly that as its reason). The nine are the pairs where obeying one
+lint disobeys another: `implicit_return` against style's
+`needless_return`; `question_mark_used` against `question_mark`;
+`self_named_module_files` against `mod_module_files` (the org enforces
+the 2018 self-named layout); `pub_with_shorthand`, whose name is
+inverted — it *bans* `pub(crate)`, so the org runs `pub_without_shorthand`
+instead; `semicolon_outside_block`; `separated_literal_suffix`, since the
+org writes `1_u32`; `big_endian_bytes` and `little_endian_bytes`, because
+all three endianness lints together ban every byte conversion and what
+the org actually wants banned is target-dependent `_ne_bytes`; and
+`inline_asm_x86_intel_syntax`, Rust's own `asm!` default being Intel.
+`multiple_crate_versions` is allowed for a different reason entirely —
+the duplicate policy is stated once, in each repo's `deny.toml`
+(docs/dependency-track.md).
+
+*The exception mechanism is `#[expect(..., reason = "...")]` and nothing
+else.* No clippy flag can beat a source attribute: a crate-level
+`#![allow(clippy::pedantic)]` silences every level the task sets and
+exits 0, and `-F` only downgrades that to a warning it still exits 0 on.
+`--force-warn` defeats attributes but is capped at warn, so it cannot
+fail a gate. What closes it is restriction's own `allow_attributes` and
+`allow_attributes_without_reason` — both arriving with the group — which
+together make `#[allow]` a hard error and an unreasoned suppression a
+hard error, leaving `#[expect]`, which errors the moment it stops being
+needed. `lint:rust` additionally greps tracked sources for crate-level
+group suppression, which is policing rather than construction, and is
+named as such.
+
+**Two gaps recorded rather than closed.** clippy cannot be belt-pinned:
+it is a rustup component of each repo's own toolchain, so repos can in
+principle run different clippy versions and a Rust bump changes what is
+enforced with no canon change. Renovate bumping every repo to the same
+version is what keeps them level in practice, and the levels being
+stated as groups means a newer toolchain is strictly stricter rather
+than differently strict — so the skew is bounded in the safe direction,
+and a guard asserting version equality would be machinery policing
+machinery. Rust also stays out of the belt deliberately: the belt carries
+what the *belt* needs to run (Go for `go run stele`, Python for the
+`pipx:` venvs), while repos carry what they *build* with — and every
+cargo-needing belt task skips clean without a Cargo.toml, so nothing in
+the belt needs cargo in a non-Rust repo. Second gap: `mise/clippy.toml`
+is an allow-list of knobs, and unlike the lint levels it cannot
+self-extend, so a future clippy option with a permissive default would be
+missed silently. An unknown key is a hard error, so removals and renames
+fail loudly — `min-ident-chars-lint-trait-impl`, taken from clippy's
+online reference, which documents master rather than any released
+toolchain, was rejected by 1.97.1 on the first real run. Closing the
+remaining half would take an `audit:*` task diffing the config against
+the toolchain's accepted key list.
+
+**Zero Rust in the canon** — `lint:rust` skips clean here, like biome,
+golangci-lint, sqlfluff and the existing Rust pair, so the rule set is
+exercised first in release-lab. Stated outright rather than left to be
+discovered: at adoption the full set measured 97 findings there across
+ten lints, 72 of them one missing manifest block, and the task's own
+plumbing (config delivery, component assertion, exit path) was run
+against that repo before this landed.
+
+**One lint enabled but inert.** `clippy::excessive_nesting` ships with
+`excessive-nesting-threshold = 0`, which disables it. Any other value is
+a number the org invented rather than the tool's maximum, so it stays
+enabled and silent until someone argues a threshold. *Reopen:* a nesting
+depth the org actually wants to refuse.
 
 **shellcheck, retained despite the abandonment flag** (#290 finding 6).
 Renovate's `abandonments:recommended` sweep flags shellcheck (last
