@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.30.0](https://github.com/monumental-archive/.github/compare/v1.29.1...v1.30.0) - 2026-08-16
+
+### Added
+
+- stand up clippy at every group ([#446](https://github.com/monumental-archive/.github/pull/446))
+- stand up rustfmt at its stable maximum ([#447](https://github.com/monumental-archive/.github/pull/447))
+- fuzz under AddressSanitizer, stop the lint writing ([#448](https://github.com/monumental-archive/.github/pull/448))
+
+### Documentation
+
+- record the emit cutover — #434 closed, the chains green ([#443](https://github.com/monumental-archive/.github/pull/443))
+
 ## [1.29.1](https://github.com/monumental-archive/.github/compare/v1.29.0...v1.29.1) - 2026-08-15
 
 ### Fixed
