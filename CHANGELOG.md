@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.32.0](https://github.com/monumental-archive/.github/compare/v1.31.0...v1.32.0) - 2026-08-16
+
+### Added
+
+- deliver the language tool configs too, minus two ([#455](https://github.com/monumental-archive/.github/pull/455))
+
+### Documentation
+
+- record what the belt now delivers, and that skips expire ([#453](https://github.com/monumental-archive/.github/pull/453))
+
 ## [1.31.0](https://github.com/monumental-archive/.github/compare/v1.30.0...v1.31.0) - 2026-08-16
 
 ### Added
