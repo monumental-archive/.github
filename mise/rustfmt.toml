@@ -1,0 +1,79 @@
+# The org's rustfmt configuration — one file, every repo (#445).
+#
+# Delivered by `lint:rust` as `cargo fmt -- --config-path <this file>`,
+# which overrides any repo-local rustfmt.toml outright (proven: with
+# --config-path set, a repo file containing an unknown key is not read).
+# Same reasoning as the clippy config beside it — formatting is an org
+# standard, and a repo that could drop its own rustfmt.toml could quietly
+# format to a different one.
+#
+# EVERY OPTION HERE IS STABLE ON THE PINNED TOOLCHAIN, and that is the
+# whole design constraint. rustfmt's interesting knobs —
+# error_on_line_overflow, error_on_unformatted, wrap_comments,
+# format_strings, format_code_in_doc_comments, imports_granularity,
+# group_imports, normalize_comments, reorder_impl_items,
+# format_macro_matchers, required_version — are ALL nightly-only. Setting
+# one on a stable toolchain does not fail: rustfmt prints
+# `Warning: can't set X, unstable features are only available in nightly
+# channel` and formats to the weaker standard with exit 0. That is
+# fail-open, so `lint:rust` fails on any rustfmt warning rather than
+# trusting the exit code, and nothing nightly-only is written here.
+# Adopting a pinned nightly is a live question (docs/tooling-verdicts.md)
+# — it is org-wide-or-nothing for a formatter, because a half-nightly org
+# silently formats to two standards.
+
+# THE ONE OPTION THAT FIXES A REAL INCONSISTENCY rather than tightening
+# taste. rustfmt invoked directly defaults to style edition 2015, while
+# `cargo fmt` infers it from Cargo.toml — so the same file formats two
+# ways depending on how it was invoked, which upstream's own README warns
+# about. Pinned here, both agree, and every repo formats to the current
+# Rust Style Guide regardless of the language edition its crate declares.
+style_edition = "2024"
+
+# Line endings are a property of the org, not of the machine that last
+# touched a file. The default, "Auto", detects per file and converts to
+# whatever it saw first, so a file committed from Windows stays CRLF
+# forever and nothing complains.
+newline_style = "Unix"
+
+# The two stable options whose non-default value strictly canonicalises
+# more code: `Foo { x }` over `Foo { x: x }`, and `?` over the ancient
+# `try!`.
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# STATED DEFAULTS, deliberately not omitted. These are already rustfmt's
+# behaviour; writing them down is flip-proofing on the `uv` precedent in
+# the belt — a default that changes upstream would otherwise land
+# unattended through an automerged toolchain bump and silently restyle
+# every repo. tab_spaces additionally ties this file to the org's one
+# written indentation rule, `.editorconfig`'s `[*.rs] indent_size = 4`,
+# so the formatter and editorconfig-checker cannot drift apart.
+force_explicit_abi = true
+hard_tabs = false
+max_width = 100
+merge_derives = true
+remove_nested_parens = true
+reorder_imports = true
+reorder_modules = true
+tab_spaces = 4
+
+# NOT SET, deliberately:
+#
+# `edition` — `cargo fmt` reads it per crate from Cargo.toml, which is
+# where a crate's edition belongs. Setting it here would override every
+# repo's own declaration with one number and wrongly parse any crate that
+# moved ahead of it.
+#
+# `hex_literal_case` — rustfmt's online reference lists it as stable, and
+# 1.97.1 rejects it as unstable: `Warning: can't set hex_literal_case`.
+# The reference documents master, not any released toolchain — the same
+# trap that put an unknown key in the clippy config on its first run.
+# Wanted (the org writes lowercase hex everywhere else); blocked until it
+# is stable in a toolchain the org actually pins.
+#
+# The width heuristics (`fn_call_width`, `chain_width`,
+# `struct_lit_width`, `use_small_heuristics`, ...) — all stable, all
+# left alone. A width the org invented is our opinion, not the tool's
+# maximum, and the Style Guide's ratios are already the considered
+# answer. Same ruling as the clippy thresholds.
