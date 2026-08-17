@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.35.0](https://github.com/monumental-archive/.github/compare/v1.34.1...v1.35.0) - 2026-08-17
+
+### Added
+
+- derive the go-binary sbom from the shipped binaries ([#486](https://github.com/monumental-archive/.github/pull/486))
+
 ## [1.34.1](https://github.com/monumental-archive/.github/compare/v1.34.0...v1.34.1) - 2026-08-17
 
 ### Fixed
