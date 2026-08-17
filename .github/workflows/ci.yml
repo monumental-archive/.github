@@ -143,6 +143,19 @@ jobs:
           # so the badge feed and the gate ratchet cannot disagree about
           # what is coverable (#316 — they did, and it reddened main).
           mise run coverage:report
+          # The upload list is what the task WROTE, never a guess from
+          # repo shape: a repo tracking both languages renders both
+          # reports, and the previous `hashFiles('go.mod')` selector
+          # named coverage.txt for every such repo — including the ones
+          # whose Rust-only leg had written lcov.info.
+          files=""
+          [[ -f lcov.info ]] && files="lcov.info"
+          [[ -f coverage.txt ]] && files="${files:+${files},}coverage.txt"
+          if [[ -z ${files} ]]; then
+            echo "::error::coverage:report wrote no report — nothing to upload"
+            exit 1
+          fi
+          echo "files=${files}" >> "${GITHUB_OUTPUT}"
           echo "skip=false" >> "${GITHUB_OUTPUT}"
       # fail_ci_if_error: TRUE, deliberately. The job is
       # continue-on-error, so a broken feed never blocks a merge — but it
@@ -157,9 +170,10 @@ jobs:
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.codecov-token }}
-          # The filename is the task's contract, selected by repo shape:
-          # the Rust leg renders lcov.info, the Go leg's coverprofile is
-          # coverage.txt — Codecov parses both natively (#392).
-          files: ${{ hashFiles('go.mod') != '' && 'coverage.txt' || 'lcov.info' }}
+          # The reports the task actually rendered, derived above by
+          # detection rather than guessed from repo shape — a mixed repo
+          # uploads both. Codecov parses lcov and Go coverprofiles
+          # natively (#392).
+          files: ${{ steps.gen.outputs.files }}
           fail_ci_if_error: true
 ...
