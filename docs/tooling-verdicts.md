@@ -827,6 +827,68 @@ dependency-declaration errors. *Reopen:* the first repo that needs
 project references, with evidence that per-project checking is
 insufficient.
 
+**`go mod tidy -diff` and `go test -fuzz`, both already in the toolchain**
+(#445). Two of the seven needed no new binary at all — the belt pins `go`
+already, and these are subcommands of it. Neither had been wired.
+
+`lint:go-tidy` catches what golangci-lint structurally cannot: it reads
+packages and never reads the manifest, so a dependency imported but not
+required, a requirement nothing imports, or a `go.sum` that drifted from
+either are all invisible to it. This is the `cargo-machete` gap in Go
+form, answered by the toolchain rather than another tool. `-diff` is what
+makes it a gate check rather than a fixer — it prints the unified diff
+and exits non-zero without writing, proven in both untidy directions.
+One honest limit: for a *missing* requirement tidy resolves the latest
+version over the network, so the suggested diff is time-dependent. The
+verdict is not, and a repo in that state is already failing.
+
+Go fuzzing splits the way the Rust half does, for the same two reasons —
+it is time-bound and it writes — but it is much cheaper to stand up: the
+engine is in the toolchain, coverage instrumentation is built in on amd64
+and arm64, and there is no sanitizer flag and **no nightly**, which was
+the whole cost of the cargo-fuzz standup. `audit:go-fuzz` runs one target
+per invocation (`-fuzz` matches exactly one target in one package by
+design) with `-fuzztime` set, because **the documented default is to run
+forever** — a task that forgot it would hang the cron rather than fail
+it. Minimization and the pre-fuzz unit-test pass are left at their
+defaults, which are the tool's maximum.
+
+**Two passes per target, plain then race, rather than a choice.** The
+race detector is Go's nearest equivalent to the AddressSanitizer the
+Rust cron runs, and it costs **31× throughput** — measured on a probe at
+425,319 execs/sec plain against 13,605 under `-race`. The two find
+different things: the plain pass explores for panics and logic failures,
+the race pass observes concurrency in targets whose code is concurrent
+at all. Picking one drops a class of finding, and the org's answer to
+instrumentation cost on a free weekly cron is already on record from the
+`--careful` ruling — more seconds, not fewer checks. Both passes were
+shown to catch a real bug. The gate's seed run carries `-race` too,
+where it costs 0.33s → 1.35s, which is nothing.
+
+`CGO_ENABLED=1` rides with it in the belt task, the measured exception
+stele already documents for its own tests: `-race` needs cgo on linux,
+the gate runner, while darwin tolerates it without — so without this a
+local run stays green over a red CI. It is a test instrument; repos that
+ship `CGO_ENABLED=0` binaries keep doing so.
+
+The gate half, `lint:go-fuzz-seeds`, is the part worth explaining. A seed
+corpus IS the regression suite: when the cron finds a crasher the engine
+writes it into `testdata/fuzz/<Target>/`, and from that moment plain `go
+test` fails on it. Proven on a probe — a 15-second run found an
+invalid-UTF-8 reverse, wrote the input, and the next ordinary run went
+red on it. That is why the seeds run under the belt rather than under
+whatever a repo happens to define as `test`, which `ci` runs only if it
+exists. Without `-fuzz` the engine never generates and never writes, so
+the gate half is deterministic by construction.
+
+Neither could be measured against a corpus that exercises them: stele is
+the org's only Go repo and has no fuzz targets, so `lint:go-tidy` was
+proven there (clean, and both failure directions on a probe) while the
+fuzzing pair was proven end to end on a throwaway module — clean seeds,
+a crash found and written, the gate then red on the committed input.
+*Reopen:* the first Go repo with fuzz targets, to measure `FUZZ_SECONDS`
+against something real rather than the 60s default.
+
 **eslint, typescript-eslint and knip stay repo-side** — not a rejection,
 a placement. A flat eslint config is a JS module that imports its plugins
 from the repo's own `node_modules`, and typescript-eslint's type-aware
