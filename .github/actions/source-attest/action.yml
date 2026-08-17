@@ -266,11 +266,13 @@ runs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        command -v go > /dev/null || {
-          echo "::error::go is not on the runner"
+        # The released, attested binary — no Go toolchain on the runner,
+        # and nothing runs until its attestation verifies against the
+        # org signer (mise/stele.sh, stele#7).
+        command -v stele > /dev/null || {
+          echo "::error::stele is not on the runner — it is a belt tool"
           exit 1
         }
-        stele_pin="github.com/monumental-archive/stele/cmd/stele@3af8d30b0016028f74bab9adc85ae465505272cf"
         root=$(mktemp)
         # No pipeline: under pipefail, head closing the pipe after one
         # line kills gh with SIGPIPE and the step dies at 141.
@@ -282,7 +284,7 @@ runs:
         }
         genesis=()
         [[ ${SA_GENESIS} == "true" ]] && genesis=(--genesis)
-        go run "${stele_pin}" emit chain \
+        stele emit chain \
           --policy "${SA_CANON_ROOT}/slsa/verify-policy.json" \
           --trusted-root "${root}" \
           --repo "${GITHUB_REPOSITORY}" \
