@@ -420,6 +420,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
+          # What the release ships decides whether the binaries can speak
+          # for it: a binary describes itself, so a release carrying
+          # artifacts no binary embeds falls back to the tree scan that
+          # covers them all. The guard job already refused anything
+          # outside the class vocabulary.
+          CLASSES: ${{ inputs.classes }}
         run: .org-canon/release/generate-sbom.sh
 
       - name: Derive this release's VEX and gate on undecided advisories
