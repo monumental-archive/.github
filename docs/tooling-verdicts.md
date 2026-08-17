@@ -518,7 +518,7 @@ The measurement that justifies `lint:python` demanding a tracked config:
 the same script yields **48 findings under `ALL` and zero under ruff's
 defaults** (E4/E7/E9/F). A repo that forgets `ruff.toml` does not get a
 weaker gate — it gets a green one that looked at almost nothing. Unlike
-biome, a nested `scaffold/ruff.toml` is harmless: ruff's config
+biome, a nested ruff config is harmless: ruff's config
 discovery is hierarchical by design, so it needs no `.stub` rename.
 
 Three settings are not preferences:
@@ -649,7 +649,9 @@ taste:
   lives in `.editorconfig`, enforced by `lint:editorconfig`.
 
 One trap, found by running the standup rather than reading about it: the
-scaffold copy must be `scaffold/biome.json.stub`, never `biome.json`.
+belt copy is `mise/biome-org.json` — a name biome's own
+discovery ignores, since it walks the tree regardless of the path it is
+given and hard-fails on a second `biome.json` below the root (#455).
 Biome discovers configuration by walking the tree independently of the
 paths it is handed, so a second `biome.json` below the root is a *nested
 root configuration* and every invocation hard-fails — including ones
@@ -754,7 +756,7 @@ its own config, which therefore also carries `---`/`...`.
 `lint:yaml` requires a tracked `.yamllint.yaml` once YAML is tracked —
 the ruff/biome/golangci trap in a fourth costume: without a config
 yamllint silently falls back to its `default` preset, a fraction of the
-org policy, on a green gate. Copy `scaffold/.yamllint.yaml`. No `fix:*`
+org policy, on a green gate. Delivered from `mise/yamllint.yaml`. No `fix:*`
 sibling exists to wire: yamllint ships no writer, so conformance is
 hand edits by design (prettier's verdict already records the YAML
 formatting gap). pipx-only — no aqua package exists (404 in the
@@ -893,7 +895,7 @@ monumental-archive-db** (#403). PyPI-only — no aqua package — so it
 rides checksummed uv under the `UV_*` floor environment like reuse and
 yamllint, closing the count this doc predicted when the uv layer was
 built. sqlfluff's default rule set is its maximum (gitleaks' shape,
-not ruff's), so `scaffold/.sqlfluff` exists for exactly one thing the
+not ruff's), so `mise/sqlfluff.cfg` exists for exactly one thing the
 tool refuses to guess: the dialect — postgres org-wide, the only SQL
 the org ships. `templater = raw`: org SQL is DDL/migrations, not
 Jinja, and a templater that expands nothing can corrupt nothing.

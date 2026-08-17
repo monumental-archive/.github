@@ -18,38 +18,20 @@ deliver a config; it cannot invent a repo's identity. A repo may still
 keep its own `_typos.toml` for domain jargon: typos merges it with the
 org vocabulary the belt supplies.
 
+One consequence to know before reaching for it: a belt-delivered config
+is the SAME file for every repo, so anything genuinely repo-shaped in it
+has nowhere to go. biome's `domains` block is the live example — react,
+next and vue rule sets are a statement of fact about one repo, and
+react and solid ship deliberately conflicting rules, so they cannot all
+be on at once. No repo in the org tracks a framework today. The first
+one that does is the trigger to move `biome.json` back to this
+directory, exactly as `.golangci.yml` stayed here for naming a module
+path (docs/tooling-verdicts.md).
+
 - `renovate.json` — extends the org preset
 - `lefthook.yml` — pulls the org git hooks by remote
 - `committed.toml` — conventional-commit canon (add repo `allowed_scopes`)
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
-- `.rumdl.toml` — markdown canon (MD013 exempts code blocks)
-- `ruff.toml` — the Python canon at `select = ["ALL"]` plus preview.
-  Copy it verbatim. `target-version` must not name a newer Python than
-  the belt's `python` pin — the pyupgrade rules rewrite code into
-  whatever it names, and ruff cannot know what will run the result;
-  `lint:python-target` fails the gate on that drift. Targeting lower is
-  legal, for a repo supporting older interpreters than it develops on.
-  `lint:python` fails the
-  gate if Python is tracked without a config — ruff's *default* selection
-  is a few dozen rules out of ~900, so a missing config yields a green
-  gate that checked almost nothing. Unlike `biome.json`, a nested copy is
-  harmless: ruff's config discovery is hierarchical by design.
-- `biome.json.stub` — the JS/TS/JSON canon at `preset: "all"`, copied to
-  the root as `biome.json`. The `.stub` suffix is load-bearing, exactly
-  as it is for `REUSE.toml.stub`: biome discovers configs by walking the
-  tree regardless of the paths it is given, and a second file named
-  `biome.json` anywhere below the root is a *nested root configuration*
-  that hard-fails every run. Copy it verbatim; the rule set is org
-  policy, not a repo choice, and
-  `lint:biome` fails the gate if biome-parseable files are tracked
-  without it (biome resolves its config from the repo, so a missing file
-  silently downgrades the repo to biome's own defaults). **A repo with a
-  framework adds its `domains` block** — `react`, `next`, `vue`, `test`,
-  `project`, `types` and the rest, each at `"all"`. Domains are the one
-  repo-shaped part: react and solid ship deliberately conflicting rules,
-  so they cannot all be enabled at once, and naming the ones a repo
-  actually uses is a statement of fact about the repo rather than a
-  choice about how strict to be.
 - `.golangci.yml` — the Go canon (#392): golangci-lint v2 at
   `default: all` with per-rule written disables, gofumpt (extra rules)
   and gci as formatters, and the depguard ban on `encoding/json`
