@@ -340,17 +340,29 @@ jobs:
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
         run: .org-canon/release/resolve-oci-facts.sh
 
-  # The release SBOM, class-shaped: lock-derived where a Cargo.lock is
-  # tracked, GitHub's dependency-graph export for manifest-less repos
+  # The release SBOM, class-shaped: binary-derived for go-binary (read
+  # out of the shipped bytes by stele, docs in stele's binary-sbom.md),
+  # lock-derived where a Cargo.lock or go.mod is tracked, GitHub's
+  # dependency-graph export for manifest-less repos
   # (docs/dependency-track.md). Its own job, like facts: it reads the
-  # caller's tree and runs belt tooling, never caller code, and the
-  # artifact fans into attach via the release-* pattern. Runs for every
-  # class — a release without an inventory caps Scorecard's SBOM check
-  # and blinds audit:blast-radius.
+  # caller's tree and the build's artifacts and runs belt tooling, never
+  # caller code, and the artifact fans into attach via the release-*
+  # pattern. Runs for every class — a release without an inventory caps
+  # Scorecard's SBOM check and blinds audit:blast-radius.
   # phase: prove
   sbom:
     name: Generate the release SBOM
-    needs: guard
+    needs:
+      - guard
+      - build-go
+    # The go-binary class reads its SBOM out of the shipped binaries
+    # (stele#46), so this job sits downstream of that build; for every
+    # other class the edge is vacuous — a skipped build-go admits, a
+    # failed one refuses. The barrier still holds: this stays a prove
+    # job, and the commit point refuses every publish on its failure.
+    if: >-
+      ${{ !cancelled() && needs.guard.result == 'success' &&
+          (needs.build-go.result == 'success' || needs.build-go.result == 'skipped') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -375,6 +387,34 @@ jobs:
           version: 2026.8.3
           cache: false
 
+      - name: Fetch the shipped binaries (go-binary)
+        if: contains(inputs.classes, 'go-binary')
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build-go.outputs.artifact-name }}
+          path: shipped-archives
+
+      - name: Unpack the legs the SBOM will describe
+        if: contains(inputs.classes, 'go-binary')
+        # One directory per archive: two legs both ship the same command
+        # basename, and a flat extraction would silently overwrite one
+        # leg with another.
+        run: |
+          set -euo pipefail
+          found=0
+          for a in shipped-archives/*.tar.gz; do
+            [[ -e ${a} ]] || break
+            leg="${a##*/}"
+            leg="${leg%.tar.gz}"
+            mkdir -p "shipped/${leg}"
+            tar -xzf "${a}" -C "shipped/${leg}"
+            found=1
+          done
+          if [[ ${found} -ne 1 ]]; then
+            echo "::error::the go-binary build artifact holds no archives"
+            exit 1
+          fi
+          echo "BINARIES_DIR=${PWD}/shipped" >> "${GITHUB_ENV}"
       - name: Derive the SBOM from what this repository ships
         env:
           GH_TOKEN: ${{ github.token }}

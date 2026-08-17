@@ -189,12 +189,13 @@ what the artifact actually is, never configuration.
 | Artifact class | SBOM source | Why |
 | --- | --- | --- |
 | rust-crate, rust-binary, pgrx tarballs | trivy over `Cargo.lock` at the tagged commit | Deterministic; every PURL versioned |
-| go-binary | trivy over `go.mod`/`go.sum` at the tagged commit | Deterministic; a 1.17+ go.mod lists the full transitive closure, go.sum pins the bytes — and the shipped binary carries the same module list in its own bytes, readable with `go version -m`, asserted at build time |
+| go-binary | `stele derive sbom` over the shipped binaries | The module list the toolchain actually linked, read back out of the artifact bytes, with the release version stamped into the binary by the toolchain from the tag — never asserted by the pipeline (stele#46; the mechanism's spec lives in stele's `docs/binary-sbom.md`) |
 | oci-image, pgrx images, continuous db image | trivy over the **published image by digest**, at the pull-back step | Captures OS packages and (via cargo-auditable) the Rust deps of the artifact a stranger pulls, not a local twin |
 | Manifest-less (the canon, source-archive) | GitHub dependency-graph export | Its dependencies are actions, which the graph covers |
 | pgrx artifact images | none, deliberately | `FROM scratch`: no OS layer, and their only content is the attested tarballs whose lock-derived SBOM already ships — an image with no surface of its own derives nothing new |
 
-trivy is the single generator — already in the belt, no new tooling.
+trivy generates the lock- and image-derived shapes; go-binary's
+generator is stele, the format authority for that shape.
 The GitHub dependency-graph export was replaced for code and image
 classes on measurement, not preference: the lab's v0.17.0 export carried
 2 versionless PURLs out of 236 (`pkg:cargo/mimalloc`,
