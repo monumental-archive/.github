@@ -1,0 +1,71 @@
+# The org's TypeScript enforcement, in one place because two would drift.
+#
+# `lint:types` reads this file and passes every flag below to tsc, where
+# a compiler flag beats the same key in a repo's tsconfig.json. The
+# `lint:tsc-flags` task reads the same file and holds it against `tsc
+# --all`, so a strictness option the pinned compiler grows and this file
+# does not name reddens the gate instead of quietly not being enforced —
+# the enable-list failure the clippy standup ruled against (#445), which
+# TypeScript cannot express as a group minus exclusions.
+#
+# Every type-checking boolean the compiler has must therefore appear
+# either as a flag below or as an `adjudicated:` line with its reason.
+# One flag per line; arguments on the same line; `#` starts a comment.
+
+# Never emit. Without it tsc writes .js beside the sources — and writes
+# it even when checking failed, since noEmitOnError defaults false.
+--noEmit
+
+# The strict family, which GROWS on its own: TypeScript adds new checks
+# under this flag between versions, so it is the one part of the org's
+# level that needs no edit to keep up.
+--strict
+
+# The dials outside the strict family, each of which must be named.
+--noImplicitReturns
+--noUnusedLocals
+--noUnusedParameters
+--noFallthroughCasesInSwitch
+--noUncheckedIndexedAccess
+--exactOptionalPropertyTypes
+--noImplicitOverride
+--noPropertyAccessFromIndexSignature
+--noUncheckedSideEffectImports
+
+# Inverted dials: the permissive default is `undefined`, which only
+# warns an editor. `false` is what makes them errors.
+--allowUnreachableCode false
+--allowUnusedLabels false
+
+# Dependencies are checked too. This is the tool's maximum and the org
+# has no exception mechanism for it: measured on monumental-archive,
+# every failure was the repo's own missing type declaration rather than
+# a broken library.
+--skipLibCheck false
+--skipDefaultLibCheck false
+
+# Language shape: each file transpilable alone, no import elision
+# surprises, and nothing that cannot be erased to plain ECMAScript.
+--isolatedModules
+--verbatimModuleSyntax
+--erasableSyntaxOnly
+
+# Exports carry explicit types so other tools can derive declarations.
+# `--declaration` is not emit here (--noEmit wins); isolatedDeclarations
+# simply refuses to run without it (TS5069).
+--isolatedDeclarations
+--declaration
+
+# Type-checking booleans deliberately NOT passed, each ruled rather than
+# forgotten. `lint:tsc-flags` accepts these and nothing else.
+# adjudicated: alwaysStrict — implied by --strict, and 7.0 removed the false case
+# adjudicated: noImplicitAny — implied by --strict
+# adjudicated: noImplicitThis — implied by --strict
+# adjudicated: strictBindCallApply — implied by --strict
+# adjudicated: strictBuiltinIteratorReturn — implied by --strict
+# adjudicated: strictFunctionTypes — implied by --strict
+# adjudicated: strictNullChecks — implied by --strict
+# adjudicated: strictPropertyInitialization — implied by --strict
+# adjudicated: useUnknownInCatchVariables — implied by --strict
+# adjudicated: deduplicatePackages — resolution behaviour, not a check; already true
+# adjudicated: stableTypeOrdering — determinism, already true and not disableable in 7

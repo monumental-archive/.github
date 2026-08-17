@@ -1387,6 +1387,42 @@ done <<< "${mods}"
 echo "lint:go: ${count} module(s) linted and format-checked"
 '''
 
+[tasks."lint:tsc-flags"]
+description = "Every type-checking option the pinned tsc has is passed or adjudicated"
+dir = "{{cwd}}"
+# The enable-list alarm, and unlike biome's it is offline and lives in
+# the gate. TypeScript cannot express its checks as a group minus
+# exclusions — `--strict` grows on its own, but every dial outside that
+# family is named one at a time in mise/tsc-flags.txt. So a strictness
+# option added by a toolchain bump would simply be absent, and
+# enforcement would stop growing with nothing to say so: the exact
+# failure the clippy standup rejected an explicit enable-list for.
+#
+# `tsc --all` is the pinned compiler's own account of what it has, so
+# the comparison needs no network and no vendored list — the belt asks
+# the binary it is running. Unconditional, because it checks the ORG's
+# config rather than a repo's code: the canon tracks no TypeScript, and
+# a check that only runs where TypeScript exists would never run here,
+# which is how three biome defects survived three days (#445).
+run = '''
+set -euo pipefail
+command -v tsc > /dev/null || { echo "lint:tsc-flags: tsc missing from the belt" >&2; exit 1; }
+list="${ORG_BELT_DIR}/tsc-flags.txt"
+[[ -f "${list}" ]] || { echo "lint:tsc-flags: ${list} missing from the belt" >&2; exit 1; }
+known=$( { grep -oE '^--[a-zA-Z]+' "${list}"; \
+  sed -n 's/^# adjudicated: \([a-zA-Z]*\) .*/--\1/p' "${list}"; } | sort -u)
+have=$(tsc --all | sed -n '/^### Type Checking/,/^### Watch/p' \
+  | awk '/^--/{name=$1} /^type: boolean/{print name}' | tr -d ',' | sort -u)
+unruled=$(comm -23 <(echo "${have}") <(echo "${known}"))
+if [[ -n "${unruled}" ]]; then
+  echo "lint:tsc-flags: $(tsc --version | tr -d '\n') has type-checking options the org has not ruled on:" >&2
+  sed 's/^/  /' <<<"${unruled}" >&2
+  echo "  pass it in mise/tsc-flags.txt, or add an '# adjudicated:' line saying why not" >&2
+  exit 1
+fi
+echo "lint:tsc-flags: every type-checking option of $(tsc --version | tr -d '\n') is passed or ruled"
+'''
+
 [tasks."lint:types"]
 description = "TypeScript type checking (tsc, every dial forced from the command line)"
 dir = "{{cwd}}"
@@ -1467,32 +1503,20 @@ if [[ -n "$(git ls-files "package.json" "*/package.json")" && ! -d node_modules 
   echo "  is not a weaker check, it is a green one that resolved nothing)" >&2
   exit 1
 fi
+flags=()
+while IFS= read -r line; do
+  line="${line%%#*}"
+  [[ -n "${line//[[:space:]]/}" ]] || continue
+  read -ra parts <<< "${line}"
+  flags+=("${parts[@]}")
+done < "${ORG_BELT_DIR}/tsc-flags.txt"
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp}"' EXIT
 count=0
 while IFS= read -r cfg; do
   [[ -n "${cfg}" ]] || continue
   count=$((count + 1))
-  tsc -p "${cfg}" \
-    --noEmit --tsBuildInfoFile "${tmp}/${count}.tsbuildinfo" \
-    --strict \
-    --noImplicitReturns \
-    --noUnusedLocals \
-    --noUnusedParameters \
-    --noFallthroughCasesInSwitch \
-    --noUncheckedIndexedAccess \
-    --exactOptionalPropertyTypes \
-    --noImplicitOverride \
-    --noPropertyAccessFromIndexSignature \
-    --noUncheckedSideEffectImports \
-    --allowUnreachableCode false \
-    --allowUnusedLabels false \
-    --skipLibCheck false \
-    --skipDefaultLibCheck false \
-    --isolatedModules \
-    --verbatimModuleSyntax \
-    --erasableSyntaxOnly \
-    --isolatedDeclarations --declaration
+  tsc -p "${cfg}" --tsBuildInfoFile "${tmp}/${count}.tsbuildinfo" "${flags[@]}"
   tsc -p "${cfg}" --noEmit --noCheck --listFiles \
     --tsBuildInfoFile "${tmp}/${count}.info" >> "${tmp}/seen"
 done <<< "${cfgs}"

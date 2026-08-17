@@ -779,6 +779,23 @@ Everything below was proven by running 7.0.2, not read:
   catches it — biome ran clean over one — so the belt greps, as it does
   for crate-level `#![allow]`.
 
+**The flag list is an enable-list, and this one closes offline.**
+TypeScript cannot express its checks as a group minus exclusions the way
+clippy can: `--strict` grows on its own between versions, but every dial
+outside that family is named one at a time, so a strictness option added
+by a toolchain bump would simply be absent and enforcement would stop
+growing silently. `mise/tsc-flags.txt` is the single source both halves
+read — `lint:types` passes what it lists, and `lint:tsc-flags` holds it
+against `tsc --all`, the pinned compiler's own account of what it has.
+Every type-checking boolean must be passed or carry an `adjudicated:`
+line with its reason; eleven do (nine implied by `--strict`, plus
+`deduplicatePackages` and `stableTypeOrdering`, which are resolution and
+determinism rather than checks). No network and no vendored list, so
+unlike `audit:biome-rules` this one lives in the gate — and it runs
+unconditionally rather than only where TypeScript is tracked, because a
+check that skipped the canon is precisely how three biome defects
+survived three days.
+
 `skipLibCheck: false` is the one setting worth its own note, because it
 is the tool's maximum and the org has no exception mechanism for it. It
 checks the type declarations *inside* dependencies. Measured on
