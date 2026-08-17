@@ -3585,7 +3585,16 @@ fi
 # ratchet semantics are identical to the Rust leg's: committed floor,
 # local measurement, merge refused below it. No COVERAGE_EXCLUDE analog
 # yet — the first Go repo that needs one adds it deliberately.
-if [[ -f go.mod && ! -f Cargo.toml ]]; then
+#
+# EVERY tracked language runs its own leg, and each must hold the floor.
+# This read `go.mod && ! -f Cargo.toml` until the lab gained a Go
+# fixture beside its crates: a mixed repo then took the Rust leg alone
+# and reported "floor held" over a language nothing had measured — the
+# vacuous green this ratchet exists to prevent, in the ratchet itself.
+# The floor is a minimum, so applying it per language is the only
+# reading that means anything; a repo that wants two numbers wants two
+# floors, and can say so when one exists.
+if [[ -f go.mod ]]; then
   command -v go > /dev/null || {
     echo "coverage:check: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
@@ -3597,12 +3606,12 @@ if [[ -f go.mod && ! -f Cargo.toml ]]; then
     exit 1
   }
   if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-    echo "coverage:check: ${pct}% is below the committed floor ${floor}%" >&2
+    echo "coverage:check: go: ${pct}% is below the committed floor ${floor}%" >&2
     exit 1
   fi
-  echo "coverage:check: floor ${floor} held (${pct}%)"
-  exit 0
+  echo "coverage:check: go leg holds the floor ${floor} (${pct}%)"
 fi
+[[ -f Cargo.toml ]] || exit 0
 if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
   echo "coverage:check: llvm-tools component missing — declare it with the" >&2
   echo "  rust pin in mise.toml: rust = { version = \\"1.xx.x\\", components = \\"llvm-tools\\" }" >&2
@@ -3641,15 +3650,20 @@ run = """
 # Codecov parses Go coverprofiles natively, so the report is the
 # measurement, with no converter to drift. ci.yml selects the filename
 # by repo shape (coverage.txt for Go, lcov.info for Rust).
-if [[ -f go.mod && ! -f Cargo.toml ]]; then
+# Every tracked language renders its own report, for the same reason
+# coverage:check runs every leg: a mixed repo used to render lcov.info
+# alone while ci.yml, guessing the filename from `hashFiles('go.mod')`,
+# asked Codecov for a coverage.txt nothing had written. The uploader
+# now takes the list of reports that actually exist.
+if [[ -f go.mod ]]; then
   command -v go > /dev/null || {
     echo "coverage:report: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
   }
   go test ./... -coverprofile=coverage.txt -covermode=atomic > /dev/null
   echo "coverage:report: coverage.txt written"
-  exit 0
 fi
+[[ -f Cargo.toml ]] || exit 0
 if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
   echo "coverage:report: llvm-tools component missing — declare it with the" >&2
   echo "  rust pin in mise.toml: rust = { version = \\"1.xx.x\\", components = \\"llvm-tools\\" }" >&2
