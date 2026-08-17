@@ -210,7 +210,7 @@ runs:
         # resolve cosign themselves, which is a larger change than the
         # scope widening that surfaced this (#82).
         dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
-        dirname "$(mise which go)" >> "${GITHUB_PATH}"
+        dirname "$(mise which stele)" >> "${GITHUB_PATH}"
 
     # The scratch clone is orchestration: which refs exist locally is
     # this action's fetch, and stele refuses to network on its own. The

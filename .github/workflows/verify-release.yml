@@ -414,6 +414,13 @@ jobs:
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
           GH_TOKEN: ${{ github.token }}
+          # The shim resolves a version from the config, not from the
+          # install: without these the step dies "No version is set for
+          # shim: stele" even though the tool is installed. Measured on
+          # v1.34.0, whose verdict job failed exactly there.
+          MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
+          MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
+          MISE_LOCKED: "1"
         run: |
           set -euo pipefail
 
