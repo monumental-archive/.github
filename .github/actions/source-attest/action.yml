@@ -176,7 +176,7 @@ runs:
         cache: false
         install: false
 
-    - name: Install the belt's cosign and go
+    - name: Install the belt's cosign and stele
       if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
@@ -191,7 +191,7 @@ runs:
         # window; the auto-heal in chain.sh is what makes losing it
         # recoverable.
         for attempt in 1 2 3 4 5; do
-          mise install "aqua:sigstore/cosign" go && break
+          mise install "aqua:sigstore/cosign" "github:monumental-archive/stele" && break
           if [[ "${attempt}" == 5 ]]; then
             echo "::error::could not install cosign after ${attempt} attempts"
             exit 1

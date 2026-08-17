@@ -385,6 +385,27 @@ jobs:
         if: inputs.mode == 'verdict'
         uses: $/.github/actions/canon
 
+      # stele is a belt tool now (pinned, locked, provenance verified at
+      # lock time) — the `go run <module>@<commit>` bootstrap this job
+      # used to carry is retired, so the verdict needs the belt rather
+      # than the runner's preinstalled Go. install: false plus one
+      # explicit install keeps the job cold: only the tool it runs.
+      - name: Install mise
+        if: inputs.mode == 'verdict'
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          cache: false
+          install: false
+
+      - name: Install the belt's stele
+        if: inputs.mode == 'verdict'
+        env:
+          MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
+          MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
+          MISE_LOCKED: "1"
+        run: mise install "github:monumental-archive/stele"
+
       - name: Verify the release and render the verdict (stele emit vsa)
         id: verdict
         if: inputs.mode == 'verdict'
@@ -408,8 +429,8 @@ jobs:
             echo "::error::POLICY_REF is empty — refusing a verdict with no policy"
             exit 1
           fi
-          command -v go > /dev/null || {
-            echo "::error::go is not on the runner"
+          command -v stele > /dev/null || {
+            echo "::error::stele is not on the runner — it is a belt tool"
             exit 1
           }
 
