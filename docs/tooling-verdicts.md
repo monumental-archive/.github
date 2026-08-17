@@ -735,6 +735,81 @@ about its rule set is not recorded until it has been run against code
 that violates it.** Not a fixture committed to the tree — a probe,
 thrown away, whose result is what the doc then states.
 
+**tsc, and the flag that beats the repo** (#445). The type checker joins
+the belt as `lint:types` — the only tool on it that reasons about what a
+value *is*. Biome reads the same files and never resolves a type.
+
+The pin was only possible because the tool changed shape: **TypeScript 7
+is the Go port**, so `tsc` is a native executable and the checker lands
+without dragging Node onto the belt. Third `github:` backend, and the
+weakest of the three on provenance — the release carries no attestation
+(`gh attestation verify` 404s on the asset) while mise still narrates
+"verify SLSA provenance" and passes under
+`locked_verify_provenance = true`. The lock's per-platform checksums are
+the only integrity control, recorded here rather than assumed away.
+
+Everything below was proven by running 7.0.2, not read:
+
+- **A compiler flag beats the same key in `tsconfig.json`, even under
+  `-p`.** So the belt forces every dial from the command line and a repo
+  cannot lower the org's level from its own config — stronger than
+  clippy, where a source attribute still wins. (`--flag=false` is
+  `TS5023`; the accepted form is `--flag false`.)
+- **`tsc -b` refuses every compiler option it is handed (`TS5094`).** So
+  following project references and enforcing the org's flags are
+  mutually exclusive, and enforcement wins: **project references are
+  refused org-wide**. TS 7 checks ~360 files a second, so the build
+  orchestration references exist for is not a problem the org has.
+- **`tsc -p` on a solution config (`files: []` + `references`) exits 0
+  having checked nothing.** The fail-open that makes the refusal above
+  cheap rather than costly.
+- **Without `--noEmit` the checker writes `.js` beside the sources — and
+  writes it when checking FAILED**, since `noEmitOnError` defaults
+  false. `.tsbuildinfo` goes to a temp dir for the same reason (#374).
+- **A file list is refused outright when a project exists (`TS5112`)**,
+  so this is the one belt linter that cannot be driven by `git
+  ls-files`. Hence the coverage check: every tracked `.ts` must appear
+  in some project's program, because `exclude` is otherwise a green
+  gate. Unlike clippy and rustfmt, an unknown or removed option is a
+  hard error (`TS5023`/`TS5102`), so a stale config cannot fail open.
+- **Suppression is clippy's ladder exactly**: `@ts-expect-error`
+  self-retires (`TS2578` when the error goes) and survives, with a
+  written reason; `@ts-ignore` is forever and silent, already banned by
+  biome's `noTsIgnore`; `@ts-nocheck` silences a whole file, nothing
+  catches it — biome ran clean over one — so the belt greps, as it does
+  for crate-level `#![allow]`.
+
+`skipLibCheck: false` is the one setting worth its own note, because it
+is the tool's maximum and the org has no exception mechanism for it. It
+checks the type declarations *inside* dependencies. Measured on
+monumental-archive: 51 failures, **all of them the repo's own missing
+declarations** — 48 vanished by declaring `geojson` in `types`, 3 by
+declaring the web-API lib — not sloppy libraries. Where a library truly
+ships broken types the routes are to patch, replace, or drop it. Ruled
+by Carl 2026-08-17: no escape hatch, repos conform to the org and the
+tools rather than the reverse. Note that no SLSA level bears on this:
+the dependency track is about a package's provenance, never about
+whether its `.d.ts` is coherent.
+
+`tsconfig.json` stays repo-side and carries **no strictness settings at
+all** — the belt forces those, so a copy here would be duplication or a
+lie. What is left is what the belt cannot invent: which files, server or
+browser, which module system. Two consequences ride along: no
+`references` (above), and **no `allowJs`**, because TypeScript refuses
+`isolatedDeclarations` alongside it (`TS5053`) and a flag the belt
+quietly drops for some repos is a hole.
+
+Like biome, **tsc cannot be proven in this repository** — the canon
+tracks no TypeScript, so `lint:types` skips clean here. Every guard was
+therefore exercised against a throwaway probe (missing config,
+`@ts-nocheck`, reasonless `@ts-expect-error`, an uncovered file,
+declared references, and the clean pass) and the checker itself against
+monumental-archive, where it finds real work: one `erasableSyntaxOnly`
+violation, ten `isolatedDeclarations` annotations, three
+dependency-declaration errors. *Reopen:* the first repo that needs
+project references, with evidence that per-project checking is
+insufficient.
+
 **eslint, typescript-eslint and knip stay repo-side** — not a rejection,
 a placement. A flat eslint config is a JS module that imports its plugins
 from the repo's own `node_modules`, and typescript-eslint's type-aware
