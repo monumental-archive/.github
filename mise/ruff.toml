@@ -4,6 +4,12 @@
 # mitigation: the version is pinned and bumped by Renovate, so an unstable
 # rule change arrives as a red bump PR, never a surprise in main. Ruff is
 # pre-1.0 and its minor versions may change lint results by design.
+#
+# Ruff is the tool that HAS the one-line switch. #445 found that biome
+# does not: its `preset: "all"` excludes nursery, nothing turns the group
+# on in bulk, and this comment's confident parallel was written while 87
+# biome rules sat off. Where a switch is claimed, run the tool and watch
+# a rule from the group fire before writing that down.
 preview = true
 
 # The interpreter this code actually runs on, which is now a fact the belt
