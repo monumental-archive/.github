@@ -13,6 +13,12 @@
       "matchManagers": ["mise"],
       "matchDepNames": ["microsoft/typescript-go"],
       "extractVersion": "^typescript/v(?<version>.+)$"
+    },
+    {
+      "description": "rumdl tags its releases `vX.Y.Z` and the belt pin is bare. Without this, Renovate writes the raw tag into the pin (`rumdl = \"v0.2.53\"`, PR #470) — and a v-prefixed pin also defeats the mise manager's automatic mise.lock refresh, so the bump arrives lockless and MISE_LOCKED fails the gate on a version the lock has never heard of.",
+      "matchManagers": ["mise"],
+      "matchDepNames": ["rumdl"],
+      "extractVersion": "^v(?<version>.+)$"
     }
   ],
   "customManagers": [
