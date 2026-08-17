@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.35.1](https://github.com/monumental-archive/.github/compare/v1.35.0...v1.35.1) - 2026-08-17
+
+### Fixed
+
+- scan the tree unless the binaries are the release ([#489](https://github.com/monumental-archive/.github/pull/489))
+
 ## [1.35.0](https://github.com/monumental-archive/.github/compare/v1.34.1...v1.35.0) - 2026-08-17
 
 ### Added
