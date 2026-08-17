@@ -1629,10 +1629,15 @@ total=0
 while IFS= read -r m; do
   [[ -n "${m}" ]] || continue
   d=$(dirname "${m}")
-  n=$( (cd "${d}" && go test -list '^Fuzz' ./... 2> /dev/null) | grep -c '^Fuzz' || true)
+  # Tracked packages, never `./...` — the walker reaches the other
+  # language's build output and races it (see go-packages.sh).
+  pkgs=()
+  while IFS= read -r p; do pkgs+=("${p}"); done < <("${ORG_BELT_DIR}/go-packages.sh" "${d}")
+  [[ -n "${pkgs[0]:-}" ]] || continue
+  n=$( (cd "${d}" && go test -list '^Fuzz' "${pkgs[@]}" 2> /dev/null) | grep -c '^Fuzz' || true)
   [[ "${n}" -gt 0 ]] || continue
   total=$((total + n))
-  (cd "${d}" && go test -race -run '^Fuzz' ./...)
+  (cd "${d}" && go test -race -run '^Fuzz' "${pkgs[@]}")
 done <<< "${mods}"
 [[ "${total}" -gt 0 ]] || { echo "lint:go-fuzz-seeds: no Go fuzz targets, skipped"; exit 0; }
 echo "lint:go-fuzz-seeds: ${total} target(s) built, seed corpora clean"
@@ -1687,7 +1692,12 @@ command -v govulncheck > /dev/null || {
 }
 while IFS= read -r m; do
   [[ -n "${m}" ]] || continue
-  (cd "$(dirname "${m}")" && govulncheck ./...)
+  # Tracked packages, never `./...` — see go-packages.sh.
+  d=$(dirname "${m}")
+  pkgs=()
+  while IFS= read -r p; do pkgs+=("${p}"); done < <("${ORG_BELT_DIR}/go-packages.sh" "${d}")
+  [[ -n "${pkgs[0]:-}" ]] || continue
+  (cd "${d}" && govulncheck "${pkgs[@]}")
 done <<< "${mods}"
 echo "audit:go-vulns: no reachable vulnerabilities"
 '''
@@ -3599,7 +3609,12 @@ if [[ -f go.mod ]]; then
     echo "coverage:check: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
   }
-  go test ./... -coverprofile=coverage.txt -covermode=atomic
+  # Tracked packages, never `./...`: the walker also walks the other
+  # language's build output, and in a repo building both it races it
+  # (see go-packages.sh — this is what reddened release-lab's main).
+  go_pkgs=()
+  while IFS= read -r p; do go_pkgs+=("${p}"); done < <("${ORG_BELT_DIR}/go-packages.sh")
+  go test "${go_pkgs[@]}" -coverprofile=coverage.txt -covermode=atomic
   pct=$(go tool cover -func=coverage.txt | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
   [[ -n "${pct}" ]] || {
     echo "coverage:check: could not read a total from the profile — a check that reads nothing must not pass" >&2
@@ -3660,7 +3675,10 @@ if [[ -f go.mod ]]; then
     echo "coverage:report: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
   }
-  go test ./... -coverprofile=coverage.txt -covermode=atomic > /dev/null
+  # Tracked packages, never `./...` — see coverage:check above.
+  go_pkgs=()
+  while IFS= read -r p; do go_pkgs+=("${p}"); done < <("${ORG_BELT_DIR}/go-packages.sh")
+  go test "${go_pkgs[@]}" -coverprofile=coverage.txt -covermode=atomic > /dev/null
   echo "coverage:report: coverage.txt written"
 fi
 [[ -f Cargo.toml ]] || exit 0
@@ -4392,7 +4410,7 @@ while IFS= read -r m; do
       (cd "${d}" && CGO_ENABLED=1 go test -race -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") \
         || failed="${failed} ${pkg}.${target}(race)"
     done < <( (cd "${d}" && go test -list '^Fuzz' "${pkg}" 2> /dev/null) | grep '^Fuzz' || true)
-  done < <( (cd "${d}" && go list ./... 2> /dev/null) || true)
+  done < <("${ORG_BELT_DIR}/go-packages.sh" "${d}")
 done <<< "${mods}"
 [[ "${ran}" -gt 0 ]] || { echo "audit:go-fuzz: no Go fuzz targets, skipped"; exit 0; }
 if [[ -n "${failed}" ]]; then
@@ -5128,17 +5146,21 @@ dir = "{{cwd}}"
 # Comment lines are skipped so that documenting a forbidden form (as the
 # signer now does) is not itself a violation.
 run = '''
-files=$(git ls-files ':!vendor/**' | xargs shfmt --find 2>/dev/null; git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
+files=$(git ls-files ':!vendor/**' | xargs shfmt --find 2>/dev/null; git ls-files ':!vendor/**' ".github/workflows/*.y*ml" "mise.toml" ".mise.toml" "mise/config.toml")
 [[ -n "${files}" ]] || { echo "lint:bash-portability: nothing to check, skipped"; exit 0; }
 # ${v,,} ${v^^} ${v,} ${v^} — case modification, bash 4.0
 # declare -A / typeset -A — associative arrays, bash 4.0
 # mapfile / readarray     — bash 4.0
 # &>>                     — append-both redirection, bash 4.0
-bad4='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^|,|\^)\}|(declare|typeset)[[:space:]]+-[A-Za-z]*A|(^|[^A-Za-z_])(mapfile|readarray)[[:space:]]|&>>'
+bad4='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^|,|\^)\}|(declare|typeset)[[:space:]]+-[A-Za-z]*A|(^|[^A-Za-z_])(mapfile|readarray)[[:space:]]|&>>' # portability-exempt: this line DEFINES the forbidden forms
 found=""
 while IFS= read -r f; do
   [[ -f "${f}" ]] || continue
-  hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
+  # Comment lines are skipped above; `portability-exempt` is for the
+  # rarer case of live code that must name a forbidden form — this
+  # task's own pattern, which contains a literal `&>>` and so matched
+  # itself the moment the scan learned to read belt task bodies.
+  hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -v "portability-exempt" | grep -nE "${bad4}" || true)
   [[ -n "${hit}" ]] && found="${found}\n  ${f}: ${hit}"
 done <<< "${files}"
 if [[ -n "${found}" ]]; then
