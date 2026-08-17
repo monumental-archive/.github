@@ -173,7 +173,7 @@ jobs:
   sign:
     name: Sign image
     needs: assemble
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d50cdb3de85d802e7ab9f50da1400f367ef7b632 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@3b69f522487c2ace40fd8f2e23e1bc291036fe77 # main
     with:
       image-name: ${{ needs.assemble.outputs.image }}
       image-digest: ${{ needs.assemble.outputs.digest }}
