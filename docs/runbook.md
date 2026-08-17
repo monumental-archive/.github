@@ -9,7 +9,7 @@ written for two moments: wiring a repository in, and a release going wrong.
 ### Versioned (has releases, versions, tags)
 
 1. Copy from [`scaffold/`](../scaffold/): `mise.toml`, `cliff.toml`,
-   `committed.toml`, `.rumdl.toml`, and `SECURITY-INSIGHTS.yml` (fill the
+   `committed.toml`, and `SECURITY-INSIGHTS.yml` (fill the
    `<angle-bracket>` fields). If the repository is citable (its release
    stub passes `mint-doi: true`), render `CITATION.cff` with
    `mise run fix:citation` — derived from `REUSE.toml`, enforced by
