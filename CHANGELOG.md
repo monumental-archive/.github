@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.33.2](https://github.com/monumental-archive/.github/compare/v1.33.1...v1.33.2) - 2026-08-17
+
+### Fixed
+
+- stamp the Go root module's version into the SBOM ([#476](https://github.com/monumental-archive/.github/pull/476))
+
 ## [1.33.1](https://github.com/monumental-archive/.github/compare/v1.33.0...v1.33.1) - 2026-08-17
 
 ### Fixed
