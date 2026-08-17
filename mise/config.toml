@@ -185,6 +185,26 @@ ruff = "0.16.2"
 # exercised first in a consumer, not in this gate (docs/tooling-verdicts.md)
 # — which is precisely how three defects rode along in it for three days.
 "aqua:biomejs/biome" = "2.5.7"
+# TypeScript type checking (#445), the one thing on the belt that reasons
+# about what a value IS rather than how it is written — biome lints the
+# same files and never resolves a type.
+#
+# TypeScript 7 is the Go port, and that is what makes this pinnable at
+# all: `tsc` is now a native executable (`package/lib/tsc` in the
+# platform tarball), so the type checker enters the belt WITHOUT
+# bringing Node with it — the "keeps Node out of the belt" line on rumdl
+# still holds. No aqua package exists, so this is the third `github:`
+# backend after cargo-machete and cargo-semver-checks, and the weakest
+# of the three on provenance: the release carries no attestation at all
+# (`gh attestation verify` 404s on the asset) while mise still prints
+# "verify SLSA provenance" and passes, so the lock's per-platform
+# checksums are the only integrity control. Recorded in
+# docs/tooling-verdicts.md rather than glossed.
+#
+# `version_prefix` because upstream tags releases `typescript/v7.0.2`,
+# and `bin_path` because the executable sits inside the npm package
+# layout the tarball preserves.
+"github:microsoft/typescript-go" = { version = "7.0.2", version_prefix = "typescript/v", bin_path = "package/lib" }
 # Coverage ratchet (docs/runbook.md): repos commit a floor in
 # .coverage-floor and the canonical coverage:check enforces it in the
 # gate — deterministic (local run against a committed number), Rust-only
@@ -1365,6 +1385,152 @@ while IFS= read -r m; do
   (cd "$(dirname "${m}")" && golangci-lint run)
 done <<< "${mods}"
 echo "lint:go: ${count} module(s) linted and format-checked"
+'''
+
+[tasks."lint:tsc-flags"]
+description = "Every type-checking option the pinned tsc has is passed or adjudicated"
+dir = "{{cwd}}"
+# The enable-list alarm, and unlike biome's it is offline and lives in
+# the gate. TypeScript cannot express its checks as a group minus
+# exclusions — `--strict` grows on its own, but every dial outside that
+# family is named one at a time in mise/tsc-flags.txt. So a strictness
+# option added by a toolchain bump would simply be absent, and
+# enforcement would stop growing with nothing to say so: the exact
+# failure the clippy standup rejected an explicit enable-list for.
+#
+# `tsc --all` is the pinned compiler's own account of what it has, so
+# the comparison needs no network and no vendored list — the belt asks
+# the binary it is running. Unconditional, because it checks the ORG's
+# config rather than a repo's code: the canon tracks no TypeScript, and
+# a check that only runs where TypeScript exists would never run here,
+# which is how three biome defects survived three days (#445).
+run = '''
+set -euo pipefail
+command -v tsc > /dev/null || { echo "lint:tsc-flags: tsc missing from the belt" >&2; exit 1; }
+list="${ORG_BELT_DIR}/tsc-flags.txt"
+[[ -f "${list}" ]] || { echo "lint:tsc-flags: ${list} missing from the belt" >&2; exit 1; }
+known=$( { grep -oE '^--[a-zA-Z]+' "${list}"; \
+  sed -n 's/^# adjudicated: \([a-zA-Z]*\) .*/--\1/p' "${list}"; } | sort -u)
+have=$(tsc --all | sed -n '/^### Type Checking/,/^### Watch/p' \
+  | awk '/^--/{name=$1} /^type: boolean/{print name}' | tr -d ',' | sort -u)
+unruled=$(comm -23 <(echo "${have}") <(echo "${known}"))
+if [[ -n "${unruled}" ]]; then
+  echo "lint:tsc-flags: $(tsc --version | tr -d '\n') has type-checking options the org has not ruled on:" >&2
+  sed 's/^/  /' <<<"${unruled}" >&2
+  echo "  pass it in mise/tsc-flags.txt, or add an '# adjudicated:' line saying why not" >&2
+  exit 1
+fi
+echo "lint:tsc-flags: every type-checking option of $(tsc --version | tr -d '\n') is passed or ruled"
+'''
+
+[tasks."lint:types"]
+description = "TypeScript type checking (tsc, every dial forced from the command line)"
+dir = "{{cwd}}"
+# The TypeScript half of the language layer (#445). Named for the subject
+# like lint:go and lint:python — tsc checks one thing, and biome already
+# owns the tool-named task over the same files.
+#
+# Every dial is passed on the COMMAND LINE, and that is the whole design:
+# a compiler flag beats the same key in tsconfig.json even under `-p`
+# (proven), so a repo cannot lower the org's level from its own config.
+# Stronger than clippy, where a source attribute could still defeat the
+# belt. What tsconfig.json is left to say is what the project IS —
+# which files, browser or server, which module system — so it stays
+# repo-side and carries no strictness lines at all (scaffold/tsconfig.json).
+#
+# Per project with `-p`, never `tsc -b`: build mode refuses every
+# compiler option it is handed (TS5094), so the org's flags and
+# reference-following are mutually exclusive, and enforcement wins.
+# Project references are therefore refused outright rather than half
+# supported — under `-p` a referenced project's declarations do not
+# exist (TS6305) and the alternative is a build that writes. TS 7 checks
+# ~360 files a second, so the build-orchestration case references exist
+# to solve is not one the org has.
+#
+# `--noEmit` is not optional: without it tsc writes .js beside the
+# sources, and writes it even when checking FAILED (noEmitOnError
+# defaults false). .tsbuildinfo is redirected to a temp dir for the same
+# reason — the gate does not write to the tree (#374).
+#
+# File selection is the one thing the command line cannot force, so it
+# is checked instead: every tracked .ts file must appear in some
+# project's program. A repo cannot `exclude` its way to a green gate.
+run = '''
+set -euo pipefail
+ts=$(git ls-files ':!vendor/**' "*.ts" "*.tsx" "*.mts" "*.cts")
+[[ -n "${ts}" ]] || { echo "lint:types: no TypeScript tracked, skipped"; exit 0; }
+cfgs=$(git ls-files ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
+  "*/*/*/tsconfig.json")
+if [[ -z "${cfgs}" ]]; then
+  echo "lint:types: TypeScript is tracked but no tsconfig.json is — copy scaffold/tsconfig.json" >&2
+  echo "  tsc refuses a file list when a project exists, so a project is how the org checks" >&2
+  exit 1
+fi
+command -v tsc > /dev/null || { echo "lint:types: tsc missing from the belt" >&2; exit 1; }
+# The suppression ladder, and it is clippy's exactly. @ts-expect-error is
+# the only survivor: it self-retires, because TypeScript errors (TS2578)
+# when the error it covers goes away — the #[expect] property. @ts-ignore
+# suppresses forever and silently, and biome's noTsIgnore already bans it
+# org-wide. @ts-nocheck silences a WHOLE FILE, the crate-level
+# #![allow] in a new costume, and nothing catches it: biome ran clean
+# over a file containing one. No compiler flag defeats either, so the
+# belt greps, exactly as it does for clippy's crate-level allows.
+banned=$(xargs grep -Hn '@ts-nocheck' <<<"${ts}" || true)
+if [[ -n "${banned}" ]]; then
+  echo "lint:types: @ts-nocheck disables checking for an entire file" >&2
+  sed 's/^/  /' <<<"${banned}" >&2
+  echo "  use @ts-expect-error with a written reason on the single line that needs it" >&2
+  exit 1
+fi
+bare=$(xargs grep -Hn '@ts-expect-error[[:space:]]*$' <<<"${ts}" || true)
+if [[ -n "${bare}" ]]; then
+  echo "lint:types: @ts-expect-error without a written reason" >&2
+  sed 's/^/  /' <<<"${bare}" >&2
+  echo "  the compiler retires the directive when the error goes; it cannot supply the why" >&2
+  exit 1
+fi
+refs=$(grep -l '"references"' ${cfgs} || true)
+if [[ -n "${refs}" ]]; then
+  echo "lint:types: project references are not supported org-wide" >&2
+  sed 's/^/  declares references: /' <<<"${refs}" >&2
+  echo "  tsc -b refuses the org's compiler flags (TS5094), so following references would" >&2
+  echo "  mean checking at whatever level the repo chose. Give each project its own config." >&2
+  exit 1
+fi
+if [[ -n "$(git ls-files "package.json" "*/package.json")" && ! -d node_modules ]]; then
+  echo "lint:types: dependencies are not installed, so their types cannot be read" >&2
+  echo "  install from the tracked lockfile before checking (a check against absent types" >&2
+  echo "  is not a weaker check, it is a green one that resolved nothing)" >&2
+  exit 1
+fi
+flags=()
+while IFS= read -r line; do
+  line="${line%%#*}"
+  [[ -n "${line//[[:space:]]/}" ]] || continue
+  read -ra parts <<< "${line}"
+  flags+=("${parts[@]}")
+done < "${ORG_BELT_DIR}/tsc-flags.txt"
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+count=0
+while IFS= read -r cfg; do
+  [[ -n "${cfg}" ]] || continue
+  count=$((count + 1))
+  tsc -p "${cfg}" --tsBuildInfoFile "${tmp}/${count}.tsbuildinfo" "${flags[@]}"
+  tsc -p "${cfg}" --noEmit --noCheck --listFiles \
+    --tsBuildInfoFile "${tmp}/${count}.info" >> "${tmp}/seen"
+done <<< "${cfgs}"
+sed "s|^${PWD}/||" "${tmp}/seen" | sort -u > "${tmp}/checked"
+sort -u <<<"${ts}" > "${tmp}/tracked"
+escaped=$(comm -23 "${tmp}/tracked" "${tmp}/checked")
+if [[ -n "${escaped}" ]]; then
+  echo "lint:types: tracked TypeScript that no project checks" >&2
+  sed 's/^/  /' <<<"${escaped}" >&2
+  echo "  add it to a project's include, or give it a project — an excluded file is" >&2
+  echo "  unchecked, and the gate cannot tell that apart from checked-and-clean" >&2
+  exit 1
+fi
+echo "lint:types: ${count} project(s) checked, $(wc -l < "${tmp}/tracked" | tr -d ' ') files covered"
 '''
 
 [tasks."fix:go"]

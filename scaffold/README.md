@@ -42,6 +42,25 @@ path (docs/tooling-verdicts.md).
   ruff trap, again). govulncheck rides repo-side: pin
   `"go:golang.org/x/vuln/cmd/govulncheck"` in `mise.toml` (the
   cargo-fuzz pattern; `audit:go-vulns` asserts it with the remedy).
+- `tsconfig.json` — the TypeScript canon (#445), and note what it does
+  **not** contain: a single strictness setting. `lint:types` passes every
+  dial on the command line, where a compiler flag beats the same key in
+  this file even under `-p`, so a repo cannot lower the org's level and
+  a copy of those settings here would be either duplication or a lie.
+  What is left is the only thing the belt cannot invent — what the
+  project *is*: which files it contains, server or browser, which module
+  system, which type packages. Adjust `include`, `lib` and `types` to
+  the repo and leave the rest alone. Two rules ride with it: **no
+  `references`** (build mode refuses the org's flags, so a referenced
+  project would be checked at whatever level the repo chose) and **no
+  `allowJs`** (TypeScript refuses `isolatedDeclarations` alongside it —
+  a TypeScript repo is TypeScript). Every tracked `.ts` file must land
+  in some project or the gate says so. One thing that bites on first
+  contact: under `module: nodenext` the belt's `verbatimModuleSyntax`
+  refuses `export` in a package that never declared `"type": "module"`
+  in `package.json` (`TS1287`). That is the flag working — it is the
+  check that stops a package from silently being CommonJS while its
+  source reads as ESM — so declare the type rather than lower the flag.
 
 **Pick the licence — this is a step, not an afterthought (#214).** The
 choice is per-repo (Rust repos conventionally dual-license

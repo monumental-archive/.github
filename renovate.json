@@ -7,6 +7,12 @@
       "matchFileNames": ["docker/pgrx-base-images.toml"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "typescript-go tags its releases `typescript/vX.Y.Z`, and the belt pin carries the bare version because mise strips the prefix itself (version_prefix). Renovate compares the pin against raw tag names, so without this it can match nothing and the pin silently never moves — the failure mode a pinned tool exists to avoid.",
+      "matchManagers": ["mise"],
+      "matchDepNames": ["microsoft/typescript-go"],
+      "extractVersion": "^typescript/v(?<version>.+)$"
     }
   ],
   "customManagers": [
