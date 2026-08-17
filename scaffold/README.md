@@ -42,6 +42,37 @@ path (docs/tooling-verdicts.md).
   ruff trap, again). govulncheck rides repo-side: pin
   `"go:golang.org/x/vuln/cmd/govulncheck"` in `mise.toml` (the
   cargo-fuzz pattern; `audit:go-vulns` asserts it with the remedy).
+
+  Two further Go checks need **no config and no stub at all**, because
+  both are subcommands of the `go` the belt already pins (#445).
+  `lint:go-tidy` runs `go mod tidy -diff` per tracked `go.mod` — it
+  fails with the diff and writes nothing, and `fix:go-tidy` applies it.
+  It catches what golangci-lint structurally cannot: golangci reads
+  packages and never the manifest, so an import with no requirement, a
+  requirement nothing imports, or a drifted `go.sum` are invisible to
+  it.
+
+  And **fuzzing costs a Go repo nothing to switch on**: write a
+  `func FuzzXxx(*testing.F)` in any `_test.go` and the belt finds it by
+  asking the toolchain, with no list to register it in. From then on
+  `lint:go-fuzz-seeds` replays its seed corpus in the gate under the
+  race detector, and the Monday `audit:go-fuzz` fuzzes it twice —
+  plain for throughput, then `-race`, because the two instruments find
+  different things and the plain pass is 31× faster (measured). What to
+  fuzz is the repo's call: the surfaces worth targeting are the ones
+  that parse bytes someone else produced.
+
+  The loop matters more than the run. When the cron finds a crasher the
+  engine writes the failing input into `testdata/fuzz/<Target>/`, and
+  from that moment plain `go test` fails on it — so **commit that
+  file**: it is the regression test, and the gate replays it forever
+  after. `repo-audit.yml` keeps it as an artifact when the cron goes
+  red, because the runner is ephemeral and a crash nobody can retrieve
+  is a crash nobody can act on. The cron never pushes it for you.
+  Seed corpora belong in `f.Add(...)` or `testdata/fuzz/<Target>/`, and
+  should come from real artifacts the system has actually produced
+  rather than hand-written examples — an input that was never emitted
+  by the real thing proves little about the real thing.
 - `tsconfig.json` — the TypeScript canon (#445), and note what it does
   **not** contain: a single strictness setting. `lint:types` passes every
   dial on the command line, where a compiler flag beats the same key in

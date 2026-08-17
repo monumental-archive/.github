@@ -96,6 +96,15 @@ a fresh session **started in the target repo's checkout**.
       stable. What to fuzz is the repo's call and nobody else's — the
       belt enforces how fuzzing runs, never which functions deserve a
       target, the same division as `coverage:check` and its floor.
+- [ ] **If the repo is Go, there is nothing to declare** (#445). The
+      fuzzing engine ships in the toolchain, so no nightly, no sanitizer
+      flag and no extra pin: `go.mod` is the whole setup. Any
+      `func FuzzXxx(*testing.F)` is found by the belt on its own —
+      `lint:go-fuzz-seeds` replays its seed corpus in the gate under the
+      race detector, and `audit:go-fuzz` fuzzes it on the Monday cron,
+      twice per target (plain, then race). `lint:go-tidy` needs nothing
+      declared either. Same division as above: the belt enforces how
+      fuzzing runs, the repo decides what deserves a target.
 - [ ] `mise trust && mise install && mise run hooks:install`.
 
 ## Phase 3 — make the gate green (session, in-repo)
