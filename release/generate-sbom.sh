@@ -2,23 +2,27 @@
 # The release SBOM, class-shaped (docs/dependency-track.md): derived from
 # what the repository actually ships, by detection, never configuration.
 #
-#   BINARIES_DIR set    -> the go-binary class: the SBOM is read out of
-#                          the shipped bytes by `stele derive sbom` —
-#                          the module list the toolchain actually
-#                          linked, with the release version stamped
-#                          into the binary from the tag, never asserted
-#                          by this pipeline (stele#46; the spec lives
-#                          in stele's docs/binary-sbom.md). VERSION is
-#                          a cross-check the binaries must agree with,
-#                          not a source.
+#   binaries are the    -> the go-binary class where the binaries ARE the
+#   whole release          release (go-binary alone, or beside oci-image,
+#                          which carries its own image-derived SBOM): the
+#                          inventory is read out of the shipped bytes by
+#                          `stele derive sbom` — the module list the
+#                          toolchain actually linked, with the release
+#                          version stamped into the binary from the tag,
+#                          never asserted by this pipeline (stele#46; the
+#                          spec lives in stele's docs/binary-sbom.md).
+#                          VERSION is a cross-check the binaries must
+#                          agree with, not a source.
 #   Cargo.lock tracked  -> trivy over the tree at the tag: every PURL
 #                          versioned, deterministic, the versionless-PURL
 #                          defect unwritable (asserted below, not hoped).
-#   go.mod tracked      -> the same trivy path, for a module shipping no
-#                          binaries: go.sum pins every module byte and a
-#                          1.17+ go.mod lists the full transitive
-#                          closure, so the inventory is lock-derived and
-#                          versioned exactly like Cargo's.
+#   go.mod tracked      -> the same trivy path, for a module whose
+#                          binaries cannot speak for the whole release
+#                          (or that ships none): go.sum pins every module
+#                          byte and a 1.17+ go.mod lists the full
+#                          transitive closure, so the inventory is
+#                          lock-derived and versioned exactly like
+#                          Cargo's.
 #   no manifest         -> GitHub's dependency-graph export (the canon and
 #                          any docs/config-only repository: its
 #                          dependencies are actions, which the graph
@@ -26,7 +30,8 @@
 #
 # Inputs: VERSION (required), SBOM_BASENAME (optional; defaults to the
 # repository name), BINARIES_DIR (go-binary only: directory of extracted
-# shipped binaries), GH_TOKEN (fallback path only). Writes into dist/.
+# shipped binaries) with CLASSES (required alongside it: what this
+# release ships), GH_TOKEN (fallback path only). Writes into dist/.
 set -euo pipefail
 
 [[ -n ${VERSION:-} ]] || {
@@ -43,7 +48,40 @@ out="dist/${base}-${VERSION}.spdx.json"
 
 cargo_locks=$(git ls-files 'Cargo.lock' '*/Cargo.lock')
 go_mods=$(git ls-files 'go.mod' '*/go.mod')
+
+# A binary describes ITSELF, so the binary-derived path is the whole
+# truth only when the binaries are the whole release. A release that
+# also ships a crate, an npm package, a pgrx extension or its own source
+# tree carries artifacts whose dependency surface no binary embeds — and
+# for those artifacts this document is the ONLY inventory that ever
+# ships, the one derive-vex.sh keys triage coverage from
+# (docs/dependency-track.md). Measured on release-lab, the org's one
+# multi-class caller: its shipped binary embeds 7 packages where the
+# tracked lock carries 152, because the other 145 belong to the pgrx
+# extension and the npm package that release also publishes.
+#
+# oci-image is the one class that may ride along: its SBOM is derived
+# separately from the published image by digest, so nothing of it
+# depends on this document.
+#
+# Detection, not configuration: the broader inventory wins whenever the
+# binaries cannot speak for the whole release, and the choice is stated
+# below rather than left for a reader to infer from a package count.
+binaries_are_the_release=1
 if [[ -n ${BINARIES_DIR:-} ]]; then
+  [[ -n ${CLASSES:-} ]] || {
+    echo "::error::BINARIES_DIR is set but CLASSES is empty — the SBOM cannot tell what this release ships"
+    exit 1
+  }
+  for class in ${CLASSES//,/ }; do
+    case "${class}" in
+      go-binary | oci-image) ;;
+      *) binaries_are_the_release=0 ;;
+    esac
+  done
+fi
+
+if [[ -n ${BINARIES_DIR:-} && ${binaries_are_the_release} -eq 1 ]]; then
   # stele reads the embedded module lists and unions the legs, refusing
   # divergence between them; --expect-version binds the inventory to the
   # tag this run believes it is releasing, and stele refuses a binary
@@ -62,6 +100,9 @@ if [[ -n ${BINARIES_DIR:-} ]]; then
   stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
   mode="binary-derived"
 elif [[ -n ${cargo_locks} || -n ${go_mods} ]]; then
+  if [[ -n ${BINARIES_DIR:-} ]]; then
+    echo "::notice::binaries present but this release also ships ${CLASSES} — deriving from the tree, which covers every artifact"
+  fi
   trivy fs --config /dev/null --format spdx-json --output "${out}" .
   mode="lock-derived"
   # A Go module's own go.mod carries no version — the tag is the version

@@ -189,7 +189,8 @@ what the artifact actually is, never configuration.
 | Artifact class | SBOM source | Why |
 | --- | --- | --- |
 | rust-crate, rust-binary, pgrx tarballs | trivy over `Cargo.lock` at the tagged commit | Deterministic; every PURL versioned |
-| go-binary | `stele derive sbom` over the shipped binaries | The module list the toolchain actually linked, read back out of the artifact bytes, with the release version stamped into the binary by the toolchain from the tag — never asserted by the pipeline (stele#46; the mechanism's spec lives in stele's `docs/binary-sbom.md`) |
+| go-binary, where the binaries are the whole release | `stele derive sbom` over the shipped binaries | The module list the toolchain actually linked, read back out of the artifact bytes, with the release version stamped into the binary by the toolchain from the tag — never asserted by the pipeline (stele#46; the mechanism's spec lives in stele's `docs/binary-sbom.md`) |
+| go-binary, where the release also ships artifacts no binary embeds | trivy over the tree at the tagged commit | A binary describes itself. When one release also publishes a crate, an npm package, a pgrx extension or its own source tree, this document is the only inventory those artifacts ever get — so the broader derivation wins, and the choice is announced in the job log |
 | oci-image, pgrx images, continuous db image | trivy over the **published image by digest**, at the pull-back step | Captures OS packages and (via cargo-auditable) the Rust deps of the artifact a stranger pulls, not a local twin |
 | Manifest-less (the canon, source-archive) | GitHub dependency-graph export | Its dependencies are actions, which the graph covers |
 | pgrx artifact images | none, deliberately | `FROM scratch`: no OS layer, and their only content is the attested tarballs whose lock-derived SBOM already ships — an image with no surface of its own derives nothing new |
