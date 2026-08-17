@@ -219,9 +219,38 @@ computed once in the belt's `[env]` via `exec()`, covering both carriers
 expression, identifying the belt by a file only the belt has so a
 differently-named symlink still resolves. 28ms per invocation.
 
-The boundary, stated once: **who reads the file, and whose content it
-is.** Nine configs are delivered — clippy, rustfmt, pinact, typos, ruff,
-biome, yamllint, rumdl, sqlfluff. Two stay repo-side for content rather
+The boundary needed a third clause, and #445 supplied it by measurement:
+**a config may only be delivered when the tool treats it as data.** The
+moment a tool derives its project root from the config's LOCATION,
+handing it one from outside the tree silently changes what the tool
+sees. biome does exactly that. Given `--config-path` into the belt
+directory, its scanner looks for the project beside that copy, finds
+none, and every project- or type-aware rule stops working while the
+syntactic ones carry on — no error, no warning, a green gate. One
+byte-identical config in two locations, measured on monumental-archive:
+**69 findings never reported** — `noUnnecessaryConditions` 65,
+`noUnresolvedImports` 2, `useImportExtensions` 1, `useArraySortCompare`
+1 — and **73 false ones invented**, `noUndeclaredDependencies` reading
+93 where the truth is 20, because it was hunting for `package.json` in
+the canon. All 17 of biome's type-aware rules were dead the whole time.
+
+So biome's config is now **generated at the repo root for the length of
+one run** and removed by a trap: correct anchoring, no residue, and
+nothing for a repo to `.gitignore`. Not a repo-root `biome.json` that
+`extends` the belt's copy — that anchors correctly too, but a repo's own
+config merges ON TOP and can switch an org rule off (proven), and a
+config that exists only during the run has no repo-side surface to
+lower. A tracked `biome.json` is refused rather than overwritten, and
+that refusal is the entire enforcement. The other eight delivered
+configs were swept against the same test: ruff was the plausible
+suspect — its isort first-party detection could have keyed on the config
+directory — and measured identical from both locations; the rest carry
+no paths at all.
+
+The boundary, stated once: **who reads the file, whose content it is,
+and whether the tool reads it as data.** Nine configs are delivered —
+clippy, rustfmt, pinact, typos, ruff, biome (generated per run, per
+above), yamllint, rumdl, sqlfluff. Two stay repo-side for content rather
 than readership: `deny.toml`'s skips describe one tree, and
 `.golangci.yml` names the module path in gci's import prefix (plus
 wrapcheck globs for that module's own packages in stele) — proven by
@@ -614,15 +643,45 @@ wants as input. Network-bound against <https://vuln.go.dev>, so
 SBOMs vs source reachability). *Reopen:* upstream shipping attested
 binaries, or an aqua package appearing.
 
-**biome at `preset: "all"`, and the two rules that are not** (#82).
-Adopted as the org's JS/TS/JSON layer: one aqua-backed binary, checksums
-and GitHub attestations on all seven lock platforms, rules compiled in,
-config read as data. Pinned to the explicit `aqua:` backend rather than
+**biome at every rule it has, and the two that are not** (#82, corrected
+by #445). Adopted as the org's JS/TS/JSON layer: one aqua-backed binary,
+checksums and GitHub attestations on all seven lock platforms, rules
+compiled in. Pinned to the explicit `aqua:` backend rather than
 the `biome` short name, which resolves to aqua **and** npm — an npm
-resolution records version only in the lock, no checksum. All 525 rules
-across all eight groups are on, nursery included: nursery is outside
-semver by Biome's own statement, but a pinned version bumped through
-Renovate turns that into a red bump PR, never a surprise in `main`.
+resolution records version only in the lock, no checksum.
+
+**This entry claimed "all 525 rules across all eight groups are on,
+nursery included" for three days, and all three claims were false.**
+Measured against the pinned 2.5.7 rather than read: there are **514**
+rules, `preset: "all"` enables **427** of them, and of those 427 only
+304 could fail anything. Three defects, one root cause — the canon has
+no JavaScript, so its own gate can never contradict a claim about biome.
+
+- **`preset: "all"` does not include nursery.** 87 rules, off. Biome's
+  documentation says nursery rules "require explicit opt-in via
+  configuration on stable versions" and never says the preset excludes
+  them; reading it as "all means all" was not unreasonable, it was
+  unverified. There is no bulk switch — group-level `"nursery":
+  {"preset": "all"}` does nothing either. Naming each rule is the only
+  mechanism, so `mise/biome-org.json` names all 87. That makes it an
+  enable-list, fail-open in one direction only: biome hard-errors on an
+  unknown key, so a graduated or renamed rule reddens the gate, while an
+  ADDED rule is silent — `audit:biome-rules` is that alarm.
+- **`--error-on-warnings` is not a severity floor.** 123 of the 427
+  enabled rules default to `info`, and an info diagnostic prints and
+  exits 0. Proven against the live config: a file whose only fault is a
+  magic number reports `noMagicNumbers` and passes green; on
+  monumental-archive it is 1,442 findings that could never fail
+  anything. `lint:biome` now reads the JSON reporter's summary and fails
+  on any diagnostic at any severity — a floor that needs no rule list,
+  and which fails closed if that (experimental) reporter changes shape.
+- **A config delivered by `--config-path` from the belt directory breaks
+  every project-aware rule.** See the delivery entry below: biome takes
+  the directory its config sits in as the project root.
+
+Nursery is outside semver by Biome's own statement, but a pinned version
+bumped through Renovate turns that into a red bump PR, never a surprise
+in `main`.
 
 Two deliberate departures, both settled against evidence rather than
 taste:
@@ -666,6 +725,15 @@ violations here by construction — the run that adopted it exercised the
 formatter and one assist action, nothing more. Its linter is exercised
 first in a consumer. Recorded rather than glossed: a green canon gate is
 not evidence about biome's rule set.
+
+That sentence was written at adoption and then not acted on. Three
+defects rode in behind it and survived three days of green gates, and
+none of them needed a consumer to find — a probe file and a run of the
+tool would have caught all three the same afternoon. The rule the
+episode leaves behind: **for a tool the canon cannot exercise, a claim
+about its rule set is not recorded until it has been run against code
+that violates it.** Not a fixture committed to the tree — a probe,
+thrown away, whose result is what the doc then states.
 
 **eslint, typescript-eslint and knip stay repo-side** — not a rejection,
 a placement. A flat eslint config is a JS module that imports its plugins

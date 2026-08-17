@@ -164,8 +164,17 @@ jq = "1.8.2"
 # language no belt tool covered, and it computes the caller/callee
 # permissions join that guards the Build L3 boundary.
 ruff = "0.16.2"
-# The org's JS/TS/JSON layer (#82), at `preset: "all"` — 525 rules, every
-# group, nursery included. Written as the explicit aqua backend, never the
+# The org's JS/TS/JSON layer (#82), at every rule biome has: `preset:
+# "all"` for the eight stable groups plus each nursery rule NAMED in
+# mise/biome-org.json. 514 rules at 2.5.7, not the 525 this comment
+# claimed until #445 measured them. `preset: "all"` does NOT include
+# nursery and no bulk switch does — naming them is the only mechanism
+# biome offers, so the list is an enable-list and fail-open in exactly
+# one direction (a rule ADDED by a version bump is silently absent).
+# Removals and renames are fail-closed: biome hard-errors on an unknown
+# key. `audit:biome-rules` covers the open direction weekly, off the
+# gate, because the check is a network fetch of the pinned schema.
+# Written as the explicit aqua backend, never the
 # `biome` short name: that name resolves to aqua AND npm, and an npm
 # resolution records version only in the lock — no checksum, no
 # attestation. Biome rules org-wide where it and eslint overlap; eslint
@@ -173,7 +182,8 @@ ruff = "0.16.2"
 # plugins from the repo's own node_modules, which no central pin can
 # supply. Unlike every other belt tool this one cannot be proven here:
 # the canon has 22 JSON files and no JavaScript, so its linter is
-# exercised first in a consumer, not in this gate (docs/tooling-verdicts.md).
+# exercised first in a consumer, not in this gate (docs/tooling-verdicts.md)
+# — which is precisely how three defects rode along in it for three days.
 "aqua:biomejs/biome" = "2.5.7"
 # Coverage ratchet (docs/runbook.md): repos commit a floor in
 # .coverage-floor and the canonical coverage:check enforces it in the
@@ -587,21 +597,70 @@ run = 'git ls-files ":!vendor/**" "*.md" "*.markdown" | xargs rumdl check --conf
 # info/warn rule cannot sit in the tree unnoticed, which is what
 # `preset: "all"` is for.
 [tasks."lint:biome"]
-description = "JS/TS/JSON lint + format check + assist (biome, preset: all)"
+description = "JS/TS/JSON lint + format check + assist (biome, every rule, every severity)"
 dir = "{{cwd}}"
-# A tracked biome.json is REQUIRED once there is anything to check, and is
-# not a style preference: biome reads its config from the repo, so a repo
-# without one silently falls back to biome's own `recommended` defaults —
-# a fraction of the 525 rules — and the gate goes green having enforced
-# something weaker than the org's policy. The belt cannot supply the file
-# centrally (there is no path from the conf.d layer into biome's config
-# resolution), so the belt asserts it instead. Copy scaffold/biome.json.
+# The config is MATERIALISED at the repo root and never handed over with
+# --config-path from the belt directory, and that is mechanism, not
+# taste: biome computes the project root from the directory its config
+# FILE SITS IN. Given the belt's copy, its scanner looks for the project
+# beside that copy, finds none, and every rule needing project or type
+# information stops working — silently, while the syntactic ones carry
+# on. Measured on monumental-archive at #445, one byte-identical config
+# in two locations: 69 findings never reported (noUnnecessaryConditions
+# 65, noUnresolvedImports 2, useImportExtensions 1, useArraySortCompare
+# 1) and 73 FALSE ones invented — noUndeclaredDependencies read 93 where
+# the truth is 20, because it was looking for package.json in the canon.
+# 17 of biome's rules are type-aware and every one of them was dead.
+#
+# So the file is GENERATED for the length of one run and removed by a
+# trap, leaving the tree exactly as found — no residue, and nothing for
+# ten repos to remember to .gitignore. That is also the whole of the
+# enforcement, and the reason this is not the #455 pattern with an extra
+# step: a repo-root `biome.json` that `extends` the belt's copy anchors
+# correctly too, but a repo's own config is merged ON TOP and a repo can
+# switch an org rule off in it (proven). A config that exists only during
+# the run has no repo-side surface to lower. A tracked biome.json is
+# refused outright, never overwritten.
+#
+# The severity floor is belt-side because --error-on-warnings is NOT one:
+# 123 of the 514 rules default to `info`, and an info diagnostic prints
+# and exits 0. Proven with the org's own config — a magic number reports
+# noMagicNumbers and the gate goes green. The JSON reporter's summary is
+# the honest gate: any diagnostic, any severity, fails. On failure the
+# run repeats under the human reporter, because JSON has no code frames
+# and the second run only ever happens on the red path.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "lint:biome: nothing biome parses is tracked, skipped"; exit 0; }
-xargs biome ci --config-path "${ORG_BELT_DIR}/biome-org.json" --error-on-warnings <<<"${files}"
+tracked=$(git ls-files "biome.json" "biome.jsonc" "*/biome.json" "*/biome.jsonc")
+if [[ -n "${tracked}" ]]; then
+  echo "lint:biome: the belt generates biome.json; a repo must not track one" >&2
+  sed 's/^/  tracked: /' <<<"${tracked}" >&2
+  echo "  git rm --cached it: the belt writes this file for the length of one run" >&2
+  exit 1
+fi
+trap 'rm -f biome.json' EXIT
+cp "${ORG_BELT_DIR}/biome-org.json" biome.json
+report=$(mktemp)
+xargs biome ci --config-path biome.json --reporter=json --reporter-file="${report}" <<<"${files}" \
+  > /dev/null || true
+counts=$(jq -r '[.summary.errors, .summary.warnings, .summary.infos] | @tsv' "${report}")
+read -r errors warnings infos <<<"${counts}"
+for n in "${errors}" "${warnings}" "${infos}"; do
+  [[ "${n}" =~ ^[0-9]+$ ]] && continue
+  echo "lint:biome: biome's JSON summary is not the shape this task reads — the reporter is" >&2
+  echo "  experimental and may move in a PATCH release, so a shape change fails rather than" >&2
+  echo "  silently counting zero. Re-read the reporter output and update the task." >&2
+  exit 1
+done
+if [[ $((errors + warnings + infos)) -ne 0 ]]; then
+  xargs biome ci --config-path biome.json <<<"${files}" || true
+  echo "lint:biome: ${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" >&2
+  exit 1
+fi
+echo "lint:biome: clean across $(wc -l <<<"${files}" | tr -d ' ') files"
 '''
 
 [tasks."fix:biome"]
@@ -610,12 +669,25 @@ dir = "{{cwd}}"
 # Safe fixes only: --unsafe is never wired into a belt task, because an
 # unsafe fix may change behaviour and a fixer must be runnable without
 # reading its diff first.
+#
+# Materialises the same generated config as lint:biome and for the same
+# reason: a fixer reading a differently-anchored config would produce
+# different edits from the check that judges them — the two halves have
+# to see one project.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
   "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
 [[ -n "${files}" ]] || { echo "fix:biome: nothing biome parses is tracked, skipped"; exit 0; }
-xargs biome check --config-path "${ORG_BELT_DIR}/biome-org.json" --write <<<"${files}"
+tracked=$(git ls-files "biome.json" "biome.jsonc" "*/biome.json" "*/biome.jsonc")
+if [[ -n "${tracked}" ]]; then
+  echo "fix:biome: the belt generates biome.json; a repo must not track one" >&2
+  sed 's/^/  tracked: /' <<<"${tracked}" >&2
+  exit 1
+fi
+trap 'rm -f biome.json' EXIT
+cp "${ORG_BELT_DIR}/biome-org.json" biome.json
+xargs biome check --config-path biome.json --write <<<"${files}"
 '''
 
 # Named for the subject, not the tool, matching lint:shell / lint:toml /
@@ -2510,6 +2582,42 @@ if [[ "${have}" != "${latest}" ]]; then
   exit 1
 fi
 echo "audit:spdx-list: vendored list is current (${have})"
+'''
+
+[tasks."audit:biome-rules"]
+description = "Warn when biome ships nursery rules the org config does not name (scheduled, not the gate)"
+dir = "{{cwd}}"
+# The one direction the enable-list in mise/biome-org.json is fail-open.
+# `preset: "all"` covers biome's eight stable groups and NOT nursery, and
+# no bulk switch exists — naming each rule is the only mechanism biome
+# offers (#445). Removals and renames are already fail-closed: biome
+# hard-errors on an unknown key, so a graduated rule reddens the gate.
+# An ADDED rule is the silent case, and this is its alarm.
+#
+# The rule list is not derivable offline: the binary ships no schema and
+# `biome explain` answers one name at a time. So the pinned version's
+# published schema is fetched — network, therefore audit:*, never the
+# gate. Guarded on the config, so it skips clean in every repo but canon.
+run = '''
+cfg="${ORG_BELT_DIR}/biome-org.json"
+[[ -f "${cfg}" ]] || { echo "audit:biome-rules: no belt biome config, skipped"; exit 0; }
+version=$(biome --version | awk '{print $2}')
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo "audit:biome-rules: cannot read a version from \`biome --version\`, skipped"; exit 0; }
+schema=$(mktemp)
+curl -sfL "https://biomejs.dev/schemas/${version}/schema.json" -o "${schema}" || {
+  echo "audit:biome-rules: schema for ${version} unreachable, skipped"; exit 0; }
+upstream=$(jq -r '(.["$defs"] // .definitions).Nursery.properties | keys[]
+  | select(. != "recommended" and . != "preset")' "${schema}" | sort)
+named=$(jq -r '.linter.rules.nursery // {} | keys[]' "${cfg}" | sort)
+missing=$(comm -23 <(echo "${upstream}") <(echo "${named}"))
+if [[ -n "${missing}" ]]; then
+  echo "audit:biome-rules: biome ${version} has nursery rules the org config does not name:" >&2
+  sed 's/^/  /' <<<"${missing}" >&2
+  echo "  add them to mise/biome-org.json — an unnamed nursery rule is simply not enforced" >&2
+  exit 1
+fi
+echo "audit:biome-rules: all $(wc -l <<<"${upstream}" | tr -d ' ') nursery rules of ${version} are named"
 '''
 
 [tasks."lint:trivy"]
