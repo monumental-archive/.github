@@ -10,6 +10,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.33.0](https://github.com/monumental-archive/.github/compare/v1.32.1...v1.33.0) - 2026-08-17
+
+### Added
+
+- adopt tsc as the type checking layer (#445) ([#465](https://github.com/monumental-archive/.github/pull/465))
+- wire go mod tidy and go fuzzing into the belt (#445) ([#467](https://github.com/monumental-archive/.github/pull/467))
+- stand up the go-binary class, repro-gated (stele#7) ([#469](https://github.com/monumental-archive/.github/pull/469))
+
+### Dependencies
+
+- update dependency rumdl to v0.2.53 ([#470](https://github.com/monumental-archive/.github/pull/470))
+
+### Documentation
+
+- stop sending readers to scaffold files that moved ([#460](https://github.com/monumental-archive/.github/pull/460))
+- tell a Go repo what it gets and what it must write (#445) ([#468](https://github.com/monumental-archive/.github/pull/468))
+
+### Fixed
+
+- run every biome rule, fail on any severity (#445) ([#463](https://github.com/monumental-archive/.github/pull/463))
+
 ## [1.32.1](https://github.com/monumental-archive/.github/compare/v1.32.0...v1.32.1) - 2026-08-16
 
 ### Fixed
