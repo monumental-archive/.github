@@ -173,7 +173,7 @@ jobs:
     name: Sign the statement
     needs: plan
     if: needs.plan.outputs.any == 'true'
-    uses: monumental-archive/signer/.github/workflows/sign.yml@87f89fcced95284369f1fa82c38e627fc32385d9 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@d50cdb3de85d802e7ab9f50da1400f367ef7b632 # main
     with:
       subjects: ${{ needs.plan.outputs.subjects }}
       predicate-type: https://openvex.dev/ns/v0.2.0
