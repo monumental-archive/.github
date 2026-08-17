@@ -853,6 +853,24 @@ forever** — a task that forgot it would hang the cron rather than fail
 it. Minimization and the pre-fuzz unit-test pass are left at their
 defaults, which are the tool's maximum.
 
+**Two passes per target, plain then race, rather than a choice.** The
+race detector is Go's nearest equivalent to the AddressSanitizer the
+Rust cron runs, and it costs **31× throughput** — measured on a probe at
+425,319 execs/sec plain against 13,605 under `-race`. The two find
+different things: the plain pass explores for panics and logic failures,
+the race pass observes concurrency in targets whose code is concurrent
+at all. Picking one drops a class of finding, and the org's answer to
+instrumentation cost on a free weekly cron is already on record from the
+`--careful` ruling — more seconds, not fewer checks. Both passes were
+shown to catch a real bug. The gate's seed run carries `-race` too,
+where it costs 0.33s → 1.35s, which is nothing.
+
+`CGO_ENABLED=1` rides with it in the belt task, the measured exception
+stele already documents for its own tests: `-race` needs cgo on linux,
+the gate runner, while darwin tolerates it without — so without this a
+local run stays green over a red CI. It is a test instrument; repos that
+ship `CGO_ENABLED=0` binaries keep doing so.
+
 The gate half, `lint:go-fuzz-seeds`, is the part worth explaining. A seed
 corpus IS the regression suite: when the cron finds a crasher the engine
 writes it into `testdata/fuzz/<Target>/`, and from that moment plain `go

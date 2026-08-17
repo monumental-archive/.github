@@ -1591,8 +1591,14 @@ done <<< "${mods}"
 '''
 
 [tasks."lint:go-fuzz-seeds"]
-description = "Every Go fuzz target compiles and its seed corpus passes (deterministic)"
+description = "Every Go fuzz target compiles and its seed corpus passes, race detector on"
 dir = "{{cwd}}"
+# CGO_ENABLED=1 here and only here, the same measured exception stele
+# documents for its own test task: -race requires cgo on linux (the gate
+# runner) while darwin tolerates it without, so a local run would stay
+# green over a red one in CI. Repos that ship CGO_ENABLED=0 binaries keep
+# doing so — this is a test instrument, not a build setting.
+env = { CGO_ENABLED = "1" }
 # The gate half of Go fuzzing (#445), and the reason it is a belt task
 # rather than something a repo's own `test` remembers to cover: a seed
 # corpus IS the regression suite. When the cron finds a crasher, the
@@ -1606,6 +1612,11 @@ dir = "{{cwd}}"
 # Deterministic by construction: without -fuzz the engine never
 # generates, never writes, and only replays the committed corpus. The
 # generated corpus lives in $GOCACHE/fuzz and is not consulted here.
+#
+# -race costs 0.33s -> 1.35s on a seed corpus (measured), which is
+# nothing, and the seeds are exactly the inputs already known to reach
+# interesting code. Determinism survives it: the detector reports races
+# it observes and invents none.
 run = '''
 set -euo pipefail
 mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
@@ -1621,7 +1632,7 @@ while IFS= read -r m; do
   n=$( (cd "${d}" && go test -list '^Fuzz' ./... 2> /dev/null) | grep -c '^Fuzz' || true)
   [[ "${n}" -gt 0 ]] || continue
   total=$((total + n))
-  (cd "${d}" && go test -run '^Fuzz' ./...)
+  (cd "${d}" && go test -race -run '^Fuzz' ./...)
 done <<< "${mods}"
 [[ "${total}" -gt 0 ]] || { echo "lint:go-fuzz-seeds: no Go fuzz targets, skipped"; exit 0; }
 echo "lint:go-fuzz-seeds: ${total} target(s) built, seed corpora clean"
@@ -4322,6 +4333,17 @@ dir = "{{cwd}}"
 # -fuzz matches exactly ONE target in ONE package per invocation, by
 # design, so the loop is structural rather than a convenience.
 #
+# TWO passes per target, plain then race, rather than a choice between
+# them. The race detector is Go's nearest equivalent to the
+# AddressSanitizer the Rust half runs, but it costs 31x throughput
+# (measured: 425,319 execs/sec against 13,605), and the two instruments
+# find different things — the plain pass explores for panics and logic
+# failures, the race pass observes concurrency in targets whose code is
+# concurrent at all. Choosing one would drop a class of finding; the
+# org's answer to instrumentation cost on a free weekly cron is more
+# seconds, not fewer checks (#445, the --careful ruling). Wall time is
+# 2 x FUZZ_SECONDS per target, which is a number, not a constraint.
+#
 # WHAT THIS IS AND IS NOT, as with the Rust half: a bounded weekly run is
 # a smoke test, not a proof. What makes it worth running is where a
 # finding LANDS — the engine writes the failing input into
@@ -4348,9 +4370,12 @@ while IFS= read -r m; do
     while IFS= read -r target; do
       [[ -n "${target}" ]] || continue
       ran=$((ran + 1))
-      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s"
+      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s, plain"
       (cd "${d}" && go test -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") \
-        || failed="${failed} ${pkg}.${target}"
+        || failed="${failed} ${pkg}.${target}(plain)"
+      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s, race detector on"
+      (cd "${d}" && CGO_ENABLED=1 go test -race -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") \
+        || failed="${failed} ${pkg}.${target}(race)"
     done < <( (cd "${d}" && go test -list '^Fuzz' "${pkg}" 2> /dev/null) | grep '^Fuzz' || true)
   done < <( (cd "${d}" && go list ./... 2> /dev/null) || true)
 done <<< "${mods}"
