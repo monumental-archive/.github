@@ -3614,6 +3614,10 @@ if [[ -f go.mod ]]; then
   # (see go-packages.sh — this is what reddened release-lab's main).
   go_pkgs=()
   while IFS= read -r p; do go_pkgs+=("${p}"); done < <("${ORG_BELT_DIR}/go-packages.sh")
+  [[ -n "${go_pkgs[0]:-}" ]] || {
+    echo "coverage:check: go.mod tracked but no tracked packages to measure — a floor over nothing holds nothing" >&2
+    exit 1
+  }
   go test "${go_pkgs[@]}" -coverprofile=coverage.txt -covermode=atomic
   pct=$(go tool cover -func=coverage.txt | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
   [[ -n "${pct}" ]] || {
@@ -3678,6 +3682,10 @@ if [[ -f go.mod ]]; then
   # Tracked packages, never `./...` — see coverage:check above.
   go_pkgs=()
   while IFS= read -r p; do go_pkgs+=("${p}"); done < <("${ORG_BELT_DIR}/go-packages.sh")
+  [[ -n "${go_pkgs[0]:-}" ]] || {
+    echo "coverage:report: go.mod tracked but no tracked packages to measure" >&2
+    exit 1
+  }
   go test "${go_pkgs[@]}" -coverprofile=coverage.txt -covermode=atomic > /dev/null
   echo "coverage:report: coverage.txt written"
 fi
