@@ -35,6 +35,7 @@ written for two moments: wiring a repository in, and a release going wrong.
    | --- | --- | --- |
    | `rust-crate` | `exclude` for container-built members | `rust` |
    | `rust-binary` | `binary-targets`, `binary-smoke-test`, `exclude` | `rust` |
+   | `go-binary` | `go-targets`, `go-smoke-test` | `go` |
    | `oci-image` | `dockerfile`, `context`, `smoke-test` | — |
    | `wasm-npm` | `crate-dir`, `npm-scope` | `rust`, `aqua:rustwasm/wasm-pack`, `node` |
    | `pgrx-extension` | `extension-crate-dir`, `pg-majors`, `extension-smoke-test` | `rust`, `cargo:cargo-pgrx` (must equal the pgrx crate dep) |

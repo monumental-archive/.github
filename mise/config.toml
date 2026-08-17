@@ -1958,6 +1958,7 @@ while IFS= read -r repo; do
     esac
     case ",${classes// /}," in *",oci-image,"*) need="${need} attestations-image.intoto.jsonl" ;; esac
     case ",${classes// /}," in *",rust-binary,"*) need="${need} attestations-binaries.intoto.jsonl" ;; esac
+    case ",${classes// /}," in *",go-binary,"*) need="${need} attestations-go-binaries.intoto.jsonl" ;; esac
     case ",${classes// /}," in *",source-archive,"*) need="${need} attestations-source.intoto.jsonl" ;; esac
     case ",${classes// /}," in *",wasm-npm,"*)
       need="${need} attestations-npm.intoto.jsonl"

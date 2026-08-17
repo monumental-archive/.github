@@ -343,7 +343,8 @@ requirement doing real work rather than ceremony.
   proves the path the permanent record takes.
 
 There is one shared build workflow per **artifact class** — `rust-crate`,
-`rust-binary`, `oci-image`, `wasm-npm`, `pgrx-extension` — and callers
+`rust-binary`, `go-binary`, `oci-image`, `wasm-npm`, `pgrx-extension`,
+`source-archive` — and callers
 declare inputs, not steps. An earlier draft of this document kept
 publish workflows per-repo,
 on the grounds that pgrx matrices and musl statics were legitimate quirks.
@@ -676,6 +677,41 @@ are the same archives the attach job uploads. Their pull-back — and
 their verdict — comes after publish, from the released download URL,
 which by then is public and immutable ("The verdict beside the
 evidence" above).
+
+### go-binary: the same doctrine with the toolchain matrix gone
+
+`go-binary` (stele#7) ships static Linux binaries and native macOS
+binaries with the same shape as `rust-binary` — four native legs, plan
+job refusing non-canon targets, collect job refusing a partial set,
+release assets with no registry, repro-gated from its first release.
+What Go's toolchain removes is the toolchain *matrix*, never the testing
+obligation: GOOS/GOARCH could cross-compile every target from one
+runner, and deliberately does not — each leg still builds **and tests**
+on the hardware the binary ships for. With `CGO_ENABLED=0` there is one
+compiler and a static output on every leg: no musl-tools, no target
+installs, no apt at all, which retires rust-binary's one accepted
+unpinned install for this class.
+
+Hermeticity is stated by the class workflow, never inherited from the
+caller's mise `[env]`: `CGO_ENABLED=0`, `GOTOOLCHAIN=local` (the
+caller's mise pin is the only toolchain; a disagreeing `go` directive
+fails loudly instead of auto-downloading), `-trimpath`, and go.sum
+refusing any module byte drift through the checksummed proxy — the one
+accepted network dependency, the un-vendoring decision recorded in
+stele's CLAUDE.md.
+
+The binary carries its own inventory: Go embeds the module list and the
+VCS facts in every build, and `go version -m` reads them back out of the
+shipped bytes — the property cargo-auditable is bolted onto rust-binary
+to provide. The build *asserts* the stamp: `vcs.revision` must equal the
+released commit, `vcs.modified` must be false, and the module list must
+be present. There is no manifest-version check because Go has no
+manifest version to check; the stamp assertion is the stronger
+replacement — it binds the bytes to the commit, not a declaration to a
+tag name. Release-time advisory triage gets a Go leg in the same sbom
+job: `audit:go-vulns` (govulncheck, call-graph aware) at the tagged
+checkout, red blocking the release with no warn path, exactly the
+`audit:deny` contract.
 
 ### pgrx extensions build inside the Postgres consumers run
 

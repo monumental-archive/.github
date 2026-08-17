@@ -160,6 +160,22 @@ name: publish
         required: false
         type: string
         default: ""
+      go-targets:
+        description: >
+          Target subset for the go-binary class, named <goos>-<goarch>;
+          defaults to the canon four. The build's plan job refuses
+          anything outside canon.
+        required: false
+        type: string
+        default: linux-amd64,linux-arm64,darwin-amd64,darwin-arm64
+      go-smoke-test:
+        description: >
+          Executable proving a built binary does its one job, for the
+          go-binary class. Receives the staged-binaries directory and the
+          target; runs on every leg, on that leg's own hardware.
+        required: false
+        type: string
+        default: ""
       crate-dir:
         description: Directory of the wasm crate, for the wasm-npm class.
         required: false
@@ -261,7 +277,7 @@ jobs:
           fi
           for c in "${requested[@]}"; do
             case "${c}" in
-              rust-crate | oci-image | rust-binary | wasm-npm | pgrx-extension | source-archive) ;;
+              rust-crate | oci-image | rust-binary | go-binary | wasm-npm | pgrx-extension | source-archive) ;;
               *)
                 echo "::error::unknown class requested"
                 exit 1
@@ -398,6 +414,15 @@ jobs:
         # green. The Monday cron stays: it sweeps advisories published
         # BETWEEN releases, which no release-time gate can see.
         run: mise run audit:deny
+
+      - name: Triage the tagged Go module graph against the advisory feed
+        # The same Dependency-L2 wording, Go leg: govulncheck at the
+        # tagged checkout, call-graph aware, red blocks the release with
+        # no warn path — the belt task guards its own applicability (no
+        # go.mod skips clean; go.mod without go or govulncheck is a loud
+        # failure, never a vacuous green). Network-bound (vuln.go.dev),
+        # fine on the release path, never in the ci gate.
+        run: mise run audit:go-vulns
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -682,6 +707,59 @@ jobs:
     with:
       subjects: ${{ needs.build-binary.outputs.subjects }}
       bundle-artifact: attestation-bundle-binaries
+    permissions:
+      id-token: write # the signer mints the Sigstore identity
+      attestations: write # the signer persists the provenance
+      artifact-metadata: write # the signer creates the storage record
+
+  # The go-binary class: same shape as rust-binary — release assets, no
+  # registry, GitHub's release attestation binds tag, commit and asset
+  # digests at publish — with the toolchain matrix gone by construction
+  # (CGO_ENABLED=0 and the caller's one pinned go cover every leg,
+  # stele#7). Repro-gated from its first release, not optional: a Go
+  # build under the class's hermetic env is bit-reproducible, so the
+  # gate extends the org's strongest claim to this class from day one.
+  # phase: build
+  build-go:
+    name: Build Go binaries
+    needs: guard
+    if: contains(inputs.classes, 'go-binary')
+    uses: ./.github/workflows/build-go-binary.yml
+    permissions:
+      # Restated, not inherited — see the note on `build` above.
+      contents: read # checkout of the caller; binaries touch no registry
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      targets: ${{ inputs.go-targets }}
+      smoke-test: ${{ inputs.go-smoke-test }}
+
+  # phase: build
+  repro-build-go:
+    name: Rebuild Go binaries (repro)
+    needs: guard
+    if: contains(inputs.classes, 'go-binary')
+    uses: ./.github/workflows/build-go-binary.yml
+    permissions:
+      contents: read # checkout of the caller
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      targets: ${{ inputs.go-targets }}
+      smoke-test: ${{ inputs.go-smoke-test }}
+      repro: true
+
+  # phase: attest
+  sign-go:
+    name: Sign Go binaries
+    needs:
+      - build-go
+      - commit-point
+    # The Sigstore entry is append-only — an irreversible step, so it
+    # sits downstream of the bit-for-bit proof (#118).
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'go-binary') }}
+    uses: monumental-archive/signer/.github/workflows/sign.yml@d50cdb3de85d802e7ab9f50da1400f367ef7b632 # main
+    with:
+      subjects: ${{ needs.build-go.outputs.subjects }}
+      bundle-artifact: attestation-bundle-go-binaries
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1005,6 +1083,8 @@ jobs:
       - repro-build-oci
       - build-binary
       - repro-build-binary
+      - build-go
+      - repro-build-go
       - build-source
       - repro-build-source
       - build-wasm
@@ -1022,6 +1102,8 @@ jobs:
           || (needs.build-oci.result == 'success' && needs.repro-build-oci.result == 'success'))
         && (!contains(inputs.classes, 'rust-binary')
           || (needs.build-binary.result == 'success' && needs.repro-build-binary.result == 'success'))
+        && (!contains(inputs.classes, 'go-binary')
+          || (needs.build-go.result == 'success' && needs.repro-build-go.result == 'success'))
         && (!contains(inputs.classes, 'source-archive')
           || (needs.build-source.result == 'success' && needs.repro-build-source.result == 'success'))
         && (!contains(inputs.classes, 'wasm-npm')
@@ -1043,6 +1125,8 @@ jobs:
           CRATES_B: ${{ needs.repro-build.outputs.subjects }}
           BIN_A: ${{ needs.build-binary.outputs.subjects }}
           BIN_B: ${{ needs.repro-build-binary.outputs.subjects }}
+          GO_A: ${{ needs.build-go.outputs.subjects }}
+          GO_B: ${{ needs.repro-build-go.outputs.subjects }}
           SRC_A: ${{ needs.build-source.outputs.subjects }}
           SRC_B: ${{ needs.repro-build-source.outputs.subjects }}
           WASM_A: ${{ needs.build-wasm.outputs.subjects }}
@@ -1070,6 +1154,7 @@ jobs:
           }
           check rust-crate "${CRATES_A}" "${CRATES_B}"
           check rust-binary "${BIN_A}" "${BIN_B}"
+          check go-binary "${GO_A}" "${GO_B}"
           check source-archive "${SRC_A}" "${SRC_B}"
           check wasm-npm "${WASM_A}" "${WASM_B}"
           check pgrx-extension "${EXT_A}" "${EXT_B}"
@@ -1274,6 +1359,7 @@ jobs:
       - sign
       - sign-image
       - sign-binaries
+      - sign-go
       - sign-source
       - sign-wasm
       - sign-extensions
@@ -1286,6 +1372,7 @@ jobs:
         && (!contains(inputs.classes, 'rust-crate') || needs.sign.result == 'success')
         && (!contains(inputs.classes, 'oci-image') || needs.sign-image.result == 'success' || inputs.dry-run)
         && (!contains(inputs.classes, 'rust-binary') || needs.sign-binaries.result == 'success')
+        && (!contains(inputs.classes, 'go-binary') || needs.sign-go.result == 'success')
         && (!contains(inputs.classes, 'source-archive') || needs.sign-source.result == 'success')
         && (!contains(inputs.classes, 'wasm-npm') || needs.sign-wasm.result == 'success')
         && (!contains(inputs.classes, 'pgrx-extension')
@@ -1325,6 +1412,26 @@ jobs:
     with:
       mode: verdict
       subjects: ${{ needs.build-binary.outputs.subjects }}
+      release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
+      version: ${{ needs.guard.outputs.version }}
+
+  # phase: attest
+  vsa-go:
+    name: Assemble and sign Go binaries VSA
+    needs:
+      - guard
+      - build-go
+      - attach
+    if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'go-binary') && !inputs.dry-run }}
+    uses: ./.github/workflows/verify-release.yml
+    permissions:
+      contents: read # pull-back plus attestation reads
+      id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # persist the verdict in the store
+      artifact-metadata: write # the attestation storage record
+    with:
+      mode: verdict
+      subjects: ${{ needs.build-go.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
 
