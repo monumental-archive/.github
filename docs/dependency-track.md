@@ -189,6 +189,7 @@ what the artifact actually is, never configuration.
 | Artifact class | SBOM source | Why |
 | --- | --- | --- |
 | rust-crate, rust-binary, pgrx tarballs | trivy over `Cargo.lock` at the tagged commit | Deterministic; every PURL versioned |
+| go-binary | trivy over `go.mod`/`go.sum` at the tagged commit | Deterministic; a 1.17+ go.mod lists the full transitive closure, go.sum pins the bytes — and the shipped binary carries the same module list in its own bytes, readable with `go version -m`, asserted at build time |
 | oci-image, pgrx images, continuous db image | trivy over the **published image by digest**, at the pull-back step | Captures OS packages and (via cargo-auditable) the Rust deps of the artifact a stranger pulls, not a local twin |
 | Manifest-less (the canon, source-archive) | GitHub dependency-graph export | Its dependencies are actions, which the graph covers |
 | pgrx artifact images | none, deliberately | `FROM scratch`: no OS layer, and their only content is the attested tarballs whose lock-derived SBOM already ships — an image with no surface of its own derives nothing new |

@@ -5,6 +5,14 @@
 #   Cargo.lock tracked  -> trivy over the tree at the tag: every PURL
 #                          versioned, deterministic, the versionless-PURL
 #                          defect unwritable (asserted below, not hoped).
+#   go.mod tracked      -> the same trivy path: go.sum pins every module
+#                          byte and a 1.17+ go.mod lists the full
+#                          transitive closure, so the inventory is
+#                          lock-derived and versioned exactly like
+#                          Cargo's. (The shipped binaries additionally
+#                          carry their own module list, readable with
+#                          `go version -m` — asserted at build time by
+#                          the go-binary class, stele#7.)
 #   no manifest         -> GitHub's dependency-graph export (the canon and
 #                          any docs/config-only repository: its
 #                          dependencies are actions, which the graph
@@ -27,7 +35,8 @@ mkdir -p dist
 out="dist/${base}-${VERSION}.spdx.json"
 
 cargo_locks=$(git ls-files 'Cargo.lock' '*/Cargo.lock')
-if [[ -n ${cargo_locks} ]]; then
+go_mods=$(git ls-files 'go.mod' '*/go.mod')
+if [[ -n ${cargo_locks} || -n ${go_mods} ]]; then
   trivy fs --config /dev/null --format spdx-json --output "${out}" .
   mode="lock-derived"
 else
