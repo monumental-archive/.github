@@ -1533,6 +1533,100 @@ fi
 echo "lint:types: ${count} project(s) checked, $(wc -l < "${tmp}/tracked" | tr -d ' ') files covered"
 '''
 
+[tasks."lint:go-tidy"]
+description = "go.mod and go.sum match the source (go mod tidy -diff)"
+dir = "{{cwd}}"
+# The Go dependency-hygiene half (#445), and the one belt task whose tool
+# would normally REWRITE the tree to answer the question. `-diff` is what
+# makes it a gate check rather than a fixer: it prints the unified diff
+# tidy would apply and exits non-zero when that diff is non-empty,
+# writing nothing (#374, proven in both directions — an unused `require`
+# and an import with no requirement).
+#
+# What it catches that nothing else does: a dependency imported but never
+# required, a requirement nothing imports any more, and go.sum entries
+# that drifted from either. golangci-lint reads packages and never reads
+# the manifest, so this is invisible to it — the cargo-machete gap in Go
+# form, except the toolchain answers it itself and needs no extra tool.
+#
+# One honest limit: for a MISSING requirement, tidy resolves the latest
+# version over the network, so the suggested diff is time-dependent. The
+# verdict is not — that tree is untidy today and tomorrow — and a repo in
+# that state is already failing, so the gate stays stable where it counts.
+run = '''
+set -euo pipefail
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "lint:go-tidy: no go.mod tracked, skipped"; exit 0; }
+command -v go > /dev/null || {
+  echo "lint:go-tidy: go.mod present but go missing — pin go in mise.toml" >&2
+  exit 1
+}
+count=0
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  count=$((count + 1))
+  if ! (cd "$(dirname "${m}")" && go mod tidy -diff); then
+    echo "lint:go-tidy: ${m} does not match the source — apply the diff above" >&2
+    echo "  mise run fix:go-tidy" >&2
+    exit 1
+  fi
+done <<< "${mods}"
+echo "lint:go-tidy: ${count} module(s) match their source"
+'''
+
+[tasks."fix:go-tidy"]
+description = "Rewrite go.mod and go.sum to match the source (go mod tidy)"
+dir = "{{cwd}}"
+# The write-mode sibling, and the same command without -diff. Safe by the
+# fix:* rule — tidy adds what the source imports and removes what it does
+# not, so it is derivable from the tree rather than a judgement call.
+run = '''
+set -euo pipefail
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "fix:go-tidy: no go.mod tracked, skipped"; exit 0; }
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  (cd "$(dirname "${m}")" && go mod tidy)
+done <<< "${mods}"
+'''
+
+[tasks."lint:go-fuzz-seeds"]
+description = "Every Go fuzz target compiles and its seed corpus passes (deterministic)"
+dir = "{{cwd}}"
+# The gate half of Go fuzzing (#445), and the reason it is a belt task
+# rather than something a repo's own `test` remembers to cover: a seed
+# corpus IS the regression suite. When the cron finds a crasher, the
+# engine writes it into testdata/fuzz/<Target>/, and from that moment
+# plain `go test` fails on it — proven on a probe, where a 15s run found
+# an invalid-UTF-8 reverse, wrote the input, and the next ordinary test
+# run went red on it. So the seeds must run under the org's enforcement,
+# not under whatever a repo chose to define as `test` (which `ci` runs
+# only if it exists).
+#
+# Deterministic by construction: without -fuzz the engine never
+# generates, never writes, and only replays the committed corpus. The
+# generated corpus lives in $GOCACHE/fuzz and is not consulted here.
+run = '''
+set -euo pipefail
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "lint:go-fuzz-seeds: no go.mod tracked, skipped"; exit 0; }
+command -v go > /dev/null || {
+  echo "lint:go-fuzz-seeds: go.mod present but go missing — pin go in mise.toml" >&2
+  exit 1
+}
+total=0
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  d=$(dirname "${m}")
+  n=$( (cd "${d}" && go test -list '^Fuzz' ./... 2> /dev/null) | grep -c '^Fuzz' || true)
+  [[ "${n}" -gt 0 ]] || continue
+  total=$((total + n))
+  (cd "${d}" && go test -run '^Fuzz' ./...)
+done <<< "${mods}"
+[[ "${total}" -gt 0 ]] || { echo "lint:go-fuzz-seeds: no Go fuzz targets, skipped"; exit 0; }
+echo "lint:go-fuzz-seeds: ${total} target(s) built, seed corpora clean"
+'''
+
 [tasks."fix:go"]
 description = "Apply golangci-lint's auto-fixes and rewrite Go to canonical format (gofumpt, gci)"
 dir = "{{cwd}}"
@@ -4207,6 +4301,67 @@ if [[ -n "${failed}" ]]; then
   exit 1
 fi
 echo "audit:fuzz: all targets ran ${secs}s clean under ASan"
+'''
+
+[tasks."audit:go-fuzz"]
+description = "Run every Go fuzz target for a bounded interval (time-bound, never the gate)"
+dir = "{{cwd}}"
+# The runtime half (#445), the Go mirror of audit:fuzz — and cheaper to
+# stand up, because the fuzzing engine is in the toolchain: no extra
+# binary, no sanitizer flag, and no nightly. Coverage instrumentation is
+# built in on amd64 and arm64, which is every runner the org uses.
+#
+# `-fuzztime` is not optional: the documented default is to run FOREVER,
+# so a task that forgot it would hang the cron rather than fail it. Two
+# further defaults are deliberately left alone because they ARE the
+# tool's maximum: minimization stays on (60s, and `-fuzzminimizetime 0`
+# would disable it), and the package's ordinary tests still run before
+# fuzzing begins, which is what stops the engine reporting what a unit
+# test already covers.
+#
+# -fuzz matches exactly ONE target in ONE package per invocation, by
+# design, so the loop is structural rather than a convenience.
+#
+# WHAT THIS IS AND IS NOT, as with the Rust half: a bounded weekly run is
+# a smoke test, not a proof. What makes it worth running is where a
+# finding LANDS — the engine writes the failing input into
+# testdata/fuzz/<Target>/, and the gate's lint:go-fuzz-seeds replays it
+# from then on. The cron finds it once; the committed corpus keeps it
+# found. The cron never pushes: a machine-generated input is proposed to
+# a human, never merged by one.
+run = '''
+set -euo pipefail
+mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+[[ -n "${mods}" ]] || { echo "audit:go-fuzz: no go.mod tracked, skipped"; exit 0; }
+command -v go > /dev/null || {
+  echo "audit:go-fuzz: go.mod present but go missing — pin go in mise.toml" >&2
+  exit 1
+}
+secs="${FUZZ_SECONDS:-60}"
+failed=""
+ran=0
+while IFS= read -r m; do
+  [[ -n "${m}" ]] || continue
+  d=$(dirname "${m}")
+  while IFS= read -r pkg; do
+    [[ -n "${pkg}" ]] || continue
+    while IFS= read -r target; do
+      [[ -n "${target}" ]] || continue
+      ran=$((ran + 1))
+      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s"
+      (cd "${d}" && go test -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") \
+        || failed="${failed} ${pkg}.${target}"
+    done < <( (cd "${d}" && go test -list '^Fuzz' "${pkg}" 2> /dev/null) | grep '^Fuzz' || true)
+  done < <( (cd "${d}" && go list ./... 2> /dev/null) || true)
+done <<< "${mods}"
+[[ "${ran}" -gt 0 ]] || { echo "audit:go-fuzz: no Go fuzz targets, skipped"; exit 0; }
+if [[ -n "${failed}" ]]; then
+  echo "audit:go-fuzz: crashing target(s):${failed}" >&2
+  echo "  the failing input is named in the output above, under testdata/fuzz/<Target>/" >&2
+  echo "  repo-audit.yml keeps it as an artifact; commit it and it becomes the regression" >&2
+  exit 1
+fi
+echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
 '''
 
 [tasks."lint:belt-available"]

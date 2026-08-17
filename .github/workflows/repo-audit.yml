@@ -118,6 +118,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # The Go half (#445): the fuzzing engine ships in the toolchain, so
+      # there is no extra binary, no sanitizer flag and no nightly — but
+      # the same two properties put it here rather than in the gate. It is
+      # time-bound (the documented -fuzztime default is to run forever)
+      # and it writes. A repo with no Go fuzz target skips clean.
+      - name: Run every Go fuzz target for a bounded interval
+        run: mise run audit:go-fuzz
+
+      # Go writes the failing input into the package's own
+      # testdata/fuzz/<Target>/ rather than a dedicated artifacts
+      # directory, so this necessarily carries the committed seed corpus
+      # along with the new crasher. That is accepted rather than worked
+      # around: the run's output names the exact file, and a filter that
+      # tried to separate the two would be guessing at which of the
+      # runner's files were new. Failure only, same as the Rust half, and
+      # the cron still never pushes.
+      - name: Keep the failing input when a Go target crashes
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: go-fuzz-corpus-${{ github.run_id }}
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore
+          retention-days: 30
+
   go-vulns:
     name: audit / go vulnerabilities
     runs-on: ubuntu-24.04
