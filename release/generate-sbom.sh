@@ -39,6 +39,32 @@ go_mods=$(git ls-files 'go.mod' '*/go.mod')
 if [[ -n ${cargo_locks} || -n ${go_mods} ]]; then
   trivy fs --config /dev/null --format spdx-json --output "${out}" .
   mode="lock-derived"
+  # A Go module's own go.mod carries no version — the tag is the version
+  # — so trivy emits the ROOT package with a versionless PURL, and the
+  # assertion below (rightly) refuses that. Measured on stele v0.1.0: 86
+  # PURLs, exactly one bare, `pkg:golang/github.com/monumental-archive/stele`.
+  #
+  # The release knows the version, so state it rather than exempt it: an
+  # inventory that cannot name the version of the artifact it describes
+  # under-claims, and a versionless PURL matches no advisory. Every
+  # tracked module path is stamped, so a multi-module repository is
+  # covered by the same loop.
+  while IFS= read -r m; do
+    [[ -n ${m} ]] || continue
+    module=$(awk '/^module /{print $2; exit}' "${m}")
+    [[ -n ${module} ]] || continue
+    purl="pkg:golang/${module}"
+    jq --arg p "${purl}" --arg v "v${VERSION}" '
+      .packages |= map(
+        if [.externalRefs[]? | select(.referenceType == "purl") | .referenceLocator] | index($p)
+        then .versionInfo = $v
+          | .externalRefs |= map(
+              if .referenceType == "purl" and .referenceLocator == $p
+              then .referenceLocator = ($p + "@" + $v)
+              else . end)
+        else . end)' "${out}" > "${out}.stamped"
+    mv "${out}.stamped" "${out}"
+  done <<< "${go_mods}"
 else
   gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" \
     --jq '.sbom' > "${out}"
