@@ -466,10 +466,11 @@ jobs:
           # predicate render — is `stele emit vsa` (stele#21): the
           # predicate is a method on the verdict type, so a PASSED
           # predicate cannot exist unearned (#208 as a compile-time
-          # fact). stele runs from the pinned module through the
-          # checksummed proxy, the audit:source-vsa bootstrap, until the
-          # go-binary release class lands (stele#7).
-          stele_pin="github.com/monumental-archive/stele/cmd/stele@3af8d30b0016028f74bab9adc85ae465505272cf"
+          # fact). stele arrives as a released binary, attested under
+          # the org signer and verified fail-closed before it runs
+          # (mise/stele.sh); the `go run <module>@<commit>` bootstrap it
+          # replaces is retired (stele#7). The verdict job therefore
+          # needs no Go toolchain to render a verdict.
           root=$(mktemp)
           # No pipeline: under pipefail, head closing the pipe after one
           # line kills gh with SIGPIPE and the step dies at 141.
@@ -479,7 +480,7 @@ jobs:
             echo "::error::empty trusted root from gh"
             exit 1
           }
-          go run "${stele_pin}" emit vsa \
+          stele emit vsa \
             --policy "${CANON_PATH}/slsa/verify-policy.json" \
             --trusted-root "${root}" \
             --repo "${GITHUB_REPOSITORY}" \
