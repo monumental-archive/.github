@@ -266,7 +266,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.2.1"
+"github:monumental-archive/stele" = "0.3.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the

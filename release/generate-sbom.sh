@@ -2,24 +2,31 @@
 # The release SBOM, class-shaped (docs/dependency-track.md): derived from
 # what the repository actually ships, by detection, never configuration.
 #
+#   BINARIES_DIR set    -> the go-binary class: the SBOM is read out of
+#                          the shipped bytes by `stele derive sbom` —
+#                          the module list the toolchain actually
+#                          linked, with the release version stamped
+#                          into the binary from the tag, never asserted
+#                          by this pipeline (stele#46; the spec lives
+#                          in stele's docs/binary-sbom.md). VERSION is
+#                          a cross-check the binaries must agree with,
+#                          not a source.
 #   Cargo.lock tracked  -> trivy over the tree at the tag: every PURL
 #                          versioned, deterministic, the versionless-PURL
 #                          defect unwritable (asserted below, not hoped).
-#   go.mod tracked      -> the same trivy path: go.sum pins every module
-#                          byte and a 1.17+ go.mod lists the full
-#                          transitive closure, so the inventory is
-#                          lock-derived and versioned exactly like
-#                          Cargo's. (The shipped binaries additionally
-#                          carry their own module list, readable with
-#                          `go version -m` — asserted at build time by
-#                          the go-binary class, stele#7.)
+#   go.mod tracked      -> the same trivy path, for a module shipping no
+#                          binaries: go.sum pins every module byte and a
+#                          1.17+ go.mod lists the full transitive
+#                          closure, so the inventory is lock-derived and
+#                          versioned exactly like Cargo's.
 #   no manifest         -> GitHub's dependency-graph export (the canon and
 #                          any docs/config-only repository: its
 #                          dependencies are actions, which the graph
 #                          covers and no lockfile describes).
 #
 # Inputs: VERSION (required), SBOM_BASENAME (optional; defaults to the
-# repository name), GH_TOKEN (fallback path only). Writes into dist/.
+# repository name), BINARIES_DIR (go-binary only: directory of extracted
+# shipped binaries), GH_TOKEN (fallback path only). Writes into dist/.
 set -euo pipefail
 
 [[ -n ${VERSION:-} ]] || {
@@ -36,7 +43,25 @@ out="dist/${base}-${VERSION}.spdx.json"
 
 cargo_locks=$(git ls-files 'Cargo.lock' '*/Cargo.lock')
 go_mods=$(git ls-files 'go.mod' '*/go.mod')
-if [[ -n ${cargo_locks} || -n ${go_mods} ]]; then
+if [[ -n ${BINARIES_DIR:-} ]]; then
+  # stele reads the embedded module lists and unions the legs, refusing
+  # divergence between them; --expect-version binds the inventory to the
+  # tag this run believes it is releasing, and stele refuses a binary
+  # whose own stamp disagrees. The #476 stamp loop below never runs on
+  # this path — there is nothing left to stamp when the version comes
+  # out of the artifact.
+  listing=$(find "${BINARIES_DIR}" -type f | sort)
+  bins=()
+  while IFS= read -r b; do
+    [[ -n ${b} ]] && bins+=("${b}")
+  done <<< "${listing}"
+  ((${#bins[@]} > 0)) || {
+    echo "::error::BINARIES_DIR holds no binaries — an inventory of nothing asserts nothing"
+    exit 1
+  }
+  stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
+  mode="binary-derived"
+elif [[ -n ${cargo_locks} || -n ${go_mods} ]]; then
   trivy fs --config /dev/null --format spdx-json --output "${out}" .
   mode="lock-derived"
   # A Go module's own go.mod carries no version — the tag is the version
@@ -83,7 +108,7 @@ if [[ ${packages} -eq 0 ]]; then
   echo "::error::SBOM has zero packages — an empty inventory asserts nothing"
   exit 1
 fi
-if [[ ${mode} == "lock-derived" ]]; then
+if [[ ${mode} == "lock-derived" || ${mode} == "binary-derived" ]]; then
   # The reason this path exists: a versionless PURL can never match an
   # advisory, so it is silently invisible to every scanner. Fail, never
   # ship an SBOM that under-claims.
