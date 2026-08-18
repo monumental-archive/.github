@@ -54,7 +54,8 @@ to every consumer (see #133).
 its own release SHA, so every release `vN` structurally ships its
 self-references — and leaves every consumer — at `vN-1` until Renovate's
 `chore(canon)` bump lands. That bump is deliberately release-neutral
-(`cliff.toml` skips the scope, ending the self-bump loop) and reaches
+(the notes convention leaves the scope unmapped, ending the self-bump
+loop) and reaches
 the front of Renovate's queue via `prPriority` and the first-party
 group in `default.json`, so the window is one bot cycle plus CI.
 

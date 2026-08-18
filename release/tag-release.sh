@@ -109,7 +109,30 @@ echo "pushed ${tag} (signed)"
 # Release notes are the changelog section for this version — the same text
 # reviewers already approved in the Release PR, not a second description of
 # it written by a machine at a different time.
-notes=$(git cliff --latest --strip all)
+# The notes conventions, previously cliff.toml: groups and URLs are the
+# org convention stated once here; the bump rules (0.x breaking bumps
+# minor, chore/ci/docs/style/test release nothing) are stele derive's
+# own defaults — and unlike the pinned git-cliff, whose
+# no_increment_regex was silently inert (2.13.1 drops unknown [bump]
+# keys), the silent-types rule is now real. Bare chore is unmapped:
+# release commits and self-pin bumps stay out of the notes, at the
+# recorded cost of cliff's Miscellaneous heading.
+repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
+repo_url="https://github.com/${repo_slug}"
+groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
+groups+=",docs=Documentation,test=Testing,build=Build,ci=CI"
+groups+=",chore(deps)=Dependencies,revert=Reverted"
+order="Breaking,Added,Changed,Fixed,Performance,Documentation"
+order+=",Testing,Build,CI,Dependencies,Reverted"
+notes_flags=(
+  --groups "${groups}"
+  --group-order "${order}"
+  --breaking-group "Breaking"
+  --compare-url "${repo_url}/compare/"
+  --release-url "${repo_url}/releases/tag/"
+  --pull-url "${repo_url}/pull/"
+)
+notes=$(stele derive notes --git-dir . "${notes_flags[@]}")
 
 # Draft, always. Immutability applies when a release is published rather than
 # when it is created, so a release made public now could never receive the
