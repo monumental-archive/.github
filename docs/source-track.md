@@ -20,10 +20,12 @@ trust published in `source-assessment.md` — no org token, no canon
 checkout:
 
 ```bash
+# v3 signatures cover PAE(payloadType, statement), never the bare
+# statement — build pae.bin per stele's docs/chain-format.md, then:
 cosign verify-blob --bundle <bundle> \
   --certificate-identity \
   https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com <statement>
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com pae.bin
 ```
 
 That is step 1 of `verifying-source` — the signature and the issuing
@@ -127,11 +129,11 @@ end to end before `signer` and `.github` founded their chains, and
 | Repository IDs / immutable revision IDs / human-readable diffs | 1 | GitHub (git SHAs, PR diffs) |
 | Source VSAs | 1 | **Emitted** per push, all three repos (#207) |
 | Access control + reliable history | 2 | `org-default-branch` ruleset: deletion blocked, force push blocked, linear history, org-wide, empty bypass list |
-| History (SCS): every Named Reference change recorded — when, by whom, new revision ID | 2 | Each chain link records the actor, `commitTime`, the revision and its parents, contemporaneously with the push (`source-attest` emit); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped |
+| History (SCS): every Named Reference change recorded — when, by whom, new revision ID | 2 | Each chain link records the actor, `commitTime`, the revision and its parents (`source-attest` emit) — contemporaneously with the push in the ordinary case, and honestly late on healed links (`repaired` marks the deviation — `source-provenance.md`, healed links); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped |
 | Tag immutability | 2 | `org-default-tag` ruleset: update/move/delete blocked, all tags, all repos |
 | Safe expunging process | 2 | `docs/expunging.md` |
 | Identity management | 2 | GitHub accounts, org 2FA required, DCO signoff + `required_signatures` attribute every change |
-| Source provenance, contemporaneous | 2 | **Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207) |
+| Source provenance, contemporaneous | 2 | **Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207) — a healed link is the named deviation: `repaired` marks it and its level is computed under the continuity guard (`source-provenance.md`, healed links) |
 | Continuity | 2 | Ruleset timestamps (GitHub-recorded); a ruleset edit that weakens a control resets its clock — see `rulesets.md` |
 | Continuous technical controls, documented | 3 | This document + `rulesets.md`; the control set: required `ci / ci` gate (bound to the Actions app), required signatures, linear history, review-thread resolution, squash-only merges, `v*` creation locked to the minting App, capability-boundary lint |
 | Protected named references, org properties | 3 | Rulesets as above; `ORG_SOURCE_GATED` emitted live in every source VSA since 2026-08-12 (#207) |
@@ -271,11 +273,12 @@ Monday walk. Activation is per repo, lab first:
    Genesis is refused if any link already exists on the history.
 4. Push something ordinary; confirm the link chains to genesis.
 5. Stranger-verify on a machine holding nothing but the published root
-   of trust (`source-assessment.md`): extract the note, then
+   of trust (`source-assessment.md`): extract the note, rebuild the
+   PAE bytes per stele's `docs/chain-format.md`, then
    `cosign verify-blob --bundle <bundle> --certificate-identity
    https://github.com/monumental-archive/<repo>/.github/workflows/source-attest.yml@refs/heads/main
    --certificate-oidc-issuer https://token.actions.githubusercontent.com
-   <statement>`.
+   pae.bin`.
 6. Lab only: simulate a lapse — weaken one ruleset rule, push, confirm
    the property drops and the VSA under-claims level 2; restore, confirm
    recovery. The claim set must be a function of live enforcement.
