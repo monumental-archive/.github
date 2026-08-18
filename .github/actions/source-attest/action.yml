@@ -115,7 +115,6 @@ runs:
           echo "SA_WORK=${work}"
           echo "SA_CANON_ROOT=${root}"
           echo "SA_CANON_REF=${canon_ref}"
-          echo "SA_IDENTITY=https://github.com/${expected}"
           echo "SA_ISSUER=https://token.actions.githubusercontent.com"
         } >> "${GITHUB_ENV}"
     # cosign comes from the toolbelt, not from sigstore's installer
