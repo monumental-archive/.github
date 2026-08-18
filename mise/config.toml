@@ -2613,6 +2613,18 @@ case "${ref}" in
     exit 0
     ;;
 esac
+# The merged release commit is the same designed state on main: phase 2
+# mints the tag AT the commit after it lands, so for exactly that push
+# the mirrors lead the tag by the release being cut (measured on the
+# canon's own v1.39.0 — the gate went red on the release commit). The
+# squash-subject law makes that commit identifiable by its enforced
+# subject; a forged subject could skip this gate once, and the next
+# ordinary commit re-arms it. stele#115 tracks the tool-side answer
+# (a stated pending-release outcome), which retires this guard.
+if git log -1 --format=%s | grep -qE '^chore: release v[0-9]'; then
+  echo "lint:version-mirrors: release commit ahead of its App-minted tag by design, skipped"
+  exit 0
+fi
 stele derive bump --git-dir . --check
 '''
 
