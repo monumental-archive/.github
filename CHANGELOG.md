@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.37.0](https://github.com/monumental-archive/.github/compare/v1.36.0...v1.37.0) - 2026-08-18
+
+### Added
+
+- adopt stele 0.8.0 — neutral policy names and the tag audit ([#504](https://github.com/monumental-archive/.github/pull/504))
+- derive versions and notes with stele, retire git-cliff ([#507](https://github.com/monumental-archive/.github/pull/507))
+
+### Fixed
+
+- drop the identity export the guard removal orphaned ([#502](https://github.com/monumental-archive/.github/pull/502))
+
+### Dependencies
+
+- update dependency rumdl to v0.2.54 ([#498](https://github.com/monumental-archive/.github/pull/498))
+
 ## [1.36.0](https://github.com/monumental-archive/.github/compare/v1.35.1...v1.36.0) - 2026-08-18
 
 ### Added
