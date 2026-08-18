@@ -2274,7 +2274,7 @@ dir = "{{cwd}}"
 # THE POST-RELEASE WINDOW IS EXPECTED, NOT MALFUNCTION (#290 finding 4).
 # A commit cannot contain its own release SHA (#227), so every canon
 # release vN structurally ships self-references at vN-1, and consumers
-# sit at vN-1 until Renovate's chore(canon) bump lands — which cliff.toml
+# sit at vN-1 until Renovate's chore(canon) bump lands — which the notes
 # deliberately skips, so the bump never triggers a release of its own.
 #
 # THE GRACE IS STALENESS DURATION, NOT RELEASES-BEHIND (#310 finding 1).
