@@ -14,11 +14,17 @@ the org binds the format's open points to, and the history of its
 chains. The predicate type URI
 
 ```text
-https://monumental-archive.github.io/attestations/source-provenance/v1
+https://monumental-archive.github.io/attestations/source-provenance/v3
 ```
 
 is an identifier, not a promise of a resolvable page; this file is
-its referent, and it delegates the bytes to stele's spec.
+its referent, and it delegates the bytes to stele's spec. Its version
+segment mirrors the note format version (stele's `docs/versioning.md`):
+the predicate is the note's payload and its shape has only ever moved
+when the note's did, so one number is defined once and read in two
+places. Statements signed under the earlier `…/v1` URI remain the
+accurate name of the shape they carry — recorded history, never
+healed (stele#107).
 
 ## The org's values
 
