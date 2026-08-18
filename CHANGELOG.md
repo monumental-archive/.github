@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.38.0](https://github.com/monumental-archive/.github/compare/v1.37.0...v1.38.0) - 2026-08-18
+
+### Added
+
+- version mirrors move by stele derive bump, not seds ([#520](https://github.com/monumental-archive/.github/pull/520))
+
+### Fixed
+
+- prove the versioned archetype by tags, not by cliff.toml ([#510](https://github.com/monumental-archive/.github/pull/510))
+- policy schema 2 and the /v3 source-provenance URI ([#518](https://github.com/monumental-archive/.github/pull/518))
+- pin stele 0.11.0 and move both policies to schema 3 ([#519](https://github.com/monumental-archive/.github/pull/519))
+
+### Documentation
+
+- name stele derive where git-cliff was still claimed ([#513](https://github.com/monumental-archive/.github/pull/513))
+- hand the chain format spec to stele and correct the recipes ([#515](https://github.com/monumental-archive/.github/pull/515))
+
 ## [1.37.0](https://github.com/monumental-archive/.github/compare/v1.36.0...v1.37.0) - 2026-08-18
 
 ### Added
