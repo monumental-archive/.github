@@ -261,7 +261,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.11.0"
+"github:monumental-archive/stele" = "0.12.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
@@ -2596,35 +2596,19 @@ dir = "{{cwd}}"
 # CITATION.cff — are derived state, and one found not carrying the
 # last released version is refused BY NAME at the PR that drifted it,
 # never repaired in passing and never discovered at the next release.
-# Pre-first-release repos report check=agreement-only and tag-only
-# repos check=no-mirrors — the tool's stated outcomes, not skips.
-# The two fixed release branches are exempt for a reason about the
-# rule, not about reach: there the mirrors carry the NEXT version
-# ahead of its tag by design — prepare-release.sh writes them with
-# the same derive bump this gate runs — so the gate's premise
-# (mirrors mirror the last release) does not hold on that branch.
+# Every state is the tool's own stated outcome, none of them this
+# task's opinion: check=ok, check=agreement-only (pre-first-release),
+# check=no-mirrors (tag-only repos), and check=pending — mirrors
+# carrying exactly the version the range derives, which is the
+# release being cut on the Release PR branch or on the merged
+# release commit before phase 2 mints its tag (stele#115). This body
+# briefly carried two context guards for that last state, keyed on
+# branch name and on commit subject; both are retired, because a
+# gate that pattern-matches prose to decide whether to run is a
+# second source of truth about a fact the derivation already holds.
 run = '''
 [[ -f .github/workflows/release.yml ]] || { echo "lint:version-mirrors: no release.yml, not a versioned repo, skipped"; exit 0; }
 command -v stele > /dev/null || { echo "lint:version-mirrors: stele missing from the belt" >&2; exit 1; }
-ref="${GITHUB_HEAD_REF:-$(git branch --show-current 2> /dev/null)}"
-case "${ref}" in
-  release/next | release-staging/next)
-    echo "lint:version-mirrors: ${ref} carries the next version ahead of its tag by design, skipped"
-    exit 0
-    ;;
-esac
-# The merged release commit is the same designed state on main: phase 2
-# mints the tag AT the commit after it lands, so for exactly that push
-# the mirrors lead the tag by the release being cut (measured on the
-# canon's own v1.39.0 — the gate went red on the release commit). The
-# squash-subject law makes that commit identifiable by its enforced
-# subject; a forged subject could skip this gate once, and the next
-# ordinary commit re-arms it. stele#115 tracks the tool-side answer
-# (a stated pending-release outcome), which retires this guard.
-if git log -1 --format=%s | grep -qE '^chore: release v[0-9]'; then
-  echo "lint:version-mirrors: release commit ahead of its App-minted tag by design, skipped"
-  exit 0
-fi
 stele derive bump --git-dir . --check
 '''
 
