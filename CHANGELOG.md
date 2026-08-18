@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.40.0](https://github.com/monumental-archive/.github/compare/v1.39.0...v1.40.0) - 2026-08-18
+
+### Added
+
+- warm go and cargo caches on the unsigned gate ([#525](https://github.com/monumental-archive/.github/pull/525))
+
+### Fixed
+
+- exempt the merged release commit from the mirror gate ([#523](https://github.com/monumental-archive/.github/pull/523))
+
 ## [1.39.0](https://github.com/monumental-archive/.github/compare/v1.38.0...v1.39.0) - 2026-08-18
 
 ### Added
