@@ -7,10 +7,11 @@
 # workflow's path plus ref, and composite steps run inside the caller's
 # job — so this action can carry every line of logic while the signing
 # identity stays `<repo>/.github/workflows/source-attest.yml@refs/heads/main`,
-# the root-of-trust contract in docs/source-assessment.md. The identity
-# guard below refuses to run from any other workflow path: an emitter
-# invoked from an unreserved path would mint chain links nobody can
-# verify against the published contract.
+# the root-of-trust contract in docs/source-assessment.md. The reserved-
+# path identity guard is the ENGINE'S (stele#74): `stele emit chain`
+# refuses an absent or foreign GITHUB_WORKFLOW_REF at preflight, so an
+# emitter invoked from an unreserved path cannot mint chain links —
+# there is no YAML copy of that check to drift.
 #
 # Correct by construction, stated as invariants the steps enforce:
 #   - Claims are read from GitHub's rules API at emission time, never
@@ -86,13 +87,6 @@ runs:
             exit 1
             ;;
         esac
-        expected="${GITHUB_REPOSITORY}/.github/workflows/source-attest.yml@refs/heads/main"
-        if [[ ${GITHUB_WORKFLOW_REF} != "${expected}" ]]; then
-          emsg="source-attest invoked from '${GITHUB_WORKFLOW_REF}' — the emitter runs only under the reserved identity"
-          emsg+=" '${expected}' (docs/source-assessment.md)"
-          echo "::error::${emsg}"
-          exit 1
-        fi
         # The action tree IS a canon tree: `uses:` fetched the whole
         # repository at the caller's pin, the same single resolution the
         # canon action relies on (#165).
@@ -236,20 +230,12 @@ runs:
           echo "::error::could not fetch main and refs/notes/commits — the notes ref must exist (seeded org-wide, #202)"
           exit 1
         }
-    # Signing mints Rekor entries; the push is the last step. Prove the
-    # environment can carry the run to completion BEFORE anything
-    # irreversible — no orphan log entries for links that never land.
-    - name: Preflight — prove the run can finish before anything signs
-      if: ${{ inputs.stage == 'attest' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: ${GITHUB_ACTION_PATH}/preflight.sh
-
-    # The emitter is `stele emit chain` (stele#21): discovery, the
-    # heal walk, link assembly, signing via the belt's cosign, the
-    # stranger's-inputs self-verify, and the compare-and-swap ledger
-    # append — one engine, the same digest function the verify walk
+    # The emitter is `stele emit chain` (stele#21): preflight (the
+    # #236 prove-the-push-first contract, preflight.sh folded into the
+    # engine at stele#66 and deleted here), the reserved-identity
+    # guard, discovery, the heal walk, link assembly, signing via the
+    # belt's cosign, the stranger's-inputs self-verify, and the
+    # compare-and-swap ledger append — one engine, the same digest function the verify walk
     # proves against (.github#434 made unrepresentable). stele runs
     # from the pinned module through the checksummed proxy, the same
     # bootstrap as audit:source-vsa, until the go-binary release class
