@@ -2588,6 +2588,34 @@ dir = "{{cwd}}"
 # clean.
 run = 'if [[ -f .github/workflows/release.yml ]]; then stele derive version --git-dir .; else echo "release:preview: no release.yml, skipped"; fi'
 
+[tasks."lint:version-mirrors"]
+description = "Every version mirror carries the released version (stele derive bump --check)"
+dir = "{{cwd}}"
+# The drift gate between releases (stele#102, #514): version mirrors —
+# the workspace version, internal path-dependency constraints,
+# CITATION.cff — are derived state, and one found not carrying the
+# last released version is refused BY NAME at the PR that drifted it,
+# never repaired in passing and never discovered at the next release.
+# Pre-first-release repos report check=agreement-only and tag-only
+# repos check=no-mirrors — the tool's stated outcomes, not skips.
+# The two fixed release branches are exempt for a reason about the
+# rule, not about reach: there the mirrors carry the NEXT version
+# ahead of its tag by design — prepare-release.sh writes them with
+# the same derive bump this gate runs — so the gate's premise
+# (mirrors mirror the last release) does not hold on that branch.
+run = '''
+[[ -f .github/workflows/release.yml ]] || { echo "lint:version-mirrors: no release.yml, not a versioned repo, skipped"; exit 0; }
+command -v stele > /dev/null || { echo "lint:version-mirrors: stele missing from the belt" >&2; exit 1; }
+ref="${GITHUB_HEAD_REF:-$(git branch --show-current 2> /dev/null)}"
+case "${ref}" in
+  release/next | release-staging/next)
+    echo "lint:version-mirrors: ${ref} carries the next version ahead of its tag by design, skipped"
+    exit 0
+    ;;
+esac
+stele derive bump --git-dir . --check
+'''
+
 [tasks."lint:gate-stub"]
 description = "A gate stub's trigger set must be closed over the gate's inputs (#427)"
 dir = "{{cwd}}"
