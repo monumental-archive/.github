@@ -300,7 +300,7 @@ literal):
   issuer), not universally — plain gpg reports the signature as
   unverifiable, and GitHub's own UI shows these tags as unsigned
   because it cannot validate gitsign certificates. Tags minted before
-  a repo's epoch in `security/tag-signing-epoch.txt` are immutable but
+  a repo's epoch in ``slsa/assert-policy.json` (`tags.epochs`)` are immutable but
   unsigned (the recorded residual in `source-assessment.md`);
   `audit:release-tags` enforces the epoch forward.
 

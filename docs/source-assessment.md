@@ -138,7 +138,7 @@ gitsign at the mint (#349 S4), keyless, the same Sigstore identity as
 everything else — is BUILT (`tag-release.sh`, the `id-token` grant with
 its capability-boundary marker in `release.yml`, `audit:release-tags`
 over the whole population) and awaits its first lab-proven mint, at
-which point the repo's line in `security/tag-signing-epoch.txt` moves
+which point the repo's line in ``slsa/assert-policy.json` (`tags.epochs`)` moves
 from `pending` to the first signed tag and the residual narrows to the
 pre-epoch tags permanently. Because it rewrites the release path's
 irreversible step, the lab cycle is the gate between built and
