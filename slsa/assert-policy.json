@@ -6,7 +6,9 @@
     "checksums": "checksums.txt",
     "umbrellaBundle": "attestations.intoto.jsonl",
     "manifestAsset": "evidence-manifest.json",
-    "storeVsaFromCanon": "1.13.0",
+    "storeVsaFromVersion": "1.13.0",
+    "decisionFromVersion": "1.23.1",
+    "evidenceSuffixes": [".openvex.json"],
     "debtFile": "security/attestation-debt.txt",
     "expectedRepos": 4,
     "publishWorkflows": ["publish", "self-publish"],
@@ -41,6 +43,16 @@
       "attestorRepo": ".github",
       "attestorIdentity": "https://github.com/monumental-archive/.github/.github/workflows/base-attest.yml@refs/heads/main",
       "predicateType": "https://monumental-archive.github.io/attestations/base-image-approval/v1"
+    }
+  },
+  "tags": {
+    "tagPattern": "^v[0-9]",
+    "taggerName": "tag-mint[bot]",
+    "identityPattern": "^https://github\\.com/monumental-archive/",
+    "notesRef": "refs/notes/commits",
+    "epochs": {
+      ".github": "v1.23.1",
+      "release-lab": "v0.24.2"
     }
   },
   "blastRadius": {

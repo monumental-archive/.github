@@ -266,7 +266,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.6.0"
+"github:monumental-archive/stele" = "0.8.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
@@ -1760,7 +1760,9 @@ head -1 "${root}.all" > "${root}"
 stele assert evidence \
   --org monumental-archive \
   --policy slsa/assert-policy.json \
-  --trusted-root "${root}"
+  --trusted-root "${root}" \
+  --depth full \
+  --verify-policy slsa/verify-policy.json
 '''
 
 [tasks."audit:source-vsa"]
@@ -3581,115 +3583,35 @@ echo "lint:tracks: ok"
 '''
 
 [tasks."audit:release-tags"]
-description = "Every release tag org-wide: App tagger, signature from the epoch on, source link on the target (network, canon only)"
+description = "Every release tag org-wide: mint tagger, signature from the epoch on, source link on the target (network, canon only)"
 dir = "{{cwd}}"
-# S4 of #349: the tag object was the one pointer in the release chain
-# whose integrity rested on a platform control plus GitHub's API answer
-# rather than a signature — and a hand-minted break-glass tag left no
-# cryptographic trace at all. Now the mint signs (tag-release.sh,
-# gitsign), and this leg watches the whole population: for every v* tag
-# in every org repo, the tagger is the minting App, the tag from the
-# repo's signing epoch onward carries a signature that VERIFIES against
-# the org's OIDC issuer with an org workflow identity, and the commit
-# the tag points at carries a source chain link. GitHub's own
-# verification field is not consulted: it cannot validate gitsign's
-# x509-in-the-PGP-slot and would report every signed tag unsigned.
+# S4 of #349, mechanism now stele's tag audit (its
+# docs/assert-policy-schema.md, tags section): for every release tag
+# in every org repo, the tagger is the policy-declared minting role,
+# the tag from the repo's signing epoch onward carries a gitsign
+# signature verified NATIVELY against the trusted root (CMS over the
+# tag payload — no gitsign binary here; the mint still uses its own),
+# and the tag's target carries a source chain link. The epochs are
+# policy data (slsa/assert-policy.json tags.epochs, absorbing the
+# retired security/tag-signing-epoch.txt); the legacy bound is derived
+# from the chain itself. GitHub's own verification field is still
+# never consulted: it cannot judge x509-in-the-PGP-slot and would
+# report every signed tag unsigned.
 run = '''
 [[ -d security ]] || { echo "audit:release-tags: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:release-tags: gh missing" >&2; exit 1; }
-command -v gitsign > /dev/null || { echo "audit:release-tags: gitsign missing from the belt" >&2; exit 1; }
-epoch_file="security/tag-signing-epoch.txt"
-if ! repos=$(gh api "orgs/monumental-archive/repos" --paginate \
-  --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
-  echo "audit:release-tags: could not enumerate org repos — nothing was checked" >&2
-  exit 1
-fi
-failed=""
-checked=0
-for repo in ${repos}; do
-  dir=$(mktemp -d)
-  git init -q "${dir}"
-  git -C "${dir}" remote add origin "https://github.com/monumental-archive/${repo}.git"
-  git -C "${dir}" fetch -q origin "+refs/tags/v*:refs/tags/v*" \
-    "+refs/notes/commits:refs/notes/commits" 2> /dev/null || true
-  tags=$(git -C "${dir}" tag -l "v[0-9]*" | sort -V)
-  [[ -n "${tags}" ]] || continue
-  epoch=$(awk -v r="${repo}" '$1 == r { print $2 }' "${epoch_file}")
-  if [[ -z "${epoch}" ]]; then
-    failed="${failed} ${repo}(releases tags but has no line in ${epoch_file})"
-    continue
-  fi
-  signing=false
-  [[ "${epoch}" == "pending" ]] || signing=true
-  # The chain genesis scopes the obligations: a tag whose target
-  # predates genesis was minted before the machinery existed — legacy
-  # by construction, reported by name, never red (the attestation-debt
-  # rule: never excuse anything newer than the obligation). Genesis is
-  # the noted revision whose first-parent carries no note.
-  # Only chain-link notes count (the seeded plain-text note is
-  # scaffolding), candidates are links whose first-parent carries no
-  # link, and among candidates the oldest committer date wins — notes
-  # list order is arbitrary and choosing by it picked the seed note.
-  noted=""
-  for r in $(git -C "${dir}" notes list 2> /dev/null | awk '{print $2}'); do
-    git -C "${dir}" notes show "${r}" 2> /dev/null \
-      | jq -e '.version and .provenance.bundle' > /dev/null 2>&1 || continue
-    noted="${noted}
-${r}"
-  done
-  genesis=""
-  gtime=""
-  while IFS= read -r r; do
-    [[ -n "${r}" ]] || continue
-    p=$(git -C "${dir}" rev-parse -q --verify "${r}^" 2> /dev/null || true)
-    if [[ -z "${p}" ]] || ! grep -qxF "${p}" <<< "${noted}"; then
-      t=$(git -C "${dir}" log -1 --format=%ct "${r}" 2> /dev/null || echo "")
-      if [[ -z "${gtime}" || ( -n "${t}" && ${t} -lt ${gtime} ) ]]; then
-        genesis="${r}"
-        gtime="${t}"
-      fi
-    fi
-  done <<< "${noted}"
-  legacy=0
-  for tag in ${tags}; do
-    checked=$((checked + 1))
-    target=$(git -C "${dir}" rev-list -n 1 "${tag}" 2> /dev/null || true)
-    if [[ -n "${genesis}" && -n "${target}" ]] \
-      && ! git -C "${dir}" merge-base --is-ancestor "${genesis}" "${target}" 2> /dev/null; then
-      legacy=$((legacy + 1))
-      continue
-    fi
-    obj=$(git -C "${dir}" cat-file tag "${tag}" 2> /dev/null) || {
-      failed="${failed} ${repo}@${tag}(lightweight tag — the mint always annotates)"
-      continue
-    }
-    grep -qE "^tagger tag-mint\[bot\] " <<< "${obj}" \
-      || failed="${failed} ${repo}@${tag}(tagger is not the minting App)"
-    # Signature required from the epoch tag onward (sort -V order).
-    if [[ "${signing}" == true ]] \
-      && [[ "$(printf '%s\n%s\n' "${epoch}" "${tag}" | sort -V | head -1)" == "${epoch}" ]]; then
-      if ! git -C "${dir}" -c gpg.format=x509 -c gpg.x509.program=gitsign \
-        -c gitsign.certificateIdentityRegexp="^https://github.com/monumental-archive/" \
-        -c gitsign.certificateOIDCIssuer="https://token.actions.githubusercontent.com" \
-        verify-tag "${tag}" > /dev/null 2>&1; then
-        failed="${failed} ${repo}@${tag}(signature does not verify against an org workflow identity)"
-      fi
-    fi
-    if [[ -n "${target}" ]]; then
-      git -C "${dir}" notes list "${target}" > /dev/null 2>&1 \
-        || failed="${failed} ${repo}@${tag}(target ${target} carries no source chain link)"
-    fi
-  done
-  [[ ${legacy} -eq 0 ]] \
-    || echo "audit:release-tags: ${repo}: ${legacy} tag(s) predate the chain genesis — legacy, exempt by construction"
-done
-if [[ -n "${failed}" ]]; then
-  echo "audit:release-tags: tag defects:${failed}" >&2
-  echo "  every v* tag is App-minted, signed from the epoch on" >&2
-  echo "  (${epoch_file}), and points at a linked revision (#349 S4)" >&2
-  exit 1
-fi
-echo "audit:release-tags: ${checked} tag(s) across the org, all conformant"
+command -v stele > /dev/null || { echo "audit:release-tags: stele missing from the belt" >&2; exit 1; }
+root=$(mktemp)
+# No pipeline: under pipefail, head closing the pipe after one line
+# kills gh with SIGPIPE and the task dies at 141 (the audit:source-vsa
+# comment, same two-step form; stele#85 retires the dance).
+gh attestation trusted-root > "${root}.all"
+head -1 "${root}.all" > "${root}"
+[[ -s "${root}" ]] || { echo "audit:release-tags: empty trusted root from gh" >&2; exit 1; }
+stele assert tags \
+  --org monumental-archive \
+  --policy slsa/assert-policy.json \
+  --trusted-root "${root}"
 '''
 
 [tasks."audit:citations"]

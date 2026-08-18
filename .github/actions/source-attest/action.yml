@@ -278,7 +278,7 @@ runs:
           --claims "${SA_WORK}/claims.json" \
           --actor "${SA_ACTOR}" \
           --actor-id "${SA_ACTOR_ID}" \
-          --canon-digest "${SA_CANON_REF}" \
+          --machinery-digest "${SA_CANON_REF}" \
           --policy-uri "https://github.com/monumental-archive/.github/blob/${SA_CANON_REF}/slsa/verify-policy.json" \
           ${genesis[@]+"${genesis[@]}"}
 ...
