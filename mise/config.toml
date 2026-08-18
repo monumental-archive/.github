@@ -3714,13 +3714,26 @@ for repo in ${repos}; do
   ${repo}: could not read .github/workflows — unreadable is not adopted"
     continue
   fi
-  has_cliff=true
-  gh api "repos/monumental-archive/${repo}/contents/cliff.toml" --jq .name > /dev/null 2>&1 || has_cliff=false
+  # The versioned archetype is proven by CONSEQUENCE, not by config: a
+  # repository carrying v* tags has released, so it owes the release
+  # machinery. cliff.toml was the old marker and retired with git-cliff
+  # (#505) — which silently switched this obligation OFF for the canon
+  # the moment that file went, the exact "a check nobody runs" shape
+  # #354 exists to prevent. Tags cannot be deleted to escape the check
+  # (org-default-tag protects them), and a versioned repo that loses
+  # release.yml entirely is now caught, which the file marker never did.
+  # Read whole, never piped into grep -q: gh --paginate dies on SIGPIPE
+  # when the reader closes early (the audit:source-vsa lesson).
+  tags=$(gh api "repos/monumental-archive/${repo}/tags" --paginate --jq '.[].name' 2> /dev/null || true)
+  releases=false
+  if grep -qE '^v[0-9]' <<< "${tags}"; then
+    releases=true
+  fi
   # artifact spec: name = acceptable workflow filenames (| separated)
   set -- "ci=ci.yml|gate.yml" "audit=audit.yml" "scorecard=scorecard.yml" \
     "source-attest=source-attest.yml" \
     "dependency-review=dependency-review.yml|self-dependency-review.yml"
-  if [[ "${has_cliff}" == true ]]; then
+  if [[ "${releases}" == true ]]; then
     set -- "$@" "release=release.yml|self-release.yml" "publish=publish.yml|self-publish.yml"
   fi
   for spec in "$@"; do
