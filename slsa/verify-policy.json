@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "issuer": "https://token.actions.githubusercontent.com",
   "trust": {
     "provenance": {
@@ -40,7 +40,7 @@
   "source": {
     "identity": "https://github.com/{owner}/{repo}/.github/workflows/source-attest.yml@refs/heads/main",
     "notesRef": "refs/notes/commits",
-    "provenancePredicateType": "https://monumental-archive.github.io/attestations/source-provenance/v1",
+    "provenancePredicateType": "https://monumental-archive.github.io/attestations/source-provenance/v3",
     "propertyPrefix": "ORG_SOURCE_",
     "resourceUri": "git+https://github.com/{owner}/{repo}",
     "protectedBranches": [
