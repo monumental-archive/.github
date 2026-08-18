@@ -90,49 +90,33 @@ records the decision — the config format itself enforces the L2 shape
 (`severity-threshold` and lint-level knobs were removed upstream;
 everything errors, and a written ignore is the only exit).
 
-### The cron: `audit:blast-radius` (osv-scanner over published SBOMs)
+### The cron: `audit:blast-radius` (`stele assert blast-radius`)
 
 The L2 triage mechanism at scale and the honesty input VEX statements
 wait on: *an advisory lands — which published releases, images and majors
-ship it?* Walks the org's published releases' SPDX SBOMs (verified as
-release assets before trust), scans each with osv-scanner (OSV includes
-malicious-package data), and aggregates one report: advisory → affected
-releases / images / majors.
+ship it?* The mechanism — the SBOM walk with verify-before-trust, the
+osv-scanner run, the exact `(advisory, package@version)` VEX join that
+is also the version-drift guard, the loud zero-package failure (exit
+128), and the canary that proves the scanner can see — is `stele
+assert blast-radius`, specified and table-tested in stele
+(`docs/assert-policy-schema.md` there; stele#39 for the port record).
+The org's conventions are data in `slsa/assert-policy.json`: the
+ecosystem classes, the canary pin (RUSTSEC-2021-0127 in release-lab
+v0.17.0), and where decisions live (`security/vex/`).
 
-Findings are filtered per exact `(advisory, package@version)` against
-the decisions in `security/vex/` — red always means *new and
-undecided*, never the standing advisory again, and never toil: a
-decision is keyed by the dependency, so every release that ships the
+What stays org policy here: red always means *new and undecided* —
+a decision is keyed by the dependency, so every release shipping the
 decided `package@version` is covered by derivation, with no product
-list to extend per release (#187). The per-version join is also the
-drift guard, by construction — a bumped version matches no decision and
-goes red for a fresh judgment; an advisory-ID-only filter would
-silently extend the old judgment to a version nobody looked at.
-
-Two triage classes, decided when the first image SBOM landed (v0.18.1,
-~30 Debian base findings, most unfixable in stable — the oldest from
-2005): **ecosystem packages** (cargo, npm — the org's own code surface)
-always gate; **OS packages** gate only when a shipped fix exists —
-lagging a fix is actionable, while the perpetual unfixed base-layer
-background's remediation path is the rebuild cadence (`docs/release.md`
-already states this: remediation is never per-CVE), so those are
-reported, never red, and never worth a VEX that decides nothing.
-Zero standing infrastructure; deterministic inputs (immutable release
-artifacts); network only for the feed — which is exactly why it is
-`audit:*` and can never be gate-eligible.
-
-Failure modes are constructed loud:
-
-- **exit 128** (osv-scanner parsed no packages) fails the job — a scan
-  that reads nothing must never report "clean".
-- **The canary**: a pinned lab release with a known-advisoried crate
-  must produce its finding on every run. A blast-radius job that
-  silently cannot see is worse than none; this converts that state into
-  a red run. (The seeded finding: RUSTSEC-2021-0127, serde_cbor,
-  measured present in release-lab's lock.)
-- The report lands in the job summary **and** as a durable report — a
-  green cron run nobody reads is write-only, per the release canon's
-  report-only obligation.
+list to extend per release (#187). Two triage classes, decided when
+the first image SBOM landed (v0.18.1): **ecosystem packages** (cargo,
+npm — the org's own code surface) always gate; **OS packages** gate
+only when a shipped fix exists — the perpetual unfixed base-layer
+background's remediation path is the rebuild cadence
+(`docs/release.md`: remediation is never per-CVE), so those surface as
+derived exceptions, never red. Zero standing infrastructure; network
+only for the feed — which is exactly why it is `audit:*` and can never
+be gate-eligible. Decisions matching no current finding surface as
+stale — retirement candidates, never quietly carried.
 
 Two report-only sections ride the same run (#187's sibling
 improvements). For repos with os-package findings, the report names the
