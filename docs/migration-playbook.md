@@ -53,7 +53,7 @@ a fresh session **started in the target repo's checkout**.
       to drift and gets the current one at its pinned SHA (#445). The
       stubs below are the files something OUTSIDE the belt reads: editors
       (`.editorconfig`), GitHub (`renovate.json`), the commit-msg hook
-      (`committed.toml`), the release script (`cliff.toml`), or the repo's
+      (`committed.toml`), the release scripts, or the repo's
       own identity and policy (licences, `REUSE.toml`, `deny.toml`).
 - [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
       always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the

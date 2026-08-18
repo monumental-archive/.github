@@ -446,45 +446,6 @@ checksum = "sha256:af3fb09d2a3dc4f2ac2db70e7877b2da3b9650aa74cd2347a1a2b7885bf7f
 url = "https://github.com/openvex/vexctl/releases/download/v0.4.4/vexctl-windows-amd64.exe"
 url_api = "https://api.github.com/repos/openvex/vexctl/releases/assets/449430835"
 
-[[tools."aqua:orhun/git-cliff"]]
-version = "2.13.1"
-backend = "aqua:orhun/git-cliff"
-
-[tools."aqua:orhun/git-cliff"."platforms.linux-arm64"]
-checksum = "sha256:4054c124b926c117f3fa048939bc8be0a954f29f3b6f367627e8cb22c1971882"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850720"
-
-[tools."aqua:orhun/git-cliff"."platforms.linux-arm64-musl"]
-checksum = "sha256:4054c124b926c117f3fa048939bc8be0a954f29f3b6f367627e8cb22c1971882"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850720"
-
-[tools."aqua:orhun/git-cliff"."platforms.linux-x64"]
-checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850671"
-
-[tools."aqua:orhun/git-cliff"."platforms.linux-x64-musl"]
-checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850671"
-
-[tools."aqua:orhun/git-cliff"."platforms.macos-arm64"]
-checksum = "sha256:21547ae4a0421164070ab75c2522864ea5565858a011fabc5f583061b20f1226"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405849885"
-
-[tools."aqua:orhun/git-cliff"."platforms.macos-x64"]
-checksum = "sha256:6e60ae390d375cecb9d8008c49f0e724a8dfe40390b532ef5501e421d2cc8acb"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850193"
-
-[tools."aqua:orhun/git-cliff"."platforms.windows-x64"]
-checksum = "sha256:3ae3a5549e85c7ad5b20192ebcfee4371269deca51255f6f2f2e051c6541f5ca"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405851866"
-
 [[tools."aqua:sigstore/cosign"]]
 version = "3.1.3"
 backend = "aqua:sigstore/cosign"
@@ -780,44 +741,44 @@ url = "https://github.com/microsoft/typescript-go/releases/download/typescript/v
 url_api = "https://api.github.com/repos/microsoft/typescript-go/releases/assets/470428092"
 
 [[tools."github:monumental-archive/stele"]]
-version = "0.8.0"
+version = "0.9.0"
 backend = "github:monumental-archive/stele"
 
 [tools."github:monumental-archive/stele"."platforms.linux-arm64"]
-checksum = "sha256:c917275863b3c5ef6641ebef48203ec43018730fc5f8fa0de5e3ce9a5a17d350"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.8.0/stele-0.8.0-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519653514"
+checksum = "sha256:d868f4ce0dc5849b7f91f93f94118d6b32fd7136e1a0403723afaa5c90cfb6b3"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.9.0/stele-0.9.0-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519683094"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.linux-arm64-musl"]
-checksum = "sha256:c917275863b3c5ef6641ebef48203ec43018730fc5f8fa0de5e3ce9a5a17d350"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.8.0/stele-0.8.0-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519653514"
+checksum = "sha256:d868f4ce0dc5849b7f91f93f94118d6b32fd7136e1a0403723afaa5c90cfb6b3"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.9.0/stele-0.9.0-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519683094"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.linux-x64"]
-checksum = "sha256:27d7c70f2110b8f852ecbe51e96ebd5aa5ace66215cca86f922c1a637a4d62cc"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.8.0/stele-0.8.0-linux-amd64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519653508"
+checksum = "sha256:bc36c695db3bfdf09d7f1f64612b66efb46d96c7f5f88eb54123ea739d8a5f6e"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.9.0/stele-0.9.0-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519683077"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.linux-x64-musl"]
-checksum = "sha256:27d7c70f2110b8f852ecbe51e96ebd5aa5ace66215cca86f922c1a637a4d62cc"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.8.0/stele-0.8.0-linux-amd64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519653508"
+checksum = "sha256:bc36c695db3bfdf09d7f1f64612b66efb46d96c7f5f88eb54123ea739d8a5f6e"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.9.0/stele-0.9.0-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519683077"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.macos-arm64"]
-checksum = "sha256:f7407f7e4f426551014d91258c2e3239ec3e855d830688918f5242a68e7dc52f"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.8.0/stele-0.8.0-darwin-arm64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519653507"
+checksum = "sha256:b4bfcc1623625a4550efd972e787f83e4c64c1e2a3dc50cabf6274d2548bd32e"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.9.0/stele-0.9.0-darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519683076"
 provenance = "github-attestations"
 provenance_verified = true
 
 [tools."github:monumental-archive/stele"."platforms.macos-x64"]
-checksum = "sha256:e47aa8009d8fa5b6d4d29f82b6b40b8fa54e98ce8581d4ac2f4495921096f528"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.8.0/stele-0.8.0-darwin-amd64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519653509"
+checksum = "sha256:80892d13ae06e4eb3596cd6bdd8648ed0e18a817535247a2aa1b4e8f7a901a99"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.9.0/stele-0.9.0-darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/519683073"
 provenance = "github-attestations"
 
 [[tools."github:obi1kenobi/cargo-semver-checks"]]

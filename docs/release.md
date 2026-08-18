@@ -33,23 +33,27 @@ nothing else in this document applies to them.
 A repository whose release needs fit neither archetype is a design question
 for this repo, not a licence to improvise.
 
-## Phase 1: the release PR (git-cliff)
+## Phase 1: the release PR (stele derive)
 
-The version is derived from conventional commits by **git-cliff** — never
-typed by a human. The canonical configuration is
-[`scaffold/cliff.toml`](../scaffold/cliff.toml); its load-bearing settings
-(pre-1.0 breaking changes bump the minor, housekeeping commits produce no
-release, `trim = false`) are documented inline and are not repo-tunable.
+The version is derived from conventional commits by **stele derive
+version** — never typed by a human. The notes convention (groups, order,
+URLs) lives once, in
+[`release/prepare-release.sh`](../release/prepare-release.sh); the
+load-bearing bump rules (pre-1.0 breaking changes bump the minor,
+housekeeping commits produce no release) are stele derive's own
+defaults, specified in its docs and tests, and are not repo-tunable.
 
-git-cliff rather than a release tool, org-wide: release-plz cannot drive
-workspaces whose interdependent crates are unpublished (release-plz#2595,
-verified open and unfixed in 0.3.160), release-please has no model for
-`[workspace.package]` inheritance at all, and dist must own the binary build,
-which collides with hardened runners and with publishing binaries extracted
-from the container image. Meanwhile the tags-only job a release tool would do
-— bump, changelog, release PR, tag, draft release — is exactly what
-iiif-server's git-cliff phase 1 already does in three small scripts. One
-flow, no structural bugs, no tool that wants to own the pipeline.
+A derivation step rather than a release tool, org-wide: release-plz
+cannot drive workspaces whose interdependent crates are unpublished
+(release-plz#2595, verified open and unfixed in 0.3.160),
+release-please has no model for `[workspace.package]` inheritance at
+all, and dist must own the binary build, which collides with hardened
+runners and with publishing binaries extracted from the container
+image. Meanwhile the tags-only job a release tool would do — bump,
+changelog, release PR, tag, draft release — is exactly what the three
+small scripts do around `stele derive` (the flow git-cliff carried
+from iiif-server until stele's derive port replaced it, .github#505).
+One flow, no structural bugs, no tool that wants to own the pipeline.
 
 The machinery is shared: callers pin
 [`release.yml`](../.github/workflows/release.yml) by SHA (the usual doubled
@@ -209,7 +213,7 @@ Three things, and only three:
   ([`slsa-reference.md`](slsa-reference.md)). Renaming it breaks trusted
   publishing in a way no local check catches.
 - **The `publish` environment.** Environments are repository objects.
-- **Build inputs**: `Cargo.toml`, `Dockerfile`, `cliff.toml`.
+- **Build inputs**: `Cargo.toml`, `Dockerfile`.
 
 Every step, every ordering constraint and every permission lives here or in
 `signer`.
@@ -234,7 +238,7 @@ and breaks all of them until each one is edited by hand. Same
 architecture, opposite blast radius — and it cannot be fixed centrally,
 because a shared workflow cannot grant itself anything.
 
-Observed: adding `contents: read` to `release.yml`, so that git-cliff
+Observed: adding `contents: read` to `release.yml`, so that the derivation
 could authenticate its GitHub API calls, took the release lab down within
 a minute of merging.
 

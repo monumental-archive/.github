@@ -15,10 +15,11 @@
 #
 # Leaves the working tree modified; open-release-pr.sh commits it via the API.
 #
-# The version is derived, never typed: git-cliff reads the conventional
-# commits since the last v* tag. See scaffold/cliff.toml for the two
-# decisions that matter — 0.x breaking changes bump the minor rather than
-# reaching 1.0.0, and chore/ci/docs-only ranges release nothing.
+# The version is derived, never typed: stele derive version reads the
+# conventional commits since the last v* tag. The two decisions that
+# matter are derive's own defaults — 0.x breaking changes bump the minor
+# rather than reaching 1.0.0, and chore/ci/docs-only ranges release
+# nothing (its docs and tests are the spec; stele#31).
 set -euo pipefail
 
 # The version source is detected, never configured — the phase-1 contract
@@ -38,8 +39,37 @@ else
   current=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2> /dev/null || true)
   current=${current#v}
 fi
-next=$(git cliff --bumped-version)
-version=${next#v}
+# The notes conventions, previously cliff.toml: groups and URLs are the
+# org convention stated once here; the bump rules (0.x breaking bumps
+# minor, chore/ci/docs/style/test release nothing) are stele derive's
+# own defaults — and unlike the pinned git-cliff, whose
+# no_increment_regex was silently inert (2.13.1 drops unknown [bump]
+# keys), the silent-types rule is now real. Bare chore is unmapped:
+# release commits and self-pin bumps stay out of the notes, at the
+# recorded cost of cliff's Miscellaneous heading.
+repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
+repo_url="https://github.com/${repo_slug}"
+groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
+groups+=",docs=Documentation,test=Testing,build=Build,ci=CI"
+groups+=",chore(deps)=Dependencies,revert=Reverted"
+order="Breaking,Added,Changed,Fixed,Performance,Documentation"
+order+=",Testing,Build,CI,Dependencies,Reverted"
+notes_flags=(
+  --groups "${groups}"
+  --group-order "${order}"
+  --breaking-group "Breaking"
+  --compare-url "${repo_url}/compare/"
+  --release-url "${repo_url}/releases/tag/"
+  --pull-url "${repo_url}/pull/"
+)
+
+derived=$(stele derive version --git-dir .)
+echo "${derived}"
+version=$(awk -F= '/^version=/{print $2}' <<< "${derived}")
+if [[ -z ${version} ]]; then
+  echo "nothing to release: no version-bumping commits since the last tag"
+  emit_pending=true
+fi
 
 echo "source:  ${source}"
 echo "current: ${current:-<no tag yet>}"
@@ -50,6 +80,11 @@ emit() {
     echo "$1" >> "${GITHUB_OUTPUT}"
   fi
 }
+
+if [[ ${emit_pending:-false} == true ]]; then
+  emit "release=false"
+  exit 0
+fi
 
 if [[ ${version} == "${current}" ]]; then
   echo "nothing to release: no version-bumping commits since the last tag"
@@ -130,13 +165,11 @@ if [[ -n ${stubs} ]]; then
   exit 1
 fi
 
-git cliff --bump --output CHANGELOG.md
-
-# git-cliff separates releases with a trailing blank line, which at end of
-# file is an MD012/MD047 violation — and markdown is linted with warnings as
-# errors org-wide. Collapse to exactly one final newline.
-changelog=$(cat CHANGELOG.md)
-printf '%s\n' "${changelog}" > CHANGELOG.md
+# The splice writes the new section above the newest one and touches
+# nothing else — existing sections are history, not something a release
+# regenerates (stele derive notes is table-tested for the exact
+# whitespace the org's markdownlint demands).
+stele derive notes --git-dir . --changelog CHANGELOG.md "${notes_flags[@]}"
 
 emit "release=true"
 emit "version=${version}"

@@ -8,7 +8,7 @@ written for two moments: wiring a repository in, and a release going wrong.
 
 ### Versioned (has releases, versions, tags)
 
-1. Copy from [`scaffold/`](../scaffold/): `mise.toml`, `cliff.toml`,
+1. Copy from [`scaffold/`](../scaffold/): `mise.toml`,
    `committed.toml`, and `SECURITY-INSIGHTS.yml` (fill the
    `<angle-bracket>` fields). If the repository is citable (its release
    stub passes `mint-doi: true`), render `CITATION.cff` with
@@ -59,7 +59,7 @@ written for two moments: wiring a repository in, and a release going wrong.
 6. Workspace shape: version via `[workspace.package]` inheritance; a pgrx
    crate is a member but **not** a default-member, and goes in the
    `exclude:` input.
-7. `lint:release-stub` (belt) enforces 2–3 from then on: `cliff.toml`
+7. `lint:release-stub` (belt) enforces 2–3 from then on: `release.yml`
    present means the stubs must be, pinned.
 8. Copy `scaffold/CODEOWNERS` to `.github/CODEOWNERS` and grant the
    `owners` team write access — documentation and reviewer routing now,
@@ -107,7 +107,7 @@ written for two moments: wiring a repository in, and a release going wrong.
 ### Continuous (no versions — the artifact's version is its pin set)
 
 Copy `ci.yml` and `continuous.yml` stubs plus the config files from
-scaffold; no cliff.toml, no release.yml, no publish.yml, no environment.
+scaffold; no release.yml, no publish.yml, no environment.
 That is the whole wiring.
 
 ### Registries, first time only

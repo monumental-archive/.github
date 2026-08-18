@@ -211,11 +211,6 @@ ruff = "0.16.2"
 # by guard, skip-clean everywhere else. Best Practices Silver requires
 # >=80% statement coverage; the floor only ratchets up.
 "aqua:taiki-e/cargo-llvm-cov" = "0.8.7"
-# The release phase-1 version decision and changelog (docs/release.md).
-# In the belt rather than a per-repo install: the shared release workflow
-# runs it in every versioned repo, and `release:preview` should answer
-# locally with the same pinned binary CI uses.
-"aqua:orhun/git-cliff" = "2.13.1"
 # The dependency track (docs/dependency-track.md). cargo-deny is the gate
 # half (bans+licenses+sources, deterministic over the lock) and the
 # advisories half (audit:deny, network). cargo-audit is skipped-subsumed:
@@ -266,7 +261,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.8.0"
+"github:monumental-archive/stele" = "0.9.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
@@ -2585,12 +2580,13 @@ env = { SHELLCHECK_OPTS = "--enable=all" }
 run = 'if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color -ignore "specifying action \"\\$/" ; else echo "lint:actions: no workflows, skipped"; fi'
 
 [tasks."release:preview"]
-description = "What the next release would be (git-cliff — read-only, not in ci)"
+description = "What the next release would be (stele derive — read-only, not in ci)"
 dir = "{{cwd}}"
 # The same pinned binary the shared release workflow runs, answering
-# locally: next version and unreleased changelog. Guarded: repos without a
-# cliff.toml (the continuous archetype, this repo) skip clean.
-run = 'if [[ -f cliff.toml ]]; then echo "next: $(git cliff --bumped-version)"; git cliff --bump --unreleased --strip all; else echo "release:preview: no cliff.toml, skipped"; fi'
+# locally: the version decision with its reasoning lines. Guarded: repos
+# without a release stub (the continuous archetype, this repo) skip
+# clean.
+run = 'if [[ -f .github/workflows/release.yml ]]; then stele derive version --git-dir .; else echo "release:preview: no release.yml, skipped"; fi'
 
 [tasks."lint:gate-stub"]
 description = "A gate stub's trigger set must be closed over the gate's inputs (#427)"
@@ -4280,15 +4276,17 @@ echo "lint:badges: badge block agrees with the derivation"
 '''
 
 [tasks."lint:release-stub"]
-description = "A versioned repo carries the canonical release stubs (cliff.toml implies publish.yml + release.yml)"
+description = "A versioned repo carries the canonical release stubs (release.yml implies publish.yml)"
 dir = "{{cwd}}"
-# The versioned archetype is three files: cliff.toml, release.yml,
-# publish.yml — and the registries pin the publish.yml FILENAME, so a
-# missing or renamed stub breaks trusted publishing with nothing local
-# going red. cliff.toml is the archetype marker: continuous repositories
-# do not have one and skip clean.
+# The versioned archetype is two files: release.yml, publish.yml — and
+# the registries pin the publish.yml FILENAME, so a missing or renamed
+# stub breaks trusted publishing with nothing local going red.
+# release.yml is the archetype marker: continuous repositories do not
+# have one and skip clean. (cliff.toml was the old marker; it retired
+# with git-cliff — stele derive carries the conventions in the shared
+# scripts, .github#505.)
 run = '''
-[[ -f cliff.toml ]] || { echo "lint:release-stub: no cliff.toml, not a versioned repo, skipped"; exit 0; }
+[[ -f .github/workflows/release.yml ]] || { echo "lint:release-stub: no release.yml, not a versioned repo, skipped"; exit 0; }
 bad=""
 for f in .github/workflows/release.yml .github/workflows/publish.yml; do
   if [[ ! -f "${f}" ]]; then
