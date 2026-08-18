@@ -68,7 +68,7 @@ jobs:
           # v0.18.2 darwin leg pulled same-day mise 2026.8.4 while every
           # pinned site ran 2026.8.3 (#117: nothing unpinned on an attested
           # path, the installer included).
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       - name: Resolve the exclusion flags

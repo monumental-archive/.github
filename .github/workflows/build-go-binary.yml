@@ -186,7 +186,7 @@ jobs:
           # mise itself is a build input and floats without this pin
           # (#117: nothing unpinned on an attested path, the installer
           # included).
-          version: 2026.8.3
+          version: 2026.8.4
           # No tool cache anywhere downstream of a signature.
           cache: false
 

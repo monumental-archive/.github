@@ -59,7 +59,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       # PRs squash-merge, and the PERMANENT commit subject is the PR
@@ -123,7 +123,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       - name: Generate the report

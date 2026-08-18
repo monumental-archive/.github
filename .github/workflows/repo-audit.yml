@@ -41,7 +41,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       - name: Check the advisory feed against the lock
@@ -66,7 +66,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       - name: Check the public API against the latest published release
@@ -91,7 +91,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       # Bounded libFuzzer runs under AddressSanitizer — cargo-fuzz's own
@@ -162,7 +162,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
-          version: 2026.8.3
+          version: 2026.8.4
           cache: false
 
       # Call-graph-aware advisory scan against https://vuln.go.dev —
