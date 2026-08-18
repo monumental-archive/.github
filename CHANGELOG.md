@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.36.0](https://github.com/monumental-archive/.github/compare/v1.35.1...v1.36.0) - 2026-08-18
+
+### Added
+
+- cut the evidence audits over to stele assert ([#495](https://github.com/monumental-archive/.github/pull/495))
+- retire preflight.sh and the yaml identity guard ([#499](https://github.com/monumental-archive/.github/pull/499))
+
+### Dependencies
+
+- update dependency jdx/mise to v2026.8.4 ([#497](https://github.com/monumental-archive/.github/pull/497))
+
+### Fixed
+
+- converge on the published record, never on curl's exit code ([#501](https://github.com/monumental-archive/.github/pull/501))
+
 ## [1.35.1](https://github.com/monumental-archive/.github/compare/v1.35.0...v1.35.1) - 2026-08-17
 
 ### Fixed
