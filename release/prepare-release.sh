@@ -22,23 +22,15 @@
 # nothing (its docs and tests are the spec; stele#31).
 set -euo pipefail
 
-# The version source is detected, never configured — the phase-1 contract
-# in docs/release.md. A Cargo workspace mirrors its version into manifests
-# that must be bumped in the release commit; a repository with no manifest
-# (the canon itself, and any docs/config/image-only repository) has no
-# mirror: its tags are the source of truth and the release commit carries
-# only the changelog (plus citation, where present). Further manifest
-# kinds (package.json, single-crate Cargo) are added here, at the read,
-# the write and the file list, when a real repository needs them — never
-# speculatively.
-if [[ -f Cargo.toml ]]; then
-  source="cargo-workspace"
-  current=$(taplo get -f Cargo.toml 'workspace.package.version')
-else
-  source="tags"
-  current=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2> /dev/null || true)
-  current=${current#v}
-fi
+# The mirror kind is detected by derive bump itself, never here — the
+# phase-1 contract in docs/release.md now lives behind that one call
+# (stele#102: cargo-workspace, single-crate, none; CITATION.cff where
+# present). The pre-bump version is the tag base, one read: the old
+# per-kind manifest read was a second detection of a fact the tool
+# owns, and derive bump refuses a drifted mirror rather than repairing
+# it, so the two can never silently disagree.
+current=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2> /dev/null || true)
+current=${current#v}
 # The notes conventions, previously cliff.toml: groups and URLs are the
 # org convention stated once here; the bump rules (0.x breaking bumps
 # minor, chore/ci/docs/style/test release nothing) are stele derive's
@@ -63,17 +55,25 @@ notes_flags=(
   --pull-url "${repo_url}/pull/"
 )
 
-derived=$(stele derive version --git-dir .)
-echo "${derived}"
-version=$(awk -F= '/^version=/{print $2}' <<< "${derived}")
-if [[ -z ${version} ]]; then
-  echo "nothing to release: no version-bumping commits since the last tag"
+# One tool call derives the version AND writes every mirror it owns
+# (workspace/single-crate version, internal path-dependency
+# constraints, CITATION.cff version + date-released): parsed for
+# location, byte-spliced, re-read through the same reader before disk
+# — never pattern-matched. Drift refuses by name (stele#102, #514).
+# date-released defaults to the committer date of HEAD, the same
+# no-wall-clock rule the old sed applied.
+bumped=$(stele derive bump --git-dir .)
+echo "${bumped}"
+release=$(awk -F= '/^release=/{print $2}' <<< "${bumped}")
+version=$(awk -F= '/^version=/{print $2}' <<< "${bumped}")
+kind=$(awk -F= '/^kind=/{print $2}' <<< "${bumped}")
+bump_files=$(awk -F= '/^files=/{print $2}' <<< "${bumped}")
+if [[ ${release} != true ]]; then
   emit_pending=true
 fi
 
-echo "source:  ${source}"
 echo "current: ${current:-<no tag yet>}"
-echo "next:    ${version}"
+echo "next:    ${version:-<none>}"
 
 emit() {
   if [[ -n ${GITHUB_OUTPUT:-} ]]; then
@@ -86,39 +86,13 @@ if [[ ${emit_pending:-false} == true ]]; then
   exit 0
 fi
 
-if [[ ${version} == "${current}" ]]; then
-  echo "nothing to release: no version-bumping commits since the last tag"
-  emit "release=false"
-  exit 0
-fi
+files="${bump_files:+${bump_files} }CHANGELOG.md"
 
-files="CHANGELOG.md"
-
-if [[ ${source} == "cargo-workspace" ]]; then
-  # Bump every place the version lives, and nowhere else. The two sed
-  # expressions are deliberately narrow: the workspace package version is the
-  # line `version = "current"` at column zero, and internal dependency
-  # constraints are the only lines that pair `path = ` with a version. An
-  # unrestricted substitution would also rewrite an external dependency that
-  # happens to share the version string.
-  sed -i.bak "s|^version = \"${current}\"\$|version = \"${version}\"|" Cargo.toml
-  sed -i.bak "/path = /s|version = \"${current}\"|version = \"${version}\"|g" Cargo.toml
-  rm -f Cargo.toml.bak
-
-  # Fail loudly rather than open a PR that does not build: a survivor on
-  # either line family means a substitution missed, which is how a workspace
-  # ends up with an internal constraint pointing at a crate version that no
-  # longer exists.
-  if grep -n "path = .*version = \"${current}\"" Cargo.toml \
-    || grep -qn "^version = \"${current}\"\$" Cargo.toml; then
-    echo "FAIL: Cargo.toml still mentions ${current} after the bump" >&2
-    exit 1
-  fi
-
-  files="Cargo.toml ${files}"
-
-  # Refresh the lockfile's copy of the workspace member versions, then prove
-  # the tree still resolves before anyone is asked to review it.
+# The mirrors are already rewritten by derive bump above; what stays
+# here is cargo's own derivation, never ours: refresh the lockfile's
+# copy of the member versions and prove the tree still resolves
+# before anyone is asked to review it.
+if [[ ${kind} == cargo-* ]]; then
   if [[ -f Cargo.lock ]]; then
     cargo update --workspace --offline 2> /dev/null || cargo update --workspace
     files="${files} Cargo.lock"
@@ -136,17 +110,6 @@ if [[ ${source} == "cargo-workspace" ]]; then
     files="${files} fuzz/Cargo.lock"
   fi
   cargo metadata --format-version 1 --no-deps > /dev/null
-fi
-
-# The citation is release metadata like any other: a stale version there is
-# the drift the Release PR exists to prevent. date-released is the commit
-# date of the release candidate, not wall-clock time.
-if [[ -f CITATION.cff ]]; then
-  sed -i.bak "s|^version: .*\$|version: ${version}|" CITATION.cff
-  released=$(git log -1 --format=%cs)
-  sed -i.bak "s|^date-released: .*\$|date-released: ${released}|" CITATION.cff
-  rm -f CITATION.cff.bak
-  files="${files} CITATION.cff"
 fi
 
 # pgrx upgrade scripts are DERIVED, never authored: the release workflow
