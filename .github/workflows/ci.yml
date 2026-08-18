@@ -62,6 +62,38 @@ jobs:
           version: 2026.8.4
           cache: false
 
+      # unattested-path: this gate signs and publishes nothing, so the
+      # cold-build rule (#117, docs/release.md) permits caches exactly
+      # here — a human is waiting on a pull request. Every signing and
+      # publishing workflow builds cold and carries no cache; this
+      # marker is reviewed by lint:cold-attested, which fails any
+      # workflow that caches without one. Integrity does not ride the
+      # cache: Go re-verifies every module read against go.sum and
+      # cargo checks registry sources against Cargo.lock, so a
+      # poisoned entry cannot change what compiles — and GitHub scopes
+      # cache writes per branch, so a pull request cannot write the
+      # default branch's entries. Restore-keys make a stale cache a
+      # slower run, never a wrong one.
+      - name: Restore the Go caches (unsigned gate only)
+        if: ${{ hashFiles('go.sum') != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gate-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: gate-go-${{ runner.os }}-
+
+      - name: Restore the cargo caches (unsigned gate only)
+        if: ${{ hashFiles('Cargo.lock') != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: gate-cargo-${{ runner.os }}-
+
       # PRs squash-merge, and the PERMANENT commit subject is the PR
       # title with GitHub's " (#N)" appended — a subject lint:commits
       # structurally cannot see, because it walks the branch's commits
@@ -125,6 +157,38 @@ jobs:
         with:
           version: 2026.8.4
           cache: false
+
+      # unattested-path: this gate signs and publishes nothing, so the
+      # cold-build rule (#117, docs/release.md) permits caches exactly
+      # here — a human is waiting on a pull request. Every signing and
+      # publishing workflow builds cold and carries no cache; this
+      # marker is reviewed by lint:cold-attested, which fails any
+      # workflow that caches without one. Integrity does not ride the
+      # cache: Go re-verifies every module read against go.sum and
+      # cargo checks registry sources against Cargo.lock, so a
+      # poisoned entry cannot change what compiles — and GitHub scopes
+      # cache writes per branch, so a pull request cannot write the
+      # default branch's entries. Restore-keys make a stale cache a
+      # slower run, never a wrong one.
+      - name: Restore the Go caches (unsigned gate only)
+        if: ${{ hashFiles('go.sum') != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gate-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: gate-go-${{ runner.os }}-
+
+      - name: Restore the cargo caches (unsigned gate only)
+        if: ${{ hashFiles('Cargo.lock') != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: gate-cargo-${{ runner.os }}-
 
       - name: Generate the report
         id: gen
