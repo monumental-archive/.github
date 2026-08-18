@@ -266,7 +266,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.3.0"
+"github:monumental-archive/stele" = "0.5.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
@@ -1706,446 +1706,61 @@ echo "audit:go-vulns: no reachable vulnerabilities"
 '''
 
 [tasks."audit:blast-radius"]
-description = "Advisory blast radius over every published SBOM (osv-scanner — network, canon only)"
+description = "Advisory blast radius over every published SBOM (stele assert — network, canon only)"
 dir = "{{cwd}}"
-# The L2 triage mechanism at scale and the honesty input VEX statements
-# wait on: which published releases ship an affected package? Walks every
-# non-draft release of every org repo, verifies each SBOM asset against
-# GitHub's release attestation before trusting it, scans with
-# osv-scanner, and aggregates one report. Red means NEW AND UNDECIDED:
-# a finding is decided iff a statement in security/vex/ exists for its
-# exact (advisory, package@version) — decisions are keyed by the
-# dependency, never by release tag, so coverage is derived here rather
-# than stored there. The per-version join is also the drift guard, by
-# construction: a release that bumps a decided package's version matches
-# no decision and goes red for a fresh judgment; an ID-only filter would
-# silently extend the old judgment to a version nobody looked at.
-# Loud failure modes, constructed:
-#   - an SBOM that verifies but parses to zero packages (osv exit 128)
-#   - the canary: the pinned lab release must yield its known advisory,
-#     or this job cannot see and says so
-#   - a release with no SBOM asset at all (pre-standup releases are
-#     recorded, not failed — they predate the obligation)
-# Guarded on security/vex/ so it runs only in the canon checkout.
+# The L2 triage mechanism at scale: which published releases ship an
+# affected package? The walk, the verify-before-trust of every SBOM
+# asset, the osv scan, the exact (advisory, package, version) VEX join,
+# the canary that proves the scanner can see, and the loud zero-package
+# failure mode all live in stele (docs/assert-policy-schema.md there);
+# the org's conventions — ecosystem classes, the canary pin, where
+# decisions live — are data in slsa/assert-policy.json. Red means NEW
+# AND UNDECIDED; a decision matching no finding surfaces as stale, a
+# retirement candidate. Guarded on security/vex/ so it runs only in
+# the canon checkout.
 run = '''
 [[ -d security/vex ]] || { echo "audit:blast-radius: no security/vex/, not the canon, skipped"; exit 0; }
 command -v osv-scanner > /dev/null || { echo "audit:blast-radius: osv-scanner missing from the belt" >&2; exit 1; }
-command -v gh > /dev/null || { echo "audit:blast-radius: gh missing" >&2; exit 1; }
-org="${BLAST_RADIUS_ORG:-monumental-archive}"
-canary_repo="release-lab"; canary_tag="v0.17.0"; canary_id="RUSTSEC-2021-0127"
-work=$(mktemp -d)
-findings="${work}/findings.tsv"; : > "${findings}"
-missing="${work}/missing.txt"; : > "${missing}"
-decided_f="${work}/decided.tsv"
-# Decided rows are (advisory, name, version) triples parsed from each
-# statement's product purls (pkg:<type>/…/<name>@<version>, version in
-# the dialect osv-scanner reports — no epoch, no encoding). An empty
-# pattern file matches EVERYTHING under grep -f — an empty VEX directory
-# must mean "nothing decided", never "everything decided".
-cat security/vex/*.openvex.json 2> /dev/null \
-  | jq -r '.statements[]? as $s | $s.products[]?["@id"] // empty
-      | capture("^pkg:.*/(?<name>[^/@]+)@(?<version>.+)$")
-      | [$s.vulnerability.name, .name, .version] | @tsv' \
-  | sort -u | grep -v "^$" > "${decided_f}" || true
-failed=0; canary_hit=0; scanned=0
-while read -r repo; do
-  [[ -n "${repo}" ]] || continue
-  while read -r tag; do
-    [[ -n "${tag}" ]] || continue
-    dir="${work}/${repo}-${tag}"
-    mkdir -p "${dir}"
-    if ! gh release download "${tag}" --repo "${org}/${repo}" \
-      --pattern "*.spdx.json" --dir "${dir}" 2> /dev/null \
-      || ! compgen -G "${dir}/*.spdx.json" > /dev/null; then
-      echo "${repo}@${tag}" >> "${missing}"
-      continue
-    fi
-    for sbom in "${dir}"/*.spdx.json; do
-      # Trust nothing downloaded: the asset must be the one GitHub's
-      # release attestation bound at publish.
-      if ! gh release verify-asset "${tag}" "${sbom}" \
-        --repo "${org}/${repo}" > /dev/null 2>&1; then
-        echo "audit:blast-radius: ${repo}@${tag} SBOM failed asset verification" >&2
-        failed=1
-        continue
-      fi
-      out="${dir}/osv.json"
-      set +e
-      osv-scanner scan source -L "${sbom}" --format json > "${out}" 2> /dev/null
-      ec=$?
-      set -e
-      if [[ ${ec} -eq 128 ]]; then
-        echo "audit:blast-radius: ${repo}@${tag} SBOM parsed to zero packages — a scan that reads nothing must not report clean" >&2
-        failed=1
-        continue
-      fi
-      if [[ ${ec} -ne 0 && ${ec} -ne 1 ]]; then
-        echo "audit:blast-radius: osv-scanner errored (${ec}) on ${repo}@${tag}" >&2
-        failed=1
-        continue
-      fi
-      scanned=$((scanned + 1))
-      # The fifth column is the triage class. OS packages (deb/rpm/apk)
-      # with no shipped fix anywhere are the perpetual base-layer
-      # background of every stable distro — their remediation path is
-      # the rebuild cadence (docs/release.md), and a per-CVE decision
-      # would decide nothing; they are REPORTED, never red. An OS
-      # finding WITH a shipped fix means our image lags a fix — that is
-      # actionable and gates like everything else. Ecosystem packages
-      # (the org's own code surface) always gate. The sixth column keeps
-      # the os/eco split for the report: os findings' remediation is the
-      # base digest bump, so the report points at the pending Renovate
-      # PR when one exists (#187's sibling improvement).
-      jq -r --arg where "${repo}@${tag}" '
-        .results[]?.packages[]? | select(.vulnerabilities != null) as $p
-        | ($p.package.ecosystem // "" | ascii_downcase) as $eco
-        | (if ($eco | test("debian|alpine|ubuntu|rocky|redhat|rpm")) then "os" else "eco" end) as $kind
-        | $p.vulnerabilities[]
-        | ([.affected[]?.ranges[]?.events[]? | select(.fixed)] | length > 0) as $fixable
-        | (if $kind == "eco" then "gate"
-           elif $fixable then "gate"
-           else "base-unfixed" end) as $class
-        | [.id, $p.package.name, $p.package.version, $where, $class, $kind] | @tsv
-      ' "${out}" >> "${findings}"
-      if [[ "${repo}" == "${canary_repo}" && "${tag}" == "${canary_tag}" ]] \
-        && grep -q "^${canary_id}$(printf "\t")" "${findings}"; then
-        canary_hit=1
-      fi
-    done
-  done < <(gh api "repos/${org}/${repo}/releases" --paginate \
-    --jq '.[] | select(.draft | not) | .tag_name')
-done < <(gh api "orgs/${org}/repos" --paginate --jq '.[].name')
-[[ ${scanned} -gt 0 ]] || { echo "audit:blast-radius: zero SBOMs scanned — the walk found nothing to check" >&2; exit 1; }
-if [[ ${canary_hit} -eq 0 ]]; then
-  echo "audit:blast-radius: CANARY MISSED — ${canary_id} not found in ${canary_repo}@${canary_tag}; the scanner cannot see" >&2
-  failed=1
-fi
-report() {
-  echo "## Blast radius — advisory → affected releases"
-  echo
-  if [[ -s "${findings}" ]]; then
-    echo "| advisory | package | version | release | decided |"
-    echo "| --- | --- | --- | --- | --- |"
-    sort -u "${findings}" | while IFS=$(printf "\t") read -r id name ver where class kind; do
-      d="NEW"
-      if grep -qxF "$(printf "%s\t%s\t%s" "${id}" "${name}" "${ver}")" "${decided_f}"; then
-        d="VEX"
-      elif [[ "${class}" == "base-unfixed" ]]; then
-        d="base (rebuild cadence)"
-      fi
-      echo "| ${id} | ${name} | ${ver} | ${where} | ${d} |"
-    done
-  else
-    echo "No findings across ${scanned} SBOM(s)."
-  fi
-  if [[ -s "${missing}" ]]; then
-    echo
-    echo "Releases with no SBOM asset (predate the obligation):"
-    sed "s/^/- /" "${missing}"
-  fi
-  # The base-image treadmill pointer (#187): os findings' remediation is
-  # never per-CVE, it is the next release on a refreshed base digest —
-  # so when a repo has os-package findings, name the pending Renovate
-  # digest PR a human would otherwise go hunting for. Report-only.
-  os_repos=$(awk -F "\t" '$6 == "os" { split($4, a, "@"); print a[1] }' "${findings}" | sort -u)
-  if [[ -n "${os_repos}" ]]; then
-    echo
-    echo "Base-image findings above remediate via the next release on a refreshed digest:"
-    while IFS= read -r r; do
-      [[ -n "${r}" ]] || continue
-      prs=$(gh pr list --repo "${org}/${r}" --author "app/renovate" --state open \
-        --json title,url --jq '.[] | select(.title | test("digest"; "i")) | "  - \(.title) (\(.url))"' 2> /dev/null || true)
-      if [[ -n "${prs}" ]]; then
-        echo "- ${r}: pending Renovate digest bump —"
-        echo "${prs}"
-      else
-        echo "- ${r}: no pending Renovate digest PR (base current, or the next bump has not landed yet)"
-      fi
-    done <<< "${os_repos}"
-  fi
-  # Decisions that matched no current finding. Coverage is derived, so a
-  # withdrawn advisory or a dropped/bumped dependency needs no doc edit —
-  # the decision simply stops matching everywhere. This names those inert
-  # decisions so retiring them is a choice, never an archaeology project.
-  # Report-only: an inert decision suppresses nothing and gates nothing.
-  if [[ -s "${decided_f}" ]]; then
-    live="${work}/live.tsv"
-    awk -F "\t" '{ print $1 "\t" $2 "\t" $3 }' "${findings}" | sort -u > "${live}"
-    # An empty live file under grep -v -f would suppress every decided
-    # line and hide a fully-stale record — zero findings means every
-    # decision is inert, not none.
-    if [[ -s "${live}" ]]; then
-      stale=$(grep -vxF -f "${live}" "${decided_f}" || true)
-    else
-      stale=$(cat "${decided_f}")
-    fi
-    if [[ -n "${stale}" ]]; then
-      echo
-      echo "Decisions matching no current finding (candidates for retirement, not errors):"
-      awk -F "\t" '{ print "- " $1 " (" $2 "@" $3 ")" }' <<< "${stale}"
-    fi
-  fi
-}
-report
-[[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && report >> "${GITHUB_STEP_SUMMARY}"
-# Only gate-class findings demand a decision: unfixed base-layer OS
-# findings are the rebuild cadence's input, reported above. The join is
-# the exact (advisory, name, version) triple — never the advisory alone.
-undecided=$(awk -F "\t" '$5 == "gate" { print $1 "\t" $2 "\t" $3 }' "${findings}" | sort -u)
-if [[ -s "${decided_f}" ]]; then
-  undecided=$(grep -vxF -f "${decided_f}" <<< "${undecided}" || true)
-fi
-if [[ -n "${undecided}" ]]; then
-  echo "audit:blast-radius: undecided advisories (no VEX decision for that package@version):" >&2
-  sed "s/^/  /" <<< "${undecided}" >&2
-  echo "  triage each and record the decision in security/vex/, keyed by package@version (docs/dependency-track.md)" >&2
-  exit 1
-fi
-[[ ${failed} -eq 0 ]] || exit 1
-echo "audit:blast-radius: ${scanned} SBOM(s) scanned, every finding decided, canary seen"
+command -v stele > /dev/null || { echo "audit:blast-radius: stele missing from the belt" >&2; exit 1; }
+stele assert blast-radius \
+  --org "${BLAST_RADIUS_ORG:-monumental-archive}" \
+  --policy slsa/assert-policy.json \
+  --vex security/vex
 '''
 
 [tasks."audit:attestations"]
 description = "Nothing ships unattested: every published artifact carries its full evidence set (network, canon only)"
 dir = "{{cwd}}"
 # The difference between "we attest" and "nothing ships unattested"
-# (#117). Walks every non-draft release of every org repo, reads the
-# classes the caller requested FROM ITS publish.yml AT THE TAG (the only
-# honest source — classes change over time), and fails if any requested
-# class is missing its bundle, any release its SBOM asset or checksums,
-# or — from canon 1.13.0 (#209) — any provenance-covered subject its
-# store-resident VSA: verdicts live in the attestation store alone,
-# because the release seals at publish, before any verdict exists — the canon's own releases shipped without their SBOM from
-# v1.0.0 to v1.4.1 with every board green, which is exactly the silent
-# gap this audit exists to catch. Continuous digests are the other
-# straggler class: their bundle artifact expires with the run, so the
-# durable record is the attestation store, and that is what is checked.
-# VEX documents are deliberately not asserted: statements exist only
-# when decisions do. Releases predating the canon machinery (no
-# publish.yml at the tag) are reported, never failed — the obligation
-# starts when the machinery does. Three report-not-fail categories exist
-# and they are not interchangeable: `legacy` (no machinery at the tag),
-# written-down `debt` (immutable releases that shipped before an
-# obligation existed, asserted by hand in security/attestation-debt.txt),
-# and `burned` (#378 — a verdict absent from a release whose publish run
-# failed, DERIVED from run history and never assertable by hand).
+# (#117). The walk — release evidence contracts (manifest-first, the
+# publish.yml-at-the-tag adapter for history), store-resident VSAs
+# (#209), the continuous-digest and base-approval halves, the
+# legacy/debt/burned taxonomy — is stele's evidence walk, specified in
+# its docs/assert-policy-schema.md; the org's conventions are data in
+# slsa/assert-policy.json and security/attestation-debt.txt. A zero
+# population or a missed canary is CANNOT_JUDGE, never PASS: the
+# 200-with-empty-body degraded read the 2026-08-17 outage served is
+# answered by refusing to judge (stele#69). The store halves verify
+# cryptographically, so the trusted root is fetched here — the trust
+# boundary is the caller\'s to state (stele#19 tracks in-tool fetch).
 run = '''
-set -euo pipefail
-org="monumental-archive"
-missing=""
-legacy=""
-checked=0
-while IFS= read -r repo; do
-  while IFS= read -r tag; do
-    wf=$(gh api "repos/${org}/${repo}/contents/.github/workflows/publish.yml?ref=${tag}" \
-      --jq ".content" 2> /dev/null | base64 -d 2> /dev/null) || true
-    [[ -n "${wf}" ]] || { legacy="${legacy} ${repo}@${tag}"; continue; }
-    # The canon's own publish.yml IS the orchestrator; its caller stub is
-    # self-publish.yml — read the classes from there.
-    if grep -qE "^[[:space:]]*workflow_call:" <<< "${wf}"; then
-      wf=$(gh api "repos/${org}/${repo}/contents/.github/workflows/self-publish.yml?ref=${tag}" \
-        --jq ".content" 2> /dev/null | base64 -d 2> /dev/null) || true
-      [[ -n "${wf}" ]] || { legacy="${legacy} ${repo}@${tag}"; continue; }
-    fi
-    classes=$(grep -E "^[^#]*classes:" <<< "${wf}" | head -1 | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")
-    [[ -n "${classes}" ]] || { legacy="${legacy} ${repo}@${tag}(no-classes)"; continue; }
-    assets=$(gh api "repos/${org}/${repo}/releases/tags/${tag}" --jq ".assets[].name")
-    checked=$((checked + 1))
-    # The canon version pinned at the tag decides the verdict
-    # obligation's SHAPE (#209): from 1.13.0 every class's VSA is
-    # store-resident (the release seals at publish, before any verdict
-    # exists), and before it the two registry classes carried VSA
-    # bundles as release assets. The pin comment in the caller's stub
-    # is the honest source; the canon's own stub uses a local
-    # reference, so its version is the tag itself.
-    canon_ver=$(grep -E "uses:.*(publish|release)\.yml@" <<< "${wf}" | grep -oE "# v[0-9]+\.[0-9]+\.[0-9]+" | head -1 | tr -dc "0-9.") || true
-    [[ -n "${canon_ver}" ]] || canon_ver="${tag#v}"
-    store_vsa=""
-    [[ "$(printf "%s\n%s" "1.13.0" "${canon_ver}" | sort -V | head -1)" == "1.13.0" ]] && store_vsa=1
-    need="checksums.txt"
-    grep -q "\.spdx\.json$" <<< "${assets}" || missing="${missing} ${repo}@${tag}(sbom)"
-    case ",${classes// /}," in *",rust-crate,"*)
-      need="${need} attestations-crates.intoto.jsonl"
-      [[ -n "${store_vsa}" ]] || need="${need} attestations-vsa-crates.intoto.jsonl"
-      ;;
-    esac
-    case ",${classes// /}," in *",oci-image,"*) need="${need} attestations-image.intoto.jsonl" ;; esac
-    case ",${classes// /}," in *",rust-binary,"*) need="${need} attestations-binaries.intoto.jsonl" ;; esac
-    case ",${classes// /}," in *",go-binary,"*) need="${need} attestations-go-binaries.intoto.jsonl" ;; esac
-    case ",${classes// /}," in *",source-archive,"*) need="${need} attestations-source.intoto.jsonl" ;; esac
-    case ",${classes// /}," in *",wasm-npm,"*)
-      need="${need} attestations-npm.intoto.jsonl"
-      [[ -n "${store_vsa}" ]] || need="${need} attestations-vsa-npm.intoto.jsonl"
-      ;;
-    esac
-    case ",${classes// /}," in *",pgrx-extension,"*)
-      need="${need} attestations-extensions.intoto.jsonl"
-      grep -q "^attestations-extimg-pg" <<< "${assets}" || missing="${missing} ${repo}@${tag}(extimg)"
-      ;;
-    esac
-    # One bundle covering the whole release truthfully takes the
-    # umbrella name (attach-release.yml, the single-bundle case).
-    bundles=$(tr " " "\n" <<< "${need}" | grep -c "intoto") || true
-    for asset in ${need}; do
-      if [[ "${asset}" == attestations-* && "${bundles}" == "1" ]] \
-        && grep -qxF "attestations.intoto.jsonl" <<< "${assets}"; then
-        continue
-      fi
-      grep -qxF "${asset}" <<< "${assets}" || missing="${missing} ${repo}@${tag}(${asset})"
-    done
-    # The verdict half, store shape (#209): every subject the release's
-    # own provenance bundles cover must carry a VSA in the attestation
-    # store. Subject digests are read out of the attached bundles — the
-    # audit asserts a verdict over exactly what the evidence covers,
-    # with no second derivation of the subject set, and that includes
-    # the image indexes (their bundles are release assets too). The
-    # store is queried per digest and filtered client-side: the API
-    # rejects the VSA predicate type as a query filter (HTTP 422,
-    # measured on v0.16.3).
-    if [[ -n "${store_vsa}" ]]; then
-      checked_digests=""
-      while IFS= read -r asset; do
-        [[ -n "${asset}" ]] || continue
-        payloads=$(curl -sSfL --retry 5 \
-          "https://github.com/${org}/${repo}/releases/download/${tag}/${asset}" \
-          | jq -r ".dsseEnvelope.payload") \
-          || { missing="${missing} ${repo}@${tag}(${asset}:unreadable)"; continue; }
-        while IFS= read -r sdigest; do
-          [[ "${sdigest}" =~ ^[0-9a-f]{64}$ ]] || continue
-          grep -qx "${sdigest}" <<< "${checked_digests}" && continue
-          checked_digests=$(printf "%s\n%s" "${checked_digests}" "${sdigest}")
-          have=""
-          while IFS= read -r p; do
-            [[ -n "${p}" ]] || continue
-            t=$(printf "%s" "${p}" | base64 -d 2> /dev/null | jq -r ".predicateType" 2> /dev/null) || t=""
-            [[ "${t}" == "https://slsa.dev/verification_summary/v1" ]] && have=1
-          done < <(gh api "repos/${org}/${repo}/attestations/sha256:${sdigest}" \
-            --jq ".attestations[].bundle.dsseEnvelope.payload" 2> /dev/null || true)
-          [[ -n "${have}" ]] || missing="${missing} ${repo}@${tag}(vsa:${sdigest:0:12})"
-        done < <(while IFS= read -r p; do
-          printf "%s" "${p}" | base64 -d 2> /dev/null | jq -r ".subject[].digest.sha256"
-        done <<< "${payloads}")
-      done < <(grep -E "^attestations.*\.intoto\.jsonl$" <<< "${assets}" | grep -v "^attestations-vsa-" || true)
-    fi
-  done < <(gh api "repos/${org}/${repo}/releases" --paginate \
-    --jq '.[] | select(.draft | not) | .tag_name')
-  # The continuous half: a repo with the archetype STUB (a caller of the
-  # canon's continuous.yml — the canon itself only defines it) publishes
-  # digests, and the digest's evidence lives only in the attestation
-  # store. The certificate names the signer's reusable workflow, so the
-  # verify pins that identity, same as rekor-monitor watches for.
-  stub=$(gh api "repos/${org}/${repo}/contents/.github/workflows/continuous.yml" \
-    --jq ".content" 2> /dev/null | base64 -d 2> /dev/null) || true
-  if grep -qE "uses:[[:space:]]*${org}/\.github/" <<< "${stub:-}"; then
-    digest=$(gh api "orgs/${org}/packages/container/${repo}/versions" --paginate \
-      --jq '.[] | select(.metadata.container.tags | index("latest")) | .name' 2> /dev/null \
-      | grep -E "^sha256:[a-f0-9]{64}$" | head -1) || true
-    if [[ -n "${digest:-}" ]]; then
-      checked=$((checked + 1))
-      # Full identity pin (#316 finding 9): the expected signer digest is
-      # derived from the producing repo's own sign.yml uses: pins at its
-      # default branch — the verify-signed derivation, never a literal.
-      # Mid-bump a repo can carry one candidate per branch state; the
-      # artifact must verify under one of them. No pins found fails
-      # closed: an org image the org signer cannot vouch for is the
-      # finding, not a skip.
-      pins=$(gh api "repos/${org}/${repo}/contents/.github/workflows" \
-        --jq ".[].name" 2> /dev/null | while IFS= read -r f; do
-          gh api "repos/${org}/${repo}/contents/.github/workflows/${f}" \
-            --jq ".content" 2> /dev/null | base64 -d 2> /dev/null || true
-        done | grep -oE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" \
-        | cut -d@ -f2 | sort -u) || true
-      ok=""
-      while IFS= read -r pin; do
-        [[ -n "${pin}" ]] || continue
-        if gh attestation verify "oci://ghcr.io/${org}/${repo}@${digest}" \
-          --repo "${org}/${repo}" \
-          --signer-workflow "${org}/signer/.github/workflows/sign.yml" \
-          --signer-digest "${pin}" \
-          --deny-self-hosted-runners > /dev/null 2>&1; then ok=1; break; fi
-      done <<< "${pins}"
-      [[ -n "${ok}" ]] || missing="${missing} ${repo}@latest(${digest:7:12}:store)"
-    fi
-  fi
-done < <(gh api "orgs/${org}/repos" --paginate --jq '.[].name')
-# The base-approval half, canon only: every pinned base digest carries
-# its approval attestation (base-attest.yml) — a Renovate roll that
-# outran the approval run must surface here, not at the next release.
-if [[ -f docker/pgrx-base-images.toml ]]; then
-  while IFS= read -r ref; do
-    repo_part="${ref%%@*}"; repo_part="${repo_part%%:*}"; digest="${ref##*@}"
-    [[ "${repo_part}" == */* ]] || repo_part="docker.io/library/${repo_part}"
-    checked=$((checked + 1))
-    gh attestation verify "oci://${repo_part}@${digest}" \
-      --repo "${org}/.github" \
-      --predicate-type https://monumental-archive.github.io/attestations/base-image-approval/v1 \
-      --signer-workflow "${org}/.github/.github/workflows/base-attest.yml" \
-      --deny-self-hosted-runners \
-      > /dev/null 2>&1 \
-      || missing="${missing} base(${ref})"
-  done < <(grep -oE "\"[a-z0-9./:-]+@sha256:[a-f0-9]{64}\"" docker/pgrx-base-images.toml | tr -d "\"")
-fi
-[[ ${checked} -gt 0 ]] || { echo "audit:attestations: zero subjects checked — the walk found nothing" >&2; exit 1; }
-# Immutable history with a written-down reason is debt, not failure —
-# security/attestation-debt.txt is the VEX pattern for evidence gaps.
-if [[ -f security/attestation-debt.txt ]]; then
-  debt=""
-  kept=""
-  for m in ${missing}; do
-    if grep -v "^#" security/attestation-debt.txt | grep -qxF "${m}"; then
-      debt="${debt} ${m}"
-    else
-      kept="${kept} ${m}"
-    fi
-  done
-  missing="${kept}"
-  [[ -n "${debt}" ]] && echo "audit:attestations: written-down debt (security/attestation-debt.txt):${debt}"
-fi
-# The burned-release category (#378): a verdict absent from a release
-# whose publish run FAILED is the record of a run that died after
-# `attach` made the release public but before the verdict legs ran — not
-# an evidence gap. The VSA is not level-bearing on the Build track (its
-# requirements name provenance and never a VSA; contrast the Source
-# track, where the VSA is constitutive), the release is immutable, and
-# verify-release.yml is workflow_call-only, so there is nothing to
-# re-run. What keeps this from being a mute button is that it is NARROW
-# and DERIVED: it covers only `(vsa:` gaps — a missing SBOM, checksum or
-# class bundle on the same tag still reddens — and only where the tag's
-# own run history shows a failure, which a human cannot assert the way a
-# line can be added to attestation-debt.txt. A verdict missing from a
-# release that published CLEANLY is a real regression and stays red.
-vsa_tags=$(for m in ${missing}; do
-  [[ "${m}" == *"(vsa:"* ]] && printf "%s\n" "${m%%(*}"
-done | sort -u) || true
-burned_tags=""
-while IFS= read -r rt; do
-  [[ -n "${rt}" ]] || continue
-  n=$(gh api "repos/${org}/${rt%%@*}/actions/runs?branch=${rt#*@}&per_page=100" \
-    --jq '[.workflow_runs[] | select(.conclusion == "failure")] | length' 2> /dev/null) || n=0
-  [[ "${n:-0}" -gt 0 ]] && burned_tags="${burned_tags} ${rt}"
-done <<< "${vsa_tags}"
-burned=""
-kept=""
-for m in ${missing}; do
-  rt="${m%%(*}"
-  if [[ "${m}" == *"(vsa:"* && " ${burned_tags} " == *" ${rt} "* ]]; then
-    burned="${burned} ${m}"
-  else
-    kept="${kept} ${m}"
-  fi
-done
-missing="${kept}"
-[[ -n "${burned}" ]] && echo "audit:attestations: verdict absent, publish run failed — burned release, reported not failed (#378):${burned}"
-if [[ -n "${legacy}" ]]; then
-  echo "audit:attestations: predate the machinery (reported, not failed):${legacy}"
-fi
-if [[ -n "${missing}" ]]; then
-  echo "audit:attestations: shipped without full evidence:${missing}" >&2
-  echo "  every published artifact carries SBOM + checksums + its class bundles;" >&2
-  echo "  continuous digests and base pins verify against the attestation store (#117)" >&2
-  exit 1
-fi
-echo "audit:attestations: ${checked} subject(s) checked, nothing ships unattested"
+[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/assert-policy.json ]] || {
+  echo "audit:attestations: not the canon, skipped"; exit 0
+}
+command -v gh > /dev/null || { echo "audit:attestations: gh missing" >&2; exit 1; }
+command -v stele > /dev/null || { echo "audit:attestations: stele missing from the belt" >&2; exit 1; }
+[[ -f slsa/assert-policy.json ]] || { echo "audit:attestations: slsa/assert-policy.json missing" >&2; exit 1; }
+root=$(mktemp)
+# No pipeline: under pipefail, head closing the pipe after one line
+# kills gh with SIGPIPE and the task dies at 141 (the audit:source-vsa
+# comment, same two-step form).
+gh attestation trusted-root > "${root}.all"
+head -1 "${root}.all" > "${root}"
+[[ -s "${root}" ]] || { echo "audit:attestations: empty trusted root from gh" >&2; exit 1; }
+stele assert evidence \
+  --org monumental-archive \
+  --policy slsa/assert-policy.json \
+  --trusted-root "${root}"
 '''
 
 [tasks."audit:source-vsa"]

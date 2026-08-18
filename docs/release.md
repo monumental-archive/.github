@@ -612,12 +612,14 @@ annotations were absent because nothing ever passed `--annotation`,
 not because a manifest list swallowed them. The flag makes the media
 type a guarantee rather than a property we happened to get, which is
 what the assertion below is entitled to rely on. So
-`release/assert-image-facts.sh` runs
-at the existing pull-back points and asserts, of the published bytes by
-digest: the index media type is OCI, the index annotations **equal** the
-map, and every per-arch config's labels equal it too. Equality, not
-presence — presence lets a wrong `revision` through, which is worse than
-a missing one.
+`stele assert image-facts` runs at the existing pull-back points and
+asserts, of the published bytes by digest: the index media type is
+OCI, the index annotations **equal** the map, and every per-arch
+config's labels equal it too. Equality, not presence — presence lets a
+wrong `revision` through, which is worse than a missing one. The
+mechanism and its tests live in stele (stele#39 for the port record);
+the env contract (`IMAGE`, `DIGEST`, `FACTS`) is unchanged from the
+bash it replaced.
 
 The artifact Dockerfile carries no `LABEL`s, deliberately: a `LABEL`
 would be a second mechanism for the same facts, and whether a `--label`

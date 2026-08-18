@@ -162,8 +162,10 @@ jobs:
         # At the pull-back point, like every other proof: the index media
         # type is OCI, its annotations EQUAL the map, and every per-arch
         # config's labels equal it too — equality, not presence, because
-        # presence lets a wrong revision through.
-        run: .org-canon/release/assert-image-facts.sh
+        # presence lets a wrong revision through. The mechanism is
+        # stele's (registry read by digest, no daemon); the env contract
+        # is unchanged from the bash it replaced (stele#39).
+        run: stele assert image-facts
 
       - name: Scan the published image, report-only
         env:
