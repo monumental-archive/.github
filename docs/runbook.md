@@ -213,15 +213,17 @@ roll-forward.
   (the published bytes are still the attested ones); diagnose before the
   next release.
 - **`audit:source-vsa` red on a ledger fork** (a link's
-  `ledgerPrev.noteSha256` matches no note that exists — #434): do NOT
-  delete-and-repush. The defect is the retired bash emitter's own
-  digest (it hashed the note minus its trailing newline —
-  `source-track.md`, ledger forks), so a heal routed through it mints
-  another bad link; that is how .github gained its 24th. The red is
-  correct and stays until the `stele emit` port lands and the
-  defective links are deleted and re-emitted through it (stele#3).
-  Never re-found the chain; the fork is bad links, not a broken
-  history.
+  `ledgerPrev.noteSha256` matches no note that exists): since the
+  `stele emit` cutover this defect class is structurally
+  unrepresentable in fresh links — one shared digest, hashing the
+  note read back from the object store, compare-and-swap append — so
+  a fork now means the predecessor's note was rewritten after
+  emission or the chain is presented out of order (stele's
+  `chain-format.md`, the ledger). Do NOT delete-and-repush; read the
+  archived history first (`refs/archive/notes-v2-2026-08-18`; the
+  #434 record in `source-track.md` is the worked example of
+  misdiagnosing this red). Never re-found the chain; a fork is bad
+  links, not a broken history.
 - **`startup_failure`, no jobs, no log**: a permissions elevation or an
   Actions-allowlist rejection. Check: does every `uses:` job restate its
   callee's permissions; is every action on the org allowlist (including

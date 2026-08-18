@@ -43,7 +43,7 @@ enforcement = "`org-default-branch` ruleset: deletion blocked, force push blocke
 requirement = "History (SCS): every Named Reference change recorded — when, by whom, new revision ID"
 spec_ids = ["history"]
 level = "2"
-enforcement = "Each chain link records the actor, `commitTime`, the revision and its parents, contemporaneously with the push (`source-attest` emit); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped"
+enforcement = "Each chain link records the actor, `commitTime`, the revision and its parents (`source-attest` emit) — contemporaneously with the push in the ordinary case, and honestly late on healed links (`repaired` marks the deviation — `source-provenance.md`, healed links); GitHub's ref history is the platform record beneath it. Distinct from the *Organization* requirement in the row above — this row was absent until #349 finding 4, met in substance but unmapped"
 
 [[source]]
 requirement = "Tag immutability"
@@ -67,7 +67,7 @@ enforcement = "GitHub accounts, org 2FA required, DCO signoff + `required_signat
 requirement = "Source provenance, contemporaneous"
 spec_ids = ["source-provenance"]
 level = "2"
-enforcement = "**Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207)"
+enforcement = "**Emitted** contemporaneously with the ref update, in the repo where the push authentically exists (#207) — a healed link is the named deviation: `repaired` marks it and its level is computed under the continuity guard (`source-provenance.md`, healed links)"
 
 [[source]]
 requirement = "Continuity"
