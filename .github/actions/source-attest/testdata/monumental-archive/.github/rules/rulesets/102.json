@@ -1,0 +1,26 @@
+{
+  "id": 102,
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/tags/v*"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "creation"
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 4534781,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ],
+  "updated_at": "2020-01-01T00:00:00.000+01:00"
+}

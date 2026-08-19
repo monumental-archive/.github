@@ -120,15 +120,31 @@ jobs:
           version: 2026.8.4
           cache: false
 
+      # `stele derive facts` (stele#40): the continuous archetype has no
+      # version surface by TYPE — a continuous release carrying a
+      # version does not exist in the engine's vocabulary, where the
+      # bash tested an environment variable in a case statement.
       - name: Resolve and validate the facts
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          ARCHETYPE: continuous
           IMAGE_TITLE: ${{ inputs.image-title }}
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
-        run: .org-canon/release/resolve-oci-facts.sh
-
+        run: |
+          set -euo pipefail
+          command -v stele > /dev/null || {
+            echo "::error::stele is not on the runner — it is a belt tool"
+            exit 1
+          }
+          out=$(stele derive facts \
+            --archetype continuous \
+            --repo "${GITHUB_REPOSITORY}" \
+            --server-url "${GITHUB_SERVER_URL}" \
+            --git-dir . \
+            --title "${IMAGE_TITLE}" \
+            --description "${IMAGE_DESCRIPTION}")
+          grep -E '^(facts|epoch)=' <<< "${out}" >> "${GITHUB_OUTPUT}"
+          grep -Ev '^(facts|epoch)=' <<< "${out}" || true
   build:
     name: Build image
     needs:

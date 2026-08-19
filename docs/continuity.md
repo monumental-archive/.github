@@ -15,7 +15,7 @@ accidental.
 | crates.io / npm ownership | Carl's registry accounts, trusted publishing only | Registry account recovery; no API tokens exist to leak or lose |
 | Zenodo / DOI | Carl's Zenodo account | Zenodo support; DOIs already minted are permanent regardless |
 | Signing identity | No key exists — Sigstore keyless via `signer`'s workflow identity | Nothing to lose: identity is the workflow ref, recreated by the repository itself |
-| `SOURCE_RULES_TOKEN` | Fine-grained PAT, `Administration: Read-only`, held in each repo's `source-attest` environment | The one standing credential in the design. Mint a replacement and re-set the environment secret; its scope list names every repo running the emitter, so it grows on each import (`source-track.md`, activation). Expiry is loud, not silent: `claims.sh` refuses to claim from a blind read, so the next push after expiry goes red rather than under-claiming |
+| `SOURCE_RULES_TOKEN` | Fine-grained PAT, `Administration: Read-only`, held in each repo's `source-attest` environment | The one standing credential in the design. Mint a replacement and re-set the environment secret; its scope list names every repo running the emitter, so it grows on each import (`source-track.md`, activation). Expiry is loud, not silent: `stele derive claims` refuses to claim from a blind read, so the next push after expiry goes red rather than under-claiming |
 
 ## Break-glass: the tag-mint App dies
 

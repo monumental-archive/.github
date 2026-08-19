@@ -489,7 +489,7 @@ bundles as assets instead, and are held to that shape).
 
 OpenVEX travels the same surface and **is** emitted: `vex-attest.yml`
 signs one statement per merge (subjects derived from published SBOMs)
-and `release/derive-vex.sh` derives each release's own concrete VEX
+and `stele derive vex` derives each release's own concrete VEX
 from the dependency-keyed decisions in `security/vex/` — the
 blast-radius query (#106, closed) is what makes an honest `not_affected`
 possible at org scale. Source provenance deliberately does not route
@@ -537,8 +537,9 @@ Every image the org publishes carries the `org.opencontainers.image.*`
 facts as config labels on each per-architecture image and as annotations
 on the index. The rule that makes them trustworthy: **every fact is
 resolved once, before anything builds, and builds consume the map without
-deriving anything** (`release/resolve-oci-facts.sh`, run by the `facts`
-job in `publish.yml` and `continuous.yml`). A per-build derivation is a
+deriving anything** (`stele derive facts`, run by the `facts`
+job in `publish.yml` and `continuous.yml`; the mechanism spec lives in
+stele). A per-build derivation is a
 drift surface, and a late derivation is a late failure — the predecessor
 of this design stamped every extension image's `created` with a canon
 commit's timestamp, because the deriving job's only checkout was canon.
@@ -568,10 +569,11 @@ and split into two kinds:
     author's declaration and the API is a lossy heuristic that flattens
     `MIT OR Apache-2.0` to a single id, so they are not independent
     statements of one fact. Every expression must satisfy the SPDX
-    grammar AND every id must appear in the vendored list
-    (`release/spdx-license-data.json`, refreshed on `audit:spdx-list`'s
-    alarm). `LicenseRef-*` (dangles outside an SPDX document),
-    `NOASSERTION`, `NONE` and the legacy `/` syntax are refused.
+    grammar and id lists via an adopted SPDX library (stele's
+    facts resolver — the vendored id list and its freshness alarm are
+    retired with it). `LicenseRef-*` (dangles outside an SPDX
+    document), `NOASSERTION`, `NONE` and non-canonical spellings are
+    refused.
     Ecosystems beyond Cargo are unbuilt branches of this contract, added
     at the manifest-read only, when a real repository needs one — the
     version-source rule applied to licences.

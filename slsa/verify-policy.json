@@ -35,7 +35,18 @@
     "resourceUri": "pkg:github/{owner}/{repo}@v{version}",
     "sourceRepository": "https://github.com/{owner}/{repo}",
     "targetLevel": "SLSA_BUILD_LEVEL_3",
-    "denySelfHostedRunners": true
+    "denySelfHostedRunners": true,
+    "enrichment": {
+      "predicateType": "https://monumental-archive.github.io/attestations/build-enrichment/v2",
+      "required": ["toolbelt-lock"],
+      "permitted": [
+        "pgrx-base-images",
+        "pgrx-base",
+        "Cargo.lock",
+        "package-lock.json",
+        "mise.toml"
+      ]
+    }
   },
   "source": {
     "identity": "https://github.com/{owner}/{repo}/.github/workflows/source-attest.yml@refs/heads/main",
@@ -91,6 +102,148 @@
         "revision": "e1ad2dde9fd24fc521b4b37453dac052e655212b",
         "reason": "pre-v2 healed fork, #349 finding 3"
       }
-    ]
+    ],
+    "claims": {
+      "properties": [
+        {
+          "name": "ORG_SOURCE_HISTORY_PROTECTED",
+          "scope": "branchRules",
+          "match": {
+            "$contains": [
+              {
+                "type": "deletion"
+              },
+              {
+                "type": "non_fast_forward"
+              },
+              {
+                "type": "required_linear_history"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ORG_SOURCE_SIGNED",
+          "scope": "branchRules",
+          "match": {
+            "$contains": [
+              {
+                "type": "required_signatures"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ORG_SOURCE_GATED",
+          "scope": "branchRules",
+          "match": {
+            "$contains": [
+              {
+                "type": "required_status_checks",
+                "parameters": {
+                  "strict_required_status_checks_policy": true,
+                  "required_status_checks": {
+                    "$contains": [
+                      {
+                        "context": "ci / ci",
+                        "integration_id": 15368
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "ORG_SOURCE_REVIEWED_THREADS",
+          "scope": "branchRules",
+          "match": {
+            "$contains": [
+              {
+                "type": "pull_request",
+                "parameters": {
+                  "required_review_thread_resolution": true,
+                  "allowed_merge_methods": ["squash"]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "ORG_SOURCE_TAG_IMMUTABLE",
+          "scope": "tagRulesets",
+          "match": {
+            "$contains": [
+              {
+                "conditions": {
+                  "ref_name": {
+                    "include": ["~ALL"],
+                    "exclude": []
+                  }
+                },
+                "rules": {
+                  "$contains": [
+                    {
+                      "type": "update"
+                    },
+                    {
+                      "type": "deletion"
+                    },
+                    {
+                      "type": "non_fast_forward"
+                    }
+                  ]
+                },
+                "bypass_actors": []
+              }
+            ]
+          }
+        },
+        {
+          "name": "ORG_SOURCE_RELEASE_TAG_MINTED",
+          "scope": "tagRulesets",
+          "match": {
+            "$contains": [
+              {
+                "conditions": {
+                  "ref_name": {
+                    "include": ["refs/tags/v*"]
+                  }
+                },
+                "rules": {
+                  "$contains": [
+                    {
+                      "type": "creation"
+                    }
+                  ]
+                },
+                "bypass_actors": [
+                  {
+                    "actor_id": 4534781,
+                    "actor_type": "Integration",
+                    "bypass_mode": "always"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ORG_SOURCE_DCO",
+          "scope": "gatedTask",
+          "requiresProperty": "ORG_SOURCE_GATED",
+          "file": "mise/config.toml",
+          "tablePath": ["tasks", "lint:dco"]
+        },
+        {
+          "name": "ORG_SOURCE_CAPABILITY_BOUNDARY",
+          "scope": "gatedTask",
+          "requiresProperty": "ORG_SOURCE_GATED",
+          "file": "mise/config.toml",
+          "tablePath": ["tasks", "lint:capability-boundary"]
+        }
+      ]
+    }
   }
 }

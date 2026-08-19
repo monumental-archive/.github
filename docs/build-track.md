@@ -72,7 +72,7 @@ Where the claim rests on a spec carve-out, the carve-out by name:
   leg that closes it; `repro-check` runs it per release.
 - **Best-effort `resolvedDependencies`** — completeness is a SHOULD at
   every level. The org answers it above the letter with the
-  **enrichment companion** (#200): a `build-enrichment/v1` predicate
+  **enrichment companion** (#200): a `build-enrichment/v2` predicate
   computed entirely in the verification control plane (toolbelt lock
   from the pinned canon tree; base-image digests only for the majors
   the declaring class's build actually instantiated — a `FROM scratch`
