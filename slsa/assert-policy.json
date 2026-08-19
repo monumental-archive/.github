@@ -24,7 +24,10 @@
         "bundles": ["attestations-image.intoto.jsonl"]
       },
       "rust-binary": {
-        "bundles": ["attestations-binaries.intoto.jsonl"]
+        "bundles": ["attestations-binaries.intoto.jsonl"],
+        "assetPrefixes": [
+          { "prefix": "sbom-cargo-", "owedFrom": "1.43.0", "planned": true }
+        ]
       },
       "go-binary": {
         "bundles": ["attestations-go-binaries.intoto.jsonl"]
