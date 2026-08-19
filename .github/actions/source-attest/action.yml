@@ -261,7 +261,6 @@ runs:
         stele emit chain \
           --policy "${SA_CANON_ROOT}/slsa/verify-policy.json" \
           --repo "${GITHUB_REPOSITORY}" \
-          --git-dir "${SA_WORK}/repo" \
           --clone "${SA_REMOTE_URL:-https://github.com/${GITHUB_REPOSITORY}.git}" \
           --committer "source-attest <source-attest@monumental-archive.github.io>" \
           --rev "${GITHUB_SHA}" \
