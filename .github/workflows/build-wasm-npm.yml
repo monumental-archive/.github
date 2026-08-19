@@ -214,6 +214,37 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
           echo "package=${name}@${version}" >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
+      - name: Emit the inventory plan (which package this artifact ships)
+        # The artifact-to-package mapping exists with certainty exactly
+        # once — here, where the tarball was just packed from the crate
+        # this job was told to build (#537). The plan is the mapping as
+        # data: the sbom job derives the crate's closure from it on the
+        # prove leg, so no caller ever declares (and drifts) a second
+        # copy of this job's own crate-dir input. Not on the repro leg:
+        # the comparator proves bytes, not inventories.
+        if: ${{ !inputs.repro }}
+        env:
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --no-deps --format-version 1 \
+            --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
+          mp=$(realpath "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
+          mkdir -p plan
+          jq --arg mp "${mp}" \
+            '[.packages[] | select(.manifest_path == $mp) | .name]
+             | if length != 1 then error("crate-dir resolves to \(length) packages") else . end
+             | map({doc: ("sbom-cargo-" + .), cargoPackage: .})' \
+            <<< "${meta}" > plan/plan.json
+          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.cargoPackage)"' plan/plan.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.repro }}
+        with:
+          name: sbom-plan-wasm
+          path: plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:
