@@ -1229,13 +1229,20 @@ SQL appearing anywhere in the org (revisit the raw templater).
   measurement and not tests (`lint:source-attest` drives the real
   emitter scripts end-to-end against recorded fixtures every commit).
   Removing the shield does not soften the verdict; this entry is where
-  it survives. *Reopen:* **the canon's bash goes away** (#392, decided
-  2026-08-15 — a Go tool in its own repo), at which point `go test
-  -cover` supplies the number, the canon gains a `.coverage-floor` and
-  the shield returns by derivation. That, not aqua packaging, is now the
-  live trigger: kcov shipping checksummed cross-platform binaries would
-  also unblock it, but nobody is waiting on that. The retirement of this
-  entry and everything that hangs off it is tracked in #398.
+  it survives. **Resolved by relocation, 2026-08-19 (#392 shipped;
+  close-out #398):** the bash whose coverage was unmeasurable no
+  longer exists — the logic lives in stele, where `go test -cover`
+  supplies the number, `.coverage-floor` ratchets it (≥ 90 committed,
+  ~98.6 measured) and the codecov shield renders it. The reopen
+  trigger fired the way the 2026-08-15 amendment predicted, with one
+  correction to that prediction: the number lives in the tool's repo,
+  not this one. The canon tree retains orchestration-only shell
+  (one-line task bodies and workflow steps) and one Python join
+  (`security/workflow-permissions.py`) — no unit-testable corpus of
+  its own, so the canon takes no `.coverage-floor` and no shield: a
+  coverage number over a workflow tree would measure nothing. The
+  Best Practices coverage criteria are re-answered on that basis in
+  [best-practices.md](best-practices.md).
   Note what was **revoked** here: this entry previously recorded a
   separable half — that bats and shellspec are both aqua-backed and
   belt-clean, so adopting a bash test framework was not blocked by any
@@ -1349,3 +1356,41 @@ The trigger lives on the issue, not duplicated here:
   adoption.
 - **`SLSA_SOURCE_TWO_PARTY_REVIEWED`** — headcount-blocked, the Source
   L4 boundary; watched via #126 rather than here.
+
+## The bash-shaped exceptions after the port (#398, closed 2026-08-19)
+
+The port's close-out asked, of every suppression whose stated reason
+was bash: does the reason still hold? Measured against this tree, item
+by item. The in-scope test was #398's own: an exception survives only
+if its reason is about the rule, never about reach.
+
+- **`SHELLCHECK_EXCLUDE` (mise/embedded-shell.py) — kept, reason
+  re-measured live.** The premise "no shell in `run:` blocks" did not
+  arrive: 98 multi-line `run:` blocks remain in the canon's workflows,
+  deliberately — the port moved *logic* to stele and left
+  *orchestration* here (the scope boundary in stele's charter: step
+  bodies became one `stele <verb>` line where a verb exists; staging,
+  artifact plumbing and commit points are workflow orchestration and
+  stay). Every excluded code is an artefact of `${{ }}` substitution
+  or step `env:` supply, which that orchestration still exhibits.
+- **yamllint `indentation.check-multi-line-strings` — stays false**,
+  same measurement: the multi-line `run:` blocks it would misjudge
+  still exist.
+- **`lint:shell-embedded` — kept as is.** The #398 inversion (assert
+  every `run:` block is a single line) presumed an end state the org
+  decided against; asserting it would red the canon's own publish
+  workflow. The task still lints a live surface.
+- **`lint:bash-portability` — already gone**; nothing to decide.
+- **The `set -e` class (#82 finding 2) — narrowed, not closed.** Task
+  bodies that became one `stele` line return real errors; multi-line
+  orchestration bodies remain and carry their own guards. The mise
+  `shell =` cure stays refused for the reason recorded at #82.
+- **Coverage ceiling — resolved by relocation**; the kcov entry above
+  carries it.
+- **git-cliff — already retired**; `release:preview` runs
+  `stele derive version`, `cliff.toml` markers are gone.
+- **`security/workflow-permissions.py` — kept.** Porting the
+  caller/callee permissions join into `stele assert` is a stele
+  change, and stele's port is closed (its scope is decided by that
+  repo, not this list). The one Python file stays with ruff over it;
+  reopen only as a stele issue with its own justification.

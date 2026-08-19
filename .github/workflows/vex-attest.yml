@@ -4,7 +4,7 @@
 # releases DERIVED to be affected — decisions are keyed by the dependency
 # (pkg:<type>/…/<name>@<version>), and the affected-release set is
 # computed from published SBOMs, the same join blast-radius and
-# derive-vex.sh run — so a consumer queries the verdict from the
+# stele derive vex runs — so a consumer queries the verdict from the
 # attestation store (`gh attestation verify --predicate-type
 # https://openvex.dev/ns/v0.2.0`) without waiting for a release to carry
 # the raw document.
@@ -21,7 +21,7 @@
 # trust) and the published checksums, nothing else. Published releases
 # are immutable, so the decision reaches the document surface on the
 # NEXT release of each affected repository, derived into that release's
-# own VEX asset (release/derive-vex.sh); this workflow is what makes the
+# own VEX asset (stele derive vex, publish.yml); this workflow makes the
 # decision public and verifiable now rather than at the next release.
 ---
 name: vex-attest
@@ -97,7 +97,7 @@ jobs:
           # pkg:<type>/…/<name>@<version> — the DEPENDENCY the judgment
           # is about, never a release tag. The affected releases are
           # therefore DERIVED here, the same join the blast-radius audit
-          # and derive-vex.sh run: walk the org's published SBOMs
+          # and stele derive vex run: walk the org's published SBOMs
           # (verified as release assets before trust) and bind the claim
           # to the checksums of every release that ships a named
           # package@version. Versions compare in the osv dialect; the

@@ -3,9 +3,9 @@
 <!-- badges:begin -->
 [![ci](https://github.com/monumental-archive/.github/actions/workflows/gate.yml/badge.svg)](https://github.com/monumental-archive/.github/actions/workflows/gate.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/monumental-archive/.github/badge)](https://scorecard.dev/viewer/?uri=github.com/monumental-archive/.github)
-[![SLSA Build L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)
-[![SLSA Source L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)
-[![SLSA Dependencies L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)](https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)
+[![SLSA build](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmonumental-archive%2F.github%2Flevels%2F.github%2Fbuild.shield.json)](https://raw.githubusercontent.com/monumental-archive/.github/levels/.github/build.report.json)
+[![SLSA source](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmonumental-archive%2F.github%2Flevels%2F.github%2Fsource.shield.json)](https://raw.githubusercontent.com/monumental-archive/.github/levels/.github/source.report.json)
+[![SLSA dependency](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmonumental-archive%2F.github%2Flevels%2F.github%2Fdependency.shield.json)](https://raw.githubusercontent.com/monumental-archive/.github/levels/.github/dependency.report.json)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14058/badge)](https://www.bestpractices.dev/projects/14058)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/14058/baseline)](https://www.bestpractices.dev/projects/14058)
 [![REUSE status](https://api.reuse.software/badge/github.com/monumental-archive/.github)](https://api.reuse.software/info/github.com/monumental-archive/.github)

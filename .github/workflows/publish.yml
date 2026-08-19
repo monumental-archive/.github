@@ -513,62 +513,37 @@ jobs:
             }
             stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
           elif compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
-            # Structural completeness, never a prefix hope: every
-            # manifest-tracking class that was requested must have
-            # planned. A class that built
-            # artifacts but emitted no plan is a red release, not a
-            # thinner SBOM.
-            for class in ${CLASSES//,/ }; do
-              case "${class}" in
-                rust-binary) want="plans/sbom-plan-binary-*" ;;
-                wasm-npm) want="plans/sbom-plan-wasm" ;;
-                pgrx-extension) want="plans/sbom-plan-extension-*" ;;
-                *) continue ;;
-              esac
-              compgen -G "${want}" > /dev/null || {
-                emsg="class ${class} shipped artifacts but no build leg emitted its inventory plan — an"
-                emsg+=" artifact with no inventory must not publish (#537)"
-                echo "::error::${emsg}"
-                exit 1
-              }
-            done
-            # The plans originate on build legs that execute caller
-            # code, so they are data: shape-checked and charset-guarded
-            # here before any field reaches a command line. Matrix legs
-            # restate the same mapping; identical entries collapse, and
-            # one document claimed by two DIFFERENT entries is evidence
-            # of legs disagreeing about what was built — refused, never
-            # last-writer-wins.
-            plan=$(jq -s '
-              add
-              | map(if (.doc? // "" | test("^sbom-[a-z]+-[A-Za-z0-9_][A-Za-z0-9_.-]*$")) | not
-                    then error("malformed doc name in an inventory plan") else . end)
-              | map(if (.cargoPackage? // "" | test("^[A-Za-z0-9_][A-Za-z0-9_-]*$")) | not
-                    then error("malformed cargoPackage in an inventory plan") else . end)
-              | map(if ([(.features // [])[] | test("^[A-Za-z0-9_+.-]+$")] | all | not)
-                    then error("malformed features in an inventory plan") else . end)
-              | map(if ((.artifact // "x") | test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$") | not)
-                    then error("malformed artifact in an inventory plan") else . end)
-              | unique
-            ' plans/sbom-plan-*/plan.json)
-            dupes=$(jq -r '[.[].doc] | length - (unique | length)' <<< "${plan}")
-            [[ ${dupes} == "0" ]] || {
-              emsg="two build legs disagree on one inventory document — the same doc name must carry the"
-              emsg+=" same plan on every leg"
-              echo "::error::${emsg}"
+            # Pre-publish judgment of the plans (`stele assert plans`,
+            # stele#142) against the SAME policy the evidence walk
+            # reads — one obligation list, two moments of looking, so a
+            # release cannot publish green and red on the walk. The
+            # plans originate on build legs that execute caller code,
+            # so they are data: shape, charset, matrix collapse and
+            # divergent-claim refusal all live inside the engine, and
+            # nothing from a plan reaches a command line until it has
+            # judged. The spec is stele's docs/assert-policy-schema.md.
+            machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
+            [[ -n ${machinery} ]] || {
+              echo "::error::the pinned canon tree's CITATION.cff names no version — the owed epochs cannot be judged"
               exit 1
             }
+            stele assert plans \
+              --policy .org-canon/slsa/assert-policy.json \
+              --classes "${CLASSES}" \
+              --machinery-version "${machinery}" \
+              plans/sbom-plan-*/plan.json
+            plan=$(jq -s 'add | unique' plans/sbom-plan-*/plan.json)
             docs=()
             count=$(jq 'length' <<< "${plan}")
             for ((i = 0; i < count; i++)); do
               entry=$(jq -c ".[${i}]" <<< "${plan}")
               doc_name=$(jq -r '.doc' <<< "${entry}")
               doc="dist/${doc_name}-${VERSION}.spdx.json"
-              pkg=$(jq -r '.cargoPackage' <<< "${entry}")
+              pkg=$(jq -r '.params.cargoPackage' <<< "${entry}")
               flags=(--cargo-package "${pkg}" --tree .)
-              feats=$(jq -r '(.features // []) | join(",")' <<< "${entry}")
+              feats=$(jq -r '(.params.features // []) | join(",")' <<< "${entry}")
               if [[ -n ${feats} ]]; then flags+=(--features "${feats}"); fi
-              ndf=$(jq -r '.noDefaultFeatures // false' <<< "${entry}")
+              ndf=$(jq -r '.params.noDefaultFeatures // false' <<< "${entry}")
               if [[ ${ndf} == "true" ]]; then
                 flags+=(--no-default-features)
               fi

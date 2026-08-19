@@ -240,9 +240,10 @@ jobs:
           jq --arg mp "${mp}" \
             '[.packages[] | select(.manifest_path == $mp) | .name]
              | if length != 1 then error("crate-dir resolves to \(length) packages") else . end
-             | map({doc: ("sbom-npm-" + .), cargoPackage: .})' \
+             | map({class: "wasm-npm", doc: ("sbom-npm-" + .),
+                    params: {cargoPackage: .}})' \
             <<< "${meta}" > plan/plan.json
-          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.cargoPackage)"' plan/plan.json
+          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:

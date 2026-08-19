@@ -159,8 +159,32 @@ jobs:
     timeout-minutes: 10
     permissions:
       issues: write # a broken reproducibility claim must page
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
+      - name: Check out caller repository at the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.5
+          cache: false
+
       - name: Compare rebuilt digests with the published ones
+        # The judgment is `stele verify repro` (stele#96): the RELEASED
+        # manifest is the population and the rebuild is the lookup, so
+        # a published artifact the rebuild failed to produce at all is
+        # a typed absent-from-rebuild finding — the bash loop this
+        # replaces walked the rebuild instead and could not see that
+        # case (a partial rebuild read exactly like a complete one).
         env:
           PUBLISHED: ${{ needs.resolve.outputs.checksums }}
           REBUILT: >-
@@ -170,35 +194,11 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          status=0
-          count=0
-          while IFS= read -r line; do
-            [[ -n ${line} ]] || continue
-            count=$((count + 1))
-            name="${line##*  }"
-            digest="${line%% *}"
-            published=$(grep -F "  ${name}" <<< "${PUBLISHED}" || true)
-            if [[ -z ${published} ]]; then
-              echo "::error::${name}: rebuilt but absent from the published checksums"
-              status=1
-              continue
-            fi
-            if [[ ${published%% *} != "${digest}" ]]; then
-              echo "::error::${name}: published ${published%% *}, rebuilt ${digest}"
-              status=1
-            else
-              echo "reproduced ${name}"
-            fi
-          done <<< "${REBUILT}"
-          if ((count == 0)); then
-            echo "::error::nothing was rebuilt — an empty proof is not a proof"
-            exit 1
-          fi
-          if ((status != 0)); then
-            echo "::error::${TAG} did not reproduce"
-            exit 1
-          fi
-          echo "::notice::${TAG}: ${count} archive(s) reproduced bit-for-bit"
+          printf '%s\n' "${PUBLISHED}" > published.sha256
+          printf '%s\n' "${REBUILT}" > rebuilt.sha256
+          stele verify repro \
+            --repo "${GITHUB_REPOSITORY}" --tag "${TAG}" \
+            --subjects published.sha256 --rebuilt rebuilt.sha256
       - name: File an issue on failure
         if: failure()
         env:

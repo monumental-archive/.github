@@ -31,6 +31,16 @@ and are tracked in issues as doors to open later — they are not being
 chased now. A target here is a claim only where a stranger can verify
 it; everywhere else it is labelled as what it is.
 
+**Since #540, the measured level is authoritative over this table.**
+`stele level` computes each track's honest current level from live
+evidence, taking no declaration; `level-publish.yml` publishes the
+judgments on the `levels` branch, and every SLSA badge renders them
+directly. Where a published judgment disagrees with a row below, the
+row is a finding: edit the table to what the evidence supports, never
+teach the tool the table. The table's remaining job is the ceiling —
+which doors the org has chosen not to open — and the "Enforced by"
+narrative, neither of which a measurement can carry.
+
 <!-- tracks:direction:begin -->
 
 | Track | Ceiling | Status | Enforced by |
@@ -85,9 +95,10 @@ every shield a repo here could carry, each block is rendered by
 `fix:badges` from the repo's own tree facts and each repo wears the
 honest subset that resolves for it — the canon included, as consumer #1
 of its own machinery, wearing what its derivation yields and nothing it
-hand-asserts (#316). No badge asserts a level this document does not:
-the Monday audit parses track and level out of every SLSA shield and
-matches this table's row.
+hand-asserts (#316). No badge asserts a level at all (#540): each SLSA
+shield is an endpoint reference to the judgment `stele level`
+published, and the Monday audit checks that the published document is
+live — there is no spliced value left to cross-check.
 
 ## Where the detail lives
 

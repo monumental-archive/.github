@@ -52,20 +52,21 @@ if [[ -f .github/workflows/scorecard.yml ]]; then
   emsg+="(https://scorecard.dev/viewer/?uri=github.com/${org_path})"
   add "${emsg}"
 fi
-# The org's claimed tracks; the Monday audit parses each shield and
-# matches it against direction.md's table, so these can never outrun it.
-emsg="[![SLSA Build"
-emsg+=" L3](https://img.shields.io/badge/SLSA-Build%20L3-2ea44f)]"
-emsg+="(https://github.com/monumental-archive/.github/blob/main/docs/runbook.md#verifying-as-a-consumer-would)"
-add "${emsg}"
-emsg="[![SLSA Source"
-emsg+=" L3](https://img.shields.io/badge/SLSA-Source%20L3-2ea44f)]"
-emsg+="(https://github.com/monumental-archive/.github/blob/main/docs/source-track.md)"
-add "${emsg}"
-emsg="[![SLSA Dependencies"
-emsg+=" L2](https://img.shields.io/badge/SLSA-Dependencies%20L2-2ea44f)]"
-emsg+="(https://github.com/monumental-archive/.github/blob/main/docs/dependency-track.md)"
-add "${emsg}"
+# The measured tracks (#540): each SLSA badge is a shields.io ENDPOINT
+# reference to the judgment `stele level` published on the canon's
+# `levels` branch — a render of the computed level with no copy in
+# between, so no value here can ever outrun the evidence. The link
+# target is the published report the shield was sealed with.
+levels_raw="https://raw.githubusercontent.com/monumental-archive/.github/levels"
+repo_name="${org_path#*/}"
+for track in build source dependency; do
+  # shields.io wants the url parameter percent-encoded.
+  enc=$(printf '%s/%s/%s.shield.json' "${levels_raw}" "${repo_name}" "${track}" \
+    | sed -e 's|:|%3A|g' -e 's|/|%2F|g')
+  emsg="[![SLSA ${track}](https://img.shields.io/endpoint?url=${enc})]"
+  emsg+="(${levels_raw}/${repo_name}/${track}.report.json)"
+  add "${emsg}"
+done
 bp=$(state bestpractices)
 bp_live=""
 if [[ -n ${bp} && ${bp} != "pending" ]]; then

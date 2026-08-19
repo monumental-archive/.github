@@ -16,7 +16,9 @@
       "rust-crate": {
         "bundles": ["attestations-crates.intoto.jsonl"],
         "legacyVsaBundles": ["attestations-vsa-crates.intoto.jsonl"],
-        "assetPrefixes": [{ "prefix": "sbom-cargo-", "owedFrom": "1.42.0" }]
+        "assetPrefixes": [
+          { "prefix": "sbom-cargo-", "owedFrom": "1.42.0", "planned": true }
+        ]
       },
       "oci-image": {
         "bundles": ["attestations-image.intoto.jsonl"]
@@ -33,13 +35,15 @@
       "wasm-npm": {
         "bundles": ["attestations-npm.intoto.jsonl"],
         "legacyVsaBundles": ["attestations-vsa-npm.intoto.jsonl"],
-        "assetPrefixes": [{ "prefix": "sbom-npm-", "owedFrom": "1.42.0" }]
+        "assetPrefixes": [
+          { "prefix": "sbom-npm-", "owedFrom": "1.42.0", "planned": true }
+        ]
       },
       "pgrx-extension": {
         "bundles": ["attestations-extensions.intoto.jsonl"],
         "assetPrefixes": [
           { "prefix": "attestations-extimg-pg" },
-          { "prefix": "sbom-pgrx-", "owedFrom": "1.42.0" }
+          { "prefix": "sbom-pgrx-", "owedFrom": "1.42.0", "planned": true }
         ],
         "enrichment": ["pgrx-base-images", "pgrx-base"]
       }
@@ -69,6 +73,9 @@
       ".github": "v1.23.1",
       "release-lab": "v0.24.2"
     }
+  },
+  "chains": {
+    "exceptions": []
   },
   "blastRadius": {
     "osEcosystems": ["debian", "alpine", "ubuntu", "rocky", "redhat", "rpm"],

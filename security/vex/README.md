@@ -2,7 +2,7 @@
 
 One OpenVEX document per decision, `*.openvex.json`. This directory is
 the record the whole dependency track keys on: `audit:blast-radius`
-joins against it, `release/derive-vex.sh` derives each release's own VEX
+joins against it, `stele derive vex` (publish.yml) derives each release's own VEX
 from it, and a finding with no decision here is *undecided* — it fails
 the Monday audit **and** fails any release whose SBOM ships it, until a
 decision is written.
@@ -34,7 +34,7 @@ toil and the drift hazard this keying removes.
 1. **The attestation store, immediately** — on merge, `vex-attest.yml`
    derives the affected-release set from published SBOMs and signs the
    document through the org's one signer over those releases' digests.
-2. **The document surface, at each release** — `derive-vex.sh` emits the
+2. **The document surface, at each release** — `stele derive vex` emits the
    release's own OpenVEX asset (product = the release purl, the decided
    `package@version` as subcomponent), shipped under GitHub's release
    attestation like the SBOM it derives from.
