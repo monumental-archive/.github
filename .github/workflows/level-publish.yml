@@ -9,10 +9,21 @@
 # same seal as the report inside stele, and nothing here restates a
 # level.
 #
-# A run that cannot judge must not publish over a good report
-# (stele#135): a cell that seals CANNOT_JUDGE keeps its previous
-# files (grey `unmeasured` publishes only where no report exists yet)
-# and the job goes red — a thing to investigate, never a quieter badge.
+# A cell that cannot be judged never publishes over a good report
+# (stele#135): the sealed judgment stands. What that means depends
+# entirely on whether the cell was ever judgeable, and the two must
+# not be confused:
+#
+#   - never judged, still not judgeable — a repository that publishes
+#     nothing has no build level. That is a fact about it, not a
+#     fault: grey `unmeasured` is published and NOTHING pages. An
+#     alarm here would fire every week forever over repositories
+#     behaving exactly as intended, and a board that is permanently
+#     amber is a board nobody reads.
+#   - judged before, not judgeable now — evidence went missing, a
+#     credential narrowed, a forge read degraded. The previous
+#     judgment stands and the job goes red, because something that
+#     could be proven no longer can.
 ---
 name: level-publish
 
@@ -82,17 +93,25 @@ jobs:
                 > "${RUNNER_TEMP}/report.json"; then
                 mv "${RUNNER_TEMP}/report.json" "${report}"
                 mv "${RUNNER_TEMP}/shield.json" "${shield}"
-              else
+              elif [[ -f ${shield} ]] \
+                && ! grep -q '"message"[[:space:]]*:[[:space:]]*"unmeasured"' "${shield}"; then
+                # REGRESSION, and the only state worth waking anyone for:
+                # this cell carried a real level and can no longer be
+                # judged. Evidence went missing, a credential narrowed,
+                # a forge read degraded. The good judgment stands.
                 investigate=1
-                if [[ ! -f ${shield} ]]; then
-                  # First measurement of this cell: grey `unmeasured` is
-                  # the honest published state, not silence.
-                  mv "${RUNNER_TEMP}/report.json" "${report}" 2> /dev/null || true
-                  mv "${RUNNER_TEMP}/shield.json" "${shield}" 2> /dev/null || true
-                  echo "::warning::${repo} ${track}: could not judge; published unmeasured (no prior report)"
-                else
-                  echo "::error::${repo} ${track}: could not judge; the previous judgment stands"
-                fi
+                echo "::error::${repo} ${track}: was judged before and cannot be judged now; the previous judgment stands"
+              else
+                # No evidence to measure, and none last time either — a
+                # repository that publishes nothing has no build level,
+                # which is a fact about it and not a fault. Grey
+                # `unmeasured` is the honest badge (stele#135); it is
+                # NOT a finding and must never page, or the board goes
+                # permanently amber over repositories behaving exactly
+                # as intended.
+                mv "${RUNNER_TEMP}/report.json" "${report}" 2> /dev/null || true
+                mv "${RUNNER_TEMP}/shield.json" "${shield}" 2> /dev/null || true
+                echo "::notice::${repo} ${track}: no evidence to measure; published unmeasured"
               fi
             done
           done <<< "${repos}"
@@ -113,7 +132,7 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             levels:levels
           if [[ ${investigate} -ne 0 ]]; then
-            echo "::error::one or more cells sealed CANNOT_JUDGE — investigate; good reports were not overwritten"
+            echo "::error::a cell that was judged before cannot be judged now — investigate; good reports were not overwritten"
             exit 1
           fi
 ...

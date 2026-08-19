@@ -57,9 +57,35 @@ fi
 # `levels` branch — a render of the computed level with no copy in
 # between, so no value here can ever outrun the evidence. The link
 # target is the published report the shield was sealed with.
+#
+# A track earns a badge only where the repository DOES that track, on
+# the same tree facts every other badge here resolves from. Build and
+# dependency both rest on published release evidence — attestations
+# and the inventories that ship beside them — so a repository that
+# publishes nothing has neither, which is a fact about it and not a
+# failed measurement. Their absence is the honest render; a badge
+# reading "unmeasured" would claim the measurement broke when nothing
+# was ever there to measure. Measured against the live org: signer
+# publishes no releases and reads unmeasured on exactly these two,
+# while the canon tracks no manifest yet holds Dependencies L2,
+# because its dependencies are its actions — which is why publishing,
+# not a manifest file, is the condition.
+#
+# A track the repository does do always renders, whatever it scores:
+# a measured L0 is an answer like any other, and hiding a low grade
+# would be the reach-shaped lie this whole layer exists to refuse.
 levels_raw="https://raw.githubusercontent.com/monumental-archive/.github/levels"
 repo_name="${org_path#*/}"
-for track in build source dependency; do
+publishes=""
+if compgen -G ".github/workflows/release.y*ml" > /dev/null \
+  || compgen -G ".github/workflows/publish.y*ml" > /dev/null; then
+  publishes=1
+fi
+tracks=""
+[[ -n ${publishes} ]] && tracks="build"
+[[ -f .github/workflows/source-attest.yml ]] && tracks="${tracks} source"
+[[ -n ${publishes} ]] && tracks="${tracks} dependency"
+for track in ${tracks}; do
   # shields.io wants the url parameter percent-encoded.
   enc=$(printf '%s/%s/%s.shield.json' "${levels_raw}" "${repo_name}" "${track}" \
     | sed -e 's|:|%3A|g' -e 's|/|%2F|g')
