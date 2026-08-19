@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "issuer": "https://token.actions.githubusercontent.com",
   "evidence": {
     "sbomSuffix": ".spdx.json",
@@ -15,7 +15,8 @@
     "classes": {
       "rust-crate": {
         "bundles": ["attestations-crates.intoto.jsonl"],
-        "legacyVsaBundles": ["attestations-vsa-crates.intoto.jsonl"]
+        "legacyVsaBundles": ["attestations-vsa-crates.intoto.jsonl"],
+        "assetPrefixes": [{ "prefix": "sbom-cargo-", "owedFrom": "1.42.0" }]
       },
       "oci-image": {
         "bundles": ["attestations-image.intoto.jsonl"]
@@ -31,11 +32,15 @@
       },
       "wasm-npm": {
         "bundles": ["attestations-npm.intoto.jsonl"],
-        "legacyVsaBundles": ["attestations-vsa-npm.intoto.jsonl"]
+        "legacyVsaBundles": ["attestations-vsa-npm.intoto.jsonl"],
+        "assetPrefixes": [{ "prefix": "sbom-npm-", "owedFrom": "1.42.0" }]
       },
       "pgrx-extension": {
         "bundles": ["attestations-extensions.intoto.jsonl"],
-        "assetPrefixes": ["attestations-extimg-pg"],
+        "assetPrefixes": [
+          { "prefix": "attestations-extimg-pg" },
+          { "prefix": "sbom-pgrx-", "owedFrom": "1.42.0" }
+        ],
         "enrichment": ["pgrx-base-images", "pgrx-base"]
       }
     },

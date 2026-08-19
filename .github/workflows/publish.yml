@@ -226,17 +226,20 @@ name: publish
         default: ""
       sbom-artifacts:
         description: >
-          Comma-separated `cargo:<package>` (or `npm:<dir>`) entries
-          naming the artifacts this release ships, for repositories whose
-          binaries cannot speak for the whole release (#492). Each entry
-          derives its OWN inventory — the artifact's resolved closure,
-          scoped to the package that ships it — and the release SBOM
-          becomes the AGGREGATED view of those documents, never a second
-          independent derivation. Declared, never detected: which
-          packages ship is a fact only the caller holds, and a tree scan
-          answers a different question (what COULD have been linked).
-          Required when any class outside go-binary/oci-image is
-          declared; refused otherwise unused.
+          Comma-separated `cargo:<package>`, `npm:<dir>` or
+          `pgrx:<package>` entries naming the artifacts this release
+          ships, for repositories whose binaries cannot speak for the
+          whole release (#492). Each entry derives its OWN inventory —
+          the artifact's resolved closure, scoped to the package that
+          ships it — and the release SBOM becomes the AGGREGATED view of
+          those documents, never a second independent derivation. A
+          `pgrx:` entry expands over `pg-majors` into one document per
+          major: one crate built once per major ships several artifacts
+          with several digests, so each owes its own. Declared, never
+          detected: which packages ship is a fact only the caller holds,
+          and a tree scan answers a different question (what COULD have
+          been linked). Required when any class outside
+          go-binary/oci-image is declared; refused otherwise unused.
         required: false
         type: string
         default: ""
@@ -472,6 +475,7 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
           CLASSES: ${{ inputs.classes }}
           SBOM_ARTIFACTS: ${{ inputs.sbom-artifacts }}
+          PG_MAJORS: ${{ inputs.pg-majors }}
         run: |
           set -euo pipefail
           command -v stele > /dev/null || {
@@ -515,18 +519,43 @@ jobs:
                   doc="dist/sbom-cargo-${name}-${VERSION}.spdx.json"
                   stele derive sbom --cargo-package "${name}" --tree . \
                     --created "${created}" --out "${doc}"
+                  docs+=("${doc}")
                   ;;
                 npm)
                   doc="dist/sbom-npm-$(basename "${name}")-${VERSION}.spdx.json"
                   stele derive sbom --npm-dir "${name}" \
                     --created "${created}" --out "${doc}"
+                  docs+=("${doc}")
+                  ;;
+                pgrx)
+                  # One crate built once per major is several artifacts
+                  # with several digests (#492), so each owes its own
+                  # inventory. --artifact names the DOCUMENT apart from
+                  # the package; the purl keeps the crate's real
+                  # identity, because advisory matching runs on what the
+                  # artifact is, not what the tarball is called
+                  # (stele#126).
+                  [[ -n ${PG_MAJORS// /} ]] || {
+                    emsg="sbom-artifacts declares pgrx:${name} but pg-majors is empty — the majors are what"
+                    emsg+=" say how many artifacts ship, and an inventory of no majors describes nothing"
+                    echo "::error::${emsg}"
+                    exit 1
+                  }
+                  for major in ${PG_MAJORS//,/ }; do
+                    doc="dist/sbom-pgrx-${name}-pg${major}-${VERSION}.spdx.json"
+                    stele derive sbom --cargo-package "${name}" --tree . \
+                      --features "pg${major}" --no-default-features \
+                      --artifact "${name}-pg${major}" \
+                      --created "${created}" --out "${doc}"
+                    docs+=("${doc}")
+                  done
                   ;;
                 *)
-                  echo "::error::sbom-artifacts entry '${entry}' is not cargo:<package> or npm:<dir>"
+                  emsg="sbom-artifacts entry '${entry}' is not cargo:<package>, npm:<dir> or pgrx:<package>"
+                  echo "::error::${emsg}"
                   exit 1
                   ;;
               esac
-              docs+=("${doc}")
             done
             union=$(
               IFS=','
