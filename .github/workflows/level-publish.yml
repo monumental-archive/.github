@@ -59,14 +59,16 @@ jobs:
           if git fetch --depth 1 origin levels 2> /dev/null; then
             git --work-tree levels checkout FETCH_HEAD -- . 2> /dev/null || true
           fi
-
       - name: Measure every repository and track
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
-          [[ -n ${repos} ]] || { echo "::error::the org listing is empty — a walk over nothing publishes nothing"; exit 1; }
+          [[ -n ${repos} ]] || {
+            echo "::error::the org listing is empty — a walk over nothing publishes nothing"
+            exit 1
+          }
           investigate=0
           while read -r repo; do
             [[ -n ${repo} ]] || continue
@@ -95,7 +97,6 @@ jobs:
             done
           done <<< "${repos}"
           echo "investigate=${investigate}" >> "${GITHUB_ENV}"
-
       - name: Publish to the levels branch
         env:
           GH_TOKEN: ${{ github.token }}
