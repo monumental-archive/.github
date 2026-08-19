@@ -115,3 +115,4 @@ jobs:
             echo "::error::one or more cells sealed CANNOT_JUDGE — investigate; good reports were not overwritten"
             exit 1
           fi
+...
