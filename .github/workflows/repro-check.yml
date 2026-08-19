@@ -158,6 +158,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      contents: read # the verdict runs from the caller tree and the canon belt
       issues: write # a broken reproducibility claim must page
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
