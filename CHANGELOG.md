@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.44.2](https://github.com/monumental-archive/.github/compare/v1.44.1...v1.44.2) - 2026-08-19
+
+### Fixed
+
+- treat a track a repo does not do as absent, not broken ([#555](https://github.com/monumental-archive/.github/pull/555))
+- compare only the artifacts a rebuild can produce ([#559](https://github.com/monumental-archive/.github/pull/559))
+
 ## [1.44.1](https://github.com/monumental-archive/.github/compare/v1.44.0...v1.44.1) - 2026-08-19
 
 ### Fixed
