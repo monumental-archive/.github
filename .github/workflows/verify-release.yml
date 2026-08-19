@@ -499,18 +499,12 @@ jobs:
           # (mise/stele.sh); the `go run <module>@<commit>` bootstrap it
           # replaces is retired (stele#7). The verdict job therefore
           # needs no Go toolchain to render a verdict.
-          root=$(mktemp)
-          # No pipeline: under pipefail, head closing the pipe after one
-          # line kills gh with SIGPIPE and the step dies at 141.
-          gh attestation trusted-root > "${root}.all"
-          head -1 "${root}.all" > "${root}"
-          [[ -s ${root} ]] || {
-            echo "::error::empty trusted root from gh"
-            exit 1
-          }
+          # Naming no --trusted-root resolves one through TUF from the
+          # anchor pinned in the binary (stele#85, #516) — the
+          # SIGPIPE-prone `gh attestation trusted-root | head -1` dance
+          # and its head-is-the-root guess are retired.
           stele emit vsa \
             --policy "${CANON_PATH}/slsa/verify-policy.json" \
-            --trusted-root "${root}" \
             --repo "${GITHUB_REPOSITORY}" \
             --tag "v${UNTRUSTED_VERSION}" \
             --subjects "${WORKDIR}/verified.sha256" \
@@ -529,6 +523,10 @@ jobs:
             exit 1
           fi
           echo "src=${src}" >> "${GITHUB_OUTPUT}"
+          # The resolved policy pin, for the enrichment predicate's
+          # policy descriptor — the same {uri, digest} the VSA carries,
+          # stated once here rather than re-resolved there.
+          echo "policy-sha=${policy_sha}" >> "${GITHUB_OUTPUT}"
 
           # The subjects the verdict covers are exactly the manifest this
           # run just re-proved — the same lines, no re-derivation.
@@ -571,6 +569,7 @@ jobs:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_BASE_MAJORS: ${{ inputs.base-majors }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
+          POLICY_SHA: ${{ steps.verdict.outputs.policy-sha }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
           SRC: ${{ steps.verdict.outputs.src }}
         run: |
@@ -667,16 +666,28 @@ jobs:
             fi
           done
 
+          # The neutral shape (#517): every identified thing is an
+          # in-toto ResourceDescriptor, so one digest rule judges all of
+          # them. `canon` was an org name inside a format that must be
+          # neutral and a bare ref moves — the policy travels as
+          # {uri, digest}, the same descriptor the VSA signed in this
+          # run already carries; `sourceRevision.repository` was a
+          # second spelling of `uri`.
+          if [[ ! ${POLICY_SHA} =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the verdict step stated no resolved policy pin — enrichment cannot name its policy"
+            exit 1
+          fi
           jq -cn \
             --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
             --arg repo "https://github.com/${GITHUB_REPOSITORY}" \
             --arg src "${src}" \
-            --arg canon "${POLICY_REF}" \
+            --arg puri "https://github.com/monumental-archive/.github/blob/${POLICY_SHA}/slsa/verify-policy.json" \
+            --arg psha "${POLICY_SHA}" \
             --argjson deps "${deps}" \
             '{
               resourceUri: $resource,
-              sourceRevision: {repository: $repo, digest: {gitCommit: $src}},
-              canon: {ref: $canon},
+              sourceRevision: {uri: $repo, digest: {gitCommit: $src}},
+              policy: {uri: $puri, digest: {gitCommit: $psha}},
               resolvedDependencies: $deps
             }' > "${RUNNER_TEMP}/enrichment-predicate.json"
           depcount=$(jq length <<< "${deps}")
@@ -686,6 +697,6 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ${{ runner.temp }}/vsa-subjects.sha256
-          predicate-type: https://monumental-archive.github.io/attestations/build-enrichment/v1
+          predicate-type: https://monumental-archive.github.io/attestations/build-enrichment/v2
           predicate-path: ${{ runner.temp }}/enrichment-predicate.json
 ...

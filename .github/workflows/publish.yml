@@ -224,6 +224,22 @@ name: publish
         required: false
         type: string
         default: ""
+      sbom-artifacts:
+        description: >
+          Comma-separated `cargo:<package>` (or `npm:<dir>`) entries
+          naming the artifacts this release ships, for repositories whose
+          binaries cannot speak for the whole release (#492). Each entry
+          derives its OWN inventory — the artifact's resolved closure,
+          scoped to the package that ships it — and the release SBOM
+          becomes the AGGREGATED view of those documents, never a second
+          independent derivation. Declared, never detected: which
+          packages ship is a fact only the caller holds, and a tree scan
+          answers a different question (what COULD have been linked).
+          Required when any class outside go-binary/oci-image is
+          declared; refused otherwise unused.
+        required: false
+        type: string
+        default: ""
       mint-doi:
         description: >
           Mint a Zenodo version DOI after the release publishes. Needs the
@@ -330,16 +346,37 @@ jobs:
           version: 2026.8.4
           cache: false
 
+      # `stele derive facts` (stele#40): the whole fact set from a NAMED
+      # checkout — the instant comes from the released commit, the
+      # licence from the manifest with the forge's detection as the
+      # fallback, the source URL held against the manifest's own
+      # repository field, and hygiene enforced at construction. The
+      # ~260 lines of bash and the vendored SPDX id list this replaces
+      # are deleted; the licence grammar is somebody else's spec, and
+      # stele adopts it as a library instead of reimplementing it.
       - name: Resolve and validate the facts
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          ARCHETYPE: versioned
           VERSION: ${{ needs.guard.outputs.version }}
           IMAGE_TITLE: ${{ inputs.image-title }}
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
-        run: .org-canon/release/resolve-oci-facts.sh
-
+        run: |
+          set -euo pipefail
+          command -v stele > /dev/null || {
+            echo "::error::stele is not on the runner — it is a belt tool"
+            exit 1
+          }
+          out=$(stele derive facts \
+            --archetype versioned \
+            --version "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --server-url "${GITHUB_SERVER_URL}" \
+            --git-dir . \
+            --title "${IMAGE_TITLE}" \
+            --description "${IMAGE_DESCRIPTION}")
+          grep -E '^(facts|epoch)=' <<< "${out}" >> "${GITHUB_OUTPUT}"
+          grep -Ev '^(facts|epoch)=' <<< "${out}" || true
   # The release SBOM, class-shaped: binary-derived for go-binary (read
   # out of the shipped bytes by stele, docs in stele's binary-sbom.md),
   # lock-derived where a Cargo.lock or go.mod is tracked, GitHub's
@@ -415,19 +452,134 @@ jobs:
             exit 1
           fi
           echo "BINARIES_DIR=${PWD}/shipped" >> "${GITHUB_ENV}"
-      - name: Derive the SBOM from what this repository ships
+      # Per-artifact inventories, aggregated into the release view
+      # (#492, stele#40): the unit of description is the artifact,
+      # because the artifact is the unit of consumption. go-binary
+      # inventories are read out of the shipped bytes; every other
+      # shipped artifact is DECLARED via sbom-artifacts and derives its
+      # own closure — the resolved lock scoped to the package that
+      # ships it, never the workspace that built it. The release SBOM
+      # is then FOLDED from the per-artifact documents (one derivation,
+      # N views), so it cannot disagree with them; the tree-scan that
+      # used to derive it independently is deleted with
+      # generate-sbom.sh. A repository with no manifest and no binaries
+      # (the canon: its dependencies are actions) exports the forge's
+      # dependency graph, the one inventory that exists for it.
+      - name: Derive the per-artifact inventories and the release view
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
-          # What the release ships decides whether the binaries can speak
-          # for it: a binary describes itself, so a release carrying
-          # artifacts no binary embeds falls back to the tree scan that
-          # covers them all. The guard job already refused anything
-          # outside the class vocabulary.
           CLASSES: ${{ inputs.classes }}
-        run: .org-canon/release/generate-sbom.sh
-
+          SBOM_ARTIFACTS: ${{ inputs.sbom-artifacts }}
+        run: |
+          set -euo pipefail
+          command -v stele > /dev/null || {
+            echo "::error::stele is not on the runner — it is a belt tool"
+            exit 1
+          }
+          base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
+          base="${base#.}"
+          mkdir -p dist
+          out="dist/${base}-${VERSION}.spdx.json"
+          # The released commit's own instant — every derived document
+          # is dated by the artifact, never by the run describing it.
+          epoch=$(git log -1 --pretty=%ct)
+          created=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)
+          echo "SBOM_CREATED=${created}" >> "${GITHUB_ENV}"
+          binaries_speak=1
+          for class in ${CLASSES//,/ }; do
+            case "${class}" in
+              go-binary | oci-image) ;;
+              *) binaries_speak=0 ;;
+            esac
+          done
+          if [[ -n ${BINARIES_DIR:-} && ${binaries_speak} -eq 1 ]]; then
+            listing=$(find "${BINARIES_DIR}" -type f | sort)
+            bins=()
+            while IFS= read -r b; do
+              [[ -n ${b} ]] && bins+=("${b}")
+            done <<< "${listing}"
+            ((${#bins[@]} > 0)) || {
+              echo "::error::BINARIES_DIR holds no binaries — an inventory of nothing asserts nothing"
+              exit 1
+            }
+            stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
+          elif [[ -n ${SBOM_ARTIFACTS// /} ]]; then
+            docs=()
+            for entry in ${SBOM_ARTIFACTS//,/ }; do
+              kind="${entry%%:*}"
+              name="${entry#*:}"
+              case "${kind}" in
+                cargo)
+                  doc="dist/sbom-cargo-${name}-${VERSION}.spdx.json"
+                  stele derive sbom --cargo-package "${name}" --tree . \
+                    --created "${created}" --out "${doc}"
+                  ;;
+                npm)
+                  doc="dist/sbom-npm-$(basename "${name}")-${VERSION}.spdx.json"
+                  stele derive sbom --npm-dir "${name}" \
+                    --created "${created}" --out "${doc}"
+                  ;;
+                *)
+                  echo "::error::sbom-artifacts entry '${entry}' is not cargo:<package> or npm:<dir>"
+                  exit 1
+                  ;;
+              esac
+              docs+=("${doc}")
+            done
+            union=$(
+              IFS=','
+              echo "${docs[*]}"
+            )
+            stele derive sbom --union "${union}" --union-name "${base}@v${VERSION}" \
+              --created "${created}" --out "${out}"
+          elif tracked=$(git ls-files 'Cargo.lock' '*/Cargo.lock' 'go.mod' '*/go.mod') && [[ -n ${tracked} ]]; then
+            emsg="this release tracks a manifest but declares no sbom-artifacts — the per-release inventory is"
+            emsg+=" aggregated from per-artifact documents (#492), and which packages ship is a fact only the"
+            emsg+=" caller holds; declare sbom-artifacts (cargo:<package> per shipped artifact)"
+            echo "::error::${emsg}"
+            exit 1
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" --jq '.sbom' > "${out}"
+            purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
+            bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
+              | .referenceLocator | select(test("@") | not)] | length' "${out}")
+            echo "::notice::dependency-graph SBOM: ${bare} of ${purls} PURLs versionless"
+          fi
+          [[ -s ${out} ]] || {
+            echo "::error::SBOM derivation produced nothing"
+            exit 1
+          }
+          packages=$(jq '.packages | length' "${out}")
+          echo "::notice::release inventory: ${packages} packages (${out##*/})"
+      # The declared contract, attested at the tag (stele#40, from
+      # #109): which classes shipped, the verdict layout, and the
+      # machinery version obligations are derived from — written by
+      # `stele emit manifest` through the same definition the assert
+      # reader decodes, and proven readable on its own rendered bytes
+      # before anything ships it.
+      - name: Write the evidence manifest
+        env:
+          CLASSES: ${{ inputs.classes }}
+        run: |
+          set -euo pipefail
+          # The machinery version is the canon tree's own, read from the
+          # version mirror the pinned tree carries — the caller's `uses:`
+          # ref is a commit SHA (the tag-pin rule), so the version is a
+          # fact about the TREE, not about the ref's spelling. For the
+          # canon's own releases the mirror already carries the version
+          # being cut, so one read covers both cases.
+          machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
+          [[ -n ${machinery} ]] || {
+            echo "::error::the pinned canon tree's CITATION.cff names no version — the manifest cannot state its machinery"
+            exit 1
+          }
+          stele emit manifest \
+            --classes "${CLASSES}" \
+            --store-vsa true \
+            --machinery-version "${machinery}" \
+            --out dist/evidence-manifest.json
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
         # the SBOM just generated, so a release is born covered — and a
@@ -442,8 +594,38 @@ jobs:
         env:
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
-        run: .org-canon/release/derive-vex.sh
-
+        run: |
+          set -euo pipefail
+          command -v stele > /dev/null || {
+            echo "::error::stele is not on the runner — it is a belt tool"
+            exit 1
+          }
+          base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
+          base="${base#.}"
+          release_purl="pkg:github/${GITHUB_REPOSITORY}@v${VERSION}"
+          # Subjects: the release view under the release's own purl,
+          # plus every per-artifact inventory under its artifact's name
+          # — a statement then names the artifact a consumer actually
+          # holds, not just the release that contained it (#492).
+          subjects="${release_purl}=dist/${base}-${VERSION}.spdx.json"
+          for doc in dist/sbom-*-"${VERSION}".spdx.json; do
+            [[ -e ${doc} ]] || continue
+            artifact=$(jq -r '.name' "${doc}")
+            subjects="${subjects},${artifact}=${doc}"
+          done
+          out="dist/${base}-${VERSION}.vex.openvex.json"
+          stele derive vex \
+            --subjects "${subjects}" \
+            --vex .org-canon/security/vex \
+            --base-ecosystems "debian,alpine,ubuntu,rocky,redhat,rpm" \
+            --author monumental-archive \
+            --id "https://openvex.dev/docs/public/vex-${GITHUB_REPOSITORY//\//-}-v${VERSION}-derived" \
+            --released "${SBOM_CREATED}" \
+            --out "${out}"
+          if [[ -f ${out} ]]; then
+            statements=$(jq '.statements | length' "${out}")
+            echo "::notice::derived VEX shipped (${statements} statement(s))"
+          fi
       - name: Triage the tagged lock against the advisory feed
         # Dependency L2's own wording — triage all known vulnerabilities
         # BEFORE release — enforced against the release rather than the

@@ -261,7 +261,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.12.0"
+"github:monumental-archive/stele" = "0.13.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
@@ -1745,17 +1745,9 @@ run = '''
 command -v gh > /dev/null || { echo "audit:attestations: gh missing" >&2; exit 1; }
 command -v stele > /dev/null || { echo "audit:attestations: stele missing from the belt" >&2; exit 1; }
 [[ -f slsa/assert-policy.json ]] || { echo "audit:attestations: slsa/assert-policy.json missing" >&2; exit 1; }
-root=$(mktemp)
-# No pipeline: under pipefail, head closing the pipe after one line
-# kills gh with SIGPIPE and the task dies at 141 (the audit:source-vsa
-# comment, same two-step form).
-gh attestation trusted-root > "${root}.all"
-head -1 "${root}.all" > "${root}"
-[[ -s "${root}" ]] || { echo "audit:attestations: empty trusted root from gh" >&2; exit 1; }
 stele assert evidence \
   --org monumental-archive \
   --policy slsa/assert-policy.json \
-  --trusted-root "${root}" \
   --depth full \
   --verify-policy slsa/verify-policy.json
 '''
@@ -1804,14 +1796,6 @@ command -v gh > /dev/null || { echo "audit:source-vsa: gh missing" >&2; exit 1; 
 command -v stele > /dev/null || { echo "audit:source-vsa: stele missing from the belt" >&2; exit 1; }
 policy="slsa/verify-policy.json"
 [[ -f "${policy}" ]] || { echo "audit:source-vsa: ${policy} missing" >&2; exit 1; }
-root=$(mktemp)
-# No pipeline: under pipefail, head closing the pipe after one line
-# kills gh with SIGPIPE and the task dies at 141. verify-release.yml
-# carries the same two-step form and the same comment; this copy was
-# missed, and it exits 141 every run it is asked to do anything.
-gh attestation trusted-root > "${root}.all"
-head -1 "${root}.all" > "${root}"
-[[ -s "${root}" ]] || { echo "audit:source-vsa: empty trusted root from gh" >&2; exit 1; }
 repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
 failed=""
 checked=0
@@ -1845,7 +1829,7 @@ while read -r repo; do
     continue
   fi
   if stele verify level \
-    --policy "${policy}" --trusted-root "${root}" \
+    --policy "${policy}" \
     --repo "monumental-archive/${repo}" --git-dir "${dir}" --ref refs/sa/main; then
     checked=$((checked + 1))
   else
@@ -2466,30 +2450,6 @@ fi
 echo "audit:org-pins: ${total} canon references across ${seen_repos} repos, all at ${latest}"
 '''
 
-[tasks."audit:spdx-list"]
-description = "Warn when the vendored SPDX id list lags the published license list (scheduled, not the gate)"
-dir = "{{cwd}}"
-# The licence validation in release/resolve-oci-facts.sh checks ids
-# against release/spdx-license-data.json — vendored so the release path
-# stays offline and deterministic. Staleness fails closed (a brand-new id
-# is refused until the vendored list is refreshed), and this audit is what
-# turns that quiet lag into a red scheduled run. Guarded on the data file,
-# so it skips clean everywhere but canon. Network- and time-dependent, so
-# audit:*, never the gate.
-run = '''
-[[ -f release/spdx-license-data.json ]] || { echo "audit:spdx-list: no vendored list, skipped"; exit 0; }
-have=$(jq -r .version release/spdx-license-data.json)
-latest=$(git ls-remote --tags https://github.com/spdx/license-list-data "v[0-9]*" \
-  | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V | tail -1)
-[[ -n "${latest}" ]] || { echo "audit:spdx-list: upstream unreachable, skipped"; exit 0; }
-if [[ "${have}" != "${latest}" ]]; then
-  echo "audit:spdx-list: vendored ${have}, upstream ${latest}" >&2
-  echo "  regenerate release/spdx-license-data.json per its own regenerate field" >&2
-  exit 1
-fi
-echo "audit:spdx-list: vendored list is current (${have})"
-'''
-
 [tasks."audit:biome-rules"]
 description = "Warn when biome ships nursery rules the org config does not name (scheduled, not the gate)"
 dir = "{{cwd}}"
@@ -2985,19 +2945,76 @@ echo "fix:input-forwarding: review the inserted expressions; rerun mise run lint
 '''
 
 [tasks."lint:source-attest"]
-description = "Dry-run the source emitter end-to-end short of signing (#236)"
+description = "Dry-run the claims derivation against recorded enforcement (#236, stele#40)"
 dir = "{{cwd}}"
-# The emitter's execution layer must be exercisable without burning a
-# lab run: the real claims/chain/emit/append scripts run against
-# recorded rule fixtures and a file-protocol stand-in repo, signing
-# skipped, push --dry-run, statements shape-checked against the spec.
-# Deterministic — no network — so it belongs in the gate. Only the
-# canon carries the emitter; everywhere else this skips clean.
+# The claims stage is `stele derive claims` over the control table the
+# policy declares; this exercises exactly that — the real engine, the
+# real committed policy, recorded rule snapshots, no network — so it
+# belongs in the gate. Three scenarios, the #240 outcomes by name:
+# the full fixture derives the complete claim set; a BLIND tag read
+# (rulesets visible to nobody) refuses loudly; a LAPSED ruleset
+# (readable, content no longer matching) drops exactly its own
+# property and nothing else. The degraded fixture sets are DERIVED
+# from the one canonical snapshot — jq transforms, never second
+# copies that drift. Only the canon carries the emitter; everywhere
+# else this skips clean.
 run = '''
-[ -x .github/actions/source-attest/dryrun.sh ] || {
-  echo "lint:source-attest: no source-attest action, skipped"; exit 0
+fixtures=".github/actions/source-attest/testdata"
+[ -d "${fixtures}/monumental-archive/.github/rules" ] || {
+  echo "lint:source-attest: no source-attest fixtures, skipped"; exit 0
 }
-.github/actions/source-attest/dryrun.sh
+command -v stele > /dev/null || { echo "lint:source-attest: stele missing from the belt" >&2; exit 1; }
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+derive() { # snapshot-dir out-file
+  stele derive claims --policy slsa/verify-policy.json \
+    --repo monumental-archive/.github --branch main \
+    --canon-root . --canon-digest "$(git rev-parse HEAD)" \
+    --snapshot "${1}" --out "${2}"
+}
+# Full snapshot: every declared property derives.
+derive "${fixtures}" "${tmp}/claims.json"
+jq -e '[.controls[].property] | sort == [
+  "ORG_SOURCE_CAPABILITY_BOUNDARY", "ORG_SOURCE_DCO", "ORG_SOURCE_GATED",
+  "ORG_SOURCE_HISTORY_PROTECTED", "ORG_SOURCE_RELEASE_TAG_MINTED",
+  "ORG_SOURCE_REVIEWED_THREADS", "ORG_SOURCE_SIGNED", "ORG_SOURCE_TAG_IMMUTABLE"]' \
+  "${tmp}/claims.json" > /dev/null || {
+  echo "lint:source-attest: the full snapshot did not derive the complete claim set" >&2; exit 1
+}
+# Blind: no tag ruleset visible — a property is declared against that
+# scope, so an empty read is a credential proving its own incapability.
+rules="${fixtures}/monumental-archive/.github/rules"
+blind="${tmp}/blind/monumental-archive/.github/rules"
+mkdir -p "${blind}/branches" "${blind}/rulesets"
+cp "${rules}/branches/main.json" "${blind}/branches/"
+cp "${rules}"/rulesets/*.json "${blind}/rulesets/"
+jq '[.[] | select(.target != "tag")]' "${rules}/rulesets.json" > "${blind}/rulesets.json"
+if out=$(derive "${tmp}/blind" "${tmp}/blind.json" 2>&1); then
+  echo "lint:source-attest: a blind tag read was accepted — the blindness guard is gone (#240)" >&2; exit 1
+fi
+grep -q "blind read" <<< "${out}" || {
+  echo "lint:source-attest: the blind read refused without its named error (#240)" >&2; exit 1
+}
+# Lapsed: a bypass granted on the all-tags ruleset — readable, content
+# no longer matching, so exactly ORG_SOURCE_TAG_IMMUTABLE drops.
+lapsed="${tmp}/lapsed/monumental-archive/.github/rules"
+mkdir -p "${lapsed}/branches" "${lapsed}/rulesets"
+cp "${rules}/branches/main.json" "${lapsed}/branches/"
+cp "${rules}/rulesets.json" "${lapsed}/rulesets.json"
+for f in "${rules}"/rulesets/*.json; do
+  jq 'if .conditions.ref_name.include == ["~ALL"]
+      then .bypass_actors += [{actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always"}]
+      else . end' "${f}" > "${lapsed}/rulesets/$(basename "${f}")"
+done
+derive "${tmp}/lapsed" "${tmp}/lapsed.json" || {
+  echo "lint:source-attest: a readable-but-lapsed ruleset failed the run — a lapse must under-claim (#240)" >&2
+  exit 1
+}
+jq -e '[.controls[].property] | (index("ORG_SOURCE_TAG_IMMUTABLE") == null)
+  and (index("ORG_SOURCE_RELEASE_TAG_MINTED") != null)' "${tmp}/lapsed.json" > /dev/null || {
+  echo "lint:source-attest: a lapsed tag ruleset did not drop exactly its own property (#240)" >&2; exit 1
+}
+echo "lint:source-attest: ok — full set derives, blindness refuses, a lapse under-claims"
 '''
 
 [tasks."lint:actions-allowed"]
@@ -3621,17 +3638,9 @@ run = '''
 [[ -d security ]] || { echo "audit:release-tags: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:release-tags: gh missing" >&2; exit 1; }
 command -v stele > /dev/null || { echo "audit:release-tags: stele missing from the belt" >&2; exit 1; }
-root=$(mktemp)
-# No pipeline: under pipefail, head closing the pipe after one line
-# kills gh with SIGPIPE and the task dies at 141 (the audit:source-vsa
-# comment, same two-step form; stele#85 retires the dance).
-gh attestation trusted-root > "${root}.all"
-head -1 "${root}.all" > "${root}"
-[[ -s "${root}" ]] || { echo "audit:release-tags: empty trusted root from gh" >&2; exit 1; }
 stele assert tags \
   --org monumental-archive \
   --policy slsa/assert-policy.json \
-  --trusted-root "${root}"
 '''
 
 [tasks."audit:citations"]

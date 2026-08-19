@@ -151,6 +151,16 @@ would implement this table rather than invent names; the emitter has
 existed since 2026-08-12 (#207), and all eight properties emit live in
 every chain link.
 
+**The executable table now lives in the policy** — the `source.claims`
+section of `slsa/verify-policy.json` declares each property's scope and
+matcher, `stele derive claims` derives the claims from it against the
+live rules API, and the loader cross-checks it against
+`requiredProperties` so a property a branch requires but the table
+cannot derive refuses at load. The rows below are the org narrative —
+what each property means and which convention enforces it; the matchers
+in the policy are the mechanism, and disagreement between the two is a
+policy bug, not a documentation one.
+
 | Property | Enforcement | Meaning |
 | --- | --- | --- |
 | `ORG_SOURCE_GATED` | `org-default-branch`: required check `ci / ci`, bound to the GitHub Actions app (integration 15368), strict policy | every revision passed the org gate — the full `lint:*` belt plus `test`/`build` — at the revision itself, not a stale merge base |

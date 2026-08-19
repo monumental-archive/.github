@@ -124,53 +124,17 @@ runs:
     # jdx/mise-action is on the org's Actions allowlist where
     # sigstore/cosign-installer is not. The signing tool arriving through
     # the same gate as every other tool is the point, not a workaround.
-    # Claims stage: read enforcement under the caller's read token —
-    # this step deliberately declares no GH_TOKEN of its own, so the
-    # only token it can ever use is the one the calling job's
-    # environment hands it, and claims.sh refuses to run without one.
-    - name: Read enforcement and derive the claims
-      if: ${{ inputs.stage == 'claims' }}
-      id: claims
-      shell: bash
-      run: |
-        set -euo pipefail
-        "${GITHUB_ACTION_PATH}/claims.sh"
-        claims_b64=$(base64 -w0 "${SA_WORK}/claims.json")
-        echo "claims=${claims_b64}" >> "${GITHUB_OUTPUT}"
-    # Attest stage: the claims payload crosses the job boundary as
-    # data and is shape-checked before anything downstream reads it.
-    - name: Receive and validate the claims payload
-      if: ${{ inputs.stage == 'attest' }}
-      shell: bash
-      env:
-        SA_CLAIMS_B64: ${{ inputs.claims }}
-      run: |
-        set -euo pipefail
-        [[ -n ${SA_CLAIMS_B64} ]] || {
-          emsg="stage 'attest' requires the claims payload from the claims job — wire this input to"
-          emsg+=" needs.claims.outputs.claims (#240)"
-          echo "::error::${emsg}"
-          exit 1
-        }
-        base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"
-        jq -e '(.rulesReadAt | type == "string")
-          and (.rulesetsUpdatedAt | type == "array" and all(.[]; type == "number"))
-          and (.controls | type == "array")
-          and all(.controls[]; (.property | type == "string") and has("evidence"))' \
-          "${SA_WORK}/claims.json" > /dev/null || {
-          echo "::error::the claims payload does not have the shape claims.sh emits — refusing to sign it"
-          exit 1
-        }
     - name: Install mise
-      if: ${{ inputs.stage == 'attest' }}
       uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
       with:
         version: 2026.8.4
         cache: false
         install: false
 
+    # Both stages install through the belt: the claims stage needs the
+    # engine to derive, the attest stage needs it to sign — one install
+    # path, so the two stages cannot run different binaries.
     - name: Install the belt's cosign and stele
-      if: ${{ inputs.stage == 'attest' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -204,43 +168,77 @@ runs:
         # scope widening that surfaced this (#82).
         dirname "$(mise which cosign)" >> "${GITHUB_PATH}"
         dirname "$(mise which stele)" >> "${GITHUB_PATH}"
-
-    # The scratch clone is orchestration: which refs exist locally is
-    # this action's fetch, and stele refuses to network on its own. The
-    # committer identity is part of the storage contract (the author of
-    # every chain-link note lands in a world-readable ledger
-    # permanently) and stele reads it from the clone's local config,
-    # deliberately — a runner has no global identity at all.
-    - name: Prepare the scratch clone
-      if: ${{ inputs.stage == 'attest' }}
+    # Claims stage: `stele derive claims` reads the enforcement state
+    # against the control table the POLICY declares (stele#40) — the
+    # frozen mapping lives in slsa/verify-policy.json's source.claims,
+    # one document beside the properties that require it, and claims.sh
+    # is deleted. The step declares no GH_TOKEN of its own, so the only
+    # token stele can ever read is the one the calling job's
+    # environment hands it, and the engine refuses a blind read by
+    # construction: a claim is only constructible from a read that
+    # succeeded and saw something, so failure, blindness and lapse
+    # stay three different outcomes (#240).
+    - name: Read enforcement and derive the claims
+      if: ${{ inputs.stage == 'claims' }}
+      id: claims
       shell: bash
       run: |
         set -euo pipefail
-        scratch="${SA_WORK}/repo"
-        git init -q "${scratch}"
-        git -C "${scratch}" config user.name "source-attest"
-        git -C "${scratch}" config user.email "source-attest@monumental-archive.github.io"
-        # SA_REMOTE_URL is a test seam: a file-protocol stand-in repo
-        # replaces the network, nothing else changes.
-        git -C "${scratch}" remote add origin "${SA_REMOTE_URL:-https://github.com/${GITHUB_REPOSITORY}.git}"
-        # Public repos, anonymous fetch; stele's push authenticates.
-        git -C "${scratch}" fetch -q origin "+refs/heads/main:refs/heads/main" \
-          "+refs/notes/commits:refs/notes/commits" || {
-          echo "::error::could not fetch main and refs/notes/commits — the notes ref must exist (seeded org-wide, #202)"
+        command -v stele > /dev/null || {
+          echo "::error::stele is not on the runner — it is a belt tool"
           exit 1
         }
+        stele derive claims \
+          --policy "${SA_CANON_ROOT}/slsa/verify-policy.json" \
+          --repo "${GITHUB_REPOSITORY}" \
+          --branch main \
+          --canon-root "${SA_CANON_ROOT}" \
+          --canon-digest "${SA_CANON_REF}" \
+          --out "${SA_WORK}/claims.json"
+        claims_b64=$(base64 -w0 "${SA_WORK}/claims.json")
+        echo "claims=${claims_b64}" >> "${GITHUB_OUTPUT}"
+    # Attest stage: the claims payload crosses the job boundary as
+    # data. No shape check here — the payload is ONE type on both
+    # sides (stele's claims.Payload), validated by the engine before
+    # anything signs; a jq copy of that contract beside it would be a
+    # second definition of the same shape, and the two would drift.
+    - name: Receive the claims payload
+      if: ${{ inputs.stage == 'attest' }}
+      shell: bash
+      env:
+        SA_CLAIMS_B64: ${{ inputs.claims }}
+      run: |
+        set -euo pipefail
+        [[ -n ${SA_CLAIMS_B64} ]] || {
+          emsg="stage 'attest' requires the claims payload from the claims job — wire this input to"
+          emsg+=" needs.claims.outputs.claims (#240)"
+          echo "::error::${emsg}"
+          exit 1
+        }
+        base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"
     # The emitter is `stele emit chain` (stele#21): preflight (the
     # #236 prove-the-push-first contract, preflight.sh folded into the
     # engine at stele#66 and deleted here), the reserved-identity
     # guard, discovery, the heal walk, link assembly, signing via the
     # belt's cosign, the stranger's-inputs self-verify, and the
-    # compare-and-swap ledger append — one engine, the same digest function the verify walk
-    # proves against (.github#434 made unrepresentable). stele runs
-    # from the pinned module through the checksummed proxy, the same
-    # bootstrap as audit:source-vsa, until the go-binary release class
-    # lands (stele#7). The trusted root is fetched from the endpoint
-    # `gh attestation verify` trusts; stele takes it as an input
-    # deliberately (the trust boundary is the caller's to state).
+    # compare-and-swap ledger append — one engine, the same digest
+    # function the verify walk proves against (.github#434 made
+    # unrepresentable).
+    #
+    # --clone moved the scratch-tree preparation into the engine too
+    # (stele#40): the refs a run fetches are derived from the policy
+    # that names them, so a hand-written refspec cannot restate the
+    # ledger's ref and drift from it — the emitter founding a new chain
+    # because the fetch never brought the old one down is the failure
+    # this retires. The committer identity is part of the storage
+    # contract (the author of every chain-link note lands in a
+    # world-readable ledger permanently), so it is declared, never
+    # inherited from a runner that has no identity at all. SA_REMOTE_URL
+    # stays the test seam: a file-protocol stand-in replaces the
+    # network, nothing else changes. Naming no --trusted-root resolves
+    # one through TUF from the anchor pinned in the binary (stele#85,
+    # #516) — the SIGPIPE-prone `gh attestation trusted-root | head -1`
+    # dance and its head-is-the-root guess are retired.
     - name: Emit the chain links and push the ledger
       if: ${{ inputs.stage == 'attest' }}
       shell: bash
@@ -258,22 +256,14 @@ runs:
           echo "::error::stele is not on the runner — it is a belt tool"
           exit 1
         }
-        root=$(mktemp)
-        # No pipeline: under pipefail, head closing the pipe after one
-        # line kills gh with SIGPIPE and the step dies at 141.
-        gh attestation trusted-root > "${root}.all"
-        head -1 "${root}.all" > "${root}"
-        [[ -s ${root} ]] || {
-          echo "::error::empty trusted root from gh"
-          exit 1
-        }
         genesis=()
         [[ ${SA_GENESIS} == "true" ]] && genesis=(--genesis)
         stele emit chain \
           --policy "${SA_CANON_ROOT}/slsa/verify-policy.json" \
-          --trusted-root "${root}" \
           --repo "${GITHUB_REPOSITORY}" \
           --git-dir "${SA_WORK}/repo" \
+          --clone "${SA_REMOTE_URL:-https://github.com/${GITHUB_REPOSITORY}.git}" \
+          --committer "source-attest <source-attest@monumental-archive.github.io>" \
           --rev "${GITHUB_SHA}" \
           --claims "${SA_WORK}/claims.json" \
           --actor "${SA_ACTOR}" \

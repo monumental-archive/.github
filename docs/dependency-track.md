@@ -12,7 +12,7 @@ the target and the declined doors were decided there and in #121/#122.
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`derive-vex.sh` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.20.0, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
+| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.20.0, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
 
@@ -125,7 +125,7 @@ per-CVE, so the pointer saves the hunt. And decisions matching no
 current finding are listed as **candidates for retirement**: coverage is
 derived, so a withdrawn advisory or a dropped/bumped dependency needs no
 document edit anywhere — the decision simply stops matching on every
-surface (audit join, `derive-vex.sh`, `vex-attest.yml` subjects) and
+surface (audit join, `stele derive vex`, `vex-attest.yml` subjects) and
 sits inert in `security/vex/` as history. Deleting it is housekeeping,
 prompted by this list, never a correctness requirement.
 
@@ -159,7 +159,7 @@ claim lands in the attestation store the moment the statement merges
 (`vex-attest.yml`, one statement per merge, enforced — a decision is
 reviewed like a release, its affected-release subjects derived from
 published SBOMs), and every *subsequent* release of each affected
-repository ships its own derived document (`release/derive-vex.sh`:
+repository ships its own derived document (`stele derive vex`:
 product = the release purl, the decided `package@version` as
 subcomponent — standard concrete-product OpenVEX for consuming tools,
 generated as a pure function of the reviewed decision and the release
@@ -204,7 +204,7 @@ MUST triage all known vulnerabilities and either remediate the
 vulnerability, or not remediate in the given release."*
 
 This is now a property of the release path itself, on two feeds. The
-`sbom` job in `publish.yml` runs `release/derive-vex.sh` after
+`sbom` job in `publish.yml` runs `stele derive vex` after
 generating the SBOM, which scans it with osv-scanner and **fails the
 release** if any gate-class advisory in it has no decision for its
 exact `package@version` — and the `commit-point` barrier turns that
