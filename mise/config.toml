@@ -67,7 +67,14 @@ disable_backends = ["asdf", "ubi"]
 # assumed — the belt is identified by a file only the belt has, so a
 # machine that named it something else still works. Empty when the belt
 # did not arrive, which `lint:belt-available` already fails on.
-ORG_BELT_DIR = "{{ exec(command='d=\"${MISE_GLOBAL_CONFIG_FILE:-}\"; [ -n \"$d\" ] || for f in \"${XDG_CONFIG_HOME:-$HOME/.config}\"/mise/conf.d/*.toml; do t=$(readlink \"$f\" 2>/dev/null || echo \"$f\"); [ -f \"$(dirname \"$t\")/clippy.toml\" ] && d=\"$t\" && break; done; [ -n \"$d\" ] && cd \"$(dirname \"$d\")\" && pwd') }}"
+#
+# "Empty" must mean exit 0 with no output, not exit 1: mise runs this under
+# `sh -o errexit`, and a template that exits nonzero aborts EVERY mise
+# invocation of this config — including Renovate's `mise lock`, which runs
+# in a container with neither carrier present (#569, measured on #567). The
+# not-found branches are therefore `if`-guarded, never bare AND-lists whose
+# failure errexit promotes to a crash.
+ORG_BELT_DIR = "{{ exec(command='d=\"${MISE_GLOBAL_CONFIG_FILE:-}\"; if [ -z \"$d\" ]; then for f in \"${XDG_CONFIG_HOME:-$HOME/.config}\"/mise/conf.d/*.toml; do t=$(readlink \"$f\" 2>/dev/null || echo \"$f\"); if [ -f \"$(dirname \"$t\")/clippy.toml\" ]; then d=\"$t\"; break; fi; done; fi; if [ -n \"$d\" ]; then cd \"$(dirname \"$d\")\" && pwd; fi') }}"
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's

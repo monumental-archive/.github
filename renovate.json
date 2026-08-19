@@ -15,7 +15,7 @@
       "extractVersion": "^typescript/v(?<version>.+)$"
     },
     {
-      "description": "rumdl tags its releases `vX.Y.Z` and the belt pin is bare. Without this, Renovate writes the raw tag into the pin (`rumdl = \"v0.2.53\"`, PR #470) — and a v-prefixed pin also defeats the mise manager's automatic mise.lock refresh, so the bump arrives lockless and MISE_LOCKED fails the gate on a version the lock has never heard of.",
+      "description": "rumdl tags its releases `vX.Y.Z` and the belt pin is bare. Without this, Renovate writes the raw tag into the pin (`rumdl = \"v0.2.53\"`, PR #470). The mise.lock refresh is Renovate running `mise lock` in its own container — measured on #567, where the belt's ORG_BELT_DIR template crashed it (#569); a bump that arrives lockless fails MISE_LOCKED on a version the lock has never heard of.",
       "matchManagers": ["mise"],
       "matchDepNames": ["rumdl"],
       "extractVersion": "^v(?<version>.+)$"
