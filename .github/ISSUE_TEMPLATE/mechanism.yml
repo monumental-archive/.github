@@ -22,7 +22,11 @@ body:
         once one has been made. State contracts and invariants, not flag
         spellings — surface details belong to the build, and a spec
         written before the code should not be trusted for them. Until a
-        decision is made, list the options and what each costs.
+        decision is made, list the options and what each costs. State
+        the standing mechanics the build must obey (jsonx-only
+        decoding, findings through the sealed Report, table tests per
+        guard branch, the failing-writer pattern) rather than betting
+        on them being known.
     validations:
       required: true
   - type: textarea
@@ -48,8 +52,12 @@ body:
     attributes:
       label: Sequencing
       description: >-
-        Pairings, shared files, batch points, what this blocks or
-        exposes. Say "independent" explicitly when true.
+        Dependencies and lanes, stated so a cold session cannot
+        start too early: what this is BLOCKED BY (hard — do not start
+        before it merges), what it should be BUILT WITH in one session,
+        what it blocks or exposes, and which files it shares with other
+        open work. Say "independent" explicitly when true — absence
+        reads as unknown, not as none.
     validations:
       required: false
 ...
