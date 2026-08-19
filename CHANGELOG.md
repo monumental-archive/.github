@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.43.0](https://github.com/monumental-archive/.github/compare/v1.42.0...v1.43.0) - 2026-08-19
+
+### Added
+
+- build legs emit the inventory plans their artifacts owe ([#541](https://github.com/monumental-archive/.github/pull/541))
+
+### Dependencies
+
+- update dependency jdx/mise to v2026.8.5 ([#538](https://github.com/monumental-archive/.github/pull/538))
+
 ## [1.42.0](https://github.com/monumental-archive/.github/compare/v1.41.0...v1.42.0) - 2026-08-19
 
 ### Added
