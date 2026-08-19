@@ -553,6 +553,48 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Emit the inventory plan (what this cell built, from its own inputs)
+        # The artifact-to-package mapping exists with certainty exactly
+        # once — here: this cell built exactly this crate with exactly
+        # `--features pg${PG}` into exactly this tarball, because those
+        # are its own build inputs (#537). The plan is that mapping as
+        # data; the sbom job derives the closure from it on the prove
+        # leg. --artifact names the DOCUMENT apart from the package —
+        # the purl keeps the crate's real identity, because advisory
+        # matching runs on what the artifact IS, not what the tarball is
+        # called (stele#126). Both arches of a major state the same
+        # plan; the sbom job collapses identical entries and refuses
+        # divergent ones. Not on the repro leg: the comparator proves
+        # bytes, not inventories.
+        if: ${{ !inputs.repro }}
+        env:
+          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        run: |
+          set -euo pipefail
+          pkg=$(python3 -c '
+          import tomllib
+          with open("'"${UNTRUSTED_CRATE_DIR}"'/Cargo.toml", "rb") as f:
+              t = tomllib.load(f)
+          print(t["package"]["name"])
+          ')
+          mkdir -p plan
+          jq -n --arg pkg "${pkg}" --arg pg "${PG}" \
+            '[{doc: ("sbom-pgrx-" + $pkg + "-pg" + $pg),
+               cargoPackage: $pkg,
+               features: [("pg" + $pg)],
+               noDefaultFeatures: true,
+               artifact: ($pkg + "-pg" + $pg)}]' \
+            > plan/plan.json
+          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.cargoPackage)"' plan/plan.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.repro }}
+        with:
+          name: sbom-plan-extension-pg${{ matrix.pg }}-${{ matrix.arch }}
+          path: plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
   collect:
     name: Collect and refuse a partial set
     needs:

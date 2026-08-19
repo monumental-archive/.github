@@ -332,6 +332,33 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Emit the inventory plan (which packages this artifact ships)
+        # The artifact-to-package mapping exists with certainty exactly
+        # once — here, where the archive was just staged from cargo's own
+        # metadata (#537). The plan is the mapping as data: the sbom job
+        # derives each package's closure from it on the prove leg, so no
+        # caller ever declares (and drifts) a second copy of what this
+        # job knows. Every leg states the same mapping; the sbom job
+        # collapses identical entries and refuses divergent ones. Not on
+        # the repro leg: the comparator proves bytes, not inventories.
+        if: ${{ !inputs.repro }}
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --no-deps --format-version 1)
+          mkdir -p plan
+          jq '[.packages[] | select([.targets[].kind[]] | index("bin")) | .name]
+              | unique | map({doc: ("sbom-cargo-" + .), cargoPackage: .})' \
+            <<< "${meta}" > plan/plan.json
+          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.cargoPackage)"' plan/plan.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.repro }}
+        with:
+          name: sbom-plan-binary-${{ matrix.target }}
+          path: plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
   # Outputs of a MATRIX job overwrite one another, so the legs hand their
   # archives over as artifacts and this job — the only place with all of
   # them — refuses a missing leg and emits the one subject manifest.

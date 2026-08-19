@@ -224,25 +224,6 @@ name: publish
         required: false
         type: string
         default: ""
-      sbom-artifacts:
-        description: >
-          Comma-separated `cargo:<package>`, `npm:<dir>` or
-          `pgrx:<package>` entries naming the artifacts this release
-          ships, for repositories whose binaries cannot speak for the
-          whole release (#492). Each entry derives its OWN inventory —
-          the artifact's resolved closure, scoped to the package that
-          ships it — and the release SBOM becomes the AGGREGATED view of
-          those documents, never a second independent derivation. A
-          `pgrx:` entry expands over `pg-majors` into one document per
-          major: one crate built once per major ships several artifacts
-          with several digests, so each owes its own. Declared, never
-          detected: which packages ship is a fact only the caller holds,
-          and a tree scan answers a different question (what COULD have
-          been linked). Required when any class outside
-          go-binary/oci-image is declared; refused otherwise unused.
-        required: false
-        type: string
-        default: ""
       mint-doi:
         description: >
           Mint a Zenodo version DOI after the release publishes. Needs the
@@ -395,14 +376,23 @@ jobs:
     needs:
       - guard
       - build-go
+      - build-binary
+      - build-wasm
+      - build-extension
     # The go-binary class reads its SBOM out of the shipped binaries
-    # (stele#46), so this job sits downstream of that build; for every
-    # other class the edge is vacuous — a skipped build-go admits, a
-    # failed one refuses. The barrier still holds: this stays a prove
+    # (stele#46), and the manifest-tracking classes hand this job their
+    # inventory plans (#537) — the artifact-to-package mapping each
+    # build leg holds as its own inputs, consumed at the only moment it
+    # is certain. So this job sits downstream of those builds; for a
+    # class not requested the edge is vacuous — a skipped build admits,
+    # a failed one refuses. The barrier still holds: this stays a prove
     # job, and the commit point refuses every publish on its failure.
     if: >-
       ${{ !cancelled() && needs.guard.result == 'success' &&
-          (needs.build-go.result == 'success' || needs.build-go.result == 'skipped') }}
+          (needs.build-go.result == 'success' || needs.build-go.result == 'skipped') &&
+          (needs.build-binary.result == 'success' || needs.build-binary.result == 'skipped') &&
+          (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+          (needs.build-extension.result == 'success' || needs.build-extension.result == 'skipped') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -455,26 +445,42 @@ jobs:
             exit 1
           fi
           echo "BINARIES_DIR=${PWD}/shipped" >> "${GITHUB_ENV}"
+      - name: Fetch the inventory plans the build legs emitted
+        if: >-
+          ${{ contains(inputs.classes, 'rust-binary') ||
+              contains(inputs.classes, 'wasm-npm') ||
+              contains(inputs.classes, 'pgrx-extension') }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: sbom-plan-*
+          path: plans
+
       # Per-artifact inventories, aggregated into the release view
       # (#492, stele#40): the unit of description is the artifact,
       # because the artifact is the unit of consumption. go-binary
       # inventories are read out of the shipped bytes; every other
-      # shipped artifact is DECLARED via sbom-artifacts and derives its
-      # own closure — the resolved lock scoped to the package that
-      # ships it, never the workspace that built it. The release SBOM
-      # is then FOLDED from the per-artifact documents (one derivation,
-      # N views), so it cannot disagree with them; the tree-scan that
-      # used to derive it independently is deleted with
-      # generate-sbom.sh. A repository with no manifest and no binaries
-      # (the canon: its dependencies are actions) exports the forge's
-      # dependency graph, the one inventory that exists for it.
+      # shipped artifact's closure is derived from the PLAN its build
+      # leg emitted (#537) — the artifact-to-package mapping exists with
+      # certainty exactly once, in the job that produced the artifact,
+      # because those are its own build inputs. No declaration exists to
+      # drift: the mapping is consumed at the only moment it is certain
+      # and never restated. Derivation stays HERE, on the prove leg that
+      # runs belt tooling and never caller code — the plan is data, and
+      # it is validated before a byte of it reaches a command line. The
+      # release SBOM is then FOLDED from the per-artifact documents (one
+      # derivation, N views), so it cannot disagree with them; the
+      # tree-scan that used to derive it independently is deleted with
+      # generate-sbom.sh, and the sbom-artifacts declaration this
+      # replaces is deleted with #537. A repository with no manifest and
+      # no binaries (the canon: its dependencies are actions) exports
+      # the forge's dependency graph, the one inventory that exists for
+      # it.
       - name: Derive the per-artifact inventories and the release view
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
           CLASSES: ${{ inputs.classes }}
-          SBOM_ARTIFACTS: ${{ inputs.sbom-artifacts }}
           PG_MAJORS: ${{ inputs.pg-majors }}
         run: |
           set -euo pipefail
@@ -509,54 +515,84 @@ jobs:
               exit 1
             }
             stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
-          elif [[ -n ${SBOM_ARTIFACTS// /} ]]; then
-            docs=()
-            for entry in ${SBOM_ARTIFACTS//,/ }; do
-              kind="${entry%%:*}"
-              name="${entry#*:}"
-              case "${kind}" in
-                cargo)
-                  doc="dist/sbom-cargo-${name}-${VERSION}.spdx.json"
-                  stele derive sbom --cargo-package "${name}" --tree . \
-                    --created "${created}" --out "${doc}"
-                  docs+=("${doc}")
-                  ;;
-                npm)
-                  doc="dist/sbom-npm-$(basename "${name}")-${VERSION}.spdx.json"
-                  stele derive sbom --npm-dir "${name}" \
-                    --created "${created}" --out "${doc}"
-                  docs+=("${doc}")
-                  ;;
-                pgrx)
-                  # One crate built once per major is several artifacts
-                  # with several digests (#492), so each owes its own
-                  # inventory. --artifact names the DOCUMENT apart from
-                  # the package; the purl keeps the crate's real
-                  # identity, because advisory matching runs on what the
-                  # artifact is, not what the tarball is called
-                  # (stele#126).
-                  [[ -n ${PG_MAJORS// /} ]] || {
-                    emsg="sbom-artifacts declares pgrx:${name} but pg-majors is empty — the majors are what"
-                    emsg+=" say how many artifacts ship, and an inventory of no majors describes nothing"
-                    echo "::error::${emsg}"
-                    exit 1
-                  }
-                  for major in ${PG_MAJORS//,/ }; do
-                    doc="dist/sbom-pgrx-${name}-pg${major}-${VERSION}.spdx.json"
-                    stele derive sbom --cargo-package "${name}" --tree . \
-                      --features "pg${major}" --no-default-features \
-                      --artifact "${name}-pg${major}" \
-                      --created "${created}" --out "${doc}"
-                    docs+=("${doc}")
-                  done
-                  ;;
-                *)
-                  emsg="sbom-artifacts entry '${entry}' is not cargo:<package>, npm:<dir> or pgrx:<package>"
-                  echo "::error::${emsg}"
-                  exit 1
-                  ;;
+          elif compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
+            # Structural completeness, never a prefix hope (#531 gave
+            # way to this at #537): every manifest-tracking class that
+            # was requested must have planned. A class that built
+            # artifacts but emitted no plan is a red release, not a
+            # thinner SBOM.
+            for class in ${CLASSES//,/ }; do
+              case "${class}" in
+                rust-binary) want="plans/sbom-plan-binary-*" ;;
+                wasm-npm) want="plans/sbom-plan-wasm" ;;
+                pgrx-extension) want="plans/sbom-plan-extension-*" ;;
+                *) continue ;;
               esac
+              compgen -G "${want}" > /dev/null || {
+                emsg="class ${class} shipped artifacts but no build leg emitted its inventory plan — an"
+                emsg+=" artifact with no inventory must not publish (#537)"
+                echo "::error::${emsg}"
+                exit 1
+              }
             done
+            # The plans originate on build legs that execute caller
+            # code, so they are data: shape-checked and charset-guarded
+            # here before any field reaches a command line. Matrix legs
+            # restate the same mapping; identical entries collapse, and
+            # one document claimed by two DIFFERENT entries is evidence
+            # of legs disagreeing about what was built — refused, never
+            # last-writer-wins.
+            plan=$(jq -s '
+              add
+              | map(if (.doc? // "" | test("^sbom-[a-z]+-[A-Za-z0-9_][A-Za-z0-9_.-]*$")) | not
+                    then error("malformed doc name in an inventory plan") else . end)
+              | map(if (.cargoPackage? // "" | test("^[A-Za-z0-9_][A-Za-z0-9_-]*$")) | not
+                    then error("malformed cargoPackage in an inventory plan") else . end)
+              | map(if ([(.features // [])[] | test("^[A-Za-z0-9_+.-]+$")] | all | not)
+                    then error("malformed features in an inventory plan") else . end)
+              | map(if ((.artifact // "x") | test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$") | not)
+                    then error("malformed artifact in an inventory plan") else . end)
+              | unique
+            ' plans/sbom-plan-*/plan.json)
+            dupes=$(jq -r '[.[].doc] | length - (unique | length)' <<< "${plan}")
+            [[ ${dupes} == "0" ]] || {
+              emsg="two build legs disagree on one inventory document — the same doc name must carry the"
+              emsg+=" same plan on every leg"
+              echo "::error::${emsg}"
+              exit 1
+            }
+            docs=()
+            count=$(jq 'length' <<< "${plan}")
+            for ((i = 0; i < count; i++)); do
+              entry=$(jq -c ".[${i}]" <<< "${plan}")
+              doc="dist/$(jq -r '.doc' <<< "${entry}")-${VERSION}.spdx.json"
+              flags=(--cargo-package "$(jq -r '.cargoPackage' <<< "${entry}")" --tree .)
+              feats=$(jq -r '(.features // []) | join(",")' <<< "${entry}")
+              if [[ -n ${feats} ]]; then flags+=(--features "${feats}"); fi
+              if [[ $(jq -r '.noDefaultFeatures // false' <<< "${entry}") == "true" ]]; then
+                flags+=(--no-default-features)
+              fi
+              artifact=$(jq -r '.artifact // ""' <<< "${entry}")
+              if [[ -n ${artifact} ]]; then flags+=(--artifact "${artifact}"); fi
+              stele derive sbom "${flags[@]}" --created "${created}" --out "${doc}"
+              docs+=("${doc}")
+            done
+            # One crate built once per major is several artifacts with
+            # several digests (#492), so each owes its own inventory —
+            # and the set is structural now: every requested major must
+            # appear in some pgrx document, or nothing publishes.
+            if [[ ${CLASSES} == *pgrx-extension* ]]; then
+              for major in ${PG_MAJORS//,/ }; do
+                found=0
+                for d in "${docs[@]}"; do
+                  if [[ ${d} == dist/sbom-pgrx-*-pg${major}-"${VERSION}".spdx.json ]]; then found=1; fi
+                done
+                ((found == 1)) || {
+                  echo "::error::pg-majors names ${major} but no pgrx inventory covers it"
+                  exit 1
+                }
+              done
+            fi
             union=$(
               IFS=','
               echo "${docs[*]}"
@@ -564,9 +600,10 @@ jobs:
             stele derive sbom --union "${union}" --union-name "${base}@v${VERSION}" \
               --created "${created}" --out "${out}"
           elif tracked=$(git ls-files 'Cargo.lock' '*/Cargo.lock' 'go.mod' '*/go.mod') && [[ -n ${tracked} ]]; then
-            emsg="this release tracks a manifest but declares no sbom-artifacts — the per-release inventory is"
-            emsg+=" aggregated from per-artifact documents (#492), and which packages ship is a fact only the"
-            emsg+=" caller holds; declare sbom-artifacts (cargo:<package> per shipped artifact)"
+            emsg="this release tracks a manifest but no build leg emitted an inventory plan — the per-release"
+            emsg+=" inventory is aggregated from per-artifact documents (#492), and the artifact-to-package"
+            emsg+=" mapping lives in the build leg that holds it (#537); release through a class whose build"
+            emsg+=" emits plans"
             echo "::error::${emsg}"
             exit 1
           else
