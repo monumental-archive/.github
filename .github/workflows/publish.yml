@@ -571,7 +571,8 @@ jobs:
               flags=(--cargo-package "${pkg}" --tree .)
               feats=$(jq -r '(.features // []) | join(",")' <<< "${entry}")
               if [[ -n ${feats} ]]; then flags+=(--features "${feats}"); fi
-              if [[ $(jq -r '.noDefaultFeatures // false' <<< "${entry}") == "true" ]]; then
+              ndf=$(jq -r '.noDefaultFeatures // false' <<< "${entry}")
+              if [[ ${ndf} == "true" ]]; then
                 flags+=(--no-default-features)
               fi
               artifact=$(jq -r '.artifact // ""' <<< "${entry}")
