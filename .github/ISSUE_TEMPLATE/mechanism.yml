@@ -1,0 +1,55 @@
+---
+name: mechanism change
+description: a defect or design decision, written to be picked up cold by any session
+body:
+  - type: textarea
+    id: defect
+    attributes:
+      label: Defect
+      description: >-
+        What is wrong, with measured evidence. Quote real output. State
+        where it is live and where it is not. If a guard fired correctly
+        on a wrong assumption, say so — the guard and the assumption are
+        judged separately.
+    validations:
+      required: true
+  - type: textarea
+    id: decided-build
+    attributes:
+      label: Decided build
+      description: >-
+        The correct-by-construction shape, recorded as a dated decision
+        once one has been made. State contracts and invariants, not flag
+        spellings — surface details belong to the build, and a spec
+        written before the code should not be trusted for them. Until a
+        decision is made, list the options and what each costs.
+    validations:
+      required: true
+  - type: textarea
+    id: canon-consequence
+    attributes:
+      label: Canon consequence
+      description: >-
+        Outcomes in the canon once a release carries this: what dies,
+        what is declared, what converts. Removal conditions, never
+        command lines. Remember the pin rule — the stele pin bump lands
+        before any policy edit that needs it. Write "none" when true.
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: Observable states, on both sides, that mean closed.
+    validations:
+      required: true
+  - type: textarea
+    id: sequencing
+    attributes:
+      label: Sequencing
+      description: >-
+        Pairings, shared files, batch points, what this blocks or
+        exposes. Say "independent" explicitly when true.
+    validations:
+      required: false
+...
