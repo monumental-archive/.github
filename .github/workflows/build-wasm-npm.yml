@@ -222,6 +222,12 @@ jobs:
         # prove leg, so no caller ever declares (and drifts) a second
         # copy of this job's own crate-dir input. Not on the repro leg:
         # the comparator proves bytes, not inventories.
+        # The document is sbom-npm-<package>: the prefix names what the
+        # artifact IS (the wasm-npm class's owed assetPrefixes in
+        # slsa/assert-policy.json), while the closure inside stays cargo
+        # — what it is MADE OF. The pgrx cells obey the same rule
+        # (sbom-pgrx-* documents over cargo closures); the two halves
+        # disagreeing silently is the #544 defect.
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
@@ -234,7 +240,7 @@ jobs:
           jq --arg mp "${mp}" \
             '[.packages[] | select(.manifest_path == $mp) | .name]
              | if length != 1 then error("crate-dir resolves to \(length) packages") else . end
-             | map({doc: ("sbom-cargo-" + .), cargoPackage: .})' \
+             | map({doc: ("sbom-npm-" + .), cargoPackage: .})' \
             <<< "${meta}" > plan/plan.json
           jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.cargoPackage)"' plan/plan.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

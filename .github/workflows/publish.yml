@@ -335,9 +335,8 @@ jobs:
       # licence from the manifest with the forge's detection as the
       # fallback, the source URL held against the manifest's own
       # repository field, and hygiene enforced at construction. The
-      # ~260 lines of bash and the vendored SPDX id list this replaces
-      # are deleted; the licence grammar is somebody else's spec, and
-      # stele adopts it as a library instead of reimplementing it.
+      # licence grammar is somebody else's spec, and stele adopts it
+      # as a library instead of reimplementing it.
       - name: Resolve and validate the facts
         id: resolve
         env:
@@ -468,10 +467,8 @@ jobs:
       # runs belt tooling and never caller code — the plan is data, and
       # it is validated before a byte of it reaches a command line. The
       # release SBOM is then FOLDED from the per-artifact documents (one
-      # derivation, N views), so it cannot disagree with them; the
-      # tree-scan that used to derive it independently is deleted with
-      # generate-sbom.sh, and the sbom-artifacts declaration this
-      # replaces is deleted with #537. A repository with no manifest and
+      # derivation, N views), so it cannot disagree with them. A
+      # repository with no manifest and
       # no binaries (the canon: its dependencies are actions) exports
       # the forge's dependency graph, the one inventory that exists for
       # it.
@@ -516,9 +513,9 @@ jobs:
             }
             stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
           elif compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
-            # Structural completeness, never a prefix hope (#531 gave
-            # way to this at #537): every manifest-tracking class that
-            # was requested must have planned. A class that built
+            # Structural completeness, never a prefix hope: every
+            # manifest-tracking class that was requested must have
+            # planned. A class that built
             # artifacts but emitted no plan is a red release, not a
             # thinner SBOM.
             for class in ${CLASSES//,/ }; do
