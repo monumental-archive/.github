@@ -22,7 +22,7 @@ name: level-publish
     - cron: 30 5 * * 1
   workflow_dispatch: {}
 permissions:
-  contents: write # pushes the published judgments to the levels branch
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}
@@ -32,6 +32,8 @@ jobs:
   publish:
     name: measure and publish
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write # pushes the published judgments to the levels branch
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
