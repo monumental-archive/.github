@@ -148,7 +148,7 @@ taplo = "0.10.0"
 shfmt = "3.13.1"
 # rumdl over markdownlint-cli2: same rule family, aqua-backed instead of
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
-rumdl = "0.2.54"
+rumdl = "0.2.55"
 lychee = "0.24.2"
 # JSON on the command line, used by eleven belt tasks — nine audit tasks
 # parsing GitHub API responses, fix:tracks, and lint:bestpractices in the
