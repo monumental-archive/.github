@@ -195,8 +195,57 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          printf '%s\n' "${PUBLISHED}" > published.sha256
           printf '%s\n' "${REBUILT}" > rebuilt.sha256
+          # The released manifest lists build artifacts AND the evidence
+          # documents published beside them, and the two carry opposite
+          # obligations: an artifact must rebuild bit-for-bit, while a
+          # signature bundle CANNOT — Sigstore embeds a fresh timestamp
+          # and certificate on every signing, which is a security
+          # property and not a defect. The repro population is therefore
+          # the artifacts alone; feeding the manifest whole reports every
+          # evidence document as absent from the rebuild.
+          #
+          # The evidence names come from the policy that already declares
+          # them, so this reads the org's one vocabulary rather than
+          # inventing a second. INTERIM (stele#156): the engine takes
+          # this classification, so every manifest walk shares one
+          # definition of a build subject. Delete this block and pass the
+          # manifest whole the day that lands.
+          rules=$(jq -r '
+            ([.evidence.umbrellaBundle, .evidence.manifestAsset, .evidence.checksums]
+             + [.evidence.classes[] | (.bundles // [])[], (.legacyVsaBundles // [])[]]
+             | unique | map("exact:" + .))
+            + ([.evidence.sbomSuffix] + (.evidence.evidenceSuffixes // [])
+               | unique | map("suffix:" + .))
+            + ([.evidence.classes[] | (.assetPrefixes // [])[].prefix]
+               | unique | map("prefix:" + .))
+            | .[]' .org-canon/slsa/assert-policy.json)
+          : > published.sha256
+          while IFS= read -r line; do
+            [[ -n ${line} ]] || continue
+            name="${line##*  }"
+            keep=1
+            while IFS= read -r rule; do
+              case "${rule}" in
+                exact:*) [[ ${name} == "${rule#exact:}" ]] && keep=0 ;;
+                suffix:*) [[ ${name} == *"${rule#suffix:}" ]] && keep=0 ;;
+                prefix:*) [[ ${name} == "${rule#prefix:}"* ]] && keep=0 ;;
+                *)
+                  # The policy grew a vocabulary this filter cannot
+                  # read. Keeping the asset would silently put an
+                  # evidence document into the repro population, which
+                  # is the defect this block exists to prevent.
+                  echo "::error::unrecognised evidence rule '${rule}' — the policy declares a kind this check cannot classify"
+                  exit 1
+                  ;;
+              esac
+            done <<< "${rules}"
+            if ((keep == 1)); then printf '%s\n' "${line}" >> published.sha256; fi
+          done <<< "${PUBLISHED}"
+          [[ -s published.sha256 ]] || {
+            echo "::error::${TAG} published no build artifacts — a repro claim over nothing is not a proof"
+            exit 1
+          }
           stele verify repro \
             --repo "${GITHUB_REPOSITORY}" --tag "${TAG}" \
             --subjects published.sha256 --rebuilt rebuilt.sha256
