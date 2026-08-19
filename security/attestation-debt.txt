@@ -41,3 +41,16 @@ release-lab@v0.14.2(attestations-vsa-npm.intoto.jsonl)
 .github@v1.43.0(vsa:deep)
 stele@v0.14.0(vsa:deep)
 stele@v0.15.0(vsa:deep)
+
+# The release decision assumes one SBOM per release; per-artifact
+# inventories publish N (stele#158). release-lab v0.25.3 shipped nine,
+# so the decision is ambiguous and the verdict refuses — at publish
+# time, which left the release without a VSA, and again on the deep
+# walk, which cannot verify it either. The burn derivation excuses the
+# vsa: findings by itself; this line covers the deep one, which it
+# does not reach.
+#
+# Remove when stele#158 lands and a release cut after it verifies
+# clean. Every full-width release burns identically until then, so a
+# new line is owed per release, not a widened exception.
+release-lab@v0.25.3(deep)
