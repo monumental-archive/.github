@@ -565,8 +565,10 @@ jobs:
             count=$(jq 'length' <<< "${plan}")
             for ((i = 0; i < count; i++)); do
               entry=$(jq -c ".[${i}]" <<< "${plan}")
-              doc="dist/$(jq -r '.doc' <<< "${entry}")-${VERSION}.spdx.json"
-              flags=(--cargo-package "$(jq -r '.cargoPackage' <<< "${entry}")" --tree .)
+              doc_name=$(jq -r '.doc' <<< "${entry}")
+              doc="dist/${doc_name}-${VERSION}.spdx.json"
+              pkg=$(jq -r '.cargoPackage' <<< "${entry}")
+              flags=(--cargo-package "${pkg}" --tree .)
               feats=$(jq -r '(.features // []) | join(",")' <<< "${entry}")
               if [[ -n ${feats} ]]; then flags+=(--features "${feats}"); fi
               if [[ $(jq -r '.noDefaultFeatures // false' <<< "${entry}") == "true" ]]; then
