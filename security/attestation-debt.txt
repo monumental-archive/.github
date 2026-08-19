@@ -30,3 +30,14 @@ release-lab@v0.14.2(attestations-vsa-npm.intoto.jsonl)
 .github@v1.3.0(sbom)
 .github@v1.2.2(sbom)
 .github@v1.2.1(sbom)
+
+# Enrichment predicates that pinned the policy by gitCommit alone;
+# stele's judge (stele#111) requires the document's sha256 — the
+# emitter conforms from the release after v1.43.0, and these shipped
+# predicates are immutable. Remove nothing: shipped history is
+# recorded, not re-signed.
+.github@v1.41.0(vsa:deep)
+.github@v1.42.0(vsa:deep)
+.github@v1.43.0(vsa:deep)
+stele@v0.14.0(vsa:deep)
+stele@v0.15.0(vsa:deep)

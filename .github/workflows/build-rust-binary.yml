@@ -347,9 +347,10 @@ jobs:
           meta=$(cargo metadata --no-deps --format-version 1)
           mkdir -p plan
           jq '[.packages[] | select([.targets[].kind[]] | index("bin")) | .name]
-              | unique | map({doc: ("sbom-cargo-" + .), cargoPackage: .})' \
+              | unique | map({class: "rust-binary", doc: ("sbom-cargo-" + .),
+                              params: {cargoPackage: .}})' \
             <<< "${meta}" > plan/plan.json
-          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.cargoPackage)"' plan/plan.json
+          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:

@@ -47,9 +47,9 @@ re-score by hand whenever a change lands that a criterion would notice.
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
 | `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
-| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 — **Unmet for the canon**, see the wall below | canonical `coverage:check` ratchet in the gate, which is gated on `.coverage-floor && Cargo.toml` and so skips a bash repo clean |
+| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 (stele holds ≥ 90 today); for the canon, answered by relocation — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust and Go legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
-| `version_semver` / `version_tags` | Met | git-cliff + App-minted `v*` tags |
+| `version_semver` / `version_tags` | Met | `stele derive version` + App-minted `v*` tags |
 | `version_tags_signed` | Met | the tag objects **are** signed — Sigstore keyless, by the release workflow. See the `no_user` trap below |
 | `governance`, `roles_responsibilities` | Met | [GOVERNANCE.md](../GOVERNANCE.md) — decision model, roles table, succession |
 | `test_policy_mandated`, `tests_documented_added` | Met | CONTRIBUTING.md, "Requirements for acceptable contributions" item 3 |
@@ -57,32 +57,28 @@ re-score by hand whenever a change lands that a criterion would notice.
 | `security_review`, `assurance_case` | Met | docs/release.md + slsa-reference.md are the written assurance case |
 | `installation_common`, `external_dependencies` | Met | mise-pinned toolchain; lockfiles everywhere |
 
-### The one wall that is not headcount
+### The coverage wall — came down by relocation (2026-08-19)
 
-Silver stands at 96% on two MUSTs, and **neither is a second maintainer**:
+Silver now stands on one remaining MUST:
 
 - `regression_tests_added50` — a measurement, not a tool. Every `fix:`
   commit in the window must be classified as "shipped the check that
   would have caught it" or not, and ≥ 50% must be yes. Free to close;
-  nobody has done the pass.
-- `test_statement_coverage80` — needs a number, and the number needs a
-  bash coverage tool. `kcov` and `bashcov` are both **404 in the aqua
-  registry**, so no belt-legal tool can measure the canon today.
+  nobody has done the pass. It was never tool-blocked.
 
-Note the escape hatch does **not** apply: the criterion is conditional on
-"if there is at least one FLOSS tool that can measure this in the
-selected language", and kcov and bashcov are FLOSS tools that measure
-bash. Aqua packaging is *our* constraint, not the criterion's, so N/A
-here would be a false claim.
-
-The wall is therefore the **language**, not a packaging decision. It
-comes down with #392 (decided 2026-08-15): the canon's bash moves to a
-Go tool in its own repo, `go test -cover` supplies the number, and the
-canon gains a `.coverage-floor` like any Rust repo — see #398 for the
-retirement of this section and the criteria it gates. Until then this
-row stays honestly Unmet. A bash test framework was considered as the
-separable half and **refused** (#364): it would neither produce a
-number — the criterion needs coverage, not tests — nor survive the port.
+`test_statement_coverage80` was the wall, and its history is kept in
+[tooling-verdicts.md](tooling-verdicts.md) (the kcov entry): the bash
+that no belt-legal tool could measure moved to stele (#392), where
+`go test -cover` supplies the number, the committed `.coverage-floor`
+ratchets it at ≥ 90, and the codecov shield renders it. What remains
+in the canon is orchestration — workflow YAML, one-line task bodies,
+one Python join — not a statement-coverage corpus. The honest
+per-repo answers: stele meets the 80 (and Gold's 90) with a measured
+number; the canon's criterion is answered by pointing at where its
+logic went, not by inventing a number over a workflow tree. A bash
+test framework was considered as the separable half and **refused**
+(#364): it would neither produce a number — the criterion needs
+coverage, not tests — nor survive the port.
 
 ## Gold — walled by headcount, deliberately not claimed
 
@@ -272,11 +268,14 @@ copying the canon's is wrong:
 - `build_repeatable` / `build_reproducible` — **Met for the canon**,
   and this is the trap that caught the first pass of these answers. See
   below.
-- `test_statement_coverage80` / `90`, `test_branch_coverage80` — Unmet
-  for the canon (no belt-legal bash coverage tool, see
-  [`tooling-verdicts.md`](tooling-verdicts.md)); winnable in Rust repos
-  via cargo-llvm-cov. **A consuming repo can legitimately outscore the
-  conformance root**, which should not read as a regression.
+- `test_statement_coverage80` / `90`, `test_branch_coverage80` — met
+  where the code is: stele's floor holds ≥ 90 and Rust repos measure
+  via cargo-llvm-cov. The canon's own answer changed with #392/#398
+  (see [`tooling-verdicts.md`](tooling-verdicts.md), the kcov entry):
+  its measurable logic moved to stele, and no number is invented over
+  the workflow tree that remains. **A consuming repo can legitimately
+  outscore the conformance root**, which should not read as a
+  regression.
 - `dynamic_analysis` — Met only where fuzzing actually runs.
 - Registry and DOI criteria follow the publish stub's `classes:`.
 

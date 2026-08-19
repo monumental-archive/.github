@@ -261,7 +261,7 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
-"github:monumental-archive/stele" = "0.14.0"
+"github:monumental-archive/stele" = "0.15.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
@@ -1758,91 +1758,26 @@ dir = "{{cwd}}"
 # The source track's coverage audit (#207): the emitter is per-push, so
 # a lapse leaves a hole in the chain rather than going red anywhere —
 # this is the cadence that finds the holes, the attestation-debt pattern
-# for evidence gaps. The audit enumerates the POPULATION, not the
-# enrolled set (#266): a repo with a main branch and no founded chain is
-# a FINDING unless security/source-attest-optout.txt names it with a
-# reason — an unactivated repo is otherwise silent by construction, the
-# SBOM gap in a different track. "Deliberate and lab-first" survives as
-# a written exception, never as silence.
-#
-# The verification itself is `stele verify level` (stele#3): the link
-# walk, hole detection, the ledger linkage walk and the computed source
-# level, one engine per repo, the same binary a stranger runs. The
-# ~170 lines of cosign/jq this body used to carry are deleted, and with
-# them the two defects the port's shadow found in them: the
-# newline-stripped ledger digest (.github#434 — the emitter's copy and
-# this walker's copy of "the" digest had drifted) and the v1-shaped
-# genesis test that ended the ledger walk at the first version-2 note
-# it met. Population enumeration and the opt-out contract stay here:
-# they are orchestration, not verification.
-#
-# stele arrives as a RELEASED BINARY, attested under the org signer and
-# verified fail-closed before it runs (mise/stele.sh, pinned by
-# mise/stele.version). That retires the `go run <module>@<commit>`
-# bootstrap stele#7 opened: the proxy's byte-identical modules were
-# honest integrity, but they proved nothing about who built the code,
-# and they required a Go toolchain everywhere the org verifies
-# anything. Now the belt needs no Go to check a chain, and the verifier
-# is checked the way the runbook tells strangers to check it. The
-# trusted root is
-# fetched from the same endpoint `gh attestation verify` trusts; stele
-# takes it as an input deliberately (the trust boundary is the
-# caller's to state, stele#19 tracks fetching it in-tool).
+# for evidence gaps. The whole walk is `stele assert chains` (stele#94):
+# the population is the org listing, never the enrolled set (#266); a
+# repository with no founded chain is a finding unless a declared
+# exception in slsa/assert-policy.json (chains.exceptions) names it
+# with a written reason — and an exception excuses absence alone,
+# structurally never a founded chain's defect. Each founded chain is
+# walked cloneless over the forge's API and verified end to end per
+# protected branch through the verify engine, the same binary a
+# stranger runs. A zero population is CANNOT_JUDGE, never PASS
+# (stele#69). The trusted root resolves through TUF from the anchor
+# pinned in the binary; the spec is stele's docs.
 run = '''
 [[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/verify-policy.json ]] || {
   echo "audit:source-vsa: not the canon, skipped"; exit 0
 }
-command -v gh > /dev/null || { echo "audit:source-vsa: gh missing" >&2; exit 1; }
 command -v stele > /dev/null || { echo "audit:source-vsa: stele missing from the belt" >&2; exit 1; }
-policy="slsa/verify-policy.json"
-[[ -f "${policy}" ]] || { echo "audit:source-vsa: ${policy} missing" >&2; exit 1; }
-repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
-failed=""
-checked=0
-optout="security/source-attest-optout.txt"
-opted_out() { # repo — listed with a reason in the opt-out file
-  [[ -f "${optout}" ]] && grep -qE "^${1}[[:space:]]" "${optout}"
-}
-while read -r repo; do
-  [[ -n "${repo}" ]] || continue
-  dir=$(mktemp -d)
-  git init -q "${dir}"
-  git -C "${dir}" remote add origin "https://github.com/monumental-archive/${repo}.git"
-  git -C "${dir}" fetch -q origin "+refs/heads/main:refs/sa/main" \
-    "+refs/notes/commits:refs/notes/commits" 2> /dev/null || {
-    if opted_out "${repo}"; then
-      echo "audit:source-vsa: ${repo}: no main or no notes ref, opted out (${optout})"
-    else
-      failed="${failed} ${repo}(no main or notes ref and not in ${optout})"
-    fi
-    continue
-  }
-  # An empty ledger is an unactivated repo, the population rule's case —
-  # judged here against the opt-out file, before the engine (which would
-  # refuse it as an evidence failure, the wrong verdict for absence).
-  if [[ -z "$(git -C "${dir}" notes list 2> /dev/null)" ]]; then
-    if opted_out "${repo}"; then
-      echo "audit:source-vsa: ${repo}: no chain founded, opted out (${optout})"
-    else
-      failed="${failed} ${repo}(no chain founded and not in ${optout} — an unactivated repo is silent, #266)"
-    fi
-    continue
-  fi
-  if stele verify level \
-    --policy "${policy}" \
-    --repo "monumental-archive/${repo}" --git-dir "${dir}" --ref refs/sa/main; then
-    checked=$((checked + 1))
-  else
-    failed="${failed} ${repo}(chain refused — the walk's own output names the defect)"
-  fi
-done <<< "${repos}"
-if [[ -n "${failed}" ]]; then
-  echo "audit:source-vsa: chain defects:${failed}" >&2
-  echo "  every revision since genesis carries a link; every link verifies" >&2
-  echo "  against the repo's pinned source-attest identity (docs/source-track.md)" >&2
-  exit 1
-fi
-echo "audit:source-vsa: ${checked} repo(s) verified end to end"
+stele assert chains \
+  --org monumental-archive \
+  --policy slsa/assert-policy.json \
+  --verify-policy slsa/verify-policy.json
 '''
 
 [tasks."audit:badges"]
@@ -1990,22 +1925,24 @@ while read -r repo; do
           note "${repo}: reuse compliant"
         fi
         ;;
-      https://img.shields.io/badge/SLSA-*)
-        # Self-asserted, so its source of truth is the canon's own
-        # table — one leg parameterised by track (#316 addendum B):
-        # the track and level are parsed OUT OF the shield and matched
-        # against that track's row, so a shield cannot outrun the
-        # table, and a level that ever moves reddens this cron.
-        tl="${url#https://img.shields.io/badge/SLSA-}"
-        tl="${tl%%-*}"
-        track="${tl%\%20*}"
-        level="${tl#*\%20}"
-        if [[ -z "${track}" || ! "${level}" =~ ^L[0-9]$ ]]; then
-          failed="${failed} ${repo}(slsa-shield: unparsable track/level in ${url})"
-        elif ! grep -qE "^\| ${track} \| \*\*${level}\*\* \| (\*\*)?Met" docs/direction.md; then
-          failed="${failed} ${repo}(slsa-shield: direction.md does not claim ${track} ${level} Met)"
+      https://img.shields.io/endpoint?url=*)
+        # A measured claim (#540, stele#5's endpoint addendum): the
+        # badge is a render of the judgment `stele level` published,
+        # so there is no value here to cross-check — the only thing
+        # this leg can honestly ask is whether the published document
+        # is live and shield-shaped. Level truth is the cron's
+        # (level-publish.yml); a stale or missing document is the
+        # finding, never a number disagreeing with a table.
+        doc="${url#https://img.shields.io/endpoint?url=}"
+        doc="${doc//%3A/:}"
+        doc="${doc//%2F//}"
+        sj=$(curl -sf "${doc}" || true)
+        if [[ -z "${sj}" ]]; then
+          failed="${failed} ${repo}(level-shield: published judgment ${doc} unreadable — the badge renders nothing)"
+        elif ! jq -e '.schemaVersion == 1 and .label and .message' > /dev/null 2>&1 <<< "${sj}"; then
+          failed="${failed} ${repo}(level-shield: ${doc} is not a shields endpoint document)"
         else
-          note "${repo}: SLSA ${track} ${level} matches direction.md"
+          note "${repo}: level shield $(jq -r '.label + " " + .message' <<< "${sj}") published and live"
         fi
         ;;
       https://github.com/monumental-archive/*/actions/workflows/*/badge.svg)

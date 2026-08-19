@@ -249,9 +249,9 @@ runs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        # The released, attested binary — no Go toolchain on the runner,
-        # and nothing runs until its attestation verifies against the
-        # org signer (mise/stele.sh, stele#7).
+        # The released, attested binary — no Go toolchain on the runner;
+        # the belt holds its per-platform checksums and attestation in
+        # mise/mise.lock (stele#7).
         command -v stele > /dev/null || {
           echo "::error::stele is not on the runner — it is a belt tool"
           exit 1

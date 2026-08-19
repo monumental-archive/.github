@@ -494,10 +494,9 @@ jobs:
           # predicate render — is `stele emit vsa` (stele#21): the
           # predicate is a method on the verdict type, so a PASSED
           # predicate cannot exist unearned (#208 as a compile-time
-          # fact). stele arrives as a released binary, attested under
-          # the org signer and verified fail-closed before it runs
-          # (mise/stele.sh); the `go run <module>@<commit>` bootstrap it
-          # replaces is retired (stele#7). The verdict job therefore
+          # fact). stele arrives as a released binary through the belt,
+          # per-platform checksums and attestation held in
+          # mise/mise.lock (stele#7). The verdict job therefore
           # needs no Go toolchain to render a verdict.
           # Naming no --trusted-root resolves one through TUF from the
           # anchor pinned in the binary (stele#85, #516) — the
@@ -525,8 +524,13 @@ jobs:
           echo "src=${src}" >> "${GITHUB_OUTPUT}"
           # The resolved policy pin, for the enrichment predicate's
           # policy descriptor — the same {uri, digest} the VSA carries,
-          # stated once here rather than re-resolved there.
+          # stated once here rather than re-resolved there. The sha256
+          # is of the policy document's bytes: stele's enrichment judge
+          # requires it (a consumer checks the bytes it fetched, not
+          # the forge's addressing), and the commit rides beside it.
           echo "policy-sha=${policy_sha}" >> "${GITHUB_OUTPUT}"
+          policy_file_sha=$(sha256sum "${CANON_PATH}/slsa/verify-policy.json" | cut -d" " -f1)
+          echo "policy-file-sha=${policy_file_sha}" >> "${GITHUB_OUTPUT}"
 
           # The subjects the verdict covers are exactly the manifest this
           # run just re-proved — the same lines, no re-derivation.
@@ -570,6 +574,7 @@ jobs:
           UNTRUSTED_BASE_MAJORS: ${{ inputs.base-majors }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           POLICY_SHA: ${{ steps.verdict.outputs.policy-sha }}
+          POLICY_FILE_SHA: ${{ steps.verdict.outputs.policy-file-sha }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
           SRC: ${{ steps.verdict.outputs.src }}
         run: |
@@ -677,17 +682,24 @@ jobs:
             echo "::error::the verdict step stated no resolved policy pin — enrichment cannot name its policy"
             exit 1
           fi
+          if [[ ! ${POLICY_FILE_SHA} =~ ^[0-9a-f]{64}$ ]]; then
+            emsg="the verdict step stated no policy document digest — the judge"
+            emsg+=" requires the bytes pinned, not just the address"
+            echo "::error::${emsg}"
+            exit 1
+          fi
           jq -cn \
             --arg resource "pkg:github/${GITHUB_REPOSITORY}@v${UNTRUSTED_VERSION}" \
             --arg repo "https://github.com/${GITHUB_REPOSITORY}" \
             --arg src "${src}" \
             --arg puri "https://github.com/monumental-archive/.github/blob/${POLICY_SHA}/slsa/verify-policy.json" \
             --arg psha "${POLICY_SHA}" \
+            --arg pfsha "${POLICY_FILE_SHA}" \
             --argjson deps "${deps}" \
             '{
               resourceUri: $resource,
               sourceRevision: {uri: $repo, digest: {gitCommit: $src}},
-              policy: {uri: $puri, digest: {gitCommit: $psha}},
+              policy: {uri: $puri, digest: {sha256: $pfsha, gitCommit: $psha}},
               resolvedDependencies: $deps
             }' > "${RUNNER_TEMP}/enrichment-predicate.json"
           depcount=$(jq length <<< "${deps}")
