@@ -4,9 +4,7 @@
   "enforcement": "active",
   "conditions": {
     "ref_name": {
-      "include": [
-        "~ALL"
-      ],
+      "include": ["~ALL"],
       "exclude": []
     }
   },
