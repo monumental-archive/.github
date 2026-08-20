@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.51.0](https://github.com/monumental-archive/.github/compare/v1.50.0...v1.51.0) - 2026-08-20
+
+### Added
+
+- audit:go-vulns joins through stele ([#647](https://github.com/monumental-archive/.github/pull/647))
+
+### Fixed
+
+- judge the targets a rebuild declared, not the class ([#653](https://github.com/monumental-archive/.github/pull/653))
+
 ## [1.50.0](https://github.com/monumental-archive/.github/compare/v1.49.0...v1.50.0) - 2026-08-20
 
 ### Added
