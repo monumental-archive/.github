@@ -90,6 +90,44 @@ records the decision — the config format itself enforces the L2 shape
 (`severity-threshold` and lint-level knobs were removed upstream;
 everything errors, and a written ignore is the only exit).
 
+### The cron: `audit:go-vulns` (Go advisories)
+
+`govulncheck` against <https://vuln.go.dev>, network-bound and therefore
+outside the gate for the same reason as `audit:deny`. It is strictly
+more precise than dependency matching: call-graph aware, so it reds only
+when a vulnerable **function** is reachable from the repo's own code —
+an advisory in a module nobody calls is reported and is never the gate.
+
+**Its exit is a written decision, never an override (#615)** — the
+`audit:deny` contract, arrived at the same way and for the same reason.
+The leg was scan-only while every advisory still had a fix to take. An
+advisory with no fixed version is the case that breaks that assumption:
+GO-2026-5932 (`golang.org/x/crypto/openpgp`, unmaintained by design,
+`Fixed in: N/A`) became reachable in stele through Rekor's `pki`
+package, and since the publish re-runs at the tagged checkout with the
+tag's pinned belt, no decision taken afterwards could rescue the
+release. v0.17.0 was burned and every release after it would have been.
+
+So the leg reads this org's decisions — the OpenVEX documents in
+[`security/vex/`](../security/vex/), resolved from the canon like every
+other canon-owned input — and excuses a finding only where a
+`not_affected` or `false_positive` statement names its exact
+`module@version`. Each excusal is printed with the statement it cites,
+the excusal set is printed even when empty, and an advisory with no
+covering statement is a hard red exactly as before. A statement naming a
+version the scan did not find excuses nothing and is named as stale:
+coverage is derived, so a version bump is a fresh judgment, never a
+decision to re-point.
+
+Two properties are worth stating because they are not obvious. The
+verdict is computed from `govulncheck -json`, not from its exit code —
+in JSON mode it exits 0 whether or not it found anything (measured,
+v1.7.0), and the task checks the scanner's own exit separately because a
+scan that failed to *build* also exits nonzero. And the leg stays
+universal: an adopter whose canon holds no decisions gets an empty
+excusal set and the scan's own verdict, which is the behaviour every Go
+repo had before this.
+
 ### The cron: `audit:blast-radius` (`stele assert blast-radius`)
 
 The L2 triage mechanism at scale and the honesty input VEX statements

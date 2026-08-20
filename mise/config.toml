@@ -1775,6 +1775,24 @@ dir = "{{cwd}}"
 # so the go: backend builds it from a pinned source version with the
 # repo's own pinned toolchain); asserted with the remedy, never
 # installed mid-run.
+#
+# THE EXIT IS A WRITTEN DECISION, NEVER AN OVERRIDE (#615) — the Rust
+# leg's contract, now this leg's too. A reachable advisory with no fixed
+# version was previously a permanent red no decision could clear: the
+# publish re-runs at the tagged checkout with the tag's pinned belt, so
+# the release was unrescuable and the tag burned (stele v0.17.0,
+# GO-2026-5932). The exit is the canon's OpenVEX decisions, joined on
+# the exact module@version, printed with the statement each one cites.
+# The judgment lives in mise/go-vulns.py; the shape of the loop is
+# unchanged.
+#
+# -json, and the exit code is NOT the verdict: `govulncheck -json` exits
+# 0 whether or not it found anything (measured, v1.7.0 — 21 findings,
+# exit 0), so the helper computes the verdict from the findings. The
+# exit code is still checked, because a scan that FAILED to build exits
+# nonzero having emitted a partial stream, and that is not a clean scan.
+# Hence the explicit status capture rather than a pipe: under pipefail a
+# broken scan would reach the helper as a truncated stream first.
 run = '''
 set -euo pipefail
 mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
@@ -1788,11 +1806,19 @@ command -v govulncheck > /dev/null || {
   echo "  mise.toml: \"go:golang.org/x/vuln/cmd/govulncheck\" = \"<version>\"" >&2
   exit 1
 }
+scan=$(mktemp)
+trap 'rm -f "${scan}"' EXIT
 while IFS= read -r m; do
   [[ -n "${m}" ]] || continue
-  (cd "$(dirname "${m}")" && govulncheck ./...)
+  d=$(dirname "${m}")
+  status=0
+  (cd "${d}" && govulncheck -json ./...) > "${scan}" || status=$?
+  if [[ ${status} -ne 0 ]]; then
+    echo "audit:go-vulns: ${d}: govulncheck exited ${status} — the scan did not complete" >&2
+    exit "${status}"
+  fi
+  python3 "${ORG_BELT_DIR}/go-vulns.py" "${d}" < "${scan}"
 done <<< "${mods}"
-echo "audit:go-vulns: no reachable vulnerabilities"
 '''
 
 [tasks."audit:blast-radius"]

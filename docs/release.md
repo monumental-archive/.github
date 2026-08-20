@@ -787,7 +787,13 @@ replacement — it binds the bytes to the commit, not a declaration to a
 tag name. Release-time advisory triage gets a Go leg in the same sbom
 job: `audit:go-vulns` (govulncheck, call-graph aware) at the tagged
 checkout, red blocking the release with no warn path, exactly the
-`audit:deny` contract.
+`audit:deny` contract — including its exit. A reachable advisory passes
+only where a `not_affected` statement in `security/vex/` names its
+`module@version`, printed with the citation; anything undecided still
+refuses (#615). That exit is what makes the leg survivable: the publish
+re-runs at the tagged checkout with the tag's pinned belt, so an
+advisory with no fixed version was previously a red no decision could
+clear, and the tag was unrescuable (stele v0.17.0, GO-2026-5932).
 
 ### pgrx extensions build inside the Postgres consumers run
 
