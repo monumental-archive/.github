@@ -133,8 +133,38 @@ done < <(git ls-files '*.control')
 # No connector configuration: in Actions gitsign takes the ambient
 # OIDC token (ACTIONS_ID_TOKEN_REQUEST_URL), which is the identity the
 # certificate should carry — the workflow, not a human.
+#
+# rekorMode=offline, and it is a MINT-SEMANTICS decision rather than a
+# flag (stele#167, stele#173). gitsign's default is `online`, which
+# writes the transparency-log entry and then drops the receipt: the
+# signature carries no proof it was ever logged, so verification can
+# only reach the certificate's own issuance instant and never a
+# countersigned one. Every tag this org minted before this line is in
+# that state — 43 of 43 carry no embedded entry.
+#
+# Only `offline` reaches gitsign's `attachRekorLogEntry`, so only
+# `offline` produces a tag that verifies against a countersigned
+# instant with no network at read time. The cost, stated because it is
+# permanent and public: the two modes log DIFFERENT SUBJECTS —
+# `LegacySHASign` writes a commit-SHA entry, `git.Sign` a hashedrekord
+# over the signed attributes — so this changes what this organisation's
+# tags are recorded as in Rekor, forever, from this tag onward.
+#
+# The alternative considered and rejected (stele#173): resolving the
+# entry online at verification time needs no mint change and works on
+# every existing tag, but it makes the verdict depend on a search index
+# the signer does not control and history can lose, re-derived at read
+# time rather than carried. Legitimate for healing an existing span;
+# wrong as the standing design, and the org refuses that shape
+# everywhere else.
+#
+# Tags minted before this line never carry a receipt, so the policy
+# floor stays `certificate-transparency` until an epoch declares where
+# `observer-timestamp` begins (stele#173 item 3) — raising it without
+# one reddens every tag ever minted, the #128/#109 shape.
 git -c gpg.format=x509 \
   -c gpg.x509.program=gitsign \
+  -c gitsign.rekorMode=offline \
   tag -s "${tag}" -m "${tag}"
 git push origin "${tag}"
 echo "pushed ${tag} (signed)"
