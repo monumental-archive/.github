@@ -486,7 +486,8 @@ files=$(git ls-files ':!vendor/**' "*.sql")
   exit 0
 }
 xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}"
-echo "lint:sql: $(wc -l <<< "${files}" | tr -d " ") file(s) linted"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:sql: ${count} file(s) linted"
 '''
 
 [tasks."fix:sql"]
@@ -580,7 +581,8 @@ files=$(git ls-files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "D
   exit 0
 }
 xargs hadolint --failure-threshold style --no-color <<< "${files}"
-echo "lint:hadolint: $(wc -l <<< "${files}" | tr -d " ") Dockerfile(s) clean at style threshold"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:hadolint: ${count} Dockerfile(s) clean at style threshold"
 '''
 
 [tasks."lint:gitleaks"]
@@ -642,7 +644,8 @@ if ! git ls-files --error-unmatch ".editorconfig" > /dev/null 2>&1; then
   exit 1
 fi
 xargs ec -disable-indent-size <<< "${files}"
-echo "lint:editorconfig: $(wc -l <<< "${files}" | tr -d " ") file(s) checked"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:editorconfig: ${count} file(s) checked"
 '''
 
 [tasks."lint:yaml"]
@@ -666,7 +669,8 @@ files=$(git ls-files ':!vendor/**' "*.yml" "*.yaml")
   exit 0
 }
 xargs yamllint -c "${ORG_BELT_DIR}/yamllint.yaml" --strict <<< "${files}"
-echo "lint:yaml: $(wc -l <<< "${files}" | tr -d " ") file(s) linted"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:yaml: ${count} file(s) linted"
 '''
 
 [tasks."fix:markdown"]
@@ -726,6 +730,7 @@ files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx"
 tracked=$(git ls-files "biome.json" "biome.jsonc" "*/biome.json" "*/biome.jsonc")
 if [[ -n ${tracked} ]]; then
   echo "lint:biome: the belt generates biome.json; a repo must not track one" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  tracked: /' <<< "${tracked}" >&2
   echo "  git rm --cached it: the belt writes this file for the length of one run" >&2
   exit 1
@@ -749,7 +754,8 @@ if [[ $((errors + warnings + infos)) -ne 0 ]]; then
   echo "lint:biome: ${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" >&2
   exit 1
 fi
-echo "lint:biome: clean across $(wc -l <<< "${files}" | tr -d ' ') files"
+count=$(wc -l <<< "${files}" | tr -d ' ')
+echo "lint:biome: clean across ${count} files"
 '''
 
 [tasks."fix:biome"]
@@ -774,6 +780,7 @@ files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx"
 tracked=$(git ls-files "biome.json" "biome.jsonc" "*/biome.json" "*/biome.jsonc")
 if [[ -n ${tracked} ]]; then
   echo "fix:biome: the belt generates biome.json; a repo must not track one" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  tracked: /' <<< "${tracked}" >&2
   exit 1
 fi
@@ -841,9 +848,9 @@ actual=$(python3 -c 'import sys; print("py%d%d" % sys.version_info[:2])')
 # exactly the trap this check exists to avoid falling into itself.
 t=${target#py}
 a=${actual#py}
-tmaj=${t%${t#?}}
+tmaj=${t%"${t#?}"}
 tmin=${t#?}
-amaj=${a%${a#?}}
+amaj=${a%"${a#?}"}
 amin=${a#?}
 if ((tmaj > amaj || (tmaj == amaj && 10#${tmin} > 10#${amin}))); then
   echo "lint:python-target: ${cfg} targets ${target} but the pinned interpreter is ${actual}" >&2
@@ -943,7 +950,8 @@ files=$(git ls-files ':!vendor/**' | xargs shfmt --find)
 }
 xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}"
 xargs shellcheck <<< "${files}"
-echo "lint:shell: $(wc -l <<< "${files}" | tr -d " ") script(s) formatted and linted"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:shell: ${count} script(s) formatted and linted"
 '''
 
 [tasks."lint:shell-embedded"]
@@ -1072,7 +1080,8 @@ dir = "{{cwd}}"
 run = '''
 if git rev-parse --verify -q origin/main > /dev/null; then
   tip=HEAD
-  if [[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]]; then tip="HEAD^2"; fi
+  parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+  if [[ ${parents} -gt 2 ]]; then tip="HEAD^2"; fi
   "${ORG_BELT_DIR}/committed.sh" "origin/main..${tip}"
 else echo "lint:commits: no origin/main, skipped"; fi
 '''
@@ -1143,7 +1152,7 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null && paths=".github/workflows/"
   echo "lint:zizmor: no workflows or actions, skipped"
   exit 0
 }
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # the path list is newline-separated on purpose
 zizmor --offline --persona=pedantic ${paths}
 '''
 
@@ -1163,8 +1172,10 @@ git rev-parse --verify -q origin/main > /dev/null || {
   exit 0
 }
 tip=HEAD
-[[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]] && tip="HEAD^2"
+parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+[[ ${parents} -gt 2 ]] && tip="HEAD^2"
 range="origin/main..${tip}"
+shas=$(git rev-list "${range}")
 count=0
 bad=""
 while read -r sha; do
@@ -1177,7 +1188,7 @@ while read -r sha; do
   git log -1 --format=%B "${sha}" | grep -i "^Signed-off-by:" \
     | grep -qF "<${email}>" \
     || bad="${bad} ${sha:0:8}"
-done < <(git rev-list "${range}")
+done <<< "${shas}"
 if [[ -n ${bad} ]]; then
   echo "lint:dco: commits missing a sign-off matching their author:${bad}" >&2
   echo "  fix with: git commit -s   (or: git rebase --signoff origin/main)" >&2
@@ -1211,7 +1222,8 @@ if [[ -n ${bad} ]]; then
   echo "  fix with: chmod +x <file> && git add <file>" >&2
   exit 1
 fi
-echo "lint:exec-bits: $(wc -l <<< "${files}" | tr -d " ") scripts executable"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:exec-bits: ${count} scripts executable"
 '''
 
 [tasks."lint:deny"]
@@ -1255,13 +1267,14 @@ cargo deny check bans licenses sources
 # helper resolves from the belt, which is where the org's policy lives;
 # a repo running without the canon cannot quietly skip this.
 helper="${ORG_BELT_DIR}/deny-skips.py"
+variants=$(python3 "${helper}" deny.toml)
 stale=""
 while IFS=$'\t' read -r name variant; do
   [[ -n ${name} ]] || continue
   if cargo deny --config "${variant}" check bans > /dev/null 2>&1; then
     stale="${stale} ${name}"
   fi
-done < <(python3 "${helper}" deny.toml)
+done <<< "${variants}"
 if [[ -n ${stale} ]]; then
   echo "lint:deny: duplicate-version skip no longer needed:${stale}" >&2
   echo "  the check passes without it, so the upstream lag it was written for is over" >&2
@@ -1411,6 +1424,7 @@ fi
 # analogue, so it can never retire itself. A whole-file `#![rustfmt::skip]`
 # is refused outright, and a narrow one states why in the marker-comment
 # idiom `lint:capability-boundary` already uses.
+rs=$(git ls-files ':!vendor/**' "*.rs")
 skips=""
 while IFS= read -r f; do
   [[ -n ${f} ]] || continue
@@ -1421,7 +1435,7 @@ while IFS= read -r f; do
   if grep -qE '^[[:space:]]*#\[rustfmt::skip' "${f}" && ! grep -q "rustfmt-skip:" "${f}"; then
     skips="${skips} ${f}(no marker)"
   fi
-done <<< "$(git ls-files ':!vendor/**' "*.rs")"
+done <<< "${rs}"
 if [[ -n ${skips} ]]; then
   echo "lint:rust: formatting suppressed without a written decision:${skips}" >&2
   echo "  #![rustfmt::skip] exempts an entire file — never allowed" >&2
@@ -1467,7 +1481,7 @@ while IFS= read -r f; do
   if grep -qE "^[[:space:]]*#!\\[(allow|expect)\\([^]]*clippy::(${groups})\\b" "${f}"; then
     blanket="${blanket} ${f}"
   fi
-done <<< "$(git ls-files ':!vendor/**' "*.rs")"
+done <<< "${rs}"
 if [[ -n ${blanket} ]]; then
   echo "lint:rust: crate-level suppression of a whole clippy group:${blanket}" >&2
   echo "  a group allow silences every level this task sets and the gate still goes green" >&2
@@ -1490,7 +1504,8 @@ features="${CLIPPY_FEATURES:---all-features}"
 cargo fetch --locked
 out=$(mktemp)
 status=0
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # both hold whole flag WORDS (--all-features, a
+# built --exclude list), which cargo must receive as separate arguments
 cargo clippy --workspace --all-targets ${features} --locked ${excludes} -- \
   -D warnings \
   -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
@@ -1557,7 +1572,8 @@ cargo fmt --all -- --config-path "${ORG_BELT_DIR}/rustfmt.toml"
 echo "fix:rust: formatted"
 features="${CLIPPY_FEATURES:---all-features}"
 cargo fetch --locked
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # ${features} holds whole flag words, which cargo
+# must receive as separate arguments
 cargo clippy --fix ${features} --locked -- \
   -D warnings \
   -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
@@ -1682,16 +1698,18 @@ known=$({
   grep -oE '^--[a-zA-Z]+' "${list}"
   sed -n 's/^# adjudicated: \([a-zA-Z]*\) .*/--\1/p' "${list}"
 } | sort -u)
+version=$(tsc --version | tr -d '\n')
 have=$(tsc --all | sed -n '/^### Type Checking/,/^### Watch/p' \
   | awk '/^--/{name=$1} /^type: boolean/{print name}' | tr -d ',' | sort -u)
 unruled=$(comm -23 <(echo "${have}") <(echo "${known}"))
 if [[ -n ${unruled} ]]; then
-  echo "lint:tsc-flags: $(tsc --version | tr -d '\n') has type-checking options the org has not ruled on:" >&2
+  echo "lint:tsc-flags: ${version} has type-checking options the org has not ruled on:" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  /' <<< "${unruled}" >&2
   echo "  pass it in mise/tsc-flags.txt, or add an '# adjudicated:' line saying why not" >&2
   exit 1
 fi
-echo "lint:tsc-flags: every type-checking option of $(tsc --version | tr -d '\n') is passed or ruled"
+echo "lint:tsc-flags: every type-checking option of ${version} is passed or ruled"
 '''
 
 [tasks."lint:types"]
@@ -1755,6 +1773,7 @@ command -v tsc > /dev/null || {
 banned=$(xargs grep -Hn '@ts-nocheck' <<< "${ts}" || true)
 if [[ -n ${banned} ]]; then
   echo "lint:types: @ts-nocheck disables checking for an entire file" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  /' <<< "${banned}" >&2
   echo "  use @ts-expect-error with a written reason on the single line that needs it" >&2
   exit 1
@@ -1762,19 +1781,23 @@ fi
 bare=$(xargs grep -Hn '@ts-expect-error[[:space:]]*$' <<< "${ts}" || true)
 if [[ -n ${bare} ]]; then
   echo "lint:types: @ts-expect-error without a written reason" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  /' <<< "${bare}" >&2
   echo "  the compiler retires the directive when the error goes; it cannot supply the why" >&2
   exit 1
 fi
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
 refs=$(grep -l '"references"' ${cfgs} || true)
 if [[ -n ${refs} ]]; then
   echo "lint:types: project references are not supported org-wide" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  declares references: /' <<< "${refs}" >&2
   echo "  tsc -b refuses the org's compiler flags (TS5094), so following references would" >&2
   echo "  mean checking at whatever level the repo chose. Give each project its own config." >&2
   exit 1
 fi
-if [[ -n "$(git ls-files "package.json" "*/package.json")" && ! -d node_modules ]]; then
+pkgs=$(git ls-files "package.json" "*/package.json")
+if [[ -n ${pkgs} && ! -d node_modules ]]; then
   echo "lint:types: dependencies are not installed, so their types cannot be read" >&2
   echo "  install from the tracked lockfile before checking (a check against absent types" >&2
   echo "  is not a weaker check, it is a green one that resolved nothing)" >&2
@@ -1802,12 +1825,14 @@ sort -u <<< "${ts}" > "${tmp}/tracked"
 escaped=$(comm -23 "${tmp}/tracked" "${tmp}/checked")
 if [[ -n ${escaped} ]]; then
   echo "lint:types: tracked TypeScript that no project checks" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  /' <<< "${escaped}" >&2
   echo "  add it to a project's include, or give it a project — an excluded file is" >&2
   echo "  unchecked, and the gate cannot tell that apart from checked-and-clean" >&2
   exit 1
 fi
-echo "lint:types: ${count} project(s) checked, $(wc -l < "${tmp}/tracked" | tr -d ' ') files covered"
+covered=$(wc -l < "${tmp}/tracked" | tr -d ' ')
+echo "lint:types: ${count} project(s) checked, ${covered} files covered"
 '''
 
 [tasks."lint:go-tidy"]
@@ -2197,6 +2222,9 @@ while read -r repo; do
     case "${sv}" in
       pending) note "${repo}: ${sk} pending a human step (declared)" ;;
       exemplary) note "${repo}: ${sk} exemplary, no data by construction (declared)" ;;
+      # Any other value is not one of the two declared states, so it
+      # claims nothing and the shield walk below judges the badge.
+      *) ;;
     esac
   done <<< "${states}"
   # Shields are markdown images; comments are stripped first so a
@@ -2306,7 +2334,8 @@ while read -r repo; do
         elif ! jq -e '.schemaVersion == 1 and .label and .message' > /dev/null 2>&1 <<< "${sj}"; then
           failed="${failed} ${repo}(level-shield: ${doc} is not a shields endpoint document)"
         else
-          note "${repo}: level shield $(jq -r '.label + " " + .message' <<< "${sj}") published and live"
+          shield=$(jq -r '.label + " " + .message' <<< "${sj}")
+          note "${repo}: level shield ${shield} published and live"
         fi
         ;;
       "${wf_prefix}"/*/actions/workflows/*/badge.svg)
@@ -2510,7 +2539,9 @@ compgen -G "workflow-templates/*.y*ml" > /dev/null || {
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 sha=$(grep -hoE "uses:[[:space:]]*${canon_re}/[^@]+@[0-9a-f]{40}" \
   workflow-templates/*.y*ml | grep -oE "[0-9a-f]{40}" | sort -u)
@@ -2518,7 +2549,8 @@ sha=$(grep -hoE "uses:[[:space:]]*${canon_re}/[^@]+@[0-9a-f]{40}" \
   echo "audit:template-pins: no org pins in templates, skipped"
   exit 0
 }
-if [[ "$(wc -l <<< "${sha}" | tr -d " ")" -gt 1 ]]; then
+pins=$(wc -l <<< "${sha}" | tr -d " ")
+if [[ ${pins} -gt 1 ]]; then
   echo "audit:template-pins: templates pin more than one SHA (lint:template-pins should have failed)" >&2
   exit 1
 fi
@@ -2591,7 +2623,9 @@ dir = "{{cwd}}"
 # Renovate paused, misconfigured or dead.
 run = '''
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 tags=$(git ls-remote --tags "https://github.com/${canon}" "v[0-9]*" \
   | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
@@ -2709,7 +2743,9 @@ command -v gh > /dev/null || {
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:org-pins walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 tags=$(git ls-remote --tags "https://github.com/${canon}" "v[0-9]*" \
   | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
@@ -2826,6 +2862,7 @@ cfg="${ORG_BELT_DIR}/biome-org.json"
 }
 version=$(biome --version | awk '{print $2}')
 [[ ${version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  # shellcheck disable=SC2016  # the backticks quote a command NAME in prose
   echo 'audit:biome-rules: cannot read a version from `biome --version`, skipped'
   exit 0
 }
@@ -2840,11 +2877,13 @@ named=$(jq -r '.linter.rules.nursery // {} | keys[]' "${cfg}" | sort)
 missing=$(comm -23 <(echo "${upstream}") <(echo "${named}"))
 if [[ -n ${missing} ]]; then
   echo "audit:biome-rules: biome ${version} has nursery rules the org config does not name:" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  /' <<< "${missing}" >&2
   echo "  add them to mise/biome-org.json — an unnamed nursery rule is simply not enforced" >&2
   exit 1
 fi
-echo "audit:biome-rules: all $(wc -l <<< "${upstream}" | tr -d ' ') nursery rules of ${version} are named"
+count=$(wc -l <<< "${upstream}" | tr -d ' ')
+echo "audit:biome-rules: all ${count} nursery rules of ${version} are named"
 '''
 
 [tasks."lint:trivy"]
@@ -2958,7 +2997,9 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 for f in .github/workflows/*.y*ml; do
@@ -3180,7 +3221,9 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 signer_wf=$(org_identity signer-workflow)
 signer_re="${signer_wf//./\\.}"
 literals=$(xargs grep -nE -- "--signer-digest[[:space:]]+[0-9a-f]{40}" <<< "${files}" || true)
@@ -3208,7 +3251,8 @@ refs=$(xargs grep -hoE "${signer_re}@[0-9a-f]{40}" <<< "${files}" | sort -u || t
   echo "lint:signer-pin: no signer references, skipped"
   exit 0
 }
-if [[ "$(wc -l <<< "${refs}" | tr -d " ")" != "1" ]]; then
+count=$(wc -l <<< "${refs}" | tr -d " ")
+if [[ ${count} != "1" ]]; then
   echo "lint:signer-pin: sign.yml pinned at more than one digest — a tree states the trusted signer once:" >&2
   echo "${refs}" >&2
   echo "  a partial bump left the tree disagreeing with itself; move every uses: line together" >&2
@@ -3253,10 +3297,12 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
   echo "lint:input-forwarding: no workflows, skipped"
   exit 0
 }
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
 grep -l "uses: ./.github/workflows/" ${files} > /dev/null 2>&1 || {
   echo "lint:input-forwarding: no local reusable-workflow callers, skipped"
   exit 0
 }
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
 awk '
 FNR == 1 { split(FILENAME, P, "/"); base = P[length(P)]; in_wc = 0; sect = ""; curkey = ""; in_jobs = 0; job = ""; mode = "" }
 /^[^ ]/ { in_wc = 0; sect = ""; in_jobs = ($0 ~ /^jobs:/); job = ""; mode = "" }
@@ -3334,6 +3380,8 @@ while read -r loc kind key; do
   [[ -n ${loc} ]] || continue
   file="${loc%%:*}"
   jobname="${loc##*:}"
+  # shellcheck disable=SC2016  # ${{ }} is GitHub's expression syntax, written
+  # literally into the workflow — expanding it here is the defect
   if [[ ${kind} == "secret" ]]; then
     blk="secrets:"
     val='${{ secrets.'"${key}"' }}'
@@ -3369,8 +3417,10 @@ dir = "{{cwd}}"
 run = '''
 fixtures=".github/actions/source-attest/testdata"
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
-[ -d "${fixtures}/${canon}/rules" ] || {
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
+[[ -d ${fixtures}/${canon}/rules ]] || {
   echo "lint:source-attest: no source-attest fixtures, skipped"
   exit 0
 }
@@ -3380,10 +3430,11 @@ command -v stele > /dev/null || {
 }
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp}"' EXIT
+head_sha=$(git rev-parse HEAD)
 derive() { # snapshot-dir out-file
   stele derive claims --policy slsa/verify-policy.json \
     --repo "${canon}" --branch main \
-    --canon-root . --canon-digest "$(git rev-parse HEAD)" \
+    --canon-root . --canon-digest "${head_sha}" \
     --snapshot "${1}" --out "${2}"
 }
 # Full snapshot: every declared property derives.
@@ -3404,6 +3455,8 @@ mkdir -p "${blind}/branches" "${blind}/rulesets"
 cp "${rules}/branches/main.json" "${blind}/branches/"
 cp "${rules}"/rulesets/*.json "${blind}/rulesets/"
 jq '[.[] | select(.target != "tag")]' "${rules}/rulesets.json" > "${blind}/rulesets.json"
+# shellcheck disable=SC2310  # deliberate predicate: this asserts that derive
+# REFUSES, so suspending set -e around it is the whole point of the test
 if out=$(derive "${tmp}/blind" "${tmp}/blind.json" 2>&1); then
   echo "lint:source-attest: a blind tag read was accepted — the blindness guard is gone (#240)" >&2
   exit 1
@@ -3423,6 +3476,8 @@ for f in "${rules}"/rulesets/*.json; do
       then .bypass_actors += [{actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always"}]
       else . end' "${f}" > "${lapsed}/rulesets/$(basename "${f}")"
 done
+# shellcheck disable=SC2310  # deliberate predicate: the || branch reports the
+# failure with its own message, so set -e has nothing to add
 derive "${tmp}/lapsed" "${tmp}/lapsed.json" || {
   echo "lint:source-attest: a readable-but-lapsed ruleset failed the run — a lapse must under-claim (#240)" >&2
   exit 1
@@ -3469,11 +3524,13 @@ bad=""
 checked=0
 while IFS= read -r f; do
   [[ -n ${f} ]] || continue
+  uses_refs=$(grep -hoE "^[^#]*uses:[[:space:]]*[A-Za-z0-9._$/-]+/[A-Za-z0-9._-]+[^[:space:]]*" "${f}" \
+    | sed -E "s|^.*uses:[[:space:]]*||") || true
   while IFS= read -r ref; do
     [[ -n ${ref} ]] || continue
     # Local refs (./path, $/path) are the repo's own tree, never a
     # third party — the allowlist does not govern them.
-    case "${ref}" in ./* | \$/*) continue ;; esac
+    case "${ref}" in ./* | \$/*) continue ;; *) ;; esac
     checked=$((checked + 1))
     owner_repo="${ref%%@*}"
     ok=""
@@ -3481,11 +3538,13 @@ while IFS= read -r f; do
       case "${pat}" in
         *@\*) [[ ${owner_repo} == "${pat%@\*}" ]] && ok=1 ;;
         */\*) [[ ${owner_repo} == "${pat%/\*}/"* ]] && ok=1 ;;
+        # A pattern with neither suffix is a literal owner/repo the org does
+        # not use; it matches nothing rather than everything.
+        *) ;;
       esac
     done
     [[ -n ${ok} ]] || bad="${bad} ${f}(${ref})"
-  done <<< "$(grep -hoE "^[^#]*uses:[[:space:]]*[A-Za-z0-9._$/-]+/[A-Za-z0-9._-]+[^[:space:]]*" "${f}" \
-    | sed -E "s|^.*uses:[[:space:]]*||")"
+  done <<< "${uses_refs}"
 done <<< "${files}"
 if [[ -n ${bad} ]]; then
   echo "lint:actions-allowed: uses: an action the org allowlist forbids:${bad}" >&2
@@ -3578,11 +3637,16 @@ bad=""
 while IFS= read -r f; do
   stages=$(grep -iE "^[[:space:]]*FROM[[:space:]]" "${f}" \
     | sed -nE 's/.*[[:space:]][Aa][Ss][[:space:]]+([A-Za-z0-9_.-]+).*/\1/p')
+  # shellcheck disable=SC2312  # process substitution: capturing first would turn
+  # a Dockerfile with no FROM into one blank line, and `set --` would then read
+  # an unset $2 under set -u. grep's no-match 1 is not a failure here.
   while IFS= read -r line; do
+    # shellcheck disable=SC2086  # deliberate split: a FROM line's words ARE the
+    # positional parameters this reads $2 and $3 from
     set -- ${line}
     ref="$2"
-    case "${ref}" in --platform=*) ref="$3" ;; esac
-    case "$(printf "%s" "${ref}" | tr "[:upper:]" "[:lower:]")" in scratch) continue ;; esac
+    case "${ref}" in --platform=*) ref="$3" ;; *) ;; esac
+    case "$(printf "%s" "${ref}" | tr "[:upper:]" "[:lower:]")" in scratch) continue ;; *) ;; esac
     grep -qxF "${ref}" <<< "${stages}" && continue
     [[ ${ref} == *"@sha256:"* ]] || bad="${bad} ${f}(${ref})"
   done < <(grep -iE "^[[:space:]]*FROM[[:space:]]" "${f}")
@@ -3741,7 +3805,8 @@ fi
 # the machinery was built for.
 excludes=""
 for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
+# which cargo must receive as separate arguments
 cargo llvm-cov --workspace --locked ${excludes} --fail-under-lines "${floor}"
 echo "coverage:check: floor ${floor} held${excludes:+ (excluding${excludes//--exclude/})}"
 '''
@@ -3788,7 +3853,8 @@ if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; the
 fi
 excludes=""
 for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
+# which cargo must receive as separate arguments
 cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
 echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
 '''
@@ -3842,7 +3908,8 @@ if ! cargo metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 
   exit 1
 fi
 cargo fuzz build -s none
-echo "lint:fuzz-build: $(cargo fuzz list | wc -l | tr -d ' ') target(s) build, lockfile current"
+count=$(cargo fuzz list | wc -l | tr -d ' ')
+echo "lint:fuzz-build: ${count} target(s) build, lockfile current"
 '''
 
 [tasks."audit:action-pins"]
@@ -3937,9 +4004,11 @@ if [[ -z ${live} ]]; then
   exit 1
 fi
 pinned=$(grep -v "^#" slsa/spec-source-matrix.txt)
-if ! diff <(sort <<< "${pinned}") <(sort <<< "${live}") > /dev/null; then
+pinned_sorted=$(sort <<< "${pinned}")
+live_sorted=$(sort <<< "${live}")
+if [[ ${pinned_sorted} != "${live_sorted}" ]]; then
   echo "audit:spec-drift: the spec's requirement matrix moved:" >&2
-  diff <(sort <<< "${pinned}") <(sort <<< "${live}") | sed "s/^/  /" >&2 || true
+  diff <(echo "${pinned_sorted}") <(echo "${live_sorted}") | sed "s/^/  /" >&2 || true
   echo "  re-map slsa/requirements.toml against the spec, then re-pin" >&2
   echo "  slsa/spec-source-matrix.txt (#349 S2, the #203 lesson)" >&2
   exit 1
@@ -3958,15 +4027,16 @@ command -v taplo > /dev/null || {
 }
 reqs=$(taplo get -f slsa/requirements.toml -o json)
 mapped=$(jq -r '[(.source[]? | .spec_ids[]?), (.declined[]? | .spec_id)] | unique[]' <<< "${reqs}")
+pinned_ids=$(awk '{print $1}' <<< "${pinned}")
 uncovered=""
 while IFS= read -r id; do
   [[ -n ${id} ]] || continue
   grep -qxF "${id}" <<< "${mapped}" || uncovered="${uncovered} ${id}"
-done < <(awk '{print $1}' <<< "${pinned}")
+done <<< "${pinned_ids}"
 stale=""
 while IFS= read -r id; do
   [[ -n ${id} ]] || continue
-  grep -qxF "${id}" <<< "$(awk '{print $1}' <<< "${pinned}")" || stale="${stale} ${id}"
+  grep -qxF "${id}" <<< "${pinned_ids}" || stale="${stale} ${id}"
 done <<< "${mapped}"
 if [[ -n ${uncovered} || -n ${stale} ]]; then
   [[ -n ${uncovered} ]] && {
@@ -3980,7 +4050,8 @@ if [[ -n ${uncovered} || -n ${stale} ]]; then
   }
   exit 1
 fi
-echo "audit:spec-drift: $(wc -l <<< "${pinned}" | tr -d ' ') requirement(s), matrix unchanged, all covered"
+count=$(wc -l <<< "${pinned}" | tr -d ' ')
+echo "audit:spec-drift: ${count} requirement(s), matrix unchanged, all covered"
 '''
 
 [tasks."fix:tracks"]
@@ -4189,6 +4260,8 @@ probe_tag="audit-visibility-probe-$(date -u +%Y%m%d%H%M%S)-$$"
 # Annotated at CREATION, not afterwards: if the delete below fails, the
 # residue has to explain itself the moment it exists, or this audit's own
 # leftovers become the unexplained drafts it reports.
+# shellcheck disable=SC2016  # the backticks quote task and file names in the
+# draft's own markdown; nothing here is a substitution
 probe_body='<!-- draft-record: audit-probe -->
 **`audit:drafts` visibility probe — safe to delete.**
 
@@ -4391,11 +4464,12 @@ fi
 # Only `.` needs escaping: GitHub repository names are limited to
 # `A-Za-z0-9._-`, and of those only the dot is an ERE metacharacter —
 # unescaped, `.github` would match any character followed by "github".
+by_length=$(awk '{ print length, $0 }' <<< "${repos}" | sort -rn | cut -d' ' -f2-)
 names=""
 while IFS= read -r r; do
   [[ -n ${r} ]] || continue
   names="${names}|${r//./\\.}"
-done <<< "$(awk '{ print length, $0 }' <<< "${repos}" | sort -rn | cut -d' ' -f2-)"
+done <<< "${by_length}"
 names="${names#|}"
 tags=""
 for repo in ${repos}; do
@@ -4536,7 +4610,8 @@ if [[ -n ${fail} ]]; then
   echo "  ${optout} as 'repo artifact reason' (#349 S7, the #266 rule)" >&2
   exit 1
 fi
-echo "audit:adoption: $(wc -w <<< "${repos}" | tr -d ' ') repo(s), ${checked} obligations, no silent gaps"
+count=$(wc -w <<< "${repos}" | tr -d ' ')
+echo "audit:adoption: ${count} repo(s), ${checked} obligations, no silent gaps"
 '''
 
 [tasks."audit:signer-surface"]
@@ -4588,6 +4663,10 @@ while IFS= read -r t; do
   declared type is not on the signer's allowlist: ${t}"
 done <<< "${declared}"
 # Every declared row's caller exists and actually requests the type.
+rows=$(awk '
+  /^type = / { gsub(/^type = "|"$/, ""); t = $0 }
+  /^caller = / { gsub(/^caller = "|"$/, ""); printf "%s\t%s\n", t, $0 }
+' security/signing-surface.toml)
 n=0
 while IFS=$'\t' read -r t c; do
   [[ -n ${t} ]] || continue
@@ -4599,10 +4678,7 @@ while IFS=$'\t' read -r t c; do
     fail="${fail}
   declared caller ${c} does not request ${t} — dead capability"
   fi
-done < <(awk '
-  /^type = / { gsub(/^type = "|"$/, ""); t = $0 }
-  /^caller = / { gsub(/^caller = "|"$/, ""); printf "%s\t%s\n", t, $0 }
-' security/signing-surface.toml)
+done <<< "${rows}"
 [[ ${n} -gt 0 ]] || fail="${fail}
   signing-surface.toml declares no rows — an empty declaration declares nothing"
 if [[ -n ${fail} ]]; then
@@ -4675,13 +4751,14 @@ if ! rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/n
   exit 1
 fi
 secs="${FUZZ_SECONDS:-60}"
+targets=$(cargo fuzz list)
 failed=""
 while IFS= read -r target; do
   [[ -n ${target} ]] || continue
   echo "audit:fuzz: ${target} for ${secs}s under AddressSanitizer (${FUZZ_TOOLCHAIN})"
   RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo fuzz run -s address --careful "${target}" \
     -- -max_total_time="${secs}" || failed="${failed} ${target}"
-done < <(cargo fuzz list)
+done <<< "${targets}"
 if [[ -n ${failed} ]]; then
   echo "audit:fuzz: crashing target(s):${failed}" >&2
   echo "  the reproducer is fuzz/artifacts/<target>/crash-<hash>, uploaded by repo-audit.yml" >&2
@@ -4817,7 +4894,8 @@ dir = "{{cwd}}"
 # tracked files only. Skips only an empty tree — a repo with content
 # and no licence is exactly the defect, never an exemption.
 run = '''
-[[ -n "$(git ls-files | head -1)" ]] || {
+tracked=$(git ls-files | head -1)
+[[ -n ${tracked} ]] || {
   echo "lint:licence: no tracked files, skipped"
   exit 0
 }
@@ -4891,7 +4969,8 @@ if [[ -z ${lic} || ${lic} == "<SPDX expression>" ]]; then
   echo "fix:citation: REUSE.toml declares no licence expression — fill it first (lint:licence)" >&2
   exit 1
 fi
-if [[ "$(wc -l <<< "${lic}" | tr -d " ")" != "1" ]]; then
+count=$(wc -l <<< "${lic}" | tr -d " ")
+if [[ ${count} != "1" ]]; then
   echo "fix:citation: REUSE.toml carries more than one licence expression — one citation cannot state two:" >&2
   echo "${lic}" >&2
   exit 1
@@ -5061,6 +5140,7 @@ while IFS= read -r f; do
   bad=$(grep -o '"OSPS-[A-Z][A-Z]-[0-9][0-9]\.[0-9][0-9]_[a-z]*"' "${f}" | sort -u || true)
   if [[ -n ${bad} ]]; then
     echo "lint:bestpractices: ${f}: display-ID keys the badge app silently drops:" >&2
+    # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
     sed 's/^/  /' <<< "${bad}" >&2
     echo "  use the criteria YAML key form instead: osps_ac_01_01_status" >&2
     rc=1
@@ -5073,7 +5153,8 @@ while IFS= read -r f; do
   fi
 done <<< "${files}"
 
-((rc == 0)) && echo "lint:bestpractices: $(wc -l <<< "${files}") file(s) clean"
+count=$(wc -l <<< "${files}")
+((rc == 0)) && echo "lint:bestpractices: ${count} file(s) clean"
 exit "${rc}"
 '''
 
@@ -5131,7 +5212,9 @@ run = '''
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 for f in .github/workflows/release.yml .github/workflows/publish.yml; do
@@ -5204,7 +5287,8 @@ if [[ -n ${missing} ]]; then
   echo "lint:toolbelt-lock: ${cfg} pins tools absent from ${lock}:${missing}" >&2
   exit 1
 fi
-echo "lint:toolbelt-lock: $(wc -w <<< "${keys}" | tr -d " ") tools locked in ${lock}"
+count=$(wc -w <<< "${keys}" | tr -d " ")
+echo "lint:toolbelt-lock: ${count} tools locked in ${lock}"
 '''
 
 [tasks."lint:nested-permissions"]
@@ -5284,11 +5368,14 @@ run = '''
 }
 bad=""
 count=0
-for t in $(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/'); do
+audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
+  | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/')
+while IFS= read -r t; do
+  [[ -n ${t} ]] || continue
   count=$((count + 1))
   grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
     || bad="${bad} audit:${t}"
-done
+done <<< "${audits}"
 [[ ${count} -gt 0 ]] || {
   echo "lint:audit-scheduled: zero audit tasks enumerated — the grep is broken" >&2
   exit 1
@@ -5495,7 +5582,9 @@ compgen -G "workflow-templates/*.y*ml" > /dev/null || {
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 shas=""
@@ -5528,7 +5617,8 @@ n=$(wc -w <<< "${shas}" | tr -d " ")
 # it, so there is nothing to verify and nothing that survives a rebuild.
 # The gate's checkout fetches tags for exactly this (ci.yml, fetch-tags).
 released=""
-if [[ -n "$(git tag --list "v[0-9]*" | head -1)" ]]; then
+anytag=$(git tag --list "v[0-9]*" | head -1)
+if [[ -n ${anytag} ]]; then
   for sha in ${shas}; do
     tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | head -1)
     if [[ -z ${tag} ]]; then
@@ -5613,7 +5703,9 @@ dir = "{{cwd}}"
 # documentation.
 run = '''
 . "${ORG_BELT_DIR}/identity.sh"
-canon="$(org_identity owner)/$(org_identity repo)"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 found=0
@@ -5628,20 +5720,23 @@ if [[ -n ${files} ]]; then
     done < <(grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" || true)
   done <<< "${files}"
 fi
+hook_files=$(git ls-files ':!vendor/**' "lefthook.yml" "*/lefthook.yml")
+renovate_files=$(git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json")
+workflow_files=$(git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml")
 while IFS= read -r f; do
   [[ -n ${f} ]] || continue
   grep -qF "github.com/${canon}" "${f}" || continue
   found=$((found + 1))
   grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
     || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
-done < <(git ls-files ':!vendor/**' "lefthook.yml" "*/lefthook.yml")
+done <<< "${hook_files}"
 while IFS= read -r f; do
   [[ -n ${f} ]] || continue
   grep -qF "github>${canon}" "${f}" || continue
   found=$((found + 1))
   grep -qE "github>${canon_re}#v[0-9]" "${f}" \
     || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
-done < <(git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json")
+done <<< "${renovate_files}"
 # The fourth surface is a prohibition: no workflow step may clone the
 # canon with actions/checkout, at any ref. Canon content reaches a job
 # only through `uses: $/.github/actions/canon` — GitHub's
@@ -5657,7 +5752,7 @@ while IFS= read -r f; do
   found=$((found + checkouts))
   [[ ${checkouts} -eq 0 ]] \
     || bad="${bad} ${f}(${checkouts} canon checkout(s) — use \$/.github/actions/canon)"
-done < <(git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml")
+done <<< "${workflow_files}"
 [[ ${found} -gt 0 ]] || {
   echo "lint:canon-pins: no canon references, skipped"
   exit 0
@@ -5716,5 +5811,6 @@ if [[ -n ${found} ]]; then
   echo "  a release untested. Use tr, case, or an explicit loop instead." >&2
   exit 1
 fi
-echo "lint:bash-portability: $(wc -l <<< "${files}" | tr -d " ") files clean"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:bash-portability: ${count} files clean"
 '''
