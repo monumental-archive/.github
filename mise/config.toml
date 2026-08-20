@@ -2005,16 +2005,26 @@ dir = "{{cwd}}"
 # the release was unrescuable and the tag burned (stele v0.17.0,
 # GO-2026-5932). The exit is the canon's OpenVEX decisions, joined on
 # the exact module@version, printed with the statement each one cites.
-# The judgment lives in mise/go-vulns.py; the shape of the loop is
-# unchanged.
+#
+# THE JUDGMENT IS stele's (#640, stele#221) — `assert advisories`, one
+# line, offline from the forge. The hand-maintained Python join is
+# deleted with this edit: one rule with two implementations was the
+# #392 defect class, and the released join is the oracle. What is left
+# here is the loop and the scanner's own exit, which carry no judgment.
+# The spec lives in stele's docs/vex-join.md; this task states no rule
+# of its own.
 #
 # -json, and the exit code is NOT the verdict: `govulncheck -json` exits
 # 0 whether or not it found anything (measured, v1.7.0 — 21 findings,
-# exit 0), so the helper computes the verdict from the findings. The
+# exit 0), so the verdict is computed from the findings. The scanner's
 # exit code is still checked, because a scan that FAILED to build exits
 # nonzero having emitted a partial stream, and that is not a clean scan.
 # Hence the explicit status capture rather than a pipe: under pipefail a
-# broken scan would reach the helper as a truncated stream first.
+# broken scan would reach the judge as a truncated stream first.
+#
+# The subject is the module PATH, read from the go.mod being scanned —
+# a report names what it judged, and the directory is a fact about this
+# checkout's layout, not about the module.
 run = '''
 set -euo pipefail
 mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
@@ -2031,6 +2041,12 @@ command -v govulncheck > /dev/null || {
   echo '  mise.toml: "go:golang.org/x/vuln/cmd/govulncheck" = "<version>"' >&2
   exit 1
 }
+command -v stele > /dev/null || { echo "audit:go-vulns: stele missing from the belt" >&2; exit 1; }
+vex="${ORG_CANON_DIR}/security/vex"
+[[ -d "${vex}" ]] || {
+  echo "audit:go-vulns: ${vex} is not a directory, so the org's triage decisions cannot be read; lint:belt-available says why" >&2
+  exit 1
+}
 scan=$(mktemp)
 trap 'rm -f "${scan}"' EXIT
 while IFS= read -r m; do
@@ -2042,7 +2058,9 @@ while IFS= read -r m; do
     echo "audit:go-vulns: ${d}: govulncheck exited ${status} — the scan did not complete" >&2
     exit "${status}"
   fi
-  python3 "${ORG_BELT_DIR}/go-vulns.py" "${d}" < "${scan}"
+  module=$(awk '/^module /{print $2; exit}' "${m}")
+  [[ -n "${module}" ]] || { echo "audit:go-vulns: ${m} names no module" >&2; exit 1; }
+  stele assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
 done <<< "${mods}"
 '''
 

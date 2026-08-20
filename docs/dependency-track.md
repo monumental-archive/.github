@@ -110,23 +110,25 @@ release. v0.17.0 was burned and every release after it would have been.
 
 So the leg reads this org's decisions — the OpenVEX documents in
 [`security/vex/`](../security/vex/), resolved from the canon like every
-other canon-owned input — and excuses a finding only where a
-`not_affected` or `false_positive` statement names its exact
-`module@version`. Each excusal is printed with the statement it cites,
-the excusal set is printed even when empty, and an advisory with no
-covering statement is a hard red exactly as before. A statement naming a
-version the scan did not find excuses nothing and is named as stale:
-coverage is derived, so a version bump is a fresh judgment, never a
-decision to re-point.
+other canon-owned input — and joins them against the scan. **The join
+is `stele assert advisories` and the rule lives there** (`docs/vex-join.md`
+in stele; stele#221, ported here at #640, which deleted the canon's
+second implementation of it). Which statuses excuse, which findings
+gate, and how a decision at another version is reported are the
+mechanism's facts, stated once in stele and not restated here.
 
-Two properties are worth stating because they are not obvious. The
-verdict is computed from `govulncheck -json`, not from its exit code —
-in JSON mode it exits 0 whether or not it found anything (measured,
-v1.7.0), and the task checks the scanner's own exit separately because a
-scan that failed to *build* also exits nonzero. And the leg stays
-universal: an adopter whose canon holds no decisions gets an empty
-excusal set and the scan's own verdict, which is the behaviour every Go
-repo had before this.
+What is the org's own is the input and the reach: the decisions this
+org has written, and the fact that an advisory with no decision
+covering it is a hard red until one exists.
+
+Two properties of the caller are worth stating because they are not
+obvious. The verdict is computed from `govulncheck -json`, not from its
+exit code — in JSON mode it exits 0 whether or not it found anything
+(measured, v1.7.0), and the task checks the scanner's own exit
+separately because a scan that failed to *build* also exits nonzero.
+And the leg stays universal: an adopter whose canon holds no decisions
+gets the scan's own verdict, which is the behaviour every Go repo had
+before this.
 
 ### The cron: `audit:blast-radius` (`stele assert blast-radius`)
 
