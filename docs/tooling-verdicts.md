@@ -527,14 +527,22 @@ tool; **yamllint (now landed, #403) and sqlfluff are both pipx-only and
 both already agreed**, so this path was about to carry three dependency
 closures instead of one — which is exactly what it now does.
 
-**ruff at `select = ["ALL"]`, and the one file it was adopted for**
-(#82). One aqua-backed Rust binary that lints *and* formats Python and
-needs no Python interpreter to do it — so the org gains Python coverage
-without Python joining the belt. It was adopted against a real hole, not
-a hypothetical one: `security/workflow-permissions.py` computes the
-caller/callee permissions join that guards the Build L3 boundary, and it
-was the one tracked file in a language no belt tool covered. Nothing
+**ruff at `select = ["ALL"]`, and the file it was adopted for** (#82).
+One aqua-backed Rust binary that lints *and* formats Python and needs
+no Python interpreter to do it — so the org gains Python coverage
+without Python joining the belt. It was adopted against a real hole,
+not a hypothetical one: `security/workflow-permissions.py` computed the
+caller/callee permissions join that guards the Build L3 boundary, and
+it was the one tracked file in a language no belt tool covered. Nothing
 checked it.
+
+That file is gone — stele#148 replaced the join with `stele assert
+permissions`, and the adoption reason went with it. Re-adjudicated
+2026-08-20 and **kept**: the belt's own helpers are Python
+(`mise/deny-skips.py`, `mise/embedded-shell.py`), so the language a
+belt tool must cover is still in the tree, and a universal layer that
+dropped Python because the canon's own count fell from three files to
+two would have to re-adopt it for the first adopter who writes one.
 
 `ALL` in ruff means every *stable* rule; preview rules are excluded from
 it by design, so `preview = true` is what makes ALL mean all — the same
@@ -1237,8 +1245,9 @@ SQL appearing anywhere in the org (revisit the raw templater).
   trigger fired the way the 2026-08-15 amendment predicted, with one
   correction to that prediction: the number lives in the tool's repo,
   not this one. The canon tree retains orchestration-only shell
-  (one-line task bodies and workflow steps) and one Python join
-  (`security/workflow-permissions.py`) — no unit-testable corpus of
+  (one-line task bodies and workflow steps) and two Python belt
+  helpers (`mise/deny-skips.py`, `mise/embedded-shell.py`) — no
+  unit-testable corpus of
   its own, so the canon takes no `.coverage-floor` and no shield: a
   coverage number over a workflow tree would measure nothing. The
   Best Practices coverage criteria are re-answered on that basis in
@@ -1389,8 +1398,11 @@ if its reason is about the rule, never about reach.
   carries it.
 - **git-cliff — already retired**; `release:preview` runs
   `stele derive version`, `cliff.toml` markers are gone.
-- **`security/workflow-permissions.py` — kept.** Porting the
-  caller/callee permissions join into `stele assert` is a stele
-  change, and stele's port is closed (its scope is decided by that
-  repo, not this list). The one Python file stays with ruff over it;
-  reopen only as a stele issue with its own justification.
+- **`security/workflow-permissions.py` — ported and deleted**
+  (2026-08-20). This entry previously recorded it as kept, on the
+  grounds that porting the caller/callee join was a stele change and
+  stele's port was closed. It was reopened as stele#148 with its own
+  justification — the join is evidence-layer logic by the port's own
+  test — and `stele assert permissions` replaced the 437-line script
+  whole, with the three org literals it carried becoming the assert
+  policy's `permissions` section. Ruff stays: see the entry above.

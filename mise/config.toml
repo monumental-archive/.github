@@ -75,6 +75,17 @@ disable_backends = ["asdf", "ubi"]
 # not-found branches are therefore `if`-guarded, never bare AND-lists whose
 # failure errexit promotes to a crash.
 ORG_BELT_DIR = "{{ exec(command='d=\"${MISE_GLOBAL_CONFIG_FILE:-}\"; if [ -z \"$d\" ]; then for f in \"${XDG_CONFIG_HOME:-$HOME/.config}\"/mise/conf.d/*.toml; do t=$(readlink \"$f\" 2>/dev/null || echo \"$f\"); if [ -f \"$(dirname \"$t\")/clippy.toml\" ]; then d=\"$t\"; break; fi; done; fi; if [ -n \"$d\" ]; then cd \"$(dirname \"$d\")\" && pwd; fi') }}"
+# WHERE THE CANON TREE IS, derived from the belt and never resolved a
+# second time. The belt is one directory inside the canon; the tasks
+# that need the canon proper need what sits BESIDE it — slsa/ policies,
+# release/, security/. Both carriers put the belt inside a full canon
+# tree by construction: CI's `$/.github/actions/canon` refuses any tree
+# with no mise/config.toml before linking it, and locally the conf.d
+# symlink points into a checkout. So this is a dirname, not a second
+# search, and it cannot disagree with ORG_BELT_DIR about which tree is
+# in play. Empty when the belt did not arrive, for the same #569 reason
+# stated above — `dirname` of empty is empty, not an error.
+ORG_CANON_DIR = "{{ env.ORG_BELT_DIR | dirname }}"
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
@@ -166,10 +177,15 @@ jq = "1.8.2"
 # Python lint + format in one binary (#82), at `select = ["ALL"]`. Ruff
 # is a standalone Rust binary: it needs no Python interpreter to run, so
 # it lints Python whether or not one is pinned. (One now is, but for uv's
-# sake, not ruff's.) It also closes a real
-# hole — security/workflow-permissions.py is the one tracked file in a
-# language no belt tool covered, and it computes the caller/callee
-# permissions join that guards the Build L3 boundary.
+# sake, not ruff's.) Adopted for
+# security/workflow-permissions.py, which computed the caller/callee
+# permissions join until stele#148 replaced it; that file is gone and
+# the reason with it. Re-adjudicated 2026-08-20 and KEPT: the belt's
+# own helpers are Python (mise/deny-skips.py, mise/embedded-shell.py),
+# so the language a belt tool must cover is still in the tree, and a
+# universal layer that dropped Python the moment the canon's own count
+# fell to two would have to re-adopt it for the first adopter who
+# writes one.
 ruff = "0.16.2"
 # The org's JS/TS/JSON layer (#82), at every rule biome has: `preset:
 # "all"` for the eight stable groups plus each nursery rule NAMED in
@@ -3384,45 +3400,19 @@ dir = "{{cwd}}"
 # Prerequisite of the #83 transfers: one consumer is what made the
 # v1.23.1 break survivable, and transfers add consumers.
 run = '''
-[[ -f security/workflow-permissions.py ]] || { echo "audit:caller-permissions: not the canon, skipped"; exit 0; }
-command -v gh > /dev/null || { echo "audit:caller-permissions: gh missing" >&2; exit 1; }
-command -v python3 > /dev/null || { echo "audit:caller-permissions: python3 missing" >&2; exit 1; }
-self="${GITHUB_REPOSITORY:-monumental-archive/.github}"
-if ! repos=$(gh api "orgs/monumental-archive/repos" --paginate \
-  --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
-  echo "audit:caller-permissions: could not enumerate org repos — nothing was checked" >&2
-  exit 1
-fi
-work=$(mktemp -d)
-trap 'rm -rf "${work}"' EXIT
-walked=0
-files=""
-for repo in ${repos}; do
-  [[ "monumental-archive/${repo}" == "${self}" ]] && continue
-  walked=$((walked + 1))
-  names=$(gh api "repos/monumental-archive/${repo}/contents/.github/workflows" \
-    --jq '.[] | select(.name | test("\\.ya?ml$")) | .name' 2> /dev/null) || continue
-  mkdir -p "${work}/${repo}"
-  for n in ${names}; do
-    gh api "repos/monumental-archive/${repo}/contents/.github/workflows/${n}" \
-      --jq .content | base64 -d > "${work}/${repo}/${n}"
-    grep -q "monumental-archive/\.github/\.github/workflows/" "${work}/${repo}/${n}" \
-      || { rm "${work}/${repo}/${n}"; continue; }
-    files="${files} ${work}/${repo}/${n}"
-  done
-done
-[[ ${walked} -gt 0 ]] || { echo "audit:caller-permissions: zero repos walked — the enumeration found nothing" >&2; exit 1; }
-if [[ -z "${files}" ]]; then
-  echo "audit:caller-permissions: ${walked} repo(s) walked, no canon consumers found"
-  exit 0
-fi
-if ! python3 security/workflow-permissions.py check ${files}; then
+[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/assert-policy.json ]] || {
+  echo "audit:caller-permissions: not the canon, skipped"; exit 0
+}
+command -v stele > /dev/null || { echo "audit:caller-permissions: stele missing from the belt" >&2; exit 1; }
+if ! stele assert permissions \
+  --policy slsa/assert-policy.json \
+  --tree . \
+  --org monumental-archive; then
   echo "audit:caller-permissions: a consumer's grant is below what canon" >&2
   echo "  HEAD's callee asks for — its next pin bump dies as" >&2
   echo "  startup_failure. Fix the stub before or with the bump (#358)." >&2
   exit 1
 fi
-echo "audit:caller-permissions: ${walked} repo(s) walked, every consumer grant covers canon HEAD"
 '''
 
 [tasks."audit:spec-drift"]
@@ -4179,10 +4169,14 @@ dir = "{{cwd}}"
 # BADGES_OUT renders the block alone to a path, for lint:badges.
 run = '''
 set -euo pipefail
-helper=mise/derive-badges.sh
-[[ -x "${helper}" ]] || helper=.org-canon/mise/derive-badges.sh
-[[ -x "${helper}" ]] || { echo "fix:badges: no canon tree, skipped"; exit 0; }
-"${helper}"
+# From the belt, like every other canon-owned input (#445). This used
+# to try mise/ then .org-canon/ and SKIP CLEAN when it found neither,
+# so a consumer clone rendered nothing and said so in a line nobody
+# reads, while lint:badges below asserted nothing and reported a pass
+# (#568). ORG_BELT_DIR resolves in both worlds, which makes the
+# degraded state unrepresentable rather than detected: there is no
+# "no canon tree" branch left to get wrong.
+"${ORG_BELT_DIR}/derive-badges.sh"
 '''
 
 [tasks."lint:bestpractices"]
@@ -4253,10 +4247,10 @@ trap 'rm -f "${tmp}" "${tmp}.cur"' EXIT
 # nested mise inside a task races the parallel lint fan-out and fails to
 # resolve its own lockfile, which made `mise run ci` unrunnable locally
 # and forced --no-verify on every push (#82).
-helper=mise/derive-badges.sh
-[[ -x "${helper}" ]] || helper=.org-canon/mise/derive-badges.sh
-[[ -x "${helper}" ]] || { echo "lint:badges: no canon tree, skipped"; exit 0; }
-BADGES_OUT="${tmp}" "${helper}" > /dev/null
+# From the belt (#445), never a two-branch probe: the old resolution
+# skipped clean in any consumer clone, so a local `mise run ci` omitted
+# the badge assertion entirely and passed (#568).
+BADGES_OUT="${tmp}" "${ORG_BELT_DIR}/derive-badges.sh" > /dev/null
 awk '/<!-- badges:begin -->/{f=1; next} /<!-- badges:end -->/{f=0} f' README.md > "${tmp}.cur"
 if ! diff -u "${tmp}.cur" "${tmp}"; then
   echo "lint:badges: the badge block drifted from the tree's facts — run fix:badges and commit the render" >&2
@@ -4443,34 +4437,40 @@ dir = "{{cwd}}"
 # lint:nested-permissions requires the grant to be WRITTEN; this
 # requires it to be SUFFICIENT.
 #
-# TWO BRANCHES, ONE SCANNER. Keyed on where the requirement can be
-# computed from, never on repo identity. In the canon that is this
-# tree: its own callers plus every workflow-templates/ stub. In a
-# consumer, ci.yml already places the FULL canon tree at .org-canon at
-# the same resolution that fetched the shared workflow (#165) — the
-# carrier release/*.sh and security/vex/ already ride — so the script
-# runs out of .org-canon with `--canon .org-canon`: requirements from
-# the pinned canon, this repo's stubs checked against them, on the
-# pin-bump PR, in the repo being bumped. Strictly earlier than
-# audit:caller-permissions, which asks the same question weekly
+# ONE RESOLUTION, NO BRANCH. The requirement is computed from the
+# canon tree the belt itself came from, which ORG_CANON_DIR names in
+# both worlds: in the canon that is this tree, in a consumer the tree
+# ci.yml resolved at the same SHA that fetched the shared workflow
+# (#165). The task and the engine therefore arrive together and cannot
+# skew. This used to probe `.` then `.org-canon` and skip clean when
+# it found neither, so a consumer clone running the gate locally
+# checked no grant at all and reported a pass (#568) — the degraded
+# state is now unrepresentable rather than detected. Strictly earlier
+# than audit:caller-permissions, which asks the same question weekly
 # against canon HEAD — a forecast; this reddens the PR where the
-# answer is actionable. Task and script both arrive from one SHA in
-# either branch, so they cannot skew, and everything past the branch —
-# enumeration, skip wording, the refusal to green a canon call it
-# cannot read — lives in the scanner, not re-derived here. Outside CI
-# there is no .org-canon and the lint skips clean: a linter that
-# cannot skip cannot be universal.
+# answer is actionable.
+#
+# Which workflows are callers and where the reusable tree sits are
+# DECLARED (the policy's permissions section), never conventions in
+# code — the engine reads them, so an adopter whose reusable workflows
+# sit beside their callers declares no shared tree and gets the join
+# over its own calls (stele#148). The guard is that this tree runs
+# workflows at all: a workflow-free tree seals CANNOT_JUDGE rather
+# than passing vacuously, so the task skips before invoking, the way
+# audit:action-pins does.
 run = '''
-canon=.
-[[ -f security/workflow-permissions.py ]] || canon=.org-canon
-[[ -f "${canon}/security/workflow-permissions.py" ]] || { echo "lint:caller-permissions: no canon tree, skipped"; exit 0; }
-command -v python3 > /dev/null || { echo "lint:caller-permissions: python3 missing" >&2; exit 1; }
-if ! python3 "${canon}/security/workflow-permissions.py" check --canon "${canon}"; then
+set -euo pipefail
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
+[[ -n "${files}" ]] || { echo "lint:caller-permissions: no workflows, skipped"; exit 0; }
+command -v stele > /dev/null || { echo "lint:caller-permissions: stele missing from the belt" >&2; exit 1; }
+if ! stele assert permissions \
+  --policy "${ORG_CANON_DIR}/slsa/assert-policy.json" \
+  --tree "${ORG_CANON_DIR}" \
+  --callers .; then
   echo "lint:caller-permissions: see above — grant what the pinned canon's" >&2
   echo "  callee jobs ask for, at the caller's uses: job (#358 seam 2)." >&2
   exit 1
 fi
-echo "lint:caller-permissions: ok"
 '''
 
 [tasks."lint:template-pins"]
