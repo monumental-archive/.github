@@ -53,38 +53,52 @@ if [[ -f .github/workflows/scorecard.yml ]]; then
   add "${emsg}"
 fi
 # The measured tracks (#540): each SLSA badge is a shields.io ENDPOINT
-# reference to the judgment `stele level` published on the canon's
-# `levels` branch — a render of the computed level with no copy in
+# reference to the judgment `stele level` published on THIS repository's
+# own `levels` branch — a render of the computed level with no copy in
 # between, so no value here can ever outrun the evidence. The link
 # target is the published report the shield was sealed with.
 #
-# A track earns a badge only where the repository DOES that track, on
-# the same tree facts every other badge here resolves from. Build and
-# dependency both rest on published release evidence — attestations
-# and the inventories that ship beside them — so a repository that
-# publishes nothing has neither, which is a fact about it and not a
-# failed measurement. Their absence is the honest render; a badge
-# reading "unmeasured" would claim the measurement broke when nothing
-# was ever there to measure. Measured against the live org: signer
-# publishes no releases and reads unmeasured on exactly these two,
-# while the canon tracks no manifest yet holds Dependencies L2,
-# because its dependencies are its actions — which is why publishing,
-# not a manifest file, is the condition.
+# Own branch, not the canon's (#554). Each repository judges itself and
+# publishes its own cells now, so the badge reads the branch of the
+# repository it describes; the canon's branch carries only the canon's
+# own cells. The path WITHIN the branch keeps the repository directory,
+# because that is the layout the engine writes.
 #
-# A track the repository does do always renders, whatever it scores:
-# a measured L0 is an answer like any other, and hiding a low grade
-# would be the reach-shaped lie this whole layer exists to refuse.
-levels_raw="https://raw.githubusercontent.com/monumental-archive/.github/levels"
+# WHICH tracks is read from this repository's own level stub, and from
+# nowhere else. It used to be derived here a second time from tree facts
+# — a release/publish workflow implying build and dependency, a
+# source-attest workflow implying source — which was fine while the stub
+# did not exist and became a THIRD statement of the same fact the moment
+# it did (the stub declares them, the canon's population declares them).
+# Two statements with a reconciler is the design; three with no
+# reconciler between the third and the others is the drift this layer
+# exists to make unrepresentable, and it would show up as a badge
+# pointing at a cell nobody published.
+#
+# Located by its `uses:`, not by filename: the stub is whichever
+# workflow CALLS the canon's level workflow. In a consumer that file is
+# `level.yml`; in the canon itself `level.yml` is the CALLEE and the
+# stub is `self-level.yml`, and a filename match would read the wrong
+# one there. The match deliberately stops before any `@ref`, because a
+# consumer pins by SHA (`…/workflows/level.yml@<sha>`) while the canon
+# calls itself locally (`./.github/workflows/level.yml`) with no ref at
+# all — and it anchors on `uses:` so a prose mention in a comment is
+# not mistaken for a call.
+#
+# A repository with no stub publishes no levels and so renders no SLSA
+# badge at all — the honest render, exactly as an absent track was
+# before: a badge reading "unmeasured" would claim the measurement broke
+# when nothing was ever there to measure. A track the repository does
+# declare always renders, whatever it scores: a measured L0 is an answer
+# like any other, and hiding a low grade would be the reach-shaped lie
+# this whole layer exists to refuse.
+levels_raw="https://raw.githubusercontent.com/${org_path}/levels"
 repo_name="${org_path#*/}"
-publishes=""
-if compgen -G ".github/workflows/release.y*ml" > /dev/null \
-  || compgen -G ".github/workflows/publish.y*ml" > /dev/null; then
-  publishes=1
-fi
+stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" .github/workflows/*.y*ml 2> /dev/null | head -1)
 tracks=""
-[[ -n ${publishes} ]] && tracks="build"
-[[ -f .github/workflows/source-attest.yml ]] && tracks="${tracks} source"
-[[ -n ${publishes} ]] && tracks="${tracks} dependency"
+if [[ -n ${stub} ]]; then
+  tracks=$(sed -n 's/^[[:space:]]*tracks:[[:space:]]*//p' "${stub}" | head -1)
+fi
 for track in ${tracks}; do
   # shields.io wants the url parameter percent-encoded.
   enc=$(printf '%s/%s/%s.shield.json' "${levels_raw}" "${repo_name}" "${track}" \
