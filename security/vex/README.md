@@ -34,6 +34,9 @@ toil and the drift hazard this keying removes.
 1. **The attestation store, immediately** — on merge, `vex-attest.yml`
    derives the affected-release set from published SBOMs and signs the
    document through the org's one signer over those releases' digests.
+   The consumer recipe — what to type, and the subject rule — lives in
+   the runbook ([`docs/runbook.md`](../../docs/runbook.md), "Verifying,
+   as a consumer would"), nowhere else.
    A `workflow_dispatch` of the same workflow is the recovery path: it
    signs every decision here the store does not already hold, so a
    decision that missed its merge (#596) is healed by running it, with

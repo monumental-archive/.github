@@ -270,7 +270,10 @@ literal):
   carry `attestations-vsa-{crates,npm}.intoto.jsonl` as assets, two
   classes only). Fetch-then-filter, because GitHub's attestations API
   rejects the VSA predicate type as a query filter (`HTTP 422`, measured
-  on `release-lab@v0.16.3`) even though the attestation is present:
+  on `release-lab@v0.16.3`) even though the attestation is present. The
+  rejection is type-specific, not a property of the endpoint: the same
+  filter accepts `https://openvex.dev/ns/v0.2.0`, which is why the VEX
+  recipe below needs no fetch-then-filter dance:
 
   ```bash
   gh api "repos/<owner>/<repo>/attestations/sha256:<digest>" \
@@ -333,6 +336,41 @@ literal):
   itself; what the org verified is the tag→digest binding and the
   signed provenance at the index digest (`release.md`). Absent on
   dry-run releases, by design: a rehearsal must never sign "PASSED".
+- The dependency triage verdict (VEX): **every decision in the canon's
+  `security/vex/` is in the attestation store too**, signed on merge
+  (`vex-attest.yml`) through the org's one signer over the digests of
+  the releases the decision was derived to affect
+  (`security/vex/README.md` has the keying rule):
+
+  ```bash
+  gh attestation verify release-lab-0.14.2.spdx.json \
+    --repo monumental-archive/.github \
+    --predicate-type https://openvex.dev/ns/v0.2.0 \
+    --signer-workflow monumental-archive/signer/.github/workflows/sign.yml
+  ```
+
+  The measured run (#610, on the recovery dispatch that closed #596 —
+  the serde_cbor decision over a real release-lab SBOM asset):
+
+  ```text
+  predicateType=https://openvex.dev/ns/v0.2.0 subjects=484
+    signer=…/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425
+  ```
+
+  **The subject is a published release asset, not the decision
+  document.** The claim is bound to the digests of the releases the
+  decision was DERIVED to affect, so you verify a file you already
+  hold from a release, and the OpenVEX document arrives as the
+  predicate. Attestations live on the canon repository — the
+  decision's home — so `--repo monumental-archive/.github` even
+  though the asset came from another repo's release. No
+  fetch-then-filter here: the API accepts this predicate type as a
+  server-side filter (the `HTTP 422` above is VSA-specific).
+
+  **Run the negative control once, so a pass is not vacuous**: the
+  same command against a file that is not a subject exits 1 with
+  `HTTP 404` (measured on the same run) — a recipe nobody has watched
+  fail is a recipe nobody has tested.
 - **The two comparisons the CLI has no flag for.** `gh attestation
   verify` compares builder identity and canonical source repository, but
   exposes nothing for `buildType` or `externalParameters` — the other
