@@ -54,6 +54,56 @@
       "commitMessageTopic": "monumental-archive/stele"
     },
     {
+      "description": "109 as minted, 37 past — a 34-character Go pseudo-version underneath, so the name must be tiny; jcs is the algorithm's own name (JSON Canonicalization Scheme).",
+      "matchPackageNames": ["github.com/cyberphone/json-canonicalization"],
+      "commitMessageTopic": "jcs"
+    },
+    {
+      "description": "92 as minted, 20 past — pseudo-versioned like jcs; pkcs7 is the standard's name.",
+      "matchPackageNames": ["github.com/digitorus/pkcs7"],
+      "commitMessageTopic": "pkcs7"
+    },
+    {
+      "description": "91 as minted, 19 past.",
+      "matchPackageNames": [
+        "github.com/secure-systems-lab/go-securesystemslib"
+      ],
+      "commitMessageTopic": "go-securesystemslib"
+    },
+    {
+      "description": "86 as minted, 14 past.",
+      "matchPackageNames": ["github.com/google/certificate-transparency-go"],
+      "commitMessageTopic": "certificate-transparency-go"
+    },
+    {
+      "description": "80 as minted, 8 past.",
+      "matchPackageNames": ["github.com/google/go-containerregistry"],
+      "commitMessageTopic": "go-containerregistry"
+    },
+    {
+      "description": "78 as minted, 6 past.",
+      "matchPackageNames": [
+        "go:golang.org/x/vuln/cmd/govulncheck",
+        "golang.org/x/vuln/cmd/govulncheck"
+      ],
+      "commitMessageTopic": "govulncheck"
+    },
+    {
+      "description": "75 as minted, 3 past.",
+      "matchPackageNames": ["github.com/transparency-dev/merkle"],
+      "commitMessageTopic": "merkle"
+    },
+    {
+      "description": "75 as minted, 3 past.",
+      "matchPackageNames": ["github.com/sigstore/protobuf-specs"],
+      "commitMessageTopic": "protobuf-specs"
+    },
+    {
+      "description": "73 as minted, 1 past.",
+      "matchPackageNames": ["github.com/Masterminds/semver/v3"],
+      "commitMessageTopic": "semver"
+    },
+    {
       "description": "Routine updates merge themselves once aged and green; majors always get a human.",
       "matchUpdateTypes": ["patch", "minor", "pin", "digest", "pinDigest"],
       "automerge": true
