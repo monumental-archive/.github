@@ -4892,6 +4892,86 @@ fi
 echo "lint:canon-policy: belt in tree and every policy document present"
 '''
 
+[tasks."lint:policy-load"]
+description = "Every committed policy document loads against the pinned engine (#617)"
+dir = "{{cwd}}"
+# The guard the epoch move needed and did not have (#617). A committed
+# policy declares a `schema`; the pinned stele implements one epoch;
+# nothing held the two together. They drifted on 2026-08-20 and only an
+# armed auto-merge stood between the belt and nine call sites refusing
+# at once — the release path, the source-attest identity path and the
+# Monday audit together (#599, migrated atomically in #626). The pair
+# can drift again at every future epoch move, and the only protection
+# until now was the same-PR rule: a rule someone must remember.
+#
+# The guard IS the engine. `stele verify policy` runs the same loader
+# every verb uses — version gate first, then strict decode (stele#107)
+# — offline, and exits 0 only if the document loads. It moves that
+# refusal from pin-bump time to commit time.
+#
+# Nothing here reads, compares or restates the epoch. A canon-side copy
+# of that integer would be its third, and the number's whole design is
+# that it has exactly one home (`jsonx.Epoch`). Grepping the documents
+# for `"schema"` was rejected for the reason it would not have worked
+# anyway: the live incident's `proofFloor` string-vs-object refusal is a
+# shape change at the RIGHT integer, so the integer is not the change.
+#
+# The two exits are two different instructions, decided at stele#210:
+# 1 is the document's verdict (bring it to the shape this pin
+# implements), anything else is this task's own input (fix the path).
+#
+# Universal, not canon-only: any repo committing its own policy inherits
+# the guard at its next pin bump, and a tree carrying none skips clean
+# by name. Tracked documents only, deterministic and offline — so it
+# belongs in the gate.
+run = '''
+pending=""
+for pair in "slsa/assert-policy.json --assert-policy" "slsa/verify-policy.json --verify-policy"; do
+  path="${pair% *}"
+  if git ls-files --error-unmatch "${path}" > /dev/null 2>&1; then
+    pending="${pending}${pair}
+"
+  fi
+done
+
+[[ -n "${pending}" ]] || {
+  echo "lint:policy-load: no committed policy documents, skipped"
+  exit 0
+}
+command -v stele > /dev/null || { echo "lint:policy-load: stele missing from the belt" >&2; exit 1; }
+
+checked=0
+bad=0
+while IFS= read -r pair; do
+  [[ -n "${pair}" ]] || continue
+  path="${pair% *}"
+  flag="${pair#* }"
+  code=0
+  stele verify policy "${flag}" "${path}" || code=$?
+  case "${code}" in
+    0)
+      checked=$((checked + 1))
+      ;;
+    1)
+      bad=$((bad + 1))
+      echo "lint:policy-load: ${path} does not load against the pinned stele." >&2
+      echo "  The refusal above is the engine's own. Bring the document to the" >&2
+      echo "  shape this pin implements; never restate its epoch here (#617)." >&2
+      ;;
+    *)
+      bad=$((bad + 1))
+      echo "lint:policy-load: the load-check could not read ${path} (exit ${code})." >&2
+      echo "  That is this task's own input, not the document's verdict." >&2
+      ;;
+  esac
+done <<EOF
+${pending}
+EOF
+
+[[ "${bad}" -eq 0 ]] || exit 1
+echo "lint:policy-load: ${checked} policy document(s) load against the pinned stele"
+'''
+
 [tasks."lint:caller-permissions"]
 description = "Every caller of a workflow_call workflow grants its computed permissions requirement"
 dir = "{{cwd}}"
