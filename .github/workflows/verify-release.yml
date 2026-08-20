@@ -94,6 +94,22 @@ name: verify-release
         required: false
         type: string
         default: ""
+      inventories:
+        description: >
+          The release's PLANNED inventory documents, as the JSON array
+          the publish workflow's sbom job emitted from the judged plan
+          set. Each one owes its own release decision and the verdict
+          aggregates over them (stele#158): the invariant is one
+          decision per planned inventory, with the plan as the
+          denominator, so ambiguity is unrepresentable rather than
+          refused. `[""]` or empty declares a release with no plan,
+          judged under the whole-release invariant every release before
+          per-artifact inventories shipped under. Never a filename
+          guess and never re-derived here — it is the same list the
+          decisions were minted over.
+        required: false
+        type: string
+        default: ""
       images:
         description: >
           Image subjects as a JSON array of {image, tag, digest} — the
@@ -411,6 +427,7 @@ jobs:
         if: inputs.mode == 'verdict'
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
+          UNTRUSTED_INVENTORIES: ${{ inputs.inventories }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
           GH_TOKEN: ${{ github.token }}
@@ -487,6 +504,30 @@ jobs:
             echo "::error::the release has no SBOM asset — the decision has no subject to verify against"
             exit 1
           fi
+          # The planned subset, filtered from the candidates by the list
+          # the decisions were minted over — the plan reaches the engine
+          # as DATA, never as policy, and is not re-derived from
+          # filenames here. A release with no plan passes no flag and
+          # keeps the whole-release invariant.
+          inv_flag=()
+          if [[ -n ${UNTRUSTED_INVENTORIES} ]]; then
+            planned=$(jq -r '.[] | select(. != "")' <<< "${UNTRUSTED_INVENTORIES}")
+            if [[ -n ${planned} ]]; then
+              : > "${WORKDIR}/inventories.sha256"
+              while IFS= read -r want; do
+                [[ -n ${want} ]] || continue
+                line=$(grep -F "  ${want}" "${WORKDIR}/sboms.sha256" || true)
+                [[ -n ${line} ]] || {
+                  echo "::error::the plan names ${want} but the release publishes no such inventory"
+                  exit 1
+                }
+                printf '%s\n' "${line}" >> "${WORKDIR}/inventories.sha256"
+              done <<< "${planned}"
+              inv_flag=(--inventories "${WORKDIR}/inventories.sha256")
+              n_inv=$(wc -l < "${WORKDIR}/inventories.sha256")
+              echo "::notice::planned inventories: ${n_inv// /}"
+            fi
+          fi
 
           # Everything verb-shaped — the store fetch, the four
           # verifying-artifacts comparisons, subject coverage equality,
@@ -508,6 +549,7 @@ jobs:
             --tag "v${UNTRUSTED_VERSION}" \
             --subjects "${WORKDIR}/verified.sha256" \
             --sboms "${WORKDIR}/sboms.sha256" \
+            "${inv_flag[@]}" \
             --signer-digest "${pin}" \
             --machinery-digest "${policy_sha}" \
             --policy-uri "https://github.com/monumental-archive/.github/blob/${policy_sha}/slsa/verify-policy.json" \

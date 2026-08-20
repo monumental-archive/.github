@@ -372,6 +372,14 @@ jobs:
   # phase: prove
   sbom:
     name: Generate the release SBOM
+    outputs:
+      # The planned inventories, as the decision leg's matrix. Derived
+      # from the JUDGED plan set and nowhere else (stele#151), so what
+      # is decided over is exactly what was planned and judged. `[""]`
+      # is the no-plan release: one decision over the whole release,
+      # which is the invariant every release before per-artifact
+      # inventories shipped under (stele#158).
+      inventories: ${{ steps.inventories.outputs.list }}
     needs:
       - guard
       - build-go
@@ -473,6 +481,7 @@ jobs:
       # the forge's dependency graph, the one inventory that exists for
       # it.
       - name: Derive the per-artifact inventories and the release view
+        id: inventories
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.guard.outputs.version }}
@@ -494,6 +503,10 @@ jobs:
           epoch=$(git log -1 --pretty=%ct)
           created=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)
           echo "SBOM_CREATED=${created}" >> "${GITHUB_ENV}"
+          # A release with no inventory plan decides as one release; a
+          # planned one decides per planned document. Set before the
+          # branch so no path can leave it unstated.
+          inventories='[""]'
           binaries_speak=1
           for class in ${CLASSES//,/ }; do
             case "${class}" in
@@ -581,6 +594,11 @@ jobs:
             )
             stele derive sbom --union "${union}" --union-name "${base}@v${VERSION}" \
               --created "${created}" --out "${out}"
+            # The union is a VIEW over the planned documents and bears
+            # no decision of its own (#492), so it is not in this list.
+            inventories=$(jq -c --arg v "${VERSION}" \
+              '[.[] | .doc + "-" + $v + ".spdx.json"] | unique' \
+              "${RUNNER_TEMP}/judged-plans.json")
           elif tracked=$(git ls-files 'Cargo.lock' '*/Cargo.lock' 'go.mod' '*/go.mod') && [[ -n ${tracked} ]]; then
             emsg="this release tracks a manifest but no build leg emitted an inventory plan — the per-release"
             emsg+=" inventory is aggregated from per-artifact documents (#492), and the artifact-to-package"
@@ -601,6 +619,8 @@ jobs:
           }
           packages=$(jq '.packages | length' "${out}")
           echo "::notice::release inventory: ${packages} packages (${out##*/})"
+          echo "list=${inventories}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::decision population: ${inventories}"
       # The declared contract, attested at the tag (stele#40, from
       # #109): which classes shipped, the verdict layout, and the
       # machinery version obligations are derived from — written by
@@ -932,6 +952,7 @@ jobs:
   vsa:
     name: Assemble and sign VSA
     needs:
+      - sbom
       - guard
       - verify
       - attach
@@ -944,6 +965,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       subjects: ${{ needs.verify.outputs.subjects }}
       version: ${{ needs.guard.outputs.version }}
 
@@ -1189,6 +1211,7 @@ jobs:
   vsa-wasm:
     name: Assemble and sign wasm VSA
     needs:
+      - sbom
       - guard
       - build-wasm
       - verify-wasm
@@ -1202,6 +1225,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
       npm-package: ${{ needs.build-wasm.outputs.package }}
       version: ${{ needs.guard.outputs.version }}
@@ -1559,6 +1583,30 @@ jobs:
       - sbom
       - repro-gate
     if: ${{ !cancelled() && needs.guard.result == 'success' }}
+    # One decision per PLANNED INVENTORY, with the plan as the
+    # denominator (stele#158). The invariant was never "exactly one
+    # decision per release": per-artifact inventories made N normal, and
+    # a verifier handed several could only refuse as ambiguous — which
+    # is what published release-lab v0.25.3 with provenance and no
+    # verdict. It is also the truer claim, since a CVE can affect the
+    # pgrx build and not the wasm package, which is why per-artifact
+    # inventories exist at all.
+    #
+    # A matrix rather than a loop because actions/attest is an action,
+    # and every leg must fail the barrier: a matrix job's result is
+    # success only when every leg succeeded, so `needs.commit-point`
+    # keeps meaning exactly what it meant. fail-fast is off so a release
+    # names every inventory whose decision could not be made, not the
+    # first.
+    #
+    # The matrix values are document NAMES from the judged plan set —
+    # charset-guarded and collapsed by the engine before they were
+    # emitted, never raw plan bytes — and they are read here as a
+    # matrix key, never interpolated into a command line.
+    strategy:
+      fail-fast: false
+      matrix:
+        inventory: ${{ fromJSON(needs.sbom.outputs.inventories) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -1605,15 +1653,39 @@ jobs:
           path: sbom-subject
 
       - name: Stage the decision subjects (the inventory the decision covered)
+        env:
+          INVENTORY: ${{ matrix.inventory }}
         run: |
           set -euo pipefail
           : > "${RUNNER_TEMP}/decision-subjects.sha256"
-          find sbom-subject -type f | sort | while IFS= read -r f; do
+          if [[ -n ${INVENTORY} ]]; then
+            # A planned inventory decides for itself and names nothing
+            # else. Resolved by listing, never by building a path out of
+            # the matrix value.
+            found=""
+            listing=$(find sbom-subject -type f | sort)
+            while IFS= read -r f; do
+              [[ -n ${f} ]] || continue
+              name=$(basename "${f}")
+              if [[ ${name} == "${INVENTORY}" ]]; then found="${f}"; fi
+            done <<< "${listing}"
+            [[ -n ${found} ]] || {
+              echo "::error::the plan names ${INVENTORY} but the sbom artifact does not carry it"
+              exit 1
+            }
+            files="${found}"
+          else
+            # No plan: one decision over the whole release, the
+            # invariant every pre-inventory release shipped under.
+            files=$(find sbom-subject -type f | sort)
+          fi
+          while IFS= read -r f; do
+            [[ -n ${f} ]] || continue
             digest=$(sha256sum "${f}" | cut -d' ' -f1)
             base=$(basename "${f}")
             printf '%s  %s\n' "${digest}" "${base}" \
               >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done
+          done <<< "${files}"
           [[ -s "${RUNNER_TEMP}/decision-subjects.sha256" ]] || {
             echo "::error::the sbom artifact is empty — a decision over nothing decides nothing"
             exit 1
@@ -1687,6 +1759,7 @@ jobs:
   vsa-binaries:
     name: Assemble and sign binaries VSA
     needs:
+      - sbom
       - guard
       - build-binary
       - attach
@@ -1699,6 +1772,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       subjects: ${{ needs.build-binary.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
@@ -1707,6 +1781,7 @@ jobs:
   vsa-go:
     name: Assemble and sign Go binaries VSA
     needs:
+      - sbom
       - guard
       - build-go
       - attach
@@ -1719,6 +1794,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       subjects: ${{ needs.build-go.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
@@ -1727,6 +1803,7 @@ jobs:
   vsa-source:
     name: Assemble and sign source VSA
     needs:
+      - sbom
       - guard
       - build-source
       - attach
@@ -1739,6 +1816,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       subjects: ${{ needs.build-source.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
@@ -1747,6 +1825,7 @@ jobs:
   vsa-extensions:
     name: Assemble and sign extensions VSA
     needs:
+      - sbom
       - guard
       - build-extension
       - attach
@@ -1759,6 +1838,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       subjects: ${{ needs.build-extension.outputs.subjects }}
       release-tag: ${{ format('v{0}', needs.guard.outputs.version) }}
       version: ${{ needs.guard.outputs.version }}
@@ -1780,6 +1860,7 @@ jobs:
   vsa-image:
     name: Assemble and sign image VSA
     needs:
+      - sbom
       - guard
       - assemble-oci
       - attach
@@ -1792,6 +1873,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       images: >-
         ${{ format('[{{"image":"{0}","tag":"{1}","digest":"{2}"}}]',
         needs.assemble-oci.outputs.image, needs.guard.outputs.version,
@@ -1805,6 +1887,7 @@ jobs:
   vsa-extension-images:
     name: Assemble and sign extension images VSA
     needs:
+      - sbom
       - guard
       - build-extension-images
       - attach
@@ -1817,6 +1900,7 @@ jobs:
       artifact-metadata: write # the attestation storage record
     with:
       mode: verdict
+      inventories: ${{ needs.sbom.outputs.inventories }}
       # The signing matrix as-is: {pg, image, tag, digest} — the verdict
       # job reads image, tag and digest and ignores the rest.
       images: ${{ needs.build-extension-images.outputs.images }}
