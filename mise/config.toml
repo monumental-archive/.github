@@ -1433,6 +1433,21 @@ dir = "{{cwd}}"
 #
 # Multi-module trees are linted per go.mod, because golangci-lint
 # resolves one module context per invocation.
+#
+# The cache is pinned INSIDE the invoking checkout's own git dir (#572).
+# golangci-lint keys its cache on import path and defaults to one
+# user-global directory, so every checkout of one module shares it: two
+# worktrees of github.com/monumental-archive/stele at different revisions
+# are, to that cache, the same packages with different contents — and
+# `lint:go` in one worktree reported 144 findings, none of them in the
+# tree it was looking at. `git rev-parse --absolute-git-dir` resolves to
+# .git/worktrees/<name>/ in a worktree, which dies with the worktree, and
+# to .git/ in a plain clone, which also ends one user-global cache
+# accumulating every repository's analysis state. --git-common-dir is
+# NOT what is wanted here: it is the shared dir a worktree points back
+# at, which is the sharing itself. Costs one cold run per new checkout
+# and nothing after; the invariant is that no invocation can read
+# analysis state produced from a different checkout.
 run = '''
 set -euo pipefail
 mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
@@ -1460,7 +1475,9 @@ count=0
 while IFS= read -r m; do
   [[ -n "${m}" ]] || continue
   count=$((count + 1))
-  (cd "$(dirname "${m}")" && golangci-lint run)
+  d=$(dirname "${m}")
+  cache="$(cd "${d}" && git rev-parse --absolute-git-dir)/golangci-lint"
+  (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run)
 done <<< "${mods}"
 echo "lint:go: ${count} module(s) linted and format-checked"
 '''
@@ -1723,6 +1740,12 @@ dir = "{{cwd}}"
 # themselves mark safe, and `fmt` applies the formatters — the same
 # no-unsafe rule as fix:biome and fix:python: a fixer must be runnable
 # without reading its diff first.
+#
+# Same per-checkout cache as lint:go (#572), and the reason it is an
+# `export` rather than a `VAR=x cmd` prefix is here: a prefix binds to one
+# command, so `fmt` after the && would have run on the user-global cache.
+# A fixer reading another checkout's analysis state would WRITE that
+# mistake into this one's source.
 run = '''
 set -euo pipefail
 mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
@@ -1733,7 +1756,9 @@ command -v go > /dev/null || {
 }
 while IFS= read -r m; do
   [[ -n "${m}" ]] || continue
-  (cd "$(dirname "${m}")" && golangci-lint run --fix && golangci-lint fmt)
+  d=$(dirname "${m}")
+  cache="$(cd "${d}" && git rev-parse --absolute-git-dir)/golangci-lint"
+  (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run --fix && golangci-lint fmt)
 done <<< "${mods}"
 '''
 
