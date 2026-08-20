@@ -1,79 +1,23 @@
 #!/usr/bin/env bash
-# Release phase 1, step 1: work out the next version and stage everything the
-# Release PR should contain. Org canon — see docs/release.md; proven in
-# iiif-server before being promoted here.
+# Release phase 1, step 1: derive the release plan and write the tree it
+# describes. Org canon — see docs/release.md.
 #
-# Runs in the caller repository's workspace. Assumes the canonical workspace
-# shape: `[workspace.package].version` is the single source, members inherit
-# it, and internal path dependencies carry a matching `version = "..."`
-# constraint in `[workspace.dependencies]`.
+# Every DECISION here belongs to the engine (stele#155): the version, the
+# notes, the commit subject, the files the commit carries, the branch it
+# lands on and the staging ref it is built through are one typed document,
+# `stele derive release-plan`. This script asks for that document, applies
+# the parts of it that touch the working tree, and states the plan's own
+# answers as step outputs. It decides nothing, and a refusal is the plan's
+# to make.
 #
 # Writes GITHUB_OUTPUT keys:
 #   release  true when there is something to release
 #   version  bare version, e.g. 0.2.0
-#   files    space-separated paths the release commit must contain
+#   current  the version being released FROM, for the pgrx upgrade derivation
+#   plan     path to the emitted plan document, which open-release-pr.sh executes
 #
 # Leaves the working tree modified; open-release-pr.sh commits it via the API.
-#
-# The version is derived, never typed: stele derive version reads the
-# conventional commits since the last v* tag. The two decisions that
-# matter are derive's own defaults — 0.x breaking changes bump the minor
-# rather than reaching 1.0.0, and chore/ci/docs-only ranges release
-# nothing (its docs and tests are the spec; stele#31).
 set -euo pipefail
-
-# The mirror kind is detected by derive bump itself, never here — the
-# phase-1 contract in docs/release.md now lives behind that one call
-# (stele#102: cargo-workspace, single-crate, none; CITATION.cff where
-# present). The pre-bump version is the tag base, one read: the old
-# per-kind manifest read was a second detection of a fact the tool
-# owns, and derive bump refuses a drifted mirror rather than repairing
-# it, so the two can never silently disagree.
-current=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2> /dev/null || true)
-current=${current#v}
-# The notes conventions, previously cliff.toml: groups and URLs are the
-# org convention stated once here; the bump rules (0.x breaking bumps
-# minor, chore/ci/docs/style/test release nothing) are stele derive's
-# own defaults — and unlike the pinned git-cliff, whose
-# no_increment_regex was silently inert (2.13.1 drops unknown [bump]
-# keys), the silent-types rule is now real. Bare chore is unmapped:
-# release commits and self-pin bumps stay out of the notes, at the
-# recorded cost of cliff's Miscellaneous heading.
-repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
-repo_url="https://github.com/${repo_slug}"
-groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
-groups+=",docs=Documentation,test=Testing,build=Build,ci=CI"
-groups+=",chore(deps)=Dependencies,revert=Reverted"
-order="Breaking,Added,Changed,Fixed,Performance,Documentation"
-order+=",Testing,Build,CI,Dependencies,Reverted"
-notes_flags=(
-  --groups "${groups}"
-  --group-order "${order}"
-  --breaking-group "Breaking"
-  --compare-url "${repo_url}/compare/"
-  --release-url "${repo_url}/releases/tag/"
-  --pull-url "${repo_url}/pull/"
-)
-
-# One tool call derives the version AND writes every mirror it owns
-# (workspace/single-crate version, internal path-dependency
-# constraints, CITATION.cff version + date-released): parsed for
-# location, byte-spliced, re-read through the same reader before disk
-# — never pattern-matched. Drift refuses by name (stele#102, #514).
-# date-released defaults to the committer date of HEAD, the same
-# no-wall-clock rule the old sed applied.
-bumped=$(stele derive bump --git-dir .)
-echo "${bumped}"
-release=$(awk -F= '/^release=/{print $2}' <<< "${bumped}")
-version=$(awk -F= '/^version=/{print $2}' <<< "${bumped}")
-kind=$(awk -F= '/^kind=/{print $2}' <<< "${bumped}")
-bump_files=$(awk -F= '/^files=/{print $2}' <<< "${bumped}")
-if [[ ${release} != true ]]; then
-  emit_pending=true
-fi
-
-echo "current: ${current:-<no tag yet>}"
-echo "next:    ${version:-<none>}"
 
 emit() {
   if [[ -n ${GITHUB_OUTPUT:-} ]]; then
@@ -81,22 +25,77 @@ emit() {
   fi
 }
 
-if [[ ${emit_pending:-false} == true ]]; then
+# The notes conventions: groups and URLs are the org's, stated once here.
+# The bump rules (0.x breaking bumps minor, chore/ci/docs/style/test
+# release nothing) are the engine's own defaults, and its docs and tests
+# are their spec (stele#31). Bare chore is unmapped: release commits and
+# self-pin bumps stay out of the notes, at the recorded cost of cliff's
+# Miscellaneous heading.
+repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
+repo_url="https://github.com/${repo_slug}"
+groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
+groups+=",docs=Documentation,test=Testing,build=Build,ci=CI"
+groups+=",chore(deps)=Dependencies,revert=Reverted"
+order="Breaking,Added,Changed,Fixed,Performance,Documentation"
+order+=",Testing,Build,CI,Dependencies,Reverted"
+
+# The lockfiles an ecosystem's own derivation refreshes below. Declared to
+# the plan rather than appended after it, so the commit's contents are one
+# list with one author — the plan's.
+also=""
+if [[ -f Cargo.lock ]]; then also="Cargo.lock"; fi
+if [[ -f fuzz/Cargo.lock ]]; then also="${also:+${also},}fuzz/Cargo.lock"; fi
+
+plan="${RUNNER_TEMP:-/tmp}/release-plan.json"
+
+# One call: derive the plan and, with --prepare, write the tree it
+# describes — the version mirrors (workspace or single crate, internal
+# path-dependency constraints, CITATION.cff version and date-released)
+# and the changelog section spliced above the newest one. Mirrors are
+# parsed for location, byte-spliced and re-read through the same reader
+# before disk, never pattern-matched, and a drifted mirror refuses by
+# name rather than being repaired (stele#102, #514). --prepare applies
+# the plan's own file list rather than taking a second reading of the
+# tree, so the document and the tree cannot describe different releases.
+stele derive release-plan \
+  --git-dir . \
+  --changelog CHANGELOG.md \
+  ${also:+--also "${also}"} \
+  --groups "${groups}" \
+  --group-order "${order}" \
+  --breaking-group "Breaking" \
+  --compare-url "${repo_url}/compare/" \
+  --release-url "${repo_url}/releases/tag/" \
+  --pull-url "${repo_url}/pull/" \
+  --prepare \
+  --out "${plan}"
+
+# A refused plan is a document saying why, carrying no instructions an
+# executor could half-run. Surface every cause rather than the first.
+refusals=$(jq -r '(.refusals // [])[] | "  " + .cause + ": " + .detail' "${plan}")
+if [[ -n ${refusals} ]]; then
+  echo "FAIL: the release plan refuses:" >&2
+  echo "${refusals}" >&2
+  exit 1
+fi
+
+releasing=$(jq -r '.release' "${plan}")
+if [[ ${releasing} != true ]]; then
+  echo "nothing to release"
   emit "release=false"
   exit 0
 fi
 
-files="${bump_files:+${bump_files} }CHANGELOG.md"
+version=$(jq -r '.version' "${plan}")
+base=$(jq -r '.base // ""' "${plan}")
+echo "current: ${base:-<no tag yet>}"
+echo "next:    ${version}"
 
-# The mirrors are already rewritten by derive bump above; what stays
-# here is cargo's own derivation, never ours: refresh the lockfile's
-# copy of the member versions and prove the tree still resolves
-# before anyone is asked to review it.
-if [[ ${kind} == cargo-* ]]; then
-  if [[ -f Cargo.lock ]]; then
-    cargo update --workspace --offline 2> /dev/null || cargo update --workspace
-    files="${files} Cargo.lock"
-  fi
+# Cargo's own derivation, never ours: refresh the lockfile's copy of the
+# member versions and prove the tree still resolves before anyone is
+# asked to review it. The paths are already in the plan's file list.
+if [[ -f Cargo.lock ]]; then
+  cargo update --workspace --offline 2> /dev/null || cargo update --workspace
   # fuzz/ is its own cargo workspace by cargo-fuzz convention, with its own
   # lockfile that path-depends on the crate being released. Left alone it
   # names the superseded version after every release, which is what made
@@ -107,7 +106,6 @@ if [[ ${kind} == cargo-* ]]; then
   if [[ -f fuzz/Cargo.lock ]]; then
     cargo update --workspace --manifest-path fuzz/Cargo.toml --offline 2> /dev/null \
       || cargo update --workspace --manifest-path fuzz/Cargo.toml
-    files="${files} fuzz/Cargo.lock"
   fi
   cargo metadata --format-version 1 --no-deps > /dev/null
 fi
@@ -128,16 +126,11 @@ if [[ -n ${stubs} ]]; then
   exit 1
 fi
 
-# The splice writes the new section above the newest one and touches
-# nothing else — existing sections are history, not something a release
-# regenerates (stele derive notes is table-tested for the exact
-# whitespace the org's markdownlint demands).
-stele derive notes --git-dir . --changelog CHANGELOG.md "${notes_flags[@]}"
-
 emit "release=true"
 emit "version=${version}"
 # The pre-bump version: generate-pgrx-upgrade.sh cross-checks it against
 # the published release when deriving upgrade scripts.
-emit "current=${current}"
-emit "files=${files}"
-echo "prepared ${version} (${files})"
+emit "current=${base}"
+emit "plan=${plan}"
+carries=$(jq -r '.commit.additions // [] | join(" ")' "${plan}")
+echo "prepared ${version} (${carries})"

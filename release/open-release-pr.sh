@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Release phase 1, step 1b: put the prepared bump on a branch and keep exactly
-# one Release PR open against it. Org canon — see docs/release.md; proven in
-# iiif-server before being promoted here.
+# Release phase 1, step 1b: execute the release plan — put its commit on its
+# branch and keep exactly one Release PR open against it. Org canon — see
+# docs/release.md.
+#
+# This script makes no release decisions (stele#155). The version, the commit
+# subject, the files the commit carries, the branch it lands on and the
+# staging ref it is built through are all read from the plan document
+# prepare-release.sh emitted. What remains is API plumbing, and it is here
+# rather than in the engine because it is capability, not judgment.
 #
 # The commit is created through GitHub's API rather than with `git commit`,
 # because org repositories require signed commits and a runner has no signing
@@ -19,8 +25,7 @@
 # away its review thread.
 set -euo pipefail
 
-: "${VERSION:?VERSION must be set}"
-: "${FILES:?FILES must be set (space-separated release commit contents)}"
+: "${PLAN:?PLAN must be set (the plan document prepare-release.sh emitted)}"
 : "${GH_TOKEN:?GH_TOKEN must be set (the tag-mint App token, not GITHUB_TOKEN)}"
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_SHA:?}"
@@ -28,23 +33,27 @@ set -euo pipefail
 # parser never closes, and shfmt then misreads the rest of the file.
 : "${APP_SLUG:?APP_SLUG must be set (the create-github-app-token app-slug output)}"
 
-# ONE branch, not one per version. Keying the branch on the computed
-# version looks tidier and is a bug: when new commits change the bump, a
-# version-keyed branch opens a SECOND pull request and abandons the first,
-# which is exactly what "keep exactly one Release PR open" forbids. The
-# orphan then sits there forever, showing a version that will never ship.
-# Observed in the lab: a v0.7.1 PR stranded when the range grew a feat and
-# the bump moved to v0.8.0.
-#
-# A fixed name makes that structurally impossible rather than relying on
-# cleanup that can itself fail. The version lives in the title, the body
-# and the commit, where it is read.
-branch="release/next"
-title="chore: release v${VERSION}"
-
+version=$(jq -r '.version' "${PLAN}")
+title=$(jq -r '.commit.subject' "${PLAN}")
+# ONE branch, not one per version — the plan says so and this script does
+# not spell it. Keying the branch on the computed version looks tidier and
+# is a bug: when new commits change the bump, a version-keyed branch opens
+# a SECOND pull request and abandons the first, which is exactly what "keep
+# exactly one Release PR open" forbids. The orphan then sits there forever,
+# showing a version that will never ship. Observed in the lab: a v0.7.1 PR
+# stranded when the range grew a feat and the bump moved to v0.8.0.
+branch=$(jq -r '.branch.name' "${PLAN}")
 # The staging ref is where the commit is built. It is disposable and no pull
 # request ever points at it, so it is free to sit at main's head.
-staging="release-staging/next"
+staging=$(jq -r '.branch.staging' "${PLAN}")
+
+for v in version title branch staging; do
+  [[ -n ${!v} && ${!v} != null ]] || {
+    echo "FAIL: the plan states no ${v}" >&2
+    exit 1
+  }
+done
+
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method PATCH -f sha="${GITHUB_SHA}" -F force=true > /dev/null
@@ -75,17 +84,28 @@ bot_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq '.id')
 bot="${bot_login} <${bot_id}+${bot_login}@users.noreply.github.com>"
 signoff="Signed-off-by: ${bot}"
 
-# prepare-release.sh has already exited early when there was nothing to bump,
-# so every file in FILES differs from the base commit by the time we get here.
-# A path that no longer exists on disk is the old half of a rename (the bump
-# renames *--next.sql upgrade scripts) and must ride the commit as a deletion.
+# The commit's contents are the plan's, plus whatever a later derivation
+# step produced that the plan could not have known about — the pgrx upgrade
+# scripts, derived against the published release after the plan was made.
+# A plan addition that no longer exists on disk is the old half of a rename
+# and rides the commit as a deletion; the plan already states deletions of
+# its own.
 request=$(
-  STAGING="${staging}" TITLE="${title}" SIGNOFF="${signoff}" python3 - << 'PY'
+  PLAN="${PLAN}" STAGING="${staging}" TITLE="${title}" SIGNOFF="${signoff}" python3 - << 'PY'
 import base64, json, os
 
+with open(os.environ["PLAN"], "rb") as handle:
+    plan = json.load(handle)
+
+commit = plan.get("commit") or {}
+paths = list(commit.get("additions") or [])
+for extra in os.environ.get("EXTRA_FILES", "").split():
+    if extra not in paths:
+        paths.append(extra)
+
 additions = []
-deletions = []
-for path in os.environ["FILES"].split():
+deletions = [{"path": p} for p in (commit.get("deletions") or [])]
+for path in paths:
     if not os.path.exists(path):
         deletions.append({"path": path})
         continue
@@ -147,14 +167,14 @@ echo "committed ${oid} to ${branch}, signature verified"
 
 body=$(
   cat << EOF
-Merging this PR is the commitment point: it tags \`v${VERSION}\` and cuts a
+Merging this PR is the commitment point: it tags \`v${version}\` and cuts a
 draft GitHub release, which triggers this repository's publish workflow to
 build, prove, sign and attach the release artifacts.
 
 Nothing is published until this is merged, and nothing outside this path
 publishes at all.
 
-- Version bumped to \`${VERSION}\` across the workspace and its internal
+- Version bumped to \`${version}\` across the workspace and its internal
   dependency constraints
 - \`CHANGELOG.md\` regenerated from the conventional commits since the last
   tag
@@ -170,5 +190,5 @@ if [[ -n ${existing} ]]; then
   echo "updated PR #${existing}"
 else
   gh pr create --head "${branch}" --base main --title "${title}" --body "${body}"
-  echo "opened the release PR for v${VERSION}"
+  echo "opened the release PR for v${version}"
 fi
