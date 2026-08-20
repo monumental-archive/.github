@@ -284,6 +284,10 @@ python = "3.14.7"
 # same delivery as cosign or trivy — exact version, per-platform
 # checksums in mise.lock, Renovate bumps it. Every call site now runs
 # `stele` and no call site needs a Go toolchain.
+#
+# Inline by decision (#579): this key is a mise tool coordinate — the
+# source the checksummed install resolves — and a TOML [tools] key can
+# read no declaration; Renovate's mise manager owns the line.
 "github:monumental-archive/stele" = "v0.16.0"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
@@ -1783,8 +1787,9 @@ run = '''
 [[ -d security/vex ]] || { echo "audit:blast-radius: no security/vex/, not the canon, skipped"; exit 0; }
 command -v osv-scanner > /dev/null || { echo "audit:blast-radius: osv-scanner missing from the belt" >&2; exit 1; }
 command -v stele > /dev/null || { echo "audit:blast-radius: stele missing from the belt" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:blast-radius walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 stele assert blast-radius \
-  --org "${BLAST_RADIUS_ORG:-monumental-archive}" \
+  --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --vex security/vex
 '''
@@ -1805,14 +1810,14 @@ dir = "{{cwd}}"
 # cryptographically, so the trusted root is fetched here — the trust
 # boundary is the caller\'s to state (stele#19 tracks in-tool fetch).
 run = '''
-[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/assert-policy.json ]] || {
-  echo "audit:attestations: not the canon, skipped"; exit 0
+[[ -f slsa/assert-policy.json ]] || {
+  echo "audit:attestations: no slsa/assert-policy.json, not the canon, skipped"; exit 0
 }
 command -v gh > /dev/null || { echo "audit:attestations: gh missing" >&2; exit 1; }
 command -v stele > /dev/null || { echo "audit:attestations: stele missing from the belt" >&2; exit 1; }
-[[ -f slsa/assert-policy.json ]] || { echo "audit:attestations: slsa/assert-policy.json missing" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:attestations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 stele assert evidence \
-  --org monumental-archive \
+  --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --depth full \
   --verify-policy slsa/verify-policy.json
@@ -1836,12 +1841,13 @@ dir = "{{cwd}}"
 # (stele#69). The trusted root resolves through TUF from the anchor
 # pinned in the binary; the spec is stele's docs.
 run = '''
-[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/verify-policy.json ]] || {
-  echo "audit:source-vsa: not the canon, skipped"; exit 0
+[[ -f slsa/verify-policy.json ]] || {
+  echo "audit:source-vsa: no slsa/verify-policy.json, not the canon, skipped"; exit 0
 }
 command -v stele > /dev/null || { echo "audit:source-vsa: stele missing from the belt" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:source-vsa walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 stele assert chains \
-  --org monumental-archive \
+  --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --verify-policy slsa/verify-policy.json
 '''
@@ -1869,18 +1875,29 @@ dir = "{{cwd}}"
 # data by construction) are reported by name, so a Monday summary reads
 # as state, not as expected-red noise (dependency-track.md:46).
 run = '''
-[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/verify-policy.json ]] || {
-  echo "audit:badges: not the canon, skipped"; exit 0
+[[ -f slsa/verify-policy.json ]] || {
+  echo "audit:badges: no slsa/verify-policy.json, not the canon, skipped"; exit 0
 }
 command -v gh > /dev/null || { echo "audit:badges: gh missing" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:badges walks an org the environment names (#579) — Actions sets it; a local run exports it}"
+# The shield endpoints are identity, not scope (#579): a shield is only
+# checkable when it points at this org's own projects on each issuer,
+# and fix:badges renders the same URLs — the declaration is what both
+# legs agree a shield is.
+. "${ORG_BELT_DIR}/identity.sh"
+sc_prefix=$(org_identity shield-scorecard)
+wf_prefix=$(org_identity shield-actions)
+ghcr_prefix=$(org_identity shield-ghcr)
+cc_prefix=$(org_identity shield-codecov)
+cc_api=$(org_identity shield-codecov-api)
 floors="security/scorecard-floors.txt"
-repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
+repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
 failed=""
 checked=0
 note() { echo "audit:badges: ${1}"; [[ -n ${GITHUB_STEP_SUMMARY:-} ]] && echo "- ${1}" >> "${GITHUB_STEP_SUMMARY}" || true; }
 while read -r repo; do
   [[ -n "${repo}" ]] || continue
-  readme=$(gh api "repos/monumental-archive/${repo}/readme" --jq '.content' 2> /dev/null || true)
+  readme=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/readme" --jq '.content' 2> /dev/null || true)
   if [[ -z "${readme}" ]]; then
     note "${repo}: no README, nothing asserted"
     continue
@@ -1896,7 +1913,7 @@ while read -r repo; do
     continue
   fi
   # Declared states: the debt lines the render could not derive.
-  states=$(gh api "repos/monumental-archive/${repo}/contents/.badge-states" --jq '.content' 2> /dev/null | base64 -d 2> /dev/null | grep -v "^#" || true)
+  states=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/.badge-states" --jq '.content' 2> /dev/null | base64 -d 2> /dev/null | grep -v "^#" || true)
   while read -r sk sv; do
     [[ -n "${sk}" ]] || continue
     case "${sv}" in
@@ -1930,7 +1947,7 @@ while read -r repo; do
     [[ -n "${url}" ]] || continue
     checked=$((checked + 1))
     case "${url}" in
-      https://api.scorecard.dev/projects/github.com/monumental-archive/*/badge)
+      "${sc_prefix}"/*/badge)
         proj="${url#https://api.scorecard.dev/projects/}"
         proj="${proj%/badge}"
         score=$(curl -sf "https://api.scorecard.dev/projects/${proj}" | jq -r '.score // empty')
@@ -2011,8 +2028,8 @@ while read -r repo; do
           note "${repo}: level shield $(jq -r '.label + " " + .message' <<< "${sj}") published and live"
         fi
         ;;
-      https://github.com/monumental-archive/*/actions/workflows/*/badge.svg)
-        wfp="${url#https://github.com/monumental-archive/}"
+      "${wf_prefix}"/*/actions/workflows/*/badge.svg)
+        wfp="${url#"${wf_prefix}"/}"
         wfr="${wfp%%/*}"
         wfn="${wfp##*/workflows/}"
         wfn="${wfn%/badge.svg}"
@@ -2022,12 +2039,12 @@ while read -r repo; do
         # red PR-branch run read as a lying shield while the shield is
         # honestly green (observed on signer during #354, latent since
         # #322). Default branch read from the API, never assumed main.
-        wfb=$(gh api "repos/monumental-archive/${wfr}" --jq '.default_branch // empty' 2> /dev/null || true)
+        wfb=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${wfr}" --jq '.default_branch // empty' 2> /dev/null || true)
         if [[ -z "${wfb}" ]]; then
           failed="${failed} ${repo}(workflow-shield: could not read ${wfr}'s default branch)"
           continue
         fi
-        conc=$(gh api "repos/monumental-archive/${wfr}/actions/workflows/${wfn}/runs?per_page=1&status=completed&branch=${wfb}" \
+        conc=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${wfr}/actions/workflows/${wfn}/runs?per_page=1&status=completed&branch=${wfb}" \
           --jq '.workflow_runs[0].conclusion // empty' 2> /dev/null || true)
         if [[ -z "${conc}" ]]; then
           failed="${failed} ${repo}(workflow-shield: ${wfn} has no completed runs on ${wfb} — a status badge over nothing)"
@@ -2046,7 +2063,7 @@ while read -r repo; do
         dots="${url#*fair--software.eu-}"
         dots="${dots%-*}"
         e3="%E2%97%8B"; grep -qE 'img.shields.io/(crates|npm)/|img.shields.io/badge/ghcr' <<< "${urls}" && e3="%E2%97%8F"
-        e4="%E2%97%8B"; gh api "repos/monumental-archive/${repo}/contents/CITATION.cff" > /dev/null 2>&1 && e4="%E2%97%8F"
+        e4="%E2%97%8B"; gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/CITATION.cff" > /dev/null 2>&1 && e4="%E2%97%8F"
         e5="%E2%97%8B"; grep -q 'bestpractices.dev/projects/' <<< "${urls}" && e5="%E2%97%8F"
         expect="%E2%97%8F%20%E2%97%8F%20${e3}%20${e4}%20${e5}"
         if [[ "${dots}" != "${expect}" ]]; then
@@ -2082,26 +2099,26 @@ while read -r repo; do
           note "${repo}: npm package exists"
         fi
         ;;
-      https://img.shields.io/badge/ghcr.io-monumental--archive%2F*)
+      "${ghcr_prefix}"*)
         # The shield names an image; ask GitHub whether that package
         # exists. The old leg HEAD-requested the org packages page,
         # which returns 200 for ANY org that exists — a check that
         # reads nothing (#316 addendum C). The anonymous REST endpoint
         # 401s even for public containers, so this goes through gh;
         # the cron token carries packages: read for it.
-        img="${url#https://img.shields.io/badge/ghcr.io-monumental--archive%2F}"
+        img="${url#"${ghcr_prefix}"}"
         img="${img%%-blue*}"
         img="${img//--/-}"
-        if ! gh api "orgs/monumental-archive/packages/container/${img}" > /dev/null 2>&1; then
+        if ! gh api "orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${img}" > /dev/null 2>&1; then
           failed="${failed} ${repo}(ghcr: package '${img}' does not exist in the org registry)"
         else
           note "${repo}: ghcr package ${img} exists"
         fi
         ;;
-      https://codecov.io/gh/monumental-archive/*/graph/badge.svg | https://codecov.io/gh/monumental-archive/*/branch/*/graph/badge.svg)
-        cc="${url#https://codecov.io/gh/monumental-archive/}"
+      "${cc_prefix}"/*/graph/badge.svg | "${cc_prefix}"/*/branch/*/graph/badge.svg)
+        cc="${url#"${cc_prefix}"/}"
         cc="${cc%%/*}"
-        if curl -sf "https://api.codecov.io/api/v2/github/monumental-archive/repos/${cc}" | jq -e '.name' > /dev/null 2>&1; then
+        if curl -sf "${cc_api}/${cc}" | jq -e '.name' > /dev/null 2>&1; then
           note "${repo}: codecov live"
         else
           failed="${failed} ${repo}(codecov: issuer has no data for ${cc} and no declared state covers it)"
@@ -2203,7 +2220,10 @@ run = '''
 compgen -G "workflow-templates/*.y*ml" > /dev/null || {
   echo "audit:template-pins: no workflow-templates/, skipped"; exit 0
 }
-sha=$(grep -hoE "uses:[[:space:]]*monumental-archive/\.github/[^@]+@[0-9a-f]{40}" \
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
+sha=$(grep -hoE "uses:[[:space:]]*${canon_re}/[^@]+@[0-9a-f]{40}" \
   workflow-templates/*.y*ml | grep -oE "[0-9a-f]{40}" | sort -u)
 [[ -n "${sha}" ]] || { echo "audit:template-pins: no org pins in templates, skipped"; exit 0; }
 if [[ "$(wc -l <<< "${sha}" | tr -d " ")" -gt 1 ]]; then
@@ -2278,22 +2298,25 @@ dir = "{{cwd}}"
 # cron landing just after a Sunday release does not cry wolf. Red means
 # Renovate paused, misconfigured or dead.
 run = '''
-tags=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
+tags=$(git ls-remote --tags "https://github.com/${canon}" "v[0-9]*" \
   | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
 latest=$(tail -1 <<< "${tags}")
 [[ -n "${latest}" ]] || { echo "audit:canon-pins: canon has no tags, skipped"; exit 0; }
 stale=""
 found=0
 claims=$(git ls-files ':!vendor/**' "*.yml" "*.yaml" | while IFS= read -r f; do
-  grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
+  grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" \
     | grep -oE "# v[0-9][0-9.]*" | sed "s|# |${f}:|"
-  if grep -qF "github.com/monumental-archive/.github" "${f}"; then
+  if grep -qF "github.com/${canon}" "${f}"; then
     grep -E "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
       | grep -oE "v[0-9][0-9.]*" | sed "s|^|${f}:|"
   fi
 done; git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json" \
   | while IFS= read -r f; do
-  grep -oE "github>monumental-archive/\.github#v[0-9][0-9.]*" "${f}" \
+  grep -oE "github>${canon_re}#v[0-9][0-9.]*" "${f}" \
     | sed "s|.*#|${f}:|"
 done)
 while IFS= read -r claim; do
@@ -2321,10 +2344,10 @@ if [[ -n "${stale}" ]]; then
     [[ -n "${v}" ]] || continue
     succ=$(awk -v p="${v}" '$0 == p { getline; print; exit }' <<< "${tags}")
     [[ -n "${succ}" ]] || { unmeasured="${unmeasured} ${v}(no successor tag resolved)"; continue; }
-    age=$(gh api "repos/monumental-archive/.github/commits/${succ}" \
+    age=$(gh api "repos/${canon}/commits/${succ}" \
       --jq '((now - (.commit.committer.date | fromdateiso8601)) | floor)' \
       2> /dev/null || true)
-    [[ "${age}" =~ ^[0-9]+$ ]] || { unmeasured="${unmeasured} ${v}(age lookup failed: repos/monumental-archive/.github/commits/${succ})"; continue; }
+    [[ "${age}" =~ ^[0-9]+$ ]] || { unmeasured="${unmeasured} ${v}(age lookup failed: repos/${canon}/commits/${succ})"; continue; }
     [[ "${age}" -ge 86400 ]] && red=1
     [[ "${age}" -gt "${oldest}" ]] && oldest="${age}"
   done
@@ -2369,15 +2392,19 @@ dir = "{{cwd}}"
 # canon by construction (scaffold/), so zero references means the
 # extraction — or the repo — is broken.
 run = '''
-[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/verify-policy.json ]] || {
-  echo "audit:org-pins: not the canon, skipped"; exit 0
+[[ -f slsa/verify-policy.json ]] || {
+  echo "audit:org-pins: no slsa/verify-policy.json, not the canon, skipped"; exit 0
 }
 command -v gh > /dev/null || { echo "audit:org-pins: gh missing" >&2; exit 1; }
-tags=$(git ls-remote --tags https://github.com/monumental-archive/.github "v[0-9]*" \
+: "${GITHUB_REPOSITORY_OWNER:?audit:org-pins walks an org the environment names (#579) — Actions sets it; a local run exports it}"
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
+tags=$(git ls-remote --tags "https://github.com/${canon}" "v[0-9]*" \
   | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p" | sort -V)
 latest=$(tail -1 <<< "${tags}")
 [[ -n "${latest}" ]] || { echo "audit:org-pins: canon has no tags, skipped"; exit 0; }
-repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
+repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
 expected_repos=4
 seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
 if [[ "${seen_repos}" -ne "${expected_repos}" ]]; then
@@ -2390,19 +2417,19 @@ stale=""
 failed=""
 for repo in ${repos}; do
   dir=$(mktemp -d)
-  git clone -q --depth 1 "https://github.com/monumental-archive/${repo}.git" "${dir}" || {
+  git clone -q --depth 1 "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}.git" "${dir}" || {
     failed="${failed} ${repo}(clone)"; continue
   }
   claims=$(cd "${dir}" && git ls-files ':!vendor/**' "*.yml" "*.yaml" | while IFS= read -r f; do
-    grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" \
+    grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" \
       | grep -oE "# v[0-9][0-9.]*" | sed "s|# |${repo}/${f}:|"
-    if grep -qF "github.com/monumental-archive/.github" "${f}"; then
+    if grep -qF "github.com/${canon}" "${f}"; then
       grep -E "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
         | grep -oE "v[0-9][0-9.]*" | sed "s|^|${repo}/${f}:|"
     fi
   done; cd "${dir}" && git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json" \
     | while IFS= read -r f; do
-    grep -oE "github>monumental-archive/\.github#v[0-9][0-9.]*" "${f}" \
+    grep -oE "github>${canon_re}#v[0-9][0-9.]*" "${f}" \
       | sed "s|.*#|${repo}/${f}:|"
   done)
   count=$(grep -c . <<< "${claims}" || true)
@@ -2431,7 +2458,7 @@ if [[ -n "${stale}" ]]; then
     [[ -n "${v}" ]] || continue
     succ=$(awk -v p="${v}" '$0 == p { getline; print; exit }' <<< "${tags}")
     [[ -n "${succ}" ]] || { red=1; continue; }
-    age=$(gh api "repos/monumental-archive/.github/commits/${succ}" \
+    age=$(gh api "repos/${canon}/commits/${succ}" \
       --jq '((now - (.commit.committer.date | fromdateiso8601)) | floor)' \
       2> /dev/null || true)
     [[ "${age}" =~ ^[0-9]+$ ]] || { red=1; continue; }
@@ -2590,9 +2617,12 @@ run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"; exit 0
 }
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
 bad=""
 for f in .github/workflows/*.y*ml; do
-  grep -qE "uses:[[:space:]]*(monumental-archive/\.github/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
+  grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
   grep -qE "^[[:space:]]*pull_request" "${f}" || continue
   grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
 done
@@ -2802,11 +2832,15 @@ dir = "{{cwd}}"
 run = '''
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
 [[ -n "${files}" ]] || { echo "lint:signer-pin: no workflows, skipped"; exit 0; }
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+signer_wf=$(org_identity signer-workflow)
+signer_re="${signer_wf//./\\.}"
 literals=$(xargs grep -nE -- "--signer-digest[[:space:]]+[0-9a-f]{40}" <<< "${files}" || true)
 if [[ -n "${literals}" ]]; then
   echo "lint:signer-pin: hand-written --signer-digest literal — nothing bumps it, so it drifts from the uses: pin the certificate will carry (#314):" >&2
   echo "${literals}" >&2
-  echo "  derive it instead: uses: monumental-archive/.github/.github/actions/verify-signed" >&2
+  echo "  derive it instead: uses: ${canon}/.github/actions/verify-signed" >&2
   echo "  (\$/.github/actions/verify-signed from a canon-owned workflow)" >&2
   exit 1
 fi
@@ -2822,7 +2856,7 @@ if [[ -n "${readers}" ]]; then
   echo "lint:signer-pin: workflows read security/signer.pin (on a non-comment line) but the file is deleted (#316 finding 2) — derive from the sign.yml uses: pin instead:${readers}" >&2
   exit 1
 fi
-refs=$(xargs grep -hoE "monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}" <<< "${files}" | sort -u || true)
+refs=$(xargs grep -hoE "${signer_re}@[0-9a-f]{40}" <<< "${files}" | sort -u || true)
 [[ -n "${refs}" ]] || { echo "lint:signer-pin: no signer references, skipped"; exit 0; }
 if [[ "$(wc -l <<< "${refs}" | tr -d " ")" != "1" ]]; then
   echo "lint:signer-pin: sign.yml pinned at more than one digest — a tree states the trusted signer once:" >&2
@@ -2976,7 +3010,9 @@ dir = "{{cwd}}"
 # else this skips clean.
 run = '''
 fixtures=".github/actions/source-attest/testdata"
-[ -d "${fixtures}/monumental-archive/.github/rules" ] || {
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+[ -d "${fixtures}/${canon}/rules" ] || {
   echo "lint:source-attest: no source-attest fixtures, skipped"; exit 0
 }
 command -v stele > /dev/null || { echo "lint:source-attest: stele missing from the belt" >&2; exit 1; }
@@ -2984,7 +3020,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "${tmp}"' EXIT
 derive() { # snapshot-dir out-file
   stele derive claims --policy slsa/verify-policy.json \
-    --repo monumental-archive/.github --branch main \
+    --repo "${canon}" --branch main \
     --canon-root . --canon-digest "$(git rev-parse HEAD)" \
     --snapshot "${1}" --out "${2}"
 }
@@ -2999,8 +3035,8 @@ jq -e '[.controls[].property] | sort == [
 }
 # Blind: no tag ruleset visible — a property is declared against that
 # scope, so an empty read is a credential proving its own incapability.
-rules="${fixtures}/monumental-archive/.github/rules"
-blind="${tmp}/blind/monumental-archive/.github/rules"
+rules="${fixtures}/${canon}/rules"
+blind="${tmp}/blind/${canon}/rules"
 mkdir -p "${blind}/branches" "${blind}/rulesets"
 cp "${rules}/branches/main.json" "${blind}/branches/"
 cp "${rules}"/rulesets/*.json "${blind}/rulesets/"
@@ -3013,7 +3049,7 @@ grep -q "blind read" <<< "${out}" || {
 }
 # Lapsed: a bypass granted on the all-tags ruleset — readable, content
 # no longer matching, so exactly ORG_SOURCE_TAG_IMMUTABLE drops.
-lapsed="${tmp}/lapsed/monumental-archive/.github/rules"
+lapsed="${tmp}/lapsed/${canon}/rules"
 mkdir -p "${lapsed}/branches" "${lapsed}/rulesets"
 cp "${rules}/branches/main.json" "${lapsed}/branches/"
 cp "${rules}/rulesets.json" "${lapsed}/rulesets.json"
@@ -3057,7 +3093,9 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*
 # github_owned_allowed=true covers the actions/ and github/ orgs.
 # verified_allowed=false — a Marketplace verification badge is a
 # publisher check, not a supply-chain one, and it is not ours to revoke.
-allowed="actions/* github/* monumental-archive/* jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
+. "${ORG_BELT_DIR}/identity.sh"
+canon_owner=$(org_identity owner)
+allowed="actions/* github/* ${canon_owner}/* jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
 bad=""
 checked=0
 while IFS= read -r f; do
@@ -3109,8 +3147,10 @@ command -v gh > /dev/null || { echo "audit:actions-allowlist: gh missing" >&2; e
 # named. The org-scoped endpoint needs an org-admin-capable token
 # (AUDIT_TOKEN via the audit environment in CI); the default job token
 # cannot perform it.
-if ! live=$(gh api "orgs/monumental-archive/actions/permissions/selected-actions" 2> /dev/null); then
-  echo "audit:actions-allowlist: could not read orgs/monumental-archive/actions/permissions/selected-actions" >&2
+. "${ORG_BELT_DIR}/identity.sh"
+canon_owner=$(org_identity owner)
+if ! live=$(gh api "orgs/${canon_owner}/actions/permissions/selected-actions" 2> /dev/null); then
+  echo "audit:actions-allowlist: could not read orgs/${canon_owner}/actions/permissions/selected-actions" >&2
   echo "  no comparison was made — this red is 'unreadable', not 'drifted'." >&2
   echo "  The endpoint needs an org-admin-capable token (AUDIT_TOKEN)." >&2
   exit 1
@@ -3120,8 +3160,11 @@ jq -e '.patterns_allowed | type == "array"' <<< "${live}" > /dev/null || {
   exit 1
 }
 live_patterns=$(jq -r '.patterns_allowed | sort | join(" ")' <<< "${live}")
+# The task text holds the owner as ${canon_owner}, unexpanded — expand
+# it from the same declaration before comparing (#579).
 belt_patterns=$(mise tasks info "lint:actions-allowed" --json \
   | jq -r '.run[0]' | sed -n 's|^allowed="\(.*\)"$|\1|p' \
+  | sed "s|\${canon_owner}|${canon_owner}|g" \
   | tr " " "\n" | grep -v "^actions/\*$" | grep -v "^github/\*$" \
   | sort | tr "\n" " " | sed "s| $||")
 fail=""
@@ -3456,14 +3499,15 @@ dir = "{{cwd}}"
 # Prerequisite of the #83 transfers: one consumer is what made the
 # v1.23.1 break survivable, and transfers add consumers.
 run = '''
-[[ "${GITHUB_REPOSITORY:-}" == "monumental-archive/.github" || -f slsa/assert-policy.json ]] || {
-  echo "audit:caller-permissions: not the canon, skipped"; exit 0
+[[ -f slsa/assert-policy.json ]] || {
+  echo "audit:caller-permissions: no slsa/assert-policy.json, not the canon, skipped"; exit 0
 }
 command -v stele > /dev/null || { echo "audit:caller-permissions: stele missing from the belt" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:caller-permissions walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 if ! stele assert permissions \
   --policy slsa/assert-policy.json \
   --tree . \
-  --org monumental-archive; then
+  --org "${GITHUB_REPOSITORY_OWNER}"; then
   echo "audit:caller-permissions: a consumer's grant is below what canon" >&2
   echo "  HEAD's callee asks for — its next pin bump dies as" >&2
   echo "  startup_failure. Fix the stub before or with the bump (#358)." >&2
@@ -3628,8 +3672,9 @@ run = '''
 [[ -d security ]] || { echo "audit:release-tags: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:release-tags: gh missing" >&2; exit 1; }
 command -v stele > /dev/null || { echo "audit:release-tags: stele missing from the belt" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:release-tags walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 stele assert tags \
-  --org monumental-archive \
+  --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
 '''
 
@@ -3675,6 +3720,7 @@ dir = "{{cwd}}"
 run = '''
 [[ -d security ]] || { echo "audit:drafts: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:drafts: gh missing" >&2; exit 1; }
+: "${GITHUB_REPOSITORY_OWNER:?audit:drafts walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 # THE VISIBILITY PROBE, and it is the whole reason this task can be
 # trusted (#604). GitHub serves draft releases only to identities it
 # considers entitled to them: a token without that entitlement gets a
@@ -3794,7 +3840,7 @@ if [[ -z "${probe_deleted}" ]]; then
   echo "    gh api -X DELETE repos/${probe_repo}/releases/${probe_id}" >&2
   exit 1
 fi
-if ! population=$(gh api "orgs/monumental-archive/repos" --paginate \
+if ! population=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate \
   --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
   echo "audit:drafts: could not enumerate the org's repositories — no population, no audit" >&2
   exit 1
@@ -3814,7 +3860,7 @@ for repo in ${population}; do
   # Read whole, never piped into a reader that closes early: gh
   # --paginate dies on SIGPIPE (the audit:source-vsa lesson). An errored
   # listing refuses; it is never read as "this repo has no drafts".
-  if ! listing=$(gh api "repos/monumental-archive/${repo}/releases" --paginate --jq '
+  if ! listing=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/releases" --paginate --jq '
       .[] | select(.draft)
       | [.tag_name, (.created_at | fromdateiso8601 | tostring),
          (((.body // "") | contains("<!-- draft-record:")) | tostring)]
@@ -3845,7 +3891,7 @@ if [[ -n "${unexplained}" ]]; then
   echo "  a draft nobody can classify by looking is why this check exists (#597)." >&2
   echo "  Record it — do not delete it: the draft is the only artifact of a" >&2
   echo "  failed attempt other than run logs, which expire at 90 days." >&2
-  echo "    REPO=monumental-archive/<repo> TAG=<vX.Y.Z> KIND=burn \\" >&2
+  echo "    REPO=${GITHUB_REPOSITORY_OWNER}/<repo> TAG=<vX.Y.Z> KIND=burn \\" >&2
   echo "      RUN_URL=<the run that burned it> release/record-draft.sh" >&2
   exit 1
 fi
@@ -3904,7 +3950,8 @@ dir = "{{cwd}}"
 run = '''
 [[ -d docs && -d security ]] || { echo "audit:citations: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:citations: gh missing" >&2; exit 1; }
-if ! repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name' 2> /dev/null); then
+: "${GITHUB_REPOSITORY_OWNER:?audit:citations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
+if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name' 2> /dev/null); then
   echo "audit:citations: could not enumerate org repos — nothing was resolved" >&2
   exit 1
 fi
@@ -3927,7 +3974,7 @@ done <<< "$(awk '{ print length, $0 }' <<< "${repos}" | sort -rn | cut -d' ' -f2
 names="${names#|}"
 tags=""
 for repo in ${repos}; do
-  t=$(git ls-remote --tags "https://github.com/monumental-archive/${repo}" "v[0-9]*" 2> /dev/null \
+  t=$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}" "v[0-9]*" 2> /dev/null \
     | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|${repo} \1|p") || true
   tags="${tags}
 ${t}"
@@ -3941,16 +3988,16 @@ fail=""
 # matches nothing on this tree today, which is exactly how the strict
 # shell surfaced it (#82 finding 2).
 cited=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -hoE \
-  "(monumental-archive/)?(${names})[@ ]v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
+  "(${GITHUB_REPOSITORY_OWNER}/)?(${names})[@ ]v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
 linked=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -hoE \
-  "github\.com/monumental-archive/(${names})/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
+  "github\.com/${GITHUB_REPOSITORY_OWNER}/(${names})/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
 # Both forms normalise to "repo version" before anything is resolved, so
 # the resolver has one shape to answer about. `sed '/^$/d'` and not
 # `grep -v`: an empty collection is legitimate, and grep's exit 1 for
 # "matched nothing" would kill the pipeline under pipefail.
 pairs=$( {
-  sed -E 's|^(monumental-archive/)?(.+)[@ ](v[0-9]+\.[0-9]+\.[0-9]+)$|\2 \3|' <<< "${cited}"
-  sed -E 's|^github\.com/monumental-archive/(.+)/releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+)$|\1 \2|' <<< "${linked}"
+  sed -E "s|^(${GITHUB_REPOSITORY_OWNER}/)?(.+)[@ ](v[0-9]+\.[0-9]+\.[0-9]+)$|\\2 \\3|" <<< "${cited}"
+  sed -E "s|^github\.com/${GITHUB_REPOSITORY_OWNER}/(.+)/releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+)$|\\1 \\2|" <<< "${linked}"
 } | sed '/^$/d' | sort -u)
 vn=0
 while IFS=' ' read -r repo ver; do
@@ -3960,14 +4007,14 @@ while IFS=' ' read -r repo ver; do
   cited in docs/ as an org release, but no such tag in ${repo}: ${ver}"
 done <<< "${pairs}"
 runs=$(git ls-files ':!vendor/**' "docs/*.md" \
-  | xargs grep -hoE "github\.com/monumental-archive/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u) || true
+  | xargs grep -hoE "github\.com/${GITHUB_REPOSITORY_OWNER}/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u) || true
 rn=0
 while IFS= read -r r; do
   [[ -n "${r}" ]] || continue
   rn=$((rn + 1))
   repo=$(cut -d/ -f3 <<< "${r}")
   id=$(cut -d/ -f6 <<< "${r}")
-  gh api "repos/monumental-archive/${repo}/actions/runs/${id}" --jq .id > /dev/null 2>&1 \
+  gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/actions/runs/${id}" --jq .id > /dev/null 2>&1 \
     || fail="${fail}
   run URL cited in docs/ does not resolve: https://${r}"
 done <<< "${runs}"
@@ -3998,7 +4045,8 @@ dir = "{{cwd}}"
 run = '''
 [[ -d security ]] || { echo "audit:adoption: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:adoption: gh missing" >&2; exit 1; }
-if ! repos=$(gh api "orgs/monumental-archive/repos" --paginate \
+: "${GITHUB_REPOSITORY_OWNER:?audit:adoption walks an org the environment names (#579) — Actions sets it; a local run exports it}"
+if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate \
   --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
   echo "audit:adoption: could not enumerate the org's repositories — no population, no audit" >&2
   exit 1
@@ -4007,7 +4055,7 @@ optout="security/adoption-optout.txt"
 fail=""
 checked=0
 for repo in ${repos}; do
-  if ! files=$(gh api "repos/monumental-archive/${repo}/contents/.github/workflows" \
+  if ! files=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/.github/workflows" \
     --jq '.[].name' 2> /dev/null); then
     fail="${fail}
   ${repo}: could not read .github/workflows — unreadable is not adopted"
@@ -4023,7 +4071,7 @@ for repo in ${repos}; do
   # release.yml entirely is now caught, which the file marker never did.
   # Read whole, never piped into grep -q: gh --paginate dies on SIGPIPE
   # when the reader closes early (the audit:source-vsa lesson).
-  tags=$(gh api "repos/monumental-archive/${repo}/tags" --paginate --jq '.[].name' 2> /dev/null || true)
+  tags=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/tags" --paginate --jq '.[].name' 2> /dev/null || true)
   releases=false
   if grep -qE '^v[0-9]' <<< "${tags}"; then
     releases=true
@@ -4076,7 +4124,11 @@ dir = "{{cwd}}"
 run = '''
 [[ -d security ]] || { echo "audit:signer-surface: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:signer-surface: gh missing" >&2; exit 1; }
-if ! signer=$(gh api repos/monumental-archive/signer/contents/.github/workflows/sign.yml \
+. "${ORG_BELT_DIR}/identity.sh"
+signer_wf=$(org_identity signer-workflow)
+signer_repo="${signer_wf%%/.github/*}"
+signer_path="${signer_wf#"${signer_repo}"/}"
+if ! signer=$(gh api "repos/${signer_repo}/contents/${signer_path}" \
   -H "Accept: application/vnd.github.raw" 2> /dev/null); then
   echo "audit:signer-surface: could not read the signer's sign.yml — no comparison was made" >&2
   exit 1
@@ -4603,6 +4655,9 @@ dir = "{{cwd}}"
 # scripts, .github#505.)
 run = '''
 [[ -f .github/workflows/release.yml ]] || { echo "lint:release-stub: no release.yml, not a versioned repo, skipped"; exit 0; }
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
 bad=""
 for f in .github/workflows/release.yml .github/workflows/publish.yml; do
   if [[ ! -f "${f}" ]]; then
@@ -4612,13 +4667,13 @@ for f in .github/workflows/release.yml .github/workflows/publish.yml; do
   # self-release.yml's local `uses:`, exercised on every push to main.
   elif grep -qE "^[[:space:]]+workflow_call:" "${f}"; then
     continue
-  elif ! grep -qE "uses: monumental-archive/.github/.github/workflows/(release|publish)\.yml@[0-9a-f]{40}|uses: \./\.github/workflows/(release|publish)\.yml" "${f}"; then
+  elif ! grep -qE "uses: ${canon_re}/.github/workflows/(release|publish)\.yml@[0-9a-f]{40}|uses: \./\.github/workflows/(release|publish)\.yml" "${f}"; then
     bad="${bad} ${f}(no pinned org uses)"
   fi
 done
 if [[ -n "${bad}" ]]; then
   echo "lint:release-stub: versioned repo with broken release stubs:${bad}" >&2
-  echo "  copy scaffold/ from monumental-archive/.github; the publish.yml filename is load-bearing" >&2
+  echo "  copy scaffold/ from ${canon}; the publish.yml filename is load-bearing" >&2
   exit 1
 fi
 echo "lint:release-stub: ok"
@@ -4754,6 +4809,35 @@ fi
 echo "lint:audit-scheduled: ${count} audit task(s), every one scheduled"
 '''
 
+[tasks."lint:canon-policy"]
+description = "A tree carrying the belt carries the org's policy documents (#579)"
+dir = "{{cwd}}"
+# The loudness the audit guards' name branch used to buy, relocated
+# (#579). The canon-only audits guard on their policy file alone —
+# belt-in-tree is the fact the run already holds, the
+# lint:audit-scheduled pattern — so a canon whose policy file is
+# deleted would make every one of them skip as "not the canon": the
+# #568 silent-skip shape, on the conformance root itself. This gate
+# lint is the named refusal that replaces it: only the canon tracks
+# mise/config.toml, and a tree that carries the belt owes the policy
+# documents those audits guard on, plus the identity declaration the
+# belt's asserting tasks read. Deterministic, tracked files only.
+run = '''
+[[ -f mise/config.toml ]] || { echo "lint:canon-policy: no belt in tree, not the canon, skipped"; exit 0; }
+missing=""
+for f in slsa/assert-policy.json slsa/verify-policy.json security/identity.toml; do
+  [[ -f "${f}" ]] || missing="${missing} ${f}"
+done
+if [[ -n "${missing}" ]]; then
+  echo "lint:canon-policy: this tree carries the belt but is missing:${missing}" >&2
+  echo "  the canon-only audits guard on these documents — without them each" >&2
+  echo "  would skip as 'not the canon', the #568 silent-skip shape (#579)." >&2
+  echo "  Restore the documents; deleting one is a defect, never a skip." >&2
+  exit 1
+fi
+echo "lint:canon-policy: belt in tree and every policy document present"
+'''
+
 [tasks."lint:caller-permissions"]
 description = "Every caller of a workflow_call workflow grants its computed permissions requirement"
 dir = "{{cwd}}"
@@ -4823,11 +4907,14 @@ run = '''
 compgen -G "workflow-templates/*.y*ml" > /dev/null || {
   echo "lint:template-pins: no workflow-templates/, skipped"; exit 0
 }
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
 bad=""
 shas=""
 count=0
 for f in workflow-templates/*.y*ml; do
-  lines=$(grep -E "uses:[[:space:]]*monumental-archive/\.github/" "${f}" || true)
+  lines=$(grep -E "uses:[[:space:]]*${canon_re}/" "${f}" || true)
   if [[ "${f##*/}" == scorecard.* ]]; then
     [[ -z "${lines}" ]] || bad="${bad} ${f}(must stay pinless: self-contained by design)"
     continue
@@ -4935,6 +5022,9 @@ dir = "{{cwd}}"
 # Comment lines are excluded: workflow headers quote the pin shape as
 # documentation.
 run = '''
+. "${ORG_BELT_DIR}/identity.sh"
+canon="$(org_identity owner)/$(org_identity repo)"
+canon_re="${canon//./\\.}"
 bad=""
 found=0
 files=$(git ls-files ':!vendor/**' "*.yml" "*.yaml")
@@ -4945,21 +5035,21 @@ if [[ -n "${files}" ]]; then
       found=$((found + 1))
       grep -qE "@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+" <<< "${line}" \
         || bad="${bad} ${f}(canon pin without '@<full-sha> # vX.Y.Z')"
-    done < <(grep -hE "^[^#]*uses:[[:space:]]*monumental-archive/\.github/" "${f}" || true)
+    done < <(grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" || true)
   done <<< "${files}"
 fi
 while IFS= read -r f; do
   [[ -n "${f}" ]] || continue
-  grep -qF "github.com/monumental-archive/.github" "${f}" || continue
+  grep -qF "github.com/${canon}" "${f}" || continue
   found=$((found + 1))
   grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
     || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
 done < <(git ls-files ':!vendor/**' "lefthook.yml" "*/lefthook.yml")
 while IFS= read -r f; do
   [[ -n "${f}" ]] || continue
-  grep -qF "github>monumental-archive/.github" "${f}" || continue
+  grep -qF "github>${canon}" "${f}" || continue
   found=$((found + 1))
-  grep -qE "github>monumental-archive/\.github#v[0-9]" "${f}" \
+  grep -qE "github>${canon_re}#v[0-9]" "${f}" \
     || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
 done < <(git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json")
 # The fourth surface is a prohibition: no workflow step may clone the
@@ -4973,7 +5063,7 @@ done < <(git ls-files ':!vendor/**' "renovate.json" "*/renovate.json" ".github/r
 # tag-mint App must never hold (#164).
 while IFS= read -r f; do
   [[ -n "${f}" ]] || continue
-  checkouts=$(grep -cE "^[^#]*repository:[[:space:]]*monumental-archive/\.github[[:space:]]*$" "${f}") || continue
+  checkouts=$(grep -cE "^[^#]*repository:[[:space:]]*${canon_re}[[:space:]]*$" "${f}") || continue
   found=$((found + checkouts))
   [[ "${checkouts}" -eq 0 ]] \
     || bad="${bad} ${f}(${checkouts} canon checkout(s) — use \$/.github/actions/canon)"
@@ -4983,7 +5073,7 @@ if [[ -n "${bad}" ]]; then
   echo "lint:canon-pins: unversioned canon references:${bad}" >&2
   echo "  every canon reference pins a tag Renovate can bump (#133);" >&2
   echo "  workflow pins: '@<sha> # vX.Y.Z', lefthook: 'ref: vX.Y.Z'," >&2
-  echo "  preset: 'github>monumental-archive/.github#vX.Y.Z'; canon" >&2
+  echo "  preset: 'github>${canon}#vX.Y.Z'; canon" >&2
   echo "  content in a job comes only via \$/.github/actions/canon (#165)." >&2
   exit 1
 fi

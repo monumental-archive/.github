@@ -155,3 +155,27 @@ a fresh session **started in the target repo's checkout**.
   re-verify a publish in the lab pattern after. **No production repo cuts
   a real release before its transfer** (canon, release.md). The lab's own
   rename is the rehearsal for this flip and goes first.
+
+## The belt does not name the org (#579)
+
+The universal belt expresses org identity in data, never in its own
+text — swept and measured at #579. The criterion, decided there: does
+a task's correctness depend on the literal, or merely on its scope?
+
+- **Scope** comes from the environment: every org walk reads
+  `${GITHUB_REPOSITORY_OWNER}` — one spelling, set by Actions, exported
+  by hand for a local audit run. An unset owner is a named refusal,
+  never a quieter walk.
+- **Literals under test** — the canon's own coordinates, the trusted
+  signer workflow ref, the shield endpoints — live in one canon-owned
+  declaration, `security/identity.toml`, read through the one reader
+  `mise/identity.sh` via `ORG_CANON_DIR`. An adopter states their
+  facts there instead of grepping the tasks; `lint:canon-policy`
+  refuses a belt-carrying tree that lacks the declaration or the
+  policy documents.
+
+The claim is measured, not asserted:
+`grep -c monumental-archive mise/config.toml` is **6**, and every
+remaining line is prose citing this org's history or the mise tool pin
+for stele, whose TOML `[tools]` key is a source coordinate no
+declaration can reach (inline by decision, reason at the pin).

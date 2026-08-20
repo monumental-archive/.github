@@ -1,0 +1,38 @@
+# The canon identity declaration (#579): the facts the belt's tasks
+# ASSERT about this org, stated once, where a reader looking for them
+# would look. The criterion that put a value here is that a task's
+# correctness depends on the literal itself — a pin must spell this
+# canon, a signature must come from this signer, a shield must point at
+# these endpoints. A value a task needs only as SCOPE (which org to
+# walk) is deliberately absent: scope is the environment's to supply,
+# as `GITHUB_REPOSITORY_OWNER`, and the belt keeps one spelling of it.
+#
+# Read via `${ORG_BELT_DIR}/identity.sh`, the one reader — tasks never
+# parse this file themselves, so the belt cannot disagree with itself
+# about what a field means. An adopter of the belt states their own
+# facts here instead of grepping the tasks; lint:canon-policy refuses
+# a tree that carries the belt without this document.
+
+# The canon repository: the tree every pin, lefthook ref and preset
+# reference must name (lint:canon-pins, lint:template-pins,
+# lint:release-stub, lint:gate-stub; audit:canon-pins, audit:org-pins,
+# audit:template-pins). Also the org owner whose Actions allowlist the
+# belt carries an enforcement copy of (lint:actions-allowed,
+# audit:actions-allowlist).
+owner = "monumental-archive"
+repo = ".github"
+
+# The trusted signer: the one workflow ref every sign.yml uses: line
+# must pin (lint:signer-pin), and the file audit:signer-surface
+# reconciles the declared signing surface against.
+signer-workflow = "monumental-archive/signer/.github/workflows/sign.yml"
+
+# The shield endpoints audit:badges recognises: a README badge is only
+# checkable when it points at THIS org's projects on the issuer, so the
+# prefixes are identity, not scope. fix:badges renders the same URLs;
+# these declare what both legs agree a shield is.
+shield-scorecard = "https://api.scorecard.dev/projects/github.com/monumental-archive"
+shield-actions = "https://github.com/monumental-archive"
+shield-ghcr = "https://img.shields.io/badge/ghcr.io-monumental--archive%2F"
+shield-codecov = "https://codecov.io/gh/monumental-archive"
+shield-codecov-api = "https://api.codecov.io/api/v2/github/monumental-archive/repos"
