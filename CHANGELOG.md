@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.47.0](https://github.com/monumental-archive/.github/compare/v1.46.0...v1.47.0) - 2026-08-20
+
+### Added
+
+- make a leftover draft the record of its own burn ([#600](https://github.com/monumental-archive/.github/pull/600))
+- deliver the commit canon and budget what it mints ([#608](https://github.com/monumental-archive/.github/pull/608))
+- move org identity out of the belt's text into data ([#614](https://github.com/monumental-archive/.github/pull/614))
+- give the go advisory leg a written-decision exit ([#623](https://github.com/monumental-archive/.github/pull/623))
+- cross to stele schema 6 with the manifest class split ([#626](https://github.com/monumental-archive/.github/pull/626))
+- let each repository publish its own measured levels ([#625](https://github.com/monumental-archive/.github/pull/625))
+
+### Fixed
+
+- recover every decision the store does not hold ([#607](https://github.com/monumental-archive/.github/pull/607))
+- prove draft visibility by making a draft ([#609](https://github.com/monumental-archive/.github/pull/609))
+- match the citation form, not every semver in docs ([#612](https://github.com/monumental-archive/.github/pull/612))
+- alias stele's nine over-budget go modules ([#616](https://github.com/monumental-archive/.github/pull/616))
+- give golangci-lint a per-checkout cache ([#621](https://github.com/monumental-archive/.github/pull/621))
+- mint fix(deps) for cargo and npm bumps ([#622](https://github.com/monumental-archive/.github/pull/622))
+
+### Documentation
+
+- give the runbook the vex consumer recipe ([#613](https://github.com/monumental-archive/.github/pull/613))
+
 ## [1.46.0](https://github.com/monumental-archive/.github/compare/v1.45.2...v1.46.0) - 2026-08-20
 
 ### Added
