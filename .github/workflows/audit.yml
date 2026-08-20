@@ -433,6 +433,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:release-tags
 
+  drafts:
+    name: audit / draft releases explain themselves
+    runs-on: ubuntu-24.04
+    # Environment-scoped for the same reason baseline-drift is: the token
+    # this needs is org-wide, and a secret referenced repo-wide is
+    # drawable by any job anyone adds to any workflow here.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+      # NOT github.token, and the difference is the audit: GitHub serves
+      # draft releases only to push-capable identities, and the default
+      # token is push-capable in THIS repository alone — every other
+      # repo's drafts would come back as an empty list with a 200. The
+      # task refuses rather than passing on that (its blindness guard
+      # asserts push per repo), so the wrong token here is loud, not
+      # silent. AUDIT_TOKEN is the org-wide fine-grained PAT this
+      # workflow already carries for reads the public view cannot serve.
+      GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.5
+          cache: false
+
+      - name: Check every draft release for its record
+        run: mise run audit:drafts
+
   spec-drift:
     name: audit / spec drift
     runs-on: ubuntu-24.04

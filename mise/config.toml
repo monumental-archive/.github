@@ -2621,6 +2621,12 @@ dir = "{{cwd}}"
 #   6. no admit, build or prove job holds `id-token: write` or
 #      `contents: write` — the capability boundary derived from the
 #      phase rather than restated beside it
+#   7. a `record` job is terminal and unprivileged: nothing may `needs`
+#      it and it holds no `id-token: write`. `record` is the one phase
+#      that is not on the way to shipping (#597 — the burn annotation
+#      runs precisely when the barrier did NOT open), so it is the one
+#      phase that could become a route around the commit point. It
+#      cannot: nothing downstream can depend on it, and it signs nothing
 run = '''
 f=".github/workflows/publish.yml"
 [[ -f "${f}" && -d security ]] || { echo "lint:release-phases: not the canon orchestrator, skipped"; exit 0; }
@@ -2655,7 +2661,7 @@ awk '
   /needs\.commit-point\.result == .success./ { testscp[job] = 1 }
   END {
     bad = ""
-    valid = ",admit,build,prove,commit-point,publish,attest,"
+    valid = ",admit,build,prove,commit-point,publish,attest,record,"
     cp = ""; proves = ""
     for (i = 1; i <= n; i++) {
       j = order[i]; p = phase[j]
@@ -2699,6 +2705,13 @@ awk '
       }
       if ((p == "admit" || p == "build" || p == "prove") && (j in idtok || j in cwrite))
         bad = bad "\n  " p " job " j " holds id-token or contents write — pre-barrier jobs sign and publish nothing"
+      if (p == "record") {
+        if (j in idtok)
+          bad = bad "\n  record job " j " holds id-token — a record writes down what happened, it signs nothing"
+        for (r = 1; r <= n; r++)
+          if (index("," needs[order[r]] ",", "," j ",") > 0)
+            bad = bad "\n  " order[r] " needs record job " j " — a record is terminal and cannot gate anything"
+      }
     }
     if (bad != "") {
       printf "lint:release-phases: the commitment barrier is unwired:%s\n", bad > "/dev/stderr"
@@ -3575,6 +3588,133 @@ command -v stele > /dev/null || { echo "audit:release-tags: stele missing from t
 stele assert tags \
   --org monumental-archive \
   --policy slsa/assert-policy.json \
+'''
+
+[tasks."audit:drafts"]
+description = "Every draft release org-wide explains itself — a burn, a rehearsal, or unexplained residue (network, canon only)"
+dir = "{{cwd}}"
+# #597. `release/tag-release.sh` cuts a draft at tag time and phase 2
+# publishes it; anything that stops in between leaves the draft behind.
+# The tag is immutable and the version spent — correctly burned — but
+# the draft is outside that taxonomy and nothing counted it. Nothing
+# NOTICED it either, and the reason is load-bearing: the evidence walk,
+# the tag walk and `derive vex-subjects` all enumerate NON-DRAFT
+# releases, and `gh release view` with no tag returns the latest
+# PUBLISHED release, so a draft is invisible to every judgment the org
+# makes — by coincidence of how those enumerations are written. Written
+# down now (docs/release.md); this is the check that keeps the count
+# from growing back while nobody is reading.
+#
+# Where the count came from is the argument for the audit: the issue
+# that decided this build said four, counted by eye off the releases
+# pages. There were thirty-two, across three repositories — the #305
+# shape, an exception list an order of magnitude under its own
+# population. Eyes do not enumerate; walks do.
+#
+# The finding is "unexplained", never "present": a draft is a legitimate
+# state for as long as a release is in flight, and a rehearsal
+# (`dry-run: true`) leaves one deliberately and forever. Both write a
+# `<!-- draft-record: -->` marker at the moment their reason is known —
+# the burn from publish.yml's burn-record job, the rehearsal from
+# attach-release.yml — so what is left over is exactly the residue
+# nobody can classify by looking.
+#
+# The 24h grace is the org's staleness grace (#310 finding 1), reused
+# rather than reinvented: the record is written seconds after the
+# failure, and the longest full-width publish is well under an hour, so
+# a day is generous past every legitimate in-flight draft and still
+# catches residue on the next Monday cron.
+#
+# The record's `Fixed forward in:` line is deliberately NOT required.
+# The fix has not been cut when the burn is recorded, so requiring it
+# would make this audit red until a human types something — red by
+# default, which is the state that trains people to ignore a check.
+run = '''
+[[ -d security ]] || { echo "audit:drafts: not the canon, skipped"; exit 0; }
+command -v gh > /dev/null || { echo "audit:drafts: gh missing" >&2; exit 1; }
+if ! population=$(gh api "orgs/monumental-archive/repos" --paginate \
+  --jq '.[] | select(.archived or .fork | not)
+        | [.name, ((.permissions.push // false) | tostring)] | @tsv' 2> /dev/null); then
+  echo "audit:drafts: could not enumerate the org's repositories — no population, no audit" >&2
+  exit 1
+fi
+[[ -n "${population}" ]] || {
+  echo "audit:drafts: the org listing named zero repositories — the walk is broken, not the org" >&2
+  exit 1
+}
+# THE BLINDNESS GUARD, and it is the whole reason this task can be
+# trusted. GitHub serves draft releases only to push-capable identities:
+# a read-only token gets 200 and a list with every draft silently
+# removed — indistinguishable from a clean org, which is the exact
+# "reads nothing, reports clean" shape #240/#310 exist to refuse. So
+# push capability is asserted per repo BEFORE any listing is believed,
+# from the same call that names the population, and a repo the token
+# cannot see into is a refusal rather than a pass.
+blind=""
+repos=""
+while IFS=$'\t' read -r name push; do
+  [[ -n "${name}" ]] || continue
+  if [[ "${push}" != "true" ]]; then
+    blind="${blind} ${name}"
+    continue
+  fi
+  repos="${repos} ${name}"
+done <<< "${population}"
+if [[ -n "${blind}" ]]; then
+  echo "audit:drafts: the token is not push-capable on:${blind}" >&2
+  echo "  GitHub lists draft releases only to push-capable identities, so an" >&2
+  echo "  empty listing there would prove nothing. Refusing to judge blind." >&2
+  echo "  Wire a token with push access to every org repo (audit.yml uses the" >&2
+  echo "  environment-scoped AUDIT_TOKEN for exactly this class of read)." >&2
+  exit 1
+fi
+now=$(date -u +%s)
+cutoff=$((now - 86400))
+unexplained=""
+drafts=0
+recorded=0
+young=0
+walked=0
+for repo in ${repos}; do
+  # Read whole, never piped into a reader that closes early: gh
+  # --paginate dies on SIGPIPE (the audit:source-vsa lesson). An errored
+  # listing refuses; it is never read as "this repo has no drafts".
+  if ! listing=$(gh api "repos/monumental-archive/${repo}/releases" --paginate --jq '
+      .[] | select(.draft)
+      | [.tag_name, (.created_at | fromdateiso8601 | tostring),
+         (((.body // "") | contains("<!-- draft-record:")) | tostring)]
+      | @tsv' 2> /dev/null); then
+    echo "audit:drafts: could not list ${repo}'s releases — unreadable is never clean" >&2
+    exit 1
+  fi
+  walked=$((walked + 1))
+  while IFS=$'\t' read -r tag created marked; do
+    [[ -n "${tag}" ]] || continue
+    drafts=$((drafts + 1))
+    if [[ "${marked}" == "true" ]]; then
+      recorded=$((recorded + 1))
+      continue
+    fi
+    if [[ "${created}" -ge "${cutoff}" ]]; then
+      # In flight, or too fresh to judge. Not a finding.
+      young=$((young + 1))
+      continue
+    fi
+    age=$(((now - created) / 86400))
+    unexplained="${unexplained}
+  ${repo}@${tag} — draft for ${age}d, no draft-record"
+  done <<< "${listing}"
+done
+if [[ -n "${unexplained}" ]]; then
+  echo "audit:drafts: ${walked} repo(s) walked, drafts that explain nothing:${unexplained}" >&2
+  echo "  a draft nobody can classify by looking is why this check exists (#597)." >&2
+  echo "  Record it — do not delete it: the draft is the only artifact of a" >&2
+  echo "  failed attempt other than run logs, which expire at 90 days." >&2
+  echo "    REPO=monumental-archive/<repo> TAG=<vX.Y.Z> KIND=burn \\" >&2
+  echo "      RUN_URL=<the run that burned it> release/record-draft.sh" >&2
+  exit 1
+fi
+echo "audit:drafts: ${walked} repo(s) walked, ${drafts} draft(s): ${recorded} recorded, ${young} in flight"
 '''
 
 [tasks."audit:citations"]

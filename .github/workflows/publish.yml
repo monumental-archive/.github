@@ -47,9 +47,15 @@
 # `if:` per job rather than by interpolating the input into a path.
 #
 # PHASES (#349 finding 1). Every job carries a `# phase:` marker on the
-# line above its id — admit, build, prove, commit-point, publish or
-# attest — in the same marker idiom as `capability-boundary:` and
-# `unattested-path:`. The `commit-point` job is the single barrier
+# line above its id — admit, build, prove, commit-point, publish,
+# attest or record — in the same marker idiom as `capability-boundary:`
+# and `unattested-path:`. `record` is the one phase that is not on the
+# way to shipping anything: it runs after the graph settles, writes down
+# what happened and reaches nothing irreversible, so it is terminal by
+# lint (nothing may need it) and holds no `id-token: write` — a phase
+# outside the barrier must not be a route around it.
+#
+# The `commit-point` job is the single barrier
 # between proof and consequence: every proof the release requires fans
 # into it, it FAILS (visibly, not skips) if any proof is not `success`,
 # and every `publish` and `attest` job reaches the irreversible world
@@ -1897,4 +1903,61 @@ jobs:
       version: ${{ needs.guard.outputs.version }}
     secrets:
       zenodo-token: ${{ secrets.zenodo-token }}
+
+  # A tag is immutable, so a publish that dies spends its version number
+  # and leaves the draft `release/tag-release.sh` cut sitting there — the
+  # release correctly burned, the residue outside the taxonomy. Nothing
+  # cleaned it up and nothing noticed: the evidence walk, the tag walk
+  # and `derive vex-subjects` all enumerate NON-DRAFT releases and
+  # `gh release view` with no tag returns the latest PUBLISHED one, so a
+  # draft is invisible to every judgment in the org — by coincidence of
+  # how those enumerations are written, and now stated in
+  # docs/release.md rather than relied on unsaid. What a draft does
+  # reach is a human reading the releases page, and at thirty-two of
+  # them "burn or release in flight?" could not be answered by looking.
+  #
+  # So the draft becomes the record. Deleting it was the old instruction
+  # and is rejected: it destroys the only artifact of the failed attempt
+  # other than run logs, which expire at 90 days, and this org derives
+  # burns from run history (#597).
+  #
+  # `needs.attach.result != 'success'` covers every way the release
+  # failed to go public in ONE edge — attach failed, or attach never ran
+  # because something upstream did — so a class added above wires itself
+  # in rather than being silently unwatched. The `record` phase is
+  # terminal by construction (`lint:release-phases`): it signs nothing,
+  # publishes nothing, and nothing may depend on it, so it cannot become
+  # a route around the commit point.
+  # phase: record
+  burn-record:
+    name: Record the burn on the draft
+    needs:
+      - guard
+      - attach
+    if: ${{ !cancelled() && needs.guard.result == 'success' && needs.attach.result != 'success' && !inputs.dry-run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {} # it annotates with the App token, not GITHUB_TOKEN
+    steps:
+      # No checkout: the canon action links the tree this run already
+      # resolved, so the failure path costs one symlink and no network.
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Mint the annotating token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.TAG_MINT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+
+      - name: Record the burn
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          KIND: burn
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .org-canon/release/record-draft.sh
 ...

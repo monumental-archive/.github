@@ -302,6 +302,14 @@ jobs:
           fi
           gh release upload "${TAG}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
           if [[ ${DRY_RUN} == "true" ]]; then
+            # The draft stays on purpose here — and to anyone reading the
+            # releases page that is indistinguishable from a burn, which
+            # is how the org accumulated thirty-two drafts nobody could
+            # classify by looking (#597). The reason is known HERE and
+            # nowhere later, so it is written down here.
+            REPO="${GITHUB_REPOSITORY}" TAG="${TAG}" KIND=rehearsal \
+              RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              .org-canon/release/record-draft.sh
             echo "::warning::rehearsal: ${TAG} left as a draft, nothing published"
             exit 0
           fi

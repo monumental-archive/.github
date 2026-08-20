@@ -171,6 +171,61 @@ shared workflow whose only exerciser lives in its own repository is
 untested for the cross-repository case**, which is precisely the case every
 consumer runs.
 
+### A draft explains itself
+
+`tag-release.sh` cuts the release as a **draft** and phase 2 publishes it.
+Anything that stops in between leaves the draft behind: the tag is already
+minted and immutable, so the version number is spent and the release is
+correctly *burned* — but the draft is outside that taxonomy, and until
+[#597](https://github.com/monumental-archive/.github/issues/597) nothing
+cleaned it up or counted it.
+
+**The invisibility invariant.** A draft release is invisible to every
+judgment this org makes, and that is a coincidence of how the enumerations
+happen to be written rather than a property anyone designed:
+
+- the evidence walk, the tag walk and `stele derive vex-subjects` all
+  enumerate **non-draft** releases;
+- `gh release view` with no tag argument returns the latest **published**
+  release, which is how `repro-check.yml`, `tag-release.sh` and the pgrx
+  upgrade derivation each find "the previous release".
+
+Nothing states this anywhere else, so it is stated here: **any future walk
+that enumerates releases must decide about drafts explicitly.** Inheriting
+the silence is how a draft becomes load-bearing by accident.
+
+What a draft *does* reach is a human reading the releases page — and there
+the silence costs something real. At thirty-two accumulated drafts,
+"is this a burn or a release in flight?" could not be answered by looking.
+
+**So the draft becomes the record.** Both paths that leave one write a
+`<!-- draft-record: -->` marker at the moment their reason is known, through
+one writer, [`release/record-draft.sh`](../release/record-draft.sh):
+
+| Path | Written by | Says |
+| --- | --- | --- |
+| the publish failed | `publish.yml`'s `burn-record` job | burned version, the run that burned it |
+| `dry-run: true` | `attach-release.yml` | rehearsal, deliberately unpublished |
+
+Deleting the draft was the previous instruction and is **rejected**: it
+destroys the only artifact of the failed attempt other than run logs, which
+expire at 90 days, and this org derives burns from run history
+(`security/attestation-debt.txt`).
+
+Two deliberate limits. The burn record's `Fixed forward in:` line cannot be
+filled automatically — the fix has not been cut when the burn is recorded —
+so it is written pending and completed by whoever ships the fix. And
+`audit:drafts` does not require it: an audit that stays red until a human
+types something is red by default, which is the state that trains people to
+ignore a check. What the audit does require is the marker, on every draft
+older than the org's standard 24-hour staleness grace.
+
+`audit:drafts` walks the org each Monday. It asserts push capability per
+repository before believing any listing, because GitHub serves draft
+releases only to push-capable identities — a read-only token gets a 200 and
+a list with every draft silently removed, which is indistinguishable from a
+clean org.
+
 ## Phase 2: publish, prove, sign
 
 Triggered by the `v*` tag, so `github.ref` *is* the tag and provenance names
@@ -893,8 +948,11 @@ in that repository's history for that day.
   verifiably published, so a half-completed release is re-run, not repaired
   by hand.
 - A release that fails before `publish` leaves a draft and unpublished
-  artifacts — delete the draft, fix, re-tag never (tags are immutable);
-  the fix ships as the next version.
+  artifacts. Re-tag never (tags are immutable); the fix ships as the next
+  version. **Do not delete the draft** — the `burn-record` job annotates it
+  as the record of the burn, and that record is the point (see "A draft
+  explains itself"). Complete its `Fixed forward in:` line when the fix
+  ships.
 
 ## Conformance
 
