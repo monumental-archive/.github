@@ -531,8 +531,15 @@ jobs:
               --policy .org-canon/slsa/assert-policy.json \
               --classes "${CLASSES}" \
               --machinery-version "${machinery}" \
+              --out "${RUNNER_TEMP}/judged-plans.json" \
               plans/sbom-plan-*/plan.json
-            plan=$(jq -s 'add | unique' plans/sbom-plan-*/plan.json)
+            # The derivation iterates the set the JUDGMENT emitted, not
+            # a second reading of the same bytes: `jq -s 'add | unique'`
+            # over the raw plans was the engine's canonical collapse
+            # derived twice, agreeing by luck (stele#151). --out writes
+            # only on PASS, so there is nothing to iterate unless the
+            # plans were judged.
+            plan=$(cat "${RUNNER_TEMP}/judged-plans.json")
             docs=()
             count=$(jq 'length' <<< "${plan}")
             for ((i = 0; i < count; i++)); do
@@ -616,10 +623,22 @@ jobs:
             echo "::error::the pinned canon tree's CITATION.cff names no version — the manifest cannot state its machinery"
             exit 1
           }
+          # Every entry is pinned and TYPED — build subject or evidence
+          # document — stamped here, the one moment that knowledge
+          # exists natively (stele#156). Downstream walks read the
+          # classification instead of re-deriving it, which is what
+          # retires the repro filter and the whole-manifest resume diff.
+          # Two passes, because a manifest cannot pin itself: this one
+          # digests everything dist/ holds BEFORE the manifest exists,
+          # and attach-release's checksums.txt then covers everything
+          # including it.
+          (cd dist && sha256sum ./* | sed 's| \./| |') > "${RUNNER_TEMP}/assets.sha256"
           stele emit manifest \
             --classes "${CLASSES}" \
             --store-vsa true \
             --machinery-version "${machinery}" \
+            --assets "${RUNNER_TEMP}/assets.sha256" \
+            --assert-policy .org-canon/slsa/assert-policy.json \
             --out dist/evidence-manifest.json
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
