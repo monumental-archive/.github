@@ -77,6 +77,18 @@ name: build-pgrx-extension
       subjects:
         description: sha256sum manifest of the extension tarballs.
         value: ${{ jobs.collect.outputs.subjects }}
+      leg-subjects:
+        # The same digests, carrying the target whose leg produced them
+        # (schema 4, stele#223). This class's target is the PG MAJOR,
+        # not the pg×arch cell the matrix runs: a rebuild of this class
+        # is requested by major (`pg-major`, repro-check.yml) and
+        # produces every arch of it, so the major is the grain at which
+        # a rebuild's coverage can be declared. What a target IS
+        # belongs to the publisher; this is that declaration.
+        description: >
+          sha256sum manifest of the extension tarballs, each line
+          prefixed with the PG major whose leg produced it.
+        value: ${{ jobs.collect.outputs.leg-subjects }}
       artifact-name:
         description: Actions artifact holding the tarballs.
         value: ${{ jobs.collect.outputs.artifact-name }}
@@ -605,6 +617,7 @@ jobs:
     permissions: {}
     outputs:
       subjects: ${{ steps.manifest.outputs.subjects }}
+      leg-subjects: ${{ steps.manifest.outputs.leg-subjects }}
       artifact-name: release-extensions
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -641,10 +654,29 @@ jobs:
             exit 1
           fi
           manifest=$(sha256sum ./*.tar.gz | sed 's| \./| |')
+          # The same digests once more, each prefixed with the PG major
+          # whose leg produced it — this class's target grain. The
+          # prefix comes from the PLANNED cell list this step has just
+          # proved matches exactly one tarball each, so both arches of
+          # one major carry that major and nothing parses a target back
+          # out of a filename.
+          legs=()
+          for c in "${cells[@]}"; do
+            pg="${c%-*}"
+            arch="${c#*-}"
+            sums=$(sha256sum ./*-pg"${pg}"-linux-"${arch}".tar.gz)
+            sums="${sums// .\// }"
+            while IFS= read -r line; do
+              legs+=("${pg} ${line}")
+            done <<< "${sums}"
+          done
           {
             echo "subjects<<SUBJECTS_EOF"
             printf '%s\n' "${manifest}"
             echo "SUBJECTS_EOF"
+            echo "leg-subjects<<LEGS_EOF"
+            printf '%s\n' "${legs[@]}"
+            echo "LEGS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
