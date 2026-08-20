@@ -231,10 +231,11 @@ Each of these cost a wasted round trip on 2026-08-13:
 3. **`OSPS-BR-01.02` is a retired criterion stored as the number `0`,**
    not a status string. It is in `baseline_criteria_retired.yml`
    (retired in the 2026-02-19 Baseline revision), scores nothing, and
-   must never be copied into a `.bestpractices.json`. Written without a
-   leading `v` deliberately: `audit:citations` reads a `vX.Y.Z` in
-   `docs/` as a claim about an org tag, and this is an upstream revision
-   name, not one of ours.
+   must never be copied into a `.bestpractices.json`. It was once
+   written without a leading `v` to dodge `audit:citations`, which then
+   read every `vX.Y.Z` in `docs/` as a claim about an org tag; the
+   matcher keys on an org repository beside the version now (#605), so
+   an upstream revision name needs no such contortion.
 
 ### Answers that must not be copied between repos
 
@@ -291,7 +292,7 @@ declares it builds a tarball through `build-source`, rebuilds it
 independently through `repro-build-source`, and the repro gate compares
 the two bit for bit before anything is signed or attached. So a
 repository that compiles nothing still has a build, and a reproducible
-one. The canon's v1.25.0 publishes four assets:
+one. `.github@v1.25.0` publishes four assets:
 
 ```text
 github-1.25.0.tar.gz          the built archive

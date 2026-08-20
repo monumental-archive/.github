@@ -627,9 +627,9 @@ Three settings are not preferences:
 not a debugging leftover, and the rule exists to catch strays in library
 code. **`EXE001` was fixed rather than ignored**: the script carried a
 shebang with mode 644. `lint:exec-bits` exists because a missing
-executable bit burned v1.5.0 with exit 126 after an immutable tag — but
-it covers shell only, and ruff extended that hard-won rule to Python and
-immediately found the same defect.
+executable bit burned `.github@v1.5.0` with exit 126 after an immutable
+tag — but it covers shell only, and ruff extended that hard-won rule to
+Python and immediately found the same defect.
 
 The remaining ~28 findings were fixed, not silenced, and the refactor was
 verified behaviourally rather than by inspection: the pre-change

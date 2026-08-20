@@ -98,8 +98,8 @@ return value of a check that job just ran (#208, #209, #210) — and
 certificate subject, so "who computed this verdict" is cryptographic
 fact. The org therefore carries two roots of trust — provenance and
 producer evidence under `signer/sign.yml`, verdicts under
-`.github/verify-release.yml` — with recipes and the pre-v1.14.0
-version boundary in [`runbook.md`](runbook.md).
+`.github/verify-release.yml` — with recipes and the version boundary
+before `.github@v1.14.0` in [`runbook.md`](runbook.md).
 
 `SLSA_BUILD_REPRODUCED` is deliberately never claimed: `repro-check`
 rebuilds on the same platform by design (skew-proofing makes a

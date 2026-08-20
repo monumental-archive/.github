@@ -184,17 +184,17 @@ roll-forward.
   is a completed step, not a failure. Re-dispatch on the tag and it
   converges.
 - **Failed AFTER publish** (the DOI mint is the only job downstream of
-  the commitment point — e.g. Zenodo down, v1.20.0's first mint):
-  re-dispatch on the tag; attach proves the rebuilt bytes equal the
-  published set and passes through the immutable release instead of
-  clobbering it (#316). Releases published by a canon older than the
-  converge path cannot resume past publish — their DOI rolls forward to
-  the next version, which is why the canon's concept record starts at
-  v1.21.0 and not v1.20.0, and skips v1.22.0 (the concept-resolution
-  redirect bug, #316). A dispatch runs the tree AT THE TAG, so a fix on
-  main never reaches an already-tagged release: version DOIs are not
-  contiguous by design, the concept DOI covers the software, and the
-  next release carries the fix.
+  the commitment point — e.g. Zenodo down, the first mint of
+  `.github@v1.20.0`): re-dispatch on the tag; attach proves the rebuilt
+  bytes equal the published set and passes through the immutable release
+  instead of clobbering it (#316). Releases published by a canon older
+  than the converge path cannot resume past publish — their DOI rolls
+  forward to the next version, which is why the canon's concept record
+  starts at `.github@v1.21.0` and not `.github@v1.20.0`, and skips
+  `.github@v1.22.0` (the concept-resolution redirect bug, #316). A
+  dispatch runs the tree AT THE TAG, so a fix on main never reaches an
+  already-tagged release: version DOIs are not contiguous by design, the
+  concept DOI covers the software, and the next release carries the fix.
 - **Gate red on the release PR**: fix on main; the release PR refreshes
   itself on the next push. Never edit the release branch by hand.
 - **A cell of a matrix class failed**: `fail-fast: false` means the other
@@ -266,11 +266,11 @@ literal):
 - The verification verdict (artifact VSA): **every class carries one,
   in the attestation store** — verdicts are rendered after the release
   publishes, and a published release is immutable, so the store is the
-  VSA's only home (#209; releases cut before canon v1.13.0 instead
+  VSA's only home (#209; releases cut before `.github@v1.13.0` instead
   carry `attestations-vsa-{crates,npm}.intoto.jsonl` as assets, two
   classes only). Fetch-then-filter, because GitHub's attestations API
-  rejects the VSA predicate type as a query filter (`HTTP 422`,
-  measured on v0.16.3) even though the attestation is present:
+  rejects the VSA predicate type as a query filter (`HTTP 422`, measured
+  on `release-lab@v0.16.3`) even though the attestation is present:
 
   ```bash
   gh api "repos/<owner>/<repo>/attestations/sha256:<digest>" \
@@ -292,11 +292,11 @@ literal):
   verdict is the certificate subject, so `verifier.id` is a tautology
   rather than a field taken on faith; pin `--signer-digest` to the canon
   release commit the publishing repo pinned. **Version boundary:**
-  verdicts on releases cut before canon v1.14.0 were signed by the org
-  signer instead — verify those with `--signer-workflow
+  verdicts on releases cut before `.github@v1.14.0` were signed by the
+  org signer instead — verify those with `--signer-workflow
   monumental-archive/signer/.github/workflows/sign.yml`, the recipe this
-  one replaced (the same shape as the pre-v1.13.0
-  `attestations-vsa-*` asset caveat below).
+  one replaced (the same shape as the `attestations-vsa-*` asset caveat
+  below, which applies to releases cut before `.github@v1.13.0`).
 
   **Release tags are signed at the mint** (#349 S4): gitsign puts a
   keyless x509 signature in the tag object's PGP slot, under the same
@@ -387,6 +387,6 @@ ref that is not a `v*` tag, and `self-publish.yml` requests no
 `dry-run`. Cut it and watch. `self-publish.yml` ships one class
 (`source-archive`) in minutes, so a red canon release costs a version
 number and no consumer — spend them as freely as lab patch numbers
-(v1.24.0 published with its verdict leg red; v1.24.1 fixed it, #367).
-The canon proves the machinery runs; the lab, publishing four classes
-across PG 14–18, proves it works.
+(`.github@v1.24.0` published with its verdict leg red;
+`.github@v1.24.1` fixed it, #367). The canon proves the machinery runs;
+the lab, publishing four classes across PG 14–18, proves it works.

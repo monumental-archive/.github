@@ -3853,23 +3853,54 @@ echo "audit:drafts: visibility proven in ${probe_repo}, ${walked} repo(s) walked
 '''
 
 [tasks."audit:citations"]
-description = "Every version and workflow-run citation in docs/ resolves against a real tag or run (network, canon only)"
+description = "Every citation of an org release and every workflow-run URL in docs/ resolves against a real tag or run (network, canon only)"
 dir = "{{cwd}}"
 # S2's cheap leg (#349): the docs cited "lab v0.19.1, which it blocked"
 # for a tag that never existed, and the error survived two audits
 # because checking a citation meant a human resolving it by hand
-# (finding 2). This resolves every vX.Y.Z and every Actions run URL in
-# docs/ against the live org — a fabricated or mistyped citation is a
-# red Monday, not a reading exercise. Versions are matched against the
-# union of all org repos' tags: a docs citation rarely names its repo
-# inline, and the failure mode being guarded is a version that exists
-# NOWHERE. Path-shaped matches (URLs like openvex.dev/ns/v0.2.0) are
-# not citations and are excluded by the leading boundary. Three more
-# non-citation shapes, each measured on this tree: a version inside
-# double quotes is a MENTION (the corrected "v0.19.1" prose names the
-# wrong tag deliberately), a version with a suffix is an example
-# (v9.9.9-negative-test), and "schema vX.Y.Z" names a third-party
-# schema, not an org release.
+# (finding 2). This resolves every citation of an org release in docs/
+# against the live org — a fabricated or mistyped one is a red Monday,
+# not a reading exercise.
+#
+# THE CITATION FORM, stated here because this is where it is enforced:
+# **an org-record citation names its repository beside its version.**
+#
+#   `.github@v1.24.1`                    repo@version, the pin form
+#   `monumental-archive/stele@v0.2.2`    the same, owner-qualified
+#   stele v0.16.0                        repo, then version
+#   https://github.com/monumental-archive/stele/releases/tag/v0.2.2
+#
+# Bare `vX.Y.Z` with nothing beside it is prose about the world and is
+# NOT walked. The first matcher took every semver in `docs/` as a claim
+# about the org's record, and was wrong in both directions on its first
+# dispatch (run 32393697805): it demanded an org tag for golangci-lint's
+# v2.12.2 — honest prose in tooling-verdicts.md naming the binary whose
+# linter catalogue was read — while passing `edtf`'s v1.0.0, an equally
+# external version that resolved only because the canon happens to hold
+# a v1.0.0 tag of its own. A walk whose population does not match the
+# question it asks fails silently as readily as it fails loudly, the
+# shape stele#181 records.
+#
+# Rejected, so it is not re-proposed: an allowlist of external versions.
+# It is paperwork that decays with every tool bump, and an exclusion
+# vocabulary for things that were never in the population. Three such
+# exclusions the old matcher carried — a version in double quotes is a
+# MENTION, a suffixed version is an example, "schema vX.Y.Z" names a
+# third-party schema — are DELETED by this change rather than kept:
+# none was ever a claim about this org's record, so none needs an
+# exception now that the population asks the right question.
+#
+# Because a citation now names its repository, each resolves against
+# THAT repository's tags rather than the union of every org repo's. The
+# union was a workaround for citations that did not say which repo they
+# meant; the form removes its reason, and with it the class of false
+# pass that `edtf`'s v1.0.0 belongs to.
+#
+# The narrowing is deliberate and its cost is stated: a bare version
+# that IS an org claim now escapes the walk. That is why the form is
+# written here, in `CONTRIBUTING.md` where docs authors meet it, and why
+# `docs/` was swept into it in one pass — measured, the same org
+# citations resolving before and after.
 run = '''
 [[ -d docs && -d security ]] || { echo "audit:citations: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:citations: gh missing" >&2; exit 1; }
@@ -3877,32 +3908,57 @@ if ! repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name' 2
   echo "audit:citations: could not enumerate org repos — nothing was resolved" >&2
   exit 1
 fi
+[[ -n "${repos}" ]] || {
+  echo "audit:citations: the org listing named zero repositories — the walk is" >&2
+  echo "  broken, not the docs, and nothing was resolved" >&2
+  exit 1
+}
+# One alternation of live repository names — no literal list of repos in
+# the belt, so an imported repo is walked the Monday it exists. Longest
+# first, so a name that prefixes another cannot win the shorter match.
+# Only `.` needs escaping: GitHub repository names are limited to
+# `A-Za-z0-9._-`, and of those only the dot is an ERE metacharacter —
+# unescaped, `.github` would match any character followed by "github".
+names=""
+while IFS= read -r r; do
+  [[ -n "${r}" ]] || continue
+  names="${names}|${r//./\\.}"
+done <<< "$(awk '{ print length, $0 }' <<< "${repos}" | sort -rn | cut -d' ' -f2-)"
+names="${names#|}"
 tags=""
 for repo in ${repos}; do
   t=$(git ls-remote --tags "https://github.com/monumental-archive/${repo}" "v[0-9]*" 2> /dev/null \
-    | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p") || true
+    | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|${repo} \1|p") || true
   tags="${tags}
 ${t}"
 done
 fail=""
 # `|| true` on both collectors, and it is not a shrug: grep exits 1 for
 # "matched nothing", which is a legitimate answer here — docs citing no
-# versions, or no Actions runs, is a state this audit must survive rather
-# than crash on. Under the belt's `-o pipefail` shell that 1 would kill
-# the task. Load-bearing for the run-URL collector especially: it matches
-# nothing on this tree today, which is exactly how the strict shell
-# surfaced it (#82 finding 2).
-cited=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -h -E "v[0-9]+\.[0-9]+\.[0-9]+" \
-  | grep -v "schema v[0-9]" \
-  | grep -hoE "(^|[^/\"A-Za-z0-9.])v[0-9]+\.[0-9]+\.[0-9]+($|[^-A-Za-z0-9])" \
-  | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | sort -uV) || true
+# org releases, or no Actions runs, is a state this audit must survive
+# rather than crash on. Under the belt's `-o pipefail` shell that 1 would
+# kill the task. Load-bearing for the run-URL collector especially: it
+# matches nothing on this tree today, which is exactly how the strict
+# shell surfaced it (#82 finding 2).
+cited=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -hoE \
+  "(monumental-archive/)?(${names})[@ ]v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
+linked=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -hoE \
+  "github\.com/monumental-archive/(${names})/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
+# Both forms normalise to "repo version" before anything is resolved, so
+# the resolver has one shape to answer about. `sed '/^$/d'` and not
+# `grep -v`: an empty collection is legitimate, and grep's exit 1 for
+# "matched nothing" would kill the pipeline under pipefail.
+pairs=$( {
+  sed -E 's|^(monumental-archive/)?(.+)[@ ](v[0-9]+\.[0-9]+\.[0-9]+)$|\2 \3|' <<< "${cited}"
+  sed -E 's|^github\.com/monumental-archive/(.+)/releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+)$|\1 \2|' <<< "${linked}"
+} | sed '/^$/d' | sort -u)
 vn=0
-while IFS= read -r v; do
-  [[ -n "${v}" ]] || continue
+while IFS=' ' read -r repo ver; do
+  [[ -n "${repo}" && -n "${ver}" ]] || continue
   vn=$((vn + 1))
-  grep -qxF "${v}" <<< "${tags}" || fail="${fail}
-  version cited in docs/ exists as a tag in no org repo: ${v}"
-done <<< "${cited}"
+  grep -qxF "${repo} ${ver}" <<< "${tags}" || fail="${fail}
+  cited in docs/ as an org release, but no such tag in ${repo}: ${ver}"
+done <<< "${pairs}"
 runs=$(git ls-files ':!vendor/**' "docs/*.md" \
   | xargs grep -hoE "github\.com/monumental-archive/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u) || true
 rn=0
@@ -3921,7 +3977,8 @@ if [[ -n "${fail}" ]]; then
   echo "  or the record, never leave them disagreeing (#349 finding 2)" >&2
   exit 1
 fi
-echo "audit:citations: ${vn} version(s) and ${rn} run URL(s) all resolve"
+dn=$(git ls-files ':!vendor/**' "docs/*.md" | wc -l | tr -d ' ')
+echo "audit:citations: ${dn} doc(s) walked, ${vn} org release citation(s) and ${rn} run URL(s) all resolve"
 '''
 
 [tasks."audit:adoption"]

@@ -38,6 +38,17 @@ executable form:
 5. Pull requests are squash-merged: the **PR title becomes the commit
    subject and the PR body becomes the commit body**. Write them as the
    permanent history they will be.
+6. **A citation of an org release in `docs/` names its repository beside
+   the version**: `` `.github@v1.24.1` ``,
+   `` `monumental-archive/stele@v0.2.2` ``, `stele v0.16.0`, or a link to
+   the release itself. `audit:citations` walks exactly that form on the
+   Monday cron and resolves each against *that repository's* tags, so a
+   fabricated or mistyped version is a red audit rather than a reading
+   exercise. A bare `vX.Y.Z` is prose about the world and is not walked
+   — golangci-lint's version in a tooling note is not a claim about this
+   org's record and needs no anchor — which is exactly why the anchor is
+   required of the claims that are. Prefer the `repo@version` form: the
+   walk is line-based and a line wrap cannot split it.
 
 ## Licensing
 
