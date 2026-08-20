@@ -10,6 +10,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.45.0](https://github.com/monumental-archive/.github/compare/v1.44.3...v1.45.0) - 2026-08-20
+
+### Added
+
+- declare the population, the floor and the join ([#577](https://github.com/monumental-archive/.github/pull/577))
+- move the permissions join into the engine ([#580](https://github.com/monumental-archive/.github/pull/580))
+- derive the affected releases in the engine ([#582](https://github.com/monumental-archive/.github/pull/582))
+- publish the board from the engine ([#584](https://github.com/monumental-archive/.github/pull/584))
+- bear the release decision per planned inventory ([#585](https://github.com/monumental-archive/.github/pull/585))
+- execute the plan the engine emits ([#587](https://github.com/monumental-archive/.github/pull/587))
+
+### Fixed
+
+- let the belt-dir template resolve empty instead of crashing ([#570](https://github.com/monumental-archive/.github/pull/570))
+- pass the released manifest whole ([#581](https://github.com/monumental-archive/.github/pull/581))
+- stamp the manifest's entries and iterate the judged plans ([#583](https://github.com/monumental-archive/.github/pull/583))
+- converge a resume on the build subjects ([#586](https://github.com/monumental-archive/.github/pull/586))
+
+### Documentation
+
+- add the mechanism-change issue template ([#563](https://github.com/monumental-archive/.github/pull/563))
+- ask for dependencies and mechanics in the mechanism template ([#566](https://github.com/monumental-archive/.github/pull/566))
+- name the mechanism template in the repo instructions ([#573](https://github.com/monumental-archive/.github/pull/573))
+
+### Dependencies
+
+- update dependency rumdl to v0.2.55 ([#567](https://github.com/monumental-archive/.github/pull/567))
+- update jdx/mise-action action to v4.2.5 ([#575](https://github.com/monumental-archive/.github/pull/575))
+- update github/codeql-action action to v4.37.7 ([#578](https://github.com/monumental-archive/.github/pull/578))
+
 ## [1.44.3](https://github.com/monumental-archive/.github/compare/v1.44.2...v1.44.3) - 2026-08-19
 
 ### Fixed
