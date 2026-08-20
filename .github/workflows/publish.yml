@@ -835,7 +835,7 @@ jobs:
     name: Sign image
     needs: assemble-oci
     if: ${{ !cancelled() && needs.assemble-oci.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       image-name: ${{ needs.assemble-oci.outputs.image }}
       image-digest: ${{ needs.assemble-oci.outputs.digest }}
@@ -885,7 +885,7 @@ jobs:
     name: Sign
     needs: verify
     if: ${{ !cancelled() && needs.verify.result == 'success' && contains(inputs.classes, 'rust-crate') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       subjects: ${{ needs.verify.outputs.subjects }}
       bundle-artifact: attestation-bundle-crates
@@ -980,7 +980,7 @@ jobs:
     # The Sigstore entry is append-only — an irreversible step, so it
     # sits downstream of the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-binary') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       subjects: ${{ needs.build-binary.outputs.subjects }}
       bundle-artifact: attestation-bundle-binaries
@@ -1033,7 +1033,7 @@ jobs:
     # The Sigstore entry is append-only — an irreversible step, so it
     # sits downstream of the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'go-binary') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       subjects: ${{ needs.build-go.outputs.subjects }}
       bundle-artifact: attestation-bundle-go-binaries
@@ -1079,7 +1079,7 @@ jobs:
       - build-source
       - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'source-archive') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       subjects: ${{ needs.build-source.outputs.subjects }}
       bundle-artifact: attestation-bundle-source
@@ -1162,7 +1162,7 @@ jobs:
     name: Sign wasm package
     needs: verify-wasm
     if: ${{ !cancelled() && needs.verify-wasm.result == 'success' && contains(inputs.classes, 'wasm-npm') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
       bundle-artifact: attestation-bundle-npm
@@ -1234,7 +1234,7 @@ jobs:
       - build-extension
       - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       subjects: ${{ needs.build-extension.outputs.subjects }}
       bundle-artifact: attestation-bundle-extensions
@@ -1324,7 +1324,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.build-extension-images.outputs.images) }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@22ad0833d49ba6b4b92fa028b376074b2f68b743 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
       image-name: ${{ matrix.image }}
       image-digest: ${{ matrix.digest }}
