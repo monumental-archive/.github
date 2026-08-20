@@ -45,6 +45,14 @@ lockfile = true
 # "go:golang.org/x/vuln/cmd/govulncheck" = "v1.x.x"
 
 # [env]
+# The commit SCOPES this repo allows, if it restricts them. The commit
+# RULES are delivered (#576) — one definition of style, ceiling, mood
+# and types, in mise/committed.toml — but a scope list is repo identity
+# and cannot ride in a shared file. Declared here, the belt composes the
+# two before it runs committed; left unset, any scope is allowed. Bare
+# lowercase names, comma-separated: anything else fails the task rather
+# than corrupting the config it is spliced into.
+# ORG_COMMIT_SCOPES = "derive,assert,emit,verify,cli,deps,canon"
 # Which nightly audit:fuzz runs the sanitized targets under. Declared,
 # never discovered: a task that used ASan wherever a nightly happened to
 # exist would enforce differently on different machines. Must match the

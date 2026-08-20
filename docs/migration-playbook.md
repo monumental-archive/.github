@@ -52,16 +52,15 @@ a fresh session **started in the target repo's checkout**.
       the canon at run time via `ORG_BELT_DIR`, so a repo carries no copy
       to drift and gets the current one at its pinned SHA (#445). The
       stubs below are the files something OUTSIDE the belt reads: editors
-      (`.editorconfig`), GitHub (`renovate.json`), the commit-msg hook
-      (`committed.toml`), the release scripts, or the repo's
-      own identity and policy (licences, `REUSE.toml`, `deny.toml`).
+      (`.editorconfig`), GitHub (`renovate.json`), the release scripts, or
+      the repo's own identity and policy (licences, `REUSE.toml`,
+      `deny.toml`).
 - [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
       always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the
       runbook's wiring section says so — CITATION.cff is rendered by
       `fix:citation` from REUSE.toml, never copied filled); fill the
-      repo-specific holes
-      (`allowed_scopes` in committed.toml, real tools/tasks in
-      mise.toml).
+      repo-specific holes (real tools and tasks in `mise.toml`, plus
+      `ORG_COMMIT_SCOPES` there if the repo restricts commit scopes).
 - [ ] **Scorecard preflight** (the policy #83 executes against,
       formerly #88's ledger): run
       `scorecard --repo=github.com/<owner>/<repo>` locally before AND

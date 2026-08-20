@@ -30,7 +30,10 @@ path (docs/tooling-verdicts.md).
 
 - `renovate.json` — extends the org preset
 - `lefthook.yml` — pulls the org git hooks by remote
-- `committed.toml` — conventional-commit canon (add repo `allowed_scopes`)
+- no `committed.toml`: the commit canon is delivered (#576). A repo that
+  restricts its commit SCOPES declares them as `ORG_COMMIT_SCOPES` in
+  `mise.toml` `[env]` and the belt composes the two — the rules have one
+  definition, the scope list stays repo identity
 - `mise.toml` — repo-specific tools/tasks; the belt arrives globally
 - `.golangci.yml` — the Go canon (#392): golangci-lint v2 at
   `default: all` with per-rule written disables, gofumpt (extra rules)

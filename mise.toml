@@ -1,0 +1,29 @@
+# The canon's own repo-level tasks. The belt arrives globally, as it does
+# everywhere; this file is the canon consuming the same `ci` contract it
+# hands every other repo — the global `ci` collects an optional `test`,
+# so the belt's Python helpers are exercised by the ordinary gate with
+# nothing added to the belt to run them.
+#
+# It exists because the canon acquired a unit-testable corpus. #392's
+# close-out recorded the opposite — "two Python belt helpers, no
+# unit-testable corpus of its own" — and that was true of a 100-line
+# skip-emitter and a shell extractor. `mise/subject-budget.py` is 700
+# lines of manager walks, template resolution and budget arithmetic
+# whose skip-clean guards are exactly the class #364 named: the least
+# exercised code in the org, where a guard that skips when it should run
+# looks precisely like success.
+#
+# No `[tools]` here on purpose: every tool this repo uses is the org's,
+# pinned in mise/config.toml beside mise.lock, and a second tool table
+# would be a second place for a pin to live.
+
+[tasks.test]
+description = "The belt's own Python helpers (stdlib unittest, no framework)"
+dir = "{{cwd}}"
+# Against the WORKING TREE's mise/, never ORG_BELT_DIR. In this repo the
+# two resolve to the same place — gate.yml self-applies ci.yml through a
+# local `uses:`, so `$/.github/actions/canon` hands the job the pull
+# request's own ref — but the code under review is what a test task owes
+# an answer about, and naming the tree says so without depending on that
+# resolution staying true.
+run = 'python3 -m unittest discover --start-directory mise --pattern "test_*.py"'
