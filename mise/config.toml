@@ -2041,9 +2041,12 @@ command -v govulncheck > /dev/null || {
   echo '  mise.toml: "go:golang.org/x/vuln/cmd/govulncheck" = "<version>"' >&2
   exit 1
 }
-command -v stele > /dev/null || { echo "audit:go-vulns: stele missing from the belt" >&2; exit 1; }
+command -v stele > /dev/null || {
+  echo "audit:go-vulns: stele missing from the belt" >&2
+  exit 1
+}
 vex="${ORG_CANON_DIR}/security/vex"
-[[ -d "${vex}" ]] || {
+[[ -d ${vex} ]] || {
   echo "audit:go-vulns: ${vex} is not a directory, so the org's triage decisions cannot be read; lint:belt-available says why" >&2
   exit 1
 }
@@ -2059,7 +2062,10 @@ while IFS= read -r m; do
     exit "${status}"
   fi
   module=$(awk '/^module /{print $2; exit}' "${m}")
-  [[ -n "${module}" ]] || { echo "audit:go-vulns: ${m} names no module" >&2; exit 1; }
+  [[ -n ${module} ]] || {
+    echo "audit:go-vulns: ${m} names no module" >&2
+    exit 1
+  }
   stele assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
 done <<< "${mods}"
 '''
