@@ -10,6 +10,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.49.0](https://github.com/monumental-archive/.github/compare/v1.48.0...v1.49.0) - 2026-08-20
+
+### Added
+
+- load every committed policy against the pinned engine ([#643](https://github.com/monumental-archive/.github/pull/643))
+
+### Fixed
+
+- judge the class under rebuild, not the whole release ([#638](https://github.com/monumental-archive/.github/pull/638))
+
+### Documentation
+
+- describe slsa shields as measured levels ([#634](https://github.com/monumental-archive/.github/pull/634))
+- make a delivered config's deletion ride the pin bump ([#636](https://github.com/monumental-archive/.github/pull/636))
+
+### Dependencies
+
+- update aqua:astral-sh/uv to 0.12.4 ([#642](https://github.com/monumental-archive/.github/pull/642))
+
 ## [1.48.0](https://github.com/monumental-archive/.github/compare/v1.47.0...v1.48.0) - 2026-08-20
 
 ### Added
