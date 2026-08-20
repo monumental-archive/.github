@@ -100,6 +100,9 @@ class Body(NamedTuple):
     run_line: int
     # The multi-line delimiter (`'''` / `\"\"\"`), or "" for a one-liner.
     delim: str
+    # False for one command of a list `run`: N bodies share one `run =`
+    # line, so there is no region a rewrite could own.
+    rewritable: bool
 
 
 class Config(NamedTuple):
@@ -162,14 +165,16 @@ def read(path: Path) -> Config:
         env |= {k for k in (task.get("env") or {}) if not k.startswith("_")}
         run = task.get("run")
         # mise also takes a list of commands, and `file =` instead of a
-        # body. A list has no single splice site, so it is checked and
-        # never rewritten.
-        for source in run if isinstance(run, list) else [run]:
+        # body. Every command of a list is CHECKED; none is rewritten,
+        # because they share one `run =` line and splicing a block over
+        # it would eat the array.
+        listed = isinstance(run, list)
+        for source in run if listed else [run]:
             if not isinstance(source, str) or not source.strip():
                 continue
             line, delim = at.get(name, (0, ""))
             bodies.append(
-                Body(name, source, line, delim if not isinstance(run, list) else ""),
+                Body(name, source, line, "" if listed else delim, not listed),
             )
     shell = (data.get("task_config") or {}).get("shell")
     return Config(bodies, env, shell if isinstance(shell, str) else None)
@@ -327,8 +332,8 @@ def splice(lines: list[str], body: Body, text: str) -> list[str] | None:
     """Replace one body's raw region with `text`, always as a `'''` block.
 
     Every rewritten body lands as a multi-line literal string: it is the
-    form 87 of the canon's 104 already use, it needs no escaping, and it
-    is the only one that survives a formatter adding lines.
+    form most of the corpus already uses, it needs no escaping, and it is
+    the only one that survives a formatter adding lines.
 
     Returns:
         The new lines, or None when the region could not be bounded.
@@ -373,6 +378,12 @@ def rewrite(path: Path, bodies: Sequence[Body]) -> tuple[int, list[str]]:
             continue
         if text == (body.source if body.source.endswith("\n") else body.source + "\n"):
             continue
+        if not body.rewritable:
+            refused.append(
+                f"{path}:{body.run_line}: {body.name}: a list `run` is checked "
+                f"but never rewritten — make it one body to format it",
+            )
+            continue
         spliced = splice(lines, body, text)
         if spliced is None:
             refused.append(f"{path}:{body.run_line}: {body.name}: cannot rewrite")
@@ -413,7 +424,7 @@ def collect(
     return configs, shell, sorted(env)
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Check, or rewrite, every task body in the files named.
 
     Returns:
@@ -435,7 +446,7 @@ def main() -> int:
         help="a directory shellcheck may resolve `source` targets in",
     )
     parser.add_argument("--write", action="store_true", help="format bodies in place")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     paths = [Path(f) for f in args.files]
     if not paths:
