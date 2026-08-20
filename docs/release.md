@@ -220,11 +220,24 @@ types something is red by default, which is the state that trains people to
 ignore a check. What the audit does require is the marker, on every draft
 older than the org's standard 24-hour staleness grace.
 
-`audit:drafts` walks the org each Monday. It asserts push capability per
-repository before believing any listing, because GitHub serves draft
-releases only to push-capable identities — a read-only token gets a 200 and
-a list with every draft silently removed, which is indistinguishable from a
-clean org.
+`audit:drafts` walks the org each Monday, and it proves it can see before
+it reports anything. GitHub serves draft releases only to entitled
+identities: a token without that entitlement gets a 200 and a list with
+every draft silently removed, which is indistinguishable from a clean org.
+
+The first version of that guard asserted `.permissions.push` per repository
+before believing any listing, and it was measured wrong on its very first
+dispatch — the assert passed on all four repos while GitHub served none of
+the thirty-two drafts that existed ([#604](https://github.com/monumental-archive/.github/issues/604)).
+**No permission bit is a proof of visibility. The only honest measurement of
+"can this token see drafts" is seeing a draft.** So the audit makes one: an
+ephemeral draft in the repository it runs from, asserted to come back in the
+same listing the walk is about to believe, then deleted. Probe failure and
+probe-cleanup failure are both loud, and the probe draft carries a
+`<!-- draft-record: audit-probe -->` marker from the moment it exists, so
+the audit's own residue explains itself like every other draft here. The
+token it spends on the probe is the token it spends on the listing —
+probing with a stronger one would prove a capability nobody uses.
 
 ## Phase 2: publish, prove, sign
 
