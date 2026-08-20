@@ -104,6 +104,12 @@ shared lives here and nowhere else. Five layers:
   ceiling — enforced by `committed` at commit-msg, pre-push, and in CI.
   PRs are squash-merged; the PR title and body become the permanent
   commit.
+- Issues: the mechanism template
+  (`.github/ISSUE_TEMPLATE/mechanism.yml`) is the org's shape for
+  defect and decision issues — Defect, Decided build, Canon
+  consequence, Done when, Sequencing. GitHub applies it only in the
+  web new-issue flow, so an issue filed through `gh` or the REST API
+  arrives blank: write the five sections by hand.
 - Spelling registers: en-US in code and identifiers, en-GB in prose
   (typos runs locale `en`, which accepts both).
 - New tools enter the belt only after a docs-first standup, at maximum
