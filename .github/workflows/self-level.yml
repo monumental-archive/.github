@@ -1,20 +1,24 @@
-# This repository's SLSA levels, measured from its own evidence and
-# published to its own `levels` branch (.github#554).
+# The canon's own SLSA levels — this repository running the stub every
+# other repository runs (#554).
 #
-# The whole per-repository obligation is below, and the only line that
-# is this repository's to write is `tracks:` — WHICH tracks this
-# repository bears evidence on. State it positively; the org's roster
-# lives in the canon and arrives with the shared workflow, so nothing
-# here restates who else exists.
+# It is the same file `workflow-templates/level.yml` ships, with the
+# one difference every canon self-application has: the `uses:` is
+# local, because the canon calls its own workflow at the running commit
+# rather than pinning a release of itself (the gate.yml and
+# self-publish.yml convention). The canon is consumer #1 and wears the
+# mechanism it delivers, with no special case.
 #
-# `tracks: build source dependency` is the ordinary case. A repository
-# that publishes no releases bears no build or dependency evidence and
-# says `tracks: source` — that is not a shortfall, it is a fact about
-# the repository, and declaring it is what keeps a permanently grey
-# cell off the board. The canon's declared population must agree, and
-# the canon's weekly sweep reds if the two disagree.
+# Named `self-level.yml` and not `level.yml` because here that filename
+# is the CALLEE — the reusable workflow this calls. `fix:badges` finds
+# this file by its `uses:`, never by its name, for exactly that reason.
+#
+# The canon's `levels` branch carried every repository's cells until
+# the other three began publishing their own. The first run of THIS
+# workflow prunes it to the canon's own — which is correct and is why
+# it must not be dispatched until the other three have repointed their
+# shields at their own branches.
 ---
-name: level
+name: self-level
 
 # zizmor's `dangerous-triggers` audit fires on the `workflow_run`
 # below, at high confidence, and it is right to by default: that
@@ -43,8 +47,12 @@ name: level
   # nothing simply never matches, and its weekly run below is its only
   # firing trigger.
   workflow_run:
+    # `self-publish`, not `publish`: `workflow_run` fires for the
+    # top-level workflow of a run, and the canon's `publish.yml` is the
+    # REUSABLE one consumers call — in this repository it only ever runs
+    # as a called job of `self-publish`, which would never match.
     workflows:
-      - publish
+      - self-publish
     types:
       - completed
   schedule:
@@ -79,7 +87,7 @@ jobs:
       # lint:caller-permissions checks it against what the callee
       # asks).
       contents: write # pushes this repository's cells to its own levels branch
-    uses: monumental-archive/.github/.github/workflows/level.yml@cc4ec82c352041817e89c1f953e718d3ed8365d0 # v1.46.0
+    uses: ./.github/workflows/level.yml
     with:
       tracks: build source dependency
 ...
