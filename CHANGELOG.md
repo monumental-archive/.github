@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.50.0](https://github.com/monumental-archive/.github/compare/v1.49.0...v1.50.0) - 2026-08-20
+
+### Added
+
+- lint the shell inside mise task bodies ([#646](https://github.com/monumental-archive/.github/pull/646))
+
+### Fixed
+
+- refuse to rewrite a body a list `run` shares ([#651](https://github.com/monumental-archive/.github/pull/651))
+
 ## [1.49.0](https://github.com/monumental-archive/.github/compare/v1.48.0...v1.49.0) - 2026-08-20
 
 ### Added
