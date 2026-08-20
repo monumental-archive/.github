@@ -55,6 +55,33 @@ a fresh session **started in the target repo's checkout**.
       (`.editorconfig`), GitHub (`renovate.json`), the release scripts, or
       the repo's own identity and policy (licences, `REUSE.toml`,
       `deny.toml`).
+- [ ] **The deletion rides the pin bump** (#620). A delivered config may
+      only replace a repo-local copy once the consumer's pinned reference
+      names a release whose belt actually reads the delivered one — the
+      deletion lands IN that pin-bump commit, never before it. This is the
+      pin rule the mechanism template already states for policy edits,
+      applied to the surface it demonstrably also governs: delete first
+      and the repo answers to neither config, because the tool falls back
+      to its own defaults and nothing says so.
+
+      Worked example, measured 2026-08-20: #608 deleted the canon's
+      repo-local `committed.toml` and rerouted the `commit-msg` hook to
+      `mise run commits:check`, but the reroute reaches a repo only
+      through `lefthook.yml`'s remote `ref:`, and the pinned ref predated
+      it — so the cached hook ran bare `committed`, found no config, and
+      enforced committed's built-in defaults: `Banana(belt): add a thing`
+      and `Fixes the belt tasks` PASSED while `fix(belt): …` was
+      REJECTED. Scope enforcement was NOT lost (`Fix(nosuchscope):`
+      passes either way, measured) — the loss is the type, format and
+      wrap-aware 72-column rules. `pre-push` and CI bound it: nothing
+      non-conformant reached `main`, but feedback was wrong exactly where
+      it is cheapest.
+
+      **Renovate bumps `lefthook.yml`'s ref one release LATER than the
+      rest of the first-party group** — consistent across six historical
+      bumps — so this window is longer than one release cycle, not one
+      bot poll. While in it: verify with `mise run commits:check` and
+      commit with `LEFTHOOK_EXCLUDE=committed`.
 - [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
       always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the
       runbook's wiring section says so — CITATION.cff is rendered by
