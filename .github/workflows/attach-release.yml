@@ -179,13 +179,53 @@ jobs:
           if [[ ${draft} == "false" ]]; then
             gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
               --pattern checksums.txt --output published-checksums.txt
-            if ! diff -u published-checksums.txt dist/checksums.txt; then
-              emsg="${TAG} is published and immutable but the rebuilt assets differ from the published set — this is not a"
-              emsg+=" resume"
-              echo "::error::${emsg}"
-              exit 1
+            # What must be identical is the BUILD SUBJECTS, and which
+            # assets those are is the published manifest's own typing to
+            # say (stele#156) — not this step's guess. Comparing the
+            # whole manifest made a resume impossible whenever an
+            # evidence document legitimately differed: a Sigstore
+            # signature embeds a fresh timestamp and certificate on
+            # every signing, so a re-signed bundle changes bytes by
+            # design, and an SBOM exported live from the forge's
+            # dependency graph can too. Measured on v1.44.1's duplicate
+            # tag push, where the resume could never converge.
+            gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+              --pattern evidence-manifest.json --output published-manifest.json 2> /dev/null || true
+            subjects=""
+            if [[ -s published-manifest.json ]]; then
+              subjects=$(jq -r '(.entries // [])[] | select(.type == "build-subject") | .name' \
+                published-manifest.json)
             fi
-            echo "::notice::${TAG} already published; rebuilt bytes verified identical, converging"
+            if [[ -z ${subjects} ]]; then
+              # A release published before entries were typed (schema 1
+              # carries no `entries`) has no answer to give, so the
+              # whole-set comparison stands for it. Pre-epoch releases
+              # keep the guard they shipped under; nothing is rewritten
+              # to make them look newer than they are.
+              if ! diff -u published-checksums.txt dist/checksums.txt; then
+                emsg="${TAG} is published and immutable but the rebuilt assets differ from the published set — this is"
+                emsg+=" not a resume"
+                echo "::error::${emsg}"
+                exit 1
+              fi
+            else
+              differing=""
+              while IFS= read -r name; do
+                [[ -n ${name} ]] || continue
+                was=$(awk -v n="${name}" '$2 == n {print $1}' published-checksums.txt)
+                now=$(awk -v n="${name}" '$2 == n {print $1}' dist/checksums.txt)
+                if [[ -z ${was} || -z ${now} || ${was} != "${now}" ]]; then
+                  differing="${differing} ${name}"
+                fi
+              done <<< "${subjects}"
+              if [[ -n ${differing} ]]; then
+                emsg="${TAG} is published and immutable but these build subjects differ from the published bytes:"
+                emsg+="${differing} — this is not a resume"
+                echo "::error::${emsg}"
+                exit 1
+              fi
+            fi
+            echo "::notice::${TAG} already published; build subjects verified identical, converging"
             exit 0
           fi
           gh release upload "${TAG}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
