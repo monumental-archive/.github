@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.48.0](https://github.com/monumental-archive/.github/compare/v1.47.0...v1.48.0) - 2026-08-20
+
+### Added
+
+- point every badge at the branch its own repo publishes ([#629](https://github.com/monumental-archive/.github/pull/629))
+
 ## [1.47.0](https://github.com/monumental-archive/.github/compare/v1.46.0...v1.47.0) - 2026-08-20
 
 ### Added
