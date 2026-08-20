@@ -34,6 +34,10 @@ toil and the drift hazard this keying removes.
 1. **The attestation store, immediately** — on merge, `vex-attest.yml`
    derives the affected-release set from published SBOMs and signs the
    document through the org's one signer over those releases' digests.
+   A `workflow_dispatch` of the same workflow is the recovery path: it
+   signs every decision here the store does not already hold, so a
+   decision that missed its merge (#596) is healed by running it, with
+   no filename to choose and nothing to re-sign on a healthy tree.
 2. **The document surface, at each release** — `stele derive vex` emits the
    release's own OpenVEX asset (product = the release purl, the decided
    `package@version` as subcomponent), shipped under GitHub's release
