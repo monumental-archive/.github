@@ -40,6 +40,68 @@ name: attach-release
           here because here is where every asset exists.
         required: true
         type: string
+      # The per-class split of the build subjects, which only the
+      # publisher holds. `stele emit manifest` requires every build
+      # subject in `--assets` to be claimed by exactly one class
+      # (stele#185), and the fan-in below flattens `release-*` with
+      # `merge-multiple: true` — so by the time the assets exist here
+      # the artifact name that carried the class is gone.
+      #
+      # The split arrives as inputs rather than being re-derived from
+      # un-merged artifact directory names, for three measured reasons.
+      # The class of a subject is the BUILD LEG's fact and the
+      # orchestrator already holds the leg-to-class map — its attach
+      # `if:` names both halves of every pair — so inputs put the fact
+      # where the mapping already lives instead of starting a second
+      # artifact-name-to-class map here. Each leg computes this string
+      # with the same glob, in the step immediately before, that its
+      # `release-*` upload takes (`sha256sum ./*.tar.gz`, or `./*.crate`
+      # for crates), and it is the same string that leg's signer signs —
+      # so the manifest's typing and the provenance's subject set are
+      # derived from ONE source rather than two that must agree. And
+      # deriving class from a directory name would rest on
+      # download-artifact's layout, which this file already records as
+      # inconsistent below: with exactly one artifact matched the
+      # download arrives FLAT and the name is gone.
+      #
+      # There is deliberately NO input for oci-image or wasm-npm. Those
+      # classes publish to a registry and attach no release asset, so
+      # they own no build subject in this manifest and passing their
+      # build outputs REFUSES. The absent input is the declaration.
+      #
+      # Empty is the ordinary value for a class this release did not
+      # build — a skipped job's output is the empty string, and the
+      # manifest step writes no flag for an empty one.
+      rust-crate-subjects:
+        # forwarding: universal
+        description: sha256sum manifest of the crates the rust-crate class built.
+        required: false
+        type: string
+        default: ""
+      rust-binary-subjects:
+        # forwarding: universal
+        description: sha256sum manifest of the archives the rust-binary class built.
+        required: false
+        type: string
+        default: ""
+      go-binary-subjects:
+        # forwarding: universal
+        description: sha256sum manifest of the archives the go-binary class built.
+        required: false
+        type: string
+        default: ""
+      source-archive-subjects:
+        # forwarding: universal
+        description: sha256sum manifest of the archive the source-archive class built.
+        required: false
+        type: string
+        default: ""
+      pgrx-extension-subjects:
+        # forwarding: universal
+        description: sha256sum manifest of the tarballs the pgrx-extension class built.
+        required: false
+        type: string
+        default: ""
       dry-run:
         # forwarding: universal
         description: Rehearsal — attach the bundle, leave the release a draft.
@@ -85,10 +147,16 @@ jobs:
 
       # By pattern, not by name: every build class uploads its assets as
       # `release-*` and every sign job its bundle as `attestation-bundle-*`,
-      # so any subset of classes fans in here with no per-class input. A
-      # class that pushed only to a registry (oci-image) contributes a
-      # bundle and no files, which is why an empty dist is legal below
-      # while an empty bundle set is not.
+      # so any subset of classes fans in here without this step knowing
+      # which. A class that pushed only to a registry (oci-image)
+      # contributes a bundle and no files, which is why an empty dist is
+      # legal below while an empty bundle set is not.
+      #
+      # The merge is what erases class from the assets, and the manifest
+      # needs class back — which is what the per-class subjects inputs
+      # above carry. The BYTES still arrive here and only here; the
+      # inputs say which class each of them belongs to, and nothing is
+      # trusted from them but that split.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
@@ -193,6 +261,11 @@ jobs:
       - name: Write the evidence manifest
         env:
           CLASSES: ${{ inputs.classes }}
+          SUBJECTS_RUST_CRATE: ${{ inputs.rust-crate-subjects }}
+          SUBJECTS_RUST_BINARY: ${{ inputs.rust-binary-subjects }}
+          SUBJECTS_GO_BINARY: ${{ inputs.go-binary-subjects }}
+          SUBJECTS_SOURCE_ARCHIVE: ${{ inputs.source-archive-subjects }}
+          SUBJECTS_PGRX_EXTENSION: ${{ inputs.pgrx-extension-subjects }}
         run: |
           set -euo pipefail
           # The machinery version is the canon tree's own, read from the
@@ -211,11 +284,37 @@ jobs:
           # the format says so. The checksum step below is pass two and
           # covers everything including it.
           (cd dist && sha256sum ./* | sed 's| \./| |') > "${RUNNER_TEMP}/assets.sha256"
+          # The class split, one --class-subjects per class that built
+          # something. stele demands every build subject in --assets be
+          # claimed by exactly one class, so a class whose leg ran
+          # contributes its leg's own subject manifest verbatim and a
+          # class that did not run contributes nothing. An unset input
+          # is the empty string, so this loop is also what makes a
+          # single-class release pass exactly one flag.
+          # Named once each, class beside its input: no name mangling
+          # between the two, so a class that is added or renamed is one
+          # line here and grep finds it.
+          subject_flags=()
+          claim() {
+            local class="$1" subjects="$2" path count
+            [[ -n ${subjects//[[:space:]]/} ]] || return 0
+            path="${RUNNER_TEMP}/subjects-${class}.sha256"
+            printf '%s\n' "${subjects}" > "${path}"
+            subject_flags+=(--class-subjects "${class}=${path}")
+            count=$(grep -c . "${path}")
+            echo "::notice::${class} claims ${count} build subject(s)"
+          }
+          claim rust-crate "${SUBJECTS_RUST_CRATE}"
+          claim rust-binary "${SUBJECTS_RUST_BINARY}"
+          claim go-binary "${SUBJECTS_GO_BINARY}"
+          claim source-archive "${SUBJECTS_SOURCE_ARCHIVE}"
+          claim pgrx-extension "${SUBJECTS_PGRX_EXTENSION}"
           stele emit manifest \
             --classes "${CLASSES}" \
             --store-vsa true \
             --machinery-version "${machinery}" \
             --assets "${RUNNER_TEMP}/assets.sha256" \
+            "${subject_flags[@]}" \
             --assert-policy .org-canon/slsa/assert-policy.json \
             --out dist/evidence-manifest.json
       - name: Checksum everything that ships

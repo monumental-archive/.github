@@ -288,7 +288,7 @@ python = "3.14.7"
 # Inline by decision (#579): this key is a mise tool coordinate — the
 # source the checksummed install resolves — and a TOML [tools] key can
 # read no declaration; Renovate's mise manager owns the line.
-"github:monumental-archive/stele" = "v0.16.0"
+"github:monumental-archive/stele" = "v0.17.1"
 # NO go toolchain here, deliberately — the rust precedent (#403). The
 # belt carried one for exactly one reason: audit:source-vsa compiled
 # stele. Nothing in the belt compiles Go now, and a toolchain in the
