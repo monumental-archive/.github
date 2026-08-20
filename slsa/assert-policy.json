@@ -1,6 +1,19 @@
 {
-  "schema": 4,
+  "schema": 5,
   "issuer": "https://token.actions.githubusercontent.com",
+  "debtFile": "security/attestation-debt.txt",
+  "population": {
+    "repositories": [
+      { "repo": ".github" },
+      { "repo": "release-lab" },
+      { "repo": "stele" },
+      {
+        "repo": "signer",
+        "tracks": ["source"],
+        "reason": "publishes no releases; it is the signing workflow repository"
+      }
+    ]
+  },
   "evidence": {
     "sbomSuffix": ".spdx.json",
     "checksums": "checksums.txt",
@@ -9,8 +22,6 @@
     "storeVsaFromVersion": "1.13.0",
     "decisionFromVersion": "1.23.1",
     "evidenceSuffixes": [".openvex.json"],
-    "debtFile": "security/attestation-debt.txt",
-    "expectedRepos": 4,
     "publishWorkflows": ["publish", "self-publish"],
     "classes": {
       "rust-crate": {
@@ -71,6 +82,7 @@
     "tagPattern": "^v[0-9]",
     "taggerName": "tag-mint[bot]",
     "identityPattern": "^https://github\\.com/monumental-archive/",
+    "proofFloor": "certificate-transparency",
     "notesRef": "refs/notes/commits",
     "epochs": {
       ".github": "v1.23.1",
@@ -79,6 +91,13 @@
   },
   "chains": {
     "exceptions": []
+  },
+  "permissions": {
+    "reusable": {
+      "repo": "monumental-archive/.github",
+      "dir": ".github/workflows"
+    },
+    "callerDirs": [".github/workflows", "workflow-templates"]
   },
   "blastRadius": {
     "osEcosystems": ["debian", "alpine", "ubuntu", "rocky", "redhat", "rpm"],
