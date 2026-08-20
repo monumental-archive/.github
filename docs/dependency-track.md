@@ -163,7 +163,12 @@ repository ships its own derived document (`stele derive vex`:
 product = the release purl, the decided `package@version` as
 subcomponent — standard concrete-product OpenVEX for consuming tools,
 generated as a pure function of the reviewed decision and the release
-SBOM). Roll-forward, like everything else.
+SBOM). Roll-forward, like everything else. Recovery asks that same
+question as a *state* rather than a range: a `workflow_dispatch` of
+`vex-attest.yml` enumerates the decisions, asks the attestation store
+which ones it already holds, and signs the rest — so a decision whose
+merge did not sign it is healed by running the workflow, and a tree
+whose decisions are all signed signs nothing (#596).
 
 ## SBOMs are class-shaped, derived from what the class ships
 

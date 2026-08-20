@@ -14,6 +14,20 @@
 # the release flow refuses to bundle releases. The plan job fails loudly
 # on more than one changed document.
 #
+# RECOVERY IS A STATE QUESTION, NOT A RANGE ONE (#596). A dispatch
+# enumerates the decisions in security/vex/, asks the attestation store
+# which ones it already holds, and signs the rest — one signing leg per
+# document, each naming its own and nothing else. The work list comes
+# from the thing that records completion, which is why the run is
+# idempotent (a tree whose decisions are all signed signs nothing and is
+# green), heals whatever is unsigned with no human choosing a filename,
+# and infers no change set at all. That last property is the defect being
+# closed: recovery used to take the newest commit touching ANY decision,
+# so the commit that added two documents made the one-decision guard fire
+# on every dispatch, permanently. A store read that FAILS is a refusal,
+# never read as "unsigned" — guessing there turns one degraded API call
+# into a re-sign of everything.
+#
 # The predicate-content contract sign.yml states: predicates must be
 # assembled in a job that runs no caller-supplied code. This workflow runs
 # in the canon on merged main — the document was reviewed into the tree,
@@ -42,14 +56,15 @@ concurrency:
 
 jobs:
   plan:
-    name: Resolve the statement and its subjects
+    name: Resolve the decisions to sign and their subjects
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      attestations: read # the recovery loop reads the store to find its work
     outputs:
-      subjects: ${{ steps.collect.outputs.subjects }}
-      predicate: ${{ steps.collect.outputs.predicate }}
+      matrix: ${{ steps.collect.outputs.matrix }}
       any: ${{ steps.collect.outputs.any }}
+      refusals: ${{ steps.collect.outputs.refusals }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,90 +82,256 @@ jobs:
           version: 2026.8.5
           cache: false
 
-      - name: Resolve subjects from the products the statement names
+      - name: Resolve subjects from the products the statements name
         id: collect
         env:
           GH_TOKEN: ${{ github.token }}
           BEFORE: ${{ github.event.before }}
           OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Changed documents only: re-signing every statement on every
-          # merge would pile duplicate attestations onto old digests. On
-          # dispatch (or an unusable before-sha) the most recently
-          # committed statement is the recovery target.
+          ns="https://openvex.dev/ns/v0.2.0"
+
+          # Does the store already hold THIS decision?
+          #
+          # The store is keyed by subject digest and by nothing else, so
+          # the question is asked through a subject the claim binds, and
+          # answered by comparing predicates. Fetch-then-filter, the org
+          # recipe (docs/runbook.md): the attestations API rejects some
+          # predicate types as a query filter, and the filter that
+          # matters is not the type anyway. It is jq's `==` against the
+          # document's own bytes — deep and key-order-insensitive — so a
+          # hit is THIS decision and not merely some OpenVEX document
+          # with the same `@id`. Measured, and the reason `@id` is not
+          # the key: this store holds versions 1 and 2 of the serde_cbor
+          # decision under the identifier version 3 still carries.
+          #
+          # Two digests are probed, the derived set's first and last, and
+          # either answering yes is a yes. The derivation walks the
+          # forge's listing order, newest release first, so a newly
+          # published affected release lands at the HEAD of the set:
+          # probing the tail as well keeps an already-public decision
+          # from being signed a second time every time the population
+          # grows.
+          #
+          # The read can be wrong in one direction only. A miss signs
+          # again, which costs a run; a hit is a positive match on bytes
+          # the store returned. A read that FAILS is neither — it
+          # refuses, because reading a degraded store as "holds nothing"
+          # re-signs every decision in the tree.
+          store_holds() {
+            local digest="$1" want="$2" body held
+            local err="${RUNNER_TEMP}/store-read.err"
+            if ! body=$(gh api --paginate --slurp \
+              "repos/${REPO}/attestations/sha256:${digest}" 2> "${err}"); then
+              # 404 is the store's empty answer — that digest carries
+              # nothing — and the one status that is not a refusal.
+              # Sound only because of the control read below: the
+              # endpoint answers a missing REPOSITORY with the same 404,
+              # byte for byte, so the two are told apart once and not
+              # per digest.
+              if grep -q "(HTTP 404)" "${err}"; then
+                return 1
+              fi
+              cat "${err}" >&2
+              return 2
+            fi
+            held=$(jq -r --arg ns "${ns}" --argjson want "${want}" '
+              [.[] | .attestations[]? | .bundle?.dsseEnvelope?.payload? // empty]
+              | map(try (@base64d | fromjson) catch null)
+              | any(. != null and .predicateType == $ns and .predicate == $want)
+            ' <<< "${body}") || return 2
+            [[ ${held} == "true" ]]
+          }
+
+          # A push is a RANGE — the merge changed a decision, and the one
+          # it changed is the one to sign. A dispatch (or an unusable
+          # before-sha) is a STATE, and a state is enumerated, never
+          # diffed: tracked files, the belt's own rule for what exists.
           if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
+            mode=push
             files=$(git diff --name-only --diff-filter=AM "${BEFORE}..HEAD" \
               -- "security/vex/*.openvex.json")
+            files=$(grep -v "^$" <<< "${files}" || true)
+            if [[ -z ${files} ]]; then
+              echo "any=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice::no changed statements"
+              exit 0
+            fi
+            n=$(wc -l <<< "${files}")
+            n="${n//[[:space:]]/}"
+            if [[ ${n} -ne 1 ]]; then
+              echo "::error::more than one VEX document changed — one decision per merge, like one release per PR"
+              exit 1
+            fi
           else
-            files=$(git log -1 --name-only --diff-filter=AM --format="" \
-              -- "security/vex/*.openvex.json")
+            mode=recover
+            files=$(git ls-files -- "security/vex/*.openvex.json")
+            files=$(grep -v "^$" <<< "${files}" || true)
+            if [[ -z ${files} ]]; then
+              echo "any=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice::security/vex/ holds no decisions"
+              exit 0
+            fi
+            decisions=$(grep -c . <<< "${files}")
+            echo "::notice::recovery over ${decisions} decision(s) in security/vex/"
+            # One control read before any probe. Measured: the
+            # attestations endpoint answers a missing REPOSITORY and a
+            # digest that carries nothing with byte-identical 404s, so
+            # "404 means nothing is stored here" only holds once the
+            # repository is known readable. Without this read, a token
+            # that lost its reach — or an outage answering 404 — would
+            # look exactly like an empty store and re-sign every
+            # decision in the tree.
+            if ! gh api "repos/${REPO}" --jq .full_name > /dev/null; then
+              echo "::error::the attestation store's repository is unreadable — refusing to read that as an empty store"
+              exit 1
+            fi
           fi
-          files=$(grep -v "^$" <<< "${files}" || true)
-          if [[ -z ${files} ]]; then
-            echo "any=false" >> "${GITHUB_OUTPUT}"
-            echo "::notice::no changed statements"
-            exit 0
+
+          # One decision's refusal must not hide the state of the rest —
+          # base-attest.yml's rule for one image in an approval set, and
+          # the reason recovery cannot be wedged by a single document.
+          # Every refusal is named, signing continues for the others, and
+          # the run still goes red (the refusals job below).
+          cells="[]"
+          refusals=""
+          while IFS= read -r f; do
+            [[ -n ${f} ]] || continue
+            slug=$(basename "${f}" .openvex.json)
+            slug="${slug//[^[:alnum:]._-]/-}"
+            if ! jq -e '.["@context"] and .statements' "${f}" > /dev/null; then
+              echo "::error::${f} is not an OpenVEX document"
+              refusals="${refusals} ${f}"
+              continue
+            fi
+            # Products are the org contract from security/vex/README.md:
+            # pkg:<type>/…/<name>@<version> — the DEPENDENCY the judgment
+            # is about, never a release tag. Which RELEASES that reaches
+            # is an evidence cross-walk, and it lives in the engine
+            # (stele#149): the org's published SBOMs walked, each one
+            # verified as a release asset before it is trusted, matched
+            # against the decision's package@version pairs, and the
+            # affected releases' checksums collected as subjects. It is
+            # the same traversal assert blast-radius runs from the other
+            # direction, shared rather than restated — this step carried
+            # ~70 lines of it, which is one join with two implementations.
+            # The vocabulary it needs (the SBOM suffix, the checksums
+            # asset, the OS ecosystems) is read from the policy that
+            # already declares it, so the flags are a policy, a decision
+            # and a population and nothing else.
+            out="${RUNNER_TEMP}/vex-subjects-${slug}.json"
+            if ! stele derive vex-subjects \
+              --decision "${f}" \
+              --policy slsa/assert-policy.json \
+              --org "${OWNER}" \
+              --out "${out}"; then
+              echo "::error::${f}: the affected-release derivation refused — see the log above"
+              refusals="${refusals} ${f}"
+              continue
+            fi
+            predicate=$(jq -c . "${f}")
+            # Recovery asks the store; a push does not. A merge changed
+            # the document, so the claim the store holds is about the
+            # bytes that were replaced.
+            if [[ ${mode} == recover ]]; then
+              held=1
+              probes=$(jq -r \
+                '[.subjects[0].sha256, .subjects[-1].sha256] | unique | .[]' "${out}")
+              while IFS= read -r digest; do
+                [[ -n ${digest} ]] || continue
+                rc=0
+                # shellcheck disable=SC2310  # the verdict IS the exit
+                # code, and every one of the three is handled below
+                store_holds "${digest}" "${predicate}" || rc=$?
+                if [[ ${rc} -eq 0 ]]; then
+                  held=0
+                  break
+                fi
+                if [[ ${rc} -gt 1 ]]; then
+                  echo "::error::${f}: the attestation store could not be read — refusing to read that as unsigned"
+                  held=2
+                  break
+                fi
+              done <<< "${probes}"
+              if [[ ${held} -eq 2 ]]; then
+                refusals="${refusals} ${f}"
+                continue
+              fi
+              if [[ ${held} -eq 0 ]]; then
+                echo "::notice::${f}: the store already holds this decision — nothing to sign"
+                continue
+              fi
+            fi
+            # The signer takes a sha256sum manifest; the document is the
+            # source of both it and the notice, so the two cannot disagree
+            # about which releases were bound.
+            subjects=$(jq -r '.subjects[] | "\(.sha256)  \(.name)"' "${out}")
+            matched=$(jq -r '[.releases[] | "\(.repo)@\(.tag)"] | join(" ")' "${out}")
+            count=$(grep -c . <<< "${subjects}") || true
+            echo "::notice::${f}: affected releases: ${matched}"
+            echo "::notice::signing ${f} over ${count} subject(s)"
+            cells=$(jq -c \
+              --arg decision "${f}" \
+              --arg slug "${slug}" \
+              --arg subjects "${subjects}" \
+              --argjson predicate "${predicate}" \
+              '. + [{decision: $decision, slug: $slug, subjects: $subjects,
+                     predicate: ($predicate | tojson)}]' <<< "${cells}")
+          done <<< "${files}"
+
+          any=false
+          signing=$(jq length <<< "${cells}")
+          if [[ ${signing} -gt 0 ]]; then
+            any=true
           fi
-          n=$(wc -l <<< "${files}")
-          n="${n//[[:space:]]/}"
-          if [[ ${n} -ne 1 ]]; then
-            echo "::error::more than one VEX document changed — one decision per merge, like one release per PR"
-            exit 1
+          if [[ ${any} == false && -z ${refusals} && ${mode} == recover ]]; then
+            echo "::notice::every decision in security/vex/ already carries its attestation"
           fi
-          f="${files}"
-          jq -e '.["@context"] and .statements' "${f}" > /dev/null || {
-            echo "::error::${f} is not an OpenVEX document"
-            exit 1
-          }
-          # Products are the org contract from security/vex/README.md:
-          # pkg:<type>/…/<name>@<version> — the DEPENDENCY the judgment
-          # is about, never a release tag. Which RELEASES that reaches
-          # is an evidence cross-walk, and it lives in the engine
-          # (stele#149): the org's published SBOMs walked, each one
-          # verified as a release asset before it is trusted, matched
-          # against the decision's package@version pairs, and the
-          # affected releases' checksums collected as subjects. It is
-          # the same traversal assert blast-radius runs from the other
-          # direction, shared rather than restated — this step carried
-          # ~70 lines of it, which is one join with two implementations.
-          # The vocabulary it needs (the SBOM suffix, the checksums
-          # asset, the OS ecosystems) is read from the policy that
-          # already declares it, so the flags are a policy, a decision
-          # and a population and nothing else.
-          stele derive vex-subjects \
-            --decision "${f}" \
-            --policy slsa/assert-policy.json \
-            --org "${OWNER}" \
-            --out vex-subjects.json
-          # The signer takes a sha256sum manifest; the document is the
-          # source of both it and the notice, so the two cannot disagree
-          # about which releases were bound.
-          subjects=$(jq -r '.subjects[] | "\(.sha256)  \(.name)"' vex-subjects.json)
-          matched=$(jq -r '[.releases[] | "\(.repo)@\(.tag)"] | join(" ")' vex-subjects.json)
-          echo "::notice::affected releases: ${matched}"
-          predicate=$(jq -c . "${f}")
-          count=$(grep -c . <<< "${subjects}") || true
+          matrix=$(jq -c '{include: .}' <<< "${cells}")
           {
-            echo "subjects<<SUBJECTS_EOF"
-            printf "%s" "${subjects}"
-            echo "SUBJECTS_EOF"
-            echo "predicate=${predicate}"
-            echo "any=true"
+            echo "matrix=${matrix}"
+            echo "refusals=${refusals# }"
+            echo "any=${any}"
           } >> "${GITHUB_OUTPUT}"
-          echo "::notice::signing ${f} over ${count} subject(s)"
   sign-vex:
-    name: Sign the statement
+    name: Sign ${{ matrix.decision }}
     needs: plan
     if: needs.plan.outputs.any == 'true'
+    strategy:
+      # One decision's signing failure must not hide the state of the
+      # rest — base-attest.yml's rule, for the same reason.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     uses: monumental-archive/signer/.github/workflows/sign.yml@65007b2d596ea691d118584899bdacc28e1ce425 # main
     with:
-      subjects: ${{ needs.plan.outputs.subjects }}
+      subjects: ${{ matrix.subjects }}
       predicate-type: https://openvex.dev/ns/v0.2.0
-      predicate: ${{ needs.plan.outputs.predicate }}
-      bundle-artifact: attestation-bundle-vex
+      predicate: ${{ matrix.predicate }}
+      # One bundle per leg: a shared artifact name would make two legs
+      # collide on upload, and the bundle is evidence about ONE decision.
+      bundle-artifact: attestation-bundle-vex-${{ matrix.slug }}
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the claim
       artifact-metadata: write # the signer creates the storage record
+  refusals:
+    name: Fail on any decision the run refused
+    needs:
+      - plan
+      - sign-vex
+    # always(): the refusals are the plan's, and they must redden the run
+    # whether the signing legs ran, were skipped, or failed on their own.
+    if: always() && needs.plan.outputs.refusals != ''
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Name what went unsigned
+        env:
+          REFUSALS: ${{ needs.plan.outputs.refusals }}
+        run: |
+          set -euo pipefail
+          echo "::error::signed nothing for, and refused to guess about:${REFUSALS}"
+          exit 1
 ...
