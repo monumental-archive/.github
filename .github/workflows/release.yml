@@ -211,9 +211,11 @@ jobs:
           # the identity that authors it. `gh api user` cannot be used: an
           # installation token has no user context and answers 403.
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
-          VERSION: ${{ steps.prepare.outputs.version }}
-          FILES: >-
-            ${{ steps.prepare.outputs.files }}
-            ${{ steps.upgrade.outputs.files }}
+          PLAN: ${{ steps.prepare.outputs.plan }}
+          # Only what the plan could not have known about: the pgrx
+          # upgrade scripts, derived against the published release after
+          # the plan was made. Everything else the commit carries is the
+          # plan's own file list (stele#155).
+          EXTRA_FILES: ${{ steps.upgrade.outputs.files }}
         run: .org-canon/release/open-release-pr.sh
 ...
