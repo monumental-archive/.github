@@ -9,21 +9,29 @@
 # same seal as the report inside stele, and nothing here restates a
 # level.
 #
-# A cell that cannot be judged never publishes over a good report
-# (stele#135): the sealed judgment stands. What that means depends
-# entirely on whether the cell was ever judgeable, and the two must
-# not be confused:
+# WHICH cells exist is the policy's declared population to say, and
+# nothing here narrows it (stele#153). A repository that bears no
+# evidence on a track is declared out and produces no file at all —
+# not a grey cell, not a finding, not a row. Before that declaration
+# existed, signer's build and dependency cells published grey every
+# week over a repository behaving exactly as intended, which is how a
+# board becomes permanently amber and stops being read.
 #
-#   - never judged, still not judgeable — a repository that publishes
-#     nothing has no build level. That is a fact about it, not a
-#     fault: grey `unmeasured` is published and NOTHING pages. An
-#     alarm here would fire every week forever over repositories
-#     behaving exactly as intended, and a board that is permanently
-#     amber is a board nobody reads.
+# A cell that cannot be judged never publishes over a good report
+# (stele#135): the sealed judgment stands. Inside the population the
+# two remaining cases must not be confused:
+#
+#   - never judged, still not judgeable — a declared cell whose
+#     evidence has not arrived yet. Grey `unmeasured` is published and
+#     NOTHING pages: it is honest, and it resolves itself the first
+#     time the evidence exists.
 #   - judged before, not judgeable now — evidence went missing, a
 #     credential narrowed, a forge read degraded. The previous
 #     judgment stands and the job goes red, because something that
-#     could be proven no longer can.
+#     could be proven no longer can. A published shield this run
+#     cannot even READ counts as holding a level, because overwriting
+#     an unknown with "could not see" is the direction that loses
+#     information.
 ---
 name: level-publish
 
@@ -71,51 +79,38 @@ jobs:
             git --work-tree levels checkout FETCH_HEAD -- . 2> /dev/null || true
           fi
       - name: Measure every repository and track
+        # One line, because every decision in it belongs to the judge.
+        # This step used to enumerate the org, loop repository × track,
+        # and implement stele#135's publish rule in workflow `if`s — a
+        # bash branch sitting between a judgment and the state it
+        # publishes, which is a place the two can disagree. The engine
+        # owns all of it now (stele#152): the population comes from the
+        # policy's declaration, so a cell nobody bears evidence on is
+        # not measured, not reported and not a file. A cell the
+        # population no longer holds is REMOVED and named, because a
+        # board is this engine's output whole and a cell left behind is
+        # a published level for something nobody measured. Expect
+        # deletions in the first publish commit under a declaration.
+        #
+        # Exit 4 is the regression case and nothing else, so the step's
+        # own status is the signal. Anything else non-zero is a broken
+        # run whose out-dir is not worth pushing, and only 4 reaches the
+        # publish step — the good judgments are published before the run
+        # goes red, which is the order the bash also took.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
-          [[ -n ${repos} ]] || {
-            echo "::error::the org listing is empty — a walk over nothing publishes nothing"
-            exit 1
-          }
-          investigate=0
-          while read -r repo; do
-            [[ -n ${repo} ]] || continue
-            mkdir -p "levels/${repo}"
-            for track in build source dependency; do
-              report="levels/${repo}/${track}.report.json"
-              shield="levels/${repo}/${track}.shield.json"
-              if stele level "${track}" \
-                --repo "${GITHUB_REPOSITORY_OWNER}/${repo}" \
-                --json --shield "${RUNNER_TEMP}/shield.json" \
-                > "${RUNNER_TEMP}/report.json"; then
-                mv "${RUNNER_TEMP}/report.json" "${report}"
-                mv "${RUNNER_TEMP}/shield.json" "${shield}"
-              elif [[ -f ${shield} ]] \
-                && ! grep -q '"message"[[:space:]]*:[[:space:]]*"unmeasured"' "${shield}"; then
-                # REGRESSION, and the only state worth waking anyone for:
-                # this cell carried a real level and can no longer be
-                # judged. Evidence went missing, a credential narrowed,
-                # a forge read degraded. The good judgment stands.
-                investigate=1
-                echo "::error::${repo} ${track}: was judged before and cannot be judged now; the previous judgment stands"
-              else
-                # No evidence to measure, and none last time either — a
-                # repository that publishes nothing has no build level,
-                # which is a fact about it and not a fault. Grey
-                # `unmeasured` is the honest badge (stele#135); it is
-                # NOT a finding and must never page, or the board goes
-                # permanently amber over repositories behaving exactly
-                # as intended.
-                mv "${RUNNER_TEMP}/report.json" "${report}" 2> /dev/null || true
-                mv "${RUNNER_TEMP}/shield.json" "${shield}" 2> /dev/null || true
-                echo "::notice::${repo} ${track}: no evidence to measure; published unmeasured"
-              fi
-            done
-          done <<< "${repos}"
-          echo "investigate=${investigate}" >> "${GITHUB_ENV}"
+          rc=0
+          stele level \
+            --org "${GITHUB_REPOSITORY_OWNER}" \
+            --out-dir levels \
+            --policy slsa/assert-policy.json || rc=$?
+          if [[ ${rc} -ne 0 && ${rc} -ne 4 ]]; then
+            echo "::error::stele level failed (exit ${rc}) — nothing published"
+            exit "${rc}"
+          fi
+          echo "investigate=${rc}" >> "${GITHUB_ENV}"
       - name: Publish to the levels branch
         env:
           GH_TOKEN: ${{ github.token }}
