@@ -71,5 +71,19 @@ ignore = [
   "T201",
 ]
 
+[lint.per-file-ignores]
+# The two rules that encode PYTEST's idiom, off for stdlib unittest
+# files. Same shape as the formatter-incompatible list above — two
+# halves of one tool contradicting each other, not a preference. PT009
+# demands a bare `assert` in place of `self.assertEqual`, and PT027
+# `pytest.raises` in place of `self.assertRaises`; taking either means
+# taking pytest, which is a belt tool the org does not have and refused
+# to add on #364's reasoning (a test framework is a further thing to
+# port). Bare asserts would then trip S101 in turn, so this is the one
+# arrangement that lets `ALL` and `unittest` coexist. Nothing is
+# weakened for a repo that DOES use pytest: neither rule fires on a
+# pytest-style test in the first place.
+"**/test_*.py" = ["PT009", "PT027"]
+
 [format]
 docstring-code-format = true

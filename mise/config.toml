@@ -963,9 +963,13 @@ dir = "{{cwd}}"
 #
 # Tracked files only, and it skips clean where it does not apply: a repo
 # with no renovate.json has no machine minting subjects, and a repo that
-# declares no dependencies has nothing to bound. The ceiling is read from
-# the delivered committed.toml rather than restated — one definition of
-# 72, which is what made the file's delivery the first step of #576.
+# declares no dependencies has nothing to bound. That second branch is
+# nearly unreachable and is not dead code: extending the org preset is
+# itself a declared dependency through default.json's own customManager,
+# so any repo that reaches this task at all counts at least one. The
+# ceiling is read from the delivered committed.toml rather than restated
+# — one definition of 72, which is what made the file's delivery the
+# first step of #576.
 run = 'git ls-files ":!vendor/**" | python3 "${ORG_BELT_DIR}/subject-budget.py"'
 
 [tasks."lint:zizmor"]

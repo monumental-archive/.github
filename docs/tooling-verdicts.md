@@ -1281,11 +1281,27 @@ SQL appearing anywhere in the org (revisit the raw templater).
   trigger fired the way the 2026-08-15 amendment predicted, with one
   correction to that prediction: the number lives in the tool's repo,
   not this one. The canon tree retains orchestration-only shell
-  (one-line task bodies and workflow steps) and two Python belt
-  helpers (`mise/deny-skips.py`, `mise/embedded-shell.py`) — no
-  unit-testable corpus of
-  its own, so the canon takes no `.coverage-floor` and no shield: a
-  coverage number over a workflow tree would measure nothing. The
+  (one-line task bodies and workflow steps) and its Python belt
+  helpers, so the canon takes no `.coverage-floor` and no shield: a
+  coverage number over a workflow tree would measure nothing.
+  **Amended 2026-08-20 (#576):** the clause that used to sit here — two
+  helpers, "no unit-testable corpus of its own" — was true of a
+  100-line skip emitter and a shell extractor and stopped being true
+  with `mise/subject-budget.py`, 700 lines of manager walks, template
+  resolution and budget arithmetic. It now has `mise/test_subject_budget.py`,
+  42 stdlib-`unittest` table tests reached by the gate through the
+  ordinary `ci` contract (a repo-level `mise.toml` defining `test`,
+  which `ci` collects optionally). Nothing joins the belt to run them:
+  #364 refused a test framework because adopting one is a further thing
+  to port, and that reasoning bites a new dependency, not the batteries
+  inside the pinned interpreter. The suite is checked against mutation
+  rather than trusted — eight deliberate defects introduced one at a
+  time (a fallback where the code must hard-error, indirect Go requires
+  counted, a digest measured at its 40-character pin, a `>=`/`>`
+  boundary slip, `matchManagers` ignored, growth applied to a
+  fixed-width pseudo-version, JS named groups left untranslated, and an
+  absent belt config defaulted), all eight caught. The coverage
+  criteria are unaffected: there is still no measurement, only tests. The
   Best Practices coverage criteria are re-answered on that basis in
   [best-practices.md](best-practices.md).
   Note what was **revoked** here: this entry previously recorded a

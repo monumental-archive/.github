@@ -3,11 +3,21 @@
   "description": "Org-wide Renovate preset. Repos extend with: github>monumental-archive/.github#vX.Y.Z",
   "extends": ["config:best-practices", ":dependencyDashboard"],
   "minimumReleaseAge": "7 days",
+  "commitMessageAction": "update",
+  "commitMessageTopic": "{{depName}}",
+  "commitMessageExtra": "to {{newValue}}",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
   "packageRules": [
     {
-      "description": "THE OWNED TEMPLATE (#576). Every permanent commit subject a machine mints in this org is composed here, and nowhere else: PR titles become squash subjects verbatim, so a bot's rendering is an immutable commit message. Renovate's default topic is `dependency {{depName}}`, and the managers add their own (`{{depName}} action`, `{{depName}} digest`) — three shapes, none of them ours, together costing eleven columns of a 72-column ceiling to say nothing. One owned topic replaces all three. It is set as a catch-all rule rather than at the top level because the documentation directs manager-specific topics through packageRules, and a rule unambiguously wins over a manager default; the per-dependency rules below override this one in turn, later-wins. lint:subject-budget reads this file and proves that every dependency the org declares mints a subject that fits. The rules that follow rename individual dependencies. Each lists the depName BOTH with and without its mise backend prefix, because Renovate renders depName with it (`update dependency github:monumental-archive/stele …`, #574) while selecting on the stripped packageName (the same PR came out scoped `chore(canon)` from `monumental-archive/**`); a pattern that matches nothing costs nothing, and one of the two is right.",
+      "description": "THE OWNED TEMPLATE (#576). Every permanent commit subject a machine mints in this org is composed from the five commitMessage/semanticCommit fields above and nowhere else. They are set EXPLICITLY, including where the value equals Renovate's own default: lint:subject-budget simulates this template to prove each declared dependency mints a subject that fits, and a simulation reading an upstream default it cannot see is the agreeing-by-memory failure #576 exists to kill. An absent field is a hard error there, never a fallback. The topic is restated as a catch-all rule here as well as at the top level because the managers carry their own defaults (`dependency {{depName}}`, `{{depName}} action`, `{{depName}} digest` — three shapes, none ours, costing eleven columns to say nothing), the documentation routes manager-specific topics through packageRules, and a rule unambiguously beats a manager default. The per-dependency rules below override this one in turn, later-wins. Each lists the depName BOTH with and without its mise backend prefix, because Renovate renders depName with it (`update dependency github:monumental-archive/stele …`, #574) while selecting on the stripped packageName (the same PR came out scoped `chore(canon)` from `monumental-archive/**`); a pattern that matches nothing costs nothing, and one of the two is right.",
       "matchPackageNames": ["*"],
       "commitMessageTopic": "{{depName}}"
+    },
+    {
+      "description": "gomod keeps `fix`, restated rather than inherited. The top-level semanticCommitType above now owns every manager, and Renovate's gomod default is `fix` — measured, not read: stele's #179 and #180 are `fix(deps): update module …`. Letting the top-level `chore` swallow that would move Go dependency bumps from Fixed to Dependencies in the release notes and out of the version decision, which is a release-semantics change and not this issue's to make. Explicit here, behaviour unchanged.",
+      "matchManagers": ["gomod"],
+      "semanticCommitType": "fix"
     },
     {
       "description": "46 characters as minted, 17 past the budget.",

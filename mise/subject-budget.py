@@ -62,18 +62,22 @@ PR_NUMBER_DIGITS = 6
 # roughly three major-digit rollovers.
 VERSION_GROWTH = 3
 
-# Renovate's documented defaults for the fields that compose a commit
-# message, restated so the renderer never silently assumes a shape the
-# preset did not set. The org owns commitMessageTopic in default.json;
-# the rest are Renovate's, and are read from the preset where it
-# overrides them.
-RENOVATE_DEFAULTS = {
-    "commitMessageAction": "update",
-    "commitMessageTopic": "dependency {{depName}}",
-    "commitMessageExtra": "to {{newValue}}",
-    "semanticCommitType": "chore",
-    "semanticCommitScope": "deps",
-}
+# The five fields that compose a commit subject. Every one is READ from
+# default.json — there is no default table here and no fallback, by
+# review decision on #576: a simulation that fills in a value the org did
+# not write is agreeing with Renovate from memory, and an upstream
+# default changing underneath it would be invisible. So the preset sets
+# all five explicitly, including where the value equals Renovate's own
+# default, and an absent one is a hard error naming the field.
+MESSAGE_CONFIG = (
+    "commitMessageAction",
+    "commitMessageTopic",
+    "commitMessageExtra",
+    "semanticCommitType",
+    "semanticCommitScope",
+)
+# The three that carry text into the subject, in the order Renovate
+# composes them; the other two form the `type(scope):` prefix.
 MESSAGE_FIELDS = ("commitMessageAction", "commitMessageTopic", "commitMessageExtra")
 
 MISE_CONFIG = re.compile(r"^\.?mise(\.[\w-]+)?\.toml$")
@@ -120,10 +124,16 @@ JS_GROUP = re.compile(r"\(\?<(?=[A-Za-z_])")
 
 
 class Dep(NamedTuple):
-    """One declared dependency, as Renovate would name and value it."""
+    """One declared dependency, as Renovate would name and value it.
+
+    `manager` is Renovate's manager id, carried because the org's preset
+    scopes a rule by it (gomod keeps `fix` where everything else takes
+    `chore`), so the renderer cannot resolve the prefix without it.
+    """
 
     name: str
     current: str
+    manager: str
     origin: str
 
 
@@ -234,22 +244,51 @@ def matches(pattern: str, dep_name: str) -> bool:
     return any(re.fullmatch(regex, name) for name in names)
 
 
-def effective(preset: dict, dep_name: str) -> dict:
+def selects(rule: dict, dep: Dep) -> bool:
+    """Test whether a packageRule applies to one dependency.
+
+    Only the two matchers the org's preset uses are modelled, and both
+    must hold when both are present — Renovate ANDs across matcher kinds
+    and ORs within one. A rule carrying neither selects nothing here: it
+    is setting something this task does not render.
+
+    Returns:
+        True when the rule's matchers all admit this dependency.
+
+    """
+    managers = rule.get("matchManagers")
+    names = rule.get("matchPackageNames")
+    if managers is None and names is None:
+        return False
+    if managers is not None and dep.manager not in managers:
+        return False
+    return names is None or any(matches(p, dep.name) for p in names)
+
+
+def effective(preset: dict, dep: Dep) -> dict:
     """Resolve the message fields Renovate would use for one dependency.
 
     packageRules are applied in order and later wins per field, which is
-    Renovate's own precedence.
+    Renovate's own precedence. Every field must be present in the preset
+    or below it; nothing is defaulted.
 
     Returns:
-        The message fields, defaults filled in.
+        The five message fields, all of them read from the preset.
 
     """
-    config = dict(RENOVATE_DEFAULTS)
-    config.update({k: preset[k] for k in RENOVATE_DEFAULTS if k in preset})
+    config = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
     for rule in preset.get("packageRules", []):
-        patterns = rule.get("matchPackageNames")
-        if patterns and any(matches(p, dep_name) for p in patterns):
-            config.update({k: rule[k] for k in RENOVATE_DEFAULTS if k in rule})
+        if selects(rule, dep):
+            config.update({k: rule[k] for k in MESSAGE_CONFIG if k in rule})
+    missing = [k for k in MESSAGE_CONFIG if k not in config]
+    if missing:
+        sys.exit(
+            "lint:subject-budget: the owned template does not set "
+            + ", ".join(missing)
+            + ".\n  Every field the subject is composed from is set"
+            " explicitly in default.json (#576); this task will not"
+            " assume Renovate's default for one.",
+        )
     return config
 
 
@@ -334,7 +373,7 @@ def from_mise(files: list[Path], report: list[str]) -> list[Dep]:
             if not version:
                 report.append(f"{path}: [tools] {tool} declares no readable version")
                 continue
-            deps.append(Dep(tool, version, f"mise ({path})"))
+            deps.append(Dep(tool, version, "mise", str(path)))
     return deps
 
 
@@ -385,8 +424,8 @@ def from_actions(files: list[Path], report: list[str]) -> list[Dep]:
                 current = "0" * DIGEST_SHORT
             else:
                 current = pinned
-            if len(current) > len(found.get(repo, Dep("", "", "")).current):
-                found[repo] = Dep(repo, current, f"github-actions ({path})")
+            if len(current) > len(found.get(repo, Dep("", "", "", "")).current):
+                found[repo] = Dep(repo, current, "github-actions", str(path))
     return list(found.values())
 
 
@@ -436,9 +475,8 @@ def from_cargo(files: list[Path], report: list[str]) -> list[Dep]:
     for path in files:
         if path.name != "Cargo.toml":
             continue
-        origin = f"cargo ({path})"
         for table in cargo_tables(load_toml(path, report)):
-            deps += [Dep(n, v, origin) for n, v in registry_deps(table)]
+            deps += [Dep(n, v, "cargo", str(path)) for n, v in registry_deps(table)]
     return deps
 
 
@@ -454,10 +492,9 @@ def from_npm(files: list[Path], report: list[str]) -> list[Dep]:
         if path.name != "package.json":
             continue
         data = load_json(path, report)
-        origin = f"npm ({path})"
         for key in NPM_TABLES:
             deps += [
-                Dep(name, spec, origin)
+                Dep(name, spec, "npm", str(path))
                 for name, spec in data.get(key, {}).items()
                 if isinstance(spec, str)
             ]
@@ -483,11 +520,10 @@ def from_gomod(files: list[Path], report: list[str]) -> list[Dep]:
         content = read_text(path, report)
         if content is None:
             continue
-        origin = f"gomod ({path})"
-        matches = GO_REQUIRE.finditer(content)
+        found = GO_REQUIRE.finditer(content)
         deps += [
-            Dep(m.group(1), m.group(2), origin)
-            for m in matches
+            Dep(m.group(1), m.group(2), "gomod", str(path))
+            for m in found
             if "indirect" not in (m.group(3) or "")
         ]
     return deps
@@ -527,10 +563,11 @@ def custom_matches(manager: dict, path: Path, content: str, origin: str) -> list
             groups = match.groupdict()
             name = template if literal else groups.get("depName")
             if not name:
-                deps.append(Dep("", "", f"{origin}: {path} (template {template!r})"))
+                unresolved = f"{origin}: {path} (template {template!r})"
+                deps.append(Dep("", "", "custom.regex", unresolved))
                 continue
             current = groups.get("currentValue") or groups.get("currentDigest") or ""
-            deps.append(Dep(name, current, f"customManager ({origin})"))
+            deps.append(Dep(name, current, "custom.regex", origin))
     return deps
 
 
@@ -619,7 +656,7 @@ def judge(
         if dep.name in seen:
             continue
         seen.add(dep.name)
-        config = effective(preset, dep.name)
+        config = effective(preset, dep)
         growth = 0 if PSEUDO_VERSION.fullmatch(dep.current) else VERSION_GROWTH
         width = len(dep.current) + growth
         subject, unmodelled = render(config, dep.name, width)
@@ -635,7 +672,7 @@ def explain(findings: list[Finding], limit: int) -> None:
     for width, dep, subject in findings:
         over = width - limit
         print(f"  {width:3d} cols (over by {over})  {dep.name}", file=sys.stderr)
-        print(f"        from {dep.origin}", file=sys.stderr)
+        print(f"        from {dep.manager} ({dep.origin})", file=sys.stderr)
         print(f"        {subject}", file=sys.stderr)
     print(
         "\n  The subject template is the org's, so the fix is the org's: give the\n"
@@ -678,14 +715,16 @@ def main() -> int:
 
     counted = len({dep.name for dep in deps})
     if not findings:
+        noun = "dependency" if counted == 1 else "dependencies"
         print(
-            f"lint:subject-budget: {counted} dependencies, every subject the "
+            f"lint:subject-budget: {counted} {noun}, every subject the "
             f"owned template can mint fits {limit} columns",
         )
         return 0
 
+    noun = "dependency" if counted == 1 else "dependencies"
     print(
-        f"lint:subject-budget: {len(findings)} of {counted} dependencies would "
+        f"lint:subject-budget: {len(findings)} of {counted} {noun} would "
         f"mint a subject past {limit} columns\n",
         file=sys.stderr,
     )
