@@ -213,10 +213,16 @@ roll-forward.
   An unexpected issuance is a stop-everything event: rotate nothing until
   you know how the identity was minted (the certificate names workflow,
   repo, ref and commit).
-- **repro-check filed an issue**: a release stopped rebuilding to its
-  published bytes — a build input escaped pinning. Not consumer-facing
-  (the published bytes are still the attested ones); diagnose before the
-  next release.
+- **repro-check filed an issue**: the reproducibility audit did not pass
+  for the class it rebuilt. Read the scope the run states before you
+  diagnose, because the two finding kinds mean different things. A digest
+  that **differs** from the published one is a build input that escaped
+  pinning. An artifact reported **absent** is one the judged population
+  held and that rebuild did not produce — and the audit rebuilds one
+  target per class by design, so a class's other targets report absent
+  even on a healthy release (#637). Neither is consumer-facing (the
+  published bytes are still the attested ones); diagnose a divergence
+  before the next release.
 - **`audit:source-vsa` red on a ledger fork** (a link's
   `ledgerPrev.noteSha256` matches no note that exists): since the
   `stele emit` cutover this defect class is structurally

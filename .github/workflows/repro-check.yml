@@ -9,10 +9,23 @@
 # mismatch means a build input escaped the pinning (a nondeterministic
 # proc macro, an environment leak) and files loudly.
 #
+# ONE class per run, and the verdict is scoped to it (#595). The released
+# evidence manifest types every artifact with the class that built it
+# (stele#185), so the population is that class's artifacts and nothing
+# else. Judging the whole release against one class's rebuild called
+# every OTHER class missing from it — thirteen of fourteen artifacts on
+# release-lab v0.25.3, and two supply-chain issues filed against a
+# release that was fine (release-lab#226, #227). A release carrying no
+# such typing keeps the whole-release population, and the run states
+# which of the two it judged rather than letting one read as the other.
+#
 # One target by default: reproducibility across REBUILDS is the property
 # under test; the per-target archives already differ from each other by
-# construction. audit-shaped, never in a gate: it takes minutes of
-# compile time and proves a property of the release, not of a diff.
+# construction. The class's OTHER targets stay in the judged population
+# and report absent — the residual this scoping does not reach, split out
+# as #637 with its cost undecided. audit-shaped, never in a gate: it
+# takes minutes of compile time and proves a property of the release,
+# not of a diff.
 ---
 name: repro-check
 
@@ -67,6 +80,7 @@ jobs:
       tag: ${{ steps.rel.outputs.tag }}
       version: ${{ steps.rel.outputs.version }}
       checksums: ${{ steps.rel.outputs.checksums }}
+      manifest: ${{ steps.rel.outputs.manifest }}
     steps:
       - name: Read the latest release
         id: rel
@@ -84,10 +98,39 @@ jobs:
             echo "::error::release ${tag} has no checksums.txt — nothing to prove against"
             exit 1
           fi
+          # Which artifacts a class built is the RELEASE's own answer, and
+          # it lives in the evidence manifest's per-entry typing. Fetched
+          # best-effort because not every release has one to give: a
+          # release older than the manifest, or one below the schema that
+          # types entries, carries no answer — schema 1 has no `entries`
+          # key at all.
+          #
+          # Such a manifest is NOT handed on. Its build-subject population
+          # is zero, which seals CANNOT_JUDGE and exits non-zero, filing a
+          # false issue of a new shape (measured: exit 4). A release that
+          # cannot answer keeps the whole-release comparison it shipped
+          # under, and the verdict says so. Same reasoning, same schema-1
+          # case, as attach-release.yml's resume guard.
+          gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern evidence-manifest.json --output evidence-manifest.json 2> /dev/null || true
+          typed=""
+          if [[ -s evidence-manifest.json ]]; then
+            typed=$(jq -r '(.entries // [])[0].name // empty' evidence-manifest.json)
+          fi
+          manifest=""
+          if [[ -n ${typed} ]]; then
+            manifest=$(< evidence-manifest.json)
+            echo "::notice::${tag} types its entries — the rebuilt class scopes the population"
+          else
+            echo "::notice::${tag} carries no per-class typing — judging every build subject it published"
+          fi
           {
             echo "checksums<<CHECKSUMS_EOF"
             cat checksums.txt
             echo "CHECKSUMS_EOF"
+            echo "manifest<<MANIFEST_EOF"
+            printf '%s\n' "${manifest}"
+            echo "MANIFEST_EOF"
             echo "tag=${tag}"
             echo "version=${tag#v}"
           } >> "${GITHUB_OUTPUT}"
@@ -188,11 +231,13 @@ jobs:
         # case (a partial rebuild read exactly like a complete one).
         env:
           PUBLISHED: ${{ needs.resolve.outputs.checksums }}
+          MANIFEST: ${{ needs.resolve.outputs.manifest }}
           REBUILT: >-
             ${{ needs.rebuild.outputs.subjects
             || needs.rebuild-go.outputs.subjects
             || needs.rebuild-extension.outputs.subjects }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          CLASS: ${{ inputs.class }}
         run: |
           set -euo pipefail
           printf '%s\n' "${REBUILT}" > rebuilt.sha256
@@ -212,21 +257,65 @@ jobs:
           # remove. An entry it cannot classify refuses the manifest and
           # an empty subject population seals CANNOT_JUDGE, both in the
           # engine, so nothing here decides what a build artifact is.
+          #
+          # WHICH released manifest is handed over decides what can be
+          # asked of it, so that choice is made once — in resolve, which
+          # emits the typed manifest only when the release can answer with
+          # it. Here the document is used, never re-judged.
+          #
+          # --class is passed either way, and that is the point: on a
+          # typed manifest it narrows the population to the artifacts that
+          # class built, and on one that cannot answer it makes the engine
+          # SAY the scope went unmet (classScopeUnmet=no-class-answer)
+          # instead of leaving a whole-release verdict looking like a
+          # scoped one. A class the release never declared refuses rather
+          # than sealing over the empty population it would otherwise
+          # draw.
+          released="released.sha256"
+          if [[ -n ${MANIFEST//[[:space:]]/} ]]; then
+            printf '%s\n' "${MANIFEST}" > released-manifest.json
+            released="released-manifest.json"
+          fi
           stele verify repro \
             --repo "${GITHUB_REPOSITORY}" --tag "${TAG}" \
-            --released released.sha256 --rebuilt rebuilt.sha256 \
+            --released "${released}" --rebuilt rebuilt.sha256 \
+            --class "${CLASS}" \
             --assert-policy .org-canon/slsa/assert-policy.json
       - name: File an issue on failure
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          MANIFEST: ${{ needs.resolve.outputs.manifest }}
+          CLASS: ${{ inputs.class }}
         run: |
           set -euo pipefail
-          body="The reproducibility audit rebuilt ${TAG} with the class workflow and the digests"
-          body+=" differ from the release's checksums.txt — a build input has escaped the pinning."
+          # Named, never implied. One run rebuilds ONE class, so a finding
+          # belongs to that class and to the population the verdict
+          # actually judged. The old wording asserted "a build input has
+          # escaped the pinning" over the whole release, including every
+          # artifact nobody rebuilt — which is how release-lab#226 and
+          # #227 were filed twice, under identical titles, against a
+          # release that was fine. The title carries the class for the
+          # same reason: two legs of one audit must not mint two issues a
+          # reader cannot tell apart.
+          #
+          # The scope sentence reads the SAME input that chose the
+          # document the verdict judged, so the two cannot disagree about
+          # what was under test.
+          if [[ -n ${MANIFEST//[[:space:]]/} ]]; then
+            scope="the ${CLASS} artifacts ${TAG} published"
+          else
+            scope="every build subject ${TAG} published — it carries no per-class typing, so this"
+            scope+=" ${CLASS} rebuild could not be scoped to its own class"
+          fi
+          body="The reproducibility audit rebuilt ${TAG} with the ${CLASS} class workflow and the verdict"
+          body+=" is not a pass. Judged population: ${scope}."
+          body+=" A digest that DIFFERS from the published one means a build input escaped the pinning."
+          body+=" An artifact reported ABSENT is one in the judged population this rebuild did not produce;"
+          body+=" read the scope the run states before treating it as a pinning defect."
           body+=" Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue create --repo "${GITHUB_REPOSITORY}" \
-            --title "repro-check: ${TAG} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
+            --title "repro-check: ${TAG} ${CLASS} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
             --body "${body}"
 ...
