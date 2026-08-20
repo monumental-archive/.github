@@ -1675,8 +1675,22 @@ jobs:
   # verdicts run AFTER this job, against the published immutable release
   # (#209) — attach publishes on evidence, verdicts follow. Assets and
   # bundles travel as `release-*` / `attestation-bundle-*` artifacts, so
-  # attach needs no per-class inputs and a new class is one more job
-  # above, not a contract change here.
+  # the BYTES need no per-class input.
+  #
+  # Their CLASS does, since stele#185: `stele emit manifest` requires
+  # every build subject to be claimed by exactly one class, and the
+  # fan-in's `merge-multiple` erases the class the artifact name
+  # carried. So each build leg's own subject manifest — the same string
+  # its signer signs — rides down as a per-class input. The leg-to-class
+  # map is already stated twice in this job (the `if` names both halves
+  # of every pair); this is the third use of the same map, in the file
+  # that holds it, rather than a second map derived from artifact names
+  # in the callee. A new class is one more job above, one `if` clause,
+  # and one forwarded input.
+  #
+  # oci-image and wasm-npm forward nothing: they publish to a registry
+  # and attach no release asset, so they own no build subject and
+  # passing their build outputs REFUSES.
   # phase: attest
   attach:
     name: Attach evidence and publish
@@ -1691,6 +1705,16 @@ jobs:
       - sign-wasm
       - sign-extensions
       - sign-extension-images
+      # The build legs join `needs` only to bring their subject
+      # manifests into scope. Each is already an ancestor through its
+      # sign job, so no ordering changes and no `if` clause moves: a
+      # failed build already failed its signer, and a skipped one
+      # contributes `skipped`, which the failure test below ignores.
+      - build
+      - build-binary
+      - build-go
+      - build-source
+      - build-extension
     if: >-
       ${{
         !cancelled() && needs.guard.result == 'success'
@@ -1716,6 +1740,13 @@ jobs:
       # string, not the per-class inputs this fan-in deliberately has
       # none of.
       classes: ${{ inputs.classes }}
+      # One line per class that attaches release assets, empty when that
+      # class did not run.
+      rust-crate-subjects: ${{ needs.build.outputs.subjects }}
+      rust-binary-subjects: ${{ needs.build-binary.outputs.subjects }}
+      go-binary-subjects: ${{ needs.build-go.outputs.subjects }}
+      source-archive-subjects: ${{ needs.build-source.outputs.subjects }}
+      pgrx-extension-subjects: ${{ needs.build-extension.outputs.subjects }}
       dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}

@@ -1,5 +1,5 @@
 {
-  "schema": 5,
+  "schema": 6,
   "issuer": "https://token.actions.githubusercontent.com",
   "debtFile": "security/attestation-debt.txt",
   "population": {
@@ -76,17 +76,26 @@
       "attestorIdentity": "https://github.com/monumental-archive/.github/.github/workflows/base-attest.yml@refs/heads/main",
       "predicateType": "https://monumental-archive.github.io/attestations/base-image-approval/v1"
     },
-    "enrichmentFromVersion": "1.41.0"
+    "enrichmentFromVersion": "1.41.0",
+    "manifestSchemaFromVersion": "1.47.0"
   },
   "tags": {
     "tagPattern": "^v[0-9]",
     "taggerName": "tag-mint[bot]",
     "identityPattern": "^https://github\\.com/monumental-archive/",
-    "proofFloor": "certificate-transparency",
+    "proofFloor": {
+      "floor": "observer-timestamp",
+      "from": {
+        ".github": "v1.46.0",
+        "release-lab": "v0.25.4"
+      },
+      "before": "certificate-transparency"
+    },
     "notesRef": "refs/notes/commits",
     "epochs": {
       ".github": "v1.23.1",
-      "release-lab": "v0.24.2"
+      "release-lab": "v0.24.2",
+      "stele": "v0.1.0"
     }
   },
   "chains": {
