@@ -14,12 +14,17 @@ Universal shields — derived for every repo:
   workflow status   the repo's own gate; earned by calling ci.yml
   OpenSSF Scorecard earned by scorecard.yml; audited against the
                     per-repo ratcheted floor in scorecard-floors.txt
-  SLSA Build L3     the org's claimed tracks, from direction.md's
-  SLSA Source L3    table — the audit parses track and level out of
-  SLSA Dep L2       each shield and matches that row, so a shield can
-                    never outrun the table. BuildEnv is deliberately
-                    unshielded: L0 is the absence of a claim, and a
-                    shield asserting an absence is noise (#316).
+  SLSA Build        earned by carrying a `level` stub that declares the
+  SLSA Source       track, plus evidence the judge can read: the level
+  SLSA Dep          is MEASURED, and the shield renders it from the
+                    repository's own levels branch — one row per track
+                    the stub declares, and no track it does not. The
+                    audit asserts only that the published document is
+                    live and shield-shaped; a level that moved is not a
+                    finding, a document that cannot be read is. BuildEnv
+                    is deliberately unshielded: L0 is the absence of a
+                    claim, and a shield asserting an absence is noise
+                    (#316).
   REUSE status      earned by registering at api.reuse.software/register
                     (no account — name, email, project URL, confirmation
                     link; `lint:reuse` in the gate proves the tree
