@@ -26,8 +26,12 @@ pre-commit:
 
 commit-msg:
   jobs:
+    # Through mise, not `committed` directly: the rules are delivered by
+    # the belt now (#576) and the hook shell carries no ORG_BELT_DIR of
+    # its own. The task composes the org's config with this repo's
+    # ORG_COMMIT_SCOPES and passes the result to committed.
     - name: committed
-      run: committed --commit-file {1}
+      run: ORG_COMMIT_MSG_FILE={1} mise run commits:check
     # Catch a missing DCO sign-off here rather than at push, where the fix
     # is an amend or a rebase instead of just redoing the commit.
     - name: dco

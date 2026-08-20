@@ -104,19 +104,29 @@ jobs:
       # merge will mint and hold it to the same tool and config the
       # branch commits answer to. Values via env, never ${{ }} into
       # shell (the injection rule).
+      #
+      # HUMAN-AUTHORED TITLES ONLY (#576). A bot owns its titles and
+      # regenerates them from a template: on #574 a manual retitle was
+      # reverted by Renovate two minutes later, so this step blocked a
+      # merge nobody present could unblock. Validating an output is
+      # right exactly when the author is here to act on the error.
+      # Machine-minted subjects are bounded at their INPUTS instead —
+      # lint:subject-budget proves, on the pull request that introduces
+      # a dependency, that every title the owned template could mint
+      # for it fits. By the time the bot runs, there is nothing to
+      # catch.
       - name: The squash subject is the PR title — hold it to the commit canon
-        if: ${{ github.event_name == 'pull_request' }}
+        if: >-
+          ${{ github.event_name == 'pull_request'
+          && github.event.pull_request.user.type != 'Bot' }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if [[ ! -f committed.toml ]]; then
-            echo "squash-subject: no committed.toml in this repo, skipped"
-            exit 0
-          fi
           printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${RUNNER_TEMP}/squash-subject"
-          if ! committed --commit-file "${RUNNER_TEMP}/squash-subject"; then
+          export ORG_COMMIT_MSG_FILE="${RUNNER_TEMP}/squash-subject"
+          if ! mise run commits:check; then
             emsg="the PR title becomes the permanent squash subject (plus ' (#${PR_NUMBER})') and it fails the commit canon"
             emsg+=" — fix the TITLE, not a commit"
             echo "::error::${emsg}"

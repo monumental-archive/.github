@@ -923,11 +923,50 @@ run = 'git ls-files ":!vendor/**" | xargs shfmt --find | xargs shfmt -i 2 -bn -c
 [tasks."lint:commits"]
 description = "Conventional-commit check for the branch (committed)"
 dir = "{{cwd}}"
-# Only meaningful on a branch with an origin/main to diverge from; the
-# range check needs committed.toml in the repo (canon: this repo's copy).
+# Only meaningful on a branch with an origin/main to diverge from. The
+# `[[ -f committed.toml ]]` half of this guard went with the file (#576):
+# the rules are delivered now, so there is no longer a state in which a
+# repo has commits to check and no config to check them against. It was
+# a fail-open — a repo that never copied the file skipped the commit
+# canon entirely and nothing said so.
 # On pull_request events CI sits on GitHub's synthetic merge commit; the
 # PR's real commits are its second parent.
-run = 'if git rev-parse --verify -q origin/main > /dev/null && [[ -f committed.toml ]]; then tip=HEAD; if [[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]]; then tip="HEAD^2"; fi; committed "origin/main..${tip}"; else echo "lint:commits: no origin/main or no committed.toml, skipped"; fi'
+run = 'if git rev-parse --verify -q origin/main > /dev/null; then tip=HEAD; if [[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]]; then tip="HEAD^2"; fi; "${ORG_BELT_DIR}/committed.sh" "origin/main..${tip}"; else echo "lint:commits: no origin/main, skipped"; fi'
+
+[tasks."commits:check"]
+description = "Hold ONE commit message (ORG_COMMIT_MSG_FILE) to the commit canon"
+dir = "{{cwd}}"
+# Outside the lint: namespace on purpose — `ci` wildcard-collects lint:*,
+# and this task is meaningless without a message to check. The
+# coverage:check precedent: tasks the gate calls by name, never by
+# wildcard.
+#
+# Two callers, both of which have a message and neither of which can
+# reach the belt on its own: lefthook's commit-msg hook (the hook shell
+# carries no ORG_BELT_DIR, so it must come through mise like every other
+# hook job) and ci.yml's squash-subject step (which composes the subject
+# the merge will mint). The path arrives in the environment rather than
+# as an argument because mise APPENDS task arguments to the last command
+# as text — $1 is never set inside a task body (measured on 2026.8.3).
+run = 'if [[ -z "${ORG_COMMIT_MSG_FILE:-}" || ! -f "${ORG_COMMIT_MSG_FILE}" ]]; then echo "commits:check: set ORG_COMMIT_MSG_FILE to a commit-message file" >&2; exit 1; fi; "${ORG_BELT_DIR}/committed.sh" --commit-file "${ORG_COMMIT_MSG_FILE}"'
+
+[tasks."lint:subject-budget"]
+description = "Every declared dependency mints a commit subject that fits (#576)"
+dir = "{{cwd}}"
+# The inversion this task exists for: a permanent commit subject is
+# minted from BOUNDED inputs, and the bound is checked when a human adds
+# the input — not when a bot renders the output and no one is there to
+# fix it. Renovate owns its pull request titles and regenerates them from
+# a template, so a title that fails the gate is a merge nobody present
+# can unblock (#574). By the time the bot runs, every title it could emit
+# has already been proven to fit.
+#
+# Tracked files only, and it skips clean where it does not apply: a repo
+# with no renovate.json has no machine minting subjects, and a repo that
+# declares no dependencies has nothing to bound. The ceiling is read from
+# the delivered committed.toml rather than restated — one definition of
+# 72, which is what made the file's delivery the first step of #576.
+run = 'git ls-files ":!vendor/**" | python3 "${ORG_BELT_DIR}/subject-budget.py"'
 
 [tasks."lint:zizmor"]
 description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"

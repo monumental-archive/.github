@@ -1,0 +1,59 @@
+# Conventional-commit enforcement (committed) — the org's one definition.
+#
+# DELIVERED, never copied (#445, #576). Every caller passes this file to
+# committed with `--config` via mise/committed.sh; no repo carries a
+# second copy that can drift. It had drifted: five copies, four distinct
+# blobs, three of them still citing a cliff.toml the org retired in #507.
+#
+# `--config` REPLACES a repo-local committed.toml rather than merging
+# with it (measured on 1.1.11 — the typos `-c` precedent does not carry
+# over), so a repo's own `allowed_scopes` cannot live beside this file.
+# Scopes are repo identity, not org policy, so a repo declares them as
+# ORG_COMMIT_SCOPES in its mise.toml [env] — the FUZZ_TOOLCHAIN pattern —
+# and mise/committed.sh composes the two into the config committed sees.
+style = "conventional"
+# Conventional descriptions are lowercase by convention ("feat: the belt…").
+subject_capitalized = false
+# 50 is the classic git norm; conventional prefixes eat into it, and the
+# org's house style favours sentence-length subjects. 72 is the hard
+# ceiling — and the ONE definition of it, which is what makes a subject
+# budget possible at all (lint:subject-budget reads this number rather
+# than restating it).
+#
+# What committed enforces here is WRAP-AWARE, and the difference matters
+# enough to record: a subject fails only when whitespace sits past column
+# 72, so an over-long UNWRAPPABLE tail is exempt. Measured on 1.1.11 with
+# this config: the last space at index 72 passes, at index 73 fails,
+# whatever the total length. That is why `chore(canon): update dependency
+# monumental-archive/.github to v1.45.1 (#592)` (76 columns) is on main
+# and `…github:monumental-archive/stele to v0.16.0 (#574)` (81) could not
+# merge. `hard_line_length` is the knob that would make 72 literal for
+# everyone; it is deliberately unset — a human subject ending in a URL or
+# an identifier has an excuse, and ~40 subjects on main rely on it.
+#
+# A MACHINE-minted subject has no such excuse, so lint:subject-budget
+# holds the templates to a literal 72. The budget is therefore stricter
+# than the gate on purpose: anything it passes, committed passes.
+subject_length = 72
+# Classic git imperative mood: "if applied, this commit will <subject>".
+# The default, restated here so nobody softens it quietly again.
+imperative_subject = true
+# committed's default list omits build, ci and revert, but the release
+# notes group all three (the --groups convention in
+# release/prepare-release.sh) and the silent-types rule names `ci`
+# explicitly. Left unstated, a `ci:` commit is rejected by the gate
+# while the release machinery expects it. Keep these two lists in step:
+# every type the notes convention maps must be allowed here.
+allowed_types = [
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "docs",
+  "test",
+  "build",
+  "ci",
+  "chore",
+  "style",
+  "revert",
+]

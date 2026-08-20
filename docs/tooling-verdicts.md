@@ -248,10 +248,10 @@ directory — and measured identical from both locations; the rest carry
 no paths at all.
 
 The boundary, stated once: **who reads the file, whose content it is,
-and whether the tool reads it as data.** Nine configs are delivered —
+and whether the tool reads it as data.** Ten configs are delivered —
 clippy, rustfmt, pinact, typos, ruff, biome (generated per run, per
-above), yamllint, rumdl, sqlfluff. Two stay repo-side for content rather
-than readership: `deny.toml`'s skips describe one tree, and
+above), yamllint, rumdl, sqlfluff, committed. Two stay repo-side for
+content rather than readership: `deny.toml`'s skips describe one tree, and
 `.golangci.yml` names the module path in gci's import prefix (plus
 wrapcheck globs for that module's own packages in stele) — proven by
 delivering it and watching stele's imports go red against a config
@@ -260,12 +260,48 @@ it walks the tree and treats any `biome.json` below the root as a nested
 root config that hard-fails, so the belt's copy is `biome-org.json`, a
 name its discovery ignores. Otherwise: An editor
 (`.editorconfig`, and the language configs whose LSPs read them), GitHub
-(`renovate.json`), a git hook (`committed.toml`, which the commit-msg
-hook runs outside mise's env), the release script (`cliff.toml`), or the
-repo itself (`deny.toml`'s skips, licences, `REUSE.toml`) — those stay in
-the repo. Everything else is delivered. *Reopen:* the language configs
+(`renovate.json`), or the repo itself (`deny.toml`'s skips, licences,
+`REUSE.toml`) — those stay in the repo. Everything else is delivered.
+*Reopen:* the language configs
 (ruff, biome, golangci, sqlfluff, yamllint) are the live question — one
 home versus in-editor linting on a fresh checkout.
+
+**`committed.toml` is delivered, and the mixed-file case has an answer**
+(#576). It was the boundary's hardest instance: the RULES are org
+policy, but `allowed_scopes` is repo identity — the `.golangci.yml`
+module-path class — and the two lived in one file. Five copies, four
+distinct blobs, three still citing a `cliff.toml` retired in #507. Two
+measurements decided the shape. `committed --config` REPLACES a
+repo-local `committed.toml` rather than merging with it, so the typos
+`-c` precedent does not carry over and the scope list cannot simply
+stay beside the delivered file; and a partial `committed.toml` left in
+a repo would silently become the WHOLE config for any bare `committed`,
+which is a de-enforcement, not a compromise. So the belt COMPOSES:
+`mise/committed.sh` concatenates the delivered rules with the scopes a
+repo declares as `ORG_COMMIT_SCOPES` in its `mise.toml` `[env]` — the
+`FUZZ_TOOLCHAIN` pattern, a repo-declared belt input — and passes the
+result to committed. A token that is not a scope fails the task rather
+than corrupting the TOML. The old objection, that the commit-msg hook
+runs outside mise's env, was answered by routing the hook through mise
+like every other lefthook job (`commits:check`).
+
+One more thing the delivery bought: `lint:commits` and the
+squash-subject step both guarded on `[[ -f committed.toml ]]` and
+skipped clean without one. A repo that never copied the file answered
+to no commit canon at all and nothing said so. Delivered, the guard has
+nothing left to skip on.
+
+**The commit ceiling is wrap-aware, and that is now written down**
+(#576). committed's `subject_length` fails a subject only when
+whitespace sits past the limit — an over-long UNWRAPPABLE tail is
+exempt. Measured on 1.1.11: the last space at index 72 passes, at 73
+fails, whatever the total length. That is why roughly forty subjects
+over 72 columns are on main, the longest 86, while `chore(canon):
+update dependency github:monumental-archive/stele to v0.16.0 (#574)`
+at 81 could not merge. `hard_line_length` is the knob that makes 72
+literal for everyone; it is deliberately unset (a human subject ending
+in a URL has an excuse) and `lint:subject-budget` holds MACHINE-minted
+subjects to the literal ceiling instead, where no such excuse exists.
 
 **Duplicate-version skips now expire** (#445). cargo-deny is silent about
 a `skip`/`skip-tree` entry that matches nothing, so an exception written

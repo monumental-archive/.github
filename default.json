@@ -5,6 +5,45 @@
   "minimumReleaseAge": "7 days",
   "packageRules": [
     {
+      "description": "THE OWNED TEMPLATE (#576). Every permanent commit subject a machine mints in this org is composed here, and nowhere else: PR titles become squash subjects verbatim, so a bot's rendering is an immutable commit message. Renovate's default topic is `dependency {{depName}}`, and the managers add their own (`{{depName}} action`, `{{depName}} digest`) — three shapes, none of them ours, together costing eleven columns of a 72-column ceiling to say nothing. One owned topic replaces all three. It is set as a catch-all rule rather than at the top level because the documentation directs manager-specific topics through packageRules, and a rule unambiguously wins over a manager default; the per-dependency rules below override this one in turn, later-wins. lint:subject-budget reads this file and proves that every dependency the org declares mints a subject that fits. The rules that follow rename individual dependencies. Each lists the depName BOTH with and without its mise backend prefix, because Renovate renders depName with it (`update dependency github:monumental-archive/stele …`, #574) while selecting on the stripped packageName (the same PR came out scoped `chore(canon)` from `monumental-archive/**`); a pattern that matches nothing costs nothing, and one of the two is right.",
+      "matchPackageNames": ["*"],
+      "commitMessageTopic": "{{depName}}"
+    },
+    {
+      "description": "46 characters as minted, 17 past the budget.",
+      "matchPackageNames": [
+        "aqua:editorconfig-checker/editorconfig-checker",
+        "editorconfig-checker/editorconfig-checker"
+      ],
+      "commitMessageTopic": "editorconfig-checker"
+    },
+    {
+      "description": "37 as minted, 9 past.",
+      "matchPackageNames": [
+        "github:obi1kenobi/cargo-semver-checks",
+        "obi1kenobi/cargo-semver-checks"
+      ],
+      "commitMessageTopic": "cargo-semver-checks"
+    },
+    {
+      "description": "32 as minted, 3 past.",
+      "matchPackageNames": ["actions/dependency-review-action"],
+      "commitMessageTopic": "dependency-review-action"
+    },
+    {
+      "description": "31 as minted, 2 past.",
+      "matchPackageNames": ["actions/create-github-app-token"],
+      "commitMessageTopic": "create-github-app-token"
+    },
+    {
+      "description": "31 as minted, 3 past — the dependency whose stuck pull request (#574) opened this.",
+      "matchPackageNames": [
+        "github:monumental-archive/stele",
+        "monumental-archive/stele"
+      ],
+      "commitMessageTopic": "monumental-archive/stele"
+    },
+    {
       "description": "Routine updates merge themselves once aged and green; majors always get a human.",
       "matchUpdateTypes": ["patch", "minor", "pin", "digest", "pinDigest"],
       "automerge": true
