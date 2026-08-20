@@ -621,45 +621,6 @@ jobs:
           echo "::notice::release inventory: ${packages} packages (${out##*/})"
           echo "list=${inventories}" >> "${GITHUB_OUTPUT}"
           echo "::notice::decision population: ${inventories}"
-      # The declared contract, attested at the tag (stele#40, from
-      # #109): which classes shipped, the verdict layout, and the
-      # machinery version obligations are derived from — written by
-      # `stele emit manifest` through the same definition the assert
-      # reader decodes, and proven readable on its own rendered bytes
-      # before anything ships it.
-      - name: Write the evidence manifest
-        env:
-          CLASSES: ${{ inputs.classes }}
-        run: |
-          set -euo pipefail
-          # The machinery version is the canon tree's own, read from the
-          # version mirror the pinned tree carries — the caller's `uses:`
-          # ref is a commit SHA (the tag-pin rule), so the version is a
-          # fact about the TREE, not about the ref's spelling. For the
-          # canon's own releases the mirror already carries the version
-          # being cut, so one read covers both cases.
-          machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
-          [[ -n ${machinery} ]] || {
-            echo "::error::the pinned canon tree's CITATION.cff names no version — the manifest cannot state its machinery"
-            exit 1
-          }
-          # Every entry is pinned and TYPED — build subject or evidence
-          # document — stamped here, the one moment that knowledge
-          # exists natively (stele#156). Downstream walks read the
-          # classification instead of re-deriving it, which is what
-          # retires the repro filter and the whole-manifest resume diff.
-          # Two passes, because a manifest cannot pin itself: this one
-          # digests everything dist/ holds BEFORE the manifest exists,
-          # and attach-release's checksums.txt then covers everything
-          # including it.
-          (cd dist && sha256sum ./* | sed 's| \./| |') > "${RUNNER_TEMP}/assets.sha256"
-          stele emit manifest \
-            --classes "${CLASSES}" \
-            --store-vsa true \
-            --machinery-version "${machinery}" \
-            --assets "${RUNNER_TEMP}/assets.sha256" \
-            --assert-policy .org-canon/slsa/assert-policy.json \
-            --out dist/evidence-manifest.json
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
         # the SBOM just generated, so a release is born covered — and a
@@ -1743,6 +1704,12 @@ jobs:
     permissions: {} # it publishes with the App token, not GITHUB_TOKEN
     with:
       version: ${{ needs.guard.outputs.version }}
+      # The manifest is written where the release's assets ALL exist,
+      # which is this job and nowhere earlier (stele#156). The classes
+      # ride with it because the manifest declares them; it is one
+      # string, not the per-class inputs this fan-in deliberately has
+      # none of.
+      classes: ${{ inputs.classes }}
       dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}
