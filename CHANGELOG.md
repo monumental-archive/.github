@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.45.1](https://github.com/monumental-archive/.github/compare/v1.45.0...v1.45.1) - 2026-08-20
+
+### Fixed
+
+- write the manifest where every asset exists ([#588](https://github.com/monumental-archive/.github/pull/588))
+
 ## [1.45.0](https://github.com/monumental-archive/.github/compare/v1.44.3...v1.45.0) - 2026-08-20
 
 ### Added
