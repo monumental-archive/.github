@@ -40,6 +40,7 @@ name: level
   workflow_call:
     inputs:
       tracks:
+        # forwarding: universal
         description: >-
           The tracks this repository bears evidence on, space
           separated: any of `build`, `source`, `dependency`. Stated

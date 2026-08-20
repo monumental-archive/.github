@@ -42,6 +42,14 @@ name: level
   # this repository publishes with; a repository that publishes
   # nothing simply never matches, and its weekly run below is its only
   # firing trigger.
+  #
+  # Name the TOP-LEVEL workflow, and check which one that is.
+  # `workflow_run` matches the workflow that STARTED a run, never a
+  # reusable one called inside it — so a repository that publishes
+  # through a caller (`self-publish`, `release`) must name the caller.
+  # Naming the called workflow is silent: it simply never fires, the
+  # badge quietly moves only on the weekly cron, and nothing goes red.
+  # The canon hit exactly this in its own stub.
   workflow_run:
     workflows:
       - publish
