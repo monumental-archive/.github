@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.46.0](https://github.com/monumental-archive/.github/compare/v1.45.2...v1.46.0) - 2026-08-20
+
+### Added
+
+- mint tags that carry their own Rekor receipt ([#593](https://github.com/monumental-archive/.github/pull/593))
+
 ## [1.45.2](https://github.com/monumental-archive/.github/compare/v1.45.1...v1.45.2) - 2026-08-20
 
 ### Fixed
