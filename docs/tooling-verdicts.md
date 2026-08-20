@@ -684,8 +684,13 @@ REACHABLE from the module's code, which is the precision the VEX triage
 wants as input. Network-bound against <https://vuln.go.dev>, so
 `audit:go-vulns`, never the gate; osv-scanner still reads go modules in
 `audit:blast-radius`, and the two answer different questions (shipped
-SBOMs vs source reachability). *Reopen:* upstream shipping attested
-binaries, or an aqua package appearing.
+SBOMs vs source reachability). Since #615 the triage is not only its
+input but also its exit: the task parses `-json` and clears a reachable
+finding only against a written decision in `security/vex/`, because in
+JSON mode govulncheck exits 0 whether or not it found anything
+(measured, v1.7.0) and an unfixable advisory otherwise burns every
+release. *Reopen:* upstream shipping attested binaries, or an aqua
+package appearing.
 
 **biome at every rule it has, and the two that are not** (#82, corrected
 by #445). Adopted as the org's JS/TS/JSON layer: one aqua-backed binary,

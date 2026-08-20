@@ -2,10 +2,17 @@
 
 One OpenVEX document per decision, `*.openvex.json`. This directory is
 the record the whole dependency track keys on: `audit:blast-radius`
-joins against it, `stele derive vex` (publish.yml) derives each release's own VEX
+joins against it, `audit:go-vulns` reads it to excuse a reachable Go
+advisory (#615), `stele derive vex` (publish.yml) derives each release's own VEX
 from it, and a finding with no decision here is *undecided* — it fails
 the Monday audit **and** fails any release whose SBOM ships it, until a
 decision is written.
+
+Every one of those readers resolves this directory from the canon, so a
+decision written here reaches every repo in the org at its next pin
+bump. None of them is a place to record an exception: they all join on
+the same triple, and a statement that names no live `package@version`
+excuses nothing anywhere.
 
 ## The keying rule — dependency, never release
 
