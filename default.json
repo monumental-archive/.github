@@ -20,6 +20,16 @@
       "semanticCommitType": "fix"
     },
     {
+      "description": "cargo mints `fix`, because a Cargo.lock change is a change to the bytes the released artifact ships and a `chore` derives no version at all (#558). Measured on release-lab 2026-08-19: three merged commits since v0.25.1, all chores, and two release runs both concluding `nothing to release: no version-bumping commits since 0.25.1`. That is the whole hole — the dependency track can detect an advisory (blast radius), record the decision (VEX) and block an undecided release, but the way OUT of that state was a release no commit type ever triggered. The derivation refusing a chore-only range is correct and is not what changes here; the commits are classified honestly instead, so the release is derivable FROM history rather than forced over it. Wholesale per manager, no dev-dependency carve-out: gomod is already `fix` wholesale, and Renovate cannot evaluate `does this dependency reach the artifact` at commit-minting time — the manager is the honest proxy it can, and this proxy errs only toward an unnecessary patch release, which is cheap where a missed delivery is not. Explicit rather than inherited from the top-level `chore`, the gomod rule's reason: lint:subject-budget resolves the prefix from these rules, and it may not read a value no one wrote. Subjects narrow by two columns here (`fix(deps):` against `chore(deps):`), so nothing the budget already passes can widen.",
+      "matchManagers": ["cargo"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "npm mints `fix`, on the same rule as cargo above and for the same reason: the wasm-npm class publishes a package, so a package.json or lockfile change is a change to shipped bytes, and `chore` would leave it with no path to a release (#558). This rule matches nothing today — measured 2026-08-20, none of the seven local org checkouts tracks a package.json, while three track a Cargo.toml — because the class generates its manifest rather than tracking one. That is deliberate, not oversight: a rule that matches nothing costs nothing, the principle this preset already records for the mise-backend depName spellings, and the classification is a property of the MANAGER decided once here rather than something a human must remember to apply when the first tracked manifest arrives. The alternative is a preset that is silently wrong on the day the class lands and correct only if someone notices.",
+      "matchManagers": ["npm"],
+      "semanticCommitType": "fix"
+    },
+    {
       "description": "46 characters as minted, 17 past the budget.",
       "matchPackageNames": [
         "aqua:editorconfig-checker/editorconfig-checker",
