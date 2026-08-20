@@ -5,9 +5,9 @@
 # (pkg:<type>/…/<name>@<version>), and the affected-release set is
 # computed from published SBOMs, the same join blast-radius and
 # stele derive vex runs — so a consumer queries the verdict from the
-# attestation store (`gh attestation verify --predicate-type
-# https://openvex.dev/ns/v0.2.0`) without waiting for a release to carry
-# the raw document.
+# attestation store without waiting for a release to carry the raw
+# document. The consumer recipe lives in docs/runbook.md ("Verifying,
+# as a consumer would"), nowhere else.
 #
 # ONE statement per merge, enforced: a VEX statement is a reviewed
 # decision, and a push that changes several has bundled decisions the way
