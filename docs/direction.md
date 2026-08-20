@@ -33,9 +33,15 @@ it; everywhere else it is labelled as what it is.
 
 **Since #540, the measured level is authoritative over this table.**
 `stele level` computes each track's honest current level from live
-evidence, taking no declaration; `level-publish.yml` publishes the
-judgments on the `levels` branch, and every SLSA badge renders them
-directly. Where a published judgment disagrees with a row below, the
+evidence, taking no declaration. Since #554 each repository judges and
+publishes ITSELF: its `level` stub runs when its publish workflow
+completes and weekly, and pushes its own judgments to its OWN `levels`
+branch, which its own SLSA badges render directly. The canon's
+`level-assert.yml` writes nothing and only reads — it measures the org
+weekly and reds when a repository's published board disagrees with the
+measurement, was never published, or has stopped moving.
+
+Where a published judgment disagrees with a row below, the
 row is a finding: edit the table to what the evidence supports, never
 teach the tool the table. The table's remaining job is the ceiling —
 which doors the org has chosen not to open — and the "Enforced by"

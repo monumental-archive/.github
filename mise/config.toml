@@ -2064,9 +2064,12 @@ while read -r repo; do
         # badge is a render of the judgment `stele level` published,
         # so there is no value here to cross-check — the only thing
         # this leg can honestly ask is whether the published document
-        # is live and shield-shaped. Level truth is the cron's
-        # (level-publish.yml); a stale or missing document is the
-        # finding, never a number disagreeing with a table.
+        # is live and shield-shaped. Level truth belongs to the
+        # repository's own `level` stub, which publishes it, and to
+        # the canon's `level-assert.yml`, which reds when a published
+        # board disagrees with the org measurement (#554); a stale or
+        # missing document is the finding here, never a number
+        # disagreeing with a table.
         doc="${url#https://img.shields.io/endpoint?url=}"
         doc="${doc//%3A/:}"
         doc="${doc//%2F//}"

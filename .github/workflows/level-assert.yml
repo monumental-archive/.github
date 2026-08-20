@@ -1,0 +1,208 @@
+# The org's level board, asserted — and no longer published from here
+# (#554).
+#
+# Renamed from `level-publish.yml`, which is what it was until this
+# workflow stopped publishing anything: a file called level-publish
+# sitting beside `level.yml`, which does publish, is a name that
+# actively misleads. Nothing pins this path — it is neither a reusable
+# workflow nor a signing identity — so the rename costs a doc line and
+# the run history's association with the old name.
+#
+# Levels are published PER REPOSITORY now. Each population repository
+# runs the level stub (`workflow-templates/level.yml`), judges itself
+# under its own `contents: write`, and pushes its own cells to its own
+# `levels` branch. Two things follow, and both were the point: a
+# release moves its own badge the moment its evidence is attached
+# rather than on the next Monday, and no capability crosses a
+# repository line — a consumer's release needs no write into the canon
+# and no dispatch token in every caller, which is the signer-split
+# boundary problem wearing a different costume.
+#
+# What survives here is the drift catcher, and it writes NOTHING. The
+# central write of consumer cells is gone; the canon's own cells are
+# published by the canon's own copy of the same stub, exactly like
+# every other member.
+#
+# The one failure the per-repo model introduces is a stub that quietly
+# stopped running, and this job exists to catch it. It reds when the
+# board a repository published disagrees with what the org measurement
+# computes, when a declared cell was never published at all, or when a
+# `levels` branch has stopped moving.
+#
+# Seeding is what makes the comparison honest rather than noisy. The
+# measurement runs OVER the fetched board, so the engine's own rule
+# (stele#135) applies here as it does in a stub: a cell it cannot
+# judge today keeps the level somebody proved yesterday instead of
+# publishing grey over it. So "the forge was unreadable this morning"
+# arrives as exit 4 with the level intact, and never as a spurious
+# grey-against-L3 difference — which is the shape that would have
+# taught everyone to ignore this job.
+#
+# Shields are compared, never reports: a report carries `sealedAt` and
+# the continuity dates the judge computed, so two honest runs a minute
+# apart differ in bytes. The shield is the sealed judgment with no
+# clock in it, and it is what a badge renders.
+#
+# Every judgment here is the engine's. This workflow enumerates,
+# compares bytes and reads dates.
+---
+name: level-assert
+
+"on":
+  schedule:
+    # Mondays 05:30 UTC — after the stubs' own weekly 05:00 run, so a
+    # healthy branch is half an hour old rather than seven days, and
+    # before the 06:00 audit reads the shields.
+    - cron: 30 5 * * 1
+  workflow_dispatch: {}
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  assert:
+    name: assert the published board
+    runs-on: ubuntu-24.04
+    # Read-only, and that is the #554 change stated in one line: this
+    # job used to hold `contents: write` to publish every repository's
+    # cells from here.
+    permissions:
+      contents: read
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+      # One weekly stub run may be missed before a branch is called
+      # dead: the stubs run weekly and this sweep runs weekly, so a
+      # seven-day floor would red on ordinary clock skew between two
+      # crons. Eight days is the smallest number that cannot.
+      STALE_AFTER_DAYS: "8"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.5
+          cache: false
+
+      - name: Fetch what every population repository published
+        # The roster is the canon's declared population and nothing
+        # else — this file is where the org states who is on the board,
+        # and a second list here could disagree with it. A member
+        # declared with an empty track list bears no cell and so has no
+        # branch to fetch; asking for one would red over a repository
+        # behaving exactly as declared.
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          : > missing.txt
+          : > ages.txt
+          jq -r '.population.repositories[]
+                 | select((.tracks // ["*"]) | length > 0)
+                 | .repo' slsa/assert-policy.json > roster.txt
+          while read -r repo; do
+            if git clone --quiet --depth 1 --single-branch --branch levels \
+              "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}.git" "fetched/${repo}"; then
+              git -C "fetched/${repo}" log -1 --format="${repo} %cI" >> ages.txt
+              rm -rf "fetched/${repo}/.git"
+              cp -R "fetched/${repo}/." published/
+            else
+              echo "${repo}" >> missing.txt
+            fi
+          done < roster.txt
+      - name: Measure the org over the published board
+        # Seeded with what the repositories published, so the engine
+        # decides what may replace what. Exit 4 is the regression case
+        # and nothing else — a cell judged before that cannot be judged
+        # now — and it is reported at the end with everything else this
+        # job found, rather than ending the run before the comparison
+        # that names which cells moved.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p measured
+          cp -R published/. measured/
+          rc=0
+          stele level \
+            --org "${GITHUB_REPOSITORY_OWNER}" \
+            --out-dir measured \
+            --policy slsa/assert-policy.json || rc=$?
+          if [[ ${rc} -ne 0 && ${rc} -ne 4 ]]; then
+            echo "::error::stele level failed (exit ${rc}) — the board was not measured, so nothing here is asserted"
+            exit "${rc}"
+          fi
+          echo "blind=${rc}" >> "${GITHUB_ENV}"
+      - name: Assert the published board is the measured one
+        # Both directions are findings. A measured cell nobody
+        # published is a stub that never ran or never declared the
+        # track; a published cell the measurement does not hold is a
+        # repository publishing a level for something the declared
+        # population says it does not bear — the drift the sweep exists
+        # to reconcile, in the two ways it can happen.
+        run: |
+          set -euo pipefail
+          cells() { (cd "$1" && find . -name '*.shield.json' | sed 's|^\./||' | sort); }
+          cells measured > measured-cells.txt
+          cells published > published-cells.txt
+          drift=""
+          while read -r cell; do
+            if [[ ! -f "published/${cell}" ]]; then
+              drift="${drift} ${cell}(measured, never published)"
+            elif ! cmp -s "measured/${cell}" "published/${cell}"; then
+              was=$(jq -r '.message' "published/${cell}")
+              now=$(jq -r '.message' "measured/${cell}")
+              drift="${drift} ${cell}(published ${was}, measured ${now})"
+            fi
+          done < measured-cells.txt
+          while read -r cell; do
+            [[ -f "measured/${cell}" ]] || drift="${drift} ${cell}(published, outside the declared population)"
+          done < published-cells.txt
+          echo "drift=${drift}" >> "${GITHUB_ENV}"
+      - name: Assert every levels branch still moves
+        # A branch can agree with the measurement and still be dead:
+        # nothing changed, so a stub that stopped running last month
+        # publishes the same bytes the measurement computes today. The
+        # date is the only thing that separates the two.
+        run: |
+          set -euo pipefail
+          now=$(date -u +%s)
+          stale=""
+          while read -r repo when; do
+            moved=$(date -u -d "${when}" +%s)
+            age=$(((now - moved) / 86400))
+            if ((age > STALE_AFTER_DAYS)); then
+              stale="${stale} ${repo}(${age}d)"
+            fi
+          done < ages.txt
+          echo "stale=${stale}" >> "${GITHUB_ENV}"
+      - name: Report
+        run: |
+          set -euo pipefail
+          bad=0
+          if [[ -s missing.txt ]]; then
+            absent=$(tr '\n' ' ' < missing.txt)
+            echo "::error::no levels branch in: ${absent}— the stub has never run there"
+            bad=1
+          fi
+          if [[ -n ${drift} ]]; then
+            echo "::error::the published board disagrees with the org measurement:${drift}"
+            bad=1
+          fi
+          if [[ -n ${stale} ]]; then
+            echo "::error::a levels branch has not moved in over ${STALE_AFTER_DAYS} days:${stale} — the stub stopped running"
+            bad=1
+          fi
+          if [[ ${blind} -ne 0 ]]; then
+            echo "::error::a cell that was judged before cannot be judged now — investigate; no published judgment was touched"
+            bad=1
+          fi
+          exit "${bad}"
+...
