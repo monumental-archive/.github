@@ -44,6 +44,16 @@ name: build-rust-crate
       subjects:
         description: sha256sum manifest of the packaged crates.
         value: ${{ jobs.build.outputs.subjects }}
+      leg-subjects:
+        # The same digests, carrying the target whose leg produced them
+        # (schema 4, stele#223). This class has one leg and packages
+        # source crates for no platform, so its target is `crate` — a
+        # name the publisher declares for the one thing this class ever
+        # produces, so no artifact ships untyped.
+        description: >
+          sha256sum manifest of the packaged crates, each line prefixed
+          with the target whose leg produced it.
+        value: ${{ jobs.build.outputs.leg-subjects }}
       artifact-name:
         description: Actions artifact holding the packaged crates.
         value: ${{ jobs.build.outputs.artifact-name }}
@@ -63,6 +73,7 @@ jobs:
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     outputs:
       subjects: ${{ steps.hash.outputs.subjects }}
+      leg-subjects: ${{ steps.hash.outputs.leg-subjects }}
       artifact-name: release-crates
     steps:
       - name: Check out caller repository
@@ -135,10 +146,17 @@ jobs:
           set -euo pipefail
           cd target/package
           manifest=$(sha256sum ./*.crate | sed 's| \./| |')
+          # One leg, one target: `crate`. The prefix is the publisher's
+          # name for what this class builds, not a platform parsed out
+          # of anything.
+          legs="crate ${manifest//$'\n'/$'\n'crate }"
           {
             echo "subjects<<SUBJECTS_EOF"
             printf '%s\n' "${manifest}"
             echo "SUBJECTS_EOF"
+            echo "leg-subjects<<LEGS_EOF"
+            printf '%s\n' "${legs}"
+            echo "LEGS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

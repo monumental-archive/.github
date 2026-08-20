@@ -77,7 +77,7 @@
       "predicateType": "https://monumental-archive.github.io/attestations/base-image-approval/v1"
     },
     "enrichmentFromVersion": "1.41.0",
-    "manifestSchemaFromVersion": "1.47.0"
+    "manifestSchemaFromVersion": "1.51.0"
   },
   "tags": {
     "tagPattern": "^v[0-9]",

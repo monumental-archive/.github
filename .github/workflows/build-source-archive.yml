@@ -36,6 +36,18 @@ name: build-source-archive
       subjects:
         description: sha256 manifest of the archive, for the signer.
         value: ${{ jobs.build.outputs.subjects }}
+      leg-subjects:
+        # The same digest, carrying the target whose leg produced it
+        # (schema 4, stele#223). This class has one leg and builds no
+        # platform, so its target is `source` — a name, declared here
+        # by the publisher, for the one thing this class ever
+        # produces. Naming it costs nothing and refusing to name it
+        # would leave the artifact untyped, which is what the schema
+        # exists to stop.
+        description: >
+          sha256 manifest of the archive, prefixed with the target
+          whose leg produced it.
+        value: ${{ jobs.build.outputs.leg-subjects }}
       artifact-name:
         description: Name of the uploaded release artifact.
         value: release-source
@@ -50,6 +62,7 @@ jobs:
       contents: read # checkout of the caller at the tag
     outputs:
       subjects: ${{ steps.manifest.outputs.subjects }}
+      leg-subjects: ${{ steps.manifest.outputs.leg-subjects }}
     steps:
       - name: Check out the tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,10 +105,17 @@ jobs:
           set -euo pipefail
           cd dist
           manifest=$(sha256sum ./*.tar.gz | sed 's| \./| |')
+          # One leg, one target: `source`. The prefix is the publisher's
+          # name for what this class builds, not a platform parsed out
+          # of anything.
+          legs="source ${manifest//$'\n'/$'\n'source }"
           {
             echo "subjects<<SUBJECTS_EOF"
             printf '%s\n' "${manifest}"
             echo "SUBJECTS_EOF"
+            echo "leg-subjects<<LEGS_EOF"
+            printf '%s\n' "${legs}"
+            echo "LEGS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

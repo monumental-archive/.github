@@ -1677,11 +1677,13 @@ jobs:
   # bundles travel as `release-*` / `attestation-bundle-*` artifacts, so
   # the BYTES need no per-class input.
   #
-  # Their CLASS does, since stele#185: `stele emit manifest` requires
-  # every build subject to be claimed by exactly one class, and the
-  # fan-in's `merge-multiple` erases the class the artifact name
-  # carried. So each build leg's own subject manifest — the same string
-  # its signer signs — rides down as a per-class input. The leg-to-class
+  # Their LEG does — its class since stele#185 and its target since
+  # stele#223: `stele emit manifest` requires every build subject to be
+  # claimed by exactly one (class, target), and the fan-in's
+  # `merge-multiple` erases the class the artifact name carried while
+  # nothing ever carried the target. So each build leg's own subject
+  # manifest — the same digests its signer signs, one target column
+  # wider — rides down as a per-class input. The leg-to-class
   # map is already stated twice in this job (the `if` names both halves
   # of every pair); this is the third use of the same map, in the file
   # that holds it, rather than a second map derived from artifact names
@@ -1740,13 +1742,16 @@ jobs:
       # string, not the per-class inputs this fan-in deliberately has
       # none of.
       classes: ${{ inputs.classes }}
-      # One line per class that attaches release assets, empty when that
-      # class did not run.
-      rust-crate-subjects: ${{ needs.build.outputs.subjects }}
-      rust-binary-subjects: ${{ needs.build-binary.outputs.subjects }}
-      go-binary-subjects: ${{ needs.build-go.outputs.subjects }}
-      source-archive-subjects: ${{ needs.build-source.outputs.subjects }}
-      pgrx-extension-subjects: ${{ needs.build-extension.outputs.subjects }}
+      # One line per artifact of every class that attaches release
+      # assets, each carrying the target its leg built, empty when that
+      # class did not run. The flat `subjects` output stays what the
+      # signers take; this is the same digests plus the one column only
+      # the leg holds.
+      rust-crate-leg-subjects: ${{ needs.build.outputs.leg-subjects }}
+      rust-binary-leg-subjects: ${{ needs.build-binary.outputs.leg-subjects }}
+      go-binary-leg-subjects: ${{ needs.build-go.outputs.leg-subjects }}
+      source-archive-leg-subjects: ${{ needs.build-source.outputs.leg-subjects }}
+      pgrx-extension-leg-subjects: ${{ needs.build-extension.outputs.leg-subjects }}
       dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}

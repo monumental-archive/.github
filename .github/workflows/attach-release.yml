@@ -40,10 +40,12 @@ name: attach-release
           here because here is where every asset exists.
         required: true
         type: string
-      # The per-class split of the build subjects, which only the
+      # The per-LEG split of the build subjects, which only the
       # publisher holds. `stele emit manifest` requires every build
-      # subject in `--assets` to be claimed by exactly one class
-      # (stele#185), and the fan-in below flattens `release-*` with
+      # subject in `--assets` to be claimed by exactly one build leg —
+      # one class and one target (stele#223, manifest schema 4;
+      # stele#185 asked the same of the class alone) — and the fan-in
+      # below flattens `release-*` with
       # `merge-multiple: true` — so by the time the assets exist here
       # the artifact name that carried the class is gone.
       #
@@ -54,15 +56,25 @@ name: attach-release
       # `if:` names both halves of every pair — so inputs put the fact
       # where the mapping already lives instead of starting a second
       # artifact-name-to-class map here. Each leg computes this string
-      # with the same glob, in the step immediately before, that its
-      # `release-*` upload takes (`sha256sum ./*.tar.gz`, or `./*.crate`
-      # for crates), and it is the same string that leg's signer signs —
+      # from the same digests, in the same step, that its flat
+      # `subjects` output carries — the string that leg's signer signs —
       # so the manifest's typing and the provenance's subject set are
       # derived from ONE source rather than two that must agree. And
       # deriving class from a directory name would rest on
       # download-artifact's layout, which this file already records as
       # inconsistent below: with exactly one artifact matched the
       # download arrives FLAT and the name is gone.
+      #
+      # Each value is that class's ordinary sha256sum manifest with ONE
+      # column added in front: the target whose matrix leg produced the
+      # line. The target is likewise a fact of the leg and of nobody
+      # else — what a target IS (a platform triple, a runtime major, a
+      # publisher's name for a class that varies nothing) is declared
+      # by the build workflow that varies it, never inferred here from
+      # an asset filename. A class whose matrix runs several legs
+      # therefore arrives as one string that the step below splits back
+      # into one flag per target; this workflow no longer concatenates
+      # anything.
       #
       # There is deliberately NO input for oci-image or wasm-npm. Those
       # classes publish to a registry and attach no release asset, so
@@ -72,33 +84,43 @@ name: attach-release
       # Empty is the ordinary value for a class this release did not
       # build — a skipped job's output is the empty string, and the
       # manifest step writes no flag for an empty one.
-      rust-crate-subjects:
+      rust-crate-leg-subjects:
         # forwarding: universal
-        description: sha256sum manifest of the crates the rust-crate class built.
+        description: >
+          Target-prefixed sha256sum manifest of the crates the
+          rust-crate class built, one line per crate.
         required: false
         type: string
         default: ""
-      rust-binary-subjects:
+      rust-binary-leg-subjects:
         # forwarding: universal
-        description: sha256sum manifest of the archives the rust-binary class built.
+        description: >
+          Target-prefixed sha256sum manifest of the archives the
+          rust-binary class built, one line per archive.
         required: false
         type: string
         default: ""
-      go-binary-subjects:
+      go-binary-leg-subjects:
         # forwarding: universal
-        description: sha256sum manifest of the archives the go-binary class built.
+        description: >
+          Target-prefixed sha256sum manifest of the archives the
+          go-binary class built, one line per archive.
         required: false
         type: string
         default: ""
-      source-archive-subjects:
+      source-archive-leg-subjects:
         # forwarding: universal
-        description: sha256sum manifest of the archive the source-archive class built.
+        description: >
+          Target-prefixed sha256sum manifest of the archive the
+          source-archive class built.
         required: false
         type: string
         default: ""
-      pgrx-extension-subjects:
+      pgrx-extension-leg-subjects:
         # forwarding: universal
-        description: sha256sum manifest of the tarballs the pgrx-extension class built.
+        description: >
+          Target-prefixed sha256sum manifest of the tarballs the
+          pgrx-extension class built, one line per tarball.
         required: false
         type: string
         default: ""
@@ -261,11 +283,11 @@ jobs:
       - name: Write the evidence manifest
         env:
           CLASSES: ${{ inputs.classes }}
-          SUBJECTS_RUST_CRATE: ${{ inputs.rust-crate-subjects }}
-          SUBJECTS_RUST_BINARY: ${{ inputs.rust-binary-subjects }}
-          SUBJECTS_GO_BINARY: ${{ inputs.go-binary-subjects }}
-          SUBJECTS_SOURCE_ARCHIVE: ${{ inputs.source-archive-subjects }}
-          SUBJECTS_PGRX_EXTENSION: ${{ inputs.pgrx-extension-subjects }}
+          SUBJECTS_RUST_CRATE: ${{ inputs.rust-crate-leg-subjects }}
+          SUBJECTS_RUST_BINARY: ${{ inputs.rust-binary-leg-subjects }}
+          SUBJECTS_GO_BINARY: ${{ inputs.go-binary-leg-subjects }}
+          SUBJECTS_SOURCE_ARCHIVE: ${{ inputs.source-archive-leg-subjects }}
+          SUBJECTS_PGRX_EXTENSION: ${{ inputs.pgrx-extension-leg-subjects }}
         run: |
           set -euo pipefail
           # The machinery version is the canon tree's own, read from the
@@ -284,25 +306,49 @@ jobs:
           # the format says so. The checksum step below is pass two and
           # covers everything including it.
           (cd dist && sha256sum ./* | sed 's| \./| |') > "${RUNNER_TEMP}/assets.sha256"
-          # The class split, one --class-subjects per class that built
-          # something. stele demands every build subject in --assets be
-          # claimed by exactly one class, so a class whose leg ran
-          # contributes its leg's own subject manifest verbatim and a
+          # The leg split, one --leg-subjects per (class, target) that
+          # built something. stele demands every build subject in
+          # --assets be claimed by exactly one leg, so a class whose
+          # matrix ran contributes one flag per target it built and a
           # class that did not run contributes nothing. An unset input
           # is the empty string, so this loop is also what makes a
-          # single-class release pass exactly one flag.
+          # single-class release pass exactly the flags its one class
+          # earned.
           # Named once each, class beside its input: no name mangling
           # between the two, so a class that is added or renamed is one
           # line here and grep finds it.
+          #
+          # The target column is READ, never invented: the leg that
+          # built the artifact wrote it. A line without one refuses
+          # rather than defaulting, because a build subject with no
+          # target goes unjudged by every scoped rebuild — silently,
+          # which is the failure #637 exists to end.
           subject_flags=()
           claim() {
-            local class="$1" subjects="$2" path count
-            [[ -n ${subjects//[[:space:]]/} ]] || return 0
-            path="${RUNNER_TEMP}/subjects-${class}.sha256"
-            printf '%s\n' "${subjects}" > "${path}"
-            subject_flags+=(--class-subjects "${class}=${path}")
-            count=$(grep -c . "${path}")
-            echo "::notice::${class} claims ${count} build subject(s)"
+            local class="$1" legs="$2" line target path
+            local -a targets=()
+            [[ -n ${legs//[[:space:]]/} ]] || return 0
+            while IFS= read -r line; do
+              [[ -n ${line//[[:space:]]/} ]] || continue
+              target="${line%% *}"
+              line="${line#* }"
+              if [[ -z ${target} || ${line} == "${target}" ]]; then
+                echo "::error::${class}: subject line names no target — an untargeted artifact no scoped rebuild judges"
+                exit 1
+              fi
+              if [[ ${target} =~ [^A-Za-z0-9._-] ]]; then
+                echo "::error::${class}: target ${target} is not a plain name — it becomes a file this step writes"
+                exit 1
+              fi
+              path="${RUNNER_TEMP}/subjects-${class}-${target}.sha256"
+              if [[ " ${targets[*]-} " != *" ${target} "* ]]; then
+                targets+=("${target}")
+                : > "${path}"
+                subject_flags+=(--leg-subjects "${class}:${target}=${path}")
+              fi
+              printf '%s\n' "${line}" >> "${path}"
+            done <<< "${legs}"
+            echo "::notice::${class} claims ${#targets[@]} leg(s): ${targets[*]}"
           }
           claim rust-crate "${SUBJECTS_RUST_CRATE}"
           claim rust-binary "${SUBJECTS_RUST_BINARY}"
