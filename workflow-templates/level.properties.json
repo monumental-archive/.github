@@ -1,0 +1,5 @@
+{
+  "name": "SLSA levels",
+  "description": "This repository judges its own SLSA levels from live evidence and publishes them to its own `levels` branch, which its README shields render. Runs when the publish workflow completes, weekly, and on dispatch. Declare the tracks the repository bears evidence on in `tracks:`; the canon's population must agree (.github#554).",
+  "categories": ["ci"]
+}
