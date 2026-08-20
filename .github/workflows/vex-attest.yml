@@ -58,11 +58,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.5
+          cache: false
+
       - name: Resolve subjects from the products the statement names
         id: collect
         env:
           GH_TOKEN: ${{ github.token }}
           BEFORE: ${{ github.event.before }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           # Changed documents only: re-signing every statement on every
@@ -95,69 +105,29 @@ jobs:
           }
           # Products are the org contract from security/vex/README.md:
           # pkg:<type>/…/<name>@<version> — the DEPENDENCY the judgment
-          # is about, never a release tag. The affected releases are
-          # therefore DERIVED here, the same join the blast-radius audit
-          # and stele derive vex run: walk the org's published SBOMs
-          # (verified as release assets before trust) and bind the claim
-          # to the checksums of every release that ships a named
-          # package@version. Versions compare in the osv dialect; the
-          # SPDX side strips a leading Debian epoch.
-          pairs=$(jq -r '.statements[].products[]?["@id"] // empty
-            | capture("^pkg:.*/(?<name>[^/@]+)@(?<version>.+)$")
-            | [.name, .version] | @tsv' "${f}" | sort -u)
-          if [[ -z ${pairs} ]]; then
-            echo "::error::${f}: no product parses as pkg:<type>/…/<name>@<version>"
-            exit 1
-          fi
-          subjects=""
-          matched=""
-          # gh api captured to variables, not process-substituted: a
-          # failed walk must kill the run, never mask as an empty loop.
-          repos=$(gh api "orgs/monumental-archive/repos" --paginate --jq '.[].name')
-          while read -r repo; do
-            [[ -n ${repo} ]] || continue
-            tags=$(gh api "repos/monumental-archive/${repo}/releases" --paginate \
-              --jq '.[] | select(.draft | not) | .tag_name')
-            while read -r tag; do
-              [[ -n ${tag} ]] || continue
-              dir=$(mktemp -d)
-              gh release download "${tag}" --repo "monumental-archive/${repo}" \
-                --pattern "*.spdx.json" --dir "${dir}" 2> /dev/null || true
-              compgen -G "${dir}/*.spdx.json" > /dev/null || continue
-              hit=0
-              for sbom in "${dir}"/*.spdx.json; do
-                # Trust nothing downloaded: the asset must be the one
-                # GitHub's release attestation bound at publish.
-                gh release verify-asset "${tag}" "${sbom}" \
-                  --repo "monumental-archive/${repo}" > /dev/null 2>&1 || {
-                  echo "::error::${repo}@${tag} SBOM failed asset verification"
-                  exit 1
-                }
-                while IFS=$(printf "\t") read -r name ver; do
-                  if jq -e --arg name "${name}" --arg ver "${ver}" '
-                    [.packages[]? | select(.name == $name)
-                      | (.versionInfo // "" | sub("^[0-9]+:"; ""))
-                      | select(. == $ver)] | length > 0' "${sbom}" > /dev/null; then
-                    hit=1
-                  fi
-                done <<< "${pairs}"
-              done
-              [[ ${hit} -eq 1 ]] || continue
-              sums=$(gh release download "${tag}" --repo "monumental-archive/${repo}" \
-                --pattern checksums.txt --output - 2> /dev/null) || {
-                echo "::error::${repo}@${tag} ships a named package but has no checksums.txt"
-                exit 1
-              }
-              subjects="${subjects}${sums}"$'\n'
-              matched="${matched}${repo}@${tag} "
-            done <<< "${tags}"
-          done <<< "${repos}"
-          if [[ -z ${subjects//[[:space:]]/} ]]; then
-            emsg="${f}: no published release ships a named package@version — a claim bound to nothing is not signed; merge"
-            emsg+=" the decision after blast-radius shows an affected release, or let the next release derive it"
-            echo "::error::${emsg}"
-            exit 1
-          fi
+          # is about, never a release tag. Which RELEASES that reaches
+          # is an evidence cross-walk, and it lives in the engine
+          # (stele#149): the org's published SBOMs walked, each one
+          # verified as a release asset before it is trusted, matched
+          # against the decision's package@version pairs, and the
+          # affected releases' checksums collected as subjects. It is
+          # the same traversal assert blast-radius runs from the other
+          # direction, shared rather than restated — this step carried
+          # ~70 lines of it, which is one join with two implementations.
+          # The vocabulary it needs (the SBOM suffix, the checksums
+          # asset, the OS ecosystems) is read from the policy that
+          # already declares it, so the flags are a policy, a decision
+          # and a population and nothing else.
+          stele derive vex-subjects \
+            --decision "${f}" \
+            --policy slsa/assert-policy.json \
+            --org "${OWNER}" \
+            --out vex-subjects.json
+          # The signer takes a sha256sum manifest; the document is the
+          # source of both it and the notice, so the two cannot disagree
+          # about which releases were bound.
+          subjects=$(jq -r '.subjects[] | "\(.sha256)  \(.name)"' vex-subjects.json)
+          matched=$(jq -r '[.releases[] | "\(.repo)@\(.tag)"] | join(" ")' vex-subjects.json)
           echo "::notice::affected releases: ${matched}"
           predicate=$(jq -c . "${f}")
           count=$(grep -c . <<< "${subjects}") || true
