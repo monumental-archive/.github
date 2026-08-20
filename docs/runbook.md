@@ -197,9 +197,12 @@ roll-forward.
   itself on the next push. Never edit the release branch by hand.
 - **A cell of a matrix class failed**: `fail-fast: false` means the other
   cells finished; collect refused the partial set; nothing signed or
-  published. Fix and roll forward — the tag was never consumed, delete
-  the draft and let the next release PR re-mint... it cannot: tags are
-  immutable. The failed version number is burned; ship the next one.
+  published. Fix and roll forward — tags are immutable, so the failed
+  version number is burned; ship the next one. The draft it left is
+  annotated by the `burn-record` job and **stays**: it is the record of
+  the burn, and `audit:drafts` reports any draft that is not
+  ([`release.md`](release.md), "A draft explains itself"). Complete its
+  `Fixed forward in:` line when the fix ships.
 - **Tag-mint App dead**: break-glass in
   [`continuity.md`](continuity.md) — an org owner disables the tag
   ruleset, mints by hand, re-enables, records the event.
