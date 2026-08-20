@@ -919,10 +919,80 @@ helper="${ORG_BELT_DIR}/embedded-shell.py"
 python3 "${helper}" ${files}
 '''
 
+[tasks."lint:belt-shell"]
+description = "Shell inside mise task `run` bodies is formatted and linted, this file included"
+dir = "{{cwd}}"
+# The third shell surface, and the one nothing reached (#619). `lint:shell`
+# finds files through `shfmt --find` and a `run = '''…'''` string is not a
+# file; `lint:shell-embedded` reads YAML `run:` blocks; `lint:toml` checks
+# the syntax around the string and never looks inside it. So ~2900 lines of
+# bash — every belt task in this file, including the ones that produce the
+# release chain — were linted by nothing. Verified by planting
+# `PROBE=$(echo probe); echo $PROBE; cd /tmp; rm -f $PROBE` in a task body:
+# `mise run ci` stayed green, and the same line in a `.sh` file is ten
+# findings. Six `# shellcheck disable=SC…` directives already sat in these
+# bodies suppressing findings nothing produced — a maintainer expecting
+# coverage that was not there. This is the #82 finding one layer in.
+#
+# The technique is `lint:shell-embedded`'s and the bar is `lint:shell`'s:
+# extract each body, run the real tools, exclude nothing. Deterministic,
+# offline, tracked files only — so it belongs in the gate.
+#
+# The glob is by NAME, covering every config file mise reads (`*` matches
+# `/` in a pathspec, so one pattern reaches `mise.toml`, `.mise.toml`,
+# `.config/mise.toml` and any depth of each). A file that merely ends in
+# the name is read only if it declares `[tasks]`, and contributes nothing
+# if it does not.
+#
+# Universal, not canon-only: a consumer's own `mise.toml` bodies are
+# checked at its next pin bump, and a tree carrying no mise config skips
+# clean by name.
+run = '''
+files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml")
+[[ -n ${files} ]] || {
+  echo "lint:belt-shell: no mise config tracked, skipped"
+  exit 0
+}
+# From the belt, like every other canon-owned input. The belt's config is
+# also handed over as an ENV source rather than a target: a repo's task
+# body reads ORG_BELT_DIR the way a workflow step reads its `env:`, and
+# the name is declared there, not here. Nothing restates it.
+helper="${ORG_BELT_DIR}/belt-shell.py"
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
+python3 "${helper}" --env-from "${ORG_BELT_DIR}/config.toml" \
+  --source-path "${ORG_BELT_DIR}" ${files}
+'''
+
 [tasks."fix:shell"]
 description = "Rewrite shell to canonical format (shfmt)"
 dir = "{{cwd}}"
 run = 'git ls-files ":!vendor/**" | xargs shfmt --find | xargs shfmt -i 2 -bn -ci -sr -s -w'
+
+[tasks."fix:belt-shell"]
+description = "Rewrite mise task `run` bodies to the org's shell format (shfmt)"
+dir = "{{cwd}}"
+# The write-mode sibling of lint:belt-shell (#619). Every rewritten body
+# lands as a `'''` literal block: it needs no escaping, it survives a
+# formatter adding lines, and it is the form the corpus already uses. The
+# splice is never trusted on its own bookkeeping — the file is decoded
+# again through the reader the lint half uses, and a body that did not
+# land is named.
+#
+# A body carrying Tera statements (`{% raw %}`) round-trips: the markers
+# are shell comments while the tools hold them and go back afterwards,
+# and a mismatched count refuses the rewrite rather than guessing.
+run = '''
+files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml")
+[[ -n ${files} ]] || {
+  echo "fix:belt-shell: no mise config tracked, nothing to fix"
+  exit 0
+}
+helper="${ORG_BELT_DIR}/belt-shell.py"
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
+python3 "${helper}" --write ${files}
+'''
 
 [tasks."lint:commits"]
 description = "Conventional-commit check for the branch (committed)"

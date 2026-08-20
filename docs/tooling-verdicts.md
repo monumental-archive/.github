@@ -46,6 +46,7 @@ honestly blocked on.
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
+| shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
 | clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus nine named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml` — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 
@@ -1320,46 +1321,44 @@ SQL appearing anywhere in the org (revisit the raw templater).
   is real and survives its closure, carried into #392 as a table-test
   requirement.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
-  bodies)** — skipped, and recorded because the gap it would close is
-  real and will otherwise be rediscovered. `mise/config.toml` holds 78
-  task bodies, **~2409 lines of bash**, and every belt linter that could
-  read it is structurally blind: `lint:toml` lints the *container*
-  (taplo exits **0** on a task body containing an unclosed `[[`, a
-  missing `fi` and `rm -rf $UNQUOTED` — a TOML string is a string under
-  every configuration, so this is not a config gap and cannot be closed
-  by one); `lint:shell` selects with `shfmt --find`, which identifies by
-  shebang or extension and returns zero hits for the file;
-  `lint:shell-embedded` globs workflows and composite actions only; and
-  `lint:bash-portability` reads the same two sources. The census in #392
-  was short by this whole population — ~8001 lines of bash org-wide, not
-  5316. It is skipped anyway, because building it would mean a **third**
-  extractor after `embedded-shell.py` and actionlint's own shellcheck
-  delegation, and writing a parser to un-hide our code from our own
-  tools is evidence the layout is wrong rather than a task to complete.
-  #392 deletes the need for all three. Measured before deciding, so the
-  probe is not written again (#397): at the `.shellcheckrc` bar the run
-  reports 194 findings and 70 of 78 bodies not shfmt-clean, but **three
-  sampled findings were all false positives** — `audit:badges`
-  SC2221/SC2222 are alternatives within one branch routing to identical
-  code, `fix:input-forwarding`'s parse errors came from feeding tera's
-  `{% raw %}` markers to shellcheck, and `audit:blast-radius` SC2034 is
-  the trailing field of `read -r id name ver where class kind`, required
-  or `class` absorbs the last column. The state is *unmeasured*, not
-  known-buggy. The untriaged remainder — 161 SC2312 (masked return
-  values) and 11 SC2249 (`case` with no default branch), against 11 of
-  78 bodies carrying `set -euo pipefail` — stays live as #82 finding 2.
-  Constraints if one is ever written regardless: strip tera `{% raw %}`;
-  extract through a real TOML parse (two bodies use `"""` and carry
-  `\\.` and `\\"`) with a separate line scan for anchors, since
-  `tomllib` gives no line numbers; 13 tasks use single-line `run =`
-  forms that shfmt would restructure into block form; and pass
-  `--enable=all --external-sources` explicitly, because `.shellcheckrc`
-  is not picked up for files written to a temp directory. One suspicion
-  tested and disproved: shfmt and shellcheck do **not** conflict on
-  unquoted `${var}` inside `[[ ]]` — shellcheck exits 0 on shfmt's
-  preferred form. *Reopen:* #392 stalling, at which point the honest
-  interim is triaging the SC2312 and SC2249 sets by hand, still not
-  building the linter.
+  bodies)** — **this skip was revoked and the task built (#619,
+  2026-08-20).** The entry stays here rather than being deleted, because
+  the reasoning that skipped it belongs beside the reasoning that
+  reversed it. The gap was stated correctly and remains the entry's
+  value: `lint:toml` lints the *container* (taplo exits **0** on a task
+  body containing an unclosed `[[`, a missing `fi` and
+  `rm -rf $UNQUOTED` — a TOML string is a string under every
+  configuration, so this was never a config gap); `lint:shell` selects
+  with `shfmt --find`, which identifies by shebang or extension and
+  returns zero hits for the file; `lint:shell-embedded` globs workflows
+  and composite actions only; and `lint:bash-portability` reads the same
+  two sources.
+  What was wrong was the disposal — "building it would mean a third
+  extractor … #392 deletes the need for all three". The port completed
+  and the need did not go. #392 replaced the bash that made JUDGMENTS
+  with `stele` lines; orchestration bodies were never in its scope,
+  which its own boundary states ("not the belt"). 105 task bodies
+  remain, they ARE the belt, and "a third extractor is evidence the
+  layout is wrong" does not survive the question the org asks of any
+  reach-shaped exception: the code did not move, so the argument bought
+  nothing except the surface staying unlinted for another four months.
+  The constraint list recorded here is exactly what the build then met,
+  and every item held: strip tera `{% raw %}`; extract through a real
+  TOML parse (two bodies use `"""` and carry `\\.` and `\\"`) with a
+  separate line scan for anchors, since `tomllib` gives no line numbers;
+  single-line `run =` forms that shfmt restructures into block form; and
+  pass `--enable=all --external-sources` explicitly, because
+  `.shellcheckrc` is not picked up for files written to a temp
+  directory. So was the disproved suspicion: shfmt and shellcheck do
+  **not** conflict on unquoted `${var}` inside `[[ ]]`.
+  Two of the numbers did not survive. The sampled `fix:input-forwarding`
+  parse errors were the tera markers, as recorded — an extractor
+  artefact, not a defect in the body. And 161 SC2312 was an artefact of
+  modelling the wrong interpreter: mise runs a body as
+  `bash -euo pipefail -c`, under which an assignment from a command
+  substitution does not mask a failure at all. The honest count was 79.
+  It is now 0, along with the SC2249 set, which closes #82 finding 2 on
+  this surface rather than leaving it live.
 - **cffconvert** — `CITATION.cff` validation. Not needed, and recorded
   now because the scaffold previously cited a verdict that was never
   made (#316): the file is generated — `fix:citation` renders it from
