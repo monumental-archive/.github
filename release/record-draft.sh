@@ -16,7 +16,11 @@
 # burn-record job), the rehearsal path (attach-release.yml, where a
 # dry-run leaves a draft ON PURPOSE and is otherwise indistinguishable
 # from a burn), and by hand for the backfill. `audit:drafts` reads the
-# marker this writes, so the marker is stated once, here.
+# marker this writes, so the marker is stated once, here. One other thing
+# writes it without coming through this script: that audit's own
+# visibility probe (#604), which annotates its ephemeral draft at
+# CREATION rather than afterwards, because the whole point of annotating
+# it is to explain a probe that failed to be cleaned up.
 #
 # Inputs are environment variables, like every other script in release/:
 #

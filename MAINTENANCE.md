@@ -79,10 +79,11 @@ looks rather than only inside itself.
 ## The audit-claims contract (#240, #266, #290, #310)
 
 Every checking task — `audit:*`, `settings/repo-baseline.sh check`, and
-anything that walks a population — must satisfy two properties, learned
-the hard way six separate times (`claims.sh` #240, `audit:source-vsa`
+anything that walks a population — must satisfy three properties, learned
+the hard way seven separate times (`claims.sh` #240, `audit:source-vsa`
 issue #266, `generate-sbom.sh`, `repo-baseline.sh` #290 finding 7,
-`audit:actions` and the baseline output #310 findings 2–3):
+`audit:actions` and the baseline output #310 findings 2–3, and
+`audit:drafts` #604):
 
 1. **Fail closed on blindness.** If the task cannot establish that it
    actually looked — token absent, tool degraded to offline, population
@@ -93,6 +94,18 @@ issue #266, `generate-sbom.sh`, `repo-baseline.sh` #290 finding 7,
    Monday audit sees the population in the output instead of having to
    reason their way to it. Soundness you have to derive is weaker than
    a line that says it.
+3. **Prove the capability, never infer it.** A permission bit, a scope
+   list or a documented grant describes what a token was *given*, not
+   what the forge will *serve* it. `audit:drafts` asserted
+   `.permissions.push` per repository before believing any listing —
+   the right instinct — and the assert passed on all four repos while
+   GitHub served none of the thirty-two drafts that existed. **No
+   permission bit is a proof of visibility.** Where a task's soundness
+   rests on being able to see something, it establishes that by seeing
+   one: `audit:drafts` now creates an ephemeral draft, asserts it comes
+   back in the same listing it is about to believe, and deletes it.
+   Property 1 says fail closed on blindness; this says you do not get
+   to decide you are sighted by reading your own paperwork.
 
 New audits copy this shape from `audit:source-vsa`. Review any checking
 task against both properties before it lands.

@@ -3675,9 +3675,127 @@ dir = "{{cwd}}"
 run = '''
 [[ -d security ]] || { echo "audit:drafts: not the canon, skipped"; exit 0; }
 command -v gh > /dev/null || { echo "audit:drafts: gh missing" >&2; exit 1; }
+# THE VISIBILITY PROBE, and it is the whole reason this task can be
+# trusted (#604). GitHub serves draft releases only to identities it
+# considers entitled to them: a token without that entitlement gets a
+# 200 and a list with every draft silently removed — indistinguishable
+# from a clean org, the exact "reads nothing, reports clean" shape
+# #240/#310 exist to refuse.
+#
+# The first version of this guard asserted `.permissions.push` per repo
+# before believing any listing. Right instinct, wrong measurement: on
+# the first dispatch (run 32393697805) the assert passed on all four
+# repos and GitHub still served none of the thirty-two drafts that
+# existed, because draft visibility is not what that permission bit
+# expresses for a fine-grained token. The general statement, and the
+# reason no permission object is read here any more: **no permission
+# bit is a proof of visibility. The only honest measurement of "can
+# this token see drafts" is seeing a draft.**
+#
+# So the audit makes one. It creates an ephemeral draft in the
+# repository it runs from, asserts that draft comes back in the same
+# release LISTING the walk below believes (never a direct read by id —
+# a direct read succeeds for tokens the listing filters, which would
+# prove the wrong thing), and deletes it. Visibility is proven by
+# construction for the token in hand: no org literal, no sentinel draft
+# that decays the day someone deletes it, and it works unchanged for
+# any adopter. The probe spends the same token the listing spends —
+# probing with a stronger one would prove a capability nobody uses.
+#
+# What the probe proves is the grant of ONE token, which is the whole
+# contract: audit.yml wires the org-wide fine-grained AUDIT_TOKEN,
+# whose permissions are uniform across its repository selection. A
+# token whose capability varies per repository — `github.token`, push-
+# capable in its own repo and nowhere else — is out of contract, and
+# audit.yml says so at the wiring.
+probe_repo="${GITHUB_REPOSITORY:-}"
+if [[ -z "${probe_repo}" ]]; then
+  probe_repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2> /dev/null) || probe_repo=""
+fi
+[[ -n "${probe_repo}" ]] || {
+  echo "audit:drafts: cannot name the repository this audit runs from, so there is" >&2
+  echo "  nowhere to prove draft visibility. Refusing to judge unproven." >&2
+  exit 1
+}
+# Not v-prefixed, deliberately: nothing here creates a tag (a draft's tag
+# is only cut at publish), but a name no `v*` trigger or ruleset could
+# ever match keeps that true by inspection rather than by argument.
+probe_tag="audit-visibility-probe-$(date -u +%Y%m%d%H%M%S)-$$"
+# Annotated at CREATION, not afterwards: if the delete below fails, the
+# residue has to explain itself the moment it exists, or this audit's own
+# leftovers become the unexplained drafts it reports.
+probe_body="<!-- draft-record: audit-probe -->
+**\`audit:drafts\` visibility probe — safe to delete.**
+
+This draft was created by \`audit:drafts\` to prove that the token running
+the audit can actually see draft releases, and should have been deleted
+seconds later. It is here because the delete failed; the run that created
+it went red saying so. Nothing was tagged and nothing was published.
+"
+probe_err="${TMPDIR:-/tmp}/audit-drafts-probe-$$.err"
+if ! probe_id=$(gh api "repos/${probe_repo}/releases" -X POST \
+  -f tag_name="${probe_tag}" \
+  -f name="audit:drafts visibility probe" \
+  -f body="${probe_body}" \
+  -F draft=true --jq .id 2> "${probe_err}"); then
+  echo "audit:drafts: could not create the visibility probe in ${probe_repo} —" >&2
+  echo "  draft visibility is unproven, so no listing is believed and no count" >&2
+  echo "  is reported. A number from a blind token is worse than no number." >&2
+  sed 's/^/    /' "${probe_err}" >&2
+  rm -f "${probe_err}"
+  echo "  The token needs Contents: read and write on the audited repositories" >&2
+  echo "  — read to see drafts at all, write to make the one that proves it." >&2
+  echo "  audit.yml carries the environment-scoped AUDIT_TOKEN for this." >&2
+  exit 1
+fi
+rm -f "${probe_err}"
+probe_seen=""
+# Three attempts, and this is read-after-write hygiene rather than a
+# retry that papers over a refusal: a token that cannot see drafts never
+# sees this one, however many times it asks. Read whole, then match —
+# `grep -q` closes the pipe early and `gh --paginate` dies of SIGPIPE,
+# which under this shell's pipefail is a false refusal (the
+# audit:source-vsa lesson, and this is the listing it applies to most).
+for attempt in 1 2 3; do
+  if probe_listing=$(gh api "repos/${probe_repo}/releases" --paginate \
+    --jq '.[] | select(.draft) | .tag_name' 2> /dev/null); then
+    if grep -qxF "${probe_tag}" <<< "${probe_listing}"; then
+      probe_seen="yes"
+      break
+    fi
+  fi
+  [[ "${attempt}" == "3" ]] || sleep 2
+done
+# Cleanup runs on BOTH paths and neither swallows the other: a blind
+# token still leaves a probe to delete, and the blindness is the more
+# important of the two findings, so it is the one reported first.
+probe_deleted="yes"
+gh api -X DELETE "repos/${probe_repo}/releases/${probe_id}" > /dev/null 2>&1 || probe_deleted=""
+if [[ -z "${probe_seen}" ]]; then
+  echo "audit:drafts: this token cannot see draft releases." >&2
+  echo "  The probe draft ${probe_repo}@${probe_tag} was created and GitHub's own" >&2
+  echo "  release listing did not return it — the listing is being filtered, and" >&2
+  echo "  an empty listing from a filtered token is indistinguishable from a" >&2
+  echo "  clean org (#604). Refusing to report a count nobody could trust." >&2
+  echo "  Fix the token grant (Contents: read on every audited repository), not" >&2
+  echo "  this check: no permission bit is a proof of visibility, so there is" >&2
+  echo "  nothing here to loosen." >&2
+  [[ -n "${probe_deleted}" ]] || {
+    echo "  The probe draft could not be deleted either — remove it by hand:" >&2
+    echo "    gh api -X DELETE repos/${probe_repo}/releases/${probe_id}" >&2
+  }
+  exit 1
+fi
+if [[ -z "${probe_deleted}" ]]; then
+  echo "audit:drafts: could not delete the visibility probe" >&2
+  echo "  ${probe_repo}@${probe_tag} (release id ${probe_id})." >&2
+  echo "  It carries a draft-record marker, so it will not be reported as" >&2
+  echo "  unexplained residue — but residue is what it is. Delete it:" >&2
+  echo "    gh api -X DELETE repos/${probe_repo}/releases/${probe_id}" >&2
+  exit 1
+fi
 if ! population=$(gh api "orgs/monumental-archive/repos" --paginate \
-  --jq '.[] | select(.archived or .fork | not)
-        | [.name, ((.permissions.push // false) | tostring)] | @tsv' 2> /dev/null); then
+  --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
   echo "audit:drafts: could not enumerate the org's repositories — no population, no audit" >&2
   exit 1
 fi
@@ -3685,32 +3803,6 @@ fi
   echo "audit:drafts: the org listing named zero repositories — the walk is broken, not the org" >&2
   exit 1
 }
-# THE BLINDNESS GUARD, and it is the whole reason this task can be
-# trusted. GitHub serves draft releases only to push-capable identities:
-# a read-only token gets 200 and a list with every draft silently
-# removed — indistinguishable from a clean org, which is the exact
-# "reads nothing, reports clean" shape #240/#310 exist to refuse. So
-# push capability is asserted per repo BEFORE any listing is believed,
-# from the same call that names the population, and a repo the token
-# cannot see into is a refusal rather than a pass.
-blind=""
-repos=""
-while IFS=$'\t' read -r name push; do
-  [[ -n "${name}" ]] || continue
-  if [[ "${push}" != "true" ]]; then
-    blind="${blind} ${name}"
-    continue
-  fi
-  repos="${repos} ${name}"
-done <<< "${population}"
-if [[ -n "${blind}" ]]; then
-  echo "audit:drafts: the token is not push-capable on:${blind}" >&2
-  echo "  GitHub lists draft releases only to push-capable identities, so an" >&2
-  echo "  empty listing there would prove nothing. Refusing to judge blind." >&2
-  echo "  Wire a token with push access to every org repo (audit.yml uses the" >&2
-  echo "  environment-scoped AUDIT_TOKEN for exactly this class of read)." >&2
-  exit 1
-fi
 now=$(date -u +%s)
 cutoff=$((now - 86400))
 unexplained=""
@@ -3718,7 +3810,7 @@ drafts=0
 recorded=0
 young=0
 walked=0
-for repo in ${repos}; do
+for repo in ${population}; do
   # Read whole, never piped into a reader that closes early: gh
   # --paginate dies on SIGPIPE (the audit:source-vsa lesson). An errored
   # listing refuses; it is never read as "this repo has no drafts".
@@ -3757,7 +3849,7 @@ if [[ -n "${unexplained}" ]]; then
   echo "      RUN_URL=<the run that burned it> release/record-draft.sh" >&2
   exit 1
 fi
-echo "audit:drafts: ${walked} repo(s) walked, ${drafts} draft(s): ${recorded} recorded, ${young} in flight"
+echo "audit:drafts: visibility proven in ${probe_repo}, ${walked} repo(s) walked, ${drafts} draft(s): ${recorded} recorded, ${young} in flight"
 '''
 
 [tasks."audit:citations"]
