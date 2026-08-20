@@ -104,7 +104,7 @@ repository's own release, which publishes a single class, and only then
 in the lab at full width. Both are cheap in version numbers by design,
 so the control is not that a change ran somewhere safe first; it is that
 consumers move last, and that every irreversible step sits behind the
-commit point (v1.24.0, #367). Communications are GitHub's TLS.
+commit point (`.github@v1.24.0`, #367). Communications are GitHub's TLS.
 
 **Creating build environments.** The control plane does not share a
 filesystem with build environments; caller artifacts reach the signing job
@@ -136,7 +136,7 @@ fact rather than a predicate field a stranger takes on the org's word.
 The org carries two roots of trust — provenance and producer evidence
 under `signer/sign.yml`, verdicts under
 `.github/verify-release.yml` — with the consumer recipes and the
-version boundary (verdicts before canon v1.14.0 verify under the old
+version boundary (verdicts before `.github@v1.14.0` verify under the old
 identity) in [`runbook.md`](runbook.md). The spec never required the
 split — `verification_summary`'s own example places the binding in the
 consumer's `(signer, verifier)` allowlist — but the org's bar is that

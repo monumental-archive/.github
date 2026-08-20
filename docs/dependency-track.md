@@ -12,7 +12,7 @@ the target and the declined doors were decided there and in #121/#122.
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on lab v0.20.0, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
+| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on `release-lab@v0.20.0`, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
 
@@ -101,17 +101,17 @@ is also the version-drift guard, the loud zero-package failure (exit
 assert blast-radius`, specified and table-tested in stele
 (`docs/assert-policy-schema.md` there; stele#39 for the port record).
 The org's conventions are data in `slsa/assert-policy.json`: the
-ecosystem classes, the canary pin (RUSTSEC-2021-0127 in release-lab
-v0.17.0), and where decisions live (`security/vex/`).
+ecosystem classes, the canary pin (RUSTSEC-2021-0127 in
+`release-lab@v0.17.0`), and where decisions live (`security/vex/`).
 
 What stays org policy here: red always means *new and undecided* —
 a decision is keyed by the dependency, so every release shipping the
 decided `package@version` is covered by derivation, with no product
 list to extend per release (#187). Two triage classes, decided when
-the first image SBOM landed (v0.18.1): **ecosystem packages** (cargo,
-npm — the org's own code surface) always gate; **OS packages** gate
-only when a shipped fix exists — the perpetual unfixed base-layer
-background's remediation path is the rebuild cadence
+the first image SBOM landed (`release-lab@v0.18.1`): **ecosystem
+packages** (cargo, npm — the org's own code surface) always gate; **OS
+packages** gate only when a shipped fix exists — the perpetual unfixed
+base-layer background's remediation path is the rebuild cadence
 (`docs/release.md`: remediation is never per-CVE), so those surface as
 derived exceptions, never red. Zero standing infrastructure; network
 only for the feed — which is exactly why it is `audit:*` and can never
@@ -187,11 +187,12 @@ what the artifact actually is, never configuration.
 trivy generates the lock- and image-derived shapes; go-binary's
 generator is stele, the format authority for that shape.
 The GitHub dependency-graph export was replaced for code and image
-classes on measurement, not preference: the lab's v0.17.0 export carried
-2 versionless PURLs out of 236 (`pkg:cargo/mimalloc`,
-`pkg:cargo/wasm-bindgen`) — versionless means unmatchable, silently
-invisible to every scanner. The trivy derivation of the same lock:
-229/229 versioned. The defect is unwritable, not detected.
+classes on measurement, not preference: the export from
+`release-lab@v0.17.0` carried 2 versionless PURLs out of 236
+(`pkg:cargo/mimalloc`, `pkg:cargo/wasm-bindgen`) — versionless means
+unmatchable, silently invisible to every scanner. The trivy derivation
+of the same lock: 229/229 versioned. The defect is unwritable, not
+detected.
 
 **cargo-auditable** closes the image-side half of the same gap, also
 measured: trivy over the published lab image found 79 OS packages and
@@ -216,8 +217,8 @@ exact `package@version` — and the `commit-point` barrier turns that
 failure into a `needs` edge every publish job waits on, so nothing
 reaches a registry past it. The edge is load-bearing history, not
 belt-and-braces: until #349 finding 1 the ordering was only a race the
-org kept winning, and lab v0.20.0's npm and GHCR uploads went out
-eleven seconds after this very gate went red. The
+org kept winning, and `release-lab@v0.20.0`'s npm and GHCR uploads
+went out eleven seconds after this very gate went red. The
 same job then runs `audit:deny` against the tagged lock (#211): the
 identical belt task the Monday cron runs, so cargo-deny reads RustSec
 directly (no OSV import lag) and additionally refuses yanked crates,
@@ -236,11 +237,12 @@ out of the **`ci` gate**, and it is right. The release path is already
 network-bound by construction — it publishes to registries and pulls
 the bytes back to prove them — so the OSV feed at release time is the
 same category as `verify-release`. Both legs are lab-proven, and the
-`audit:deny` leg caught a real finding on its first live run: the
-lab's v0.20.0 release was refused — RUSTSEC-2021-0127, `serde_cbor`
+`audit:deny` leg caught a real finding on its first live run:
+`release-lab@v0.20.0` was refused — RUSTSEC-2021-0127, `serde_cbor`
 unmaintained via pgrx itself, RustSec-direct where the OSV gate-class
-filter had not flagged it — and the fix shipped as v0.20.1 only behind
-an `ignore` entry citing the pre-existing
+filter had not flagged it — and the fix shipped as
+`release-lab@v0.20.1` only behind an `ignore` entry citing the
+pre-existing
 `security/vex/RUSTSEC-2021-0127.openvex.json` decision. The written-
 decision exit and the roll-forward behaved as designed; the refusal
 did not, in full: the release (attach, VSAs, SBOM asset, DOI) was

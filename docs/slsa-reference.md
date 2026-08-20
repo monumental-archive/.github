@@ -795,10 +795,10 @@ Documentation does not answer these; the release lab does.
    use?~~ **Answered, measured 2026-08-12** —
    `https://in-toto.io/attestation/release/v0.2`, read from the
    attestations store for release-lab v0.20.1 and the canon's own
-   v1.13.0. It appears beside our provenance and VSA on every published
-   subject, including assets we do not attest ourselves (SBOM, VEX),
-   which is what makes it a useful independent binding rather than a
-   duplicate.
+   `.github@v1.13.0`. It appears beside our provenance and VSA on every
+   published subject, including assets we do not attest ourselves (SBOM,
+   VEX), which is what makes it a useful independent binding rather than
+   a duplicate.
 4. Does the OIDC subject-claim format change break either registry's
    trusted publishing configuration on transfer? **Answered for
    crates.io** — no, it never reads `sub`. npm still open.
