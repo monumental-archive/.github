@@ -32,6 +32,14 @@ name: attach-release
         description: Version being released, without the leading v.
         required: true
         type: string
+      classes:
+        # forwarding: universal
+        description: >
+          Comma-separated evidence classes this release ships. The
+          evidence manifest declares them, and the manifest is written
+          here because here is where every asset exists.
+        required: true
+        type: string
       dry-run:
         # forwarding: universal
         description: Rehearsal — attach the bundle, leave the release a draft.
@@ -146,6 +154,62 @@ jobs:
             exit 1
           fi
           echo "::notice::${n} SBOM(s) in the bundle"
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.5
+          cache: false
+
+      # The declared contract, attested at the tag (stele#40, from
+      # #109): which classes shipped, the verdict layout, the machinery
+      # version obligations are derived from, and every asset pinned and
+      # TYPED as a build subject or an evidence document — written by
+      # `stele emit manifest` through the same definition the assert
+      # reader decodes, and proven readable on its own rendered bytes
+      # before anything ships it.
+      #
+      # It is written HERE, in the fan-in, because here is the first
+      # moment the release's assets all exist. Written in the sbom job
+      # it saw only the inventory that job had just derived, and typed
+      # one entry where the release published five — the build subject
+      # among them, so the repro walk's population was empty and its
+      # verdict CANNOT_JUDGE. Measured on v1.45.0.
+      - name: Write the evidence manifest
+        env:
+          CLASSES: ${{ inputs.classes }}
+        run: |
+          set -euo pipefail
+          # The machinery version is the canon tree's own, read from the
+          # version mirror the pinned tree carries — the caller's `uses:`
+          # ref is a commit SHA (the tag-pin rule), so the version is a
+          # fact about the TREE, not about the ref's spelling. For the
+          # canon's own releases the mirror already carries the version
+          # being cut, so one read covers both cases.
+          machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
+          [[ -n ${machinery} ]] || {
+            echo "::error::the pinned canon tree's CITATION.cff names no version — the manifest cannot state its machinery"
+            exit 1
+          }
+          # Pass one of two: everything the release ships BEFORE the
+          # manifest exists, because a manifest cannot pin itself and
+          # the format says so. The checksum step below is pass two and
+          # covers everything including it.
+          (cd dist && sha256sum ./* | sed 's| \./| |') > "${RUNNER_TEMP}/assets.sha256"
+          stele emit manifest \
+            --classes "${CLASSES}" \
+            --store-vsa true \
+            --machinery-version "${machinery}" \
+            --assets "${RUNNER_TEMP}/assets.sha256" \
+            --assert-policy .org-canon/slsa/assert-policy.json \
+            --out dist/evidence-manifest.json
       - name: Checksum everything that ships
         run: |
           set -euo pipefail
