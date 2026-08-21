@@ -10,6 +10,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.55.0](https://github.com/monumental-archive/.github/compare/v1.54.0...v1.55.0) - 2026-08-21
+
+### Added
+
+- collect a repo's own audit:* tasks (#704) ([#736](https://github.com/monumental-archive/.github/pull/736))
+- declare edtf in the population, epoch and floors ([#739](https://github.com/monumental-archive/.github/pull/739))
+
+### Fixed
+
+- model the advisory subject in the subject budget ([#735](https://github.com/monumental-archive/.github/pull/735))
+- authenticate the org walks and name the unreadable (#692) ([#730](https://github.com/monumental-archive/.github/pull/730))
+- anchor the unattested-path marker at its cache step ([#729](https://github.com/monumental-archive/.github/pull/729))
+- deliver the org TOML format (#691) ([#745](https://github.com/monumental-archive/.github/pull/745))
+- retire the head -1 idiom in the thirteen sites ([#747](https://github.com/monumental-archive/.github/pull/747))
+- derive adoption from the roster, not the listing (#693) ([#748](https://github.com/monumental-archive/.github/pull/748))
+
+### Documentation
+
+- name the delivered configs, not stubs that never existed (#689) ([#737](https://github.com/monumental-archive/.github/pull/737))
+- record sqlfluff's two escapes and the noqa trap (#708) ([#740](https://github.com/monumental-archive/.github/pull/740))
+
 ## [1.54.0](https://github.com/monumental-archive/.github/compare/v1.53.1...v1.54.0) - 2026-08-21
 
 ### Added
