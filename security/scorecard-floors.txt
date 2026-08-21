@@ -44,3 +44,25 @@
 signer 6.8
 release-lab 7.4
 stele 6.2
+# iiif-server floored 2026-08-21 at the import (#671), from a
+# POST-transfer reading of the default branch: `scorecard
+# --repo=github.com/monumental-archive/iiif-server` (v5.5.0, checksum
+# verified) read 6.9 at commit eb30e71. Floored a tenth under, per this
+# file's floor-low rule, not at the observed high.
+#
+# The pre-transfer reading was also 6.9, which is a coincidence and not
+# a carry-over: Branch-Protection was 4 in both (org rulesets are
+# org-level and scorecard reads the branch-protection API),
+# Vulnerabilities moved 10 -> 9 on an advisory in the feed, and every
+# other cell held. Recorded because a floor that silently reuses a
+# reading of a repository under its old name is exactly the mistake
+# this header exists to prevent.
+#
+# Three movements are expected and are NOT regressions: SAST stays only
+# because deleting the repo's advanced-setup codeql.yml lets the org
+# security configuration's default setup take over; Pinned-Dependencies
+# dents on the $/.github/actions/canon self-reference once the gate stub
+# lands; Signed-Releases is 0 until v0.2.0 publishes and Maintained
+# self-heals. If the score rises past 7.2 after the first release, the
+# ratchet nudge raises this line.
+iiif-server 6.8

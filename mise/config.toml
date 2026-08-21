@@ -2806,7 +2806,7 @@ latest=$(tail -1 <<< "${tags}")
   exit 0
 }
 repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
-expected_repos=8
+expected_repos=9
 seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
 if [[ ${seen_repos} -ne ${expected_repos} ]]; then
   echo "audit:org-pins: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2

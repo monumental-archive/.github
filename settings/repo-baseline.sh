@@ -35,7 +35,7 @@ repos="$(gh api "orgs/${org}/repos?per_page=100" --paginate --jq '.[].name')"
 # check indistinguishable from no check. The count is the org's known
 # population, and growing it is a reviewed edit here, exactly so a
 # narrowed AUDIT_TOKEN repo selection is a red run rather than silence.
-expected_repos=8
+expected_repos=9
 seen_repos="$(wc -w <<< "${repos}" | tr -d ' ')"
 if [[ ${seen_repos} -ne ${expected_repos} ]]; then
   echo "repo-baseline: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2
