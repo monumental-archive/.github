@@ -43,6 +43,10 @@ CLEAN = 'echo "hello"\n'
 # The same body before shfmt: a one-line block holding two statements,
 # and a quoted variable inside `[[ ]]` that `-s` simplifies.
 DIRTY = '[[ -n "${x}" ]] || { echo "no"; exit 0; }\n'
+# The two lines every task-defining config owes (#700). Spelled out here
+# rather than built from SHELL_PIN, so a change to the constant has to
+# face a test that disagrees with it.
+PIN = '[task_config]\nshell = "bash -euo pipefail -c"\n'
 
 
 def write(tmp: str, text: str) -> Path:
@@ -356,7 +360,7 @@ class Main(unittest.TestCase):
     def test_a_clean_config_exits_zero(self) -> None:
         """And says how much it checked, so a vacuous pass is visible."""
         with TemporaryDirectory() as tmp:
-            path = write(tmp, f"[tasks.t]\nrun = '''\n{CLEAN}'''\n")
+            path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\n{CLEAN}'''\n")
             out = io.StringIO()
             with redirect_stdout(out):
                 self.assertEqual(bs.main([str(path)]), 0)
@@ -368,6 +372,100 @@ class Main(unittest.TestCase):
             path = write(tmp, "[tasks.t]\nrun = '''\necho $x\n'''\n")
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(bs.main([str(path)]), 1)
+
+
+class Unpinned(unittest.TestCase):
+    """The task-shell pin assertion (#700).
+
+    Driven in both directions per #650: every row that fires is paired
+    with the row that must not. The failure this guards against is the
+    silent one — a repo task under dash gets no pipefail and no nounset,
+    so a body whose failure signal is a tool's exit status inside a
+    pipeline goes green having not checked.
+    """
+
+    def test_tasks_without_a_pin_are_a_finding(self) -> None:
+        """The defect shape: a repo defines tasks and restates nothing."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, '[tasks.t]\nrun = "echo hi"\n')
+            found = bs.unpinned({path: bs.read(path)})
+        self.assertEqual(len(found), 1)
+
+    def test_the_finding_carries_the_remedy(self) -> None:
+        """A red gate that does not say what to paste is half a guard."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, '[tasks.t]\nrun = "echo hi"\n')
+            found = bs.unpinned({path: bs.read(path)})
+        self.assertIn("[task_config]", found[0])
+        self.assertIn('shell = "bash -euo pipefail -c"', found[0])
+        self.assertIn(str(path), found[0])
+
+    def test_a_pinned_config_is_silent(self) -> None:
+        """The other direction, so the row above is not vacuously true."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, f'{PIN}\n[tasks.t]\nrun = "echo hi"\n')
+            self.assertEqual(bs.unpinned({path: bs.read(path)}), [])
+
+    def test_a_config_with_no_tasks_is_silent(self) -> None:
+        """Skip clean by name: nothing to run means no shell to pin."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, '[tools]\njq = "1.8.2"\n')
+            self.assertEqual(bs.unpinned({path: bs.read(path)}), [])
+
+    def test_a_pin_to_something_other_than_bash_is_still_a_pin(self) -> None:
+        """The assertion is that the file DECIDES, not which shell it picks."""
+        with TemporaryDirectory() as tmp:
+            other = '[task_config]\nshell = "pwsh -c"\n'
+            path = write(tmp, f'{other}\n[tasks.t]\nrun = "x"\n')
+            self.assertEqual(bs.unpinned({path: bs.read(path)}), [])
+
+    def test_main_reds_on_an_unpinned_config(self) -> None:
+        """End to end, through the exit status the gate reads."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, f"[tasks.t]\nrun = '''\n{CLEAN}'''\n")
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(bs.main([str(path)]), 1)
+        self.assertIn("pins no task shell", err.getvalue())
+
+    def test_an_env_from_config_is_not_asserted_on(self) -> None:
+        """It is read for its `[env]`; its tasks are not being checked.
+
+        The belt's own config arrives this way in every consumer repo, so
+        asserting on it would red every repo for a file it does not own.
+        """
+        with TemporaryDirectory() as tmp:
+            checked = write(tmp, f'{PIN}\n[tasks.t]\nrun = "echo hi"\n')
+            other = Path(tmp) / "belt.toml"
+            other.write_text('[tasks.b]\nrun = "echo belt"\n', encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                rc = bs.main([str(checked), "--env-from", str(other)])
+        self.assertEqual(rc, 0)
+
+    def test_write_mode_does_not_assert(self) -> None:
+        """`fix:belt-shell` formats bodies; it cannot add a pin for you."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, f"[tasks.t]\nrun = '''\n{CLEAN}'''\n")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(bs.main([str(path), "--write"]), 0)
+
+    def test_an_unpinned_config_reds_even_when_modelling_is_skipped(self) -> None:
+        """A file the tools decline to read still answers for its pin.
+
+        The shell resolves to `pwsh` from the env-from config, so the body
+        lint skips — the pin assertion must not skip with it.
+        """
+        with TemporaryDirectory() as tmp:
+            checked = write(tmp, '[tasks.t]\nrun = "echo hi"\n')
+            other = Path(tmp) / "belt.toml"
+            other.write_text('[task_config]\nshell = "pwsh -c"\n', encoding="utf-8")
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = bs.main([str(checked), "--env-from", str(other)])
+        self.assertEqual(rc, 1)
+        self.assertIn("not shell — skipped", out.getvalue())
+        self.assertIn("pins no task shell", err.getvalue())
 
 
 if __name__ == "__main__":

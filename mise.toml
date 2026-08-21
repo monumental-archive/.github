@@ -17,6 +17,16 @@
 # pinned in mise/config.toml beside mise.lock, and a second tool table
 # would be a second place for a pin to live.
 
+# The pin every task-defining config in the org owes, restated here because
+# this file defines a task (#700). The belt supplies the same string as
+# mise's default inline shell, so in the gate and on a belt-wearing machine
+# this line changes nothing; it is what makes the file true in a clone that
+# has neither. `lint:belt-shell` reds any config that defines tasks and
+# leaves the shell to whatever layer happens to be in play — mise's own
+# default is `sh`, which is dash on an Ubuntu runner.
+[task_config]
+shell = "bash -euo pipefail -c"
+
 [tasks.test]
 description = "The belt's own Python helpers (stdlib unittest, no framework)"
 dir = "{{cwd}}"
