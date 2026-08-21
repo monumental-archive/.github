@@ -35,7 +35,7 @@ honestly blocked on.
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"` |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` (`lint:biome-domains`) |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
@@ -266,8 +266,11 @@ nothing for a repo to `.gitignore`. Not a repo-root `biome.json` that
 `extends` the belt's copy — that anchors correctly too, but a repo's own
 config merges ON TOP and can switch an org rule off (proven), and a
 config that exists only during the run has no repo-side surface to
-lower. A tracked `biome.json` is refused rather than overwritten, and
-that refusal is the entire enforcement. The other eight delivered
+lower. Since #695 the repo root may track a `biome.json` again, but it
+carries the repo's DOMAINS and nothing else and is merged in by the
+belt rather than read by biome — a nested or `.jsonc` one is still
+refused outright, and that plus the generation is the entire
+enforcement. The other eight delivered
 configs were swept against the same test: ruff was the plausible
 suspect — its isort first-party detection could have keyed on the config
 directory — and measured identical from both locations; the rest carry
@@ -823,19 +826,21 @@ in `main`.
 Two deliberate departures, both settled against evidence rather than
 taste:
 
-- **`assist/source/useSortedKeys` is off.** It does not fire at Biome's
-  own default assist level — `preset: "all"` is what turns it on — and
-  every peer tool defaults the same way: ESLint's `sort-keys` is off and
-  frozen, Prettier preserves authored order and needs a third-party
-  plugin to sort. The ecosystem's convergent answer for hand-authored
-  config is `sort-package-json`'s: keep the conventional lead keys,
-  sort the bulk underneath. Alphabetising top-to-bottom here put `name`
-  last in the workflow-template metadata and buried `extends` — the line
-  that says what a Renovate config inherits — under a twenty-line
-  `customManagers` block. The fix is safe and automatic, so this is not
-  a migration-cost objection; it is that four independent tools ship the
-  behaviour off. *Reopen:* a repo whose JSON is generated rather than
-  authored, where stable key placement beats reading order.
+- **`assist/source/useSortedKeys` is off**, and since #695 so are the six
+  other alphabetisers beside it, each named rather than inherited. It
+  does not fire at Biome's own default assist level — `preset: "all"` is
+  what turns it on — and every peer tool defaults the same way: ESLint's
+  `sort-keys` is off and frozen, Prettier preserves authored order and
+  needs a third-party plugin to sort. The ecosystem's convergent answer
+  for hand-authored config is `sort-package-json`'s: keep the
+  conventional lead keys, sort the bulk underneath. Alphabetising
+  top-to-bottom here put `name` last in the workflow-template metadata
+  and buried `extends` — the line that says what a Renovate config
+  inherits — under a twenty-line `customManagers` block. The fix is safe
+  and automatic, so this is not a migration-cost objection; it is that
+  four independent tools ship the behaviour off. *Reopen:* a repo whose
+  JSON is generated rather than authored, where stable key placement
+  beats reading order.
 - **`indentStyle` is space/2, not Biome's tab default.** Tabs cannot be
   uniform here: YAML forbids tab indentation by spec, which is 49 of the
   canon's 153 tracked files. Space is the only setting that can hold
@@ -871,6 +876,144 @@ episode leaves behind: **for a tool the canon cannot exercise, a claim
 about its rule set is not recorded until it has been run against code
 that violates it.** Not a fixture committed to the tree — a probe,
 thrown away, whose result is what the doc then states.
+
+**The domains trigger fired, and declaring what you are did nothing**
+(#695). The scaffold had written the condition down in advance: the
+first repo in the org to track a framework moves `biome.json` back to
+`scaffold/`. monumental-archive is that repo — React in `apps/web`, a
+Hono server in `apps/door` — and it arrived with ten
+`useQwikValidLexicalScope` findings, a Qwik rule judging a React
+component, plus 33 `noNodejsModules` on a service whose entire job is to
+be a Node service.
+
+What the issue assumed, and what measurement says, are different things,
+and the mechanism turns on the difference. Measured on that tree against
+2.5.7, one variable at a time:
+
+| `linter.domains` | diagnostics | Qwik findings |
+|---|---|---|
+| absent (the shipped state) | 2164 | 10 |
+| `{react: all, project: all, types: all, test: all}` | **2164** | **10** |
+| the above plus `qwik: "none"` | 2154 | 0 |
+
+Declaring what the repo IS changes nothing, because `preset: "all"` has
+already turned every domain on. **Only the negative has an effect** —
+and a repository writing "none" is a repository switching an org rule
+off, which is the thing this whole layer exists to prevent (#694).
+
+So the two halves are split by who can honestly state them. The repo
+writes `biome.json` carrying `linter.domains` and nothing else, values
+`"all"` and nothing else, over the eleven domains that are identity;
+`mise/biome-config.py` merges it with the org's rules and writes every
+`"none"` itself. A repo cannot write `"none"`, cannot name `project`,
+`types` or `test`, cannot carry a rule or an `overrides` block, and
+cannot stay silent about a framework its own package.json declares —
+that last one is the hole this mechanism would otherwise open, since
+silence would turn react's rules off for a React repo.
+
+Which domains are identity is biome's metadata, not a judgement: each of
+the eleven is auto-enabled by a dependency, and `project` and `types`
+have no dependency trigger at all. `test` does and is still org-fixed,
+for the one reason worth arguing: a repo testing under `node:test`
+declares no runner package, and making `test` claimable would hand it a
+way to have no test rules and look conformant. `mise/biome-domains.tsv`
+records the table; `lint:biome-domains` re-derives all fourteen rows
+from `biome explain` in the canon's own gate, and `audit:biome-rules`
+holds the domain LIST against the published schema, because a
+fifteenth domain would sit outside the table and stay on everywhere.
+
+The generated config is what biome is run against, so the declaration
+never reaches the tool even if it lies: proven by planting a `biome.json`
+that claimed `qwik` and switched `noNodejsModules` off, and measuring no
+change to either (0 Qwik findings, 33 `noNodejsModules`).
+
+**One rule domains cannot reach, recorded so its absence is not read as
+an oversight.** `noNodejsModules` has no domain at all — `biome explain`
+says so — so no belt mechanism can scope it to browser code. It is not
+turned off org-wide, because it is a real check for the browser code the
+org will import next. A Node application answers it where every other
+exception in this org is answered: in the repo, per file,
+`biome-ignore-all lint/correctness/noNodejsModules:` with a reason.
+
+**Nursery stays on, and this is the ruling rather than the default.**
+Biome prints "not yet stable and may change in the future" beside all 87
+rules, and #695 asked whether a gate whose rule set can move in a patch
+release belongs in `ci`. It does, because the version is pinned exact
+with `minimum_release_age` at 168h: a changed rule set can only arrive
+as a Renovate bump, which reddens that pull request and never `main`. A
+gate that goes red on a version bump is the gate working. Nothing in the
+87 was a mechanical contradiction on the fixture — the large tail
+(`useExplicitType` 33, `useUnicodeRegex` 30, `useExplicitReturnType` 26)
+is style the repo has never answered to, which is work, not a defect.
+
+**The sorting family is ruled one action at a time**, because the issue
+that reported it named the wrong rule and that is the lesson.
+`fix:biome` did rewrite `package.json`, but `useSortedKeys` was already
+off and provably so — delete the `assist.actions.source` block and it
+fires, as shipped, zero. The action that actually rewrote the file was
+`useSortedPackageJson`, never named and inheriting `preset: "all"`. The
+`knip.jsonc` rewrite blamed on sorting was the formatter expanding an
+array. Whole-tree assist inventory on the fixture: `organizeImports` 48,
+`useSortedInterfaceMembers` 46, `useSortedPackageJson` 3,
+`useSortedAttributes` 1, and `useSortedKeys` 0 with the block against
+**622** without it.
+
+All ten source actions are now named so none can be silently inherited
+again. Seven are off on the org's existing reason — alphabetical order
+destroys semantic grouping, already recorded for taplo (`reorder_keys`
+off) and yamllint (`key-ordering` disabled) — and CSS property order
+decides which declaration wins, so `useSortedProperties` is a
+correctness argument as well as a legibility one.
+`useSortedPackageJson` is ON and is not the exception it looks like: it
+does not alphabetise. Measured, it rewrote
+`name,private,type,engines,devDependencies` to
+`name,private,type,devDependencies,engines` — neither the input order nor
+alphabetical, but the conventional field order its own documentation
+attributes to `sort-package-json`. Imposing a semantic grouping is what
+the anti-alphabetisation ruling is FOR. `organizeImports` and
+`noDuplicateClasses` stay on for plainer reasons: import statements carry
+no author-chosen order, and removing a duplicate class is not sorting.
+
+**This was ruled twice in one day, and the record of the reversal is the
+point.** The first ruling read the standing rule as "everything complies
+with the tools at max, not the other way round" and deleted the block
+outright; the canon reformatted 24 of its own JSON files to comply. It
+was reversed the same day because the org's rule is narrower than *max
+always*: **max by default, and an exclusion only where max is measurably
+worse, with the measurement written down.** Alphabetising a
+hand-authored file is that case; it had already been adjudicated twice,
+for two other tools, on evidence; and one tool shipping a behaviour is
+not itself evidence against a ruling made on evidence. The consistent
+position is biome's alphabetisers off here, clippy's
+`arbitrary_source_item_ordering` excluded in #701, and
+`rustfmt`/`yamllint` key ordering off — all four the same ruling, not
+four preferences.
+
+Issue #695 asked for one of two answers: make `useSortedKeys` agree with
+the taplo and yamllint rulings, or record why JSON is different. The
+answer is the first: it agrees, it always did, and now the other six
+agree with it too.
+
+One claim checked and withdrawn before it was written down:
+`useSortedEnumMembers` is a SAFE-tier fix, which looked like a
+value-changing hazard for numeric TypeScript enums. It is not — the rule
+sorts only enums with string initializers, and a planted numeric enum
+came back in its original order.
+
+**Nested configs are refused, and biome's own documentation is the
+reason.** biome 2.x supports a package-level `biome.json` carrying
+`"root": false` and `"extends": "//"`, and the worked example in its
+monorepo guide is a nested package switching `noConsole` off. That is
+the mechanism working as designed and it is exactly the surface the org
+does not have: a subtree lowering an org rule. So a nested or `.jsonc`
+config fails the gate, the root `biome.json` carries domains only, and
+the config biome actually reads is generated — `--config-path` "disables
+the default configuration file resolution mechanism", which is why the
+declaration cannot reach the tool even if it lies. Per-path IDENTITY is
+expressible in the pinned schema (`overrides[].linter.domains`) and is
+deliberately not built here: the omission cross-check is repo-wide, and
+scoping identity by path needs per-path manifest attribution that no
+issue has asked for yet.
 
 **tsc, and the flag that beats the repo** (#445). The type checker joins
 the belt as `lint:types` — the only tool on it that reasons about what a

@@ -9,7 +9,11 @@ written for two moments: wiring a repository in, and a release going wrong.
 ### Versioned (has releases, versions, tags)
 
 1. Copy from [`scaffold/`](../scaffold/): `mise.toml` and
-   `SECURITY-INSIGHTS.yml` (fill the `<angle-bracket>` fields). No
+   `SECURITY-INSIGHTS.yml` (fill the `<angle-bracket>` fields). A repo
+   with JavaScript or TypeScript also copies `biome.json.stub` to the
+   root as `biome.json` and names the frameworks it uses in
+   `linter.domains` — the .stub suffix for the same nested-config reason
+   as `REUSE.toml.stub` below (#695). No
    `committed.toml`: the commit canon is delivered (#576), and a repo
    that restricts scopes names them in `mise.toml`'s
    `ORG_COMMIT_SCOPES`. If the repository is citable (its release
