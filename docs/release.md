@@ -634,14 +634,53 @@ measured the containerised cargo build nondeterministic — while the
 rust-binary class built the identical crates bit-for-bit under the
 belt's pinned toolchain in the same runs. The distinction was never
 the code; it was the second, tag-pinned toolchain inside BuildKit.
-So the oci-image class takes a `prepare` script: the binary is built
-natively per architecture in the caller's mise-pinned toolchain,
-under the same reproducibility flags as the rust-binary class, and
-the Dockerfile is pure assembly — a digest-pinned or `scratch` base
-plus a COPY of bytes the job just built. Nothing nondeterministic
-remains inside the image build, the repro leg runs the same script,
-and one toolchain serves both classes. A Dockerfile that compiles is
-the failure mode, not a style choice.
+So the binary is built natively per architecture in the caller's
+mise-pinned toolchain, under the same reproducibility flags as the
+rust-binary class, and the Dockerfile is pure assembly — a
+digest-pinned or `scratch` base plus a COPY of bytes the job just
+built. Nothing nondeterministic remains inside the image build, the
+repro leg builds the same way, and one toolchain serves both classes.
+A Dockerfile that compiles is the failure mode, not a style choice.
+
+**The caller declares the crate, it does not write the recipe**
+(#775). `binary-crate: crates/<name>` names the crate whose binary the
+image ships, and the class builds it through `release/rust-build.sh` —
+the same definition `build-rust-binary.yml` runs, so the pinned
+toolchain, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, the path remap,
+the preserved `cargo-auditable` section and the inventory plan (#537)
+are one statement rather than a recipe every consumer rewrites. The
+binaries land at `<context>/dist/<name>`, mode 0755, named as cargo
+names them. The measurement that decided it: the org's two image
+consumers had written the same twenty-five-line prepare script with
+one binary name changed, and *neither emitted an inventory plan* —
+which is why a repository releasing through the oci-image class alone
+could not publish at all (#773). The plan the class now emits names
+the document `sbom-image-<package>` and the artifact
+`<package>-image`: the prefix says what the artifact IS (an image),
+the params say what it is MADE OF (a cargo closure), and the distinct
+names are what let one crate ship as a binary and inside an image
+without two documents claiming one artifact.
+
+`prepare` remains for materialisation a declaration cannot express,
+and the two are refused together — a caller with two answers to "what
+goes in the context" gets an error in seconds rather than an image
+built from whichever ran last. What a declaration cannot carry is a
+repository's own compile-time environment: a `prepare` script that
+exported, say, a build-revision variable for `option_env!` has no
+declarative equivalent, and the replacement is the runner's own
+`GITHUB_SHA`, which every build step already carries and which is
+identical on both repro legs. Nothing new is invented for it.
+
+One deliberate silence, recorded so it is not read as an oversight:
+the `oci-image` class declares no planned `assetPrefixes` in
+`slsa/assert-policy.json`. An unconditional obligation would be wrong
+— an image assembled from a Dockerfile alone ships no cargo inventory
+and would red the evidence walk forever — and the policy schema has no
+way to say "owed when `binary-crate` is declared". A class that
+declares no planned prefixes has declared no vocabulary, so its plans
+are outside that judgment rather than refused by it (stele's
+`assert-policy-schema.md`); the plans are still shape-, conflict- and
+drift-judged like every other.
 
 ### Image metadata: one map, resolved once
 

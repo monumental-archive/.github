@@ -42,10 +42,21 @@ written for two moments: wiring a repository in, and a release going wrong.
    | `rust-crate` | `exclude` for container-built members | `rust` |
    | `rust-binary` | `binary-targets`, `binary-smoke-test`, `exclude` | `rust` |
    | `go-binary` | `go-targets`, `go-smoke-test` | `go` |
-   | `oci-image` | `dockerfile`, `context`, `smoke-test` | — |
+   | `oci-image` | `dockerfile`, `context`, `smoke-test`, and `binary-crate` **or** `prepare` | `rust`, `cargo:cargo-auditable` when either is declared |
    | `wasm-npm` | `crate-dir`, `npm-scope` | `rust`, `aqua:rustwasm/wasm-pack`, `node` |
    | `pgrx-extension` | `extension-crate-dir`, `pg-majors`, `extension-smoke-test` | `rust`, `cargo:cargo-pgrx` (must equal the pgrx crate dep) |
    | `source-archive` | none — the artifact is the tagged tree itself | — |
+
+   The oci-image row is the one to read twice: the class compiles
+   nothing on its own, and a Dockerfile that compiles is the failure
+   mode (#295). A Rust-backed image DECLARES its crate — `binary-crate:
+   crates/<name>` — and the class builds it through the rust-binary
+   class's own definition, installing the binaries at
+   `<context>/dist/<name>` for the Dockerfile to COPY. `prepare` is the
+   escape for materialisation a declaration cannot express, the two are
+   refused together, and either way the compile runs in the caller's own
+   mise-pinned toolchain — which is why the build inputs column is not
+   empty for this class and once wrongly was (#775).
 
    `source-archive` is first-class, not canon-only: it is what this
    repository publishes itself (`self-publish.yml`), built twice,

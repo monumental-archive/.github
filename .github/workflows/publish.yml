@@ -129,7 +129,23 @@ name: publish
           the image build, for the oci-image class — the compile belongs
           here, in the caller's mise-pinned toolchain, never inside the
           Dockerfile (#295). Receives the architecture as $1. Runs
-          identically on both repro-gate legs.
+          identically on both repro-gate legs. For a Rust binary prefer
+          `binary-crate` below and delete the script; `prepare` is for
+          materialisation a declaration cannot express, and the two are
+          refused together.
+        required: false
+        type: string
+        default: ""
+      binary-crate:
+        description: >
+          Directory of the crate whose binary the image ships, for the
+          oci-image class (#775). The class builds it through the
+          rust-binary class's own definition — same pinned toolchain,
+          same reproducibility flags, same inventory plan — and installs
+          the binaries at `<context>/dist/`, so a Rust-backed image needs
+          no prepare script at all. Requires `rust` and
+          `cargo:cargo-auditable` in the caller's mise config, like every
+          other class that compiles Rust.
         required: false
         type: string
         default: ""
@@ -269,6 +285,7 @@ jobs:
         id: check
         env:
           UNTRUSTED_CLASSES: ${{ inputs.classes }}
+          UNTRUSTED_BINARY_CRATE: ${{ inputs.binary-crate }}
         run: |
           set -euo pipefail
           if [[ ${GITHUB_REF} != refs/tags/v* ]]; then
@@ -290,6 +307,15 @@ jobs:
                 ;;
             esac
           done
+          # A class input naming no requested class is a declaration
+          # that does nothing — which is how a caller comes to believe a
+          # binary is being built for an image nobody declared (#775).
+          # Judged here, in the five-second job, rather than as a puzzle
+          # in a green release that shipped a Dockerfile's stale COPY.
+          if [[ -n ${UNTRUSTED_BINARY_CRATE} ]] && [[ ,${UNTRUSTED_CLASSES// /}, != *,oci-image,* ]]; then
+            echo "::error::binary-crate is declared but oci-image is not among the classes — it would build nothing"
+            exit 1
+          fi
           version="${GITHUB_REF#refs/tags/v}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
@@ -392,9 +418,11 @@ jobs:
       - build-binary
       - build-wasm
       - build-extension
+      - build-oci
     # The go-binary class reads its SBOM out of the shipped binaries
     # (stele#46), and the manifest-tracking classes hand this job their
-    # inventory plans (#537) — the artifact-to-package mapping each
+    # inventory plans (#537) — the oci-image class among them since it
+    # took a declared binary-crate (#775, closing #773) — the artifact-to-package mapping each
     # build leg holds as its own inputs, consumed at the only moment it
     # is certain. So this job sits downstream of those builds; for a
     # class not requested the edge is vacuous — a skipped build admits,
@@ -405,7 +433,8 @@ jobs:
           (needs.build-go.result == 'success' || needs.build-go.result == 'skipped') &&
           (needs.build-binary.result == 'success' || needs.build-binary.result == 'skipped') &&
           (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
-          (needs.build-extension.result == 'success' || needs.build-extension.result == 'skipped') }}
+          (needs.build-extension.result == 'success' || needs.build-extension.result == 'skipped') &&
+          (needs.build-oci.result == 'success' || needs.build-oci.result == 'skipped') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -462,7 +491,8 @@ jobs:
         if: >-
           ${{ contains(inputs.classes, 'rust-binary') ||
               contains(inputs.classes, 'wasm-npm') ||
-              contains(inputs.classes, 'pgrx-extension') }}
+              contains(inputs.classes, 'pgrx-extension') ||
+              (contains(inputs.classes, 'oci-image') && inputs.binary-crate != '') }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: sbom-plan-*
@@ -521,6 +551,21 @@ jobs:
             esac
           done
           if [[ -n ${BINARIES_DIR:-} && ${binaries_speak} -eq 1 ]]; then
+            # The oci-image class is in the binaries-speak set because an
+            # image whose contents are the shipped Go binaries adds no
+            # inventory of its own. A DECLARED binary-crate does add one
+            # (#775), and this branch would derive from the binaries and
+            # drop it — an inventory silently narrower than the release.
+            # Refuse rather than choose: the two shapes disagree about
+            # what the release ships, and only the caller can say which
+            # it meant.
+            if compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
+              emsg="a build leg emitted an inventory plan while the shipped binaries would speak for the whole"
+              emsg+=" release — the two describe different artifact sets; declare the classes that own the plan,"
+              emsg+=" or drop binary-crate from the image"
+              echo "::error::${emsg}"
+              exit 1
+            fi
             listing=$(find "${BINARIES_DIR}" -type f | sort)
             bins=()
             while IFS= read -r b; do
@@ -779,6 +824,7 @@ jobs:
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
       prepare: ${{ inputs.prepare }}
+      binary-crate: ${{ inputs.binary-crate }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
@@ -800,6 +846,7 @@ jobs:
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
       prepare: ${{ inputs.prepare }}
+      binary-crate: ${{ inputs.binary-crate }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
