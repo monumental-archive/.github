@@ -1016,6 +1016,73 @@ deliberately not built here: the omission cross-check is repo-wide, and
 scoping identity by path needs per-path manifest attribution that no
 issue has asked for yet.
 
+**The flag that beats the repo does not reach the other readers**
+(#699). `lint:types` forces every dial on the command line, and this
+document recorded the consequence as settled: a repo's `tsconfig.json`
+carries no strictness at all, because a copy would be "either
+duplication or a lie". That reasoning assumes ONE consumer. There are
+at least three — `tsc`, typescript-eslint and biome — and only the first
+one sees a command line.
+
+Measured on monumental-archive, three states, one variable changed:
+
+| `tsconfig.json` | `eslint --max-warnings 0` |
+|---|---|
+| its own config, strictness present | 0 errors |
+| stripped, per the scaffold instruction | **935 errors** |
+| raised to the full org level | 0 errors |
+
+The 935 are typescript-eslint reading a weaker program:
+`@typescript-eslint/dot-notation` 590 once
+`noPropertyAccessFromIndexSignature` is gone, and
+`@typescript-eslint/no-unnecessary-condition` 345 once the null-checking
+dials move. Nothing about the code changed; the org's enforcement did,
+downward, silently, in the direction the design document called
+impossible. biome is exposed identically — its `types` and `project`
+domains resolve the same TypeScript program.
+
+So the keys are neither duplication nor a lie. They are the only
+statement of the level the second reader can see, and the command line
+is the redundant copy for `tsc` alone. The org already accepts exactly
+this arrangement and says so about `.editorconfig`: a cap stated there
+never fights a belt formatter, it states the same fact where every
+editor can read it.
+
+`lint:tsconfig-dials` makes it enforcement rather than advice. The
+comparison is derived from `mise/tsc-flags.txt` — the same file
+`lint:types` passes to the compiler and `lint:tsc-flags` holds against
+`tsc --all` — and never from a second list, because the list that
+drifted low would look exactly like enforcement. A bare flag demands
+`true`, `--flag false` demands `false`, **absent fails** because absent
+is the defect, and stricter is never inspected: the hazard is
+one-directional, which is the `lint:python-target` shape.
+
+Two mechanics worth recording, both measured rather than assumed:
+
+- The config judged is what `tsc -p <cfg> --showConfig` **resolves**,
+  not the file's text. That is TypeScript's own parser, so JSONC
+  comments, trailing commas and `extends` behave exactly as they do for
+  the compiler, and a monorepo that states the dials once in a root
+  config and extends it passes without writing them twice. Crucially,
+  `--showConfig` does **not** materialise a default for a dial the
+  config never mentions — which is the only reason "absent" is
+  detectable at all.
+- `declaration` is a required key, not an emit-only one. Setting
+  `isolatedDeclarations` without it is `TS5069`, a hard config error, so
+  a config carrying one and not the other does not load for any reader.
+  That settled a split this build was otherwise about to invent a second
+  list for: every flag in `tsc-flags.txt` is required, with no
+  exceptions and no new grammar.
+
+The fixture was already failing this on both counts when the check was
+first run against it: monumental-archive's six tsconfigs each state
+`"skipLibCheck": true` against the org's `false` — actively weaker, not
+merely absent — and each omits `noImplicitReturns`,
+`noUncheckedSideEffectImports`, `skipDefaultLibCheck`,
+`erasableSyntaxOnly`, `isolatedDeclarations` and `declaration`. Raising
+them to the org's level costs zero new eslint findings, which is the
+third row of the table above.
+
 **tsc, and the flag that beats the repo** (#445). The type checker joins
 the belt as `lint:types` — the only tool on it that reasons about what a
 value *is*. Biome reads the same files and never resolves a type.
@@ -1104,8 +1171,12 @@ therefore exercised against a throwaway probe (missing config,
 declared references, and the clean pass) and the checker itself against
 monumental-archive, where it finds real work: one `erasableSyntaxOnly`
 violation, ten `isolatedDeclarations` annotations, three
-dependency-declaration errors. *Reopen:* the first repo that needs
-project references, with evidence that per-project checking is
+dependency-declaration errors. One exception since #699:
+`lint:tsconfig-dials` DOES run here, because the canon tracks
+`scaffold/tsconfig.json` and a scaffold that fails the org's own check
+would be worse than no scaffold at all. It is the one TypeScript claim
+this repository can prove about itself. *Reopen:* the first repo that
+needs project references, with evidence that per-project checking is
 insufficient.
 
 **`go mod tidy -diff` and `go test -fuzz`, both already in the toolchain**

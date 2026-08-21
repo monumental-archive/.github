@@ -1,7 +1,13 @@
 # The org's TypeScript enforcement, in one place because two would drift.
 #
 # `lint:types` reads this file and passes every flag below to tsc, where
-# a compiler flag beats the same key in a repo's tsconfig.json. The
+# a compiler flag beats the same key in a repo's tsconfig.json.
+# `lint:tsconfig-dials` reads the SAME file for the opposite direction
+# (#699): a repo's own tsconfig.json must state every dial below and
+# none of them weaker, because typescript-eslint and biome read that
+# file and never see the command line above. Deriving both from here is
+# the point — two lists would drift, and the one that drifted low would
+# look exactly like enforcement. The
 # `lint:tsc-flags` task reads the same file and holds it against `tsc
 # --all`, so a strictness option the pinned compiler grows and this file
 # does not name reddens the gate instead of quietly not being enforced —

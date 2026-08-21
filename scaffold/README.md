@@ -110,15 +110,42 @@ it and never will; see the entry below.
   should come from real artifacts the system has actually produced
   rather than hand-written examples — an input that was never emitted
   by the real thing proves little about the real thing.
-- `tsconfig.json` — the TypeScript canon (#445), and note what it does
-  **not** contain: a single strictness setting. `lint:types` passes every
-  dial on the command line, where a compiler flag beats the same key in
-  this file even under `-p`, so a repo cannot lower the org's level and
-  a copy of those settings here would be either duplication or a lie.
-  What is left is the only thing the belt cannot invent — what the
-  project *is*: which files it contains, server or browser, which module
-  system, which type packages. Adjust `include`, `lib` and `types` to
-  the repo and leave the rest alone. Two rules ride with it: **no
+- `tsconfig.json` — the TypeScript canon (#445, corrected by #699). It
+  carries **every one of the org's strictness dials**, and that is not
+  duplication. This file had the opposite instruction until #699 — carry
+  no strictness at all, because `lint:types` passes every dial on the
+  command line where a compiler flag beats the same key even under `-p`.
+  That is true of `tsc` and false of every other type-aware tool, because
+  those tools read this file and never see the belt's command line.
+  Measured on monumental-archive, three states, one variable:
+
+  | `tsconfig.json` | `eslint --max-warnings 0` |
+  |---|---|
+  | its own config, strictness present | 0 errors |
+  | stripped, per the instruction this replaces | **935 errors** |
+  | raised to the full org level | 0 errors |
+
+  The 935 are typescript-eslint reading a weaker program —
+  `dot-notation` 590 once `noPropertyAccessFromIndexSignature` is gone,
+  `no-unnecessary-condition` 345 once the null-checking dials move.
+  Nothing about the code changed. biome moves the same way: its `types`
+  and `project` domains resolve the same TypeScript program. One fact,
+  two readers, and this file is the only one both can see — exactly what
+  `.editorconfig` already does for caps that belt formatters also
+  enforce.
+
+  `lint:tsconfig-dials` holds you to it, deriving the comparison from
+  `mise/tsc-flags.txt` and nothing else. A dial stated WEAKER than the
+  org's fails; a dial ABSENT fails, because absent is the whole defect.
+  Stricter is never inspected — name dials the org does not, freely.
+  In a monorepo, state them once in the root config and `extends` it
+  from each project: the check reads what `tsc --showConfig` resolves,
+  so inheritance counts and you never write them twice.
+
+  The rest of the file is still the only thing the belt cannot invent —
+  what the project *is*: which files it contains, server or browser,
+  which module system, which type packages. Adjust `include`, `lib` and
+  `types` to the repo and leave the dials alone. Two rules ride with it: **no
   `references`** (build mode refuses the org's flags, so a referenced
   project would be checked at whatever level the repo chose) and **no
   `allowJs`** (TypeScript refuses `isolatedDeclarations` alongside it —
