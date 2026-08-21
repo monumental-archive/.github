@@ -47,6 +47,37 @@ disable_backends = ["asdf", "ubi"]
 # decision that needs evidence about what actually runs where, and getting
 # it wrong drops a platform silently — the lock simply stops carrying it.
 
+# THE DEFAULT INLINE SHELL FOR EVERY TASK IN EVERY REPO, not just the ones
+# below (#700). `[task_config]` governs the tasks declared in the file it is
+# written in and reaches no further, so until this line a repo's own
+# `mise.toml` task ran under mise's default — `sh -c -o errexit`, which is
+# dash on an Ubuntu runner and bash-in-posix-mode on macOS. Settings, unlike
+# `[task_config]`, DO layer: the belt sets the default here and every repo
+# task inherits it through the same conf.d symlink and the same
+# MISE_GLOBAL_CONFIG_FILE that deliver everything else.
+#
+# The divergence this closes was silent and one-directional — green where
+# the author is, red where nobody is watching. Measured 2026-08-21 on a
+# planted repo task, dash forced as the default to stand in for the runner:
+#
+#   set -euo pipefail; …    exit 2   (`set: Illegal option -o pipefail`)
+#   false | cat; echo …     exit 0   ← the quiet one: the pipeline FAILED
+#   [[ 1 == 1 ]] && …       exit 127    and the task went green anyway
+#   grep -c x <<< "xx"      exit 2
+#
+# With this line all four are exit 0, 1, 0, 0 — the failing pipeline is the
+# only one that reds, which is the whole point. Note the second row: dash
+# does accept `-o errexit` on the command line, so an unpinned body was
+# never missing errexit — it was missing PIPEFAIL and nounset, and a body
+# whose failure signal is a tool's exit status inside a pipeline passed
+# having not checked. That is #82 finding 2 exactly, one layer out.
+#
+# `[task_config]` below stays: it is what the tasks IN THIS FILE run under,
+# it is what `lint:belt-shell` reads to model them, and a default a repo can
+# override is not the same statement as a declaration this file makes about
+# itself.
+unix_default_inline_shell_args = "bash -euo pipefail -c"
+
 # Environment the belt exports to every mise-run process, including the
 # subprocesses mise itself spawns to INSTALL tools — verified by setting an
 # absurd cutoff here and watching the pipx install fail (#82).
@@ -132,8 +163,13 @@ UV_NO_MANAGED_PYTHON = "1"
 UV_PYTHON_DOWNLOADS = "never"
 
 [task_config]
-# Tasks are written in bash (guards use [[ ]] and <<<); the default task
-# shell is sh, which is dash on Ubuntu runners and chokes on both.
+# Tasks are written in bash (guards use [[ ]] and <<<); mise's own default
+# task shell is sh, which is dash on Ubuntu runners and chokes on both.
+#
+# This declaration covers THIS FILE's tasks only — `[task_config]` does not
+# layer, which is #700. What reaches a repo's own `mise.toml` is the
+# `unix_default_inline_shell_args` setting above, and `lint:belt-shell`
+# reds any repo that defines tasks without restating the pin here.
 #
 # -euo pipefail, not a bare `bash -c` (#82 finding 2). Without it a task
 # whose failure signal is a tool's exit status passes if anything follows

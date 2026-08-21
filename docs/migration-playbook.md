@@ -162,8 +162,23 @@ a fresh session **started in the target repo's checkout**.
 
 ## Known landmines (learned the hard way, 2026-08-09)
 
-- Ubuntu's `sh` is dash: tasks are bash — already pinned via
-  `[task_config]`, do not write POSIX-only guards to compensate.
+- Ubuntu's `sh` is dash, and `[task_config]` does NOT layer — it governs
+  the file it is written in and reaches no repo's own `mise.toml` (#700).
+  The belt closes this from its side by setting the strict shell as mise's
+  default (`[settings] unix_default_inline_shell_args`), so tasks are bash
+  and POSIX-only guards are still the wrong compensation. A repo that
+  defines tasks restates the pin anyway — `lint:belt-shell` reds it
+  otherwise — because the belt's default is a layer that a bare clone does
+  not have:
+
+      [task_config]
+      shell = "bash -euo pipefail -c"
+
+  What went wrong before that setting existed is worth knowing, because
+  the loud half is not the dangerous half: a body carrying its own
+  `set -euo pipefail` died on the runner with `set: Illegal option -o
+  pipefail`, but a body without one ran under dash with errexit and no
+  pipefail — so a failing tool inside a pipeline passed the check.
 - `pull_request` CI sits on a synthetic merge commit; `lint:commits`
   already handles it. Do not "fix" ranges per-repo.
 - Tool walkers find lefthook's remote cache inside `.git/`; belt tasks

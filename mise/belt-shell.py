@@ -71,10 +71,22 @@ if TYPE_CHECKING:
 
 SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 
-# mise's own default when no `[task_config] shell` is declared anywhere.
-# The belt declares one, so this is the adopter's floor, not the canon's
-# path.
+# What the belt sets as mise's default inline shell
+# (`[settings] unix_default_inline_shell_args`, #700), and therefore what a
+# body runs under when its own file pins nothing.
+#
+# NOT mise's own default, which is `sh -c -o errexit` — dash on an Ubuntu
+# runner. This constant used to claim otherwise, and the claim was load
+# bearing: an unpinned repo's bodies were modelled with pipefail and
+# nounset they did not get, so the linter judged them against a stricter
+# shell than the runner gave them. The belt setting is what makes the
+# optimistic model true; `unpinned()` below is what keeps it true when the
+# belt is not the layer in play.
 DEFAULT_SHELL = "bash -euo pipefail -c"
+
+# The remedy `unpinned()` names, verbatim, so the message hands over the
+# lines to paste rather than a description of them.
+SHELL_PIN = '[task_config]\nshell = "bash -euo pipefail -c"'
 
 # `[tasks.name]` and `[tasks."name:with:colons"]`.
 HEADER_RE = re.compile(r'^\[tasks\.(?:"([^"]+)"|([^\]"]+))\]\s*$')
@@ -424,6 +436,105 @@ def collect(
     return configs, shell, sorted(env)
 
 
+def unpinned(configs: dict[Path, Config]) -> list[str]:
+    """Name every checked config that defines tasks and pins no shell.
+
+    The assertion that makes the strict shell true rather than advisory
+    (#700). `[task_config]` governs the file it is written in and layers
+    nowhere, so a repo that defines a task and restates nothing is relying
+    on the belt's default being the layer in play — true in the gate and on
+    a belt-wearing machine, false in a clone that has neither. The pin costs
+    two lines and removes the dependency.
+
+    Only files being CHECKED are asserted on: an `--env-from` config is read
+    for its `[env]`, and a config that declares no tasks has nothing to run
+    under a shell, so both stay silent. That is the same skip-clean rule
+    every other belt linter follows.
+
+    Returns:
+        One finding per offending file, each carrying the remedy.
+
+    """
+    found: list[str] = []
+    for path, config in sorted(configs.items()):
+        if not config.bodies or config.shell:
+            continue
+        remedy = SHELL_PIN.replace("\n", "; ")
+        found.append(
+            f"{path}:1: defines {len(config.bodies)} task body(ies) and pins no "
+            f"task shell — mise's default is `sh`, which is dash on an Ubuntu "
+            f"runner: no pipefail, no nounset, and `[[ ]]`/`<<<` are syntax "
+            f"errors. Add to {path}: {remedy}",
+        )
+    return found
+
+
+def write_mode(configs: dict[Path, Config]) -> int:
+    """Rewrite every body in place, and name any splice that did not land.
+
+    Returns:
+        A process exit status.
+
+    """
+    total = 0
+    refused: list[str] = []
+    for path, config in configs.items():
+        written, problems = rewrite(path, config.bodies)
+        total += written
+        refused += problems
+    for line in refused:
+        print(line, file=sys.stderr)
+    print(f"belt-shell: reformatted {total} `run` body(ies)")
+    return 1 if refused else 0
+
+
+def check_mode(
+    configs: dict[Path, Config],
+    shell: str,
+    env: Sequence[str],
+    source_path: Sequence[str],
+    pins: Sequence[str],
+) -> int:
+    """Lint every body, and settle the exit with the pin findings.
+
+    `pins` is already reported by the caller; it is passed in because a
+    clean body sweep does not make an unpinned config green.
+
+    Returns:
+        A process exit status.
+
+    """
+    head = prelude(shell, env)
+    # The linted tree resolves a body's own `source` targets; the belt
+    # directory the caller adds resolves the ones it delivers.
+    source_paths = [str(Path(p).resolve()) for p in [".", *source_path]]
+    found: list[str] = []
+    bodies = 0
+    for path, config in configs.items():
+        for body in config.bodies:
+            bodies += 1
+            found += findings(body, path, head, source_paths)
+    for line in found:
+        print(line, file=sys.stderr)
+    if found:
+        print(
+            f"belt-shell: {len(found)} finding(s) in mise task bodies — the same "
+            "bar the belt applies to standalone scripts",
+            file=sys.stderr,
+        )
+    if pins:
+        print(
+            f"belt-shell: {len(pins)} config(s) define tasks without pinning the "
+            "task shell — the belt supplies the strict shell as a default, and "
+            "the pin is what makes the file true without it (#700)",
+            file=sys.stderr,
+        )
+    if found or pins:
+        return 1
+    print(f"belt-shell: {bodies} task body(ies) shfmt-clean and shellcheck-clean")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Check, or rewrite, every task body in the files named.
 
@@ -454,43 +565,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     configs, shell, env = collect(paths, [Path(f) for f in args.env_from])
 
+    # Asserted before the interpreter skip below and before any body is
+    # read: whether a file pins the shell is a fact about the file, not
+    # about what the tools can make of its bodies, so a config the linter
+    # then declines to model must still answer for it.
+    pins = [] if args.write else unpinned(configs)
+    for line in pins:
+        print(line, file=sys.stderr)
+
     if Path(shlex.split(shell)[0]).name not in {"bash", "sh"}:
         print(f"belt-shell: task shell is {shell!r}, not shell — skipped")
-        return 0
+        return 1 if pins else 0
 
     if args.write:
-        total = 0
-        refused: list[str] = []
-        for path, config in configs.items():
-            written, problems = rewrite(path, config.bodies)
-            total += written
-            refused += problems
-        for line in refused:
-            print(line, file=sys.stderr)
-        print(f"belt-shell: reformatted {total} `run` body(ies)")
-        return 1 if refused else 0
-
-    head = prelude(shell, env)
-    # The linted tree resolves a body's own `source` targets; the belt
-    # directory the caller adds resolves the ones it delivers.
-    source_paths = [str(Path(p).resolve()) for p in [".", *args.source_path]]
-    found: list[str] = []
-    bodies = 0
-    for path, config in configs.items():
-        for body in config.bodies:
-            bodies += 1
-            found += findings(body, path, head, source_paths)
-    for line in found:
-        print(line, file=sys.stderr)
-    if found:
-        print(
-            f"belt-shell: {len(found)} finding(s) in mise task bodies — the same "
-            "bar the belt applies to standalone scripts",
-            file=sys.stderr,
-        )
-        return 1
-    print(f"belt-shell: {bodies} task body(ies) shfmt-clean and shellcheck-clean")
-    return 0
+        return write_mode(configs)
+    return check_mode(configs, shell, env, args.source_path, pins)
 
 
 if __name__ == "__main__":
