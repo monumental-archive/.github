@@ -5254,11 +5254,28 @@ dir = "{{cwd}}"
 # obligation instead of one. audit:source-vsa enumerates chains;
 # nothing enumerated the rest — which is how the signer carried no
 # audit stub and nobody noticed until a capstone audit read the org by
-# hand (finding 8). The population is the org's non-archived, non-fork
-# repos; the obligations are the stub set the runbook wires; a repo
-# excused from one names itself in security/adoption-optout.txt as
-# "repo artifact reason". Absence plus silence is the only red state —
+# hand (finding 8). Absence plus silence is the only red state —
 # "deliberate" survives as a written exception, never as a gap.
+#
+# The POPULATION is slsa/assert-policy.json's roster, not the forge
+# listing (#693). It used to be the listing, and a roster-declared
+# EXCLUSION was therefore invisible: the only way to stop the walk
+# demanding evidence of a repository that owes none was a written
+# opt-out row per artifact. Measured 2026-08-21, monumental-archive
+# needed four of them — audit, scorecard, source-attest,
+# dependency-review — which is an exclusion decaying into a standing
+# exception, the one thing the vocabulary forbids. An exclusion
+# produces NOTHING; an exception is dated and loud.
+#
+# The listing is still read, for exactly one thing: reconciliation by
+# NAME in both directions, so a repository in the org and absent from
+# the roster SCREAMS rather than being quietly walked, and one declared
+# but not listed screams too. A count cannot say which went missing.
+#
+# The obligation set is derived per repository from what its declared
+# membership makes applicable — mise/adoption-population.py holds that
+# derivation and the table tests for it. "Does not apply" and "has not
+# got" are different sentences, and only the second is debt.
 # The canon's self-* variants and gate.yml satisfy the same
 # obligations under their canonical alternate names.
 run = '''
@@ -5278,23 +5295,44 @@ command -v gh > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:adoption walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate \
-  --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
-  echo "audit:adoption: could not enumerate the org's repositories — no population, no audit" >&2
+roster="slsa/assert-policy.json"
+[[ -f ${roster} ]] || {
+  echo "audit:adoption: ${roster} missing — the roster IS the population," >&2
+  echo "  so without it there is nothing to walk (#693)" >&2
+  exit 1
+}
+# One object per line, re-slurped into an array: `gh --paginate` emits
+# one JSON array PER PAGE, and concatenated arrays are not JSON. A
+# single-page org hides that; the org that outgrows a page would not.
+if ! listing=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos?per_page=100" --paginate \
+  --jq '.[] | {name, private, archived, fork}' 2> /dev/null | jq -s '.'); then
+  echo "audit:adoption: could not enumerate the org's repositories — CANNOT_JUDGE" >&2
+  echo "  (no listing, no reconciliation: the roster would go unchecked)" >&2
   exit 1
 fi
+derive="${ORG_BELT_DIR}/adoption-population.py"
+if ! population=$(python3 "${derive}" population --roster "${roster}" <<< "${listing}"); then
+  echo "audit:adoption: the roster was refused, so no population was derived" >&2
+  exit 1
+fi
+unlisted=$(sed -n 's/^UNLISTED\t//p' <<< "${population}")
+absent=$(sed -n 's/^ABSENT\t//p' <<< "${population}")
+repos=$(sed -n 's/^POP\t//p' <<< "${population}")
 optout="security/adoption-optout.txt"
 fail=""
 blind=""
 checked=0
+tagged=""
+seen=$(mktemp -d)
 for repo in ${repos}; do
   # Unreadable is CANNOT_JUDGE, never a gap. The old branch here read
   # "unreadable is not adopted", which is a finding against a repository
   # the walk never saw — and for a private member with a token scoped to
   # this repo alone, that is every artifact it owes (#692).
-  if ! files=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/.github/workflows" \
-    --jq '.[].name' 2> /dev/null); then
+  if ! gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/.github/workflows" \
+    --jq '.[].name' > "${seen}/${repo}" 2> /dev/null; then
     blind="${blind} ${repo}"
+    rm -f "${seen}/${repo}"
     continue
   fi
   # The versioned archetype is proven by CONSEQUENCE, not by config: a
@@ -5305,36 +5343,42 @@ for repo in ${repos}; do
   # #354 exists to prevent. Tags cannot be deleted to escape the check
   # (org-default-tag protects them), and a versioned repo that loses
   # release.yml entirely is now caught, which the file marker never did.
+  # A tag is an ACT, not a claim, so this stays a consequence and is not
+  # narrowed by a repository's declared tracks: it can only make the
+  # audit louder (#693).
   # Read whole, never piped into grep -q: gh --paginate dies on SIGPIPE
   # when the reader closes early (the audit:source-vsa lesson).
   tags=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/tags" --paginate --jq '.[].name' 2> /dev/null || true)
-  releases=false
   if grep -qE '^v[0-9]' <<< "${tags}"; then
-    releases=true
+    tagged="${tagged} ${repo}"
   fi
-  # artifact spec: name = acceptable workflow filenames (| separated)
-  set -- "ci=ci.yml|gate.yml" "audit=audit.yml" "scorecard=scorecard.yml" \
-    "source-attest=source-attest.yml" \
-    "dependency-review=dependency-review.yml|self-dependency-review.yml"
-  if [[ ${releases} == true ]]; then
-    set -- "$@" "release=release.yml|self-release.yml" "publish=publish.yml|self-publish.yml"
-  fi
-  for spec in "$@"; do
-    artifact="${spec%%=*}"
-    found=false
-    IFS='|' read -ra names <<< "${spec#*=}"
-    for f in "${names[@]}"; do
-      grep -qxF "${f}" <<< "${files}" && found=true
-    done
-    checked=$((checked + 1))
-    [[ ${found} == true ]] && continue
-    if [[ -f ${optout} ]] && grep -qE "^${repo}[[:space:]]+${artifact}[[:space:]]+\S" "${optout}"; then
-      continue
-    fi
-    fail="${fail}
-  ${repo}: missing ${artifact} (no workflow named ${spec#*=}) and no opt-out row"
-  done
 done
+# The obligations are DERIVED from declared membership, never listed
+# here: "does not apply" leaves no row behind, which is what keeps an
+# exclusion from decaying into a standing exception (#693).
+if ! owed=$(python3 "${derive}" obligations --roster "${roster}" \
+  --tagged "${tagged}" <<< "${listing}"); then
+  echo "audit:adoption: the roster was refused, so no obligations were derived" >&2
+  exit 1
+fi
+while IFS=$'\t' read -r _ repo artifact names; do
+  [[ -n ${repo} ]] || continue
+  # A repo the walk could not read is already CANNOT_JUDGE; judging its
+  # obligations against an empty file list would manufacture findings.
+  [[ -f ${seen}/${repo} ]] || continue
+  found=false
+  IFS='|' read -ra alts <<< "${names}"
+  for f in "${alts[@]}"; do
+    grep -qxF "${f}" "${seen}/${repo}" && found=true
+  done
+  checked=$((checked + 1))
+  [[ ${found} == true ]] && continue
+  if [[ -f ${optout} ]] && grep -qE "^${repo}[[:space:]]+${artifact}[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+\S" "${optout}"; then
+    continue
+  fi
+  fail="${fail}
+  ${repo}: missing ${artifact} (no workflow named ${names}) and no opt-out row"
+done <<< "${owed}"
 if [[ -n ${blind} ]]; then
   echo "audit:adoption: CANNOT_JUDGE — could not read .github/workflows in:${blind}" >&2
   echo "  The walk never saw these repositories, so it knows nothing about" >&2
@@ -5343,14 +5387,38 @@ if [[ -n ${blind} ]]; then
   echo "  Contents: read on every member of the population (#692)." >&2
   exit 1
 fi
+reconciled=0
+if [[ -n ${unlisted} ]]; then
+  echo "audit:adoption: in the org and NOT in the roster:" >&2
+  while IFS= read -r name; do echo "  ${name}" >&2; done <<< "${unlisted}"
+  echo "  The roster is the org's statement of its own shape, so a" >&2
+  echo "  repository missing from it is walked by nothing and covered by" >&2
+  echo "  no claim. Declare it in ${roster} — with its tracks, or with an" >&2
+  echo "  empty track list and a reason if it is an exclusion — or" >&2
+  echo "  transfer it out (#266, #693)." >&2
+  reconciled=1
+fi
+if [[ -n ${absent} ]]; then
+  echo "audit:adoption: declared in the roster and NOT in the org listing:" >&2
+  while IFS= read -r name; do echo "  ${name}" >&2; done <<< "${absent}"
+  echo "  Either the repository is gone and the roster is stale, or the" >&2
+  echo "  token cannot see it — both are red, and neither is clean." >&2
+  reconciled=1
+fi
 if [[ -n ${fail} ]]; then
   echo "audit:adoption: population gaps:${fail}" >&2
   echo "  wire the stub per docs/runbook.md, or record the exception in" >&2
-  echo "  ${optout} as 'repo artifact reason' (#349 S7, the #266 rule)" >&2
-  exit 1
+  echo "  ${optout} as 'repo artifact YYYY-MM-DD reason' (#349 S7, #266)." >&2
+  echo "  An artifact a repository's declared membership does not make" >&2
+  echo "  applicable never reaches this list and needs no row (#693)." >&2
+  reconciled=1
 fi
+# One red never hides another: an undeclared repository and a missing
+# stub are different defects with different owners, and reporting only
+# the first would send the reader back for a second round.
+[[ ${reconciled} -eq 0 ]] || exit 1
 count=$(wc -w <<< "${repos}" | tr -d ' ')
-echo "audit:adoption: ${count} repo(s), ${checked} obligations, no silent gaps"
+echo "audit:adoption: ${count} roster repo(s), ${checked} derived obligations, no silent gaps"
 '''
 
 [tasks."audit:signer-surface"]

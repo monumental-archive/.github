@@ -1,0 +1,37 @@
+# Adoption debt: a repository that OWES a governance artifact and has
+# not got it yet. One row per line, `repo artifact YYYY-MM-DD reason`.
+# audit:adoption reads it; a row suppresses exactly one artifact for
+# exactly one repository.
+#
+# This file is for EXCEPTIONS, and an exception is dated and loud. It
+# is NOT the parking place for "outside the scope", and a row written
+# to mean that is a bug in the derivation, not an entry here.
+#
+# The difference is the whole point (#693, #672). An EXCLUSION says a
+# repository owes no evidence: it produces nothing — no row, no count,
+# no board cell — because there is nothing to say. An EXCEPTION says a
+# repository owes something it has not got: dated, removal-conditioned,
+# and loud until resolved.
+#
+# So before adding a row, ask which sentence is true:
+#
+#   "does not apply"  -> NOT a row. The obligation set is derived per
+#                        repository from its declared membership in
+#                        slsa/assert-policy.json and from what is
+#                        structurally possible. An artifact a
+#                        repository's membership does not make
+#                        applicable never reaches the gap list at all.
+#                        Track evidence (source-attest) drops for a
+#                        repository off that track; Scorecard and
+#                        dependency review drop for a private one.
+#                        If something that does not apply is being
+#                        demanded, fix mise/adoption-population.py.
+#
+#   "has not got it"  -> a row here, with the date it was written and
+#                        the condition for removing it.
+#
+# The date is not decoration: it is what makes the exception ageable,
+# and what lets a reader see an exception that has outlived its reason.
+#
+# Empty, deliberately. Every member of the roster either carries what
+# its membership makes applicable or is a red in the Monday audit.
