@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.52.0](https://github.com/monumental-archive/.github/compare/v1.51.1...v1.52.0) - 2026-08-21
+
+### Added
+
+- exclude the tenth restriction contradiction ([#701](https://github.com/monumental-archive/.github/pull/701))
+
+### Fixed
+
+- read first lines with sed -n 1p, not head -1 ([#679](https://github.com/monumental-archive/.github/pull/679))
+- declare the shipped set's security cadence ([#685](https://github.com/monumental-archive/.github/pull/685))
+
 ## [1.51.1](https://github.com/monumental-archive/.github/compare/v1.51.0...v1.51.1) - 2026-08-21
 
 ### Fixed
