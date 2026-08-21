@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.56.0](https://github.com/monumental-archive/.github/compare/v1.55.1...v1.56.0) - 2026-08-21
+
+### Added
+
+- verify a caller's first-party FROM before the build (#715) ([#755](https://github.com/monumental-archive/.github/pull/755))
+
+### Fixed
+
+- deliver the org shellcheck config (#696) ([#733](https://github.com/monumental-archive/.github/pull/733))
+
 ## [1.55.1](https://github.com/monumental-archive/.github/compare/v1.55.0...v1.55.1) - 2026-08-21
 
 ### Fixed
