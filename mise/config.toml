@@ -1017,6 +1017,36 @@ dir = "{{cwd}}"
 # a `biome.json` that claimed `qwik` and switched `noNodejsModules` off,
 # and measuring no change in either (0 Qwik findings, 33 noNodejsModules).
 #
+# ONE STABLE RULE IS OFF, and it is a mechanical contradiction rather
+# than a preference (#759). `complexity/useLiteralKeys` wants
+# `row["id"]` written `row.id`. `noPropertyAccessFromIndexSignature` —
+# an org tsc dial, forced on the command line and, since #731, required
+# in every repo's tsconfig.json — makes exactly that rewrite an error.
+# Proven on two files rather than inferred: given an index-signature
+# type, the bracket form draws `useLiteralKeys` and type-checks clean,
+# and the dot form is biome-clean and `TS4111: Property 'id' comes from
+# an index signature, so it must be accessed with ['id']`. There is no
+# order of edits in which both are green.
+#
+# The tsc dial wins because it is the correctness distinction — it marks
+# an index-signature lookup as one, which is the whole reason the dial
+# was adjudicated into tsc-flags.txt — where the biome rule is a style
+# preference that recommends the one form TypeScript rejects. Scale on
+# monumental-archive: 590 sites, every one of them a database row read
+# through `postgres`'s index-signature `Row`. 590 per-site
+# `biome-ignore` comments for a rule wrong as a CLASS is the shape #694
+# refused; that is a waiver, not an exception.
+#
+# Naming one rule in a group does NOT reset the group under
+# `preset: "all"` — measured on the same tree, the other five complexity
+# rules that fire (noExcessiveLinesPerFunction 53,
+# noExcessiveCognitiveComplexity 22, useMaxParams 4,
+# useSimplifiedLogicExpression 3, noUselessUndefined 2) are unchanged.
+# The invariant is pinned by a test rather than left to prose:
+# `test_biome_config.py` refuses a config that enables this rule while
+# `tsc-flags.txt` still names the dial, so the pair cannot silently
+# disagree again.
+#
 # THE DOMAINS REACH NURSERY TOO, and did not at first (#720). biome's
 # `preset: "all"` excludes nursery, so the org names all 87 rules one by
 # one, and a NAMED rule beats its own domain being "none" — measured,

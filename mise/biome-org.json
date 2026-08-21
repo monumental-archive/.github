@@ -115,7 +115,10 @@
         "useVueNextTickPromise": "on",
         "useVueValidVFor": "on"
       },
-      "preset": "all"
+      "preset": "all",
+      "complexity": {
+        "useLiteralKeys": "off"
+      }
     }
   }
 }

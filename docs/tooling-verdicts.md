@@ -36,7 +36,7 @@ honestly blocked on.
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. One stable rule is excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701. |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
@@ -1017,6 +1017,47 @@ The generated config is what biome is run against, so the declaration
 never reaches the tool even if it lies: proven by planting a `biome.json`
 that claimed `qwik` and switched `noNodejsModules` off, and measuring no
 change to either (0 Qwik findings, 33 `noNodejsModules`).
+
+**Two org controls demanded the opposite edit on the same line**
+(#759). `complexity/useLiteralKeys` wants `row["id"]` written `row.id`.
+`noPropertyAccessFromIndexSignature` — an org tsc dial, named in
+`tsc-flags.txt`, forced on the compiler's command line and, since #731,
+required in every repo's own `tsconfig.json` — makes exactly that
+rewrite an error. Proven on two files rather than inferred from a
+bulk conversion, given an index-signature type:
+
+| form | biome | tsc at the org's flags |
+|---|---|---|
+| `row["id"]` | `useLiteralKeys` | clean |
+| `row.id` | clean | `TS4111` |
+
+There is no order of edits in which both are green. On
+monumental-archive that is **590** sites, every one a database row read
+through `postgres`'s index-signature `Row` type — and 590 per-site
+`biome-ignore` comments for a rule wrong as a CLASS is the shape #694
+refused: a waiver, not an exception.
+
+The tsc dial wins, and the reason is not seniority. It is the
+correctness distinction — it marks an index-signature lookup as one,
+which is why it was adjudicated into the flag file — where the biome
+rule is a style preference recommending the one form TypeScript
+rejects. Measured: naming the rule does not reset its group under
+`preset: "all"`, and the other five complexity rules that fire on that
+tree are unchanged. The pair is pinned by a cross-file test rather than
+by prose, because `lint:biome` reads one file and `lint:types` the
+other, and each was green in isolation the whole time the pair was
+unsatisfiable — which is precisely how it survived.
+
+**A zero can mean "did not look".** The lane that found #759 first
+measured `TS4111: 0` after converting the tree, and believed it long
+enough to write it down. One line of the conversion had produced a
+syntax error, and a project that does not PARSE never reaches semantic
+checking — so tsc reported the parse error and nothing else. Fixing
+that single line surfaced all 587. This is the org's own sqlfluff `PRS`
+trap (#708) in TypeScript: one unparsable unit makes an entire file's
+real findings invisible. **When a check that should find something
+reports nothing, prove the tool got as far as looking before recording
+the zero.**
 
 **Domains stopped at the nursery door, and a named rule beat its own
 domain** (#720, found building #695). `preset: "all"` excludes nursery,
