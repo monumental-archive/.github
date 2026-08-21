@@ -1,14 +1,25 @@
 {
   "name": "org-default",
-  "description": "Everything on, enforced. Free features on public repos; GHAS-billed features simply fail to attach on private repos under the free plan.",
+  "description": "Everything on, enforced. The PUBLIC shape: every feature here is free on public repos. On a private repo Secret Protection and Code Security are metered products — they attach and bill per active committer, so private members take the org-private shape instead.",
+  "advanced_security": "enabled",
   "dependency_graph": "enabled",
+  "dependency_graph_autosubmit_action": "not_set",
   "dependabot_alerts": "enabled",
   "dependabot_security_updates": "enabled",
+  "dependabot_delegated_alert_dismissal": "not_set",
   "code_scanning_default_setup": "enabled",
+  "code_scanning_options": {
+    "allow_advanced": false
+  },
+  "code_scanning_delegated_alert_dismissal": "not_set",
   "secret_scanning": "enabled",
   "secret_scanning_push_protection": "enabled",
+  "secret_scanning_delegated_bypass": "not_set",
   "secret_scanning_non_provider_patterns": "enabled",
   "secret_scanning_validity_checks": "enabled",
+  "secret_scanning_extended_metadata": "enabled",
+  "secret_scanning_generic_secrets": "not_set",
+  "secret_scanning_delegated_alert_dismissal": "not_set",
   "private_vulnerability_reporting": "enabled",
   "enforcement": "enforced"
 }
