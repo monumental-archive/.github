@@ -115,7 +115,7 @@ standing = "**Have** — lockfiles committed everywhere, per-release SBOMs on ev
 [[dependency]]
 level = "L2"
 demands = "Known vulnerabilities triaged per release"
-standing = "**Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on `release-lab@v0.20.0`, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see \"Where L2 is met by construction\""
+standing = "**Met by construction** — deny in the gate, blast-radius on the cron, and a commit point on BOTH archetypes refuses every publish job while an advisory in its SBOM is undecided (the continuous path gained it in #717, one decision per publish rather than per version) (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on `release-lab@v0.20.0`, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see \"Where L2 is met by construction\""
 
 [[dependency]]
 level = "L3"

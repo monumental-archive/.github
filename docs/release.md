@@ -27,8 +27,11 @@ full rebuild by construction), a guard that refuses *tags* — the inverse of
 the versioned guard — and the same signing identity over the index digest.
 The caller stub is
 [`workflow-templates/continuous.yml`](../workflow-templates/continuous.yml).
-Continuous repositories share the toolbelt, the gate and the signer, and
-nothing else in this document applies to them.
+Continuous repositories share the toolbelt, the gate, the signer and the
+**dependency commit point** (#717) — the last of those because a track
+whose mechanism runs on only one archetype is a claim with a scope limit
+nobody wrote down, and this org refuses those everywhere else. Nothing
+else in this document applies to them.
 
 A repository whose release needs fit neither archetype is a design question
 for this repo, not a licence to improvise.
@@ -936,6 +939,26 @@ removes. The residual case — a rebuild introducing a regression the live
 image lacked — is real, and the answer to it is still not to block, since
 that trades a rare regression for a guaranteed weekly failure to
 remediate.
+
+**A scanner's report and a triage decision are different things, and only
+one of them blocks.** The rule above governs the SCANNER: what a feed says
+today about bytes that already shipped never stops a publish, on either
+archetype. The commit point governs the DECISION, and it does refuse — on
+both archetypes since #717 — because what it refuses is not a
+vulnerability but the *absence of a judgment about one*, which is
+remediable in minutes by writing the judgment down. That distinction is
+the whole of Dependency L2: "known, decided, and written down", never
+vulnerability-free ([`dependency-track.md`](dependency-track.md)).
+
+The scheduled rebuild is where the two meet, and it is the case that
+decides the shape rather than an exception to it. A blocked rebuild
+preserves more exposure than one that ships, so a refusal there costs
+something real — which is why the refusal is **loud**: the commit point
+fails visibly rather than skipping, the run goes red, and the undecided
+advisories are written into the job summary so the person who can clear
+them does not have to open a log to find out what to decide. What is
+never acceptable is the third option, a rebuild that publishes past an
+advisory nobody has looked at while a green cron reports success.
 
 **But a report-only scan must go somewhere a human or a machine will see
 it.** A scan whose output lands in the log of a scheduled job that

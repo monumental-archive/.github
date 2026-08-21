@@ -12,7 +12,7 @@ the target and the declined doors were decided there and in #121/#122.
 | Level | Demands | Standing |
 | --- | --- | --- |
 | L1 | Inventory: know what you depend on | **Have** — lockfiles committed everywhere, per-release SBOMs on every release |
-| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on `release-lab@v0.20.0`, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
+| L2 | Known vulnerabilities triaged per release | **Met by construction** — deny in the gate, blast-radius on the cron, and a commit point on BOTH archetypes refuses every publish job while an advisory in its SBOM is undecided (the continuous path gained it in #717, one decision per publish rather than per version) (`stele derive vex` + the `commit-point` barrier, #349); every decision exits through a signed VEX keyed by `package@version`. First exercised on `release-lab@v0.20.0`, which it refused a release — and whose npm and GHCR uploads raced past the then-unwired graph, the defect #349 finding 1 closed — see "Where L2 is met by construction" |
 | L3 | Producer-controlled locations | **Declined in writing (#121)** — permanent vendor weight for availability coverage that checksum integrity does not need |
 | L4 | Acceptable-risk policy over L3 | **Declined (#122)** — sequential on L3 |
 
@@ -271,6 +271,47 @@ the release does not happen. The Monday sweeps over *already-published*
 releases — which no release-time gate can cover — remain: `audit:deny`
 from `repo-audit.yml` via each repo's audit stub, and
 `audit:blast-radius` from the canon's own `audit.yml`.
+
+### Which publish shapes the commit point covers
+
+Both archetypes, since #717 — stated here because until then the
+sentence above was true of the release path and silent about the other
+one, which is how a track comes to have an unwritten scope limit.
+
+| Publish shape | Where the commit point sits | What it decides over |
+| --- | --- | --- |
+| Versioned (`publish.yml`) | between the prove jobs and every publish job, once per release | the release view plus each planned per-artifact inventory (#492), one decision each |
+| Continuous (`continuous.yml`) | between the per-architecture digest pushes and the `latest` tag, once per publish | the inventory of each pushed digest, taken from the registry before any tag names it |
+
+The difference is only *which act is irreversible*. A version is spent
+the moment a tag exists; a stream is committed the moment `latest`
+moves. The per-architecture pushes are untagged digests that name
+nothing — the same property the repro gate relies on (#118) — so they
+are the last point at which refusing still prevents something, and the
+inventory is taken from them rather than from the index the release
+path would scan.
+
+Everything else is the same leg, deliberately: the same
+`stele derive vex` over decisions keyed by `package@version`, the same
+gate-class-versus-rebuild-cadence split, the same `audit:deny` and
+`audit:go-vulns` legs guarding their own applicability, and the same
+signed `release-decision/v1` claim — minus the `tag` field, which a
+stream has none of and which would manufacture the version surface the
+archetype's guard exists to refuse. One decision per publish rather
+than one per version is the only count that changes.
+
+**A refused continuous publish is loud, and that is load-bearing.** The
+scheduled rebuild exists to remediate base layers nothing can pin, so
+blocking one preserves more exposure than shipping it
+([`release.md`](release.md)). The commit point therefore fails visibly
+rather than skipping, and the undecided advisories go to the job
+summary, so the refusal reaches whoever can clear it by writing a
+decision. It deliberately does not open an issue: that would need
+`issues: write` from every caller, and adding a permission to a shared
+workflow breaks every repository that calls it until each is edited by
+hand (`release.md`, "A shared workflow's permissions are a public
+contract") — a real cost against a red scheduled run that GitHub
+already notifies on.
 
 The gate-determinism rule is untouched: it keeps network-bound checks
 out of the **`ci` gate**, and it is right. The release path is already

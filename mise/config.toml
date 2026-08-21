@@ -3964,11 +3964,19 @@ dir = "{{cwd}}"
 # the ordering the docs claimed was a race the org kept winning, because
 # nothing publish-side carried the `needs` edge. The fix is a single
 # commit-point job between proof and consequence; this lint makes the
-# fix structural. Deterministic — parses one tracked file — so it is
+# fix structural. Deterministic — parses tracked files — so it is
 # gate-eligible. Canon-only: consuming repos hold a one-line caller
 # stub, not the orchestrator.
 #
-# Enforced, from the `# phase:` markers in publish.yml:
+# BOTH archetype orchestrators are judged (#717). The continuous path
+# gained the same barrier for the same reason, and a rule that covered
+# only publish.yml would have made the second one convention while
+# calling the first structural — the exact split #349 finding 1 was.
+# Each file is parsed on its own: the awk carries per-file state, and
+# one invocation over both would let one archetype's guard satisfy the
+# other's.
+#
+# Enforced, from the `# phase:` markers in each orchestrator:
 #   1. every job carries exactly one marker, from the closed vocabulary
 #   2. exactly one commit-point job, named commit-point
 #   3. commit-point's needs EQUAL `guard` plus every prove-phase job —
@@ -3987,12 +3995,17 @@ dir = "{{cwd}}"
 #      phase that could become a route around the commit point. It
 #      cannot: nothing downstream can depend on it, and it signs nothing
 run = '''
-f=".github/workflows/publish.yml"
-[[ -f ${f} && -d security ]] || {
+orchestrators=""
+for f in .github/workflows/publish.yml .github/workflows/continuous.yml; do
+  [[ -f ${f} ]] && orchestrators="${orchestrators}${f} "
+done
+[[ -n ${orchestrators} && -d security ]] || {
   echo "lint:release-phases: not the canon orchestrator, skipped"
   exit 0
 }
-awk '
+red=0
+for f in ${orchestrators}; do
+  awk '
   /^jobs:$/ { injobs = 1; next }
   !injobs { next }
   /^  # phase: / { pending = $NF; next }
@@ -4076,16 +4089,18 @@ awk '
       }
     }
     if (bad != "") {
-      printf "lint:release-phases: the commitment barrier is unwired:%s\n", bad > "/dev/stderr"
+      printf "lint:release-phases: %s: the commitment barrier is unwired:%s\n", FILENAME, bad > "/dev/stderr"
       exit 1
     }
-    printf "lint:release-phases: %d jobs, barrier intact\n", n
+    printf "lint:release-phases: %s: %d jobs, barrier intact\n", FILENAME, n
   }
-' "${f}" || {
+' "${f}" || red=1
+done
+if [[ ${red} -ne 0 ]]; then
   echo "  every publish/attest job must reach commit-point (#349 finding 1);" >&2
-  echo "  see the PHASES header in publish.yml" >&2
+  echo "  see the PHASES header in the orchestrator named above" >&2
   exit 1
-}
+fi
 '''
 
 [tasks."lint:signer-pin"]

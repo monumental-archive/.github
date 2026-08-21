@@ -14,10 +14,32 @@
 # no cache of any kind (everything downstream of it is signed), so every
 # run is a full rebuild by construction.
 #
-# capability-boundary: the `sign` job below declares `id-token: write`,
-# but this file runs no steps of its own — every job is a `uses:`. The
-# grant exists solely to be passed to `signer`, and the build job that
-# runs caller code holds `contents: read` + `packages: write` only.
+# PHASES, and the dependency commit point (#717). This archetype now
+# carries the same barrier the release path does, in the same shape and
+# under the same lint: every job wears a `# phase:` marker, one
+# `commit-point` job stands between proof and consequence, and the job
+# that makes the stream public reaches it through `needs` rather than
+# through an ordering nobody enforces. The defect it closes is the one
+# the release path already paid for on lab v0.20.0 — a gate that goes
+# red while a publish eleven seconds later goes out anyway (#349
+# finding 1) — with the archetype difference being WHICH act is
+# irreversible. Here it is the `latest` tag: the per-arch pushes are
+# untagged digests and name nothing, so the inventory is taken from
+# those bytes, judged, and the tag is created only if the decision
+# opened. One decision per publish, not per version — a stream has no
+# versions to hang one on.
+#
+# capability-boundary: two jobs below declare `id-token: write`, and
+# neither runs caller-supplied code. `sign` is a `uses:` of the org
+# signer and the grant exists solely to be passed to it. `commit-point`
+# is defined here with steps of its own, and those steps judge other
+# jobs' results and hand `actions/attest` a predicate assembled from
+# them — it checks out nothing and runs no script of the caller's. The
+# jobs that DO run caller code are `build` (the class build, which
+# holds `contents: read` + `packages: write`), `assemble` and `sbom`,
+# and none of them holds a signing identity. The belt lint is
+# file-scoped rather than job-scoped, so this exception is written down
+# rather than assumed.
 ---
 name: continuous
 
@@ -75,6 +97,7 @@ jobs:
   # a tag. A continuous repository has no versions, and an attestation
   # minted for a ref that looks like a release would manufacture a version
   # surface the archetype exists to not have.
+  # phase: admit
   guard:
     name: Refuse tags — this stream has no versions
     runs-on: ubuntu-24.04
@@ -92,6 +115,7 @@ jobs:
   # the archetype difference is one flag: the continuous map simply never
   # contains `version`, because this stream has none. It runs no caller
   # code; the guard stays `permissions: {}` untouched.
+  # phase: admit
   facts:
     name: Resolve the image facts
     needs: guard
@@ -145,6 +169,7 @@ jobs:
             --description "${IMAGE_DESCRIPTION}")
           grep -E '^(facts|epoch)=' <<< "${out}" >> "${GITHUB_OUTPUT}"
           grep -Ev '^(facts|epoch)=' <<< "${out}" || true
+  # phase: build
   build:
     name: Build image
     needs:
@@ -166,17 +191,310 @@ jobs:
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
 
+  # The dependency commit point's proof half (#717). The release path
+  # takes its inventory from the tree it tagged; a stream has no tag, so
+  # this takes it from the bytes just pushed — each per-architecture
+  # digest, pulled back from the registry and scanned there, which is
+  # the same class-shaped derivation assemble-oci-index.yml performs on
+  # the index (docs/dependency-track.md, "SBOMs are class-shaped":
+  # trivy over the published image BY DIGEST, "not a local twin").
+  #
+  # Why here and not in the assemble job that already renders one: the
+  # SBOM assemble renders is taken AFTER `imagetools create --tag`, and
+  # the tag is this archetype's irreversible act. A gate downstream of
+  # it would decide about an image the world already has. The per-arch
+  # digests, by contrast, exist and are public reference-less — the
+  # same property #118 relies on — so they are the last moment at which
+  # refusing still prevents something.
+  #
+  # Both architectures, not one. An arch-specific package is exactly
+  # the finding a single-platform scan would miss, and `stele derive
+  # vex` takes one subject per artifact, so each digest is decided for
+  # itself and named in its own statement.
+  # phase: prove
+  sbom:
+    name: Inventory and triage the digests about to be published
+    needs:
+      - guard
+      - facts
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read # pull the pushed digests back to scan them
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.10
+          cache: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: oci-digest-*
+          merge-multiple: true
+          path: digests
+
+      - name: Inventory each pushed digest from the registry
+        id: inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          mkdir -p dist
+          subjects=""
+          for arch in amd64 arm64; do
+            digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
+            if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::no ${arch} digest to inventory; refusing to decide about a partial image"
+              exit 1
+            fi
+            out="dist/${arch}.spdx.json"
+            trivy image --config /dev/null --format spdx-json \
+              --output "${out}" "${image}@${digest}"
+            [[ -s ${out} ]] || {
+              echo "::error::image SBOM export produced nothing for ${arch}"
+              exit 1
+            }
+            # The same two assertions the assemble job makes of its own
+            # SBOM: a versionless PURL is invisible to every scanner, so
+            # an inventory carrying one would gate on a set it cannot
+            # see (docs/dependency-track.md, the measured 2-of-236).
+            purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
+            bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
+              | .referenceLocator | select(test("@") | not)] | length' "${out}")
+            if [[ ${purls} -eq 0 || ${bare} -ne 0 ]]; then
+              emsg="${arch} SBOM has ${purls} PURLs, ${bare} versionless — a versionless PURL is invisible to every"
+              emsg+=" scanner, so an inventory carrying one gates on a set it cannot see"
+              echo "::error::${emsg}"
+              exit 1
+            fi
+            # trivy stamps the document name with the reference it was
+            # given, so the product id IS the digest a consumer pulls —
+            # derived, never composed here.
+            name=$(jq -r '.name' "${out}")
+            subjects="${subjects}${subjects:+,}${name}=${out}"
+            echo "::notice::${arch} (${digest}): ${purls} versioned PURLs"
+          done
+          echo "subjects=${subjects}" >> "${GITHUB_OUTPUT}"
+      - name: Derive this publish's VEX and gate on undecided advisories
+        # The release path's leg, unchanged in policy and in tool
+        # (publish.yml's sbom job): decisions are keyed by
+        # package@version, coverage is derived from the inventory just
+        # taken, and a gate-class advisory with no decision fails HERE —
+        # with the commit point turning that failure into a `needs` edge
+        # every publish job waits on, which is the half #349 finding 1
+        # bought the hard way. Network-bound (the OSV feed), which is
+        # fine on a publish path and never in the `ci` gate.
+        #
+        # The derived document is not attached to anything: a stream has
+        # no release to carry an asset. It travels as a run artifact
+        # beside the inventories, and the decision signed at the commit
+        # point is what a consumer verifies.
+        env:
+          SUBJECTS: ${{ steps.inventory.outputs.subjects }}
+          # The instant this publish describes, resolved once in the
+          # facts job from the published commit's own committer time —
+          # the same value SOURCE_DATE_EPOCH carries into the image. A
+          # clock reading here would be the one wall-clock value in a
+          # document every other field derives (docs/release.md, "one
+          # map, resolved once"), and `stele derive vex` asks for the
+          # release instant, "never a clock reading".
+          SOURCE_EPOCH: ${{ needs.facts.outputs.epoch }}
+        run: |
+          set -euo pipefail
+          command -v stele > /dev/null || {
+            echo "::error::stele is not on the runner — it is a belt tool"
+            exit 1
+          }
+          # A stream's document is identified by the run that made it:
+          # there is no version to name it after, and two publishes of
+          # the same stream are two different documents.
+          id="https://openvex.dev/docs/public/vex-${GITHUB_REPOSITORY//\//-}-continuous-${GITHUB_RUN_ID}-derived"
+          released=$(date -u -d "@${SOURCE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)
+          # Captured, not streamed, so the verdict reaches the job
+          # summary either way. A refused SCHEDULED rebuild is the case
+          # that decides this: blocking a rebuild preserves MORE
+          # exposure than shipping it, so the refusal has to be
+          # readable by whoever can clear it — the issue's own
+          # reasoning. The red run is the notification; the summary is
+          # what makes it legible without opening a log.
+          code=0
+          stele derive vex \
+            --subjects "${SUBJECTS}" \
+            --vex .org-canon/security/vex \
+            --base-ecosystems "debian,alpine,ubuntu,rocky,redhat,rpm" \
+            --author monumental-archive \
+            --id "${id}" \
+            --released "${released}" \
+            --out dist/continuous.vex.openvex.json > vex.log 2>&1 || code=$?
+          cat vex.log
+          {
+            if [[ ${code} -eq 0 ]]; then
+              echo "### Dependency decision: OPEN"
+            else
+              echo "### Dependency decision: REFUSED — this publish is blocked"
+              echo
+              echo "An advisory in the inventory below has no recorded decision."
+              echo "Record one in the canon under security/vex/, keyed by the"
+              echo "exact package@version; the next publish derives its coverage"
+              echo "from that decision, with no per-release list to extend."
+            fi
+            echo
+            echo '```'
+            cat vex.log
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [[ ${code} -ne 0 ]]; then
+            exit "${code}"
+          fi
+          if [[ -f dist/continuous.vex.openvex.json ]]; then
+            statements=$(jq '.statements | length' dist/continuous.vex.openvex.json)
+            echo "::notice::derived VEX (${statements} statement(s))"
+          fi
+      - name: Triage the tree's lock against the advisory feed
+        # The release path's second and third legs, at the commit the
+        # stream is publishing rather than at a tag. Both belt tasks
+        # guard their own applicability — no tracked Cargo.lock or
+        # go.mod skips clean, a lock without its tool is a loud failure
+        # and never a vacuous green — so a repository whose image is its
+        # only artifact pays nothing for them, and one that does build
+        # Rust or Go gets the same triage a versioned repository gets.
+        # A continuous member held to a weaker policy than a versioned
+        # one would be a seam in the track, not a saving.
+        run: mise run audit:deny
+
+      - name: Triage the tree's Go module graph against the advisory feed
+        run: mise run audit:go-vulns
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: continuous-inventory
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The barrier. It runs and FAILS rather than skipping, so a refused
+  # publish shows one red job naming the refusal instead of a cloud of
+  # skips — and on the scheduled rebuild that red IS the notification:
+  # a blocked rebuild preserves MORE exposure than one that ships
+  # (docs/release.md, "Scanning never blocks a publish"), so it must be
+  # loud where a human reads, never a silent skip in a green cron.
+  #
+  # It signs what it decided, for the reason publish.yml's does: a
+  # decision that lives only in a job graph is a decision nobody can
+  # re-read. The predicate carries no `tag` — this archetype has none,
+  # and inventing one would manufacture the version surface the guard
+  # above exists to refuse — and its subjects are the inventories the
+  # decision was made over, each named by the digest a consumer pulls.
+  # phase: commit-point
+  commit-point:
+    name: Commit point — every proof, or nothing publishes
+    needs:
+      - guard
+      - sbom
+    if: ${{ !cancelled() && needs.guard.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write # the decision signature, nothing else
+      attestations: write # store the decision in the caller's attestation store
+    env:
+      SBOM_RESULT: ${{ needs.sbom.result }}
+    steps:
+      - name: Refuse unless every required proof succeeded
+        run: |
+          set -euo pipefail
+          fail=0
+          proofs='[]'
+          # An array, not a bare word list: this archetype has exactly
+          # one proof today, and a single-element `for … in "x:y"` is a
+          # loop shellcheck reads as a mistake (SC2066). The array keeps
+          # the release path's shape — add a proof by adding an element,
+          # and lint:release-phases forces the `needs` edge beside it.
+          required=("inventory and advisory triage:${SBOM_RESULT}")
+          for p in "${required[@]}"; do
+            name="${p%:*}" result="${p##*:}"
+            proofs=$(jq -c --arg n "${name}" --arg r "${result}" \
+              '. + [{name: $n, result: $r}]' <<< "${proofs}")
+            if [[ ${result} != "success" ]]; then
+              echo "::error::${name} is '${result}' — absence of a proof is never a proof"
+              fail=1
+            fi
+          done
+          ((fail == 0)) || exit 1
+          decided_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n \
+            --arg classes "oci-image" \
+            --arg at "${decided_at}" \
+            --argjson proofs "${proofs}" \
+            '{classes: $classes, conclusion: "OPEN",
+              decidedAt: $at, proofs: $proofs}' \
+            > "${RUNNER_TEMP}/decision-predicate.json"
+          echo "::notice::commit point open: every required proof succeeded"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: continuous-inventory
+          path: inventory
+
+      - name: Stage the decision subjects (what the decision covered)
+        run: |
+          set -euo pipefail
+          : > "${RUNNER_TEMP}/decision-subjects.sha256"
+          # Listed and named in their own statements, publish.yml's
+          # shape: a command substitution inside another command's
+          # arguments masks its exit status, and a `find` that failed
+          # would read here as an empty inventory.
+          listing=$(find inventory -type f | sort)
+          while IFS= read -r f; do
+            [[ -n ${f} ]] || continue
+            digest=$(sha256sum "${f}" | cut -d' ' -f1)
+            base=$(basename "${f}")
+            printf '%s  %s\n' "${digest}" "${base}" \
+              >> "${RUNNER_TEMP}/decision-subjects.sha256"
+          done <<< "${listing}"
+          [[ -s "${RUNNER_TEMP}/decision-subjects.sha256" ]] || {
+            echo "::error::the inventory artifact is empty — a decision over nothing decides nothing"
+            exit 1
+          }
+      - name: Sign the decision under this workflow's identity
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/decision-subjects.sha256
+          predicate-type: https://monumental-archive.github.io/attestations/release-decision/v1
+          predicate-path: ${{ runner.temp }}/decision-predicate.json
+
   # The index assembly moved out of the build workflow when the
-  # versioned flow gained its repro gate (#118); the continuous stream
-  # is ungated by design — its tag is a moving pointer and its
-  # immutability story is the digest attestation — so build and
-  # assemble simply run back to back here.
+  # versioned flow gained its repro gate (#118). The stream is still
+  # ungated for REPRODUCIBILITY by design — its tag is a moving pointer
+  # and its immutability story is the digest attestation — but it is no
+  # longer ungated for dependency triage: creating the tag is the act
+  # that makes these bytes the stream, so it happens downstream of the
+  # commit point or not at all (#717).
+  # phase: publish
   assemble:
     name: Assemble the image index
     needs:
       - guard
       - facts
       - build
+      - commit-point
+    if: ${{ !cancelled() && needs.commit-point.result == 'success' }}
     uses: ./.github/workflows/assemble-oci-index.yml
     permissions:
       contents: read # checkout of the caller
@@ -186,6 +504,7 @@ jobs:
       smoke-test: ${{ inputs.smoke-test }}
       facts: ${{ needs.facts.outputs.facts }}
 
+  # phase: attest
   sign:
     name: Sign image
     needs: assemble
