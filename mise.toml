@@ -28,7 +28,7 @@
 shell = "bash -euo pipefail -c"
 
 [tasks.test]
-description = "The belt's own Python helpers (stdlib unittest, no framework)"
+description = "The belt's Python helpers and release scripts (stdlib unittest)"
 dir = "{{cwd}}"
 # Against the WORKING TREE's mise/, never ORG_BELT_DIR. In this repo the
 # two resolve to the same place — gate.yml self-applies ci.yml through a
@@ -36,4 +36,13 @@ dir = "{{cwd}}"
 # request's own ref — but the code under review is what a test task owes
 # an answer about, and naming the tree says so without depending on that
 # resolution staying true.
-run = 'python3 -m unittest discover --start-directory mise --pattern "test_*.py"'
+#
+# release/ joined mise/ with #816: the release scripts had no tests at
+# all (#772), and the first one written reproduces a burned release from
+# a real captured listing. Two explicit roots rather than a walk from `.`
+# — a discovery root is a claim about what is tested, and a wildcard
+# makes that claim silently.
+run = """
+python3 -m unittest discover --start-directory mise --pattern "test_*.py"
+python3 -m unittest discover --start-directory release --pattern "test_*.py"
+"""

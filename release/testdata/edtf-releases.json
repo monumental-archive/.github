@@ -1,0 +1,211 @@
+[
+  { "assets": [], "draft": true, "tag_name": "v1.3.0" },
+  {
+    "assets": [
+      { "name": "edtf-wasm-1.2.3.provenance.intoto.jsonl" },
+      { "name": "edtf-wasm-1.2.3.sbom.intoto.jsonl" },
+      { "name": "edtf-wasm.cdx.json" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-wasm-v1.2.3"
+  },
+  {
+    "assets": [
+      { "name": "edtf-postgres-1.2.3.provenance.intoto.jsonl" },
+      { "name": "edtf-postgres-1.2.3.sbom.intoto.jsonl" },
+      { "name": "edtf-postgres.cdx.json" },
+      { "name": "edtf_postgres-1.2.3-pg14-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg14-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg15-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg15-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg16-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg16-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg17-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg17-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg18-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg14-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg14-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg15-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg15-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg16-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg16-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg17-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg17-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg18-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-dbgsym-1.2.3-pg18-linux-arm64.tar.gz" },
+      { "name": "SHA256SUMS" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-postgres-v1.2.3"
+  },
+  {
+    "assets": [
+      { "name": "edtf-normalize-1.2.3.provenance.intoto.jsonl" },
+      { "name": "edtf-normalize-1.2.3.sbom.intoto.jsonl" },
+      { "name": "edtf-normalize.cdx.json" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-normalize-v1.2.3"
+  },
+  {
+    "assets": [
+      { "name": "edtf-core-1.2.3.provenance.intoto.jsonl" },
+      { "name": "edtf-core-1.2.3.sbom.intoto.jsonl" },
+      { "name": "edtf-core.cdx.json" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-core-v1.2.3"
+  },
+  {
+    "assets": [
+      { "name": "edtf-cli-1.2.3-aarch64-apple-darwin.tar.gz" },
+      { "name": "edtf-cli-1.2.3-aarch64-unknown-linux-gnu.tar.gz" },
+      { "name": "edtf-cli-1.2.3-x86_64-apple-darwin.tar.gz" },
+      { "name": "edtf-cli-1.2.3-x86_64-unknown-linux-gnu.tar.gz" },
+      { "name": "edtf-cli-1.2.3.provenance.intoto.jsonl" },
+      { "name": "edtf-cli-1.2.3.sbom.intoto.jsonl" },
+      { "name": "edtf-cli.cdx.json" },
+      { "name": "SHA256SUMS" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-cli-v1.2.3"
+  },
+  {
+    "assets": [
+      { "name": "edtf-calendars-1.2.3.provenance.intoto.jsonl" },
+      { "name": "edtf-calendars-1.2.3.sbom.intoto.jsonl" },
+      { "name": "edtf-calendars.cdx.json" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-calendars-v1.2.3"
+  },
+  {
+    "assets": [{ "name": "edtf-wasm.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-wasm-v1.1.2"
+  },
+  {
+    "assets": [{ "name": "edtf-wasm.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-wasm-v1.1.0"
+  },
+  {
+    "assets": [{ "name": "edtf-wasm.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-wasm-v1.0.2"
+  },
+  { "assets": [], "draft": false, "tag_name": "edtf-wasm-v1.0.1" },
+  {
+    "assets": [
+      { "name": "edtf-postgres.cdx.json" },
+      { "name": "edtf_postgres-1.1.2-pg14-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg14-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg15-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg15-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg16-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg16-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg17-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg17-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg18-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.2-pg18-linux-arm64.tar.gz" },
+      { "name": "SHA256SUMS" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-postgres-v1.1.2"
+  },
+  {
+    "assets": [
+      { "name": "edtf-postgres.cdx.json" },
+      { "name": "edtf_postgres-1.1.0-pg14-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg14-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg15-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg15-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg16-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg16-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg17-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg17-linux-arm64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg18-linux-amd64.tar.gz" },
+      { "name": "edtf_postgres-1.1.0-pg18-linux-arm64.tar.gz" },
+      { "name": "SHA256SUMS" }
+    ],
+    "draft": false,
+    "tag_name": "edtf-postgres-v1.1.0"
+  },
+  {
+    "assets": [{ "name": "edtf-postgres.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-postgres-v1.0.2"
+  },
+  { "assets": [], "draft": false, "tag_name": "edtf-postgres-v1.0.1" },
+  {
+    "assets": [{ "name": "edtf-normalize.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-normalize-v1.1.2"
+  },
+  {
+    "assets": [{ "name": "edtf-normalize.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-normalize-v1.1.0"
+  },
+  {
+    "assets": [{ "name": "edtf-normalize.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-normalize-v1.0.2"
+  },
+  { "assets": [], "draft": false, "tag_name": "edtf-normalize-v1.0.1" },
+  {
+    "assets": [{ "name": "edtf-core.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-core-v1.1.2"
+  },
+  {
+    "assets": [{ "name": "edtf-core.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-core-v1.1.0"
+  },
+  {
+    "assets": [{ "name": "edtf-core.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-core-v1.0.2"
+  },
+  { "assets": [], "draft": false, "tag_name": "edtf-core-v1.0.1" },
+  {
+    "assets": [{ "name": "edtf-cli.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-cli-v1.1.2"
+  },
+  {
+    "assets": [{ "name": "edtf-cli.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-cli-v1.1.0"
+  },
+  {
+    "assets": [{ "name": "edtf-cli.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-cli-v1.0.2"
+  },
+  { "assets": [], "draft": false, "tag_name": "edtf-cli-v1.0.1" },
+  {
+    "assets": [{ "name": "edtf-calendars.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-calendars-v1.1.2"
+  },
+  {
+    "assets": [{ "name": "edtf-calendars.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-calendars-v1.1.0"
+  },
+  {
+    "assets": [{ "name": "edtf-calendars.cdx.json" }],
+    "draft": false,
+    "tag_name": "edtf-calendars-v1.0.2"
+  },
+  { "assets": [], "draft": false, "tag_name": "edtf-calendars-v1.0.1" },
+  { "assets": [], "draft": false, "tag_name": "edtf-wasm-v1.0.0" },
+  { "assets": [], "draft": false, "tag_name": "edtf-normalize-v1.0.0" },
+  { "assets": [], "draft": false, "tag_name": "edtf-core-v1.0.0" },
+  { "assets": [], "draft": false, "tag_name": "edtf-cli-v1.0.0" },
+  { "assets": [], "draft": false, "tag_name": "edtf-calendars-v1.0.0" },
+  { "assets": [], "draft": false, "tag_name": "v0.2.0" }
+]
