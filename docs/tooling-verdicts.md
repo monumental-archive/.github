@@ -29,7 +29,7 @@ honestly blocked on.
 | rekor-monitor (org-owned workflow) | Transparency-log watch for forged signer identities — the reason the id-token rule was narrowed |
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
-| cargo-llvm-cov + `.coverage-floor` ratchet | Line-coverage floor in the gate (`coverage:check`), codecov badge feed off-gate |
+| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
@@ -1407,6 +1407,31 @@ SQL appearing anywhere in the org (revisit the raw templater).
   a guard that skips when it should run looks exactly like success —
   is real and survives its closure, carried into #392 as a table-test
   requirement.
+  **Amended 2026-08-21 (#652):** two defects in the number itself,
+  both measured on stele. The floor was a HAND-TYPED number the
+  ceiling could drift away from: 98.6 on 08-18, 92.1 two days later
+  with four features landed, nothing red and nothing noticed — the
+  floor never moved, the ceiling fell into the headroom. And the Go
+  leg ran `go test ./...` with no `-coverpkg`, so a statement
+  exercised only by a neighbouring package's tests scored uncovered
+  and the gate enforced a number below what the tests prove: measured
+  94.9 without the flag against 95.4 with it, 0.5 points and 51
+  statements. Both are closed by making the floor DERIVED STATE —
+  `mise/coverage-floor.py` re-derives it at every release as
+  `measured - 2`, it only rises, a release measuring below
+  `floor + band` fails loudly, and a hand edit that disagrees with the
+  file's own record is refused as drift rather than repaired. The
+  measurement moved to `mise/coverage-measure.sh`, shared by the gate
+  and the release path so the two cannot enforce and derive from
+  different flags. Adoption stays opt-in and is now a measurement
+  (`mise run coverage:adopt`), not a guess. Tested the way #576's
+  helper is: `mise/test_coverage_floor.py`, 33 table rows over every
+  guard branch in both directions, mutation-checked with seven
+  deliberate defects (the drift check disabled, the ratchet disabled,
+  the ratchet loosened by a band, `--adopt` honoured everywhere,
+  rounding turned half-up, the weakest leg turned into the strongest,
+  and a malformed measurement skipped instead of refused) — all seven
+  caught.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because

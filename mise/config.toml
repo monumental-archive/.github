@@ -236,9 +236,12 @@ ruff = "0.16.3"
 "github:microsoft/typescript-go" = { version = "7.0.2", version_prefix = "typescript/v", bin_path = "package/lib" }
 # Coverage ratchet (docs/runbook.md): repos commit a floor in
 # .coverage-floor and the canonical coverage:check enforces it in the
-# gate — deterministic (local run against a committed number), Rust-only
-# by guard, skip-clean everywhere else. Best Practices Silver requires
-# >=80% statement coverage; the floor only ratchets up.
+# gate — deterministic (local run against a committed number), guarded
+# on the repo's manifests, skip-clean everywhere else. Best Practices
+# Silver requires >=80% statement coverage. The floor is DERIVED STATE
+# since #652: the release machinery writes it as `measured - band` and
+# it only ever rises, so it can no longer drift below a ceiling nobody
+# is watching.
 "aqua:taiki-e/cargo-llvm-cov" = "0.8.7"
 # The dependency track (docs/dependency-track.md). cargo-deny is the gate
 # half (bans+licenses+sources, deterministic over the lock) and the
@@ -3785,78 +3788,74 @@ echo "lint:cold-attested: ok"
 '''
 
 [tasks."coverage:check"]
-description = "Enforce the committed coverage floor (.coverage-floor); repos without one skip clean"
+description = "Enforce the derived coverage floor (.coverage-floor); repos without one skip clean"
 dir = "{{cwd}}"
-# No task-time rustup, by rule: a component installed mid-run races
-# every other task driving the toolchain (measured twice on the lab's
-# v0.18.0 release PR; the wait_for chains that served as the workaround
-# are deleted, #117). llvm-tools is a declared build input like
-# cargo-auditable — pinned in the repo's mise.toml, installed before any
-# task runs — and this task asserts it with a remedy, never installs.
-# The ratchet: the floor is a committed number that only rises. A repo
-# without a floor has not adopted coverage yet and skips clean; a repo
+# The ratchet: the floor is DERIVED STATE that only rises (#652). The
+# release machinery writes it as `measured - band` and commits it with
+# the release; this task enforces it, and refuses a floor that disagrees
+# with its own record as DRIFT rather than repairing it — a floor found
+# wrong is evidence the machinery was bypassed. It was a hand-typed
+# number until the org measured what that costs: stele's ceiling fell
+# 6.5 points in two days with four features landed, nothing red and
+# nothing noticed, because the floor sat far enough below the ceiling
+# that the headroom became a landing zone.
+#
+# A repo without a floor has adopted no ratchet and skips clean; a repo
 # with one cannot merge below it. Deterministic — the number is local,
 # the run is local; the Codecov upload (the badge) lives in ci.yml as a
 # separate non-blocking job.
+#
+# The measurement is mise/coverage-measure.sh, shared with
+# release/derive-coverage-floor.sh, so the number enforced here and the
+# number the floor is derived from cannot come from different flags —
+# the #316 shape, where a second hardcoded --workspace drifted from the
+# first the instant a repo excluded a member. Each leg measures what its
+# language measures (statements for Go, lines for Rust); the floor is a
+# minimum in both, and every leg must hold it.
 run = '''
-[[ -f .coverage-floor ]] && [[ -f Cargo.toml || -f go.mod ]] || {
+floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
+if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod ]]; then
   echo "coverage:check: no .coverage-floor, skipped"
   exit 0
-}
-floor=$(tr -d '[:space:]' < .coverage-floor)
-if [[ ! ${floor} =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-  echo "coverage:check: .coverage-floor is not a number: ${floor}" >&2
+fi
+legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
+if [[ -z ${legs} ]]; then
+  echo "coverage:check: no leg was measured — a check that reads nothing must not pass" >&2
   exit 1
 fi
-# The Go leg (#392): `go test -coverprofile` plus `go tool cover -func`
-# — both in the pinned toolchain, no extra component to assert. The
-# ratchet semantics are identical to the Rust leg's: committed floor,
-# local measurement, merge refused below it. No COVERAGE_EXCLUDE analog
-# yet — the first Go repo that needs one adds it deliberately.
-#
-# EVERY tracked language runs its own leg, and each must hold the floor.
-# This read `go.mod && ! -f Cargo.toml` until the lab gained a Go
-# fixture beside its crates: a mixed repo then took the Rust leg alone
-# and reported "floor held" over a language nothing had measured — the
-# vacuous green this ratchet exists to prevent, in the ratchet itself.
-# The floor is a minimum, so applying it per language is the only
-# reading that means anything; a repo that wants two numbers wants two
-# floors, and can say so when one exists.
-if [[ -f go.mod ]]; then
-  command -v go > /dev/null || {
-    echo "coverage:check: go.mod present but go missing — pin go in mise.toml" >&2
-    exit 1
-  }
-  go test ./... -coverprofile=coverage.txt -covermode=atomic
-  pct=$(go tool cover -func=coverage.txt | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
-  [[ -n ${pct} ]] || {
-    echo "coverage:check: could not read a total from the profile — a check that reads nothing must not pass" >&2
-    exit 1
-  }
+while read -r leg pct; do
   if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-    echo "coverage:check: go: ${pct}% is below the committed floor ${floor}%" >&2
+    echo "coverage:check: ${leg}: ${pct}% is below the derived floor ${floor}%" >&2
     exit 1
   fi
-  echo "coverage:check: go leg holds the floor ${floor} (${pct}%)"
+  echo "coverage:check: ${leg} leg holds the floor ${floor} (${pct}%)"
+done <<< "${legs}"
+'''
+
+[tasks."coverage:adopt"]
+description = "Write .coverage-floor from a real measurement (adoption, and the migration off a hand-typed floor)"
+dir = "{{cwd}}"
+# The write-mode half of the ratchet (#652), and the remedy every
+# refusal in coverage-floor.py names. Adoption is a MEASUREMENT, not a
+# guess: a repo joins the ratchet by measuring itself and committing
+# what it found, and a repo whose floor predates the derivation migrates
+# the same way, in one commit with the canon pin bump that brings the
+# new recipe.
+#
+# It cannot lower a floor whose record parses — that is the ratchet, and
+# stepping down is a conscious `reset: <why>` a human writes and a
+# reviewer sees. A `coverage:*` sibling rather than a `fix:*` one, like
+# coverage:report beside it: the `fix` aggregate collects `fix:*`
+# wildcard, and a fixer that runs the whole test suite does not belong
+# in a sweep nobody asked for.
+run = '''
+if [[ ! -f Cargo.toml && ! -f go.mod ]]; then
+  echo "coverage:adopt: no Cargo.toml or go.mod, nothing to measure"
+  exit 0
 fi
-[[ -f Cargo.toml ]] || exit 0
-if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
-  echo "coverage:check: llvm-tools component missing — declare it with the" >&2
-  echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
-  echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
-  exit 1
-fi
-# COVERAGE_EXCLUDE ([env] in the repo's mise.toml): workspace members
-# whose tests cannot run on the gate runner — the lab's lab-pg needs a
-# live postgres and is excluded from `test` for the same reason (#316);
-# a floor task that hard-codes --workspace fails on exactly the repos
-# the machinery was built for.
-excludes=""
-for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-# shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
-# which cargo must receive as separate arguments
-cargo llvm-cov --workspace --locked ${excludes} --fail-under-lines "${floor}"
-echo "coverage:check: floor ${floor} held${excludes:+ (excluding${excludes//--exclude/})}"
+legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
+python3 "${ORG_BELT_DIR}/coverage-floor.py" write \
+  --provenance "coverage:adopt" --adopt <<< "${legs}"
 '''
 
 [tasks."coverage:report"]

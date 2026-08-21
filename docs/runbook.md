@@ -67,8 +67,11 @@ written for two moments: wiring a repository in, and a release going wrong.
    `owners` team write access — documentation and reviewer routing now,
    enforcement when a second maintainer flips the Code Owners toggle.
 9. **Score-ready extras**, so the repository badges the day it lands:
-   commit a `.coverage-floor` (a bare number; the gate's `coverage:check`
-   ratchet enforces it — Silver wants ≥ 80) and pass the `codecov-token`
+   run `mise run coverage:adopt` to commit a `.coverage-floor` (the
+   floor is DERIVED STATE, #652: the task measures the repo and writes
+   `measured - 2`, the release path re-derives it at every release, and
+   the gate's `coverage:check` enforces it and refuses a hand edit as
+   drift — Silver wants ≥ 80) and pass the `codecov-token`
    secret to the ci stub for the badge feed; copy
    `scaffold/REUSE.toml.stub` to the root as `REUSE.toml` (the .stub
    suffix keeps the placeholder from governing the canon's own tree —
