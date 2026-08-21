@@ -66,7 +66,13 @@ disable_backends = ["asdf", "ubi"]
 # ~/.config/mise/conf.d symlink into a checkout. The symlink's NAME is not
 # assumed — the belt is identified by a file only the belt has, so a
 # machine that named it something else still works. Empty when the belt
-# did not arrive, which `lint:belt-available` already fails on.
+# did not arrive — which is not a quiet state: `ci` is itself
+# belt-defined, so a tree with no belt dies at `mise run ci` as an
+# unknown command, before any lint task exists to skip (measured
+# 2026-08-21 in a consumer tree with `MISE_GLOBAL_CONFIG_FILE=/dev/null`:
+# `mise ERROR unknown command: ci`, exit 1). The canon's own checkout
+# cannot reach that state — mise loads `mise/config.toml` from the
+# project root as a local config, the same filename fact stated above.
 #
 # "Empty" must mean exit 0 with no output, not exit 1: mise runs this under
 # `sh -o errexit`, and a template that exits nonzero aborts EVERY mise
@@ -930,9 +936,10 @@ dir = "{{cwd}}"
 # shfmt --find filters the tracked list to shell files itself, including
 # extensionless scripts with shell shebangs that an extension glob misses.
 #
-# shellcheck was pinned in the belt and listed in lint:belt-available, and
-# NO TASK RAN IT (#82). The canary proves a binary is present, which reads
-# like coverage and is not — so 2732 lines of standalone shell, including
+# shellcheck was pinned in the belt and listed in the availability canary
+# that used to stand beside these tasks, and NO TASK RAN IT (#82). That
+# canary proved a binary was present, which reads like coverage and is
+# not — so 2732 lines of standalone shell, including
 # the source-attest emitter that produces the Source L3 chain, were linted
 # by nothing. Verified by putting `rm $f` and `which git` into lib.sh:
 # shellcheck reported 22 findings and the gate stayed green.
@@ -2047,7 +2054,8 @@ command -v stele > /dev/null || {
 }
 vex="${ORG_CANON_DIR}/security/vex"
 [[ -d ${vex} ]] || {
-  echo "audit:go-vulns: ${vex} is not a directory, so the org's triage decisions cannot be read; lint:belt-available says why" >&2
+  echo "audit:go-vulns: ${vex} is not a directory, so the org's triage decisions cannot be read" >&2
+  echo "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally a ~/.config/mise/conf.d symlink into a canon checkout" >&2
   exit 1
 }
 scan=$(mktemp)
@@ -4871,36 +4879,6 @@ if [[ -n ${failed} ]]; then
   exit 1
 fi
 echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
-'''
-
-[tasks."lint:belt-available"]
-description = "Every belt tool actually resolves — a missing belt must fail loudly, not lint nothing"
-dir = "{{cwd}}"
-# The belt arrives via MISE_GLOBAL_CONFIG_FILE in CI and a conf.d symlink
-# locally. If either is absent, every guarded lint task "skips clean" and
-# the gate goes green having checked nothing — the vacuous-success failure.
-# This canary asserts the layer itself is present.
-run = '''
-# The belt's own location, exported once by [env] and used by every task
-# that delivers a canon-owned config. Empty means the belt did not
-# arrive, which is this canary's whole job to say (#445).
-if [[ -z ${ORG_BELT_DIR:-} || ! -f "${ORG_BELT_DIR}/config.toml" ]]; then
-  echo "lint:belt-available: ORG_BELT_DIR is unset or not a canon tree" >&2
-  echo "  CI: MISE_GLOBAL_CONFIG_FILE not set, or the canon checkout is missing" >&2
-  echo "  locally: no ~/.config/mise/conf.d symlink into a canon checkout" >&2
-  exit 1
-fi
-missing=""
-for tool in actionlint shellcheck typos lefthook trivy zizmor committed taplo shfmt rumdl biome ruff jq pinact cargo-deny osv-scanner vexctl reuse golangci-lint; do
-  command -v "${tool}" > /dev/null || missing="${missing} ${tool}"
-done
-if [[ -n ${missing} ]]; then
-  echo "lint:belt-available: belt tools missing:${missing}" >&2
-  echo "  CI: MISE_GLOBAL_CONFIG_FILE not set or checkout missing" >&2
-  echo "  locally: ~/.config/mise/conf.d symlink to the org belt is absent" >&2
-  exit 1
-fi
-echo "lint:belt-available: ok"
 '''
 
 [tasks."lint:licence"]

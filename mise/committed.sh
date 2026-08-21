@@ -22,7 +22,8 @@ set -euo pipefail
 
 if [[ -z ${ORG_BELT_DIR:-} || ! -f "${ORG_BELT_DIR}/committed.toml" ]]; then
   echo "committed.sh: ORG_BELT_DIR is unset or carries no committed.toml" >&2
-  echo "  the org belt did not arrive; lint:belt-available says why" >&2
+  echo "  the org belt did not arrive; CI sets MISE_GLOBAL_CONFIG_FILE," >&2
+  echo "  locally it is a ~/.config/mise/conf.d symlink into a canon checkout" >&2
   exit 1
 fi
 
