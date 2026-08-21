@@ -1,5 +1,22 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "assist": {
+    "actions": {
+      "preset": "all",
+      "source": {
+        "noDuplicateClasses": "on",
+        "organizeImports": "on",
+        "useSortedAttributes": "off",
+        "useSortedEnumMembers": "off",
+        "useSortedInterfaceMembers": "off",
+        "useSortedKeys": "off",
+        "useSortedPackageJson": "on",
+        "useSortedProperties": "off",
+        "useSortedSelectionSet": "off",
+        "useSortedTypeFields": "off"
+      }
+    }
+  },
   "files": {
     "includes": ["**", "!**/.claude", "!**/.git", "!**/node_modules"]
   },
@@ -9,7 +26,6 @@
   },
   "linter": {
     "rules": {
-      "preset": "all",
       "nursery": {
         "noBaseToString": "on",
         "noComponentHookFactories": "on",
@@ -98,15 +114,8 @@
         "useVueConsistentDefinePropsDeclaration": "on",
         "useVueNextTickPromise": "on",
         "useVueValidVFor": "on"
-      }
-    }
-  },
-  "assist": {
-    "actions": {
-      "preset": "all",
-      "source": {
-        "useSortedKeys": "off"
-      }
+      },
+      "preset": "all"
     }
   }
 }

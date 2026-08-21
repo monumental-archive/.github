@@ -1,0 +1,62 @@
+# WHAT BIOME'S RULE DOMAINS ARE, and which of them a repository may claim.
+#
+# biome groups framework and library rules into DOMAINS. Under the org's
+# `preset: "all"` every domain's rules are on regardless of what the repo
+# is — measured on monumental-archive at #695: a React tree drew ten
+# `useQwikValidLexicalScope` findings, a Qwik rule judging a React
+# component. Declaring `domains: {react: "all"}` changes nothing
+# (2164 diagnostics before and after, identical histogram); only the
+# NEGATIVE has an effect (`qwik: "none"` → 2154, the ten gone). So the
+# belt writes "none" for every identity domain a repo did not claim, and
+# a repo never writes "none" itself. It states what it IS; the belt does
+# the arithmetic. That is the whole reason this file exists.
+#
+# Columns, tab-separated: domain, kind, representative rule, and — for
+# identity rows only — the comma-separated trigger packages. An org row
+# stops at three columns rather than carrying an empty fourth, because a
+# line ending in a tab is trailing whitespace and `lint:editorconfig`
+# is right about that.
+#
+# EVERY VALUE IS DERIVED FROM `biome explain`, never authored here.
+# `lint:biome-domains` re-derives it against the pinned binary in the
+# canon's own gate — 14 explain calls, ~0.7s — so a renamed rule or a
+# changed trigger reddens rather than rotting. `audit:biome-rules` holds
+# the domain LIST against the pinned version's published schema, which
+# is the network half and catches biome growing a fifteenth domain.
+#
+# KIND is the one adjudicated column. `project` and `types` are org
+# strictness on biome's own metadata: neither has a dependency trigger at
+# all, so neither is a statement about what a repo is — `types` is the
+# seventeen type-aware rules and `project` the cross-file ones, which is
+# the org's level, not the repo's shape.
+#
+# `test` IS triggered by a dependency (jest, mocha, ava, vitest) and is
+# still org-fixed, which is the one row that needs an argument rather
+# than a citation. Every repo in the org tests, and a repo testing under
+# `node:test` declares no runner package at all — making `test` claimable
+# would hand that repo a way to have no test rules and look conformant.
+# Test-domain rules only fire on test-shaped code, so holding them at
+# "all" everywhere costs a repo without tests exactly nothing.
+#
+# The other eleven are identity: each is auto-enabled by a dependency the
+# repo either has or does not have, which is precisely the fact the belt
+# cannot invent.
+#
+# A repo may claim a domain it has no dependency for: that turns rules ON
+# and the hazard is one-directional, the lint:python-target shape. The
+# reverse — having the dependency and not claiming it — is lowering an
+# org rule by omission, and `lint:biome` refuses it.
+react	identity	noChildrenProp	react
+reactNative	identity	noReactNativeDeepImports	react-native
+solid	identity	noSolidDestructuredProps	solid
+next	identity	noBeforeInteractiveScriptOutsideDocument	next
+qwik	identity	noQwikUseVisibleTask	@builder.io/qwik,@qwik.dev/core
+svelte	identity	noSvelteUnnecessaryStateWrap	svelte
+vue	identity	noVueDataObjectDeclaration	vue
+drizzle	identity	noDrizzleDeleteWithoutWhere	drizzle-orm
+tailwind	identity	noTailwindArbitraryValue	tailwindcss
+turborepo	identity	noUndeclaredEnvVars	turbo
+playwright	identity	noPlaywrightElementHandle	@playwright/test
+project	org	noPrivateImports
+types	org	useArrayFind
+test	org	noExcessiveNestedTestSuites

@@ -771,19 +771,80 @@ run = 'git ls-files ":!vendor/**" "*.md" "*.markdown" | xargs rumdl check --conf
 # `biome ci` is the no-write CI command; --error-on-warnings means an
 # info/warn rule cannot sit in the tree unnoticed, which is what
 # `preset: "all"` is for.
+#
+# NURSERY IS ON, ruled here rather than left implicit (#695). 87 rules,
+# each named in mise/biome-org.json because biome offers no bulk switch,
+# and biome prints "not yet stable and may change in the future" beside
+# every one of them. That instability is real and it is also contained:
+# the version is pinned exact with `minimum_release_age` at 168h, so a
+# changed rule set can only arrive as a Renovate bump, which reddens THAT
+# pull request and never main. A gate that goes red on a version bump is
+# the gate working. `audit:biome-rules` covers the other direction —
+# rules biome adds and this config does not yet name.
+#
+# THE SORTING FAMILY IS RULED ONE ACTION AT A TIME, and all ten are named
+# so none is ever silently inherited from `preset: "all"` again (#695).
+# The org has answered this question twice already — taplo
+# (`reorder_keys` off) and yamllint (`key-ordering` disabled) — both
+# times with the same reason written down: alphabetical order destroys
+# semantic grouping. So `useSortedKeys`, `useSortedInterfaceMembers`,
+# `useSortedTypeFields`, `useSortedProperties`, `useSortedSelectionSet`,
+# `useSortedEnumMembers` and `useSortedAttributes` are OFF — each
+# alphabetises a structure whose order its author chose, and CSS
+# property order in particular decides which declaration wins, so
+# `useSortedProperties` is a correctness argument as well as a
+# legibility one.
+#
+# `useSortedPackageJson` is ON, and it is not the exception it looks
+# like: it does not alphabetise. Measured on monumental-archive, it
+# rewrote `name,private,type,engines,devDependencies` to
+# `name,private,type,devDependencies,engines` — neither the input order
+# nor alphabetical, but the conventional package.json field order, which
+# its own documentation attributes to sort-package-json. Imposing a
+# semantic grouping is what the anti-alphabetisation ruling is FOR.
+# `organizeImports` and `noDuplicateClasses` stay on for plainer
+# reasons: import statements carry no author-chosen order, and removing
+# a duplicate class is not sorting.
+#
+# THIS WAS RULED TWICE IN ONE DAY AND THE SECOND RULING IS THIS ONE.
+# The first reading was that the org runs every tool at its maximum and
+# the tree complies, which would delete this block entirely; measured,
+# that costs 622 `useSortedKeys` findings on the fixture and reorders 24
+# of the canon's own JSON files. It was reversed because the org's rule
+# is narrower than "max always": max by DEFAULT, and an exclusion only
+# where max is measurably worse, with the measurement written down.
+# Alphabetising a hand-authored file is that case, it was already
+# adjudicated twice for two other tools, and one tool shipping the
+# behaviour is not evidence against a ruling made on evidence. Keeping
+# biome off here and clippy's `arbitrary_source_item_ordering` off in
+# #701 is the consistent position, not the inconsistent one.
+#
+# What the family is NOT is a fixer-only concern. `lint:biome` fails on
+# assist findings exactly as it fails on lint findings, so an action left
+# on is enforcement, not a convenience.
+#
+# One correction worth keeping, because the issue that reported this
+# named the wrong rule: the action that rewrote package.json was
+# `useSortedPackageJson`, not `useSortedKeys` — the latter was off and
+# provably so (delete this block and it fires; as shipped, zero) — and
+# the knip.jsonc rewrite blamed on sorting was the formatter expanding
+# an array. `useSortedEnumMembers` was also checked for a value-changing
+# hazard on numeric TypeScript enums and does not have one: it sorts
+# only enums with string initializers, and a planted numeric enum came
+# back in its original order.
 [tasks."lint:biome"]
 description = "JS/TS/JSON lint + format check + assist (biome, every rule, every severity)"
 dir = "{{cwd}}"
-# The config is MATERIALISED at the repo root and never handed over with
-# --config-path from the belt directory, and that is mechanism, not
-# taste: biome computes the project root from the directory its config
-# FILE SITS IN. Given the belt's copy, its scanner looks for the project
-# beside that copy, finds none, and every rule needing project or type
-# information stops working — silently, while the syntactic ones carry
-# on. Measured on monumental-archive at #445, one byte-identical config
-# in two locations: 69 findings never reported (noUnnecessaryConditions
-# 65, noUnresolvedImports 2, useImportExtensions 1, useArraySortCompare
-# 1) and 73 FALSE ones invented — noUndeclaredDependencies read 93 where
+# The config is MATERIALISED at the repo root and never handed over from
+# the belt directory, and that is mechanism, not taste: biome computes
+# the project root from the directory its config FILE SITS IN. Given the
+# belt's copy, its scanner looks for the project beside that copy, finds
+# none, and every rule needing project or type information stops working
+# — silently, while the syntactic ones carry on. Measured on
+# monumental-archive at #445, one byte-identical config in two
+# locations: 69 findings never reported (noUnnecessaryConditions 65,
+# noUnresolvedImports 2, useImportExtensions 1, useArraySortCompare 1)
+# and 73 FALSE ones invented — noUndeclaredDependencies read 93 where
 # the truth is 20, because it was looking for package.json in the canon.
 # 17 of biome's rules are type-aware and every one of them was dead.
 #
@@ -791,11 +852,39 @@ dir = "{{cwd}}"
 # trap, leaving the tree exactly as found — no residue, and nothing for
 # ten repos to remember to .gitignore. That is also the whole of the
 # enforcement, and the reason this is not the #455 pattern with an extra
-# step: a repo-root `biome.json` that `extends` the belt's copy anchors
+# step: a repo-root config that `extends` the belt's copy anchors
 # correctly too, but a repo's own config is merged ON TOP and a repo can
 # switch an org rule off in it (proven). A config that exists only during
-# the run has no repo-side surface to lower. A tracked biome.json is
-# refused outright, never overwritten.
+# the run has no repo-side surface to lower.
+#
+# WHAT THE REPO STILL OWNS IS ONE FACT (#695): which of biome's rule
+# DOMAINS it is. Under `preset: "all"` every domain's rules run whatever
+# the tree contains — measured on monumental-archive, ten
+# `useQwikValidLexicalScope` findings on a React app — and declaring
+# `react` fixes nothing, because the declaration is already implied.
+# Measured both ways on the same tree: adding `domains: {react: "all"}`
+# left the run at 2164 diagnostics with an identical histogram, while
+# `qwik: "none"` took it to 2154 and the ten Qwik findings to zero. Only
+# the negative has an effect, and a repository must never be the thing
+# writing a negative.
+#
+# So the repository writes `biome.json` containing `linter.domains` and
+# NOTHING else, values "all" and nothing else, over the eleven identity
+# domains and none of the three that are org strictness; the belt writes
+# every "none" itself. `biome-config.py` refuses the rest by name, and
+# refuses SILENCE too — a repo whose own package.json declares `react`
+# must claim `react`, or this mechanism would turn react's rules off for
+# it. The generated config is what biome is actually run against, so
+# even a hostile declaration never reaches the tool: proven by planting
+# a `biome.json` that claimed `qwik` and switched `noNodejsModules` off,
+# and measuring no change in either (0 Qwik findings, 33 noNodejsModules).
+#
+# One rule the domains cannot reach, recorded so its absence is not read
+# as an oversight: `noNodejsModules` has NO domain at all (`biome
+# explain`), so no belt mechanism can scope it to browser code. A Node
+# application answers it where the org's rule is answered everywhere
+# else — in the repo, per file, with `biome-ignore-all
+# lint/correctness/noNodejsModules: <reason>` (#694).
 #
 # The severity floor is belt-side because --error-on-warnings is NOT one:
 # 123 of the 514 rules default to `info`, and an info diagnostic prints
@@ -812,19 +901,31 @@ files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx"
   echo "lint:biome: nothing biome parses is tracked, skipped"
   exit 0
 }
-tracked=$(git ls-files "biome.json" "biome.jsonc" "*/biome.json" "*/biome.jsonc")
+tracked=$(git ls-files "biome.jsonc" "*/biome.json" "*/biome.jsonc")
 if [[ -n ${tracked} ]]; then
-  echo "lint:biome: the belt generates biome.json; a repo must not track one" >&2
+  echo "lint:biome: a repo declares its biome domains in a root biome.json and nowhere else" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  tracked: /' <<< "${tracked}" >&2
-  echo "  git rm --cached it: the belt writes this file for the length of one run" >&2
+  echo "  a nested config takes root:false + extends and may then switch a rule off in one" >&2
+  echo "  subtree — biome's own monorepo guide demonstrates exactly that; the org has no" >&2
+  echo "  such surface. A .jsonc root is refused for the plainer reason: one shape, one name." >&2
   exit 1
 fi
-trap 'rm -f biome.json' EXIT
-cp "${ORG_BELT_DIR}/biome-org.json" biome.json
+generated="biome-org.generated.json"
+generated_tracked=$(git ls-files "${generated}")
+if [[ -n ${generated_tracked} ]]; then
+  echo "lint:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
+  exit 1
+fi
+trap 'rm -f "${generated}"' EXIT
+git ls-files ':!vendor/**' "package.json" "*/package.json" \
+  | python3 "${ORG_BELT_DIR}/biome-config.py" \
+    --org "${ORG_BELT_DIR}/biome-org.json" \
+    --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
+    --out "${generated}"
 report=$(mktemp)
-xargs biome ci --config-path biome.json --reporter=json --reporter-file="${report}" <<< "${files}" \
-  > /dev/null || true
+xargs biome ci --config-path "${generated}" --reporter=json --reporter-file="${report}" \
+  <<< "${files}" > /dev/null || true
 counts=$(jq -r '[.summary.errors, .summary.warnings, .summary.infos] | @tsv' "${report}")
 read -r errors warnings infos <<< "${counts}"
 for n in "${errors}" "${warnings}" "${infos}"; do
@@ -835,7 +936,7 @@ for n in "${errors}" "${warnings}" "${infos}"; do
   exit 1
 done
 if [[ $((errors + warnings + infos)) -ne 0 ]]; then
-  xargs biome ci --config-path biome.json <<< "${files}" || true
+  xargs biome ci --config-path "${generated}" <<< "${files}" || true
   echo "lint:biome: ${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" >&2
   exit 1
 fi
@@ -850,10 +951,11 @@ dir = "{{cwd}}"
 # unsafe fix may change behaviour and a fixer must be runnable without
 # reading its diff first.
 #
-# Materialises the same generated config as lint:biome and for the same
-# reason: a fixer reading a differently-anchored config would produce
-# different edits from the check that judges them — the two halves have
-# to see one project.
+# Materialises the same generated config as lint:biome, through the same
+# helper, and for the same reason: a fixer reading a differently-anchored
+# config — or one that resolved different DOMAINS — would produce
+# different edits from the check that judges them. The two halves have to
+# see one project and one identity.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
@@ -862,16 +964,107 @@ files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx"
   echo "fix:biome: nothing biome parses is tracked, skipped"
   exit 0
 }
-tracked=$(git ls-files "biome.json" "biome.jsonc" "*/biome.json" "*/biome.jsonc")
+tracked=$(git ls-files "biome.jsonc" "*/biome.json" "*/biome.jsonc")
 if [[ -n ${tracked} ]]; then
-  echo "fix:biome: the belt generates biome.json; a repo must not track one" >&2
+  echo "fix:biome: a repo declares its biome domains in a root biome.json and nowhere else" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
   sed 's/^/  tracked: /' <<< "${tracked}" >&2
+  echo "  a nested config takes root:false + extends and may then switch a rule off in one" >&2
+  echo "  subtree — biome's own monorepo guide demonstrates exactly that; the org has no" >&2
+  echo "  such surface. A .jsonc root is refused for the plainer reason: one shape, one name." >&2
   exit 1
 fi
-trap 'rm -f biome.json' EXIT
-cp "${ORG_BELT_DIR}/biome-org.json" biome.json
-xargs biome check --config-path biome.json --write <<< "${files}"
+generated="biome-org.generated.json"
+generated_tracked=$(git ls-files "${generated}")
+if [[ -n ${generated_tracked} ]]; then
+  echo "fix:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
+  exit 1
+fi
+trap 'rm -f "${generated}"' EXIT
+git ls-files ':!vendor/**' "package.json" "*/package.json" \
+  | python3 "${ORG_BELT_DIR}/biome-config.py" \
+    --org "${ORG_BELT_DIR}/biome-org.json" \
+    --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
+    --out "${generated}"
+xargs biome check --config-path "${generated}" --write <<< "${files}"
+'''
+
+# The delivered domain table, re-derived against the pinned binary (#695).
+#
+# `mise/biome-domains.tsv` is what turns "the repo says react" into a
+# full fourteen-key `linter.domains` block, and every value in it came
+# out of `biome explain`. A table nobody re-derives is a second list, and
+# the org has ruled against second lists everywhere else it found one
+# (tsc-flags.txt, the clippy enable-list). This is that ruling applied to
+# this file: fourteen `biome explain` calls, ~0.7s, and a renamed rule or
+# a moved trigger reddens instead of rotting into a domain that silently
+# stops being claimable.
+#
+# GUARDED ON THE TRACKED TABLE, so it runs in the canon and skips clean
+# in every consumer — the canon is where the file is edited, and paying
+# 0.7s in ten repos to re-check a file only one of them can change is
+# the cost with none of the benefit. The direction this cannot see —
+# biome growing a FIFTEENTH domain, which would sit outside the table
+# and stay on under `preset: "all"` — is the network half, and
+# `audit:biome-rules` holds it against the published schema weekly.
+[tasks."lint:biome-domains"]
+description = "The org's biome domain table still matches what biome says (canon only)"
+dir = "{{cwd}}"
+run = '''
+set -euo pipefail
+table=$(git ls-files "mise/biome-domains.tsv")
+[[ -n ${table} ]] || {
+  echo "lint:biome-domains: the domain table is delivered, not tracked here, skipped"
+  exit 0
+}
+command -v biome > /dev/null || {
+  echo "lint:biome-domains: biome missing from the belt" >&2
+  exit 1
+}
+problems=""
+rows=0
+while IFS=$'\t' read -r domain kind rule triggers; do
+  line="${domain%%#*}"
+  [[ -n ${line//[[:space:]]/} ]] || continue
+  [[ ${domain} != \#* ]] || continue
+  rows=$((rows + 1))
+  explained=$(biome explain "${rule}" 2> /dev/null) || {
+    problems+="${domain}: biome does not know the rule ${rule}"$'\n'
+    continue
+  }
+  said=$(awk '/^Domains/ { f = 1; next } f && /^- Name:/ { print $3; exit }' <<< "${explained}")
+  [[ ${said} == "${domain}" ]] || {
+    problems+="${domain}: ${rule} now reports domain \"${said:-none}\""$'\n'
+    continue
+  }
+  [[ ${kind} == "identity" ]] || continue
+  # The trigger names only, versions dropped: a dependency spec bumping
+  # its floor is biome tightening a rule, not the table going wrong.
+  #
+  # The end-of-list test runs BEFORE the rewrite and never after it. Both
+  # sub() calls mutate $0, so a rule ordered the other way round stops
+  # matching its own list pattern the moment it edits the line, and the
+  # exit fires on the first entry — which read as biome having dropped
+  # qwik's second trigger package (caught by this task's first real run).
+  found=$(awk '
+    /dependencies are detected/ { f = 1; next }
+    f && !/^  - / { exit }
+    f { dep = $0; sub(/^  - /, "", dep); sub(/@>=.*$/, "", dep); print dep }
+  ' <<< "${explained}" | paste -sd, -)
+  [[ ${found} == "${triggers}" ]] || {
+    problems+="${domain}: triggers are now \"${found}\", the table says \"${triggers}\""$'\n'
+  }
+done < "${table}"
+if [[ -n ${problems} ]]; then
+  echo "lint:biome-domains: the table no longer matches the pinned biome" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+  sed '/^$/d; s/^/  /' <<< "${problems}" >&2
+  # shellcheck disable=SC2016  # the backticks quote a command NAME in prose
+  echo '  re-derive it from `biome explain` — a repo claims domains through this file' >&2
+  exit 1
+fi
+version=$(biome --version | awk '{print $2}')
+echo "lint:biome-domains: ${rows} domains agree with biome ${version}"
 '''
 
 # Named for the subject, not the tool, matching lint:shell / lint:toml /
@@ -881,11 +1074,12 @@ xargs biome check --config-path biome.json --write <<< "${files}"
 description = "Python lint + format check (ruff, select ALL + preview)"
 dir = "{{cwd}}"
 # A tracked ruff config is REQUIRED once Python is tracked, for the same
-# reason lint:biome demands biome.json and with a sharper edge: ruff's
-# DEFAULT selection is E4/E7/E9/F, a few dozen rules out of ~900. Measured
-# at standup on this repo's own script — 48 findings under `ALL`, ZERO
-# under the defaults. A repo that forgets the config does not get a
-# weaker gate, it gets a green one that checked almost nothing.
+# reason biome's config is generated rather than defaulted, and with a
+# sharper edge: ruff's DEFAULT selection is E4/E7/E9/F, a few dozen rules
+# out of ~900. Measured at standup on this repo's own script — 48
+# findings under `ALL`, ZERO under the defaults. A repo that forgets the
+# config does not get a weaker gate, it gets a green one that checked
+# almost nothing.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
@@ -2968,7 +3162,7 @@ echo "audit:org-pins: ${total} canon references across ${seen_repos} repos, all 
 '''
 
 [tasks."audit:biome-rules"]
-description = "Warn when biome ships nursery rules the org config does not name (scheduled, not the gate)"
+description = "Warn when biome ships nursery rules or domains the org does not name (scheduled, not the gate)"
 dir = "{{cwd}}"
 # The one direction the enable-list in mise/biome-org.json is fail-open.
 # `preset: "all"` covers biome's eight stable groups and NOT nursery, and
@@ -3008,6 +3202,26 @@ if [[ -n ${missing} ]]; then
   sed 's/^/  /' <<< "${missing}" >&2
   echo "  add them to mise/biome-org.json — an unnamed nursery rule is simply not enforced" >&2
   exit 1
+fi
+# The same fail-open direction one level up (#695). A domain the table
+# does not name is never written into the generated config, so its rules
+# stay on under `preset: "all"` for every repo whatever they are — the
+# very state #695 was filed about. `lint:biome-domains` re-derives the
+# rows that ARE named and is offline; only the published schema knows
+# that a new domain exists at all.
+table="${ORG_BELT_DIR}/biome-domains.tsv"
+if [[ -f ${table} ]]; then
+  shipped=$(jq -r '(.["$defs"] // .definitions).RuleDomain.oneOf[].const' "${schema}" | sort)
+  recorded=$(awk -F'\t' '!/^#/ && NF { print $1 }' "${table}" | sort)
+  unnamed=$(comm -23 <(echo "${shipped}") <(echo "${recorded}"))
+  if [[ -n ${unnamed} ]]; then
+    echo "audit:biome-rules: biome ${version} has rule domains the org table does not name:" >&2
+    # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+    sed 's/^/  /' <<< "${unnamed}" >&2
+    echo "  add each to mise/biome-domains.tsv as identity or org — an unnamed domain runs" >&2
+    echo "  its rules in every repo regardless of what the repo is" >&2
+    exit 1
+  fi
 fi
 count=$(wc -l <<< "${upstream}" | tr -d ' ')
 echo "audit:biome-rules: all ${count} nursery rules of ${version} are named"

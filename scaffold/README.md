@@ -5,7 +5,7 @@ root at creation or migration time — they are the *entire* per-repo
 footprint of the governance stack.
 
 What is deliberately NOT here: the config of any tool only the belt runs.
-clippy, rustfmt, pinact, typos, ruff, biome, yamllint, rumdl and
+clippy, rustfmt, pinact, typos, ruff, biome's RULES, yamllint, rumdl and
 sqlfluff are configured from `mise/` and passed
 to the tool by the task that runs it (`ORG_BELT_DIR`, #445), so a repo
 carries nothing to drift and gets the current rules at the canon SHA it
@@ -20,14 +20,48 @@ org vocabulary the belt supplies.
 
 One consequence to know before reaching for it: a belt-delivered config
 is the SAME file for every repo, so anything genuinely repo-shaped in it
-has nowhere to go. biome's `domains` block is the live example — react,
-next and vue rule sets are a statement of fact about one repo, and
-react and solid ship deliberately conflicting rules, so they cannot all
-be on at once. No repo in the org tracks a framework today. The first
-one that does is the trigger to move `biome.json` back to this
-directory, exactly as `.golangci.yml` stayed here for naming a module
-path (docs/tooling-verdicts.md).
+has nowhere to go. biome's `domains` block was the live example, and
+monumental-archive is the repo that fired it (#695): a React app drew
+ten `useQwikValidLexicalScope` findings, a Qwik rule judging React.
+A `biome.json` stub is therefore back in this directory — but as an
+identity declaration, not a config. The org's rules did not travel with
+it and never will; see the entry below.
 
+- `biome.json.stub` — copy it to the root as `biome.json`. It carries
+  the repository's biome DOMAINS, and nothing else (#695). The `.stub`
+  suffix is the `REUSE.toml.stub` reason exactly: biome walks the tree
+  regardless of the path it is handed and treats any `biome.json` below
+  a root as a nested root config, which hard-fails every invocation,
+  including ones that never touch this directory.
+
+  biome sorts its framework and library rules into domains, and under
+  the org's `preset: "all"` every one of them runs whatever the tree
+  contains. Declaring what you are does not fix that — measured, adding
+  `react` changed nothing at all — so the belt writes `"none"` for every
+  framework domain a repo did NOT claim, and computes the whole block
+  from this file. Name each framework the repo actually uses:
+
+  ```json
+  { "linter": { "domains": { "react": "all" } } }
+  ```
+
+  Eleven domains are yours to claim — `react`, `reactNative`, `solid`,
+  `next`, `qwik`, `svelte`, `vue`, `drizzle`, `tailwind`, `turborepo`,
+  `playwright` — with `"all"` the only value you may write. `project`,
+  `types` and `test` are the org's level, not your shape, and naming one
+  fails the gate; so does a rule, an `overrides` block, or anything else
+  in this file. Claiming a framework you do not have is legal and simply
+  turns rules on. NOT claiming one you DO have is not: if a
+  `package.json` in the repo declares `react`, the gate makes you say
+  so, because silence would turn react's rules off. Leave `domains`
+  empty when the repo tracks no framework at all.
+
+  What this file cannot do is scope a rule that has no domain.
+  `noNodejsModules` is the one that bites a Node service: biome gives it
+  no domain, so the answer is biome's own per-file directive in the file
+  that needs it — `biome-ignore-all lint/correctness/noNodejsModules:`
+  with the reason — decided in the repo, like every other exception
+  (#694).
 - `renovate.json` — extends the org preset
 - `lefthook.yml` — pulls the org git hooks by remote
 - no `committed.toml`: the commit canon is delivered (#576). A repo that
