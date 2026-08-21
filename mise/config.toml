@@ -1353,6 +1353,20 @@ dir = "{{cwd}}"
 #                              _ne_bytes, because explicit endianness is
 #                              what reproducibility requires
 #   inline_asm_x86_intel_syntax — Rust's own asm! default is Intel
+#   arbitrary_source_item_ordering — demands alphabetical source
+#                              items. The org has already decided
+#                              this question twice the other way, in
+#                              rustfmt.toml (reorder_keys off,
+#                              "alphabetical reordering destroys
+#                              semantic grouping") and yamllint.yaml
+#                              (key-ordering off, same reason). A
+#                              lint contradicting two standing org
+#                              rulings is a contradiction like the
+#                              rest of this list, not a taste call
+#                              (#687; on edtf 113 of 955, measured
+#                              by lint:rust at belt 1818749 — a count
+#                              from this ladder means nothing without
+#                              the belt SHA that produced it)
 #
 # blanket_clippy_restriction_lints fires because we enable the group on
 # purpose; allowed with that as its reason. multiple_crate_versions is
@@ -1527,6 +1541,7 @@ cargo clippy --workspace --all-targets ${features} --locked ${excludes} -- \
   -A clippy::separated_literal_suffix \
   -A clippy::big_endian_bytes \
   -A clippy::little_endian_bytes \
+  -A clippy::arbitrary_source_item_ordering \
   -A clippy::inline_asm_x86_intel_syntax 2>&1 | tee "${out}" || status=$?
 # A lint name rustc does not recognise is warning E0602, and `-D
 # warnings` cannot reach it: it is emitted by the command-line parser
@@ -1541,7 +1556,7 @@ if grep -qE "E0602|has been renamed to" "${out}"; then
   exit 1
 fi
 [[ ${status} -eq 0 ]] || exit "${status}"
-echo "lint:rust: clean at every group (restriction minus 9 named contradictions)"
+echo "lint:rust: clean at every group (restriction minus 10 named contradictions)"
 '''
 
 [tasks."fix:rust"]
@@ -1595,6 +1610,7 @@ cargo clippy --fix ${features} --locked -- \
   -A clippy::separated_literal_suffix \
   -A clippy::big_endian_bytes \
   -A clippy::little_endian_bytes \
+  -A clippy::arbitrary_source_item_ordering \
   -A clippy::inline_asm_x86_intel_syntax
 echo "fix:rust: applied what is machine-applicable — the rest is judgement"
 '''

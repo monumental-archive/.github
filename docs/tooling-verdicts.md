@@ -47,7 +47,7 @@ honestly blocked on.
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
-| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus nine named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml` — plus `fix:rust` |
+| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus ten named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml` — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 
 **clippy, and the three things standing it up settled** (#445). The
@@ -55,7 +55,7 @@ belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
 was reached by running the tool rather than reading about it.
 
 *Levels are stated as groups minus exclusions, never as a list of lints
-to enable.* Both forms measure identically today — 97 findings on
+to enable.* Both forms measured identically at standup — 97 findings on
 release-lab either way — and they fail in opposite directions. A list of
 lints to enable is fail-open: when a toolchain bump adds restriction
 lints, they are absent from the list, so enforcement quietly fails to
@@ -66,11 +66,11 @@ anything, so the contradiction it was hiding fires and the gate reddens
 where someone reads it. The same reasoning should govern any future belt
 list.
 
-*The nine exclusions are mechanical, not taste.* clippy's own book says
+*The ten exclusions are mechanical, not taste.* clippy's own book says
 the restriction group must not be enabled wholesale, because its lints
 contradict each other — enabling it as a group even makes clippy lint
 you for doing so (`blanket_clippy_restriction_lints`, allowed here with
-exactly that as its reason). The nine are the pairs where obeying one
+exactly that as its reason). Nine are the pairs where obeying one
 lint disobeys another: `implicit_return` against style's
 `needless_return`; `question_mark_used` against `question_mark`;
 `self_named_module_files` against `mod_module_files` (the org enforces
@@ -84,6 +84,31 @@ the org actually wants banned is target-dependent `_ne_bytes`; and
 `multiple_crate_versions` is allowed for a different reason entirely —
 the duplicate policy is stated once, in each repo's `deny.toml`
 (docs/dependency-track.md).
+
+The tenth, `arbitrary_source_item_ordering`, is a contradiction of the
+same kind, just with an org ruling on the other side rather than another
+clippy lint. It demands alphabetical source items, and this organisation
+has already decided that question twice the other way: `rustfmt.toml`
+keeps `reorder_keys` off because "alphabetical reordering destroys
+semantic grouping", and `yamllint.yaml` disables key-ordering with the
+same reason recorded. A lint that contradicts two standing rulings is
+mechanical to exclude; leaving it on would have meant the belt enforcing
+in Rust exactly what the belt forbids in TOML and YAML.
+
+*The ladder was recalibrated against a real codebase (#687).* The 97
+findings above are release-lab's — a fixture of small crates — and the
+canon tracks no Rust at all, so until 2026-08-21 nothing had run this
+ladder over a production tree. Importing edtf (#669) did: **955 errors
+across roughly thirty restriction lints** from `mise run lint:rust` at
+belt `1818749`, on a tree `cargo check` compiles cleanly. (The same tree
+read 896 at belt `511af95` earlier the same day; a count from this ladder
+is only meaningful with the belt SHA that produced it, which is why both
+are stamped.) One of them, `arbitrary_source_item_ordering` at 113
+findings, was the exclusion above. The rest stand, and edtf
+conforms to them per site with `#[expect(..., reason = "...")]` — the
+decision being that the ladder is right and the codebase answers to it,
+not the reverse. Read the 97 as what a fixture measures, never as what
+this ladder costs a real repository.
 
 *The exception mechanism is `#[expect(..., reason = "...")]` and nothing
 else.* No clippy flag can beat a source attribute: a crate-level
