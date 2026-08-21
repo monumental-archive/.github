@@ -48,6 +48,15 @@ if TYPE_CHECKING:
 
 SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 
+# The org's shellcheck settings, read from the belt directory this file is
+# itself delivered in (#696) — one definition for every surface that can
+# reach it, rather than a second copy of `--enable=all` living here and
+# drifting from the one lint:shell uses. It also closes a smaller hole:
+# these blocks are linted as temporary files, and until this file was
+# passed, shellcheck was free to discover $HOME/.shellcheckrc and lower
+# the level on a developer's machine while CI stayed strict.
+ORG_RCFILE = Path(__file__).resolve().parent / "shellcheckrc"
+
 # The exclusion list is actionlint's, verbatim from its rule_shellcheck.go,
 # because this runs the same code through the same tool and must agree with
 # it. Its reasons, preserved rather than re-derived:
@@ -210,8 +219,7 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
                 r = subprocess.run(
                     [
                         "shellcheck",
-                        "--enable=all",
-                        "--external-sources",
+                        f"--rcfile={ORG_RCFILE}",
                         "--exclude",
                         SHELLCHECK_EXCLUDE,
                         "--format=gcc",
@@ -242,6 +250,16 @@ def main() -> None:
     ap.add_argument("--no-lint", action="store_true")
     ap.add_argument("--write", action="store_true", help="format blocks in place")
     args = ap.parse_args()
+
+    # shellcheck only WARNS on an unreadable --rcfile and then lints at its
+    # own defaults, exit 0 — so a belt that did not arrive would read as a
+    # clean run. Checked before anything is linted.
+    if not args.write and not args.no_lint and not ORG_RCFILE.is_file():
+        print(
+            f"embedded-shell: the org shellcheck config is missing at {ORG_RCFILE}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.write:
         total = sum(rewrite(Path(f)) for f in args.files)

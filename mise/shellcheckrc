@@ -1,0 +1,77 @@
+# The org's shellcheck configuration, DELIVERED (#696).
+#
+# It used to live in a `.shellcheckrc` at the canon's root, discovered by
+# shellcheck walking up from each script — which worked here and nowhere
+# else. `.shellcheckrc` is not in scaffold/, not asserted by any task, and
+# not carried by release-lab or stele, so `lint:shell` ran at shellcheck's
+# DEFAULTS in every repo but this one: the config-required trap in a fifth
+# costume. Measured 2026-08-21 in release-lab, one four-line script whose
+# only fault is an unbraced `$x` — silent and exit 0 without the file,
+# SC2250 and exit 1 with it, same belt, same tree.
+#
+# So the belt hands it over with `--rcfile`, like every other org-owned
+# config, and a repo-local `.shellcheckrc` is refused rather than merged.
+#
+# --rcfile beats discovery, measured both ways: with this file passed, a
+# repo-local `.shellcheckrc` carrying `disable=SC2250` does not silence
+# SC2250, and neither does the same line in $HOME/.shellcheckrc; without
+# it, either one does. That is the whole reason a repo copy is refused
+# rather than tolerated — not that it would win, but that it would be a
+# file a maintainer believes in that does nothing.
+
+# Every optional check on. shellcheck ships eleven checks disabled by
+# default — require-variable-braces, quote-safe-variables, deprecate-which,
+# require-double-brackets, add-default-case, avoid-nullary-conditions,
+# check-extra-masked-returns, check-set-e-suppressed,
+# check-unassigned-uppercase, avoid-negated-conditions, useless-use-of-cat.
+# The belt holds embedded `run:` blocks to this bar too — lint:actions sets
+# SHELLCHECK_OPTS=--enable=all for actionlint's delegation, and
+# lint:shell-embedded and lint:belt-shell read THIS FILE. Holding a
+# standalone script to a LOWER bar than the same code pasted into a
+# workflow would be incoherent, so it is one setting for every surface
+# that can reach it.
+#
+# Note the upstream caveat, taken deliberately: optional checks are
+# "more subjective rather than more comprehensive, and may conflict with
+# each other". Where one is genuinely wrong for a script, the answer is a
+# `# shellcheck disable=SCxxxx` directive at the site with a reason —
+# visible in review — never a quiet removal from this file, and never a
+# repo-local config.
+enable=all
+
+# Follow `source`d files instead of skipping them. Without this, sourcing
+# a library is a blind spot: lib.sh's definitions are invisible to the
+# scripts that use them, and every variable it sets reads as unassigned.
+external-sources=true
+
+# Dataflow analysis on. It is shellcheck's default today and stating it
+# is not decoration: it is the difference between SC2317 (unreachable
+# code) being reported and not, measured, and a default the org relies on
+# is a default the org should own rather than inherit.
+extended-analysis=true
+
+# WHAT DELIBERATELY IS NOT HERE, each measured on shellcheck 0.11.0 so the
+# next reader does not re-derive it:
+#
+#   severity=  is NOT an rc directive. `severity=error` in an rcfile
+#   changes nothing, while `-S error` on the command line silences the
+#   same finding. The floor is therefore shellcheck's default, `style`,
+#   which is already the lowest and loudest of the four — the maximum is
+#   the default here, and a line claiming to set it would be a line that
+#   does nothing.
+#
+#   --check-sourced (-a) is command-line-only and would not raise
+#   coverage for the way the belt calls shellcheck: every tracked shell
+#   file is linted directly, so a sourced library's findings are already
+#   reported once. Measured on a lib.sh/main.sh pair — with `-a` the
+#   identical SC2250 is printed TWICE, once per caller. Duplication, not
+#   coverage.
+#
+#   disable= has no entries and must not gain one. An org-wide `disable`
+#   is a waiver with no site and no reason attached; the per-site
+#   directive is the mechanism.
+#
+# And one trap for anyone editing this file: shellcheck accepts an
+# UNKNOWN rc key in silence — no warning, no diagnostic, exit unchanged.
+# A typo here does not fail; it just stops enforcing. Change a line and
+# measure the finding it is supposed to move.
