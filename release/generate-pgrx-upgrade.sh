@@ -601,8 +601,44 @@ data = ""
 if data_path:
     data = read(data_path).strip()
 
+# The psql guard, emitted so no line can exceed the org's 80-column SQL
+# rule (#792). It used to be one line:
+#
+#   \echo Use "ALTER EXTENSION <ext> UPDATE TO '<v>'" to load this file. \quit
+#
+# which is 66 fixed characters plus the extension name plus the version, so
+# it fit only when name+version <= 14. release-lab's `lab_pg` lands at 78
+# and passed with two characters to spare; `edtf_postgres` lands at 84 and
+# did not. The fixture's own name length was what satisfied the rule.
+#
+# Dropping `\quit` onto its own line is NOT enough: that leaves 60 fixed,
+# and `pg_stat_statements` with a three-component version still reaches 86.
+# The message splits too, leaving 41 fixed:
+#
+#   41 + len(ext) + len(version) <= 80   =>   len(ext) + len(version) <= 39
+#
+# Measured against the form below: lab_pg 53, edtf_postgres 59,
+# timescaledb 58, pg_stat_statements with 10.10.10 67 — the worst realistic
+# case keeps 13 characters of headroom. psql prints the message as two
+# lines instead of one; the wording, the quoting and the `\quit` semantics
+# are unchanged.
+#
+# A PostgreSQL identifier may be up to 63 bytes, so the bound is not
+# unconditional and is asserted rather than assumed: an extension whose
+# name and version together exceed 39 characters fails HERE, with the
+# arithmetic, instead of emitting a file the gate will reject later.
+guard_budget = 80 - 41
+if len(ext) + len(new_v) > guard_budget:
+    sys.exit(
+        f"generate-pgrx-upgrade: the psql guard would exceed 80 columns: "
+        f"len('{ext}') + len('{new_v}') = {len(ext) + len(new_v)} > {guard_budget}. "
+        f"Shorten the extension name, or re-shape the guard in this script."
+    )
+
 lines = [
-    f"\\echo Use \"ALTER EXTENSION {ext} UPDATE TO '{new_v}'\" to load this file. \\quit",
+    f"\\echo Use \"ALTER EXTENSION {ext} UPDATE TO '{new_v}'\"",
+    "\\echo to load this file.",
+    "\\quit",
     "",
     f"-- Derived by release/generate-pgrx-upgrade.sh: {prev_v} -> {new_v}.",
     "-- DO NOT EDIT. Regenerated on every Release-PR refresh from the",
