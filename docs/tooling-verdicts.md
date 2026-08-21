@@ -36,7 +36,7 @@ honestly blocked on.
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. One stable rule is excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701. |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Two more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
@@ -1122,6 +1122,80 @@ outside TypeScript and still enforced. After the narrowing **11**
 remain — those 10, plus one PascalCase `TextEncoder` in a type literal.
 One per-site `biome-ignore` is what per-site suppression is for; 147 of
 them would have been the waiver #694 refused.
+
+**In a test the literal is the specification** (#783), so two rules are
+off for test files and nowhere else. This is the first `overrides`
+entry the org delivers, and it is applicability declared once and owned
+by the org — the #718 shape — rather than a suppression at every site,
+which #694 refused.
+
+| rule | sites | after the override |
+|---|---|---|
+| `style/noMagicNumbers` | 40 | **2** — both genuine, in production |
+| `performance/useTopLevelRegex` | 19 | **0** — 19/19 were in tests |
+
+`expect(x).toBe(3)` and `rejects.toThrow(/append-only/u)` are the thing
+the test asserts; `expect(x).toBe(EXPECTED_ACT_COUNT)` hides it behind a
+constant. For the regex the rule's own payoff is absent as well — not
+recompiling a literal in a hot loop is worth nothing for a regex
+evaluated once — and 16 of the 19 are `toThrow(/…/u)` and kin, the error
+contract being asserted.
+
+**One correction to the issue**, from re-deriving rather than
+re-reading: it is **38 of the 40**, not 40 of 40. The other two are real
+production magic numbers in `packages/ark/src/index.ts` — a
+rejection-sampling bound (`if (b < 232)`) and a prefix width
+(`s.slice(4)`) — and they still red, which is the rule working. They are
+that repository's two-line fix, not the canon's.
+
+**The glob list is closed and measured**, not a guess at what a test
+file might be called. Every JS/TS file in the org was enumerated:
+release-lab, stele, signer and this repo have **zero**, so
+monumental-archive is the entire population, and across its branches and
+its history the only shapes that exist are `*.test.ts` (21 files) under
+`apps/door/test/` and `tests/unit/`. The list is therefore
+`**/*.test.ts`, `**/test/**`, `**/tests/**` — the two directory globs
+also carrying that repo's test support (`stack.ts`, `global-setup.ts`),
+which hold fixture literals for the same reason. Looked for and **not**
+found anywhere, so deliberately unnamed: `*.spec.*`, `__tests__/**`,
+`*.test.tsx`, `*.test.js`. A repo needing one of those comes here, which
+is the mechanism rather than a gap — a repository cannot widen the list,
+because `overrides` is refused by name in its own `biome.json` and the
+generated config is what biome is run against.
+
+**That an override merges with `preset: "all"` is measured, not read.**
+The reference says only that a matched pattern "will be override the
+top-level configuration", which read strictly could mean a test file
+loses every other rule. Planted on six files with a control rule:
+`noDebugger` still fires in all four test-glob files while the two named
+rules go silent, and on the real tree no other rule moved by a single
+finding. Both directions and the near miss:
+
+| file | `noMagicNumbers` / `useTopLevelRegex` |
+|---|---|
+| `src/prod.ts` | **reported** |
+| `src/probe-test.ts` — test-shaped, hyphen not dot | **reported** |
+| `probe.test.ts`, `src/colocated.test.ts` | clean |
+| `test/probe.test.ts`, `tests/unit/probe.test.ts` | clean |
+
+One entry, and the count is load-bearing: the docs state that when a
+file matches several patterns "only the first one is used", so a second
+entry added later would not compose with this one.
+
+**`suspicious/noMisplacedAssertion` is deliberately not in it.** Its 8
+findings on the same tree are all false, but not because they are in
+test files: six are the assertion-helper pattern (a helper literally
+named `expectValidArk`) and two are the rule not recognising
+`test.prop(...)` from `@fast-check/vitest`. A test-glob override would
+remove the one class it guards — an `expect` genuinely stranded outside
+`it`/`test` reports nothing and the suite passes green. So the rule
+stays on, the eight sites take per-site `biome-ignore`, and the library
+blindness went upstream as
+[biomejs/biome#11454](https://github.com/biomejs/biome/issues/11454) —
+searched first, no existing report, confirmed on the pinned 2.5.7
+against the control that `test.each` (fixed in biomejs/biome#10680) is
+clean in the same run. Same library as #11453: two rules, one
+unrecognised test API.
 
 **Two org controls demanded the opposite edit on the same line**
 (#759). `complexity/useLiteralKeys` wants `row["id"]` written `row.id`.

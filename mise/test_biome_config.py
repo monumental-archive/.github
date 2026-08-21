@@ -22,6 +22,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import ClassVar
 
 _SPEC = importlib.util.spec_from_file_location(
     "biome_config",
@@ -354,6 +355,121 @@ class ContradictionTest(unittest.TestCase):
             set(org["linter"]["rules"]["complexity"]),
             {"useLiteralKeys"},
         )
+
+
+class TestFileOverrideTest(unittest.TestCase):
+    """The one `overrides` entry the org delivers (#783).
+
+    In a test the literal — a number or a regex — IS the specification,
+    so `style/noMagicNumbers` and `performance/useTopLevelRegex` are off
+    for test files and nowhere else. Everything here is asserted against
+    the literals biome understands rather than against a constant in
+    this module: a test that compares a value to the thing that produced
+    it passes whatever that thing says.
+    """
+
+    # The closed list, measured across every JS/TS file in the org
+    # (monumental-archive is the whole population; the other repos have
+    # none). Repeated here as literals ON PURPOSE — this is the mutation
+    # check, and reading the list out of the file under test would make
+    # the assertion vacuous.
+    GLOBS: ClassVar[list[str]] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
+    SILENCED: ClassVar[dict[str, str]] = {
+        "performance": "useTopLevelRegex",
+        "style": "noMagicNumbers",
+    }
+
+    def setUp(self) -> None:
+        """Read the delivered config, not a copy of it."""
+        self.org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+
+    def entry(self) -> dict:
+        """Return the single override entry.
+
+        Returns:
+            The delivered override pattern.
+
+        """
+        overrides = self.org["overrides"]
+        self.assertEqual(len(overrides), 1, msg="biome uses only the FIRST match")
+        return overrides[0]
+
+    def test_the_glob_list_is_exactly_the_closed_list(self) -> None:
+        """Widening the list is an edit to this test as well as the config."""
+        self.assertEqual(self.entry()["includes"], self.GLOBS)
+
+    def test_the_shapes_the_org_does_not_have_are_absent(self) -> None:
+        """`*.spec.*` and `__tests__/**` exist in no org repo, so are unnamed."""
+        joined = " ".join(self.entry()["includes"])
+        for absent in ("spec", "__tests__", "tsx", ".js"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, joined)
+
+    def test_both_rules_are_off_against_the_literal(self) -> None:
+        """Asserted against "off" itself; a mutant value must not survive."""
+        rules = self.entry()["linter"]["rules"]
+        for group, rule in self.SILENCED.items():
+            with self.subTest(rule=rule):
+                self.assertEqual(rules[group][rule], "off")
+
+    def test_the_override_silences_those_two_rules_and_no_others(self) -> None:
+        """A third rule arriving here is a decision, not a drive-by."""
+        rules = self.entry()["linter"]["rules"]
+        self.assertEqual(
+            {(g, r) for g, block in rules.items() for r in block},
+            set(self.SILENCED.items()),
+        )
+
+    def test_the_override_carries_nothing_but_those_rules(self) -> None:
+        """No `linter.enabled: false`, no formatter, no files — rules only."""
+        self.assertEqual(set(self.entry()), {"includes", "linter"})
+        self.assertEqual(set(self.entry()["linter"]), {"rules"})
+
+    def test_neither_rule_is_switched_off_at_the_top_level(self) -> None:
+        """The other direction: a magic number in production still reds.
+
+        Both rules are on by `preset: "all"` not naming them, so the
+        proof that production is untouched is that neither appears in the
+        top-level rule block at all.
+        """
+        top = self.org["linter"]["rules"]
+        self.assertEqual(top["preset"], "all")
+        for group, rule in self.SILENCED.items():
+            with self.subTest(rule=rule):
+                self.assertNotIn(rule, top.get(group, {}))
+
+    def test_nomisplacedassertion_is_not_in_the_override(self) -> None:
+        """#783's ruling: its 8 false positives are not a file-type question.
+
+        Six are the assertion-helper pattern and two are the rule not
+        knowing `test.prop` (biomejs/biome#11454). A test-glob override
+        would remove the class it guards — an `expect` stranded outside
+        `it`/`test`, which reports nothing and passes green.
+        """
+        rules = self.entry()["linter"]["rules"]
+        self.assertNotIn("noMisplacedAssertion", rules.get("suspicious", {}))
+        self.assertNotIn("suspicious", self.org["linter"]["rules"])
+
+    def test_the_override_survives_generation_untouched(self) -> None:
+        """A repository's identity moves domains and nursery, never this."""
+        for claimed in (set(), {"react"}):
+            with self.subTest(claimed=claimed):
+                config, _silenced = biome_config.generate(
+                    self.org,
+                    claimed,
+                    DELIVERED,
+                    NURSERY,
+                )
+                self.assertEqual(config["overrides"], self.org["overrides"])
+
+    def test_a_repository_may_not_declare_an_override_of_its_own(self) -> None:
+        """The widening a repo would reach for is refused by name (#695)."""
+        problems = biome_config.declaration_problems(
+            {"overrides": [{"includes": ["src/**"], "linter": {"rules": {}}}]},
+            DELIVERED.identity,
+        )
+        self.assertTrue(problems)
+        self.assertIn("overrides", problems[0])
 
 
 class NurseryTableTest(unittest.TestCase):

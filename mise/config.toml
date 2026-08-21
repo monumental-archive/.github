@@ -1060,6 +1060,82 @@ dir = "{{cwd}}"
 # `biome-ignore` is actually for; 147 of them would have been the waiver
 # #694 refused.
 #
+# IN A TEST THE LITERAL IS THE SPECIFICATION, so two rules are off for
+# test files and nowhere else (#783). This is applicability declared
+# once and owned by the org — the #718 shape — not a suppression at
+# every site, which is what #694 refused.
+#
+# `expect(x).toBe(3)` and `rejects.toThrow(/append-only/u)` are the
+# thing the test asserts. Naming them — `expect(x).toBe(EXPECTED)`,
+# `const APPEND_ONLY = /append-only/u` — moves the specification out of
+# the assertion and leaves the reader chasing a constant. Measured on
+# monumental-archive at 43df3482, after every production literal was
+# named: `style/noMagicNumbers` 40 and `performance/useTopLevelRegex`
+# 19. `useTopLevelRegex` is 19/19 in tests, 16 of them
+# `toThrow(/…/u)` and kin, and the rule's payoff — not recompiling a
+# regex in a hot loop — does not exist for a regex evaluated once.
+#
+# ONE CORRECTION TO THE ISSUE, from re-deriving rather than re-reading:
+# it is 38 of the 40, not 40 of 40. The other two are genuine
+# production magic numbers in `packages/ark/src/index.ts` — a
+# rejection-sampling bound (`if (b < 232)`) and a prefix width
+# (`s.slice(4)`) — and they still red, which is the rule working. After
+# the override: `useTopLevelRegex` 19 → 0, `noMagicNumbers` 40 → 2, and
+# no other rule moves by one finding.
+#
+# THE GLOB LIST IS CLOSED AND MEASURED, not a guess at what a test file
+# might be called. Every JS/TS file in the org was enumerated:
+# release-lab, stele, signer and this repo have zero, so
+# monumental-archive is the whole population, and across its branches
+# and its history the only shapes that exist are `*.test.ts` (21 files)
+# under `apps/door/test/` and `tests/unit/`. `**/test/**` and
+# `**/tests/**` also carry that repo's test support — `stack.ts`,
+# `global-setup.ts` — which hold fixture literals for the same reason.
+# Looked for and NOT found anywhere, so deliberately not named:
+# `*.spec.*`, `__tests__/**`, `*.test.tsx`, `*.test.js`. A repo that
+# needs one of those comes here; that is the mechanism, not a gap.
+#
+# A REPO CANNOT WIDEN IT. `overrides` is refused by name in a
+# repository's own `biome.json` (`biome-config.py`), and the generated
+# config is what biome is run against, so a declaration that carried
+# one would never reach the tool. The org's entry survives generation
+# untouched, pinned by a test.
+#
+# THE OVERRIDE MERGES WITH `preset: "all"`, MEASURED, because the docs
+# do not say so — they say only that an override "will be override the
+# top-level configuration", which read strictly could mean the test
+# glob loses every other rule. Planted on six files, one rule per
+# direction: `noDebugger` still fires in all four test-glob files while
+# the two named rules go silent. Both directions and the near miss:
+# `src/prod.ts` still reds on both, `src/probe-test.ts` — test-shaped
+# but a hyphen, not a dot — still reds on both, and `probe.test.ts`,
+# `src/colocated.test.ts`, `test/probe.test.ts` and
+# `tests/unit/probe.test.ts` are clean.
+#
+# ONE ENTRY, and the count is load-bearing: biome documents that "if a
+# file can match three patterns, only the first one is used". A second
+# entry added later does not compose with this one for a file matching
+# both — it replaces it.
+#
+# `suspicious/noMisplacedAssertion` IS NOT IN THIS OVERRIDE, ruled
+# separately and deliberately. Its 8 findings on the same tree are all
+# false, but not because they are in test files: six are the
+# assertion-helper pattern (a helper literally named `expectValidArk`)
+# and two are the rule not recognising `test.prop(...)` from
+# `@fast-check/vitest`. Switching it off for test globs would remove
+# the only class it guards — an `expect` genuinely stranded outside
+# `it`/`test`, which reports nothing and lets the suite pass green. So
+# the rule stays on, the eight sites take per-site `biome-ignore` with
+# their reasons in the repo, and the library blindness went upstream as
+# https://github.com/biomejs/biome/issues/11454 — searched first, no
+# existing report, confirmed on the pinned 2.5.7 against the control
+# that `test.each` (fixed in biomejs/biome#10680) is clean in the same
+# run. Same library as #11453; two rules, one unrecognised test API.
+#
+# Inert in this repository by construction: the canon tracks no file
+# matching any of the three globs, which is the same standing caveat as
+# every other biome rule here (#82).
+#
 # TWO SAFE FIXES WERE NOT SAFE, and the belt now says so in the config
 # rather than trusting biome's own classification (#758).
 #
