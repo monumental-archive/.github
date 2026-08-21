@@ -2602,7 +2602,7 @@ if [[ -n ${drift} ]]; then
   # burst of releases inside one bot cycle is one short staleness, not
   # a multi-release alarm, while a week-old lag stays red no matter how
   # recent the newest tag is. All local: tags and dates are in the clone.
-  pin_tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | head -1)
+  pin_tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | sed -n 1p)
   succ_tag=$(git tag --list "v[0-9]*" | sort -V \
     | awk -v p="${pin_tag}" '$0 == p { getline; print; exit }')
   if [[ -n ${pin_tag} && -n ${succ_tag} ]]; then
@@ -4896,7 +4896,7 @@ dir = "{{cwd}}"
 # tracked files only. Skips only an empty tree — a repo with content
 # and no licence is exactly the defect, never an exemption.
 run = '''
-tracked=$(git ls-files | head -1)
+tracked=$(git ls-files | sed -n 1p)
 [[ -n ${tracked} ]] || {
   echo "lint:licence: no tracked files, skipped"
   exit 0
@@ -4977,7 +4977,7 @@ if [[ ${count} != "1" ]]; then
   echo "${lic}" >&2
   exit 1
 fi
-supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
 person="${supplier%% <*}"
 if [[ -z ${person} ]]; then
   echo "fix:citation: REUSE.toml carries no SPDX-PackageSupplier — the citation needs an author" >&2
@@ -4985,7 +4985,7 @@ if [[ -z ${person} ]]; then
 fi
 family="${person##* }"
 given="${person% "${family}"}"
-repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
 [[ -n ${repo_url} ]] || {
   echo "fix:citation: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2
   exit 1
@@ -4995,11 +4995,11 @@ version="0.0.0"
 released=$(git log -1 --format=%cs 2> /dev/null || date -u +%F)
 concept=""
 if [[ -f CITATION.cff ]]; then
-  t=$(sed -n "s/^title: //p" CITATION.cff | head -1)
+  t=$(sed -n "s/^title: //p" CITATION.cff | sed -n 1p)
   [[ -n ${t} ]] && title="${t}"
-  v=$(sed -n "s/^version: //p" CITATION.cff | head -1)
+  v=$(sed -n "s/^version: //p" CITATION.cff | sed -n 1p)
   [[ -n ${v} ]] && version="${v}"
-  d=$(sed -n 's/^date-released: "\{0,1\}\([0-9-]*\)"\{0,1\}$/\1/p' CITATION.cff | head -1)
+  d=$(sed -n 's/^date-released: "\{0,1\}\([0-9-]*\)"\{0,1\}$/\1/p' CITATION.cff | sed -n 1p)
   [[ -n ${d} ]] && released="${d}"
   concept=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' CITATION.cff)
 fi
@@ -5619,10 +5619,10 @@ n=$(wc -w <<< "${shas}" | tr -d " ")
 # it, so there is nothing to verify and nothing that survives a rebuild.
 # The gate's checkout fetches tags for exactly this (ci.yml, fetch-tags).
 released=""
-anytag=$(git tag --list "v[0-9]*" | head -1)
+anytag=$(git tag --list "v[0-9]*" | sed -n 1p)
 if [[ -n ${anytag} ]]; then
   for sha in ${shas}; do
-    tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | head -1)
+    tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | sed -n 1p)
     if [[ -z ${tag} ]]; then
       bad="${bad} (${sha:0:8} names no released tag — pins must name a release, not any ancestor)"
     else
