@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.11](https://github.com/monumental-archive/.github/compare/v1.58.10...v1.58.11) - 2026-08-21
+
+### Fixed
+
+- mint canon bumps under the topic canon ([#827](https://github.com/monumental-archive/.github/pull/827))
+
 ## [1.58.10](https://github.com/monumental-archive/.github/compare/v1.58.9...v1.58.10) - 2026-08-21
 
 ### Fixed
