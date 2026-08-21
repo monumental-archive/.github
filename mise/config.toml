@@ -3164,6 +3164,23 @@ dir = "{{cwd}}"
 # canon references at all is a finding too: every org repo pins the
 # canon by construction (scaffold/), so zero references means the
 # extraction — or the repo — is broken.
+#
+# The population contains a PRIVATE member (#692), and that splits the
+# old single failure bucket in two. "I cloned it and found no canon
+# reference" is a finding about the repository. "I could not read it"
+# is a fact about the credential, and printing it as the first was the
+# defect: an unauthenticated clone of a private member fails, and the
+# task recorded `monumental-archive(clone)` — a finding against a repo
+# whose only offence was being invisible to the token. Unreadable is
+# CANNOT_JUDGE: still red, because unknown is not clean (#266), never
+# a finding against the member.
+#
+# Every git read here is authenticated from GH_TOKEN, through an
+# http.extraheader supplied in the ENVIRONMENT rather than on the
+# command line or in a clone URL — the token never reaches argv, a
+# config file, or the cloned repo's remote. The token must carry
+# Contents: read across the org; without it this walk can only report
+# that it could not look.
 run = '''
 [[ -f slsa/verify-policy.json ]] || {
   echo "audit:org-pins: no slsa/verify-policy.json, not the canon, skipped"
@@ -3173,7 +3190,22 @@ command -v gh > /dev/null || {
   echo "audit:org-pins: gh missing" >&2
   exit 1
 }
+[[ -n ${GH_TOKEN:-} ]] || {
+  echo "audit:org-pins: GH_TOKEN is unset — CANNOT_JUDGE. This walk lists," >&2
+  echo "  clones and reads tags for every member of the population, and a" >&2
+  echo "  private member is invisible without a credential. A tokenless run" >&2
+  echo "  would clone what it can and print the rest as findings against" >&2
+  echo "  repositories it never saw (#692)." >&2
+  exit 1
+}
 : "${GITHUB_REPOSITORY_OWNER:?audit:org-pins walks an org the environment names (#579) — Actions sets it; a local run exports it}"
+# Authenticate every github.com git read for the rest of this task.
+# GIT_CONFIG_COUNT is git's environment-only config channel: no file is
+# written and no argument carries the secret.
+git_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+export GIT_CONFIG_VALUE_0="${git_auth_header}"
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
@@ -3197,10 +3229,11 @@ fi
 total=0
 stale=""
 failed=""
+unreadable=""
 for repo in ${repos}; do
   dir=$(mktemp -d)
   git clone -q --depth 1 "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}.git" "${dir}" || {
-    failed="${failed} ${repo}(clone)"
+    unreadable="${unreadable} ${repo}"
     continue
   }
   claims=$(
@@ -3230,8 +3263,19 @@ for repo in ${repos}; do
     [[ ${v} != "${latest}" ]] && stale="${stale} ${claim}"
   done <<< "${claims}"
 done
+if [[ -n ${unreadable} ]]; then
+  echo "audit:org-pins: CANNOT_JUDGE — the token could not read:${unreadable}" >&2
+  echo "  This is a statement about the credential, NOT a finding against" >&2
+  echo "  those repositories: the walk never saw them, so it knows nothing" >&2
+  echo "  about their canon references. Red because unknown is not clean" >&2
+  echo "  (#266). Grant the token Contents: read on every member of the" >&2
+  echo "  population — a private member needs it (#692)." >&2
+  exit 1
+fi
 if [[ -n ${failed} ]]; then
-  echo "audit:org-pins: repos that could not be checked:${failed}" >&2
+  echo "audit:org-pins: cloned clean and carry no canon reference:${failed}" >&2
+  echo "  Every org repo pins the canon by construction (scaffold/), so" >&2
+  echo "  zero references means the repo — or this extraction — is broken." >&2
   exit 1
 fi
 if [[ -n ${stale} ]]; then
@@ -4998,6 +5042,13 @@ command -v gh > /dev/null || {
   echo "audit:adoption: gh missing" >&2
   exit 1
 }
+[[ -n ${GH_TOKEN:-} ]] || {
+  echo "audit:adoption: GH_TOKEN is unset — CANNOT_JUDGE. The population" >&2
+  echo "  contains a private member, and a credential that cannot see it" >&2
+  echo "  enumerates a short org and reports the difference as adoption" >&2
+  echo "  gaps (#692)." >&2
+  exit 1
+}
 : "${GITHUB_REPOSITORY_OWNER:?audit:adoption walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate \
   --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
@@ -5006,12 +5057,16 @@ if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate \
 fi
 optout="security/adoption-optout.txt"
 fail=""
+blind=""
 checked=0
 for repo in ${repos}; do
+  # Unreadable is CANNOT_JUDGE, never a gap. The old branch here read
+  # "unreadable is not adopted", which is a finding against a repository
+  # the walk never saw — and for a private member with a token scoped to
+  # this repo alone, that is every artifact it owes (#692).
   if ! files=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/.github/workflows" \
     --jq '.[].name' 2> /dev/null); then
-    fail="${fail}
-  ${repo}: could not read .github/workflows — unreadable is not adopted"
+    blind="${blind} ${repo}"
     continue
   fi
   # The versioned archetype is proven by CONSEQUENCE, not by config: a
@@ -5052,6 +5107,14 @@ for repo in ${repos}; do
   ${repo}: missing ${artifact} (no workflow named ${spec#*=}) and no opt-out row"
   done
 done
+if [[ -n ${blind} ]]; then
+  echo "audit:adoption: CANNOT_JUDGE — could not read .github/workflows in:${blind}" >&2
+  echo "  The walk never saw these repositories, so it knows nothing about" >&2
+  echo "  what they have adopted. Red because unknown is not clean (#266)," >&2
+  echo "  but this is the credential's failure, not theirs: grant the token" >&2
+  echo "  Contents: read on every member of the population (#692)." >&2
+  exit 1
+fi
 if [[ -n ${fail} ]]; then
   echo "audit:adoption: population gaps:${fail}" >&2
   echo "  wire the stub per docs/runbook.md, or record the exception in" >&2
