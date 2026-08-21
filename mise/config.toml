@@ -1017,6 +1017,49 @@ dir = "{{cwd}}"
 # a `biome.json` that claimed `qwik` and switched `noNodejsModules` off,
 # and measuring no change in either (0 Qwik findings, 33 noNodejsModules).
 #
+# THE PRESET HAD NEVER MET TYPESCRIPT THAT CROSSES A DATABASE BOUNDARY,
+# and three of its four largest rules broke on that one seam (#759,
+# #767). monumental-archive is the first repo in the org where column
+# names and row types enter TypeScript as Postgres spells them.
+#
+# `style/noTernary` is OFF. 164 findings, and 123 of them sit in
+# expression positions where no statement can go — `...(c ? { k: v } :
+# {})` has no if/else form, because an object literal admits expressions
+# and not statements. The remaining 41 are convertible and measured a
+# wash: turning `const x = c ? a : b` into `let` plus if/else trades the
+# finding for a formatting finding and costs the `const`. A rule whose
+# remedy is impossible for three quarters of its sites and a downgrade
+# for the rest is max being measurably worse.
+#
+# `style/useNamingConvention` stays ON and is NARROWED, not dropped,
+# because only two of its selectors touch the boundary. The org has
+# already ruled this question one tool over: sqlfluff's `RF04` flags
+# `public`/`method`/`label`, and #672 concluded that renaming a column
+# is a migration and not a lint fix. The same column seen from
+# TypeScript cannot become a naming defect. `typeProperty` and
+# `objectLiteralProperty` therefore admit `snake_case` and
+# `CONSTANT_CASE` beside `camelCase` — a name the DATABASE owns and a
+# name the ENVIRONMENT owns (a container reads `POSTGRES_DB` by that
+# exact key) are the same class of fact, and they land on the same two
+# selectors. The widening holds to the SELECTOR, never to the case
+# style at large.
+#
+# Everything else stays at maximum, and that is planted rather than
+# asserted: on a file carrying `merged_ark`, `POSTGRES_DB`,
+# `bad_function_name`, `bad_variable_name`, `bad_class_name` and
+# `bad_type_name`, the two property names pass and the other four are
+# still reported. camelCase at the row-mapping edge is the door's job,
+# and the belt still enforces it everywhere the row is not.
+#
+# Measured on monumental-archive: 157 findings, not the 147 the issue
+# reported. The split is what matters — 147 are properties, and the
+# other 10 are function-scoped CONSTANT_CASE consts in that repo's own
+# tests, which are NOT owned by anything outside TypeScript and stay
+# enforced. After the narrowing: 11 remain, being those 10 plus one
+# PascalCase `TextEncoder` in a type literal. One site is what per-site
+# `biome-ignore` is actually for; 147 of them would have been the waiver
+# #694 refused.
+#
 # TWO SAFE FIXES WERE NOT SAFE, and the belt now says so in the config
 # rather than trusting biome's own classification (#758).
 #
@@ -1040,6 +1083,17 @@ dir = "{{cwd}}"
 # one option covers every case instead of trading one project for
 # another.
 #
+# The option is used OUTSIDE its documented rationale, deliberately, and
+# the table above is why that is safe. biome documents
+# `forceJsExtensions` as "useful if you use the `module: node16` setting
+# when building your code with tsc" — it says nothing about
+# `moduleResolution: bundler`, and 2.5.7 ships NO bundler-aware option:
+# `extensionMappings` and `forceJsExtensions` choose WHICH extension is
+# suggested and neither can suppress the suggestion. Reading the docs
+# alone gives the wrong answer here — it says no configuration can serve
+# the bundler case, which is what this lane first concluded. Measuring
+# says one does, in all three shapes. Docs cross-check, binary decides.
+#
 # `nursery/useConsistentTestIt` renamed `test.prop(...)` to
 # `it.prop(...)` and left `import { test } from "@fast-check/vitest"`
 # alone, so the module threw on load and two property tests stopped
@@ -1052,10 +1106,15 @@ dir = "{{cwd}}"
 # from vitest is renamed to `test(...)` and ITS import is left alone
 # too. Measured both ways. The rule renames a call whose callee is an
 # imported binding without touching the binding, which is not a safe
-# application of a style opinion in either direction. Reported upstream
-# so this exclusion carries an expiry rather than becoming permanent
-# scar tissue; `audit:biome-rules` is where a fixed version would
-# surface.
+# application of a style opinion in either direction.
+#
+# THIS EXCLUSION HAS AN EXPIRY: reported upstream as
+# https://github.com/biomejs/biome/issues/11453 — searched first, no
+# existing report, confirmed on the pinned 2.5.7 with the symmetric
+# reproduction above. When biome reclassifies the fix as unsafe or stops
+# firing on an imported binding, delete the `fix` key and let the fixer
+# do its job again. Without that link this is scar tissue nobody can
+# ever retire.
 #
 # ONE STABLE RULE IS OFF, and it is a mechanical contradiction rather
 # than a preference (#759). `complexity/useLiteralKeys` wants
