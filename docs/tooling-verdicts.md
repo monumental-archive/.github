@@ -36,7 +36,7 @@ honestly blocked on.
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Two more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Three more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), and `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
@@ -1133,6 +1133,7 @@ which #694 refused.
 |---|---|---|
 | `style/noMagicNumbers` | 40 | **2** — both genuine, in production |
 | `performance/useTopLevelRegex` | 19 | **0** — 19/19 were in tests |
+| `complexity/noExcessiveLinesPerFunction` | 40 in tests, 27 of them `describe` callbacks | **0 in describes** — 33/60 groups exceeded 50 lines at 4.7 cases each (#804) |
 
 `expect(x).toBe(3)` and `rejects.toThrow(/append-only/u)` are the thing
 the test asserts; `expect(x).toBe(EXPECTED_ACT_COUNT)` hides it behind a
@@ -1147,6 +1148,22 @@ production magic numbers in `packages/ark/src/index.ts` — a
 rejection-sampling bound (`if (b < 232)`) and a prefix width
 (`s.slice(4)`) — and they still red, which is the rule working. They are
 that repository's two-line fix, not the canon's.
+
+**A describe's span is the sum of its tests** (#804), so the third rule
+in the same entry is `complexity/noExcessiveLinesPerFunction`. The bound
+of 50 is right about test bodies — 215 cases on monumental-archive #262
+have a median of 20 lines and only 9% exceed it — but splitting a long
+test makes its `describe` longer, and the only compliant move, fewer
+cases per group, turns 33 groups into ~133: complying with a measurement
+of the wrong thing. The other two structural rules stay on in tests; a
+1,400-line test file genuinely splits and a test body's branching is
+real. The cost is per-file and stated: the rule's 2.5.7 options are
+`maxLines`, `skipBlankLines` and `skipIifes`, no per-construct selector,
+so a 60-line helper in a `.test.ts` file goes quiet too. Planted both
+directions on the pinned binary: a 60-line production function still
+reds, a 60-line describe and a 60-line helper in `tests/` do not. One
+trap: `biome lint --only=<rule>` bypasses `overrides` entirely — never
+measure an override with it.
 
 **The glob list is closed and measured**, not a guess at what a test
 file might be called. Every JS/TS file in the org was enumerated:

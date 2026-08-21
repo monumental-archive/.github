@@ -358,14 +358,19 @@ class ContradictionTest(unittest.TestCase):
 
 
 class TestFileOverrideTest(unittest.TestCase):
-    """The one `overrides` entry the org delivers (#783).
+    """The one `overrides` entry the org delivers (#783, #804).
 
     In a test the literal — a number or a regex — IS the specification,
     so `style/noMagicNumbers` and `performance/useTopLevelRegex` are off
-    for test files and nowhere else. Everything here is asserted against
-    the literals biome understands rather than against a constant in
-    this module: a test that compares a value to the thing that produced
-    it passes whatever that thing says.
+    for test files and nowhere else. A `describe` callback's span is the
+    SUM of its tests, so `complexity/noExcessiveLinesPerFunction` is off
+    there too (#804): the rule has no per-construct selector on 2.5.7
+    (`maxLines`, `skipBlankLines`, `skipIifes` only), so the override is
+    per-file and a long helper in a test file is the accepted cost.
+    Everything here is asserted against the literals biome understands
+    rather than against a constant in this module: a test that compares
+    a value to the thing that produced it passes whatever that thing
+    says.
     """
 
     # The closed list, measured across every JS/TS file in the org
@@ -375,6 +380,7 @@ class TestFileOverrideTest(unittest.TestCase):
     # the assertion vacuous.
     GLOBS: ClassVar[list[str]] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
     SILENCED: ClassVar[dict[str, str]] = {
+        "complexity": "noExcessiveLinesPerFunction",
         "performance": "useTopLevelRegex",
         "style": "noMagicNumbers",
     }
@@ -412,8 +418,8 @@ class TestFileOverrideTest(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertEqual(rules[group][rule], "off")
 
-    def test_the_override_silences_those_two_rules_and_no_others(self) -> None:
-        """A third rule arriving here is a decision, not a drive-by."""
+    def test_the_override_silences_those_three_rules_and_no_others(self) -> None:
+        """A fourth rule arriving here is a decision, not a drive-by."""
         rules = self.entry()["linter"]["rules"]
         self.assertEqual(
             {(g, r) for g, block in rules.items() for r in block},
@@ -428,8 +434,8 @@ class TestFileOverrideTest(unittest.TestCase):
     def test_neither_rule_is_switched_off_at_the_top_level(self) -> None:
         """The other direction: a magic number in production still reds.
 
-        Both rules are on by `preset: "all"` not naming them, so the
-        proof that production is untouched is that neither appears in the
+        All three rules are on by `preset: "all"` not naming them, so the
+        proof that production is untouched is that none appears in the
         top-level rule block at all.
         """
         top = self.org["linter"]["rules"]
@@ -437,6 +443,16 @@ class TestFileOverrideTest(unittest.TestCase):
         for group, rule in self.SILENCED.items():
             with self.subTest(rule=rule):
                 self.assertNotIn(rule, top.get(group, {}))
+
+    def test_the_other_two_structural_rules_stay_on_in_tests(self) -> None:
+        """#804 turns off the line-count rule only.
+
+        A 1,400-line test file genuinely splits along concerns and a test
+        body's branching is real, so `noExcessiveLinesPerFile` and
+        `noExcessiveCognitiveComplexity` are judged in tests as anywhere.
+        """
+        complexity = self.entry()["linter"]["rules"]["complexity"]
+        self.assertEqual(set(complexity), {"noExcessiveLinesPerFunction"})
 
     def test_nomisplacedassertion_is_not_in_the_override(self) -> None:
         """#783's ruling: its 8 false positives are not a file-type question.
