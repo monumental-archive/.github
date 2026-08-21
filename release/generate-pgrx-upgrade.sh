@@ -238,9 +238,33 @@ for control in "${controls[@]}"; do
     --output "${work}/prev.tar.gz"
   tar -xzf "${work}/prev.tar.gz" -C "${work}/prevroot"
 
-  # -print -quit, never `| head -1`: find's own first-match stop, so
-  # there is no pipe to break and no walk to finish (#682).
-  prev_schema=$(find "${work}/prevroot" -type f -name "${name}--${prev}.sql" -print -quit)
+  # WHERE THE PREVIOUS TREE IS, resolved once and read by everything that
+  # needs it (#780). Our own tarballs are packed from a staging directory
+  # and carry a `pkgroot/` top level; an imported repository's were packed
+  # from `/` and carry `./usr/...` directly. The payload and every path
+  # below that level are identical — the difference is one archive
+  # component, not a difference in the extension.
+  #
+  # This used to be two answers that could disagree, and did: the schema
+  # was located with a recursive `find` (layout-agnostic, so it passed on
+  # edtf) while the proof mounted a hard-coded `prevroot/pkgroot` (which
+  # did not exist there). The mismatch therefore surfaced as `cp: cannot
+  # stat` AFTER a full candidate compile, two minutes past the point it
+  # was knowable. One variable now, asserted here.
+  prev_root="${work}/prevroot/pkgroot"
+  [[ -d ${prev_root} ]] || prev_root="${work}/prevroot"
+  if [[ ! -d ${prev_root}/usr/lib/postgresql/${pg}/lib ]]; then
+    echo "FAIL: ${prev_tag} tarball has no usr/lib/postgresql/${pg}/lib under its package root" >&2
+    echo "  looked in ${prev_root#"${work}/"} (of $(basename "${work}/prev.tar.gz"))" >&2
+    echo "  the archive is neither pkgroot/usr/... nor ./usr/..., which is the shape a" >&2
+    echo "  pgrx package tarball has; nothing downstream can read it" >&2
+    exit 1
+  fi
+
+  # Same root, so the two cannot disagree again. -print -quit, never
+  # `| head -1`: find's own first-match stop, so there is no pipe to break
+  # and no walk to finish (#682).
+  prev_schema=$(find "${prev_root}" -type f -name "${name}--${prev}.sql" -print -quit)
   if [[ -z ${prev_schema} ]]; then
     echo "FAIL: ${prev_tag} tarball carries no generated schema ${name}--${prev}.sql" >&2
     exit 1
@@ -671,7 +695,7 @@ EOSH
   docker run --rm \
     --env PG="${pg}" --env NAME="${name}" \
     --env PREV="${prev}" --env NEW="${VERSION}" \
-    --volume "${work}/prevroot/pkgroot:/prev:ro" \
+    --volume "${prev_root}:/prev:ro" \
     --volume "${work}/out/pkgroot:/new:ro" \
     --volume "${work}:/work:ro" \
     "${build_image}" \
