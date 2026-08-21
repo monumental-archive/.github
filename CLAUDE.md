@@ -29,7 +29,8 @@ shared lives here and nowhere else. Five layers:
 2. **The toolbelt** (`mise/`): `config.toml` + `mise.lock`, and beside
    them the configs of the tools only the belt runs — `clippy.toml`,
    `rustfmt.toml`, `pinact.yaml`, `typos.toml`, `ruff.toml`,
-   `biome-org.json` (+ `biome-domains.tsv`), `yamllint.yaml`,
+   `biome-org.json` (+ `biome-domains.tsv`,
+   `biome-nursery-domains.tsv`), `yamllint.yaml`,
    `rumdl.toml`, `sqlfluff.cfg`, `lychee.toml`, `taplo-org.toml` —
    plus the helpers tasks call. Those configs are DELIVERED, never
    copied: `ORG_BELT_DIR` is computed once in the belt's `[env]` and

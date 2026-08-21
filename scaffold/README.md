@@ -91,6 +91,14 @@ it and never will; see the entry below.
   so, because silence would turn react's rules off. Leave `domains`
   empty when the repo tracks no framework at all.
 
+  Claiming a domain also decides its NURSERY rules (#720). biome's
+  `preset: "all"` does not reach nursery, so the org names all 87 rules
+  one by one — and a named rule beats its own domain being off, which
+  meant a React repo drew Vue's and Playwright's nursery rules whatever
+  it declared. The belt now switches those off for you: claim `react`
+  and you keep react's six, lose the other frameworks', and keep every
+  rule that belongs to no framework at all.
+
   What this file cannot do is scope a rule that has no domain.
   `noNodejsModules` is the one that bites a Node service: biome gives it
   no domain, so the answer is biome's own per-file directive in the file

@@ -32,9 +32,11 @@ _SPEC.loader.exec_module(biome_config)
 
 BELT = Path(__file__).parent
 DOMAINS_FILE = BELT / "biome-domains.tsv"
+NURSERY_FILE = BELT / "biome-nursery-domains.tsv"
 ORG_FILE = BELT / "biome-org.json"
 
 DELIVERED = biome_config.read_domains(DOMAINS_FILE)
+NURSERY = biome_config.read_nursery(NURSERY_FILE)
 
 
 def declaration(body: dict) -> str:
@@ -237,9 +239,14 @@ class GenerateTest(unittest.TestCase):
     """The arithmetic the repository is not allowed to do for itself."""
 
     def setUp(self) -> None:
-        """Generate against the real org config and the real table."""
+        """Generate against the real org config and the real tables."""
         self.org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
-        self.config = biome_config.generate(self.org, {"react"}, DELIVERED)
+        self.config, self.silenced = biome_config.generate(
+            self.org,
+            {"react"},
+            DELIVERED,
+            NURSERY,
+        )
         self.written = self.config["linter"]["domains"]
 
     def test_every_domain_is_written_explicitly(self) -> None:
@@ -267,8 +274,14 @@ class GenerateTest(unittest.TestCase):
                 self.assertEqual(self.written[domain], "all")
 
     def test_the_org_rules_survive_untouched(self) -> None:
-        """The merge adds identity; it may not edit a single rule."""
-        self.assertEqual(self.config["linter"]["rules"], self.org["linter"]["rules"])
+        """The merge adds identity and silences nursery; nothing else moves."""
+        generated = self.config["linter"]["rules"]
+        original = self.org["linter"]["rules"]
+        self.assertEqual(generated["preset"], original["preset"])
+        self.assertEqual(
+            {k: v for k, v in generated.items() if k != "nursery"},
+            {k: v for k, v in original.items() if k != "nursery"},
+        )
         self.assertEqual(self.config["assist"], self.org["assist"])
 
     def test_the_org_config_is_not_mutated_in_place(self) -> None:
@@ -277,11 +290,117 @@ class GenerateTest(unittest.TestCase):
 
     def test_a_repository_claiming_nothing_gets_every_identity_off(self) -> None:
         """The canon's own case: no framework, no framework rules."""
-        written = biome_config.generate(self.org, set(), DELIVERED)["linter"]["domains"]
+        config, _silenced = biome_config.generate(self.org, set(), DELIVERED, NURSERY)
+        written = config["linter"]["domains"]
         self.assertEqual(
             {d for d, v in written.items() if v == "all"},
             set(DELIVERED.org),
         )
+
+
+class NurseryTableTest(unittest.TestCase):
+    """The delivered rule-to-domain table, and what the generator does with it."""
+
+    def test_every_enforced_nursery_rule_is_mapped(self) -> None:
+        """An unmapped rule escapes its domain — the whole #720 defect."""
+        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        enforced = set(org["linter"]["rules"]["nursery"])
+        self.assertEqual(enforced - set(NURSERY), set())
+
+    def test_the_table_maps_nothing_the_org_does_not_enforce(self) -> None:
+        """A mapped rule nobody enables is a row that means nothing."""
+        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(set(NURSERY) - set(org["linter"]["rules"]["nursery"]), set())
+
+    def test_no_domain_is_stated_rather_than_left_blank(self) -> None:
+        """`-` is a statement; an empty column is a field someone forgot."""
+        self.assertEqual(biome_config.NO_DOMAIN, "-")
+        self.assertNotIn("", NURSERY.values())
+        self.assertIn("-", NURSERY.values())
+
+    def test_every_stated_domain_is_a_domain_the_org_knows(self) -> None:
+        """A row naming a domain outside the table could never be claimed."""
+        known = {*DELIVERED.identity, *DELIVERED.org, biome_config.NO_DOMAIN}
+        for rule, domain in NURSERY.items():
+            with self.subTest(rule=rule):
+                self.assertIn(domain, known)
+
+    def test_the_measured_fixture_rule_is_mapped_to_reactnative(self) -> None:
+        """The rule that proved the defect, spot-checked."""
+        self.assertEqual(NURSERY["noReactNativeRawText"], "reactNative")
+
+    def test_comments_are_not_rows(self) -> None:
+        """The file is commented heavily; none of it may become a rule."""
+        self.assertNotIn("#", "".join(NURSERY))
+
+
+class SilenceNurseryTest(unittest.TestCase):
+    """Which nursery rules a repository's identity switches off."""
+
+    @staticmethod
+    def build(claimed: set[str], table: dict[str, str]) -> tuple:
+        """Silence one small nursery block.
+
+        Returns:
+            The resulting block and the count reported.
+
+        """
+        config = {"linter": {"rules": {"nursery": dict.fromkeys(table, "on")}}}
+        silenced = biome_config.silence_nursery(config, claimed, DELIVERED, table)
+        return config["linter"]["rules"]["nursery"], silenced
+
+    def test_the_silencing_value_is_the_literal_biome_understands(self) -> None:
+        """Asserted against "off" itself, never against the constant.
+
+        Comparing a result to the constant that produced it passes whatever
+        the constant says — proven: a mutant setting SILENCED to "on"
+        survived a whole suite that did exactly that.
+        """
+        self.assertEqual(biome_config.SILENCED, "off")
+
+    def test_an_unclaimed_framework_rule_is_switched_off(self) -> None:
+        """The #720 case, in miniature."""
+        block, silenced = self.build(set(), {"noReactNativeRawText": "reactNative"})
+        self.assertEqual(block["noReactNativeRawText"], "off")
+        self.assertEqual(silenced, 1)
+
+    def test_a_claimed_framework_rule_stays_on(self) -> None:
+        """A React repo keeps react's nursery rules."""
+        block, silenced = self.build({"react"}, {"noJsxLeakedDollar": "react"})
+        self.assertEqual(block["noJsxLeakedDollar"], "on")
+        self.assertEqual(silenced, 0)
+
+    def test_a_rule_with_no_domain_stays_on_everywhere(self) -> None:
+        """31 of the 87 are not statements about what a repo is."""
+        block, silenced = self.build(set(), {"useExplicitType": "-"})
+        self.assertEqual(block["useExplicitType"], "on")
+        self.assertEqual(silenced, 0)
+
+    def test_org_fixed_domains_are_never_silenced(self) -> None:
+        """project, types and test are the org's level, not repo identity."""
+        for domain in DELIVERED.org:
+            with self.subTest(domain=domain):
+                block, silenced = self.build(set(), {"aRule": domain})
+                self.assertEqual(block["aRule"], "on")
+                self.assertEqual(silenced, 0)
+
+    def test_a_rule_missing_from_the_table_stays_on(self) -> None:
+        """Fail OPEN here: the gate's own guard is what catches an omission."""
+        block, silenced = self.build(set(), {})
+        self.assertEqual(block, {})
+        self.assertEqual(silenced, 0)
+
+    def test_the_delivered_tables_silence_the_measured_counts(self) -> None:
+        """34 for a repo claiming nothing, 28 for one claiming react."""
+        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        _config, none = biome_config.generate(org, set(), DELIVERED, NURSERY)
+        _config, react = biome_config.generate(org, {"react"}, DELIVERED, NURSERY)
+        self.assertEqual(none, 34)
+        self.assertEqual(react, 28)
+        # The difference is exactly react's own nursery rules, which is
+        # what claiming a domain buys back.
+        react_rules = sum(1 for d in NURSERY.values() if d == "react")
+        self.assertEqual(none - react, react_rules)
 
 
 class RunTest(unittest.TestCase):
@@ -310,6 +429,7 @@ class RunTest(unittest.TestCase):
         class Args:
             org = ORG_FILE
             domains = DOMAINS_FILE
+            nursery = NURSERY_FILE
 
         args = Args()
         args.out = out
@@ -367,6 +487,7 @@ class RunTest(unittest.TestCase):
         class Args:
             org = ORG_FILE
             domains = DOMAINS_FILE
+            nursery = NURSERY_FILE
 
         args = Args()
         args.out = tree / "generated.json"

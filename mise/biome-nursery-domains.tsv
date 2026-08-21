@@ -1,0 +1,115 @@
+# WHICH NURSERY RULES BELONG TO A FRAMEWORK, and therefore stop applying
+# when a repository says it is not that framework (#720).
+#
+# #695 made `linter.domains` real: the belt writes "none" for every
+# identity domain a repo did not claim, and a domain at "none" stops its
+# rules. That is true of the eight stable groups and FALSE of nursery,
+# because `preset: "all"` excludes nursery and naming each rule is the
+# only mechanism biome offers (#445) — and an explicitly named rule beats
+# its own domain being "none". Measured on monumental-archive with
+# `reactNative: "none"` throughout: `noReactNativeRawText` fires 1 with
+# the rule named "on", 0 with the name removed. Nothing else changed.
+#
+# So the generator consults this file and writes "off" for a nursery rule
+# whose domain the repository did not claim. 56 of the 87 named rules
+# carry a domain; the other 31 are marked `-` and run everywhere, exactly
+# as before.
+#
+# Columns, tab-separated: rule, domain — or `-` where biome reports none.
+# `-` rather than an empty column on purpose: "no domain" is a statement
+# this file makes, not a field someone forgot, and a line ending in a tab
+# is trailing whitespace `lint:editorconfig` is right about.
+#
+# EVERY ROW IS DERIVED FROM `biome explain`, never authored.
+# `lint:biome-domains` re-derives all 87 against the pinned binary in the
+# canon's own gate — 1.0s measured, and it also holds this file's rule set
+# against the nursery block in biome-org.json in BOTH directions, so a
+# rule added to one and not the other reddens rather than silently
+# escaping its domain again.
+noBaseToString	types
+noComponentHookFactories	react
+noConditionalExpect	test
+noDrizzleDeleteWithoutWhere	drizzle
+noDrizzleUpdateWithoutWhere	drizzle
+noDuplicateFieldDefinitionNames	-
+noDuplicateSelectors	-
+noEmptyObjectKeys	-
+noExcessiveNestedCallbacks	-
+noExcessiveSelectorClasses	-
+noExtendNative	-
+noFloatingPromises	types
+noIdenticalTestTitle	test
+noImpliedEval	-
+noInlineStyles	-
+noJsRestrictedProperties	-
+noJsxLeakedDollar	react
+noJsxNamespace	react
+noLoopFunc	-
+noMisleadingReturnType	types
+noMisusedPromises	types
+noNegationInEqualityCheck	-
+noNonScalableViewport	-
+noPlaywrightElementHandle	playwright
+noPlaywrightEval	playwright
+noPlaywrightForceOption	playwright
+noPlaywrightMissingAwait	playwright
+noPlaywrightNetworkidle	playwright
+noPlaywrightPagePause	playwright
+noPlaywrightUselessAwait	playwright
+noPlaywrightWaitForNavigation	playwright
+noPlaywrightWaitForSelector	playwright
+noPlaywrightWaitForTimeout	playwright
+noReactNativeDeepImports	reactNative
+noReactNativeLiteralColors	reactNative
+noReactNativeRawText	reactNative
+noReactStringRefs	react
+noRestrictedDependencies	-
+noSvelteUnnecessaryStateWrap	svelte
+noTailwindArbitraryValue	tailwind
+noTopLevelLiterals	-
+noUndeclaredClasses	project
+noUnnecessaryTemplateExpression	-
+noUnsafePlusOperands	types
+noUntrustedLicenses	project
+noUnusedClasses	project
+noUselessTypeConversion	types
+noVueImportCompilerMacros	vue
+noVueRefAsOperand	vue
+noVueVOnNumberValues	vue
+useArraySome	-
+useAwaitThenable	types
+useBaseline	-
+useConsistentTestIt	test
+useDisposables	types
+useDomNodeTextContent	-
+useDomQuerySelector	-
+useExhaustiveSwitchCases	types
+useExpect	test
+useExplicitReturnType	-
+useExplicitType	-
+useIframeSandbox	-
+useImportsFirst	-
+useIncludes	types
+useMathMinMax	-
+useNamedCaptureGroup	-
+useNullishCoalescing	types
+usePlaywrightValidDescribeCallback	playwright
+useQwikLoaderLocation	qwik
+useReactAsyncServerFunction	react
+useReactFunctionComponentDefinition	react
+useReactNativePlatformComponents	reactNative
+useReduceTypeParameter	-
+useRegexpExec	types
+useRegexpTest	-
+useScopedStyles	vue
+useSortedClasses	-
+useStringStartsEndsWith	types
+useSvelteRequireEachKey	svelte
+useTestHooksInOrder	test
+useTestHooksOnTop	test
+useThisInClassMethods	-
+useUnicodeRegex	-
+useVarsOnTop	-
+useVueConsistentDefinePropsDeclaration	vue
+useVueNextTickPromise	vue
+useVueValidVFor	vue
