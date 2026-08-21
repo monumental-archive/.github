@@ -153,5 +153,16 @@
         }
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.test.ts", "**/test/**", "**/tests/**"],
+      "linter": {
+        "rules": {
+          "performance": { "useTopLevelRegex": "off" },
+          "style": { "noMagicNumbers": "off" }
+        }
+      }
+    }
+  ]
 }
