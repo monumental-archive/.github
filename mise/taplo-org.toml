@@ -1,0 +1,99 @@
+# The org's TOML format, DELIVERED (#691).
+#
+# taplo was the only config-taking belt linter handed no config at all,
+# so `lint:toml`'s verdict was whatever each repo happened to carry:
+# taplo auto-discovers a repo-local `taplo.toml`, and nothing told a repo
+# to carry one or not to. Measured 2026-08-21 on edtf, which does carry
+# one — remove it and `lint:toml` reddens on four files. Two standards,
+# neither written down, and the difference invisible until a file moves
+# between repos.
+#
+# Delivered like every other org-owned config and passed with `--config`.
+# A repo-local `taplo.toml` is refused rather than merged, and the
+# refusal is not decoration: `--config` REPLACES the discovered file
+# rather than layering over it (measured — with this file passed, a local
+# `array_trailing_comma = false` has no effect at all), so a repo copy
+# cannot lower the org format. It can only be a file someone believes in
+# that does nothing.
+#
+# THE NAME carries a mechanical reason, the same one behind
+# `biome-org.json`: `lint:toml` refuses a repo-tracked `taplo.toml` at
+# any depth, and the belt lives INSIDE the canon, so a delivered file
+# called `taplo.toml` would be refused by the very rule it enforces —
+# measured, not predicted: with the natural name the canon's own gate
+# reported `tracked: mise/taplo.toml` and exited 1. Excluding the belt
+# path instead would have to trust that ORG_BELT_DIR and the working
+# tree name the same checkout, which is false the moment a maintainer
+# has a second canon clone. `--config` takes any path, so the name is
+# free to say what it is.
+#
+# The same collision sits latent in `lint:rust`, which refuses
+# `*/clippy.toml` and `*/rustfmt.toml` while the belt delivers both
+# under exactly those names; it is invisible only because that task
+# skips a repo with no tracked Cargo.toml.
+
+# NO `include`/`exclude` GLOBS, deliberately. Those exist to steer
+# taplo's own directory walker, and the belt never uses it: `lint:toml`
+# passes an explicit `git ls-files` list, which is also why the walker
+# wandering into `.git/` (lefthook's remote cache) was never this org's
+# problem. A repo-local exclude list is therefore not a thing the belt
+# takes away — it is a thing that was never load-bearing for the gate.
+
+[formatting]
+# 80 is taplo's own default, and that is the reason to state it rather
+# than an accident to correct. The org's recorded rule for widths is in
+# rustfmt.toml — "a width the org invented is our opinion, not the
+# tool's" — so a tool's default stands unless a MECHANICAL constraint
+# derives another number, the way yamllint's 130 is derived from the
+# mandatory pin format (`uses: <path>@<40-char-sha> # vX.Y.Z`) producing
+# unbreakable 127-character lines. No such constraint exists for TOML:
+# `column_width` governs when taplo expands and collapses ARRAYS, and it
+# does not wrap strings, so this repo's longest TOML lines — the
+# ORG_BELT_DIR exec template, mise.lock checksums — are untouched at any
+# setting.
+#
+# Two claims of a "120-column org canon" are on the record and both are
+# wrong, measured against the delivered configs on 2026-08-21: this
+# org's stated widths are 130 (`.editorconfig` for yaml and sh, derived
+# from the pin format), 100 (rustfmt, its own default, deliberately left
+# alone) and 80 (rumdl prose, its own default). There is no 120
+# anywhere. edtf's `taplo.toml` cites "yamllint, markdownlint" for its
+# 120 and neither says 120.
+#
+# The canon is already formatted at 80 — 16 files, zero diff — and edtf
+# reformats four files at its pin bump, which is the #620 rule working
+# as intended rather than a cost to be avoided.
+column_width = 80
+
+# The one knob here with a real strictness axis rather than a taste:
+# taplo's default of 2 lets an author choose one blank line or two
+# between entries, and a format check that accepts two spellings of the
+# same thing checks less than one that accepts one. Free for this repo —
+# measured, zero files change — and one more file for edtf.
+allowed_blank_lines = 1
+
+# Alphabetical reordering destroys semantic order, and this org has
+# already ruled on exactly that: yamllint's `key-ordering` is disabled
+# because `on`/`permissions`/`jobs` is meaning, not disorder, and
+# docs/tooling-verdicts.md records it as "the same ruling as taplo's
+# reorder_keys and biome's useSortedKeys" — a category call, never to be
+# reopened. All three are taplo's defaults; they are written out because
+# this file is where someone would go to turn them on.
+reorder_keys = false
+reorder_arrays = false
+reorder_inline_tables = false
+
+# WHAT IS DELIBERATELY LEFT AT TAPLO'S DEFAULTS, with the numbers, so the
+# next reader does not re-derive them. Each of these is a STYLE, not a
+# level: turning it on does not check more, it checks something else, and
+# it rewrites the org's whole TOML corpus to an aesthetic nobody chose.
+#
+#   indent_tables = true          canon 2 files, edtf 8
+#   compact_inline_tables = true  canon 2 files, edtf 11
+#   align_entries = true          canon 11 files, edtf 14
+#
+# And one trap for anyone editing this file: taplo names an unknown
+# TOP-LEVEL table ("unknown field `bogus_table`") but accepts an unknown
+# key INSIDE [formatting] in complete silence, exit 0. A misspelled
+# option here does not fail; it just stops applying. Change a line and
+# measure the file it is supposed to move.

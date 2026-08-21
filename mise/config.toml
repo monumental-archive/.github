@@ -541,20 +541,85 @@ dir = "{{cwd}}"
 run = 'typos -c "${ORG_BELT_DIR}/typos.toml"'
 
 [tasks."lint:toml"]
-description = "TOML format check + lint (taplo)"
+description = "TOML format check + lint (taplo, the delivered org format)"
 dir = "{{cwd}}"
 # No schema catalogs in the gate: catalog resolution is a network fetch.
 # Tracked files only: taplo's own walker wanders into .git (lefthook's
 # remote cache lives there) and has no exclude flag.
+#
+# The config is DELIVERED (#691). taplo was the last config-taking belt
+# linter running with none, and it auto-discovers a repo-local
+# `taplo.toml`, so the org's TOML format was whatever each repo happened
+# to say — or taplo's defaults where a repo said nothing. Measured on
+# edtf: remove its `taplo.toml` and this task reddens on four files.
+# Not the vacuous-green trap — taplo's defaults are a real standard — but
+# the quieter one, where the verdict depends on a file nothing tells a
+# repo to carry.
+#
+# Two measured facts shape the guards, the same pair `lint:shell` met at
+# #696 and for the same reasons:
+#
+#   A repo-local `taplo.toml` or `.taplo.toml` is REFUSED. `--config`
+#   REPLACES the discovered file rather than merging with it (measured:
+#   with the belt's config passed, a local `array_trailing_comma = false`
+#   changes nothing), so a repo copy cannot lower the org format — it can
+#   only be a file a maintainer believes in that does nothing. This also
+#   ends the asymmetry #691 names: lint:rust hard-fails on a repo-local
+#   clippy.toml while lint:toml silently DEPENDED on a repo-local config.
+#
+#   An unreadable `--config` is a WARN on stderr and exit 0 — taplo falls
+#   back to its own defaults and formats on. So a belt that did not
+#   arrive would produce a green run at a level nobody chose, and the
+#   file is checked here before either half runs.
 run = '''
+set -euo pipefail
 files=$(git ls-files ":!vendor/**" "*.toml")
-if [[ -n ${files} ]]; then xargs taplo fmt --check --diff <<< "${files}" && xargs taplo lint <<< "${files}"; else echo "lint:toml: no TOML tracked, skipped"; fi
+[[ -n ${files} ]] || {
+  echo "lint:toml: no TOML tracked, skipped"
+  exit 0
+}
+tracked=$(git ls-files "taplo.toml" "*/taplo.toml" ".taplo.toml" "*/.taplo.toml")
+if [[ -n ${tracked} ]]; then
+  echo "lint:toml: the belt delivers the org TOML format; a repo must not track its own" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+  sed 's/^/  tracked: /' <<< "${tracked}" >&2
+  echo "  git rm --cached it: --config replaces it, so it changes nothing and reads as if it did" >&2
+  echo "  its exclude globs steer taplo's walker, which the belt never uses — the file list is git's" >&2
+  exit 1
+fi
+config="${ORG_BELT_DIR}/taplo-org.toml"
+[[ -r ${config} ]] || {
+  echo "lint:toml: the org TOML format is not readable at ${config}" >&2
+  echo "  taplo only WARNS on an unreadable --config and formats on at its own defaults, so a" >&2
+  echo "  belt that did not arrive would produce a green run at a level nobody chose." >&2
+  exit 1
+}
+xargs taplo fmt --config "${config}" --check --diff <<< "${files}"
+xargs taplo lint --config "${config}" <<< "${files}"
+count=$(wc -l <<< "${files}" | tr -d " ")
+echo "lint:toml: ${count} file(s) checked"
 '''
 
 [tasks."fix:toml"]
-description = "Rewrite TOML to canonical format (taplo)"
+description = "Rewrite TOML to canonical format (taplo, the delivered org format)"
 dir = "{{cwd}}"
-run = 'git ls-files ":!vendor/**" "*.toml" | xargs taplo fmt'
+# The same delivered config the check reads, on the fix:biome rule: a
+# fixer working from a different config than the check that judges it
+# produces edits the gate then rejects.
+run = '''
+set -euo pipefail
+files=$(git ls-files ":!vendor/**" "*.toml")
+[[ -n ${files} ]] || {
+  echo "fix:toml: no TOML tracked, nothing to fix"
+  exit 0
+}
+config="${ORG_BELT_DIR}/taplo-org.toml"
+[[ -r ${config} ]] || {
+  echo "fix:toml: the org TOML format is not readable at ${config}" >&2
+  exit 1
+}
+xargs taplo fmt --config "${config}" <<< "${files}"
+'''
 
 [tasks."lint:markdown"]
 description = "Markdown lint (rumdl, full rule set)"
