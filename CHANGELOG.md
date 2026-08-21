@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.55.1](https://github.com/monumental-archive/.github/compare/v1.55.0...v1.55.1) - 2026-08-21
+
+### Fixed
+
+- apply a repo's domains to biome's nursery rules (#720) ([#744](https://github.com/monumental-archive/.github/pull/744))
+- lint the whole workspace, crate by crate (#726) ([#750](https://github.com/monumental-archive/.github/pull/750))
+- feed the badge the profile the gate measures ([#753](https://github.com/monumental-archive/.github/pull/753))
+
 ## [1.55.0](https://github.com/monumental-archive/.github/compare/v1.54.0...v1.55.0) - 2026-08-21
 
 ### Added
