@@ -19,7 +19,7 @@ enforced = "Org-level rulesets: required gate, required signatures, linear histo
 [[track]]
 name = "Dependencies"
 ceiling = "**L2**"
-status = "Met by construction: the release path's commit point refuses every publish job while an advisory in its SBOM is undecided (see `dependency-track.md`; first exercised on `release-lab@v0.20.0` — whose refusal also exposed, and #349 closed, the unwired publish edges)"
+status = "Met by construction on both archetypes: a commit point refuses every publish job while an advisory in its SBOM is undecided — per release on the versioned path, per publish on the continuous one, which gained the leg in #717 (see `dependency-track.md`; first exercised on `release-lab@v0.20.0` — whose refusal also exposed, and #349 closed, the unwired publish edges)"
 enforced = "Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day minimum release age, Renovate fan-out, cargo-deny in the gate, signed dependency-keyed VEX as the only exit"
 
 [[track]]
