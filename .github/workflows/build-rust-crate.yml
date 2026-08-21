@@ -91,7 +91,7 @@ jobs:
           # v0.18.2 darwin leg pulled same-day mise 2026.8.4 while every
           # pinned site ran 2026.8.3 (#117: nothing unpinned on an attested
           # path, the installer included).
-          version: 2026.8.5
+          version: 2026.8.10
           # No tool cache anywhere downstream of a signature: a poisoned
           # cache would be signed along with everything else.
           cache: false
