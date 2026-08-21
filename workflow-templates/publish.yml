@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   publish:
-    uses: monumental-archive/.github/.github/workflows/publish.yml@8928b592f4aa9224f747f530fe3750fc971ab019 # v1.54.0
+    uses: monumental-archive/.github/.github/workflows/publish.yml@a947b2dc53545fac9bae2c0cac771a667812ccd5 # v1.56.0
     with:
       # Comma-separated. A repository may need several: an image plus
       # binaries, or crates plus a wasm package.
