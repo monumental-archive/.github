@@ -11,6 +11,11 @@
         "repo": "signer",
         "tracks": ["source"],
         "reason": "publishes no releases; it is the signing workflow repository"
+      },
+      {
+        "repo": "monumental-archive-ledger",
+        "tracks": [],
+        "reason": "excluded, not excepted: the public anchor for the archive's ledger checkpoint chain publishes no artifact and makes no SLSA claim, so no track applies and it bears no board cell — it is accounted for by name here so the reconciliation against the org listing does not read it as an unlisted repository (#673)"
       }
     ]
   },
