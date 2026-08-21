@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.5](https://github.com/monumental-archive/.github/compare/v1.58.4...v1.58.5) - 2026-08-21
+
+### Fixed
+
+- shorten the psql guard, and keep it on one line ([#801](https://github.com/monumental-archive/.github/pull/801))
+
 ## [1.58.4](https://github.com/monumental-archive/.github/compare/v1.58.3...v1.58.4) - 2026-08-21
 
 ### Fixed
