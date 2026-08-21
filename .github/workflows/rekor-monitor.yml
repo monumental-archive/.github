@@ -94,6 +94,11 @@ jobs:
             --once=true \
             --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
             --config "${config}"
+      # unattested-path: the save half of the checkpoint restore
+      # marked above — same cache, same reasoning: this workflow
+      # builds and signs nothing, and the entry holds only the
+      # monitor's own Rekor checkpoint. Marked per declaration
+      # (#676); the restore step's marker does not carry the file.
       - name: Save the advanced checkpoint
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
