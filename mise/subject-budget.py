@@ -267,21 +267,44 @@ def selects(rule: dict, dep: Dep) -> bool:
     return names is None or any(matches(p, dep.name) for p in names)
 
 
-def effective(preset: dict, dep: Dep) -> dict:
+def apply_rules(config: dict, rules: list[dict], dep: Dep) -> None:
+    """Fold one packageRules list into a resolved config, in order.
+
+    Later wins per field, which is Renovate's own precedence within a
+    list. Mutates `config`; returns nothing, because there is one
+    resolution being built and two lists folded into it.
+    """
+    for rule in rules:
+        if selects(rule, dep):
+            config.update({k: rule[k] for k in MESSAGE_CONFIG if k in rule})
+
+
+def effective(preset: dict, dep: Dep, repo_rules: list[dict] | None = None) -> dict:
     """Resolve the message fields Renovate would use for one dependency.
 
     packageRules are applied in order and later wins per field, which is
-    Renovate's own precedence. Every field must be present in the preset
-    or below it; nothing is defaulted.
+    Renovate's own precedence. The repo's OWN rules are folded in after
+    the preset's, because that is where Renovate puts them: a repo
+    extends the canon, so the extended preset's list resolves first and
+    the repo's appends to it (#677). Modelling the preset alone left a
+    repo-level rule invisible to the simulation that exists to prove
+    these fields fit — fail-SAFE only by luck, since the one such rule
+    in the org narrows (#668's `fix` against the preset's `chore`), and
+    a repo-level `commitMessageTopic` (the remedy this task's own
+    failure message prints) would have widened it green.
+
+    The absent-field check sits BETWEEN the two lists, and that placement
+    is the rule rather than an accident: a repo may override a field the
+    preset already sets, but it may not be the only place one is
+    written. Otherwise a consumer that does not extend the canon
+    inherits nothing and the hard error stops meaning what it says.
 
     Returns:
-        The five message fields, all of them read from the preset.
+        The five message fields, every one of them written by the org.
 
     """
     config = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
-    for rule in preset.get("packageRules", []):
-        if selects(rule, dep):
-            config.update({k: rule[k] for k in MESSAGE_CONFIG if k in rule})
+    apply_rules(config, preset.get("packageRules", []), dep)
     missing = [k for k in MESSAGE_CONFIG if k not in config]
     if missing:
         sys.exit(
@@ -291,6 +314,7 @@ def effective(preset: dict, dep: Dep) -> dict:
             " explicitly in default.json (#576); this task will not"
             " assume Renovate's default for one.",
         )
+    apply_rules(config, repo_rules or [], dep)
     return config
 
 
@@ -647,8 +671,14 @@ def judge(
     preset: dict,
     limit: int,
     report: list[str],
+    repo_rules: list[dict] | None = None,
 ) -> list[Finding]:
     """Measure each dependency's widest subject against the ceiling.
+
+    `repo_rules` are the repo's own packageRules, folded in after the
+    preset's (#677). The default is empty rather than required so that
+    a caller which does not supply them gets the preset-only model,
+    which over-estimates: no reading of this argument can go fail-open.
 
     Returns:
         The dependencies that overrun it, widest first.
@@ -660,7 +690,7 @@ def judge(
         if dep.name in seen:
             continue
         seen.add(dep.name)
-        config = effective(preset, dep)
+        config = effective(preset, dep, repo_rules)
         growth = 0 if PSEUDO_VERSION.fullmatch(dep.current) else VERSION_GROWTH
         width = len(dep.current) + growth
         subject, unmodelled = render(config, dep.name, width)
@@ -713,7 +743,14 @@ def main() -> int:
 
     limit = ceiling()
     preset = load_json(preset_path(files), report)
-    findings = judge(deps, preset, limit, report)
+    # The repo's own packageRules resolve after the extended preset's,
+    # so they are read from the working tree here and folded in there
+    # (#677). Loaded a second time rather than threaded out of collect()
+    # for the same reason the preset is: the two readers want different
+    # halves of the same file, and one guaranteed-tracked re-read is
+    # cheaper than a return type that carries both.
+    repo_rules = load_json(Path("renovate.json"), report).get("packageRules", [])
+    findings = judge(deps, preset, limit, report, repo_rules)
     for line in report:
         print(f"lint:subject-budget: unmodelled — {line}", file=sys.stderr)
 
