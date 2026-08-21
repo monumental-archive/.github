@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.7](https://github.com/monumental-archive/.github/compare/v1.58.6...v1.58.7) - 2026-08-21
+
+### Fixed
+
+- update aqua:astral-sh/uv to 0.12.5 ([#807](https://github.com/monumental-archive/.github/pull/807))
+
 ## [1.58.6](https://github.com/monumental-archive/.github/compare/v1.58.5...v1.58.6) - 2026-08-21
 
 ### Fixed
