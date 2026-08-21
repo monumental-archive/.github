@@ -30,6 +30,11 @@
       "semanticCommitType": "fix"
     },
     {
+      "description": "26 as minted; 1.58.10 spent the last of VERSION_GROWTH's three columns, so every canon bump in every repo minted at 73 (#826).",
+      "matchPackageNames": ["monumental-archive/.github"],
+      "commitMessageTopic": "canon"
+    },
+    {
       "description": "46 characters as minted, 17 past the budget.",
       "matchPackageNames": [
         "aqua:editorconfig-checker/editorconfig-checker",
