@@ -87,14 +87,24 @@ fi
 # upgrade path is for.
 #
 # An EMPTY graph is the only thing that means first publish.
-prev=$(
+#
+# The graph yields CANDIDATES, newest first, not a single answer (#816).
+# Its head is the newest version someone meant to publish, which is not
+# the newest version anyone can install. A burned release leaves its
+# upgrade script in the tree — deliberately, as the burn record — while
+# no release carries its tarballs. edtf v1.3.0 was tagged, failed to
+# publish, and left `--1.2.3--1.3.0.sql` behind; the derivation asked
+# about 1.3.0 alone, found nothing, and called an extension with eleven
+# published versions a first publish. Installability is a fact about
+# release assets, so it is settled per extension, in the loop below.
+graph_targets=$(
   python3 - "${controls[@]}" << 'PYEOF'
 import os, re, sys
 
 def key(v):
     return tuple(int(part) for part in v.split("."))
 
-best = None
+targets = set()
 for control in sys.argv[1:]:
     crate_dir = os.path.dirname(control)
     name = os.path.basename(control)[: -len(".control")]
@@ -110,24 +120,24 @@ for control in sys.argv[1:]:
         match = pattern.match(entry)
         if not match:
             continue
-        target = match.group(2)
-        if best is None or key(target) > key(best):
-            best = target
-print(best or "")
+        targets.add(match.group(2))
+for target in sorted(targets, key=key, reverse=True):
+    print(target)
 PYEOF
 )
-if [[ -z ${prev} ]]; then
+graph_head=$(head -n 1 <<< "${graph_targets}")
+if [[ -z ${graph_head} ]]; then
   echo "no upgrade graph; first publish of this extension needs no upgrade path"
   emit "files="
   exit 0
 fi
-if [[ ${prev} == "${VERSION}" ]]; then
+if [[ ${graph_head} == "${VERSION}" ]]; then
   echo "upgrade graph already reaches ${VERSION}; nothing to derive"
   emit "files="
   exit 0
 fi
-if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${prev}" ]]; then
-  echo "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${prev}; deriving from ${prev}"
+if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${graph_head}" ]]; then
+  echo "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${graph_head}"
 fi
 
 # rust and cargo-pgrx are caller build inputs, pinned in the caller's own
@@ -194,14 +204,36 @@ for control in "${controls[@]}"; do
   # Only installations that can exist need a path: same carve-out as the
   # publish guard. A repo adding the class mid-life has a previous
   # release and no previous extension.
-  prefix="${name}-${prev}-pg"
-  prev_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-    --jq "[.[] | select(.draft | not)
-           | select(any(.assets[]; .name | startswith(\"${prefix}\")))
-           | .tag_name] | first // empty")
-  if [[ -z ${prev_tag} ]]; then
-    echo "no published release carries ${name} ${prev} tarballs; first publish of this extension, no upgrade path needed"
+  # Walk the graph newest-first and stop at the first version a non-draft
+  # release actually CARRIES (#816). A graph version no release carries is
+  # not installable — burned, or its release deleted — so it cannot be the
+  # predecessor; skipping it is not the same as concluding there is no
+  # predecessor. Only when NO version in the whole graph is carried has
+  # this extension truly never shipped.
+  prev=""
+  prev_tag=""
+  while IFS= read -r candidate; do
+    [[ -n ${candidate} ]] || continue
+    prefix="${name}-${candidate}-pg"
+    candidate_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+      --jq "[.[] | select(.draft | not)
+             | select(any(.assets[]; .name | startswith(\"${prefix}\")))
+             | .tag_name] | first // empty" < /dev/null)
+    if [[ -n ${candidate_tag} ]]; then
+      prev="${candidate}"
+      prev_tag="${candidate_tag}"
+      break
+    fi
+    echo "NOTE: ${name} ${candidate} is in the upgrade graph but no non-draft release"
+    echo "      carries its tarballs; not installable, trying the next older version"
+  done <<< "${graph_targets}"
+  if [[ -z ${prev} ]]; then
+    echo "no non-draft release carries any ${name} tarball; first publish of this extension, no upgrade path needed"
     continue
+  fi
+  if [[ ${prev} != "${graph_head}" ]]; then
+    echo "NOTE: deriving ${name} from ${prev}, the newest installable published"
+    echo "      version; graph head ${graph_head} is not installable"
   fi
   shipped=$(gh release view "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
     --json assets --jq \

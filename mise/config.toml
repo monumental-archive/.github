@@ -723,6 +723,19 @@ done <<< "${manifests}"
 cargo-semver-checks check-release
 '''
 
+[tasks."lint:pg-upgrade-path"]
+description = "Every published pgrx extension version reaches the current one"
+dir = "{{cwd}}"
+# Delivered rather than copied (#816). This check existed in exactly one
+# repository, and it is what caught a Release PR that had derived no
+# upgrade path at all after a burned release — a conforming repo without
+# it ships a version every existing installation is stranded on, silently.
+# The helper is the belt's; the graph it reads is the repo's.
+#
+# Deterministic and offline: it reads tracked filenames and the crate
+# version. It belongs in `ci`, never in `audit:*`.
+run = 'bash "${ORG_BELT_DIR}/pg-upgrade-path.sh"'
+
 [tasks."lint:machete"]
 description = "No unused Rust dependencies (cargo-machete, static)"
 dir = "{{cwd}}"
