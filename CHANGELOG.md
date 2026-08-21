@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.0](https://github.com/monumental-archive/.github/compare/v1.57.3...v1.58.0) - 2026-08-21
+
+### Added
+
+- declare the oci-image class's binary (#775) ([#785](https://github.com/monumental-archive/.github/pull/785))
+
 ## [1.57.3](https://github.com/monumental-archive/.github/compare/v1.57.2...v1.57.3) - 2026-08-21
 
 ### Fixed
