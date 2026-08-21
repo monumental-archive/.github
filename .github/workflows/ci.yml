@@ -56,24 +56,48 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # unattested-path: this gate signs and publishes nothing, so the
+      # cold-build rule (#117, docs/release.md) permits caches exactly
+      # here — a human is waiting on a pull request. The rule covers
+      # TOOLS as well as build artifacts (#660): the toolchain
+      # installed below restores from cache, and so do the Go and
+      # cargo caches under it. Every signing and publishing workflow
+      # builds cold and carries no cache; this marker is reviewed by
+      # lint:cold-attested, which fails any workflow that caches
+      # without one.
+      #
+      # The tool cache is not free, and this is the property it
+      # spends: mise verifies every tool against mise.lock's
+      # per-platform checksum and its GitHub attestation at INSTALL
+      # time, and a restored cache skips that verification — so a
+      # poisoned entry could hold a lint open that should have closed.
+      # Accepted here because this gate signs nothing, because the
+      # cargo cache below already accepts the identical property, and
+      # because writing an Actions cache at all implies an attacker
+      # already inside CI write scope. Same trust class, applied
+      # consistently.
+      #
+      # Staleness is not the exposure: mise-action keys its cache on
+      # the hash of every mise config the workspace exposes — the
+      # delivered .org-canon tree included, which its glob follows
+      # through the symlink — so a canon pin bump asks for a key that
+      # does not exist yet and installs cold. Measured against the
+      # pinned action's own glob (#660): changing the delivered
+      # config.toml changes the key, changing mise.lock alone changes
+      # the key, an unrelated workspace file leaves it identical.
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
         with:
           version: 2026.8.10
-          cache: false
+          cache: true
 
-      # unattested-path: this gate signs and publishes nothing, so the
-      # cold-build rule (#117, docs/release.md) permits caches exactly
-      # here — a human is waiting on a pull request. Every signing and
-      # publishing workflow builds cold and carries no cache; this
-      # marker is reviewed by lint:cold-attested, which fails any
-      # workflow that caches without one. Integrity does not ride the
-      # cache: Go re-verifies every module read against go.sum and
-      # cargo checks registry sources against Cargo.lock, so a
-      # poisoned entry cannot change what compiles — and GitHub scopes
-      # cache writes per branch, so a pull request cannot write the
-      # default branch's entries. Restore-keys make a stale cache a
-      # slower run, never a wrong one.
+      # Integrity does not ride the artifact caches either: Go
+      # re-verifies every module read against go.sum and cargo checks
+      # registry sources against Cargo.lock, so a poisoned entry
+      # cannot change what compiles — and GitHub scopes cache writes
+      # per branch, so a pull request cannot write the default
+      # branch's entries. Restore-keys make a stale cache a slower
+      # run, never a wrong one.
       - name: Restore the Go caches (unsigned gate only)
         if: ${{ hashFiles('go.sum') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -162,24 +186,48 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # unattested-path: this gate signs and publishes nothing, so the
+      # cold-build rule (#117, docs/release.md) permits caches exactly
+      # here — a human is waiting on a pull request. The rule covers
+      # TOOLS as well as build artifacts (#660): the toolchain
+      # installed below restores from cache, and so do the Go and
+      # cargo caches under it. Every signing and publishing workflow
+      # builds cold and carries no cache; this marker is reviewed by
+      # lint:cold-attested, which fails any workflow that caches
+      # without one.
+      #
+      # The tool cache is not free, and this is the property it
+      # spends: mise verifies every tool against mise.lock's
+      # per-platform checksum and its GitHub attestation at INSTALL
+      # time, and a restored cache skips that verification — so a
+      # poisoned entry could hold a lint open that should have closed.
+      # Accepted here because this gate signs nothing, because the
+      # cargo cache below already accepts the identical property, and
+      # because writing an Actions cache at all implies an attacker
+      # already inside CI write scope. Same trust class, applied
+      # consistently.
+      #
+      # Staleness is not the exposure: mise-action keys its cache on
+      # the hash of every mise config the workspace exposes — the
+      # delivered .org-canon tree included, which its glob follows
+      # through the symlink — so a canon pin bump asks for a key that
+      # does not exist yet and installs cold. Measured against the
+      # pinned action's own glob (#660): changing the delivered
+      # config.toml changes the key, changing mise.lock alone changes
+      # the key, an unrelated workspace file leaves it identical.
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
         with:
           version: 2026.8.10
-          cache: false
+          cache: true
 
-      # unattested-path: this gate signs and publishes nothing, so the
-      # cold-build rule (#117, docs/release.md) permits caches exactly
-      # here — a human is waiting on a pull request. Every signing and
-      # publishing workflow builds cold and carries no cache; this
-      # marker is reviewed by lint:cold-attested, which fails any
-      # workflow that caches without one. Integrity does not ride the
-      # cache: Go re-verifies every module read against go.sum and
-      # cargo checks registry sources against Cargo.lock, so a
-      # poisoned entry cannot change what compiles — and GitHub scopes
-      # cache writes per branch, so a pull request cannot write the
-      # default branch's entries. Restore-keys make a stale cache a
-      # slower run, never a wrong one.
+      # Integrity does not ride the artifact caches either: Go
+      # re-verifies every module read against go.sum and cargo checks
+      # registry sources against Cargo.lock, so a poisoned entry
+      # cannot change what compiles — and GitHub scopes cache writes
+      # per branch, so a pull request cannot write the default
+      # branch's entries. Restore-keys make a stale cache a slower
+      # run, never a wrong one.
       - name: Restore the Go caches (unsigned gate only)
         if: ${{ hashFiles('go.sum') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
