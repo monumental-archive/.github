@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.10](https://github.com/monumental-archive/.github/compare/v1.58.9...v1.58.10) - 2026-08-21
+
+### Fixed
+
+- judge pg-upgrade-path from installable predecessors ([#822](https://github.com/monumental-archive/.github/pull/822))
+
 ## [1.58.9](https://github.com/monumental-archive/.github/compare/v1.58.8...v1.58.9) - 2026-08-21
 
 ### Fixed
