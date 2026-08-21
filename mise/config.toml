@@ -4678,8 +4678,9 @@ dir = "{{cwd}}"
 # separate non-blocking job.
 #
 # The measurement is mise/coverage-measure.sh, shared with
-# release/derive-coverage-floor.sh, so the number enforced here and the
-# number the floor is derived from cannot come from different flags —
+# release/derive-coverage-floor.sh and coverage:report, so the number
+# enforced here, the number the floor is derived from and the profile
+# the badge uploads cannot come from different flags (#707) —
 # the #316 shape, where a second hardcoded --workspace drifted from the
 # first the instant a repo excluded a member. Each leg measures what its
 # language measures (statements for Go, lines for Rust); the floor is a
@@ -4742,6 +4743,14 @@ dir = "{{cwd}}"
 # on the first push after coverage landed (#316). One task, one
 # exclusion set, same llvm-tools assertion — never a task-time rustup,
 # which races every other task driving the toolchain.
+#
+# The Go leg no longer has its own invocation at all: it calls the
+# shared measurement (#707), so the drift class is closed for Go by
+# construction rather than by two copies staying in step. The Rust leg
+# still renders here because lcov is an output format the measurement
+# script does not produce; its exclusion set is the one place a second
+# copy survives, and it is asserted by the identical COVERAGE_EXCLUDE
+# loop rather than a hardcoded --workspace.
 run = '''
 [[ -f .coverage-floor ]] && [[ -f Cargo.toml || -f go.mod ]] || {
   echo "coverage:report: no .coverage-floor, skipped"
@@ -4757,11 +4766,14 @@ run = '''
 # asked Codecov for a coverage.txt nothing had written. The uploader
 # now takes the list of reports that actually exist.
 if [[ -f go.mod ]]; then
-  command -v go > /dev/null || {
-    echo "coverage:report: go.mod present but go missing — pin go in mise.toml" >&2
-    exit 1
-  }
-  go test ./... -coverprofile=coverage.txt -covermode=atomic > /dev/null
+  # ONE `go test -coverprofile` in the belt (#707). The profile Codecov
+  # receives is the profile coverage:check enforces from, because it is
+  # the same invocation — not two that happen to agree. This leg used to
+  # write its own without `-coverpkg=./...` and handed the badge 94.9%
+  # while the gate held the same tree to a floor derived from 95.4%
+  # (measured on stele, 1818498). The `go` selector keeps the Rust half
+  # below, which renders lcov this script does not produce.
+  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report go > /dev/null
   echo "coverage:report: coverage.txt written"
 fi
 [[ -f Cargo.toml ]] || exit 0

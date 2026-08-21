@@ -2,12 +2,15 @@
 # Measure statement coverage, one line per language leg. Org canon — the
 # shared half of #652.
 #
-# `coverage:check` enforces this number and the release path derives the
-# floor from it, so there is ONE measurement with one set of flags rather
-# than two that agree until they do not. That is not a hypothetical
-# shape: a second hardcoded `--workspace` beside coverage:check's drifted
-# from it the instant a repository excluded a member, and reddened main
-# (#316).
+# `coverage:check` enforces this number, the release path derives the
+# floor from it, and `coverage:report` takes the profile written here as
+# the artifact it uploads — so there is ONE measurement with one set of
+# flags rather than several that agree until they do not. That is not a
+# hypothetical shape: a second hardcoded `--workspace` beside
+# coverage:check's drifted from it the instant a repository excluded a
+# member, and reddened main (#316); and a second `go test -coverprofile`
+# without `-coverpkg` handed Codecov 94.9% while the gate held the same
+# tree to a floor derived from 95.4% (#707, measured on stele).
 #
 # Prints `<leg> <percent>` on stdout, one line per language the tree
 # tracks and nothing else; every tool's own output goes to stderr, so a
@@ -23,11 +26,25 @@ set -euo pipefail
 # actually ran.
 label="${1:-coverage:measure}"
 
+# Which language legs to run. `coverage:report` needs the GO profile and
+# renders its own Rust lcov — a format this script does not produce — so
+# it asks for `go` rather than paying for a second Rust test run (#707).
+# Default `all`: every caller that reads the percentages wants them all,
+# because the floor is a minimum every leg must hold.
+legs="${2:-all}"
+case "${legs}" in
+  all | go | rust) ;;
+  *)
+    echo "${label}: unknown leg selector '${legs}' — expected all, go or rust" >&2
+    exit 1
+    ;;
+esac
+
 # EVERY tracked language measures its own leg, because the floor is a
 # minimum and applying it per language is the only reading that means
 # anything: a mixed repository that measured Rust alone once reported
 # "floor held" over a language nothing had measured (#392).
-if [[ -f go.mod ]]; then
+if [[ -f go.mod && ${legs} != rust ]]; then
   if ! command -v go > /dev/null; then
     echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
@@ -47,7 +64,7 @@ if [[ -f go.mod ]]; then
   echo "go ${go_pct}"
 fi
 
-if [[ -f Cargo.toml ]]; then
+if [[ -f Cargo.toml && ${legs} != go ]]; then
   # No task-time rustup, by rule: a component installed mid-run races
   # every other task driving the toolchain (measured twice on the lab's
   # v0.18.0 release PR, #117). llvm-tools is a declared build input —
