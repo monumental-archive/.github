@@ -159,6 +159,7 @@
       "includes": ["**/*.test.ts", "**/test/**", "**/tests/**"],
       "linter": {
         "rules": {
+          "complexity": { "noExcessiveLinesPerFunction": "off" },
           "performance": { "useTopLevelRegex": "off" },
           "style": { "noMagicNumbers": "off" }
         }

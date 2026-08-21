@@ -1112,6 +1112,29 @@ dir = "{{cwd}}"
 # `src/colocated.test.ts`, `test/probe.test.ts` and
 # `tests/unit/probe.test.ts` are clean.
 #
+# A DESCRIBE'S SPAN IS THE SUM OF ITS TESTS, so a third rule is off in
+# the same entry: `complexity/noExcessiveLinesPerFunction` (#804).
+# Measured on monumental-archive #262: of 40 findings in tests, 27 are
+# `describe(...)` callbacks; 215 cases have a median of 20 lines and
+# only 20 (9%) exceed the bound of 50 — the bound is right about test
+# bodies — but 33 of 60 `describe` blocks exceed it at 4.7 cases each.
+# Splitting a long test makes its describe LONGER; the only compliant
+# move is fewer cases per group, 33 groups becoming ~133, which is
+# complying with a measurement of the wrong thing. In production the
+# rule means "this function does too much"; on a describe it means
+# "this subject has too many tests". `noExcessiveLinesPerFile` and
+# `noExcessiveCognitiveComplexity` stay ON in tests: a 1,400-line test
+# file genuinely splits and a test body's branching is real.
+#
+# THE COST IS PER-FILE AND STATED: the rule's 2.5.7 options are
+# `maxLines`, `skipBlankLines`, `skipIifes` — no per-construct
+# selector — so a 60-line helper in a `.test.ts` file goes quiet with
+# the describes. Planted: `src/prod.ts` with a 60-line function still
+# reds; `tests/x.test.ts` with a 60-line describe AND a 60-line helper
+# reports nothing. And a trap met while planting: `biome lint --only=`
+# BYPASSES `overrides` entirely — the same tree reports all three under
+# `--only`, so never measure an override with it.
+#
 # ONE ENTRY, and the count is load-bearing: biome documents that "if a
 # file can match three patterns, only the first one is used". A second
 # entry added later does not compose with this one for a file matching
