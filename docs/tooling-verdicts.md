@@ -35,6 +35,7 @@ honestly blocked on.
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
+| lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` (`lint:biome-domains`) |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
@@ -1409,6 +1410,45 @@ mode. **Zero SQL in the canon** — the task skips clean here, and the
 rule set is exercised first in monumental-archive-db, stated outright
 like biome, golangci-lint and the Rust pair. *Reopen:* Jinja-templated
 SQL appearing anywhere in the org (revisit the raw templater).
+
+**lychee, and the escape the belt could not see** (#681). The link
+audit, and the second config the belt delivers for the reason
+`mise/clippy.toml` is delivered. Measured on the pinned 0.24.2:
+
+- a repo-local `lychee.toml` in the working directory is
+  auto-discovered and obeyed, so `exclude = [".*"]` beside a README
+  returns every link in the tree as *excluded*, exit 0, with a summary
+  line no different from a clean run;
+- an explicit `--config` REPLACES that discovery — the same repo-local
+  file present and the same broken link, and the run reds;
+- `.lycheeignore` is read from the working directory INDEPENDENTLY of
+  `--config`, and is honoured with the belt config in force;
+- config `exclude` and CLI `--exclude` merge rather than replace;
+- an unknown or mistyped config key refuses to start (exit 3), so a
+  delivered config cannot silently become a no-op.
+
+So the judgement #681 left open answers itself, and it answers the
+*other* way round from how the question was put: the question was
+whether a consumer NEEDS a lychee config, and the measurement is that
+every consumer already HAS one available to it and the belt could not
+see it. That is a per-repo escape from an org check, which is the one
+thing the belt does not have — so the config is delivered, and
+`--config` is load-bearing rather than tidy.
+
+`.lycheeignore` stays repo content, on the footing `deny.toml`'s skips
+stand on: it is lychee's own per-link mechanism, it survives the
+delivered config by construction rather than by permission, and a link
+that is dead for a reason only that repo knows — a vendor that 403s
+every bot, a login wall — is repo identity. Give each entry a `#`
+reason comment above it, as every other per-site escape in the org
+does; lychee tolerates the comments, and a comment excludes nothing on
+its own (both measured). `--include-fragments` deliberately stays a
+command-line flag: its config form takes an enum and the bare flag's
+default could not be shown equal to any single value, so moving it
+would have changed what the audit means while only tidying where it
+was written. *Reopen:* lychee gaining a way to state "no repo-local
+config may apply" in-config, which would make the `--config` argument
+documentation rather than enforcement.
 
 ## Skipped, with rationale and reopen trigger
 

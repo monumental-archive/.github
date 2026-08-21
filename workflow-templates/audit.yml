@@ -1,6 +1,10 @@
 # The repo-side Monday audit. This stub is a repo's entire audit
-# obligation: the checks (today, the dependency advisory feed) arrive via
-# the shared workflow and the toolbelt it pins — same model as the gate.
+# obligation: the checks arrive via the shared workflow and the toolbelt
+# it pins — same model as the gate, and deliberately not enumerated
+# here. WHICH legs run is repo-audit.yml's business, so a leg the canon
+# adds later reaches this repository on its next pin bump with nothing
+# to edit in this file — which is how the per-tree link and online
+# action checks arrived (#681).
 ---
 name: audit
 
