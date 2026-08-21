@@ -19,7 +19,7 @@ set -euo pipefail
   echo "fix:badges: no REUSE.toml, no badge surface, skipped"
   exit 0
 }
-repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
 [[ -n ${repo_url} ]] || {
   echo "fix:badges: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2
   exit 1
@@ -94,10 +94,10 @@ fi
 # this whole layer exists to refuse.
 levels_raw="https://raw.githubusercontent.com/${org_path}/levels"
 repo_name="${org_path#*/}"
-stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" .github/workflows/*.y*ml 2> /dev/null | head -1)
+stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" .github/workflows/*.y*ml 2> /dev/null | sed -n 1p)
 tracks=""
 if [[ -n ${stub} ]]; then
-  tracks=$(sed -n 's/^[[:space:]]*tracks:[[:space:]]*//p' "${stub}" | head -1)
+  tracks=$(sed -n 's/^[[:space:]]*tracks:[[:space:]]*//p' "${stub}" | sed -n 1p)
 fi
 for track in ${tracks}; do
   # shields.io wants the url parameter percent-encoded.
@@ -154,7 +154,7 @@ elif [[ -n ${minting} ]]; then
 fi
 classes=""
 for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
-  [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | head -1 \
+  [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | sed -n 1p \
     | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")"
 done
 reg_live=""

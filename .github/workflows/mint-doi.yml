@@ -159,7 +159,7 @@ jobs:
             exit 1
           fi
           creators=$(printf '%s\n' "${name_lines}" | jq -R '{name: .}' | jq -sc '.')
-          licence=$(sed -n 's/^license: //p' cff.yaml | head -1)
+          licence=$(sed -n 's/^license: //p' cff.yaml | sed -n 1p)
           if [[ ! ${licence} =~ ^[A-Za-z0-9.+-]+$ ]]; then
             emsg="CITATION.cff license '${licence}' is not a single SPDX id — Zenodo's vocabulary holds ids, not"
             emsg+=" expressions"

@@ -89,7 +89,7 @@ jobs:
           # to mutate the runner with an unpinned global install.
           need="11.5.1"
           have=$(npm --version)
-          lowest=$(printf '%s\n' "${need}" "${have}" | sort -V | head -1)
+          lowest=$(printf '%s\n' "${need}" "${have}" | sort -V | sed -n 1p)
           if [[ ${lowest} != "${need}" ]]; then
             emsg="npm ${have} < ${need}; trusted publishing needs ${need}+ — bump the pin in this repository's mise"
             emsg+=" config"
