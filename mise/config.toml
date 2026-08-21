@@ -2015,13 +2015,20 @@ dir = "{{cwd}}"
 # like lint:go and lint:python — tsc checks one thing, and biome already
 # owns the tool-named task over the same files.
 #
-# Every dial is passed on the COMMAND LINE, and that is the whole design:
-# a compiler flag beats the same key in tsconfig.json even under `-p`
-# (proven), so a repo cannot lower the org's level from its own config.
-# Stronger than clippy, where a source attribute could still defeat the
-# belt. What tsconfig.json is left to say is what the project IS —
-# which files, browser or server, which module system — so it stays
-# repo-side and carries no strictness lines at all (scaffold/tsconfig.json).
+# Every dial is passed on the COMMAND LINE, and that is the whole design
+# FOR TSC: a compiler flag beats the same key in tsconfig.json even under
+# `-p` (proven), so a repo cannot lower the org's level from its own
+# config. Stronger than clippy, where a source attribute could still
+# defeat the belt.
+#
+# What that argument does NOT cover is every other type-aware tool, and
+# #699 measured the cost: typescript-eslint and biome read
+# tsconfig.json and never see this command line, so the scaffold's old
+# "carry no strictness settings" instruction lowered them silently — 935
+# new eslint errors on monumental-archive from stripping the keys, and
+# nothing about the code changed. The repo's tsconfig.json therefore
+# carries the org's dials as well, and `lint:tsconfig-dials` holds it
+# there. Two readers, one fact, stated where both can see it.
 #
 # Per project with `-p`, never `tsc -b`: build mode refuses every
 # compiler option it is handed (TS5094), so the org's flags and
@@ -2129,6 +2136,92 @@ if [[ -n ${escaped} ]]; then
 fi
 covered=$(wc -l < "${tmp}/tracked" | tr -d ' ')
 echo "lint:types: ${count} project(s) checked, ${covered} files covered"
+'''
+
+# The other half of the TypeScript level, and the half `lint:types`
+# structurally cannot enforce (#699).
+#
+# `lint:types` forces every dial on the command line, where a compiler
+# flag beats the same key in a repo's config even under `-p`. That is
+# true of `tsc` and false of every other type-aware tool, because those
+# tools read `tsconfig.json` and never see the belt's command line. The
+# scaffold read the flag's primacy as licence to carry no strictness at
+# all — "a copy of those settings here would be either duplication or a
+# lie" — and following that instruction silently lowered every reader
+# but one.
+#
+# Measured on monumental-archive, three states, one variable:
+#
+#   its own config, strictness present     eslint --max-warnings 0 →   0
+#   stripped per the old scaffold text                            → 935
+#   raised to the full org level                                  →   0
+#
+# The 935 are typescript-eslint reading a weaker program —
+# `dot-notation` 590 once `noPropertyAccessFromIndexSignature` is gone,
+# `no-unnecessary-condition` 345 once the null-checking dials move.
+# Nothing about the code changed. biome is exposed identically: its
+# `types` and `project` domains resolve the same TypeScript program.
+#
+# So the keys are neither duplication nor a lie — they are the only
+# statement of the level the second reader can see, which is exactly
+# what `.editorconfig` already does for caps that belt formatters also
+# enforce. This task makes that true rather than advisory.
+#
+# THE COMPARISON IS DERIVED FROM tsc-flags.txt AND NOWHERE ELSE — the
+# same file `lint:types` passes to the compiler and `lint:tsc-flags`
+# holds against `tsc --all`. A bare flag means the key must be `true`;
+# `--flag false` means it must be `false`. Absent FAILS, because absent
+# is the defect. Stricter is never inspected: a repo may name dials the
+# org does not, and the hazard is one-directional — the
+# `lint:python-target` shape.
+#
+# The config being judged is what `tsc --showConfig` RESOLVES, not the
+# file's text. That is TypeScript's own parser, so JSONC comments,
+# trailing commas and `extends` behave exactly as they do for the
+# compiler, and a repo that states the dials once in a root config and
+# extends it everywhere passes without stating them twice. Measured:
+# `--showConfig` does not materialise a default for a dial the config
+# never mentions, which is the only reason "absent" is detectable.
+#
+# Same config enumeration as `lint:types`, deliberately character for
+# character: a config one task checks and the other does not is a
+# program checked at a level nobody stated.
+[tasks."lint:tsconfig-dials"]
+description = "Every tracked tsconfig.json states the org's dials, none weaker (#699)"
+dir = "{{cwd}}"
+run = '''
+set -euo pipefail
+cfgs=$(git ls-files ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
+  "*/*/*/tsconfig.json")
+[[ -n ${cfgs} ]] || {
+  echo "lint:tsconfig-dials: no tsconfig.json tracked, skipped"
+  exit 0
+}
+command -v tsc > /dev/null || {
+  echo "lint:tsconfig-dials: tsc missing from the belt" >&2
+  exit 1
+}
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+rc=0
+count=0
+while IFS= read -r cfg; do
+  [[ -n ${cfg} ]] || continue
+  count=$((count + 1))
+  if ! tsc -p "${cfg}" --showConfig > "${tmp}/resolved.json" 2> "${tmp}/err"; then
+    echo "lint:tsconfig-dials: ${cfg} does not resolve" >&2
+    # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+    sed 's/^/  /' "${tmp}/err" >&2
+    rc=1
+    continue
+  fi
+  python3 "${ORG_BELT_DIR}/tsconfig-dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
+    --name "${cfg}" < "${tmp}/resolved.json" || rc=1
+done <<< "${cfgs}"
+[[ ${rc} -eq 0 ]] || {
+  echo "lint:tsconfig-dials: ${count} config(s) checked, at least one below the org's level" >&2
+  exit 1
+}
 '''
 
 [tasks."lint:go-tidy"]

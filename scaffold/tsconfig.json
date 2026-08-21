@@ -1,10 +1,29 @@
 {
   "compilerOptions": {
+    "lib": ["es2025"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "lib": ["es2025"],
     "types": [],
-    "noEmit": true
+    "noEmit": true,
+    "strict": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedSideEffectImports": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "skipLibCheck": false,
+    "skipDefaultLibCheck": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "isolatedDeclarations": true,
+    "declaration": true
   },
   "include": ["src"]
 }
