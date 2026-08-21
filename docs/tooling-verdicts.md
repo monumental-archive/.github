@@ -246,6 +246,66 @@ computed once in the belt's `[env]` via `exec()`, covering both carriers
 expression, identifying the belt by a file only the belt has so a
 differently-named symlink still resolves. 28ms per invocation.
 
+**taplo was the last belt linter with no delivered config, and TOML width
+was per-repo by accident** (#691, 2026-08-21). `lint:toml` passed no
+`--config` at all, so taplo auto-discovered a repo-local `taplo.toml` and
+the org's TOML format was whatever each repo happened to say — edtf at
+`column_width = 120`, this repo at taplo's default 80, neither written
+down. Not the vacuous-green trap (taplo's defaults are a real standard)
+but the quieter one, where a verdict depends on a file nothing tells a
+repo to carry, and where the org had no *stated* answer.
+
+Delivered as `mise/taplo-org.toml`, and the width question was settled by
+the org's own recorded rule rather than by the number in the issue. The
+rule is rustfmt's — "a width the org invented is our opinion, not the
+tool's" — so a tool's default stands unless a MECHANICAL constraint
+derives another, the way yamllint's 130 comes from unbreakable pin lines.
+No such constraint exists for TOML: `column_width` decides when arrays
+expand and collapse, and it does not wrap strings. So 80, taplo's own
+default, at which this repo's sixteen TOML files were already clean.
+
+The "120-column org canon" both #691 and edtf's own `taplo.toml` cite
+does not exist — measured against the delivered configs: 130
+(`.editorconfig`, yaml and sh), 100 (rustfmt, its default, left alone),
+80 (rumdl prose, its default). edtf cites "yamllint, markdownlint" for
+its 120 and neither says 120. edtf reformats four files at its pin bump,
+all of it `mise run fix:toml`.
+
+`allowed_blank_lines = 1` is the one setting raised above taplo's
+default, and it is the only knob here with a strictness axis rather than
+a taste: the default of 2 lets an author choose one blank line or two,
+and a format check accepting two spellings of one thing checks less than
+one accepting a single spelling. Free for this repo, measured. The
+options NOT taken are recorded in the file with their costs
+(`indent_tables` 2 files here and 8 in edtf, `compact_inline_tables` 2
+and 11, `align_entries` 11 and 14) — each rewrites the corpus to an
+aesthetic nobody chose, which is a style, not a level. `reorder_keys`,
+`reorder_arrays` and `reorder_inline_tables` are written out as false
+because this file is where someone would go to turn them on, and the
+category call against alphabetical reordering was already made for
+yamllint's `key-ordering`.
+
+Two mechanics decided the guards, and both are the shellcheck pair
+from #696 in another costume. `--config` REPLACES a discovered config rather
+than merging with it (measured: with the belt's file passed, a local
+`array_trailing_comma = false` has no effect), so a repo-local
+`taplo.toml` cannot lower the format — which is why it is refused rather
+than tolerated: it could only be a file someone believes in that does
+nothing. And an unreadable `--config` is a WARN at **exit 0**, taplo
+formatting on at its own defaults, so the task checks the file before
+running — without that check a belt that never arrived reports a green
+gate at a level nobody chose (mutation-checked).
+
+The delivered file is `taplo-org.toml`, not `taplo.toml`, for the reason
+`biome-org.json` carries its suffix: the belt lives inside the canon, and
+a delivered file under the discovered name is caught by the very refusal
+it enforces. Measured, not predicted — with the natural name this repo's
+own gate reported `tracked: mise/taplo.toml` and exited 1. The same
+collision sits latent in `lint:rust`, which refuses `*/clippy.toml` and
+`*/rustfmt.toml` while the belt delivers both under exactly those names;
+it is invisible only because that task skips a repo with no tracked
+`Cargo.toml`.
+
 The boundary needed a third clause, and #445 supplied it by measurement:
 **a config may only be delivered when the tool treats it as data.** The
 moment a tool derives its project root from the config's LOCATION,
