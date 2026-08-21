@@ -9,10 +9,19 @@
 #       uses: monumental-archive/.github/.github/workflows/repo-audit.yml@<sha> # vX.Y.Z
 #
 # Failures page via the Actions UI rather than blocking merges. The
-# org-wide audit surface (blast-radius over published SBOMs, link rot,
-# settings drift) runs in the canon's own audit.yml; this workflow carries
-# only the checks that must run against each repo's own tree. No inputs,
-# by design — zero caller-controlled expansion.
+# org-wide audit surface — blast radius over published SBOMs, settings
+# drift, the org-scoped pin and attestation sweeps — runs in the canon's
+# own audit.yml, because each of those is a property of the ORG and one
+# repository has to hold it. Everything that is a property of a repo's
+# OWN TREE runs here.
+#
+# That sentence used to name link rot among the org-wide checks, and it
+# was wrong (#681): `audit:links` builds its corpus from `git ls-files`
+# and `audit:actions` from `.github/workflows/`, so both walk whatever
+# repository they run in — scheduling them in the canon only ever
+# checked the canon, and no consumer's markdown or workflows had been
+# audited by anything. They are per-tree checks and they run here now.
+# No inputs, by design — zero caller-controlled expansion.
 ---
 name: repo-audit
 
@@ -170,4 +179,73 @@ jobs:
       # gate (#392). A repo with no go.mod skips clean.
       - name: Check reachable Go vulnerabilities
         run: mise run audit:go-vulns
+
+  links:
+    name: audit / links
+    runs-on: ubuntu-24.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.10
+          cache: false
+
+      # Link liveness over the caller's own tracked markdown. Network-
+      # bound and a property of the internet rather than the diff, so it
+      # is an audit and never the gate. The belt's lychee.toml arrives
+      # with the canon and is passed explicitly, so a repo-local
+      # lychee.toml cannot quietly outrank it; `.lycheeignore` remains
+      # the repo's own per-link escape (#681). A repo with no tracked
+      # markdown skips clean.
+      - name: Check links
+        run: mise run audit:links
+
+  actions:
+    name: audit / actions (online)
+    runs-on: ubuntu-24.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+        with:
+          version: 2026.8.10
+          cache: false
+
+      - name: Audit workflows online
+        env:
+          # zizmor's API-backed audits — impostor-commit,
+          # known-vulnerable-actions, ref-confusion, typosquat-uses,
+          # stale-action-refs — are the ones the gate's --offline run
+          # structurally cannot perform, so until #681 they ran against
+          # no consumer at all. The default token is enough: they read
+          # public advisory and commit data. It is passed rather than
+          # assumed because the task FAILS CLOSED without it (#310
+          # finding 3) — a tokenless zizmor degrades to offline, skips
+          # every audit this job exists for, and still prints "No
+          # findings to report".
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:actions
 ...

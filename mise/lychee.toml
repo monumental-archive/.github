@@ -1,0 +1,50 @@
+# The org's lychee configuration — one file, every repo (#681).
+#
+# Delivered by `audit:links` through `--config`, and that delivery is the
+# whole point. Measured on the pinned lychee (0.24.2), a repo-local
+# `lychee.toml` in the working directory is auto-discovered and obeyed:
+# a consumer could drop `exclude = [".*"]` beside its README and every
+# link in the tree would come back excluded, exit 0, with a green
+# summary line and nothing to distinguish it from a clean run. An
+# explicit `--config` REPLACES that discovery entirely — the same
+# repo-local file present, the same broken link, and the run reds
+# (measured both directions). So this file exists so that the belt's
+# link policy is the one that runs, on the CLIPPY_CONF_DIR footing that
+# `mise/clippy.toml` already stands on.
+#
+# WHAT IS STILL THE REPO'S: `.lycheeignore`. It is read from the working
+# directory INDEPENDENTLY of `--config` (measured: honoured with the belt
+# config in force), so it survives this file by construction rather than
+# by permission — it is lychee's own per-site mechanism, and a dead link
+# nobody can fix from here is repo identity in the way `deny.toml`'s
+# skips are. Give every entry a `#` reason comment above it, the way
+# every other per-site escape in the org carries one; lychee tolerates
+# the comments and they exclude nothing on their own (both measured).
+#
+# A KEY THIS FILE GETS WRONG FAILS CLOSED: lychee refuses to start on an
+# unknown or mistyped key (exit 3, "Failed to parse configuration file"),
+# so this config cannot silently become a no-op the way a permissive
+# schema would let it.
+
+# The scaffold's deliberate placeholders for a new repo to fill in —
+# `<repo>` (percent-encoded by the time lychee sees it), `BP_ID`,
+# `CONCEPT_DOI`. Excluded by exact token rather than by skipping the
+# scaffold files wholesale: their REAL links still deserve the check.
+# Three patterns here rather than the single alternation they replace on
+# the command line, and the two forms select the same 589 links on this
+# tree (`lychee --dump`, both ways).
+#
+# CARRIED ACROSS UNCHANGED, NOT ENDORSED: measured on the canon at this
+# commit, these three exclude NOTHING — the dump is 589 links with them
+# and 589 without, because `scaffold/README-badges.md` is one long HTML
+# comment and a placeholder inside `<!-- -->` is never a link candidate.
+# (A live run prints "1 Excluded" against this tree and it is NOT these:
+# it is the `mailto:` in CODE_OF_CONDUCT.md, which lychee excludes by
+# default unless --include-mail is passed.)
+# The line they replace claimed the opposite ("lychee resolves them to
+# real requests and 404s"), and that claim is false here today. They are
+# kept because #681 is not the issue that decides whether they still
+# earn their place, and because dropping them would change what the
+# audit means in consumer trees that have never once run it — which is
+# the very condition #681 exists to end. Filed separately.
+exclude = ["%3Crepo%3E", "BP_ID", "CONCEPT_DOI"]

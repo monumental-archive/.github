@@ -2786,21 +2786,34 @@ echo "audit:badges: ${checked} shield(s) checked, all agree with their issuers"
 description = "Check links in tracked markdown (lychee — network, not in ci)"
 dir = "{{cwd}}"
 # audit:*, not lint:*: link liveness is a property of the internet, not the
-# diff. Runs on demand locally and on a schedule in CI (step-3 workflow).
-# Scaffold files carry deliberate placeholders a new repo fills in
-# (<repo>, BP_ID, CONCEPT_DOI — README-badges.md above all); lychee
-# resolves them to real requests and 404s. Excluded by exact token, not
-# by skipping scaffold files wholesale: the scaffold's REAL links still
-# deserve the check.
+# diff. Runs on demand locally and on a schedule in CI — in the canon's
+# audit.yml and, since #681, in repo-audit.yml for every consumer too:
+# this walk is `git ls-files` in whatever repository it runs in, so the
+# canon scheduling it only ever checked the canon.
+#
+# --config, and it is load-bearing rather than tidy: lychee
+# auto-discovers a `lychee.toml` from the working directory, so without
+# an explicit config a consumer's own file silently outranks the belt —
+# `exclude = [".*"]` beside a README buys a green run over an unchecked
+# tree. An explicit --config replaces that discovery (measured both
+# directions, #681). The org's link policy — the scaffold placeholder
+# exclusions above all — therefore lives in the belt's lychee.toml, and
+# `.lycheeignore`, which lychee reads independently of --config, stays
+# the repo's per-link escape.
 # --include-fragments: without it lychee verifies that a page exists and
 # never that the `#anchor` on the end of the link points at anything, so
 # every deep link into a heading was half-checked (#82 max audit). A
 # renamed heading is the common way a link rots while still returning
 # 200. Enabled at zero cost — measured on this tree at adoption, it adds
-# no findings.
+# no findings. It stays a FLAG rather than moving into the delivered
+# config with the exclusions: the config form takes an enum
+# (none|anchor-only|text-only|full) and the bare flag's default could
+# not be shown equal to any single one of them on this tree, so
+# re-encoding it would have changed what the audit means as a side
+# effect of tidying where it is written.
 run = '''
 files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
-if [[ -n ${files} ]]; then xargs lychee --no-progress --include-fragments --exclude "%3Crepo%3E|BP_ID|CONCEPT_DOI" <<< "${files}"; else echo "audit:links: no markdown tracked, skipped"; fi
+if [[ -n ${files} ]]; then xargs lychee --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" <<< "${files}"; else echo "audit:links: no markdown tracked, skipped"; fi
 '''
 
 [tasks."audit:actions"]
