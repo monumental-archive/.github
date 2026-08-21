@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.1](https://github.com/monumental-archive/.github/compare/v1.58.0...v1.58.1) - 2026-08-21
+
+### Fixed
+
+- pin the LTO mode, the fourth determinism input (#778) ([#789](https://github.com/monumental-archive/.github/pull/789))
+
 ## [1.58.0](https://github.com/monumental-archive/.github/compare/v1.57.3...v1.58.0) - 2026-08-21
 
 ### Added
