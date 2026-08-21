@@ -109,6 +109,16 @@
       "commitMessageTopic": "protobuf-specs"
     },
     {
+      "description": "73 columns as the ADVISORY subject, 1 past \u2014 measured under #686's model, where the suffix spends the pull-request-number allowance rather than charging beside it. The ordinary subject fits; this rule exists for the advisory one, which is the pull request in the org it would hurt most to have wedged.",
+      "matchPackageNames": ["github.com/sigstore/sigstore-go"],
+      "commitMessageTopic": "sigstore-go"
+    },
+    {
+      "description": "73 columns as the ADVISORY subject, 1 past \u2014 the same measurement and the same reason as sigstore-go above. The major suffix is kept: `go-toml` and `go-toml/v2` are different modules and a subject that cannot tell them apart is worse than a long one.",
+      "matchPackageNames": ["github.com/pelletier/go-toml/v2"],
+      "commitMessageTopic": "go-toml/v2"
+    },
+    {
       "description": "73 as minted, 1 past.",
       "matchPackageNames": ["github.com/Masterminds/semver/v3"],
       "commitMessageTopic": "semver"
