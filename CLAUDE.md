@@ -31,7 +31,8 @@ shared lives here and nowhere else. Five layers:
    `rustfmt.toml`, `pinact.yaml`, `typos.toml`, `ruff.toml`,
    `biome-org.json` (+ `biome-domains.tsv`,
    `biome-nursery-domains.tsv`), `yamllint.yaml`,
-   `rumdl.toml`, `sqlfluff.cfg`, `lychee.toml`, `taplo-org.toml` —
+   `rumdl.toml`, `sqlfluff.cfg`, `lychee.toml`, `taplo-org.toml`,
+   `shellcheckrc` —
    plus the helpers tasks call. Those configs are DELIVERED, never
    copied: `ORG_BELT_DIR` is computed once in the belt's `[env]` and
    every task passes the file to its tool, so no repo carries a second

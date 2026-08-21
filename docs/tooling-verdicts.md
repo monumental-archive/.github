@@ -1468,6 +1468,28 @@ registry; pure Python, no binary releases) — making it the second
 `UV_*` floor environment, pinned in `[tools]` before first install so
 the lock entry is never bare.
 
+`lint:shell` delivers `mise/shellcheckrc` and refuses a repo-local
+`.shellcheckrc` — the same trap in a **fifth** costume, and the one that
+survived longest because it is invisible from any repo that happens to
+carry the file (#696). shellcheck's defaults leave all eleven optional
+checks off, and the settings used to be discovered by walking up from
+each script, so the canon was strict and every consumer was not:
+measured 2026-08-21 in release-lab, an unbraced `$x` was silent at exit
+0 without the file and SC2250 at exit 1 with it, on the same belt and
+the same tree. Three mechanics decided the shape, each measured on
+shellcheck 0.11.0. `--rcfile` beats discovery, so a repo copy could not
+win — it could only be a file someone believed in; `--norc` beats
+`--rcfile` in either order, which is why `lint:actions` (actionlint
+calls shellcheck with `--norc`) is the one surface that restates the
+level as flags instead of reading the file; and an unreadable
+`--rcfile` is a warning at **exit 0**, so the task asserts the file
+before linting rather than letting a belt that never arrived read as a
+clean run. `severity=` is not an rc directive at all — the floor stays
+shellcheck's default `style`, which is already the lowest — and
+`--check-sourced` is left off with its reason recorded in the file:
+every tracked script is linted directly, so it duplicates findings
+rather than adding any.
+
 **editorconfig-checker, and the `.editorconfig` it lands with** (#403).
 The point of doing it second: the file is the org's first *written*
 indentation rule — until now 2-space was practice plus two tool
@@ -1853,9 +1875,12 @@ documentation rather than enforcement.
   TOML parse (two bodies use `"""` and carry `\\.` and `\\"`) with a
   separate line scan for anchors, since `tomllib` gives no line numbers;
   single-line `run =` forms that shfmt restructures into block form; and
-  pass `--enable=all --external-sources` explicitly, because
-  `.shellcheckrc` is not picked up for files written to a temp
-  directory. So was the disproved suspicion: shfmt and shellcheck do
+  hand shellcheck its settings explicitly, because a
+  discovered `.shellcheckrc` is not picked up for files written to a
+  temp directory — first as literal flags, and since #696 as
+  `--rcfile mise/shellcheckrc`, the same level from the one delivered
+  definition and also immune to a `$HOME/.shellcheckrc`, which a temp
+  path DOES reach. So was the disproved suspicion: shfmt and shellcheck do
   **not** conflict on unquoted `${var}` inside `[[ ]]`.
   Two of the numbers did not survive. The sampled `fix:input-forwarding`
   parse errors were the tera markers, as recorded — an extractor

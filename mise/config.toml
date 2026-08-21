@@ -1399,7 +1399,7 @@ xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" <<< "${files}"
 '''
 
 [tasks."lint:shell"]
-description = "Shell format check AND lint (shfmt + shellcheck at --enable=all)"
+description = "Shell format check AND lint (shfmt + shellcheck at the delivered org config)"
 dir = "{{cwd}}"
 # shfmt --find filters the tracked list to shell files itself, including
 # extensionless scripts with shell shebangs that an extension glob misses.
@@ -1412,10 +1412,32 @@ dir = "{{cwd}}"
 # by nothing. Verified by putting `rm $f` and `which git` into lib.sh:
 # shellcheck reported 22 findings and the gate stayed green.
 #
-# --enable=all matches what lint:actions already sets for actionlint's
-# delegation; a standalone script held to a lower bar than the same code
-# pasted into a workflow would be incoherent. The rest of the settings
-# live in .shellcheckrc so they are declared once.
+# The settings are DELIVERED (#696), not discovered. They used to sit in a
+# `.shellcheckrc` at this repo's root and be found by shellcheck walking
+# up from each script, which is a mechanism that works in exactly the
+# repository that carries the file: `.shellcheckrc` was in no scaffold, in
+# no other repo, and asserted by nothing, so this task ran at shellcheck's
+# DEFAULTS everywhere but here — the config-required trap in a fifth
+# costume, after ruff, biome, golangci and yamllint. Measured 2026-08-21
+# in release-lab, on a four-line script whose only fault is an unbraced
+# `$x`: silent and exit 0 without the file, SC2250 and exit 1 with it,
+# same belt and same tree. `mise/shellcheckrc` states the level and the
+# reasoning; `--rcfile` hands it over.
+#
+# Two measured facts shape the guards below.
+#
+#   A repo-local `.shellcheckrc` is REFUSED, the way lint:rust refuses a
+#   repo-local clippy.toml and lint:biome a tracked biome.json. Not
+#   because it would win — `--rcfile` beats discovery in both directions,
+#   measured on a repo file and on $HOME/.shellcheckrc, each carrying
+#   `disable=SC2250` and neither able to silence it — but because it
+#   would be a config a maintainer believes in that does nothing.
+#
+#   An unreadable `--rcfile` is a WARNING ON STDERR AND EXIT 0.
+#   shellcheck falls back to its defaults and lints on, so a belt that
+#   did not arrive would look exactly like a clean run. Every other
+#   delivered config in this file is passed to a tool that dies on a
+#   missing path; this one has to be checked here.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' | xargs shfmt --find)
@@ -1423,8 +1445,24 @@ files=$(git ls-files ':!vendor/**' | xargs shfmt --find)
   echo "lint:shell: no shell tracked, skipped"
   exit 0
 }
+tracked=$(git ls-files ".shellcheckrc" "*/.shellcheckrc")
+if [[ -n ${tracked} ]]; then
+  echo "lint:shell: the belt delivers the org's shellcheck settings; a repo must not track its own" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+  sed 's/^/  tracked: /' <<< "${tracked}" >&2
+  echo "  git rm --cached it: --rcfile beats discovery, so it changes nothing and reads as if it did" >&2
+  echo "  a check genuinely wrong for one site takes a # shellcheck disable=SCxxxx there, with a reason" >&2
+  exit 1
+fi
+rc="${ORG_BELT_DIR}/shellcheckrc"
+[[ -r ${rc} ]] || {
+  echo "lint:shell: the org shellcheck config is not readable at ${rc}" >&2
+  echo "  shellcheck only WARNS on an unreadable --rcfile and lints on at its defaults, so a" >&2
+  echo "  belt that did not arrive would produce a clean run instead of a red one. Checked here." >&2
+  exit 1
+}
 xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}"
-xargs shellcheck <<< "${files}"
+xargs shellcheck --rcfile="${rc}" <<< "${files}"
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:shell: ${count} script(s) formatted and linted"
 '''
@@ -3737,9 +3775,19 @@ trivy fs --scanners misconfig,secret --exit-code 1 "${scratch}"
 description = "Lint GitHub Actions workflows (actionlint)"
 # {{cwd}}: global-layer tasks otherwise run from the config root (~ locally)
 dir = "{{cwd}}"
-# actionlint calls shellcheck with --norc, so rc files are ignored; the env
-# var is the only way to raise shellcheck to max (all optional checks on).
-env = { SHELLCHECK_OPTS = "--enable=all" }
+# The one shellcheck surface that CANNOT read the delivered config, and
+# the reason is mechanical: actionlint calls shellcheck with --norc, and
+# --norc beats --rcfile in either order (measured on 0.11.0 — the org
+# file passed alongside --norc silences nothing). So this is the single
+# place the org level is restated in flag form rather than read from
+# mise/shellcheckrc, and the two are kept in step by hand.
+#
+# Drift here cannot lower what the org actually enforces: lint:shell-embedded
+# reads the SAME `run:` blocks out of the same files and runs them against
+# the delivered config, so this line is a floor under a check that already
+# holds the code to the file. Keep it equal to mise/shellcheckrc anyway —
+# a floor that disagrees with the ceiling is a puzzle for the next reader.
+env = { SHELLCHECK_OPTS = "--enable=all --external-sources --extended-analysis=true" }
 # Guard: actionlint exits 3 when a repo has no workflow YAML (including an
 # existing-but-empty workflows directory).
 # The -ignore is a documented exception in the capability-boundary

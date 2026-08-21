@@ -71,6 +71,13 @@ if TYPE_CHECKING:
 
 SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 
+# The org's shellcheck settings, read from the belt directory this file is
+# itself delivered in (#696). One definition, shared with lint:shell and
+# embedded-shell.py, instead of a third copy of `--enable=all` here; and
+# these bodies are linted as temporary files, so without it shellcheck
+# was free to discover $HOME/.shellcheckrc and quietly lower the level.
+ORG_RCFILE = Path(__file__).resolve().parent / "shellcheckrc"
+
 # What the belt sets as mise's default inline shell
 # (`[settings] unix_default_inline_shell_args`, #700), and therefore what a
 # body runs under when its own file pins nothing.
@@ -316,7 +323,7 @@ def findings(
                 f"{path}:{body.run_line}: {body.name}: `run` body is not "
                 f"shfmt-formatted (mise run fix:belt-shell)"
             )
-        args = ["shellcheck", "--enable=all", "--external-sources"]
+        args = ["shellcheck", f"--rcfile={ORG_RCFILE}"]
         for source_path in source_paths:
             args += ["--source-path", source_path]
         # ruff: ignore[subprocess-without-shell-equals-true]
@@ -563,6 +570,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not paths:
         print("belt-shell: no mise config named, nothing to check")
         return 0
+
+    # shellcheck only WARNS on an unreadable --rcfile and then lints at its
+    # own defaults, exit 0 — so a belt that did not arrive would read as a
+    # clean run. Checked before any body is linted.
+    if not args.write and not ORG_RCFILE.is_file():
+        print(
+            f"belt-shell: the org shellcheck config is missing at {ORG_RCFILE}",
+            file=sys.stderr,
+        )
+        return 1
     configs, shell, env = collect(paths, [Path(f) for f in args.env_from])
 
     # Asserted before the interpreter skip below and before any body is
