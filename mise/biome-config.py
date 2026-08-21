@@ -46,6 +46,17 @@ NAME = "biome-config"
 # "recommended" would be a repo lowering a domain it did claim.
 CLAIM = "all"
 
+# What `mise/biome-nursery-domains.tsv` writes where biome reports no
+# domain for a rule. An explicit marker rather than an empty column: "no
+# domain" is a statement the file makes.
+NO_DOMAIN = "-"
+
+# The value written for a nursery rule whose domain this repository did
+# not claim. `preset: "all"` does not reach nursery, so the org names each
+# rule "on" — and a named rule beats its own domain being "none" (#720),
+# which is the whole reason this file has to intervene at all.
+SILENCED = "off"
+
 # Manifest sections a dependency can be declared in. `bundleDependencies`
 # is deliberately absent: it is a list of names already required
 # elsewhere, not a declaration of its own.
@@ -85,6 +96,23 @@ def read_domains(path: Path) -> Domains:
         else:
             org.append(domain)
     return Domains(identity=identity, org=org)
+
+
+def read_nursery(path: Path) -> dict[str, str]:
+    """Read which nursery rule belongs to which domain.
+
+    Returns:
+        Rule name mapped to its domain, or to NO_DOMAIN when it has none.
+
+    """
+    table: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        rule, domain = line.split("\t")
+        table[rule] = domain
+    return table
 
 
 def declaration_problems(document: object, identity: dict[str, list[str]]) -> list[str]:
@@ -171,18 +199,56 @@ def omissions(
     return missing
 
 
-def generate(org: dict, claimed: set[str], domains: Domains) -> dict:
+def silence_nursery(
+    config: dict,
+    claimed: set[str],
+    domains: Domains,
+    nursery: dict[str, str],
+) -> int:
+    """Switch off nursery rules belonging to a framework this repo is not.
+
+    A domain at "none" stops the rules of the eight stable groups and does
+    NOT stop a nursery rule the org named "on" — biome offers no bulk
+    switch for nursery, so every one of the 87 is named, and a named rule
+    wins. This closes that in the one place the org can: the generated
+    config, where the repository's identity is already known.
+
+    Returns:
+        How many rules were switched off.
+
+    """
+    block = config.get("linter", {}).get("rules", {}).get("nursery", {})
+    silenced = 0
+    for rule in block:
+        domain = nursery.get(rule, NO_DOMAIN)
+        # No domain, or a domain the org fixes for every repo, means the
+        # rule is not a statement about what this repository is.
+        if domain in {NO_DOMAIN, *domains.org} or domain in claimed:
+            continue
+        block[rule] = SILENCED
+        silenced += 1
+    return silenced
+
+
+def generate(
+    org: dict,
+    claimed: set[str],
+    domains: Domains,
+    nursery: dict[str, str],
+) -> tuple[dict, int]:
     """Merge the org's rules with the repository's identity.
 
     Returns:
-        The config biome is actually run against.
+        The config biome is actually run against, and how many nursery
+        rules its identity switched off.
 
     """
     config = json.loads(json.dumps(org))
     written = {d: CLAIM if d in claimed else "none" for d in domains.identity}
     written.update(dict.fromkeys(domains.org, CLAIM))
     config.setdefault("linter", {})["domains"] = written
-    return config
+    silenced = silence_nursery(config, claimed, domains, nursery)
+    return config, silenced
 
 
 def complain(headline: str, lines: list[str], remedy: str) -> int:
@@ -207,6 +273,7 @@ def run(args: argparse.Namespace, manifests: list[Path]) -> int:
 
     """
     domains = read_domains(args.domains)
+    nursery = read_nursery(args.nursery)
     org = json.loads(args.org.read_text(encoding="utf-8"))
 
     claimed: set[str] = set()
@@ -238,12 +305,10 @@ def run(args: argparse.Namespace, manifests: list[Path]) -> int:
             "silence here lowers an org rule",
         )
 
-    args.out.write_text(
-        json.dumps(generate(org, claimed, domains), indent=2) + "\n",
-        encoding="utf-8",
-    )
+    config, silenced = generate(org, claimed, domains, nursery)
+    args.out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     named = ", ".join(sorted(claimed)) if claimed else "none"
-    print(f"{NAME}: domains claimed: {named}")
+    print(f"{NAME}: domains claimed: {named}; {silenced} nursery rule(s) off")
     return 0
 
 
@@ -257,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="the generated biome config")
     parser.add_argument("--org", type=Path, required=True)
     parser.add_argument("--domains", type=Path, required=True)
+    parser.add_argument("--nursery", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--declaration", type=Path, default=Path("biome.json"))
     args = parser.parse_args(argv)

@@ -36,7 +36,7 @@ honestly blocked on.
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` (`lint:biome-domains`) |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
@@ -987,6 +987,43 @@ The generated config is what biome is run against, so the declaration
 never reaches the tool even if it lies: proven by planting a `biome.json`
 that claimed `qwik` and switched `noNodejsModules` off, and measuring no
 change to either (0 Qwik findings, 33 `noNodejsModules`).
+
+**Domains stopped at the nursery door, and a named rule beat its own
+domain** (#720, found building #695). `preset: "all"` excludes nursery,
+so the org names all 87 rules individually — and an explicitly named
+rule wins over its domain being `"none"`. The mechanism above was
+therefore true of the eight stable groups and false of the ninth.
+Measured on the fixture with `reactNative: "none"` throughout:
+`noReactNativeRawText` fires **1** with the rule named `"on"` and **0**
+with the name removed, nothing else changed. 56 of the 87 carry a
+domain, so a React repository was drawing Vue's seven, Playwright's
+eleven and Svelte's two whatever it declared.
+
+The generated config now writes `"off"` for a nursery rule whose domain
+the repository did not claim. `mise/biome-nursery-domains.tsv` records
+which rule belongs to which domain, every row from `biome explain`, with
+`-` for the 31 that have none — an explicit statement rather than an
+empty column. `lint:biome-domains` re-derives all 87 in the canon's own
+gate and holds the file's rule set against the org config's nursery
+block **in both directions**, because a rule in one and not the other is
+exactly how this escaped the first time.
+
+Measured after: `noReactNativeRawText` 1 → 0; `useExplicitType` 33 and
+`useUnicodeRegex` 30 unchanged, which is the proof that domainless rules
+still run everywhere; `noConditionalExpect` 8 unchanged, the proof that
+the org-fixed domains are untouched. A repo claiming nothing silences
+34 rules, one claiming `react` silences 28, and the difference is
+exactly react's own six.
+
+The cost was the open question and the estimate was wrong by 4.5×, in
+the helpful direction. 87 `biome explain` calls take **1.0s**, not the
+~4.5s the issue assumed — a call is ~12ms. That made deriving at run
+time in every repo genuinely arguable, so it was measured rather than
+dismissed: the recorded-table shape adds **no measurable time at all**
+to a consumer's `lint:biome` (20 generator runs took 0.818s with the
+table populated and 0.818s with every row blank), against 2.64s for one
+`biome ci` over the same tree. One second per repo per gate run, versus
+zero, for a file with an alarm on it.
 
 **One rule domains cannot reach, recorded so its absence is not read as
 an oversight.** `noNodejsModules` has no domain at all — `biome explain`

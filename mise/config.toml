@@ -1017,6 +1017,20 @@ dir = "{{cwd}}"
 # a `biome.json` that claimed `qwik` and switched `noNodejsModules` off,
 # and measuring no change in either (0 Qwik findings, 33 noNodejsModules).
 #
+# THE DOMAINS REACH NURSERY TOO, and did not at first (#720). biome's
+# `preset: "all"` excludes nursery, so the org names all 87 rules one by
+# one, and a NAMED rule beats its own domain being "none" — measured,
+# `noReactNativeRawText` fired on the React fixture with
+# `reactNative: "none"` set, and stopped only when the name was removed.
+# 56 of the 87 carry a domain, so the mechanism above was true of the
+# eight stable groups and false of the ninth. The generator now writes
+# "off" for a nursery rule whose domain the repo did not claim, reading
+# `biome-nursery-domains.tsv`; the 31 rules with no domain, and every
+# rule in the org-fixed domains, are untouched. Measured on the fixture:
+# noReactNativeRawText 1 → 0, useExplicitType 33 → 33,
+# noConditionalExpect 8 → 8, and no measurable time added (20 generator
+# runs, 0.818s either way).
+#
 # One rule the domains cannot reach, recorded so its absence is not read
 # as an oversight: `noNodejsModules` has NO domain at all (`biome
 # explain`), so no belt mechanism can scope it to browser code. A Node
@@ -1060,6 +1074,7 @@ git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
+    --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
     --out "${generated}"
 report=$(mktemp)
 xargs biome ci --config-path "${generated}" --reporter=json --reporter-file="${report}" \
@@ -1123,6 +1138,7 @@ git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
+    --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
     --out "${generated}"
 xargs biome check --config-path "${generated}" --write <<< "${files}"
 '''
@@ -1202,7 +1218,48 @@ if [[ -n ${problems} ]]; then
   exit 1
 fi
 version=$(biome --version | awk '{print $2}')
-echo "lint:biome-domains: ${rows} domains agree with biome ${version}"
+# The nursery half (#720). Same file, same alarm, one level down: which
+# nursery RULE belongs to which domain, so the generator can switch off
+# the ones whose framework a repository is not. 87 explain calls, 1.0s
+# measured — paid here and nowhere else, exactly as above.
+nursery=$(git ls-files "mise/biome-nursery-domains.tsv")
+[[ -n ${nursery} ]] || {
+  echo "lint:biome-domains: ${rows} domains agree with biome ${version}; no nursery table"
+  exit 0
+}
+named=$(jq -r '.linter.rules.nursery // {} | keys[]' mise/biome-org.json | sort)
+recorded=$(awk -F'\t' '!/^#/ && NF { print $1 }' "${nursery}" | sort)
+drift=$(comm -3 <(echo "${named}") <(echo "${recorded}"))
+if [[ -n ${drift} ]]; then
+  echo "lint:biome-domains: the nursery table and the org config name different rules" >&2
+  comm -23 <(echo "${named}") <(echo "${recorded}") | sed 's/^/  enforced but unmapped: /' >&2
+  comm -13 <(echo "${named}") <(echo "${recorded}") | sed 's/^/  mapped but not enforced: /' >&2
+  echo "  an unmapped rule escapes its domain and runs in every repo whatever the repo is" >&2
+  exit 1
+fi
+nrows=0
+while IFS=$'\t' read -r rule domain; do
+  [[ -n ${rule} ]] || continue
+  [[ ${rule} != \#* ]] || continue
+  nrows=$((nrows + 1))
+  explained=$(biome explain "${rule}" 2> /dev/null) || {
+    problems+="${rule}: biome does not know it"$'\n'
+    continue
+  }
+  said=$(awk '/^Domains/ { f = 1; next } f && /^- Name:/ { print $3; exit }' <<< "${explained}")
+  [[ ${said:--} == "${domain}" ]] || {
+    problems+="${rule}: biome says domain \"${said:--}\", the table says \"${domain}\""$'\n'
+  }
+done < "${nursery}"
+if [[ -n ${problems} ]]; then
+  echo "lint:biome-domains: the nursery table no longer matches the pinned biome" >&2
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+  sed '/^$/d; s/^/  /' <<< "${problems}" >&2
+  # shellcheck disable=SC2016  # the backticks quote a command NAME in prose
+  echo '  re-derive it from `biome explain` — a wrong row is a rule in the wrong repo' >&2
+  exit 1
+fi
+echo "lint:biome-domains: ${rows} domains and ${nrows} nursery rules agree with biome ${version}"
 '''
 
 # Named for the subject, not the tool, matching lint:shell / lint:toml /
