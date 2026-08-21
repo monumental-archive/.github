@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.4](https://github.com/monumental-archive/.github/compare/v1.58.3...v1.58.4) - 2026-08-21
+
+### Fixed
+
+- turn noConditionalExpect off, all 8 were false (#788) (#797) ([#797](https://github.com/monumental-archive/.github/pull/797))
+
 ## [1.58.3](https://github.com/monumental-archive/.github/compare/v1.58.2...v1.58.3) - 2026-08-21
 
 ### Fixed
