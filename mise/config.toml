@@ -516,13 +516,17 @@ if [[ -n ${files} ]]; then xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.tom
 [tasks."lint:sql"]
 description = "SQL lint + format check (sqlfluff, all core rules)"
 dir = "{{cwd}}"
-# Subject-named like lint:python — sqlfluff covers one language. A
-# tracked .sqlfluff is REQUIRED once SQL is tracked, but for the
-# opposite reason to ruff/biome: sqlfluff's default rule set is its
-# maximum, and the config exists because the tool refuses to guess a
-# DIALECT — a repo without one gets a loud error, never a weak green.
-# The belt asserts it anyway so the remedy is named. Copy
-# scaffold/.sqlfluff. Tracked files only, on the standing rule.
+# Subject-named like lint:python — sqlfluff covers one language. The
+# config is DELIVERED, never copied: mise/sqlfluff.cfg is passed
+# explicitly as --config from ORG_BELT_DIR (it joined the delivered set
+# in dd5eea7, #455), so a repo tracks no .sqlfluff and there is nothing
+# here to assert — the run body goes from the git ls-files guard
+# straight to the lint. The dialect reasoning is why that delivered
+# file states `dialect = postgres`: sqlfluff refuses to guess a
+# dialect, so a run without one is a loud error, never a weak green —
+# the reverse of the ruff/biome trap, where a missing config is a
+# silent fallback to something weaker. Tracked files only, on the
+# standing rule.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.sql")
@@ -696,14 +700,15 @@ echo "lint:editorconfig: ${count} file(s) checked"
 [tasks."lint:yaml"]
 description = "YAML lint (yamllint, full rule inventory at error + --strict)"
 dir = "{{cwd}}"
-# A tracked yamllint config is REQUIRED once YAML is tracked — the
-# ruff/biome/golangci trap in a fourth costume: without one yamllint
-# falls back to its own `default` preset, a fraction of the org policy,
-# and the gate goes green having enforced something weaker. The belt
-# cannot supply the file centrally (yamllint discovers upward from the
-# file, not through mise's conf.d layer), so the belt asserts it. Copy
-# scaffold/.yamllint.yaml. No fix:* sibling exists to wire: yamllint
-# ships no writer, so findings are hand edits by design.
+# The org's yamllint config is DELIVERED, never copied: the run body
+# passes -c "${ORG_BELT_DIR}/yamllint.yaml" explicitly, so delivery
+# never depends on yamllint's upward discovery and a repo tracks no
+# copy of its own (it joined the delivered set in dd5eea7, #455). The
+# rule set matters because yamllint's fallback is its own `default`
+# preset, a fraction of the org policy — but that fallback is
+# unreachable while --config is passed, so the belt asserts nothing
+# here. No fix:* sibling exists to wire: yamllint ships no writer, so
+# findings are hand edits by design.
 # Tracked files only — yamllint's own discovery is never used, on the
 # standing lefthook-cache rule.
 #

@@ -34,7 +34,7 @@ re-score by hand whenever a change lands that a criterion would notice.
 | --- | --- | --- |
 | Basics: homepage, description, contribution | Met | README + CONTRIBUTING.md (org-wide health files) |
 | FLOSS licence, in LICENSE | Met | per-repo LICENSE (0BSD in the org's own repos), `LICENSES/` + REUSE.toml, enforced by `lint:licence` (#214) |
-| Change control: public VCS, unique versions, release notes | Met | GitHub; semver by git-cliff; CHANGELOG per release |
+| Change control: public VCS, unique versions, release notes | Met | GitHub; semver derived by `stele derive version` (#507); CHANGELOG per release |
 | Reporting: issue process, vulnerability process, ack ≤ 14 days | Met | issue forms; SECURITY.md (private reporting, 14-day ack) |
 | Quality: build, automated test suite, new-functionality tests, warnings | Met | `mise run ci` = the cloud gate: the repo's own `test` task and the `coverage:check` ratchet run the suite, and every belt linter fails the gate on a finding. `warnings_strict` is **Met for Rust repos since 2026-08-16** (#445): `lint:rust` runs clippy with `-D warnings`, which denies rustc's own warn-by-default lints as well as clippy's, at every group with restriction minus nine named contradictions. Answer it from the tasks that actually run, per repo — a repo with no `lint:rust`-eligible source is answering about a different language, not inheriting this row. History worth keeping: this read "clippy/tests enforced; warnings deny" until 2026-08-13, which was never true of any repo, and then Unmet-with-the-reason until the belt actually grew the task |
 | Security: secure design knowledge, no unencrypted auth, vuln fix ≤ 60 days | Met | trusted publishing only, no tokens; Dependabot + Renovate |

@@ -1327,10 +1327,12 @@ sequences rather than the tree keeping flow style, because the org
 conforms to the tool, not the tool to a parser. Second, yamllint lints
 its own config, which therefore also carries `---`/`...`.
 
-`lint:yaml` requires a tracked `.yamllint.yaml` once YAML is tracked —
-the ruff/biome/golangci trap in a fourth costume: without a config
-yamllint silently falls back to its `default` preset, a fraction of the
-org policy, on a green gate. Delivered from `mise/yamllint.yaml`. No `fix:*`
+`lint:yaml` passes `-c mise/yamllint.yaml` from `ORG_BELT_DIR`, so the
+config is DELIVERED and no repo tracks one (#455). The delivery is what
+keeps the ruff/biome/golangci trap shut rather than an assertion: with
+no config yamllint falls back silently to its `default` preset, a
+fraction of the org policy, on a green gate — but `-c` beats discovery,
+so that fallback is unreachable and the belt asserts nothing. No `fix:*`
 sibling exists to wire: yamllint ships no writer, so conformance is
 hand edits by design (prettier's verdict already records the YAML
 formatting gap). pipx-only — no aqua package exists (404 in the
@@ -1474,8 +1476,10 @@ tool refuses to guess: the dialect — postgres org-wide, the only SQL
 the org ships. `templater = raw`: org SQL is DDL/migrations, not
 Jinja, and a templater that expands nothing can corrupt nothing.
 `lint:sql` is subject-named (one language, the lint:python rule) and
-still asserts the config so the remedy is named, though a missing
-config here fails loud rather than green. `fix:sql` is the write-mode
+asserts nothing: the config is delivered with `--config` from
+`ORG_BELT_DIR` (#455), so no repo tracks a `.sqlfluff` and the missing-
+config case cannot arise — and would fail loud rather than green if it
+did. `fix:sql` is the write-mode
 sibling; `--force` is its non-interactive flag, not an unsafe-fix
 mode. **Zero SQL in the canon** — the task skips clean here, and the
 rule set is exercised first in monumental-archive-db, stated outright
