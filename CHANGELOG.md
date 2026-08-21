@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.54.0](https://github.com/monumental-archive/.github/compare/v1.53.1...v1.54.0) - 2026-08-21
+
+### Added
+
+- let a repo declare its biome domains (#695) ([#719](https://github.com/monumental-archive/.github/pull/719))
+- check links and workflows in every repo (#681) ([#727](https://github.com/monumental-archive/.github/pull/727))
+
+### Fixed
+
+- lint:yaml is for YAML a human wrote (#718) ([#721](https://github.com/monumental-archive/.github/pull/721))
+- fold repo packageRules into the subject budget ([#722](https://github.com/monumental-archive/.github/pull/722))
+- require the org's dials in a repo's tsconfig (#699) ([#731](https://github.com/monumental-archive/.github/pull/731))
+
 ## [1.53.1](https://github.com/monumental-archive/.github/compare/v1.53.0...v1.53.1) - 2026-08-21
 
 ### Fixed
