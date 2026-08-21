@@ -214,6 +214,14 @@ jobs:
       MISE_LOCKED: "1"
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_RELEASE_STRIP: "false"
+      # The fourth input (#778): the release profile's default is thin
+      # LOCAL LTO across 16 codegen units, and that path was measured
+      # not to reproduce — four distinct binaries from four legs of one
+      # commit. A `prepare` script gets the determinism inputs the
+      # class's own steps get (#308), so it gets this one too; the
+      # declarative path takes it from release/rust-build.sh, where the
+      # measurement is written down.
+      CARGO_PROFILE_RELEASE_LTO: fat
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/build
     steps:
       - name: Refuse a caller that declares the binary twice

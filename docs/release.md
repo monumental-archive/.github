@@ -647,8 +647,9 @@ A Dockerfile that compiles is the failure mode, not a style choice.
 image ships, and the class builds it through `release/rust-build.sh` —
 the same definition `build-rust-binary.yml` runs, so the pinned
 toolchain, `SOURCE_DATE_EPOCH`, `CARGO_INCREMENTAL=0`, the path remap,
-the preserved `cargo-auditable` section and the inventory plan (#537)
-are one statement rather than a recipe every consumer rewrites. The
+the preserved `cargo-auditable` section, `CARGO_PROFILE_RELEASE_LTO=fat`
+and the inventory plan (#537) are one statement rather than a recipe
+every consumer rewrites. The
 binaries land at `<context>/dist/<name>`, mode 0755, named as cargo
 names them. The measurement that decided it: the org's two image
 consumers had written the same twenty-five-line prepare script with
@@ -825,9 +826,26 @@ upgrade path, should it ever matter, is zig/cargo-zigbuild.
 **Reproducible by construction** (Best Practices Silver
 `build_repeatable`): `SOURCE_DATE_EPOCH` from the released commit's own
 timestamp, `CARGO_INCREMENTAL=0`, `--remap-path-prefix`, stripping
-disabled (it would destroy the section cargo-auditable lives in), and
-normalised archives — sorted members, zeroed ownership, clamped mtimes,
-`gzip -n`.
+disabled (it would destroy the section cargo-auditable lives in),
+`CARGO_PROFILE_RELEASE_LTO=fat`, and normalised archives — sorted
+members, zeroed ownership, clamped mtimes, `gzip -n`.
+
+**Why LTO is one of them** (#778). Cargo's release default is
+`lto = false`, which is not "no LTO": it performs thin *local* LTO
+across the profile's sixteen codegen units, and that path does not
+reproduce. Measured on x86_64, four independently allocated runners per
+candidate, cold, through `release/rust-build.sh` itself: the default
+produced four distinct binaries out of four legs, and so did
+`codegen-units = 1` and `lto = "off"` — while `lto = "fat"` produced
+one digest across all four. The obvious remedy was the falsified one:
+`codegen-units = 1` removes every `.llvm.<hash>` symbol (rustc disables
+the local LTO entirely at one codegen unit) and leaves `.text` itself
+varying between legs, which is the part iiif-server v0.2.0's failure —
+where only `.strtab` differed — looked too narrow to show. The cost is
++30% wall time and −23% size on that graph; `codegen-units = 1` is
+deliberately not set beside it, being insufficient alone and
+unnecessary with fat. Fat LTO's peak memory scales with the whole
+dependency graph, which is the limit to watch on a large workspace.
 
 Binaries have no registry, so there is no pre-sign pull-back leg: they
 ship as release assets, GitHub's own release attestation binds tag,

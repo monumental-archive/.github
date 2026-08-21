@@ -17,7 +17,11 @@
 #   Builds are reproducible by construction (Best Practices Silver
 #   build_repeatable): SOURCE_DATE_EPOCH from the released commit,
 #   incremental compilation off, paths remapped, symbols kept (stripping
-#   would destroy the cargo-auditable section), archives normalised.
+#   would destroy the cargo-auditable section), fat LTO instead of the
+#   profile's default thin LOCAL LTO — which was measured not to
+#   reproduce, #778 — and archives normalised. The first four live in
+#   release/rust-build.sh with the compile they govern; the last is
+#   this file's own step.
 #
 # No cache of any kind: everything downstream of this job gets signed.
 ---

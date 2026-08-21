@@ -19,7 +19,9 @@
 # here — the determinism inputs, the toolchain assertions, the staging
 # rule, and the plan — and a caller states only its scope.
 #
-# WHAT MAKES THE BYTES REPRODUCIBLE (#295, #118), all four together:
+# WHAT MAKES THE BYTES REPRODUCIBLE (#295, #118, #778), all five
+# together — and the fifth is there because four was measured to be
+# one short:
 #
 #   SOURCE_DATE_EPOCH          the released commit's own time, so the
 #                              same tag rebuilds to the same bytes on
@@ -35,6 +37,11 @@
 #                              section cargo-auditable writes, which is
 #                              the image-side dependency surface a
 #                              scanner reads out of published bytes
+#   CARGO_PROFILE_RELEASE_LTO=fat
+#                              the release profile's default is thin
+#                              LOCAL LTO across 16 codegen units, and
+#                              that path does not reproduce (#778) —
+#                              see the measurement below
 #
 # Inputs are environment variables, like every other script in release/:
 #
@@ -146,6 +153,41 @@ fi
 export SOURCE_DATE_EPOCH
 export CARGO_INCREMENTAL=0
 export CARGO_PROFILE_RELEASE_STRIP=false
+# The fourth determinism input, and the one that was missing (#778).
+# Cargo's release default is `lto = false`, which is NOT "no LTO": it
+# performs thin LOCAL LTO across the profile's 16 codegen units, and
+# that path does not reproduce. Measured on x86_64 GitHub runners,
+# four independently allocated legs per candidate, cold, through this
+# very script (iiif-server probe runs 32514356144 and 32514981377):
+#
+#   candidate            distinct digests / 4 legs   size      mean s
+#   baseline (default)   4                           23.7 MB   141
+#   codegen-units=1      4                           20.4 MB   148
+#   lto="off"            4                           27.4 MB   118
+#   lto="fat"            1                           18.2 MB   184
+#   both                 1                           17.0 MB   182
+#
+# THE OBVIOUS CANDIDATE IS FALSIFIED, which is why the reasoning sits
+# here rather than a bare flag. `codegen-units=1` removes every
+# `.llvm.<hash>` symbol — rustc disables the local LTO entirely at one
+# codegen unit — so `.strtab` becomes identical and the binaries still
+# differ four ways out of four. Per-section digests say why: the
+# sections that vary are `.note.gnu.build-id` (a hash of the content,
+# so a consequence) and `.text` itself. The machine code varies, not
+# just the symbol table, and only whole-graph LTO makes it stop.
+# iiif-server v0.2.0's failure looked narrower than it was.
+#
+# `codegen-units=1` is deliberately NOT set beside this: measured
+# insufficient alone, measured unnecessary with fat, and it costs
+# front-half parallelism that grows with the workspace.
+#
+# The cost, stated rather than discovered: +30% wall time and −23%
+# size on that graph, and fat LTO's peak memory scales with the whole
+# dependency graph — a much larger workspace on a 7 GB runner could
+# meet a limit thin-local never did. Checked before adopting: the
+# `.dep-v0` section survives fat LTO (2881 bytes in the measured
+# binaries), so the dependency surface a scanner reads is intact.
+export CARGO_PROFILE_RELEASE_LTO=fat
 # Set outright rather than appended: this script owns the flag set, so a
 # caller's job-level RUSTFLAGS cannot half-apply it.
 export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE:-${PWD}}=/build"
