@@ -19,6 +19,27 @@
       "matchManagers": ["mise"],
       "matchDepNames": ["rumdl"],
       "extractVersion": "^v(?<version>.+)$"
+    },
+    {
+      "description": "In the canon the belt IS the released artifact, so a mise pin is a change to shipped bytes and mints `fix` (#668). The org preset answers `chore` here because #558's per-manager proxy was evaluated once, org-wide, for repos whose released artifacts contain no belt tools — correct there, wrong in the one repo that ships the belt. Measured 2026-08-21: trivy 0.74.0, ruff 0.16.3 and mise 2026.8.10 sat merged on main behind a v1.51.0 tag every consumer's gate still pinned, all `chore`, nothing derived — a vulnerability scanner going stale in every gate in the org. Repo config resolves after the preset, so this overrides the top-level `chore` for the mise manager alone; the scope stays the preset's, giving `fix(deps):`, two columns NARROWER than `chore(deps):`, so nothing lint:subject-budget already passes can widen. `github:monumental-archive/stele` is a mise pin and takes `fix` with the rest — the release engine is belt bytes, and no canon release moves it, so there is no loop to guard.",
+      "matchManagers": ["mise"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "Action and reusable-workflow pins ship to every caller — publish.yml's `monumental-archive/signer/.github/workflows/sign.yml@<sha>` IS the identity a consumer's verification turns on — so a pin bump is a change to shipped bytes and mints `fix` (#668). The signer pin stranded on main on 2026-08-21 is this rule's own case. Canon-local-only workflows (scorecard.yml, the CodeQL SARIF upload) are consumed by nobody and technically over-classify here: accepted on #558's recorded argument, that the manager is the honest proxy Renovate can evaluate at commit-minting time and this one errs only toward an unnecessary patch release, which is cheap where a missed delivery is not. Narrowing to reusable-workflow paths was rejected on #668 — precision whose only yield is withholding a patch number from a canon-local pin bump.",
+      "matchManagers": ["github-actions"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "The pgrx base-image matrix is a build input to every extension image the canon builds for a consumer, so a digest or suffix refresh within a major is shipped bytes and mints `fix` (#668). Selected by file, the precedent of the major-disable rule above, and here that is load-bearing rather than stylistic: `matchManagers` spells every regex manager `custom.regex` with no way to tell two apart, and default.json's two — the lefthook `ref:` line and the preset `extends` pin — both raise the canon's OWN pin, which the guard below must hold at `chore`. Selecting the manager wholesale would defeat that guard through the back door.",
+      "matchFileNames": ["docker/pgrx-base-images.toml"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "THE LOOP GUARD, load-bearing and not a restatement. Measured 2026-08-21: source-attest.yml pins `monumental-archive/.github/.github/actions/source-attest@<sha> # v1.51.0`, so the canon's own pin is raised by the github-actions manager and the wholesale rule above WOULD flip it to `fix` — a release mints a tag, the tag opens a self-pin bump, the bump derives a release, and nothing terminates it. It stays `chore(canon)`: the release-neutral scope of the two-config contract (#227, MAINTENANCE.md's post-release window), where the notes convention leaves the scope unmapped and the silent-types rule keeps it out of the version decision, so a self-pin bump justifies no version. Last in the list because later wins and every rule above it is wholesale by manager. Stated here in full rather than inherited from default.json's first-party rule, on this config's own law (#576): a guard whose only reason lives in another file is a guard the next edit to this one cannot see.",
+      "matchPackageNames": ["monumental-archive/.github"],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "canon"
     }
   ],
   "customManagers": [
