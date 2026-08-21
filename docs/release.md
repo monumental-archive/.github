@@ -1007,11 +1007,18 @@ in that repository's history for that day.
 
 ## Conformance
 
-| Repository | Gaps to close |
-| --- | --- |
-| edtf | drop release-plz + per-crate tags; adopt `[workspace.package]` inheritance; App-minted tag; re-anchor attestation to `signer` |
-| iiif-server | adopt canonical `cliff.toml`/scripts (it is their source, but canon now lives here); App-minted tag replaces `RELEASE_TOKEN`; re-anchor to `signer` |
-| monumental-archive-db | re-anchor cosign identity to `signer`; everything else exempt (continuous archetype) |
+Per-repository migration state is **not recorded here**. One import issue
+owns each repository in full — the transfer, the gaps, the order, and the
+evidence that each one closed: issues #669 (edtf), #670
+(monumental-archive-db), #671 (iiif-server), #672 (monumental-archive)
+and #673 (monumental-archive-ledger). A table here could only be a second copy of
+that state, and was: it still named `cliff.toml` as something to adopt
+— a file that git-cliff's retirement (issue #507) makes a thing an
+import DELETES.
+
+What this document owns is the target the imports conform *to*: the
+release path above, the archetypes, and the belt that delivers every
+tool config. A repository carries no copy of a delivered config.
 
 Risky release-machinery changes are proven in the **release lab**
 (`release-lab`) before any production repository

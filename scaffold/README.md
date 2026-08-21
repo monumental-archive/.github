@@ -204,8 +204,10 @@ is all rights reserved — the opposite of publishing anything — and
     root — that is the design, not a regression.
 
 Conditional stubs, wired per the runbook's "Wiring in a repository"
-section (`docs/runbook.md`): `cliff.toml` and the release/publish
-workflow templates for versioned repos, `CITATION.cff` where citable —
+section (`docs/runbook.md`): the release/publish workflow templates for
+versioned repos (there is no `cliff.toml` stub — git-cliff retired in
+issue #507, and `stele derive version` carries the conventions),
+`CITATION.cff` where citable —
 rendered by `fix:citation` from `REUSE.toml`, and required by
 `lint:citation` wherever the stub passes `mint-doi: true` (#316) —
 `REUSE.toml` + `README-badges.md` + `SECURITY-INSIGHTS.yml` for the
