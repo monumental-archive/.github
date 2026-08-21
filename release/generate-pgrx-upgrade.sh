@@ -184,7 +184,9 @@ for control in "${controls[@]}"; do
     --output "${work}/prev.tar.gz"
   tar -xzf "${work}/prev.tar.gz" -C "${work}/prevroot"
 
-  prev_schema=$(find "${work}/prevroot" -type f -name "${name}--${prev}.sql" | head -1)
+  # -print -quit, never `| head -1`: find's own first-match stop, so
+  # there is no pipe to break and no walk to finish (#682).
+  prev_schema=$(find "${work}/prevroot" -type f -name "${name}--${prev}.sql" -print -quit)
   if [[ -z ${prev_schema} ]]; then
     echo "FAIL: v${prev} tarball carries no generated schema ${name}--${prev}.sql" >&2
     exit 1
@@ -235,7 +237,9 @@ EOSH
     "${build_image}" \
     bash /work/build.sh
 
-  new_schema=$(find "${work}/out/pkgroot" -type f -name "${name}--${VERSION}.sql" | head -1)
+  # -print -quit, never `| head -1`: find's own first-match stop, so
+  # there is no pipe to break and no walk to finish (#682).
+  new_schema=$(find "${work}/out/pkgroot" -type f -name "${name}--${VERSION}.sql" -print -quit)
   if [[ -z ${new_schema} ]]; then
     echo "FAIL: candidate build produced no generated schema ${name}--${VERSION}.sql" >&2
     exit 1

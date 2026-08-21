@@ -409,7 +409,10 @@ jobs:
                 # guard demands sql/<ext>--A--B.sql exists, so the package
                 # must SHIP it, or ALTER EXTENSION UPDATE fails at the one
                 # consumer the guard protected.
-                extdir=$(find /out/pkgroot -type d -name extension | head -1)
+                # -print -quit, never a pipe into head: the first-match
+                # stop is built into find, so there is no pipe to break
+                # and no walk to finish (#682).
+                extdir=$(find /out/pkgroot -type d -name extension -print -quit)
                 if compgen -G "sql/*.sql" > /dev/null; then
                   cp sql/*.sql "${extdir}/"
                 fi
@@ -427,7 +430,9 @@ jobs:
       - name: Assert the glibc floor
         run: |
           set -euo pipefail
-          so=$(find /tmp/out/pkgroot -name '*.so' -type f | head -n 1)
+          # -print -quit, never `| head -1`: find's own first-match stop, so
+          # there is no pipe to break and no walk to finish (#682).
+          so=$(find /tmp/out/pkgroot -name '*.so' -type f -print -quit)
           [[ -n ${so} ]] || {
             echo "::error::no shared library packaged"
             exit 1

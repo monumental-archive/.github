@@ -282,7 +282,7 @@ jobs:
             --tag "consumer-proof:pg${PG}" /tmp
           docker run --rm "consumer-proof:pg${PG}" bash -c '
             set -euo pipefail
-            ext=$(ls /usr/share/postgresql/*/extension/*.control | head -1)
+            ext=$(ls /usr/share/postgresql/*/extension/*.control | sed -n 1p)
             ext=$(basename "${ext}" .control)
             su postgres -c "
               set -euo pipefail

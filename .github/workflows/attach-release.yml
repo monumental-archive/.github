@@ -207,7 +207,9 @@ jobs:
             [[ -d ${dir} ]] || continue
             class=$(basename "${dir}")
             class="${class#attestation-bundle-}"
-            src=$(find "${dir}" -type f | head -n 1)
+            # -print -quit, never `| head -1`: find's own first-match stop, so
+            # there is no pipe to break and no walk to finish (#682).
+            src=$(find "${dir}" -type f -print -quit)
             [[ -n ${src} ]] || {
               echo "::error::empty bundle for ${class}"
               exit 1
@@ -224,7 +226,9 @@ jobs:
             # bundle covering the whole release truthfully takes the
             # umbrella name, which is the same `*.intoto.jsonl` pattern
             # Scorecard recognises and SLSA's naming SHOULD asks for.
-            flat=$(find bundle -maxdepth 1 -type f 2> /dev/null | head -n 1)
+            # -print -quit, never `| head -1`: find's own first-match stop, so
+            # there is no pipe to break and no walk to finish (#682).
+            flat=$(find bundle -maxdepth 1 -type f -print -quit 2> /dev/null)
             if [[ -n ${flat} ]]; then
               mv "${flat}" "dist/attestations.intoto.jsonl"
               found=1
