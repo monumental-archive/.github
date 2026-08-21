@@ -69,24 +69,65 @@ if ((${#controls[@]} == 0)); then
   exit 0
 fi
 
-# The published release is authoritative for what consumers actually run.
-# The manifest version SHOULD match it; when it does not (a burned tag, a
-# repo adopting the canon mid-life), the published version wins — an
-# upgrade path from a version nobody has installed helps nobody.
-last=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName 2> /dev/null || true)
-if [[ -z ${last} || ${last} != v* ]]; then
-  echo "no previous release; first publish needs no upgrade path"
+# What consumers actually run is recorded by the extension itself, not by
+# the forge (#762). Every published version is the target of an upgrade
+# script — `<ext>--<from>--<to>.sql` — so the highest `to` in that graph
+# IS the latest version a database can be sitting on. That is the same
+# source the repo-side upgrade-path lint reads, so the two agree by
+# construction rather than by coincidence.
+#
+# This used to ask `gh release view` for the latest release and require
+# its tag to look like `v<version>`. That is true of a repo which has
+# always released under the canon and false of an imported one: edtf
+# published eleven extension versions as `edtf-postgres-v1.2.3` and
+# friends before its import, so the tag test read "first publish" and
+# derived nothing, while the lint correctly demanded a path from 1.2.3
+# (#669). A tag scheme is a fact about a repository's past; an upgrade
+# graph is a fact about installations, and installations are what an
+# upgrade path is for.
+#
+# An EMPTY graph is the only thing that means first publish.
+prev=$(
+  python3 - "${controls[@]}" << 'PYEOF'
+import os, re, sys
+
+def key(v):
+    return tuple(int(part) for part in v.split("."))
+
+best = None
+for control in sys.argv[1:]:
+    crate_dir = os.path.dirname(control)
+    name = os.path.basename(control)[: -len(".control")]
+    sql_dir = os.path.join(crate_dir, "sql")
+    pattern = re.compile(
+        r"^" + re.escape(name) + r"--(\d+\.\d+\.\d+)--(\d+\.\d+\.\d+)\.sql$"
+    )
+    try:
+        entries = os.listdir(sql_dir)
+    except FileNotFoundError:
+        continue
+    for entry in entries:
+        match = pattern.match(entry)
+        if not match:
+            continue
+        target = match.group(2)
+        if best is None or key(target) > key(best):
+            best = target
+print(best or "")
+PYEOF
+)
+if [[ -z ${prev} ]]; then
+  echo "no upgrade graph; first publish of this extension needs no upgrade path"
   emit "files="
   exit 0
 fi
-prev="${last#v}"
 if [[ ${prev} == "${VERSION}" ]]; then
-  echo "previous release already is ${VERSION}; nothing to derive"
+  echo "upgrade graph already reaches ${VERSION}; nothing to derive"
   emit "files="
   exit 0
 fi
 if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${prev}" ]]; then
-  echo "NOTE: manifest carried ${PREV_MANIFEST} but the published release is v${prev}; deriving from v${prev}"
+  echo "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${prev}; deriving from ${prev}"
 fi
 
 # rust and cargo-pgrx are caller build inputs, pinned in the caller's own
@@ -141,17 +182,30 @@ for control in "${controls[@]}"; do
   crate_dir=$(dirname "${control}")
   name=$(basename "${control}" .control)
 
+  # Find the release that CARRIES the previous tarballs, rather than
+  # assuming its tag (#762). For a repository that has always released
+  # under the canon this is `v<prev>` and the search finds exactly that;
+  # for an imported one the same bytes sit on whatever tag its old scheme
+  # used — edtf's 1.2.3 extension tarballs are on `edtf-postgres-v1.2.3`,
+  # and `v1.2.3` exists as a tag with no release object and therefore no
+  # assets at all. Asking which release has the file is true in both
+  # cases; asking which tag ought to have it is true in one.
+  #
   # Only installations that can exist need a path: same carve-out as the
   # publish guard. A repo adding the class mid-life has a previous
   # release and no previous extension.
-  shipped=$(gh release view "v${prev}" --repo "${GITHUB_REPOSITORY}" \
-    --json assets --jq \
-    "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))]")
-  shipped_count=$(jq 'length' <<< "${shipped}")
-  if [[ ${shipped_count} == "0" ]]; then
-    echo "v${prev} shipped no ${name} tarballs; first publish of this extension, no upgrade path needed"
+  prefix="${name}-${prev}-pg"
+  prev_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+    --jq "[.[] | select(.draft | not)
+           | select(any(.assets[]; .name | startswith(\"${prefix}\")))
+           | .tag_name] | first // empty")
+  if [[ -z ${prev_tag} ]]; then
+    echo "no published release carries ${name} ${prev} tarballs; first publish of this extension, no upgrade path needed"
     continue
   fi
+  shipped=$(gh release view "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
+    --json assets --jq \
+    "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))]")
 
   pg=""
   for candidate_pg in $(jq -r '.build | keys | sort_by(tonumber) | reverse | .[]' <<< "${mapping}"); do
@@ -162,7 +216,7 @@ for control in "${controls[@]}"; do
     fi
   done
   if [[ -z ${pg} ]]; then
-    echo "FAIL: v${prev} shipped ${name} tarballs, but none for a PG major the base-image mapping carries" >&2
+    echo "FAIL: ${prev_tag} shipped ${name} tarballs, but none for a PG major the base-image mapping carries" >&2
     exit 1
   fi
   build_image=$(jq -r --arg pg "${pg}" '.build[$pg]' <<< "${mapping}")
@@ -179,7 +233,7 @@ for control in "${controls[@]}"; do
   mkdir -p "${work}/prevroot" "${work}/out"
 
   echo "deriving ${name}: ${prev} -> ${VERSION} (pg${pg})"
-  gh release download "v${prev}" --repo "${GITHUB_REPOSITORY}" \
+  gh release download "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
     --pattern "${name}-${prev}-pg${pg}-linux-amd64.tar.gz" \
     --output "${work}/prev.tar.gz"
   tar -xzf "${work}/prev.tar.gz" -C "${work}/prevroot"
@@ -188,7 +242,7 @@ for control in "${controls[@]}"; do
   # there is no pipe to break and no walk to finish (#682).
   prev_schema=$(find "${work}/prevroot" -type f -name "${name}--${prev}.sql" -print -quit)
   if [[ -z ${prev_schema} ]]; then
-    echo "FAIL: v${prev} tarball carries no generated schema ${name}--${prev}.sql" >&2
+    echo "FAIL: ${prev_tag} tarball carries no generated schema ${name}--${prev}.sql" >&2
     exit 1
   fi
 
