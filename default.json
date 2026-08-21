@@ -151,8 +151,23 @@
     }
   ],
   "lockFileMaintenance": {
+    "description": "The cadence at which shipped crates may go stale, CHOSEN rather than inherited (#667). The value equals Renovate's own default \u2014 measured at renovatebot/renovate@b7f19dc9, `schedule: ['before 4am on monday']`, and observed firing 2026-08-17 02:07 \u2014 and it is written out for the reason this preset gives for the subject template above: a value the org leans on and did not write is a value nobody can see change underneath it. It is leaned on hard, because this branch is the ONLY path by which an in-range or transitive crate moves in this org \u2014 measured on release-lab, whose direct crates are ranges (`mimalloc 0.1`, `wasm-bindgen 0.2`) or exact pins (`pgrx =0.19.2`), so Renovate has never raised a crate update pull request there and every advisory reachable only through `Cargo.lock` waits for Monday. Weekly is defensible ONLY because vulnerabilityAlerts below exists: an advisory does not wait for this schedule, it escapes it. Tightening the cadence as a SUBSTITUTE for that was rejected on #667 \u2014 a daily race against an event is still a race. The option is `mergeable: true` upstream, so the fields not written here (recreateWhen, branchTopic, commitMessageAction, prBodyDefinitions) survive from Renovate's default; the three below are the org's.",
     "enabled": true,
-    "automerge": true
+    "automerge": true,
+    "schedule": ["before 4am on monday"]
   },
+  "vulnerabilityAlerts": {
+    "description": "Advisories jump the queue, declared rather than inherited, and `osvVulnerabilityAlerts` beside this block is the same decision \u2014 OSV is the only source that sees a RustSec advisory GitHub has not mirrored, and it is gated on itself alone (`extract-update.ts`), independent of this block's `enabled` (#667). MEASURED at renovatebot/renovate@b7f19dc9, not read from the documentation, which states neither answer: the upstream default for this block ALREADY carries `minimumReleaseAge: null`, `schedule: []` and `prCreation: 'immediate'`, and `mergeChildConfig` is a plain `{...parent, ...child}` spread with no null-skipping, so an advisory branch does escape the 7-day age gate above with no override needed. Every field is written out anyway, because the option is `mergeable: true` upstream \u2014 a partly declared block silently inherits the rest, the agreeing-from-memory state #576 exists to kill \u2014 and because a bypass the lock cadence below depends on for its own defensibility may not be invisible. `groupName: null` keeps an advisory out of the first-party group so it can merge alone; `dependencyDashboardApproval: false` stops it waiting for a human tick; `vulnerabilityFixStrategy: 'lowest'` takes the earliest version that clears the advisory, the smallest jump the waived caution has to buy; `rangeStrategy: 'update-lockfile'` is what makes an in-range fix a lockfile-only change \u2014 cargo honours it (`cargo/range.ts`), and its `updateLockedDependency` answering `unsupported` is not a failure there but the hand-off to `cargo update --precise`. `branchTopic` is the one field deliberately left inherited: it is a template over Renovate's internal variable names, not an org decision, and pinning it would freeze an identifier this org does not own. `commitMessageSuffix` is Renovate's own value restated \u2014 it is in force whether or not this preset writes it, and writing it is what makes visible that lint:subject-budget models no suffix at all: measured on the canon, 20 of 49 declared dependencies would mint an advisory subject past the budget's literal 72 columns, of which committed's wrap-aware gate rejects only the widest (79 columns passes, 91 fails). Filed, not fixed here. THE RESIDUAL, recorded because a config believed to cover more than it does is worse than none: none of this reaches a crate unless a Cargo.toml declares it. An advisory in a transitive crate \u2014 where #667 measured the CVE surface actually lives \u2014 has no extracted dependency, so the OSV path generates no rule for it and the Dependabot path lands on `remediationNotPossible`. audit:blast-radius remains the detector and lock file maintenance above the delivery for that set.",
+    "enabled": true,
+    "minimumReleaseAge": null,
+    "schedule": [],
+    "prCreation": "immediate",
+    "dependencyDashboardApproval": false,
+    "groupName": null,
+    "rangeStrategy": "update-lockfile",
+    "vulnerabilityFixStrategy": "lowest",
+    "commitMessageSuffix": "[SECURITY]"
+  },
+  "osvVulnerabilityAlerts": true,
   "commitBody": "Signed-off-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>"
 }
