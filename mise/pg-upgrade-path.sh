@@ -25,9 +25,15 @@
 # what has to be checked: a single new script can leave older published
 # versions stranded while a target-only check stays green.
 #
-# The released set is derived from the graph's own endpoints — the union
-# of the `from` and `to` halves of `<name>--<from>--<to>.sql` — never from
-# git tags. Lint checkouts are shallow and tagless, imported repos carry
+# The installable set is derived from the graph's own `from` halves of
+# `<name>--<from>--<to>.sql` — never from git tags. A version appears as
+# a `from` only when a later release was derived from it, which is what
+# "installable predecessor" means; a version that is only ever a `to`
+# and not the current one is a dead end — the Release PR committed its
+# script and the publish then burned (#816, #821), so nobody could have
+# installed it and nothing need reach the current version from it. Such
+# dead ends are reported as NOTE lines, never as errors. Not from tags:
+# Lint checkouts are shallow and tagless, imported repos carry
 # pre-canon tag schemes, and a hand-maintained list has no owner once the
 # Release PR is machine-generated. It is also the same source the release
 # derivation reads (#762, #816), so the two agree by construction rather
@@ -88,6 +94,7 @@ name, version, sql_dir, *paths = sys.argv[1:]
 pattern = re.compile(r"^" + re.escape(name) + r"--(.+?)--(.+)\.sql$")
 edges = collections.defaultdict(list)
 released = set()
+targets = set()
 
 for path in paths:
     match = pattern.match(os.path.basename(path))
@@ -96,7 +103,8 @@ for path in paths:
         print(f"::error::expected {name}--<from>--<to>.sql")
         sys.exit(1)
     edges[match.group(1)].append(match.group(2))
-    released.update(match.groups())
+    released.add(match.group(1))
+    targets.add(match.group(2))
 
 
 def reaches(start):
@@ -113,6 +121,10 @@ def reaches(start):
     return False
 
 
+dead_ends = sorted(v for v in targets - released if v != version)
+for dead in dead_ends:
+    print(f"NOTE: {name} {dead} is a target nothing was derived from — burned; need not reach {version}")
+
 stranded = sorted(v for v in released if v != version and not reaches(v))
 
 if stranded:
@@ -125,7 +137,7 @@ if stranded:
 # not, this release added no upgrade script — which is exactly what a
 # burned predecessor produced in #816: a Release PR that derived nothing
 # and would have stranded every installation.
-if version not in released:
+if version not in released | targets:
     print(f"::error::{name} {version} is not an endpoint of the upgrade graph")
     print(f"::error::this release derived no upgrade script, so nothing can reach {version}")
     print(f"::error::expected {sql_dir}/{name}--<previous>--{version}.sql")
