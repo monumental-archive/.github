@@ -160,8 +160,10 @@ the org adds is the cache rule, because a cache is the one legitimate way
 one build influences another. Caches are permitted only where a human is
 waiting and nothing is signed — pull-request `ci` runs. Every path that
 signs or publishes builds cold, and `lint:cold-attested` fails the gate on
-a workflow that uses a cache without an `unattested-path:` marker
-explaining why its path signs nothing.
+any cache **declaration** without its own `unattested-path:` marker
+explaining why its path signs nothing. The marker anchors to the step it
+introduces, never to the file (#676): a comment that merely mentions the
+marker exempts nothing, and one marker never covers a second cache.
 
 **Container build environments.** The pgrx classes build inside postgres
 containers, digest-pinned in `docker/pgrx-base-images.toml`, org-attested

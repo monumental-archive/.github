@@ -91,6 +91,12 @@ jobs:
           version: 2026.8.10
           cache: true
 
+      # unattested-path: this gate signs and publishes nothing, so
+      # the cold-build rule (#117, docs/release.md) permits the Go
+      # module and build caches exactly here. Each cache carries
+      # its own marker (#676): the exemption is per declaration,
+      # never per file.
+      #
       # Integrity does not ride the artifact caches either: Go
       # re-verifies every module read against go.sum and cargo checks
       # registry sources against Cargo.lock, so a poisoned entry
@@ -108,6 +114,10 @@ jobs:
           key: gate-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: gate-go-${{ runner.os }}-
 
+      # unattested-path: same standing as the Go caches above — this
+      # gate signs and publishes nothing, cargo checks every registry
+      # source against Cargo.lock, and GitHub scopes cache writes per
+      # branch. Marked per declaration (#676).
       - name: Restore the cargo caches (unsigned gate only)
         if: ${{ hashFiles('Cargo.lock') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -221,6 +231,12 @@ jobs:
           version: 2026.8.10
           cache: true
 
+      # unattested-path: this gate signs and publishes nothing, so
+      # the cold-build rule (#117, docs/release.md) permits the Go
+      # module and build caches exactly here. Each cache carries
+      # its own marker (#676): the exemption is per declaration,
+      # never per file.
+      #
       # Integrity does not ride the artifact caches either: Go
       # re-verifies every module read against go.sum and cargo checks
       # registry sources against Cargo.lock, so a poisoned entry
@@ -238,6 +254,10 @@ jobs:
           key: gate-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: gate-go-${{ runner.os }}-
 
+      # unattested-path: same standing as the Go caches above — this
+      # gate signs and publishes nothing, cargo checks every registry
+      # source against Cargo.lock, and GitHub scopes cache writes per
+      # branch. Marked per declaration (#676).
       - name: Restore the cargo caches (unsigned gate only)
         if: ${{ hashFiles('Cargo.lock') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

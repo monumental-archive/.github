@@ -3576,6 +3576,21 @@ dir = "{{cwd}}"
 # workflow_call workflow holding id-token, and must say so with a
 # `capability-boundary:` comment explaining why it runs none. An exception
 # you have to write down is an exception somebody reviews.
+#
+# A marker is a comment line whose FIRST token is `capability-boundary:`
+# (#676, rule 1). A bare token grep let prose ABOUT the marker read as
+# the marker — the shape that made lint:cold-attested skip publish.yml
+# entirely. Audited here in the same pass: six workflows reach this
+# exemption (continuous, publish-rust-crate, publish-wasm-npm, publish,
+# release, verify-release) and every one carries a real first-token
+# marker, so nothing was riding prose and this line changes no verdict
+# on the tree today. It closes the same hole before something does.
+#
+# Scope stays per FILE, and that is a measured difference from
+# lint:cold-attested, not a seam: what this marker asserts is that the
+# workflow runs no caller-supplied code, which is a property of the
+# whole file — a new job in it inherits the same standing. A cache is a
+# per-declaration build input, so its marker anchors per declaration.
 run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:capability-boundary: no workflows, skipped"
@@ -3588,7 +3603,7 @@ for f in .github/workflows/*.y*ml; do
   # a comment is documenting the boundary, not breaching it — matching
   # comment text flagged exactly the files that get this right.
   grep -qE "^[^#]*id-token:[[:space:]]*write" "${f}" || continue
-  grep -q "capability-boundary:" "${f}" && continue
+  grep -qE "^[[:space:]]*#[[:space:]]*capability-boundary:" "${f}" && continue
   bad="${bad} ${f}"
 done
 if [[ -n ${bad} ]]; then
@@ -4246,41 +4261,138 @@ dir = "{{cwd}}"
 # cache riding an action's `cache:` default) is state injected into the
 # build that no provenance captures — cache poisoning is the classic
 # attack the attestation cannot see. The rule: caches only where a human
-# is waiting and nothing is signed. Structurally that means a workflow
-# using a cache must say why its path is unattested, with an
-# `unattested-path:` marker — the capability-boundary pattern: an
-# exception you have to write down is an exception somebody reviews.
+# is waiting and nothing is signed. Structurally that means a cache must
+# say why its path is unattested, with an `unattested-path:` marker —
+# the capability-boundary pattern: an exception you have to write down
+# is an exception somebody reviews.
+#
+# WHAT MAKES A MARKER A MARKER (#676). The exemption is per CACHE
+# DECLARATION, never per file, and prose cannot forge it:
+#
+#   1. a marker is a comment line whose FIRST token is
+#      `unattested-path:` (`^[[:space:]]*#[[:space:]]*unattested-path:`);
+#   2. it is the FIRST line of its comment block;
+#   3. the block runs unbroken — no blank line — to a step at the
+#      marker's own indentation, and authorises THAT STEP ALONE;
+#   4. a marker introducing no step, or introducing a step that
+#      declares no cache, is itself the failure. An exemption that
+#      exempts nothing is prose in marker clothing.
+#
+# The defect this replaced (#676): the guard was a bare
+# `grep -q "unattested-path:"` over the whole file, so publish.yml —
+# the workflow that signs and publishes every artifact class — was
+# skipped entirely, because its PHASES comment mentions the marker
+# while explaining the idiom. Warming its toolchain went unnoticed;
+# release.yml and verify-release.yml were caught only because they
+# happen not to discuss the convention. Anchoring also surfaced five
+# caches no per-file rule could ever see: ci.yml's four Go and cargo
+# cache steps and rekor-monitor.yml's cache/save, each riding a marker
+# written for a different step.
 #
 # Two shapes are caught: an explicit `uses: actions/cache*`, and a
 # mise-action step without `cache: false` (its default is true — the
-# silent shape). Both are per-file heuristics, deliberately: the gate is
-# deterministic and this stays grep-shaped, like every belt lint.
+# silent shape). Indentation-keyed parsing is defensible for the reason
+# lint:input-forwarding's is: actionlint runs ahead of this in the same
+# gate and guarantees well-formed YAML, and the canon's two-space style
+# is uniform. Deterministic, no network — belongs in `ci`.
+#
+# lint:capability-boundary takes rule 1 and not rules 2-4, deliberately:
+# whether a workflow runs caller-supplied code is a property of the
+# FILE, so one marker there legitimately covers every grant in it. A
+# cache is a per-declaration input, and a file grows more of them.
 run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:cold-attested: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in .github/workflows/*.y*ml; do
-  grep -q "unattested-path:" "${f}" && continue
-  if grep -qE "^[^#]*uses:[[:space:]]*actions/cache" "${f}"; then
-    bad="${bad} ${f}(actions/cache)"
-    continue
-  fi
-  actions=$(grep -cE "^[^#]*uses:[[:space:]]*jdx/mise-action@" "${f}") || true
-  cold=$(grep -cE "^[^#]*cache:[[:space:]]*false" "${f}") || true
-  if ((actions > cold)); then
-    bad="${bad} ${f}(mise-action without cache: false)"
-  fi
-done
-if [[ -n ${bad} ]]; then
-  echo "lint:cold-attested: cache on a path with no unattested-path marker:${bad}" >&2
-  echo "  attested paths build cold — a cache is an unattested input" >&2
-  echo "  (docs/release.md); if this workflow truly signs nothing, say why" >&2
-  echo "  with an 'unattested-path:' comment" >&2
-  exit 1
-fi
-echo "lint:cold-attested: ok"
+awk '
+function endstep() {
+  declares = has_cache || (has_mise && !has_false)
+  if (instep && auth && !declares) {
+    printf "lint:cold-attested: %s:%d unattested-path marker on a step that declares no cache\n", stepfile, stepline > "/dev/stderr"
+    fail = 1
+  }
+  if (instep && has_mise && !has_false && !auth) {
+    printf "lint:cold-attested: %s:%d mise-action step caches (no `cache: false`) and carries no unattested-path marker\n", stepfile, stepline > "/dev/stderr"
+    fail = 1
+  }
+  instep = 0
+  has_mise = 0
+  has_false = 0
+  has_cache = 0
+  auth = 0
+}
+BEGIN { fail = 0 }
+{
+  ind = match($0, /[^ ]/) - 1
+  isblank = ($0 ~ /^[[:space:]]*$/)
+  iscmt = (!isblank && $0 ~ /^[[:space:]]*#/)
+}
+FNR == 1 {
+  endstep()
+  blkstart = 0
+  blkmark = 0
+  blkind = -1
+  stepind = -1
+  has_cache = 0
+}
+isblank {
+  if (blkmark) {
+    printf "lint:cold-attested: %s:%d unattested-path marker introduces no step\n", FILENAME, blkstart > "/dev/stderr"
+    fail = 1
+  }
+  blkstart = 0
+  blkmark = 0
+  next
+}
+iscmt {
+  if (!blkstart) {
+    blkstart = FNR
+    blkind = ind
+    blkmark = ($0 ~ /^[[:space:]]*#[[:space:]]*unattested-path:/)
+  }
+  next
+}
+{
+  isstep = ($0 ~ /^[[:space:]]*-[[:space:]]+[A-Za-z_][A-Za-z0-9_-]*:/) && (!instep || ind <= stepind)
+  newauth = 0
+  if (blkstart) {
+    if (blkmark) {
+      if (isstep && ind == blkind)
+        newauth = 1
+      else {
+        printf "lint:cold-attested: %s:%d unattested-path marker introduces no step\n", FILENAME, blkstart > "/dev/stderr"
+        fail = 1
+      }
+    }
+    blkstart = 0
+    blkmark = 0
+  }
+  if (isstep) {
+    endstep()
+    instep = 1
+    stepind = ind
+    stepline = FNR
+    stepfile = FILENAME
+    auth = newauth
+  } else if (instep && ind <= stepind)
+    endstep()
+  if ($0 ~ /^[^#]*uses:[[:space:]]*actions\/cache/) {
+    has_cache = 1
+    if (!auth) {
+      printf "lint:cold-attested: %s:%d actions/cache step carries no unattested-path marker\n", FILENAME, FNR > "/dev/stderr"
+      fail = 1
+    }
+  }
+  if ($0 ~ /^[^#]*uses:[[:space:]]*jdx\/mise-action@/) has_mise = 1
+  if ($0 ~ /^[^#]*cache:[[:space:]]*false/) has_false = 1
+}
+END {
+  endstep()
+  if (fail) exit 1
+  print "lint:cold-attested: every cache declaration carries its own unattested-path marker"
+}
+' .github/workflows/*.y*ml
 '''
 
 [tasks."coverage:check"]
