@@ -34,6 +34,7 @@ BELT = Path(__file__).parent
 DOMAINS_FILE = BELT / "biome-domains.tsv"
 NURSERY_FILE = BELT / "biome-nursery-domains.tsv"
 ORG_FILE = BELT / "biome-org.json"
+TSC_FLAGS_FILE = BELT / "tsc-flags.txt"
 
 DELIVERED = biome_config.read_domains(DOMAINS_FILE)
 NURSERY = biome_config.read_nursery(NURSERY_FILE)
@@ -295,6 +296,63 @@ class GenerateTest(unittest.TestCase):
         self.assertEqual(
             {d for d, v in written.items() if v == "all"},
             set(DELIVERED.org),
+        )
+
+
+class ContradictionTest(unittest.TestCase):
+    """Rules the org delivers that another org control forbids (#759).
+
+    This is a CROSS-FILE invariant and it lives here because nothing else
+    reads both files. `lint:biome` reads biome-org.json, `lint:types`
+    reads tsc-flags.txt, and each is green in isolation while the pair is
+    unsatisfiable on a real tree — which is exactly how it survived.
+    """
+
+    @staticmethod
+    def tsc_dials() -> set[str]:
+        """Read the dial names the org forces on the compiler.
+
+        Returns:
+            Every flag named in tsc-flags.txt, without its leading dashes.
+
+        """
+        dials = set()
+        for raw in TSC_FLAGS_FILE.read_text(encoding="utf-8").splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if line.startswith("--"):
+                dials.add(line.split()[0].removeprefix("--"))
+        return dials
+
+    @staticmethod
+    def rule_setting(group: str, rule: str) -> object:
+        """Read one rule's setting out of the delivered config.
+
+        Returns:
+            The setting, or None when the group does not name the rule.
+
+        """
+        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        return org["linter"]["rules"].get(group, {}).get(rule)
+
+    def test_useliteralkeys_is_off_while_the_tsc_dial_is_forced(self) -> None:
+        """The #759 pair, pinned so it cannot silently re-open.
+
+        `useLiteralKeys` wants `row.id`; `noPropertyAccessFromIndexSignature`
+        makes that TS4111 on an index-signature type. Measured on
+        monumental-archive at 590 sites. If the dial is ever dropped from
+        tsc-flags.txt the rule may come back — but not before.
+        """
+        if "noPropertyAccessFromIndexSignature" not in self.tsc_dials():
+            self.skipTest("the org no longer forces the dial that contradicts it")
+        self.assertEqual(self.rule_setting("complexity", "useLiteralKeys"), "off")
+
+    def test_naming_that_rule_does_not_disable_its_whole_group(self) -> None:
+        """Only the one rule is named; the preset still carries the rest."""
+        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(org["linter"]["rules"]["preset"], "all")
+        self.assertEqual(
+            set(org["linter"]["rules"]["complexity"]),
+            {"useLiteralKeys"},
         )
 
 
