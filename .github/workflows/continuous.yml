@@ -75,6 +75,18 @@ name: continuous
         required: false
         type: string
         default: ""
+      binary-crate:
+        description: >
+          Directory of the crate whose binary the image ships. Same
+          contract as the oci-image class (#775) — this archetype reuses
+          that class's build wholesale, and the class refuses this
+          alongside `prepare`. A stream publishes no release view, so
+          the inventory plan the class emits beside the binary is simply
+          never fetched here; the archetype's own inventory is trivy
+          over each per-architecture digest, as it always was.
+        required: false
+        type: string
+        default: ""
       image-title:
         description: >
           org.opencontainers.image.title — editorial only, defaults to the
@@ -188,6 +200,7 @@ jobs:
       context: ${{ inputs.context }}
       smoke-test: ${{ inputs.smoke-test }}
       prepare: ${{ inputs.prepare }}
+      binary-crate: ${{ inputs.binary-crate }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
 

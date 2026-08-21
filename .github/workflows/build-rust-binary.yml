@@ -176,21 +176,23 @@ jobs:
       # locked-mode install failure for a tool the leg had no use for.
       # Measured in the lab, 2026-08-09.
       #
-      # Reproducibility, by construction rather than by audit:
-      #   CARGO_INCREMENTAL=0        incremental artifacts embed local state
-      #   remap-path-prefix          no runner paths in the binary
-      #   CARGO_PROFILE_RELEASE_STRIP=false
-      #                              stripping destroys the section
-      #                              cargo-auditable will live in
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_RELEASE_STRIP: "false"
-      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/build
+      # The reproducibility inputs are NOT restated here: they live in
+      # release/rust-build.sh beside the compile they govern — one
+      # definition for the two classes that ship a Rust binary (#775),
+      # so a flag can never reach one class's build and miss the other's.
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+
+      # The canon tree, for release/rust-build.sh: a symlink to the tree
+      # this run already resolved — no checkout, no network and no belt.
+      # The toolbelt note above is about MISE_GLOBAL_CONFIG_FILE, which
+      # stays absent.
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
 
       - name: Install mise and the caller's pinned toolchain
         uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
@@ -203,20 +205,7 @@ jobs:
           # No tool cache anywhere downstream of a signature.
           cache: false
 
-      - name: Install the target and the musl C toolchain
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          rustup target add "${TARGET}"
-          if [[ ${TARGET} == *-linux-musl ]]; then
-            # Unconditional on the Linux legs: pure Rust self-links without
-            # it, but a C dependency can arrive transitively in any PR, and
-            # identical environments beat conditional ones.
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq musl-tools
-          fi
-      - name: Resolve the exclusion flags
+      - name: Resolve the exclusion flags for the test invocation
         env:
           UNTRUSTED_EXCLUDE: ${{ inputs.exclude }}
         run: |
@@ -243,7 +232,32 @@ jobs:
             echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
+      # The class's whole compile, from the one definition the oci-image
+      # class's declarative binary also runs through (#775): the
+      # determinism inputs, the target and musl toolchain, the
+      # cargo-auditable assertion, the staging rule, and the inventory
+      # plan (#537). A caller states only its scope — here, the whole
+      # workspace minus the members the caller excluded.
+      - name: Build, stage and plan
+        env:
+          TARGET: ${{ matrix.target }}
+          EXCLUDE: ${{ inputs.exclude }}
+          STAGE_DIR: staged
+          # No plan on the repro leg: the comparator proves bytes, not
+          # inventories. The prefix is the rust-binary class's own
+          # planned obligation in slsa/assert-policy.json.
+          #
+          # Negated deliberately: an empty string is FALSY in a GitHub
+          # expression, so `repro && '' || 'rust-binary'` would yield
+          # 'rust-binary' on both legs.
+          PLAN_CLASS: ${{ !inputs.repro && 'rust-binary' || '' }}
+          PLAN_DOC_PREFIX: sbom-cargo-
+        run: .org-canon/release/rust-build.sh
+
       - name: Test on the target
+        # After the build, not before it: the target toolchain this test
+        # needs is installed by release/rust-build.sh, which is the one
+        # place the class's build environment is stated (#775).
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -253,62 +267,6 @@ jobs:
           # the property the shipped binary claims.
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           cargo test --workspace --locked --target "${TARGET}" ${EXCLUDE_FLAGS}
-      - name: Build
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          # cargo-auditable is a build input like the toolchain itself,
-          # pinned in the caller's mise config (cargo:cargo-auditable) —
-          # asserted, never installed here; an unpinned install on a
-          # release leg is a runner mutation.
-          command -v cargo-auditable > /dev/null || {
-            emsg="cargo-auditable missing — pin cargo:cargo-auditable in this repository's mise config; it is a build input"
-            emsg+=" of the rust-binary class"
-            echo "::error::${emsg}"
-            exit 1
-          }
-          # SOURCE_DATE_EPOCH is the released commit's own time, so the same
-          # tag rebuilds to the same bytes on any machine on any day.
-          epoch=$(git log -1 --pretty=%ct)
-          export SOURCE_DATE_EPOCH="${epoch}"
-          # `auditable`: the shipped binary carries its dependency tree in
-          # the .dep-v0 linker section (stripping is already disabled to
-          # preserve it), so image and binary scanners see the Rust
-          # surface of the artifact itself (docs/dependency-track.md).
-          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
-          cargo auditable build --workspace --locked --release --target "${TARGET}" ${EXCLUDE_FLAGS}
-      - name: Stage the binaries
-        id: stage
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          # The bin list comes from cargo's own metadata, never from a
-          # directory listing: target/release also holds build scripts and
-          # deps, and a glob over it would ship someone else's bytes.
-          mkdir -p staged
-          meta=$(cargo metadata --no-deps --format-version 1)
-          bin_list=$(jq -r \
-            '[.packages[].targets[] | select(.kind[] == "bin") | .name] | unique | .[]' \
-            <<< "${meta}")
-          bins=()
-          while IFS= read -r b; do
-            if [[ -n ${b} ]]; then bins+=("${b}"); fi
-          done <<< "${bin_list}"
-          if ((${#bins[@]} == 0)); then
-            echo "::error::no bin targets in this workspace — rust-binary is the wrong class"
-            exit 1
-          fi
-          for b in "${bins[@]}"; do
-            src="target/${TARGET}/release/${b}"
-            if [[ ! -x ${src} ]]; then
-              echo "::error::expected binary ${src} was not produced"
-              exit 1
-            fi
-            cp "${src}" "staged/${b}"
-          done
-          echo "count=${#bins[@]}" >> "${GITHUB_OUTPUT}"
       - name: Smoke the binaries
         if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:
@@ -344,26 +302,6 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 1
-
-      - name: Emit the inventory plan (which packages this artifact ships)
-        # The artifact-to-package mapping exists with certainty exactly
-        # once — here, where the archive was just staged from cargo's own
-        # metadata (#537). The plan is the mapping as data: the sbom job
-        # derives each package's closure from it on the prove leg, so no
-        # caller ever declares (and drifts) a second copy of what this
-        # job knows. Every leg states the same mapping; the sbom job
-        # collapses identical entries and refuses divergent ones. Not on
-        # the repro leg: the comparator proves bytes, not inventories.
-        if: ${{ !inputs.repro }}
-        run: |
-          set -euo pipefail
-          meta=$(cargo metadata --no-deps --format-version 1)
-          mkdir -p plan
-          jq '[.packages[] | select([.targets[].kind[]] | index("bin")) | .name]
-              | unique | map({class: "rust-binary", doc: ("sbom-cargo-" + .),
-                              params: {cargoPackage: .}})' \
-            <<< "${meta}" > plan/plan.json
-          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:

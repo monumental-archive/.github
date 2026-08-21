@@ -39,10 +39,22 @@
 #   The compile lives OUTSIDE the Dockerfile (#295). The repro gate
 #   measured the containerised cargo build nondeterministic while the
 #   same crates built bit-for-bit under the belt's pinned rust — so the
-#   binary is built by the `prepare` script in the caller's mise-pinned
-#   toolchain, and the Dockerfile stays pure assembly over pinned
-#   inputs. One toolchain, not two; determinism by construction, proven
-#   by the gate.
+#   binary is built in the caller's mise-pinned toolchain and the
+#   Dockerfile stays pure assembly over pinned inputs. One toolchain,
+#   not two; determinism by construction, proven by the gate.
+#
+#   For the common case the caller DECLARES it (#775): `binary-crate`
+#   names the crate, and the binary is built by release/rust-build.sh —
+#   the same definition the rust-binary class's own leg runs, so the
+#   pinned toolchain, the reproducibility flags and the inventory plan
+#   (#537) are one statement rather than a recipe every consumer
+#   rewrites. Measured 2026-08-21: release-lab's and iiif-server's
+#   prepare scripts were the same twenty-five lines with one binary
+#   name changed, and neither emitted the plan, which is what left an
+#   oci-image-only repository unable to publish at all (#773).
+#   `prepare` remains for materialisation a declaration cannot express,
+#   and the two are mutually exclusive: a caller states one or the
+#   other, never both.
 ---
 name: build-oci-image
 
@@ -102,6 +114,31 @@ name: build-oci-image
         required: false
         type: string
         default: ""
+      binary-crate:
+        # forwarding: universal
+        description: >
+          Directory of the crate whose binary this image ships — the
+          declarative half of the compile-outside-the-Dockerfile rule
+          (#775). Declared, the class builds that crate's binaries
+          through release/rust-build.sh: the rust-binary class's own
+          definition, so the pinned toolchain, SOURCE_DATE_EPOCH,
+          CARGO_INCREMENTAL=0, the path remap, the preserved
+          cargo-auditable section and the inventory plan arrive by
+          construction rather than by a script each consumer writes
+          again. The binaries are installed into `<context>/dist/`,
+          mode 0755, named as cargo names them — which is what both
+          existing consumers' Dockerfiles already COPY. Refused
+          alongside `prepare`: one or the other.
+
+          Linux only, and musl by construction: an image's runtime is
+          the architecture it was built on, and the org's images are
+          `FROM scratch`, where a dynamically linked binary cannot run.
+          The arch-to-target pairing is the matrix's own, beside the
+          runner it belongs to — the same pairing build-rust-binary's
+          plan job makes for the canon target list.
+        required: false
+        type: string
+        default: ""
       facts:
         # forwarding: universal
         description: >
@@ -151,11 +188,18 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
+        # Arch, the runner that IS that arch, and the canon target a
+        # declarative binary is built for on it — one row, so the three
+        # cannot drift apart. The targets are the two Linux members of
+        # build-rust-binary.yml's canon list, paired with the same
+        # runners that leg pairs them with.
         include:
           - arch: amd64
             runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
           - arch: arm64
             runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
@@ -172,6 +216,25 @@ jobs:
       CARGO_PROFILE_RELEASE_STRIP: "false"
       RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/build
     steps:
+      - name: Refuse a caller that declares the binary twice
+        # One or the other (#775). `binary-crate` builds through the
+        # rust-binary class's own definition; `prepare` runs a script
+        # the caller wrote. A caller stating both has two answers to
+        # "what goes in the context", and the second would overwrite
+        # the first silently — with the inventory plan describing
+        # whichever the class believed. Before the checkout: a
+        # contradiction must cost seconds, not an image.
+        env:
+          UNTRUSTED_PREPARE: ${{ inputs.prepare }}
+          UNTRUSTED_BINARY_CRATE: ${{ inputs.binary-crate }}
+        run: |
+          set -euo pipefail
+          if [[ -n ${UNTRUSTED_PREPARE} && -n ${UNTRUSTED_BINARY_CRATE} ]]; then
+            emsg="prepare and binary-crate are both declared — the class materialises the context one way or the"
+            emsg+=" other; delete the prepare script the declaration replaces (#775)"
+            echo "::error::${emsg}"
+            exit 1
+          fi
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -309,7 +372,10 @@ jobs:
           done <<< "${refs}"
           echo "::notice::${checked} first-party base(s) verified"
       - name: Install mise and the caller's pinned toolchain
-        if: inputs.prepare != ''
+        # Either path compiles in the CALLER's pinned toolchain, which
+        # is the whole point of #295 — the declaration changes who
+        # writes the recipe, never whose rust runs it.
+        if: ${{ inputs.prepare != '' || inputs.binary-crate != '' }}
         uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
         with:
           # mise itself is a build input and floats without this pin
@@ -343,6 +409,69 @@ jobs:
             exit 1
           fi
           "${UNTRUSTED_PREPARE}" "${ARCH}"
+      - name: Build the declared binary into the context (binary-crate)
+        # The declarative half (#775), through the one definition the
+        # rust-binary class's leg runs: same pinned toolchain, same
+        # determinism inputs, same staging rule, and the inventory plan
+        # this class could not otherwise emit (#773). It runs on BOTH
+        # repro-gate legs, exactly as `prepare` does — a compile the
+        # rebuild skipped would leave the gate proving the image build
+        # and not the path.
+        #
+        # SOURCE_DATE_EPOCH comes from the facts job, the same resolved
+        # instant every other timestamp surface of this release is a
+        # function of; the script would otherwise read the commit
+        # itself, which is the same value by a second derivation.
+        if: inputs.binary-crate != ''
+        env:
+          TARGET: ${{ matrix.target }}
+          SOURCE_DATE_EPOCH: ${{ inputs.source-epoch }}
+          PACKAGE_DIR: ${{ inputs.binary-crate }}
+          STAGE_DIR: ${{ inputs.context }}/dist
+          # The document names what the artifact IS — an image — while
+          # the params name what it is MADE OF, a cargo closure; the two
+          # disagreeing silently is the #544 defect. `-image` names the
+          # DOCUMENT apart from the package, the way the pgrx cells name
+          # theirs `<crate>-pg<major>`: one crate can ship as a binary
+          # AND inside an image, and two documents describing one
+          # artifact name is a union the engine rightly refuses.
+          #
+          # Negated deliberately: an empty string is FALSY in a GitHub
+          # expression, so `repro && '' || 'oci-image'` would yield
+          # 'oci-image' on both legs.
+          PLAN_CLASS: ${{ !inputs.repro && 'oci-image' || '' }}
+          PLAN_DOC_PREFIX: sbom-image-
+          PLAN_ARTIFACT_SUFFIX: -image
+        run: |
+          set -euo pipefail
+          # The crate DIRECTORY is the caller's declaration; the package
+          # NAME is cargo's answer, read from the manifest that lives
+          # there and never from the directory's basename — the two
+          # agree by convention and diverge without warning. Exactly one
+          # package must live there, the same refusal build-wasm-npm
+          # makes of its crate-dir.
+          meta=$(cargo metadata --no-deps --format-version 1 \
+            --manifest-path "${PACKAGE_DIR}/Cargo.toml")
+          mp=$(realpath "${PACKAGE_DIR}/Cargo.toml")
+          PACKAGE=$(jq -r --arg mp "${mp}" \
+            '[.packages[] | select(.manifest_path == $mp) | .name]
+             | if length != 1 then error("binary-crate resolves to \(length) packages") else .[0] end' \
+            <<< "${meta}")
+          export PACKAGE
+          .org-canon/release/rust-build.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The plan the sbom job folds into the release view. Both arches
+        # state the same mapping and the engine collapses them, exactly
+        # as the rust-binary targets and the pgrx cells do. The
+        # continuous archetype builds no release view, so the artifact
+        # it uploads here is simply never fetched.
+        if: ${{ inputs.binary-crate != '' && !inputs.repro }}
+        with:
+          name: sbom-plan-oci-${{ matrix.arch }}
+          path: plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Resolve the image name
         id: name
         run: |
