@@ -20,6 +20,11 @@
         "reason": "excluded, not excepted: the private application the organisation exists to serve publishes nothing and consumes the org's artifacts, so no SLSA track applies, it owes no evidence and it bears no board cell — it is accounted for by name here so the reconciliation against the org listing does not read it as an unlisted repository, and so the roster-reading walks that ask no track question (assert permissions) still cover it (#672)"
       },
       {
+        "repo": "monumental-archive-db",
+        "tracks": ["source", "build"],
+        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. The dependency track is deliberately absent, not forgotten — that track's enforcement is the release path's commit point refusing an undecided advisory (publish.yml's VEX leg), and the continuous archetype has no such leg, so claiming the track here would claim a mechanism that does not run on this repository's path (#717)"
+      },
+      {
         "repo": "monumental-archive-ledger",
         "tracks": [],
         "reason": "excluded, not excepted: the public anchor for the archive's ledger checkpoint chain publishes no artifact and makes no SLSA claim, so no track applies and it bears no board cell — it is accounted for by name here so the reconciliation against the org listing does not read it as an unlisted repository (#673)"

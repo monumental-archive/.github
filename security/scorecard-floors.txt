@@ -87,3 +87,38 @@ stele 6.2
 # ratchet nudge raises this line.
 iiif-server 6.8
 edtf 7.4
+
+# monumental-archive-db floored 2026-08-21 at the import (#670), from a
+# POST-transfer reading of the default branch: `scorecard
+# --repo=github.com/monumental-archive/monumental-archive-db` (v5.5.0,
+# checksum verified against the release's scorecard_checksums.txt) read
+# 6.9 at commit 23ec6d5 — the tree as it stood BEFORE the conformance
+# pull request, which is the only tree a live reading could see.
+#
+# The floor is not a tenth under that reading, and the difference is
+# deliberate. The 6.9 includes Packaging 10, earned by the repo's own
+# publish.yml, and the conformance PR deletes it: this repository
+# publishes nothing until its continuous stub lands (its #5). Scorecard
+# drops an inconclusive Packaging from the aggregate rather than scoring
+# it zero, and losing a 10 from a weighted mean lowers it. Arithmetic
+# on the published weights, validated by reproducing the measured 6.9
+# from the per-check scores: 6.78 without Packaging, 6.73 with
+# Pinned-Dependencies also dented to 9 by the $/.github/actions/canon
+# self-reference the gate stub introduces. Floored a tenth under that
+# 6.7, per this file's floor-low rule — a floor set at the pre-merge
+# high would be red on the first Monday after the merge, which is the
+# expected-red failure the header exists to prevent.
+#
+# `scorecard --commit <sha>` was tried against the conformance branch
+# and is NOT the number here: with an explicit commit scorecard runs a
+# reduced check set (9 checks, 8.6 aggregate), which is not comparable
+# to the 17-check default-branch reading. Recorded so nobody floors a
+# repo from it.
+#
+# Three movements are expected and are NOT regressions: Maintained is 0
+# for the repository's first 90 days and self-heals (+0.8 alone);
+# Packaging returns when the continuous stub lands; CII-Best-Practices
+# is 0 until the Best Practices project (13998) is re-registered against
+# the org path, which is a human step on bestpractices.dev. Any of them
+# should fire the ratchet nudge — raise this line then, from a reading.
+monumental-archive-db 6.6
