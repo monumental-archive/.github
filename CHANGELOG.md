@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.57.1](https://github.com/monumental-archive/.github/compare/v1.57.0...v1.57.1) - 2026-08-21
+
+### Fixed
+
+- stop two biome safe fixes from breaking code (#758) ([#770](https://github.com/monumental-archive/.github/pull/770))
+
 ## [1.57.0](https://github.com/monumental-archive/.github/compare/v1.56.0...v1.57.0) - 2026-08-21
 
 ### Added
