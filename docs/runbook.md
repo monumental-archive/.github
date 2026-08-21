@@ -432,6 +432,62 @@ literal):
   caller's workflow, not the signer — two paths, both documented).
 - Checksums without tooling: `sha256sum -c checksums.txt`.
 
+### The whole release in one command, and how to name an image subject
+
+`gh attestation verify` answers "is this artifact attested". `stele
+verify release` answers the release-shaped question — every subject, its
+provenance, the release decision and the planned inventories, under the
+committed verify policy:
+
+```bash
+gh release download <tag> --repo <owner>/<repo>
+grep -E '\.spdx\.json$' checksums.txt > sboms.sha256   # decision candidates
+stele verify release --policy .org-canon/slsa/verify-policy.json \
+  --repo <owner>/<repo> --tag <tag> \
+  --subjects subjects.sha256 --sboms sboms.sha256 \
+  --inventories inventories.sha256 \
+  --signer-digest <signer-commit> --machinery-digest <canon-commit>
+```
+
+`--subjects` is a sha256sum manifest, and **an image subject goes in it
+like any other line** — the index digest, two spaces, the image
+reference, no `sha256:` prefix and no tag:
+
+```text
+e751d510a2b45806ab03ce41794b44cee5b5eb8fd078452530dc23a65a77edd5  ghcr.io/monumental-archive/iiif-server
+```
+
+That is the one thing this recipe could not previously tell you (#809).
+A release that ships only an image has **no file subjects at all**, and
+handing the verb an empty manifest earns `verify: no subjects — an empty
+proof is not a proof` — a correct refusal of a bad input that reads like
+an unverifiable release. Resolving the tag to that digest is the
+consumer's own step, and it is half the point: the publish path proves
+the tag serves the attested index, and a stranger repeats it rather than
+trusting it. Anonymously, no docker daemon:
+
+```bash
+TOK=$(curl -s "https://ghcr.io/token?scope=repository:<owner>/<repo>:pull" | jq -r .token)
+curl -sI -H "Authorization: Bearer ${TOK}" \
+     -H "Accept: application/vnd.oci.image.index.v1+json" \
+     "https://ghcr.io/v2/<owner>/<repo>/manifests/<version>" |
+  awk -F': ' 'tolower($1)=="docker-content-digest"{print $2}'
+```
+
+Measured on iiif-server v0.2.2, the org's first oci-image-only release
+(#671, #775):
+
+```text
+verify: provenance b318fe16c6c0 verified (via ghcr.io/monumental-archive/iiif-server)
+verify: release decision verified: OPEN for v0.2.2 over 1 planned inventory document(s)
+verify: release monumental-archive/iiif-server@v0.2.2: 2 attestation(s) opened over 1 subject(s),
+        source revision c1ff101112b593aea495857647744a018aae2e18
+```
+
+exit 0. **Negative control, as everywhere else here** — one hex digit
+changed in the subject digest: `no attestation retrievable … HTTP 404`,
+exit 1. A recipe nobody has watched fail is a recipe nobody has tested.
+
 ## Canon changes (this repository)
 
 A shared workflow's permissions and inputs are a public contract; adding
