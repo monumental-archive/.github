@@ -1051,7 +1051,20 @@ broken for the scaffold's own default project, so this was never the
 per-repo accident it looked like. `.js` is the extension TypeScript has
 always wanted in a relative specifier — it resolves to the `.ts` file —
 which is why one option covers every case rather than trading one
-project for another. Proven end to end on the fixture: after the change
+project for another.
+
+**The option is used outside its documented rationale on purpose.**
+biome documents `forceJsExtensions` as "useful if you use the
+`module: node16` setting when building your code with `tsc`", says
+nothing about `moduleResolution: bundler`, and 2.5.7 ships **no
+bundler-aware option at all** — `extensionMappings` and
+`forceJsExtensions` choose which extension is suggested, and neither can
+suppress the suggestion. Read alone, that says no configuration serves
+the bundler case, which is what this lane first concluded and wrote
+down. The table above is the correction, and the general rule it repeats
+for this tool: the docs are the cross-check, the pinned binary decides.
+
+Proven end to end on the fixture: after the change
 the fixer leaves `test.prop` alone, rewrites `./App` to `./App.js`,
 still touches 73 files, and the tree comes out with `TS5097: 0`, 22 test
 files and 337 tests passing.

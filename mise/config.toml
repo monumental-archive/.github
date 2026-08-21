@@ -1040,6 +1040,17 @@ dir = "{{cwd}}"
 # one option covers every case instead of trading one project for
 # another.
 #
+# The option is used OUTSIDE its documented rationale, deliberately, and
+# the table above is why that is safe. biome documents
+# `forceJsExtensions` as "useful if you use the `module: node16` setting
+# when building your code with tsc" — it says nothing about
+# `moduleResolution: bundler`, and 2.5.7 ships NO bundler-aware option:
+# `extensionMappings` and `forceJsExtensions` choose WHICH extension is
+# suggested and neither can suppress the suggestion. Reading the docs
+# alone gives the wrong answer here — it says no configuration can serve
+# the bundler case, which is what this lane first concluded. Measuring
+# says one does, in all three shapes. Docs cross-check, binary decides.
+#
 # `nursery/useConsistentTestIt` renamed `test.prop(...)` to
 # `it.prop(...)` and left `import { test } from "@fast-check/vitest"`
 # alone, so the module threw on load and two property tests stopped
