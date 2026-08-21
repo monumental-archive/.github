@@ -1984,33 +1984,113 @@ fi
 # linting by editing an unrelated field. CLIPPY_EXCLUDE is the
 # COVERAGE_EXCLUDE pattern ([env] in the repo's mise.toml), written down
 # where a reviewer sees it.
-excludes=""
-for m in ${CLIPPY_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
+#
 # CLIPPY_FEATURES lets a repo whose features are mutually exclusive say
 # so; everything else gets --all-features, because an unlinted feature is
 # unlinted code.
 features="${CLIPPY_FEATURES:---all-features}"
+# THE WHOLE WORKSPACE IS LINTED EVERY RUN, one `-p` pass per crate
+# (#726). Under `-D warnings` a finding IS a compile error, so a red
+# crate emits no metadata and every crate that depends on it is never
+# linted at all — and the number this task prints then reads as a
+# workspace total when it is one crate's. Measured on both Rust imports:
+# clearing the last `iiif-core` finding moved iiif-server's count 24 ->
+# 319, because the S3 backend behind it had never once been linted
+# (#671); on edtf every total ever recorded — 896, 955, ~840 — was
+# `edtf-core` alone with four crates unseen (#669).
+#
+# `--keep-going` is the flag cargo offers for this and it is NOT enough.
+# The Cargo Book defines it as "Build as many crates in the dependency
+# graph as possible, rather than aborting the build on the first one that
+# fails to build": SIBLINGS, never a DEPENDENT, which has nothing to
+# compile against. Measured at -j1 on a two-crate fixture carrying the
+# flags below — independent crates, the plain run reported 1 of 2 and
+# --keep-going reported 2 of 2; b depending on a, BOTH runs reported a
+# alone. It is kept, per pass, because inside one pass it is what makes a
+# red lib still report its own test target (measured at -j1: one unit
+# without it, two with).
+#
+# `--no-deps` is what makes a per-crate pass work at all. The clippy
+# book's Workspaces section: a `-p` run "includes dependencies that are
+# members of the workspace, like path dependencies" — so without it the
+# red dependency fails the pass before its dependent is ever reached.
+# With it, a member compiled as somebody else's dependency runs as plain
+# rustc and only the primary package is linted. Every member is still
+# primary in exactly one pass, so coverage equals the old single pass
+# when nothing is red and is strictly larger when something is: this is
+# a truncation removed, not a level lowered.
+#
+# NOT fail-open through the build cache, measured in both orders: a pass
+# that compiled a member as an unlinted dependency does not stop that
+# member's own pass reporting it red, and re-running a pass replays the
+# failure rather than serving a green cache.
+command -v jq > /dev/null || {
+  echo "lint:rust: jq missing from the belt" >&2
+  exit 1
+}
 cargo fetch --locked
+# cargo's own account of the population. `workspace_members` and not
+# `workspace_default_members`, for the reason above; `--no-deps` is what
+# holds `packages` to the members themselves. The spec is name@version,
+# which cargo accepts for `-p` and which stays unambiguous.
+members=$(cargo metadata --no-deps --format-version 1 --locked \
+  | jq -r '.workspace_members as $m | .packages[]
+      | select(.id as $i | $m | index($i)) | "\(.name)@\(.version)"')
+[[ -n ${members} ]] || {
+  echo "lint:rust: a Cargo.toml is tracked but cargo metadata names no workspace member" >&2
+  exit 1
+}
 out=$(mktemp)
 status=0
-# shellcheck disable=SC2086  # both hold whole flag WORDS (--all-features, a
-# built --exclude list), which cargo must receive as separate arguments
-cargo clippy --workspace --all-targets ${features} --locked ${excludes} -- \
-  -D warnings \
-  -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
-  -D clippy::restriction \
-  -A clippy::blanket_clippy_restriction_lints \
-  -A clippy::multiple_crate_versions \
-  -A clippy::implicit_return \
-  -A clippy::question_mark_used \
-  -A clippy::self_named_module_files \
-  -A clippy::pub_with_shorthand \
-  -A clippy::semicolon_outside_block \
-  -A clippy::separated_literal_suffix \
-  -A clippy::big_endian_bytes \
-  -A clippy::little_endian_bytes \
-  -A clippy::arbitrary_source_item_ordering \
-  -A clippy::inline_asm_x86_intel_syntax 2>&1 | tee "${out}" || status=$?
+count=0
+linted=""
+red=""
+excluded=""
+while IFS= read -r spec; do
+  [[ -n ${spec} ]] || continue
+  name="${spec%@*}"
+  if [[ " ${CLIPPY_EXCLUDE:-} " == *" ${name} "* ]]; then
+    excluded="${excluded} ${name}"
+    continue
+  fi
+  count=$((count + 1))
+  linted="${linted} ${name}"
+  pass=0
+  # shellcheck disable=SC2086  # ${features} holds whole flag WORDS
+  # (--all-features), which cargo must receive as separate arguments
+  cargo clippy -p "${spec}" --no-deps --all-targets ${features} --locked --keep-going -- \
+    -D warnings \
+    -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
+    -D clippy::restriction \
+    -A clippy::blanket_clippy_restriction_lints \
+    -A clippy::multiple_crate_versions \
+    -A clippy::implicit_return \
+    -A clippy::question_mark_used \
+    -A clippy::self_named_module_files \
+    -A clippy::pub_with_shorthand \
+    -A clippy::semicolon_outside_block \
+    -A clippy::separated_literal_suffix \
+    -A clippy::big_endian_bytes \
+    -A clippy::little_endian_bytes \
+    -A clippy::arbitrary_source_item_ordering \
+    -A clippy::inline_asm_x86_intel_syntax 2>&1 | tee -a "${out}" || pass=$?
+  if [[ ${pass} -ne 0 ]]; then
+    red="${red} ${name}"
+    status=${pass}
+  fi
+done <<< "${members}"
+# A bare `--features NAME` means different things to the two shapes:
+# cargo accepts a name held by ANY member when one pass covers the
+# workspace, and rejects it for a member that lacks it when each crate
+# gets its own pass (measured, both). No repo in the org sets
+# CLIPPY_FEATURES today, so this is a signpost and not a migration.
+if grep -q "does not contain this feature" "${out}"; then
+  echo "lint:rust: CLIPPY_FEATURES names a feature some crate in this workspace lacks" >&2
+  echo "  every crate is linted as its own package (#726), so the value has to be one" >&2
+  echo "  each member accepts — --all-features, or --no-default-features — and a crate" >&2
+  echo "  that genuinely cannot take it is named in CLIPPY_EXCLUDE instead" >&2
+  exit 1
+fi
 # A lint name rustc does not recognise is warning E0602, and `-D
 # warnings` cannot reach it: it is emitted by the command-line parser
 # before lint levels apply, so `-D unknown_lints` and `-D
@@ -2023,7 +2103,15 @@ if grep -qE "E0602|has been renamed to" "${out}"; then
   echo "  clippy renamed or removed it — update the exclusion list in mise/config.toml" >&2
   exit 1
 fi
-[[ ${status} -eq 0 ]] || exit "${status}"
+# The population, printed before the verdict and in BOTH directions, so
+# that no run of this task can read as a whole workspace when it was not
+# one (#726).
+echo "lint:rust: ${count} crate(s) linted:${linted}"
+[[ -z ${excluded} ]] || echo "lint:rust: excluded by CLIPPY_EXCLUDE:${excluded}"
+if [[ -n ${red} ]]; then
+  echo "lint:rust: red:${red}" >&2
+  exit "${status}"
+fi
 echo "lint:rust: clean at every group (restriction minus 10 named contradictions)"
 '''
 
@@ -2061,10 +2149,45 @@ fi
 cargo fmt --all -- --config-path "${ORG_BELT_DIR}/rustfmt.toml"
 echo "fix:rust: formatted"
 features="${CLIPPY_FEATURES:---all-features}"
+# The POPULATION is declared here too (#726). `cargo clippy --fix`
+# without `--workspace` selects the workspace's DEFAULT members, so a
+# repo could drop a crate from the write-mode twin by editing a field
+# nobody reads as a lint setting — measured on a two-crate fixture with
+# `default-members = ["a"]`: `--fix` rewrote a/src/lib.rs and never
+# touched b/src/lib.rs, and `--fix --workspace` rewrote both.
+# CLIPPY_EXCLUDE applies for the reason it applies to the gate leg — a
+# crate that cannot build on a runner cannot be fixed on one either
+# (measured: `--exclude` is accepted under `--fix`).
+#
+# What this leg does NOT need is the gate leg's per-crate iteration.
+# `cargo fix` caps lint denials to warnings and says so in its own note,
+# "the `clippy::<lint>` lint ignores `-D warnings`", so a red crate never
+# stops the crates behind it: measured on the same fixture with b
+# depending on a and both red, ONE `--fix` pass rewrote both and exited
+# 0. The defect #726 names is the gate leg's, and the mirror this leg
+# owes it is the population, not the mechanism.
+command -v jq > /dev/null || {
+  echo "fix:rust: jq missing from the belt" >&2
+  exit 1
+}
 cargo fetch --locked
-# shellcheck disable=SC2086  # ${features} holds whole flag words, which cargo
+members=$(cargo metadata --no-deps --format-version 1 --locked \
+  | jq -r '.workspace_members as $m | .packages[]
+      | select(.id as $i | $m | index($i)) | .name')
+excludes=""
+fixing=""
+excluded=""
+for name in ${members}; do
+  if [[ " ${CLIPPY_EXCLUDE:-} " == *" ${name} "* ]]; then
+    excludes="${excludes} --exclude ${name}"
+    excluded="${excluded} ${name}"
+  else
+    fixing="${fixing} ${name}"
+  fi
+done
+# shellcheck disable=SC2086  # both hold whole flag words, which cargo
 # must receive as separate arguments
-cargo clippy --fix ${features} --locked -- \
+cargo clippy --fix --workspace ${excludes} ${features} --locked -- \
   -D warnings \
   -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
   -D clippy::restriction \
@@ -2080,6 +2203,8 @@ cargo clippy --fix ${features} --locked -- \
   -A clippy::little_endian_bytes \
   -A clippy::arbitrary_source_item_ordering \
   -A clippy::inline_asm_x86_intel_syntax
+echo "fix:rust:${fixing:- none} rewritten where clippy could"
+[[ -z ${excluded} ]] || echo "fix:rust: excluded by CLIPPY_EXCLUDE:${excluded}"
 echo "fix:rust: applied what is machine-applicable — the rest is judgement"
 '''
 

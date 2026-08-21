@@ -48,7 +48,7 @@ honestly blocked on.
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
-| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus ten named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml` — plus `fix:rust` |
+| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus ten named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 
 **clippy, and the three things standing it up settled** (#445). The
@@ -110,6 +110,36 @@ conforms to them per site with `#[expect(..., reason = "...")]` — the
 decision being that the ladder is right and the codebase answers to it,
 not the reverse. Read the 97 as what a fixture measures, never as what
 this ladder costs a real repository.
+
+*The whole workspace is linted every run, one crate at a time (#726).*
+Under `-D warnings` a clippy finding IS a compile error, so a red crate
+emits no metadata and every crate that depends on it is never linted at
+all — which means the counts in the paragraph above are not what they
+say they are. The 955 was `edtf-core` alone, with four crates behind it
+unseen; iiif-server's 24 became 319 the moment the last `iiif-core`
+finding was cleared, because the S3 backend behind it had never once
+been linted (#669, #671). `--keep-going` is the flag cargo offers for
+this and it is not enough: the Cargo Book defines it as building "as
+many crates in the dependency graph as possible, rather than aborting
+the build on the first one that fails to build", which covers siblings
+and never a dependent, because a dependent has nothing to compile
+against. Measured at `-j1` on a two-crate fixture carrying this ladder —
+independent crates, the plain run reported 1 of 2 and `--keep-going` 2
+of 2; the second crate depending on the first, both runs reported the
+first alone. So each member is now linted as its own primary package,
+with `cargo metadata`'s `workspace_members` naming the population and
+the clippy book's `--no-deps` keeping a red dependency from failing the
+pass before its dependent is ever reached. The task prints the crates it
+linted, the crates `CLIPPY_EXCLUDE` held back and the crates that went
+red, in both directions, so a truncated run can never read as a whole
+one. On the iiif-server import branch that is 194 finding sites in one
+crate before and 470 across three after, with `iiif-server` and
+`iiif-sources` linted for the first time; on the edtf branch the verdict
+is unchanged and the green line now names all five crates it covers.
+`fix:rust` mirrors the population — `--workspace` rather than the
+workspace's default members, and `CLIPPY_EXCLUDE` honoured — but not the
+mechanism: `cargo fix` caps lint denials to warnings and says so in its
+own note, so one pass already reaches every crate (measured, both).
 
 *The exception mechanism is `#[expect(..., reason = "...")]` and nothing
 else.* No clippy flag can beat a source attribute: a crate-level
