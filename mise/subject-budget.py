@@ -45,6 +45,26 @@ from typing import NamedTuple
 # budget holds machine-minted subjects to a LITERAL 72 columns: a
 # template has no excuse for an overhanging tail, and the margin is what
 # keeps a bot pull request off the gate entirely.
+#
+# THE ADVISORY SUBJECT SPENDS THIS ALLOWANCE ON THE SUFFIX (#686). It is
+# an allowance, not the ceiling: one ceiling is read from committed.toml
+# and one comparison is made against it, here as everywhere. What the
+# advisory rendering does not do is charge BOTH the eleven columns
+# Renovate appends and the ten this margin costs, because charging both
+# is unsatisfiable rather than strict. Measured 2026-08-21 against a real
+# stele checkout: a Go module on a pseudo-version floors at 78 columns
+# with a ONE-character topic — the version is fixed-width at 34 by
+# construction and takes no growth allowance — so `jcs`, already the
+# shortest name in the org and chosen for this dependency on #576, would
+# be six past a ceiling no rename can reach. A delivered gate a repo
+# cannot pass is not enforcement.
+#
+# The suffix plus its space is eleven columns against this margin's ten,
+# so the advisory rendering is the binding one for every dependency and
+# the ordinary check rides free underneath it: the content budget is 61
+# columns rather than 62. Still strictly stronger than the gate, whose
+# real condition is a last whitespace at or before column 72 — which is
+# exactly what `content + suffix <= 72` proves.
 PR_NUMBER_DIGITS = 6
 
 # VERSION_GROWTH — the subject carries the NEW version, which by
@@ -62,6 +82,10 @@ PR_NUMBER_DIGITS = 6
 # roughly three major-digit rollovers.
 VERSION_GROWTH = 3
 
+# The squash tail GitHub appends, at the pinned worst case. Named once
+# so the advisory rendering can say what it is not charging (#686).
+PR_TAIL = f" (#{'9' * PR_NUMBER_DIGITS})"
+
 # The five fields that compose a commit subject. Every one is READ from
 # default.json — there is no default table here and no fallback, by
 # review decision on #576: a simulation that fills in a value the org did
@@ -76,9 +100,26 @@ MESSAGE_CONFIG = (
     "semanticCommitType",
     "semanticCommitScope",
 )
-# The three that carry text into the subject, in the order Renovate
+# The FOUR that carry text into the subject, in the order Renovate
 # composes them; the other two form the `type(scope):` prefix.
-MESSAGE_FIELDS = ("commitMessageAction", "commitMessageTopic", "commitMessageExtra")
+#
+# commitMessageSuffix is the sixth field and it is not in MESSAGE_CONFIG
+# above, because it does not arrive the way the other five do (#686).
+# No repo sets it at the top level; the one suffix in force org-wide
+# comes from the `vulnerabilityAlerts` block, where Renovate's own
+# default appends `[SECURITY]` — eleven columns, in force whether or not
+# a preset writes it (measured at renovatebot/renovate@b7f19dc9, and
+# written out explicitly in default.json since #667). So it is resolved
+# from that block rather than from packageRules, and every dependency is
+# rendered TWICE: the ordinary subject and the advisory one. Both are
+# held to the ceiling, because an advisory pull request is the single
+# worst one in the org to have wedged on a naming rule.
+MESSAGE_FIELDS = (
+    "commitMessageAction",
+    "commitMessageTopic",
+    "commitMessageExtra",
+    "commitMessageSuffix",
+)
 
 MISE_CONFIG = re.compile(r"^\.?mise(\.[\w-]+)?\.toml$")
 MISE_NESTED = re.compile(r"^config(\.[\w-]+)?\.toml$")
@@ -135,6 +176,22 @@ class Dep(NamedTuple):
     current: str
     manager: str
     origin: str
+
+
+class Template(NamedTuple):
+    """The owned subject template, gathered from where the org wrote it.
+
+    Three sources, because the org writes the template in three places
+    and Renovate reads all three: the extended preset, the repo's own
+    packageRules which resolve after it (#677), and the advisory suffix
+    which lives in the vulnerabilityAlerts block rather than in any rule
+    (#686). Carried as one value so no caller can supply two of the
+    three and silently model a subject the bot will not mint.
+    """
+
+    preset: dict
+    repo_rules: list[dict]
+    suffix: str
 
 
 class Finding(NamedTuple):
@@ -279,7 +336,7 @@ def apply_rules(config: dict, rules: list[dict], dep: Dep) -> None:
             config.update({k: rule[k] for k in MESSAGE_CONFIG if k in rule})
 
 
-def effective(preset: dict, dep: Dep, repo_rules: list[dict] | None = None) -> dict:
+def effective(template: Template, dep: Dep) -> dict:
     """Resolve the message fields Renovate would use for one dependency.
 
     packageRules are applied in order and later wins per field, which is
@@ -303,6 +360,7 @@ def effective(preset: dict, dep: Dep, repo_rules: list[dict] | None = None) -> d
         The five message fields, every one of them written by the org.
 
     """
+    preset = template.preset
     config = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
     apply_rules(config, preset.get("packageRules", []), dep)
     missing = [k for k in MESSAGE_CONFIG if k not in config]
@@ -314,8 +372,45 @@ def effective(preset: dict, dep: Dep, repo_rules: list[dict] | None = None) -> d
             " explicitly in default.json (#576); this task will not"
             " assume Renovate's default for one.",
         )
-    apply_rules(config, repo_rules or [], dep)
+    apply_rules(config, template.repo_rules, dep)
     return config
+
+
+def advisory_suffix(preset: dict, repo_config: dict) -> str:
+    """Read the suffix Renovate appends to an ADVISORY subject.
+
+    It lives in the `vulnerabilityAlerts` block, not in packageRules,
+    and Renovate merges that block child-over-parent — so a repo's own
+    block wins the field where it sets one, and the extended preset's
+    answers otherwise.
+
+    Absent everywhere is a hard error, the same law the five composed
+    fields answer to (#576): Renovate's default appends `[SECURITY]`
+    whether or not the org writes it, so a budget that reads no suffix
+    is not modelling "no suffix" — it is agreeing with an upstream
+    default from memory, eleven columns wide, on the one pull request
+    nobody can afford to have wedged.
+
+    `enabled` is deliberately not read. A repo that turned advisories
+    off would mint no such subject, but modelling one anyway costs
+    margin and never correctness, and the org enforces the block
+    enabled everywhere (#667).
+
+    Returns:
+        The suffix, exactly as the org wrote it.
+
+    """
+    for source in (repo_config, preset):
+        block = source.get("vulnerabilityAlerts", {})
+        if "commitMessageSuffix" in block:
+            return block["commitMessageSuffix"]
+    sys.exit(
+        "lint:subject-budget: the owned template does not set "
+        "vulnerabilityAlerts.commitMessageSuffix.\n  Renovate appends "
+        "one to every advisory subject whether or not the org writes it "
+        "(#686); this task will not assume its default for the field it "
+        "measures.",
+    )
 
 
 def render(config: dict, dep_name: str, width: int) -> tuple[str, str | None]:
@@ -340,8 +435,7 @@ def render(config: dict, dep_name: str, width: int) -> tuple[str, str | None]:
         if "{{" in text:
             unmodelled = f"{key}: {config[key]}"
         parts.append(text)
-    suffix = f" (#{'9' * PR_NUMBER_DIGITS})"
-    return " ".join(p for p in parts if p) + suffix, unmodelled
+    return " ".join(p for p in parts if p) + PR_TAIL, unmodelled
 
 
 # ---------------------------------------------------------------------
@@ -668,17 +762,25 @@ def collect(files: list[Path], report: list[str]) -> list[Dep]:
 
 def judge(
     deps: list[Dep],
-    preset: dict,
+    template: Template,
     limit: int,
     report: list[str],
-    repo_rules: list[dict] | None = None,
 ) -> list[Finding]:
     """Measure each dependency's widest subject against the ceiling.
 
-    `repo_rules` are the repo's own packageRules, folded in after the
-    preset's (#677). The default is empty rather than required so that
-    a caller which does not supply them gets the preset-only model,
-    which over-estimates: no reading of this argument can go fail-open.
+    TWO subjects are rendered per dependency, not one (#686): the
+    ordinary one, and the advisory one carrying the template's suffix.
+    Renovate mints both from the same template, so proving only the
+    first proves the template fits for every pull request EXCEPT the one
+    it would hurt most to have wedged. Neither leg is optional, which is
+    why the three sources arrive as one Template rather than as
+    arguments a caller can leave out.
+
+    Only the widest overrunning subject is reported per dependency. The
+    advisory one is never narrower, and the remedy for both is the same
+    single rule, so a second finding would be a second line naming one
+    fix. The subject printed carries the suffix where it is the culprit,
+    which is what tells the two apart.
 
     Returns:
         The dependencies that overrun it, widest first.
@@ -690,14 +792,27 @@ def judge(
         if dep.name in seen:
             continue
         seen.add(dep.name)
-        config = effective(preset, dep, repo_rules)
+        base = effective(template, dep)
         growth = 0 if PSEUDO_VERSION.fullmatch(dep.current) else VERSION_GROWTH
         width = len(dep.current) + growth
-        subject, unmodelled = render(config, dep.name, width)
-        if unmodelled:
-            report.append(f"{dep.name}: template field is unresolved — {unmodelled}")
-        if len(subject) > limit:
-            findings.append(Finding(len(subject), dep, subject))
+        widest, charged = "", 0
+        for value in ("", template.suffix):
+            subject, unmodelled = render(
+                {**base, "commitMessageSuffix": value},
+                dep.name,
+                width,
+            )
+            line = f"{dep.name}: template field is unresolved — {unmodelled}"
+            if unmodelled and line not in report:
+                report.append(line)
+            # The advisory rendering spends the pull-request-number
+            # allowance on the suffix rather than charging both; the
+            # reasoning is pinned beside PR_TAIL.
+            cost = len(subject) - (len(PR_TAIL) if value else 0)
+            if cost > charged:
+                widest, charged = subject, cost
+        if charged > limit:
+            findings.append(Finding(charged, dep, widest))
     return sorted(findings, reverse=True)
 
 
@@ -714,9 +829,14 @@ def explain(findings: list[Finding], limit: int) -> None:
         "  mint a subject nobody can shorten once it is a commit.\n\n"
         '    { "matchPackageNames": ["<depName>"],\n'
         '      "commitMessageTopic": "<short name>" }\n\n'
-        f"  Widths above allow {VERSION_GROWTH} characters of version growth and\n"
-        f"  a {PR_NUMBER_DIGITS}-digit pull request number; both are pinned and\n"
-        "  reasoned in mise/subject-budget.py.",
+        "  A subject printed with a suffix is the ADVISORY one: Renovate appends\n"
+        "  vulnerabilityAlerts.commitMessageSuffix to it, so every dependency is\n"
+        "  measured twice and the same one rule shortens both. Its width above\n"
+        f"  excludes the {PR_NUMBER_DIGITS}-digit pull request tail, which the\n"
+        "  suffix spends that allowance in place of.\n\n"
+        f"  Widths above allow {VERSION_GROWTH} characters of version growth, and\n"
+        f"  an ordinary subject a {PR_NUMBER_DIGITS}-digit pull request number;\n"
+        "  both are pinned and reasoned in mise/subject-budget.py.",
         file=sys.stderr,
     )
 
@@ -749,8 +869,17 @@ def main() -> int:
     # for the same reason the preset is: the two readers want different
     # halves of the same file, and one guaranteed-tracked re-read is
     # cheaper than a return type that carries both.
-    repo_rules = load_json(Path("renovate.json"), report).get("packageRules", [])
-    findings = judge(deps, preset, limit, report, repo_rules)
+    repo_config = load_json(Path("renovate.json"), report)
+    # The sixth field is resolved from the vulnerabilityAlerts block
+    # rather than from packageRules, because that is where the org's
+    # only suffix lives and where Renovate's own default applies it
+    # (#686, #667).
+    template = Template(
+        preset=preset,
+        repo_rules=repo_config.get("packageRules", []),
+        suffix=advisory_suffix(preset, repo_config),
+    )
+    findings = judge(deps, template, limit, report)
     for line in report:
         print(f"lint:subject-budget: unmodelled — {line}", file=sys.stderr)
 

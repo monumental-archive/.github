@@ -34,8 +34,13 @@ _SPEC = importlib.util.spec_from_file_location(
 sb = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sb)
 
+# What Renovate appends to an advisory subject, and what default.json
+# writes out explicitly since #667. Eleven columns.
+SUFFIX = "[SECURITY]"
+
 # A minimal preset in the shape default.json now has: all five message
-# fields explicit, so nothing here depends on a Renovate default.
+# fields explicit plus the advisory suffix, so nothing here depends on
+# a Renovate default.
 PRESET = {
     "commitMessageAction": "update",
     "commitMessageTopic": "{{depName}}",
@@ -43,6 +48,7 @@ PRESET = {
     "semanticCommitType": "chore",
     "semanticCommitScope": "deps",
     "packageRules": [],
+    "vulnerabilityAlerts": {"commitMessageSuffix": SUFFIX},
 }
 
 
@@ -66,6 +72,38 @@ def preset(**overrides: object) -> dict:
     return {**PRESET, **overrides}
 
 
+def owned(
+    source: dict,
+    repo_rules: list | None = None,
+    suffix: str = "",
+) -> sb.Template:
+    """Gather a Template the way main() does, from a test's three parts.
+
+    Returns:
+        The three sources as one value.
+
+    """
+    return sb.Template(source, repo_rules or [], suffix)
+
+
+def template(**overrides: object) -> dict:
+    """Build a resolved template, ordinary shape unless told otherwise.
+
+    `render()` composes six fields and reads every one of them, so a
+    caller must state the suffix rather than let it default — the same
+    law the five composed fields answer to (#576, #686).
+
+    Returns:
+        The six rendered fields, safe to mutate.
+
+    """
+    return {
+        **{k: PRESET[k] for k in sb.MESSAGE_CONFIG},
+        "commitMessageSuffix": "",
+        **overrides,
+    }
+
+
 def width_of(name: str, current: str) -> int:
     """Render one dependency under the baseline preset and measure it.
 
@@ -73,7 +111,7 @@ def width_of(name: str, current: str) -> int:
         The subject's column count, growth allowance included.
 
     """
-    subject, _ = sb.render(dict(PRESET), name, len(current) + sb.VERSION_GROWTH)
+    subject, _ = sb.render(template(), name, len(current) + sb.VERSION_GROWTH)
     return len(subject)
 
 
@@ -142,7 +180,7 @@ class TestEffective(unittest.TestCase):
 
     def test_reads_all_five_from_the_top_level(self) -> None:
         """With no rules, every field comes from the preset as written."""
-        config = sb.effective(preset(), dep("ruff"))
+        config = sb.effective(owned(preset()), dep("ruff"))
         self.assertEqual(
             config,
             {k: PRESET[k] for k in sb.MESSAGE_CONFIG},
@@ -154,20 +192,20 @@ class TestEffective(unittest.TestCase):
             {"matchPackageNames": ["*"], "commitMessageTopic": "first"},
             {"matchPackageNames": ["ruff"], "commitMessageTopic": "second"},
         ]
-        config = sb.effective(preset(packageRules=rules), dep("ruff"))
+        config = sb.effective(owned(preset(packageRules=rules)), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "second")
 
     def test_a_rule_leaves_fields_it_does_not_set(self) -> None:
         """Overriding the topic must not disturb the semantic prefix."""
         rules = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "short"}]
-        config = sb.effective(preset(packageRules=rules), dep("ruff"))
+        config = sb.effective(owned(preset(packageRules=rules)), dep("ruff"))
         self.assertEqual(config["semanticCommitType"], "chore")
         self.assertEqual(config["commitMessageExtra"], "to {{newValue}}")
 
     def test_manager_scoped_rule_reaches_only_that_manager(self) -> None:
         """The gomod rule keeps `fix` without touching anything else."""
         rules = [{"matchManagers": ["gomod"], "semanticCommitType": "fix"}]
-        config = preset(packageRules=rules)
+        config = owned(preset(packageRules=rules))
         self.assertEqual(
             sb.effective(config, dep("x", manager="gomod"))["semanticCommitType"],
             "fix",
@@ -187,13 +225,13 @@ class TestEffective(unittest.TestCase):
         incomplete = preset()
         del incomplete["commitMessageExtra"]
         with self.assertRaises(SystemExit) as caught:
-            sb.effective(incomplete, dep("ruff"))
+            sb.effective(owned(incomplete), dep("ruff"))
         self.assertIn("commitMessageExtra", str(caught.exception))
 
     def test_every_missing_field_is_named_at_once(self) -> None:
         """The error lists all absent fields, not just the first."""
         with self.assertRaises(SystemExit) as caught:
-            sb.effective({"packageRules": []}, dep("ruff"))
+            sb.effective(owned({"packageRules": []}), dep("ruff"))
         for field in sb.MESSAGE_CONFIG:
             self.assertIn(field, str(caught.exception))
 
@@ -217,8 +255,8 @@ class TestRepoRules(unittest.TestCase):
         rules = [{"matchPackageNames": ["*"], "commitMessageTopic": "kept"}]
         config = preset(packageRules=rules)
         self.assertEqual(
-            sb.effective(config, dep("ruff")),
-            sb.effective(config, dep("ruff"), []),
+            sb.effective(owned(config), dep("ruff")),
+            sb.effective(owned(config, []), dep("ruff")),
         )
 
     def test_a_repo_rule_narrows_a_preset_field(self) -> None:
@@ -229,7 +267,7 @@ class TestRepoRules(unittest.TestCase):
         preset's.
         """
         repo = [{"matchManagers": ["mise"], "semanticCommitType": "fix"}]
-        config = sb.effective(preset(), dep("ruff"), repo)
+        config = sb.effective(owned(preset(), repo), dep("ruff"))
         self.assertEqual(config["semanticCommitType"], "fix")
 
     def test_a_repo_rule_widens_a_preset_field(self) -> None:
@@ -239,7 +277,7 @@ class TestRepoRules(unittest.TestCase):
         narrower value — the row the preset-only model got wrong.
         """
         repo = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "a" * 40}]
-        config = sb.effective(preset(), dep("ruff"), repo)
+        config = sb.effective(owned(preset(), repo), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "a" * 40)
 
     def test_a_repo_rule_resolves_after_every_preset_rule(self) -> None:
@@ -251,7 +289,7 @@ class TestRepoRules(unittest.TestCase):
         """
         rules = [{"matchPackageNames": ["*"], "commitMessageTopic": "preset-last"}]
         repo = [{"matchPackageNames": ["*"], "commitMessageTopic": "repo"}]
-        config = sb.effective(preset(packageRules=rules), dep("ruff"), repo)
+        config = sb.effective(owned(preset(packageRules=rules), repo), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "repo")
 
     def test_later_wins_within_the_repo_list_too(self) -> None:
@@ -264,14 +302,14 @@ class TestRepoRules(unittest.TestCase):
                 "semanticCommitScope": "canon",
             },
         ]
-        config = sb.effective(preset(), dep("monumental-archive/.github"), repo)
+        config = sb.effective(owned(preset(), repo), dep("monumental-archive/.github"))
         self.assertEqual(config["semanticCommitType"], "chore")
         self.assertEqual(config["semanticCommitScope"], "canon")
 
     def test_a_repo_rule_that_does_not_select_changes_nothing(self) -> None:
         """Selection is unchanged; only the list it walks grew."""
         repo = [{"matchPackageNames": ["rumdl"], "commitMessageTopic": "other"}]
-        config = sb.effective(preset(), dep("ruff"), repo)
+        config = sb.effective(owned(preset(), repo), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "{{depName}}")
 
     def test_a_repo_rule_may_not_be_the_only_place_a_field_is_written(
@@ -288,7 +326,7 @@ class TestRepoRules(unittest.TestCase):
         del thin["commitMessageAction"]
         repo = [{"matchPackageNames": ["*"], "commitMessageAction": "bump"}]
         with self.assertRaises(SystemExit) as caught:
-            sb.effective(thin, dep("ruff"), repo)
+            sb.effective(owned(thin, repo), dep("ruff"))
         self.assertIn("commitMessageAction", str(caught.exception))
 
     def test_judge_goes_red_on_a_widening_repo_rule_and_green_without(
@@ -297,13 +335,13 @@ class TestRepoRules(unittest.TestCase):
         """Plant and measure, both directions, through the real judge."""
         row = [dep("ruff", "v1.0.0")]
         limit = width_of("ruff", "v1.0.0")
-        self.assertEqual(sb.judge(row, PRESET, limit, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), [])
         widen = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "ruff-x"}]
-        findings = sb.judge(row, PRESET, limit, [], widen)
+        findings = sb.judge(row, owned(PRESET, widen), limit, [])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].width, limit + 2)
         narrow = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "rf"}]
-        self.assertEqual(sb.judge(row, PRESET, limit, [], narrow), [])
+        self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), [])
 
 
 class TestRender(unittest.TestCase):
@@ -311,37 +349,36 @@ class TestRender(unittest.TestCase):
 
     def test_composes_the_whole_subject(self) -> None:
         """Prefix, action, topic, extra and the pinned suffix, in order."""
-        subject, unmodelled = sb.render(dict(PRESET), "ruff", 6)
+        subject, unmodelled = sb.render(template(), "ruff", 6)
         self.assertEqual(subject, "chore(deps): update ruff to 999999 (#999999)")
         self.assertIsNone(unmodelled)
 
     def test_substitutes_triple_and_double_braces(self) -> None:
         """Renovate writes both spellings; both must resolve."""
-        config = dict(PRESET)
-        config["commitMessageTopic"] = "{{{depName}}}"
-        config["commitMessageExtra"] = "to {{{newValue}}}"
+        config = template(
+            commitMessageTopic="{{{depName}}}",
+            commitMessageExtra="to {{{newValue}}}",
+        )
         subject, unmodelled = sb.render(config, "ruff", 3)
         self.assertEqual(subject, "chore(deps): update ruff to 999 (#999999)")
         self.assertIsNone(unmodelled)
 
     def test_an_empty_field_is_skipped_not_double_spaced(self) -> None:
         """A preset may empty a field; the subject must not gain a gap."""
-        config = dict(PRESET)
-        config["commitMessageExtra"] = ""
+        config = template(commitMessageExtra="")
         subject, _ = sb.render(config, "ruff", 6)
         self.assertEqual(subject, "chore(deps): update ruff (#999999)")
 
     def test_unresolved_placeholder_is_reported(self) -> None:
         """A template this task cannot model is named, never measured raw."""
-        config = dict(PRESET)
-        config["commitMessageTopic"] = "{{depName}} {{newMajor}}"
+        config = template(commitMessageTopic="{{depName}} {{newMajor}}")
         _, unmodelled = sb.render(config, "ruff", 6)
         self.assertIsNotNone(unmodelled)
         self.assertIn("newMajor", unmodelled)
 
     def test_suffix_uses_the_pinned_worst_case(self) -> None:
         """The rendered suffix is as wide as the pinned digit count."""
-        subject, _ = sb.render(dict(PRESET), "x", 1)
+        subject, _ = sb.render(template(), "x", 1)
         self.assertTrue(subject.endswith(f" (#{'9' * sb.PR_NUMBER_DIGITS})"))
 
 
@@ -352,40 +389,201 @@ class TestJudge(unittest.TestCase):
         """A subject of exactly `limit` columns is not over budget."""
         name = "n" * 20
         limit = width_of(name, "v1.0.0")
-        self.assertEqual(sb.judge([dep(name, "v1.0.0")], PRESET, limit, []), [])
+        self.assertEqual(sb.judge([dep(name, "v1.0.0")], owned(PRESET), limit, []), [])
 
     def test_one_column_over_fails(self) -> None:
         """One column past the ceiling is a finding, reported with it."""
         name = "n" * 20
         limit = width_of(name, "v1.0.0") - 1
-        findings = sb.judge([dep(name, "v1.0.0")], PRESET, limit, [])
+        findings = sb.judge([dep(name, "v1.0.0")], owned(PRESET), limit, [])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].width, limit + 1)
         self.assertEqual(findings[0].dep.name, name)
 
     def test_version_growth_is_added_to_the_declared_width(self) -> None:
         """The budget measures the NEXT version, not the one in the tree."""
-        bare = len(sb.render(dict(PRESET), "x", len("v1.0.0"))[0])
+        bare = len(sb.render(template(), "x", len("v1.0.0"))[0])
         self.assertEqual(width_of("x", "v1.0.0"), bare + sb.VERSION_GROWTH)
 
     def test_a_go_pseudo_version_gets_no_growth(self) -> None:
         """Pseudo-versions are fixed-width, so the allowance is zero."""
         pseudo = "v0.0.0-20241213102144-19d51d7fe467"
         self.assertRegex(pseudo, sb.PSEUDO_VERSION)
-        limit = len(sb.render(dict(PRESET), "x", len(pseudo))[0])
-        self.assertEqual(sb.judge([dep("x", pseudo)], PRESET, limit, []), [])
+        limit = len(sb.render(template(), "x", len(pseudo))[0])
+        self.assertEqual(sb.judge([dep("x", pseudo)], owned(PRESET), limit, []), [])
 
     def test_a_name_is_judged_once(self) -> None:
         """Two managers declaring one name produce one finding, not two."""
         rows = [dep("n" * 60, "v1.0.0"), dep("n" * 60, "v1.0.0", manager="npm")]
-        self.assertEqual(len(sb.judge(rows, PRESET, 40, [])), 1)
+        self.assertEqual(len(sb.judge(rows, owned(PRESET), 40, [])), 1)
 
     def test_unresolved_template_reaches_the_report(self) -> None:
         """judge() records what render() could not model."""
         config = preset(commitMessageTopic="{{depName}} {{newMajor}}")
         report: list[str] = []
-        sb.judge([dep("ruff")], config, 200, report)
+        sb.judge([dep("ruff")], owned(config), 200, report)
         self.assertTrue(any("newMajor" in line for line in report))
+
+
+class TestAdvisorySubject(unittest.TestCase):
+    """The sixth field, and the allowance the advisory subject spends.
+
+    Renovate composes a commit subject from six fields, not five: it
+    appends `commitMessageSuffix`, and the one in force org-wide is
+    `[SECURITY]` from the `vulnerabilityAlerts` block (#686, #667). Every
+    dependency is therefore rendered twice and both subjects are held to
+    the one ceiling.
+    """
+
+    def test_the_suffix_is_read_from_the_vulnerability_block(self) -> None:
+        """It arrives from a nested block, not from a packageRule."""
+        self.assertEqual(sb.advisory_suffix(PRESET, {}), SUFFIX)
+
+    def test_a_repo_block_wins_the_field_it_sets(self) -> None:
+        """The repo's own value is the one minted.
+
+        Renovate merges that block child over parent, so a repo that
+        writes its own suffix is not modelled at the preset's.
+        """
+        repo = {"vulnerabilityAlerts": {"commitMessageSuffix": "[CVE]"}}
+        self.assertEqual(sb.advisory_suffix(PRESET, repo), "[CVE]")
+
+    def test_a_repo_block_without_the_field_falls_to_the_preset(self) -> None:
+        """A partly declared block does not erase the preset's value."""
+        repo = {"vulnerabilityAlerts": {"enabled": True}}
+        self.assertEqual(sb.advisory_suffix(PRESET, repo), SUFFIX)
+
+    def test_an_absent_suffix_is_a_hard_error_not_an_empty_string(
+        self,
+    ) -> None:
+        """Renovate appends one whether or not the org writes it.
+
+        Reading no suffix would not model "no suffix"; it would model an
+        upstream default from memory, eleven columns wide, which is the
+        failure #576 exists to kill.
+        """
+        with self.assertRaises(SystemExit) as caught:
+            sb.advisory_suffix({}, {})
+        self.assertIn("commitMessageSuffix", str(caught.exception))
+
+    def test_the_suffix_renders_last_before_the_pull_request_tail(
+        self,
+    ) -> None:
+        """Renovate's own composition order, and the whole subject."""
+        subject, _ = sb.render(template(commitMessageSuffix=SUFFIX), "ruff", 6)
+        self.assertEqual(
+            subject,
+            "chore(deps): update ruff to 999999 [SECURITY] (#999999)",
+        )
+
+    def test_an_empty_suffix_leaves_the_subject_untouched(self) -> None:
+        """The ordinary subject gains no gap where the field is empty."""
+        subject, _ = sb.render(template(), "ruff", 6)
+        self.assertEqual(subject, "chore(deps): update ruff to 999999 (#999999)")
+
+    def test_the_ordinary_subject_is_charged_its_whole_width(self) -> None:
+        """Including the pinned pull request tail, as #576 decided."""
+        row = [dep("ruff", "v1.0.0")]
+        width = len("v1.0.0") + sb.VERSION_GROWTH
+        ordinary, _ = sb.render(template(), "ruff", width)
+        findings = sb.judge(row, owned(PRESET), len(ordinary) - 1, [])
+        self.assertEqual(findings[0].width, len(ordinary))
+
+    def test_the_advisory_subject_is_not_charged_that_tail(self) -> None:
+        """It spends the allowance on the suffix rather than beside it.
+
+        The measured consequence is in the next test; this one pins the
+        arithmetic: the charge is the subject less the pinned tail, and
+        the boundary is exact in both directions.
+        """
+        row = [dep("ruff", "v1.0.0")]
+        width = len("v1.0.0") + sb.VERSION_GROWTH
+        advisory, _ = sb.render(template(commitMessageSuffix=SUFFIX), "ruff", width)
+        charged = len(advisory) - len(sb.PR_TAIL)
+        findings = sb.judge(row, owned(PRESET, suffix=SUFFIX), charged - 1, [])
+        self.assertEqual(findings[0].width, charged)
+        self.assertEqual(findings[0].subject, advisory)
+        self.assertEqual(sb.judge(row, owned(PRESET, suffix=SUFFIX), charged, []), [])
+
+    def test_the_advisory_charge_is_one_column_over_the_ordinary(
+        self,
+    ) -> None:
+        """The whole tightening this change is, in one number.
+
+        Suffix plus its space is eleven columns against the tail's ten,
+        so the advisory rendering binds everywhere and the ordinary
+        check rides free underneath it: 61 columns of content rather
+        than 62.
+        """
+        width = len("v1.0.0") + sb.VERSION_GROWTH
+        ordinary, _ = sb.render(template(), "ruff", width)
+        advisory, _ = sb.render(template(commitMessageSuffix=SUFFIX), "ruff", width)
+        self.assertEqual(
+            len(advisory) - len(sb.PR_TAIL) - len(ordinary),
+            len(SUFFIX) + 1 - len(sb.PR_TAIL),
+        )
+
+    def test_a_short_suffix_leaves_the_ordinary_subject_binding(self) -> None:
+        """Both subjects are measured, and either can be the wider one.
+
+        `[SECURITY]` plus its space is eleven columns against the pinned
+        tail's ten, so it binds — but that is a property of the org's
+        suffix, not of the model. A suffix under ten columns puts the
+        ordinary subject back in front, and the budget must report that
+        one rather than assume the advisory is always widest.
+        """
+        row = [dep("ruff", "v1.0.0")]
+        width = len("v1.0.0") + sb.VERSION_GROWTH
+        ordinary, _ = sb.render(template(), "ruff", width)
+        findings = sb.judge(row, owned(PRESET, suffix="[X]"), len(ordinary) - 1, [])
+        self.assertEqual(findings[0].width, len(ordinary))
+        self.assertEqual(findings[0].subject, ordinary)
+
+    def test_a_pseudo_versioned_module_fits_and_could_not_otherwise(
+        self,
+    ) -> None:
+        """THE row that pins the allowance decision (#686).
+
+        A Go pseudo-version is fixed-width at 34 columns and takes no
+        growth allowance, so charging the tail as well as the suffix puts
+        it past the ceiling at ANY dependency name — measured against a
+        real stele checkout, a floor of 78 columns with a ONE-character
+        topic, against `jcs` which is already the shortest name in the
+        org. A delivered gate a repo cannot pass is not enforcement, so
+        this must stay green.
+        """
+        pseudo = "v0.0.0-20241213102144-19d51d7fe467"
+        self.assertEqual(len(pseudo), 34)
+        name = "github.com/cyberphone/json-canonicalization"
+        config = preset(
+            packageRules=[
+                {"matchManagers": ["gomod"], "semanticCommitType": "fix"},
+                {"matchPackageNames": [name], "commitMessageTopic": "jcs"},
+            ],
+        )
+        row = [dep(name, pseudo, manager="gomod")]
+        self.assertEqual(sb.judge(row, owned(config, suffix=SUFFIX), 72, []), [])
+        charged = sb.judge(row, owned(config, suffix=SUFFIX), 0, [])[0]
+        self.assertGreater(charged.width + len(sb.PR_TAIL), 72)
+
+    def test_a_dependency_that_fits_ordinarily_and_not_with_the_suffix(
+        self,
+    ) -> None:
+        """Plant and measure, both directions, per #650."""
+        name = "n" * 30
+        row = [dep(name, "1.0.0")]
+        ordinary, _ = sb.render(template(), name, len("1.0.0") + sb.VERSION_GROWTH)
+        self.assertLessEqual(len(ordinary), 72)
+        self.assertEqual(sb.judge(row, owned(PRESET), 72, []), [])
+        findings = sb.judge(row, owned(PRESET, suffix=SUFFIX), 72, [])
+        self.assertEqual(len(findings), 1)
+        self.assertIn(SUFFIX, findings[0].subject)
+        shorter = preset(
+            packageRules=[
+                {"matchPackageNames": [name], "commitMessageTopic": "n" * 29},
+            ],
+        )
+        self.assertEqual(sb.judge(row, owned(shorter, suffix=SUFFIX), 72, []), [])
 
 
 class TestCeiling(unittest.TestCase):
@@ -619,12 +817,22 @@ class TestMainGuards(unittest.TestCase):
             ],
             "depNameTemplate": "monumental-archive/.github",
         }
+        # The canon's own name is 26 columns and overruns once the
+        # advisory suffix is on it, which is this repo's live case and
+        # not what this test is about — so the fixture preset shortens
+        # it the way default.json does.
+        short = {
+            "matchPackageNames": ["monumental-archive/.github"],
+            "commitMessageTopic": "canon",
+        }
         status, out, _ = self._run(
             {
                 "renovate.json": (
                     '{"extends":["github>monumental-archive/.github#v1.46.0"]}\n'
                 ),
-                "default.json": json.dumps({**PRESET, "customManagers": [manager]}),
+                "default.json": json.dumps(
+                    {**PRESET, "customManagers": [manager], "packageRules": [short]},
+                ),
             },
         )
         self.assertEqual(status, 0)
@@ -637,7 +845,7 @@ class TestMainGuards(unittest.TestCase):
         green when it is removed, with no change to the preset either
         side.
         """
-        name = "n" * 30
+        name = "n" * 15
         tree = {
             "renovate.json": "{}\n",
             "default.json": json.dumps(PRESET),
@@ -658,6 +866,47 @@ class TestMainGuards(unittest.TestCase):
         status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
         self.assertEqual(status, 1)
         self.assertIn("would mint a subject past 72 columns", err)
+
+    def test_the_advisory_subject_reaches_the_end_to_end_verdict(self) -> None:
+        """A dependency that fits ordinarily and not with the suffix.
+
+        The whole of #686 driven through main(): the tree is green under
+        the ordinary subject alone and red once the sixth field is
+        modelled, and one topic rule in the preset turns it back.
+        """
+        name = "n" * 30
+        tree = {
+            "renovate.json": "{}\n",
+            "default.json": json.dumps(PRESET),
+            "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
+        }
+        status, _, err = self._run(tree)
+        self.assertEqual(status, 1)
+        self.assertIn(SUFFIX, err)
+        self.assertIn("would mint a subject past 72 columns", err)
+
+        short = {
+            "matchPackageNames": [name],
+            "commitMessageTopic": "n" * 29,
+        }
+        status, out, _ = self._run(
+            {**tree, "default.json": json.dumps({**PRESET, "packageRules": [short]})},
+        )
+        self.assertEqual(status, 0)
+        self.assertIn("fits 72 columns", out)
+
+    def test_a_preset_with_no_advisory_suffix_stops_the_task(self) -> None:
+        """The sixth field answers the same law as the other five."""
+        thin = {k: v for k, v in PRESET.items() if k != "vulnerabilityAlerts"}
+        with self.assertRaises(SystemExit) as caught:
+            self._run(
+                {
+                    "renovate.json": "{}\n",
+                    "default.json": json.dumps(thin),
+                    "mise.toml": '[tools]\nruff = "0.16.2"\n',
+                },
+            )
+        self.assertIn("commitMessageSuffix", str(caught.exception))
 
     def test_an_incomplete_template_stops_the_task(self) -> None:
         """A preset missing a field errors; it does not quietly assume."""
