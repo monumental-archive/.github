@@ -476,6 +476,57 @@ dir = "{{cwd}}"
 depends = ["fix:*"]
 run = "echo 'fix: all fixers applied'"
 
+[tasks.audit]
+description = "Run this repository's OWN audit:* tasks (the caller half of the audit surface)"
+dir = "{{cwd}}"
+# The third member of the `ci` / `fix` trio, and the one the org went
+# without (#704). `ci` collects `lint:*` by wildcard, so a repo adds a
+# deterministic check and the gate runs it with no workflow change.
+# There was no such collection on the audit side: repo-audit.yml named
+# belt legs one by one and every one of them was a BELT task, so a task
+# a consumer defined in its own mise.toml was run by nothing, ever. The
+# failure mode was silence — `mise run` finds the task, and no cron
+# calls it.
+#
+# NOT `depends = ["audit:*"]`, which is the obvious symmetry and is
+# wrong here: the belt arrives as mise's global config, so its own two
+# dozen audit tasks are visible to every consumer and the wildcard
+# would re-run the belt's legs inside the leg collecting them. Which
+# tasks are the CALLER's is derived once, in own-audits.sh — by the
+# file that defines them, NOT by mise's `global` flag, which reports
+# how a config was loaded and calls the belt's own tasks non-global in
+# the canon (own-audits.sh carries the measurement).
+#
+# EVERY TASK RUNS, THEN THE FAILURES ARE REPORTED. Failing fast would
+# let one red task hide the rest — and the belt's own legs do not hide
+# each other, because they are separate GitHub jobs. Collecting into
+# one job would have quietly lost that property, so it is restored by
+# hand here. Nothing is continue-on-error: measured while building
+# this, `continue-on-error` appears nowhere in repo-audit.yml or
+# audit.yml, so there is no per-leg tolerance ruling for a collected
+# task to be inconsistent with. A red audit task reds the audit.
+run = '''
+. "${ORG_BELT_DIR}/own-audits.sh"
+tasks=$(own_audit_tasks)
+if [[ -z ${tasks} ]]; then
+  echo "audit: no repo-defined audit:* tasks, skipped"
+  exit 0
+fi
+failed=""
+count=0
+while IFS= read -r t; do
+  [[ -n ${t} ]] || continue
+  count=$((count + 1))
+  echo "audit: running ${t}"
+  mise run "${t}" || failed="${failed} ${t}"
+done <<< "${tasks}"
+if [[ -n ${failed} ]]; then
+  echo "audit: repo-defined audit task(s) failed:${failed}" >&2
+  exit 1
+fi
+echo "audit: ${count} repo-defined audit task(s), all green"
+'''
+
 [tasks."hooks:install"]
 description = "Wire this clone's git hooks to lefthook (run once per clone)"
 dir = "{{cwd}}"
@@ -5842,33 +5893,99 @@ dir = "{{cwd}}"
 # generated: generating audit.yml from the task list would mean
 # templating workflow YAML, and audit legs legitimately carry per-leg
 # permissions and env the task list cannot express.
+#
+# TWO HALVES, and the split is what #704 corrected. This lint used to
+# open with `[[ -f mise/config.toml ]] || exit 0` — so it enforced "a
+# check nobody runs is no check" on exactly the one repository where
+# that was already true, and exempted every repository where it was
+# not. The asymmetry was invisible from inside the canon, which was the
+# only place the lint ran.
+#
+# Half 1 is the BELT's audit tasks. It stays guarded on mise/config.toml
+# and that guard now has a stated reason rather than being a silent
+# exemption: those tasks are DEFINED in that file and no consumer
+# carries it, so outside the canon the half has no subject, not a
+# waived one.
+#
+# Half 2 is this repository's OWN audit tasks, and it runs everywhere.
+# A repo-defined audit task is satisfied by a workflow that runs it
+# directly, or by one that calls repo-audit.yml — whose collecting leg
+# runs every audit:* the caller defines (#704). Naming repo-audit.yml
+# as a satisfying answer is not a loophole: it is the mechanism that
+# made the property true for consumers in the first place.
 run = '''
-[[ -f mise/config.toml ]] || {
-  echo "lint:audit-scheduled: not the canon, skipped"
-  exit 0
-}
-bad=""
-count=0
-audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
-  | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/')
-while IFS= read -r t; do
-  [[ -n ${t} ]] || continue
-  count=$((count + 1))
-  grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
-    || bad="${bad} audit:${t}"
-done <<< "${audits}"
-[[ ${count} -gt 0 ]] || {
-  echo "lint:audit-scheduled: zero audit tasks enumerated — the grep is broken" >&2
-  exit 1
-}
-if [[ -n ${bad} ]]; then
-  echo "lint:audit-scheduled: audit task(s) no workflow ever runs:${bad}" >&2
-  echo "  schedule each in .github/workflows/ (audit.yml, publish.yml or" >&2
-  echo "  repo-audit.yml) or delete the task — a check nobody runs is a" >&2
-  echo "  claim, not a check (#358 seam 1)." >&2
+status=0
+
+if [[ -f mise/config.toml ]]; then
+  bad=""
+  count=0
+  audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
+    | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/')
+  while IFS= read -r t; do
+    [[ -n ${t} ]] || continue
+    count=$((count + 1))
+    grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
+      || bad="${bad} audit:${t}"
+  done <<< "${audits}"
+  if [[ ${count} -eq 0 ]]; then
+    echo "lint:audit-scheduled: zero belt audit tasks enumerated — the grep is broken" >&2
+    status=1
+  elif [[ -n ${bad} ]]; then
+    echo "lint:audit-scheduled: belt audit task(s) no workflow ever runs:${bad}" >&2
+    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml or" >&2
+    echo "  repo-audit.yml) or delete the task — a check nobody runs is a" >&2
+    echo "  claim, not a check (#358 seam 1)." >&2
+    status=1
+  else
+    echo "lint:audit-scheduled: ${count} belt audit task(s), every one scheduled"
+  fi
+fi
+
+. "${ORG_BELT_DIR}/own-audits.sh"
+own=$(own_audit_tasks)
+if [[ -z ${own} ]]; then
+  echo "lint:audit-scheduled: this repository defines no audit:* of its own"
+  exit "${status}"
+fi
+if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+  echo "lint:audit-scheduled: repo-defined audit task(s) and NO workflows at all:" >&2
+  while IFS= read -r t; do
+    [[ -n ${t} ]] && echo "    ${t}" >&2
+  done <<< "${own}"
+  echo "  wire the audit stub (workflow-templates/audit.yml) — it calls" >&2
+  echo "  repo-audit.yml, whose collecting leg runs every audit:* this" >&2
+  echo "  repository defines (#704)." >&2
   exit 1
 fi
-echo "lint:audit-scheduled: ${count} audit task(s), every one scheduled"
+. "${ORG_BELT_DIR}/identity.sh"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
+canon_re="${canon//./\\.}"
+collected=0
+grep -rEq "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/repo-audit\.ya?ml" \
+  .github/workflows/ && collected=1
+missing=""
+own_count=0
+while IFS= read -r t; do
+  [[ -n ${t} ]] || continue
+  own_count=$((own_count + 1))
+  [[ ${collected} -eq 1 ]] && continue
+  grep -rEq "mise run ${t}([^a-z-]|$)" .github/workflows/ || missing="${missing} ${t}"
+done <<< "${own}"
+if [[ -n ${missing} ]]; then
+  echo "lint:audit-scheduled: repo-defined audit task(s) no workflow runs:${missing}" >&2
+  echo "  wire the audit stub (workflow-templates/audit.yml), which calls" >&2
+  echo "  repo-audit.yml and collects every audit:* this repository defines," >&2
+  echo "  or run each from a workflow here — or delete the task. A check" >&2
+  echo "  nobody runs is a claim, not a check (#358 seam 1, #704)." >&2
+  status=1
+elif [[ ${collected} -eq 1 ]]; then
+  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), collected by repo-audit.yml"
+else
+  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), each run by a workflow here"
+fi
+exit "${status}"
 '''
 
 [tasks."lint:canon-policy"]
