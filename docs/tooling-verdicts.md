@@ -455,11 +455,12 @@ audit tasks parsing GitHub API responses, `fix:tracks`, and
 in the same position as `python3` and `curl`: a hard dependency of the
 gate, satisfied by whatever the machine happened to have.
 
-The interesting part is why nobody noticed. `lint:belt-available` looks
-like the check that would catch it, and is not: its tool list is
-**hand-maintained**, so it proves the tools someone remembered to list
-are present, and says nothing about the tools a task actually invokes.
-jq was never missed by a check; there was no check.
+The interesting part is why nobody noticed. The belt's availability
+canary looked like the check that would catch it, and was not: its tool
+list was **hand-maintained**, so it proved the tools someone remembered
+to list were present, and said nothing about the tools a task actually
+invokes. jq was never missed by a check; there was no check. That canary
+has since been deleted for exactly this, the entry below.
 
 **The obvious fix does not work, and the attempt is recorded so it is not
 retried blind.** A lint that parses task bodies, extracts invoked
@@ -480,6 +481,67 @@ empty value and a green line — the vacuous-success class the
 audit-claims contract exists to forbid. Not blanket-fixable, since many
 of those filters legitimately yield nothing and are checked by the
 surrounding bash; it wants a per-site pass.
+
+**`lint:belt-available` — deleted; the disposal is the record** (#658,
+2026-08-21). The belt's availability canary is gone. It is written up
+here on the revoke-in-place precedent (#619, #646) rather than vanishing
+with its lines, because "the belt checks that its own tools are present"
+is precisely the claim a stranger expects to find, and would re-propose
+from scratch. Both halves died, for different reasons, both measured on
+canon main at `511af95`:
+
+- **The tool list was a hand restatement of a declaration that already
+  existed.** The description promised that *every* belt tool resolves;
+  the loop named **19** tools against a `[tools]` table declaring
+  **34**. Nothing joined the two, so it drifted the way restatements
+  drift. `ruff` happened to be on the list and was caught once (#603);
+  the **15** that never were are `uv`, `lychee`, `python`, `stele`,
+  `cosign`, `gitsign`, `hadolint`, `gitleaks`, `sqlfluff`, `yamllint`,
+  `editorconfig-checker`, `typescript-go`, `cargo-llvm-cov`,
+  `cargo-machete` and `cargo-semver-checks`.
+- **The layer check's premise had been eliminated at the root.** Its
+  comment said an absent belt makes every guarded lint task "skip
+  clean" so the gate goes green having checked nothing. That was true
+  at #445 and is not true now. The belt holds **42** `command -v`
+  guards and every one of them ends in `exit 1` with a pointed message
+  — the 42nd being this canary's own loop. `command -v` is the belt's
+  only tool-presence idiom: no `which`, `type -p`, `hash` or `[[ -x ]]`
+  probe appears anywhere in a task body. And every `exit 0` skip in the
+  belt is keyed on FILES — no `go.mod`, no `Cargo.toml`, no tracked
+  shell — which is *applicability*, a different axis. So: **no belt
+  task skips on a missing tool.** A missing tool either meets an
+  explicit `exit 1` or dies as `command not found` under
+  `set -euo pipefail`.
+
+An absent belt is not quiet either, because `ci` is itself belt-defined.
+In a consumer tree with `MISE_GLOBAL_CONFIG_FILE=/dev/null` and no
+`conf.d` carrier, `mise run ci` exits 1 with `mise ERROR unknown
+command: ci` (mise 2026.8.3) — there is no gate left to go green. The
+canon's own checkout cannot reach that state at all, because mise loads
+`mise/config.toml` from a project root as a local config: the same
+filename fact the belt is named for.
+
+**The one real loss, recorded so nobody rediscovers it as a surprise.**
+The canary's message was friendlier than the failures that replace it —
+it named both carriers and said which to fix. `unknown command: ci` is
+loud and terser. The messages that used to defer to it by name
+(`identity.sh`, `committed.sh`, `subject-budget.py` twice,
+`audit:go-vulns`) now state both carriers in place, so the guidance
+survives at the points a reader actually meets it.
+
+**This is not a verdict against canaries as a class**, and the contrast
+is the whole reason to record it. `audit:blast-radius` pins a
+known-vulnerable canary package with the opposite epistemics: a positive
+control that goes RED when detection silently breaks, where "a zero
+population or a missed canary is CANNOT_JUDGE, never PASS". A canary
+whose absence is a failure is sound. `lint:belt-available` went GREEN
+when nothing had been checked — the #82 defect it was itself the
+evidence for, since shellcheck sat on its list, present and green, while
+no task ran it. Same word, opposite direction; leave the good one alone.
+
+*Reopen:* a belt task found to *skip* rather than fail on a missing
+tool. That would restore the failure mode the canary existed for, and
+reopens the delete-or-derive fork #658 closed on the measurement above.
 
 **uv, adjudicated late — it entered as an implementation detail and was
 never stood up** (#82). uv arrived inside the `reuse` adoption as "the

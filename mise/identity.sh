@@ -10,7 +10,7 @@
 # Fails closed with the field named: an identity the reader cannot
 # produce is a refusal, never a default or a silent skip (#568).
 org_identity() { # usage: org_identity <field> -> value on stdout
-  local file="${ORG_CANON_DIR:?ORG_CANON_DIR unset — the belt did not arrive (lint:belt-available)}/security/identity.toml"
+  local file="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}/security/identity.toml"
   if [[ ! -f ${file} ]]; then
     echo "identity: ${file} missing — a tree carrying the belt owes the identity declaration (#579, lint:canon-policy)" >&2
     return 1
