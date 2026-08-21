@@ -198,6 +198,114 @@ class TestEffective(unittest.TestCase):
             self.assertIn(field, str(caught.exception))
 
 
+class TestRepoRules(unittest.TestCase):
+    """The repo's own packageRules, folded in after the preset's (#677).
+
+    Both directions per #650. The narrowing direction was already true
+    by accident before this existed — `fix(deps):` is two columns under
+    `chore(deps):` — so it is the WIDENING rows that carry the proof:
+    the preset-only model went green on a subject Renovate cannot mint
+    inside the ceiling, and that is the state #576 exists to forbid.
+    """
+
+    def test_no_repo_rules_is_the_preset_only_model(self) -> None:
+        """The default argument leaves the resolution exactly as it was.
+
+        Fail-SAFE by construction: a caller that supplies nothing gets
+        the over-estimating model rather than a silently narrower one.
+        """
+        rules = [{"matchPackageNames": ["*"], "commitMessageTopic": "kept"}]
+        config = preset(packageRules=rules)
+        self.assertEqual(
+            sb.effective(config, dep("ruff")),
+            sb.effective(config, dep("ruff"), []),
+        )
+
+    def test_a_repo_rule_narrows_a_preset_field(self) -> None:
+        """#668's live case, followed down.
+
+        The canon takes `fix` where the preset says `chore`, and the
+        model must resolve to the narrower prefix rather than the
+        preset's.
+        """
+        repo = [{"matchManagers": ["mise"], "semanticCommitType": "fix"}]
+        config = sb.effective(preset(), dep("ruff"), repo)
+        self.assertEqual(config["semanticCommitType"], "fix")
+
+    def test_a_repo_rule_widens_a_preset_field(self) -> None:
+        """THE direction that matters.
+
+        A widening repo rule is modelled wide, not at the preset's
+        narrower value — the row the preset-only model got wrong.
+        """
+        repo = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "a" * 40}]
+        config = sb.effective(preset(), dep("ruff"), repo)
+        self.assertEqual(config["commitMessageTopic"], "a" * 40)
+
+    def test_a_repo_rule_resolves_after_every_preset_rule(self) -> None:
+        """Ordering is not a choice.
+
+        Repo config resolves after an extended preset, so the repo's
+        rule appends to the preset's list and wins the field they
+        both set.
+        """
+        rules = [{"matchPackageNames": ["*"], "commitMessageTopic": "preset-last"}]
+        repo = [{"matchPackageNames": ["*"], "commitMessageTopic": "repo"}]
+        config = sb.effective(preset(packageRules=rules), dep("ruff"), repo)
+        self.assertEqual(config["commitMessageTopic"], "repo")
+
+    def test_later_wins_within_the_repo_list_too(self) -> None:
+        """The canon's loop guard is last in its own list and must win."""
+        repo = [
+            {"matchManagers": ["mise"], "semanticCommitType": "fix"},
+            {
+                "matchPackageNames": ["monumental-archive/.github"],
+                "semanticCommitType": "chore",
+                "semanticCommitScope": "canon",
+            },
+        ]
+        config = sb.effective(preset(), dep("monumental-archive/.github"), repo)
+        self.assertEqual(config["semanticCommitType"], "chore")
+        self.assertEqual(config["semanticCommitScope"], "canon")
+
+    def test_a_repo_rule_that_does_not_select_changes_nothing(self) -> None:
+        """Selection is unchanged; only the list it walks grew."""
+        repo = [{"matchPackageNames": ["rumdl"], "commitMessageTopic": "other"}]
+        config = sb.effective(preset(), dep("ruff"), repo)
+        self.assertEqual(config["commitMessageTopic"], "{{depName}}")
+
+    def test_a_repo_rule_may_not_be_the_only_place_a_field_is_written(
+        self,
+    ) -> None:
+        """The absent-field error sits BETWEEN the two lists.
+
+        That placement is the rule: a repo may override a field the
+        preset sets, never supply one it does not. Otherwise a consumer
+        that does not extend the canon inherits nothing and the hard
+        error stops meaning what it says.
+        """
+        thin = preset()
+        del thin["commitMessageAction"]
+        repo = [{"matchPackageNames": ["*"], "commitMessageAction": "bump"}]
+        with self.assertRaises(SystemExit) as caught:
+            sb.effective(thin, dep("ruff"), repo)
+        self.assertIn("commitMessageAction", str(caught.exception))
+
+    def test_judge_goes_red_on_a_widening_repo_rule_and_green_without(
+        self,
+    ) -> None:
+        """Plant and measure, both directions, through the real judge."""
+        row = [dep("ruff", "v1.0.0")]
+        limit = width_of("ruff", "v1.0.0")
+        self.assertEqual(sb.judge(row, PRESET, limit, []), [])
+        widen = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "ruff-x"}]
+        findings = sb.judge(row, PRESET, limit, [], widen)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].width, limit + 2)
+        narrow = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "rf"}]
+        self.assertEqual(sb.judge(row, PRESET, limit, [], narrow), [])
+
+
 class TestRender(unittest.TestCase):
     """Subject composition, substitution, and the unmodelled report."""
 
@@ -521,6 +629,35 @@ class TestMainGuards(unittest.TestCase):
         )
         self.assertEqual(status, 0)
         self.assertIn("1 dependency", out)
+
+    def test_a_repo_rule_reaches_the_end_to_end_verdict(self) -> None:
+        """The whole point, driven through main().
+
+        The same dependency goes red under a widening repo rule and
+        green when it is removed, with no change to the preset either
+        side.
+        """
+        name = "n" * 30
+        tree = {
+            "renovate.json": "{}\n",
+            "default.json": json.dumps(PRESET),
+            "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
+        }
+        status, out, _ = self._run(tree)
+        self.assertEqual(status, 0)
+        self.assertIn("fits 72 columns", out)
+
+        widen = {
+            "packageRules": [
+                {
+                    "matchPackageNames": [name],
+                    "commitMessageTopic": "{{depName}}-and-then-some-more",
+                },
+            ],
+        }
+        status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
+        self.assertEqual(status, 1)
+        self.assertIn("would mint a subject past 72 columns", err)
 
     def test_an_incomplete_template_stops_the_task(self) -> None:
         """A preset missing a field errors; it does not quietly assume."""
