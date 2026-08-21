@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.57.3](https://github.com/monumental-archive/.github/compare/v1.57.2...v1.57.3) - 2026-08-21
+
+### Fixed
+
+- derive where the previous package tree is, once ([#781](https://github.com/monumental-archive/.github/pull/781))
+
 ## [1.57.2](https://github.com/monumental-archive/.github/compare/v1.57.1...v1.57.2) - 2026-08-21
 
 ### Fixed
