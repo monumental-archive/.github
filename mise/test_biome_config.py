@@ -472,6 +472,66 @@ class TestFileOverrideTest(unittest.TestCase):
         self.assertIn("overrides", problems[0])
 
 
+class ConditionalExpectTest(unittest.TestCase):
+    """The one nursery rule the org switches off by name (#788).
+
+    Eight findings on the first real tree, eight false positives, one of
+    them in production code — the door's `assert` VERB read as a test
+    assertion, which no test-glob override could reach. Off with an
+    expiry at biomejs/biome#11455.
+    """
+
+    RULE = "noConditionalExpect"
+
+    def setUp(self) -> None:
+        """Read the delivered config, not a copy of it."""
+        self.org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        self.nursery = self.org["linter"]["rules"]["nursery"]
+
+    def test_the_rule_is_off_against_the_literal(self) -> None:
+        """Asserted against "off" itself, never against a constant."""
+        self.assertEqual(self.nursery[self.RULE], "off")
+
+    def test_the_rule_is_still_named(self) -> None:
+        """`preset: "all"` never reaches nursery, so the 87 names are the list.
+
+        Deleting the name would leave the rule off by accident rather
+        than by decision, and indistinguishable from one nobody ruled on.
+        """
+        self.assertIn(self.RULE, self.nursery)
+        self.assertIn(self.RULE, NURSERY)
+
+    def test_its_domain_is_org_fixed_so_no_repo_can_move_it(self) -> None:
+        """`test` is org strictness; a repository cannot claim or lower it."""
+        self.assertEqual(NURSERY[self.RULE], "test")
+        self.assertIn(NURSERY[self.RULE], DELIVERED.org)
+        self.assertNotIn(NURSERY[self.RULE], DELIVERED.identity)
+
+    def test_no_repository_identity_turns_it_back_on(self) -> None:
+        """The generator only ever writes "off"; assert it never writes "on"."""
+        for claimed in (set(), {"react"}, set(DELIVERED.identity)):
+            with self.subTest(claimed=sorted(claimed)):
+                config, _silenced = biome_config.generate(
+                    self.org,
+                    claimed,
+                    DELIVERED,
+                    NURSERY,
+                )
+                rule = config["linter"]["rules"]["nursery"][self.RULE]
+                self.assertEqual(rule, "off")
+
+    def test_it_is_not_in_the_test_file_override(self) -> None:
+        """The reason it is off org-wide: one of the eight is production code.
+
+        `apps/door/src/submit.ts:176` — a local `assert` verb, not a test
+        assertion. #783's globs would never have reached it.
+        """
+        for entry in self.org["overrides"]:
+            with self.subTest(includes=entry["includes"]):
+                rules = entry.get("linter", {}).get("rules", {})
+                self.assertNotIn(self.RULE, rules.get("nursery", {}))
+
+
 class NurseryTableTest(unittest.TestCase):
     """The delivered rule-to-domain table, and what the generator does with it."""
 

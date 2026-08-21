@@ -29,7 +29,7 @@
       "nursery": {
         "noBaseToString": "on",
         "noComponentHookFactories": "on",
-        "noConditionalExpect": "on",
+        "noConditionalExpect": "off",
         "noDrizzleDeleteWithoutWhere": "on",
         "noDrizzleUpdateWithoutWhere": "on",
         "noDuplicateFieldDefinitionNames": "on",

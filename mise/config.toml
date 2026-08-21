@@ -1136,6 +1136,67 @@ dir = "{{cwd}}"
 # matching any of the three globs, which is the same standing caveat as
 # every other biome rule here (#82).
 #
+# `nursery/noConditionalExpect` IS OFF ORG-WIDE, and this is the org
+# accepting the loss of a detector rather than the loss of a true
+# positive (#788). Eight findings on monumental-archive at 43df3482,
+# eight false positives, re-derived site by site against the pinned
+# 2.5.7 rather than taken from the issue:
+#
+#   apps/door/src/submit.ts:176        PRODUCTION — the door's `assert`
+#                                      VERB read as a test assertion
+#   apps/door/test/matrix.test.ts:224  try/catch, BOTH branches assert
+#   apps/door/test/matrix.test.ts:227  "
+#   apps/door/test/matrix.test.ts:229  "
+#   apps/door/test/matrix.test.ts:324  " — the try ends in
+#                                      `throw new Error("unreachable")`
+#   apps/door/test/matrix.test.ts:325  "
+#   apps/door/test/boundary.test.ts:682  filtered universal assertion
+#   apps/door/test/replay.test.ts:925    "
+#
+# The rule cannot tell a FILTER from a BRANCH. "For every act with a
+# null payload, assert a tombstone exists" is vacuously true when no act
+# qualifies, which is the correct meaning; a branch that might never be
+# taken is the defect. Both are `if (…) expect(…)`. And where every
+# branch of a try/catch asserts, no path is silent — at 324 the `try`
+# ends in an unconditional `throw`, so the `catch` is guaranteed.
+#
+# A TEST-GLOB OVERRIDE CANNOT CONTAIN THIS, which is why it is not in
+# #783's entry: the first site is in `apps/door/src`. The `test` domain
+# is org-fixed at "all" and is enabled by a `vitest` devDependency, so
+# the rule reaches every file in the project, and the defect is not
+# file-shaped. Per-site suppression is refused for the other reason —
+# a rule wrong as a CLASS suppressed at every site is the waiver #694
+# refused, and the vacuous-assertion class it exists for was not found
+# anywhere on the tree.
+#
+# THE COST IS REAL AND IS PLANTED, not asserted. A genuinely vacuous
+# test — `try { await doThing() } catch (e) { expect(…) }`, which
+# passes having run no assertion at all when the call succeeds — is
+# reported with the rule on and SILENT with it off. The org is losing a
+# detector that had zero true positives and one production false
+# positive on the first real tree it met, and that trade is the whole
+# ruling; it is not a claim that the rule detects nothing.
+#
+# THIS EXCLUSION HAS AN EXPIRY, the difference between an exception and
+# scar tissue: reported upstream as
+# https://github.com/biomejs/biome/issues/11455 — searched first
+# (`noConditionalExpect in:title` returned nothing), confirmed on the
+# pinned 2.5.7 with a minimal reproduction of both classes, and with
+# the control that renaming the imported `assert` to `applyVerb` clears
+# the production finding while changing nothing else. The rule returns
+# when biome (a) stops reporting a try/catch in which every branch
+# asserts and (b) stops reading a call whose callee is not an assertion
+# import as an assertion — its own sibling `noMisplacedAssertion`
+# already carries the import allowlist that would fix (b), and in the
+# same run is silent on the file this rule reports. `audit:biome-rules`
+# keeps the watch on the other direction.
+#
+# The rule is NAMED "off" rather than deleted from the block on
+# purpose: `preset: "all"` does not reach nursery, so the org's 87
+# names are an enable-list, and a deleted name is indistinguishable
+# from a rule nobody has ruled on. `lint:biome-domains` holds the block
+# against `biome-nursery-domains.tsv` in both directions.
+#
 # TWO SAFE FIXES WERE NOT SAFE, and the belt now says so in the config
 # rather than trusting biome's own classification (#758).
 #
@@ -1234,7 +1295,9 @@ dir = "{{cwd}}"
 # rule in the org-fixed domains, are untouched. Measured on the fixture:
 # noReactNativeRawText 1 → 0, useExplicitType 33 → 33,
 # noConditionalExpect 8 → 8, and no measurable time added (20 generator
-# runs, 0.818s either way).
+# runs, 0.818s either way). That org-fixed-domain control is off since
+# #788, so the live one is `useConsistentTestIt` — `test` domain, 2 → 2
+# on the same fixture whether or not the repo claims react.
 #
 # One rule the domains cannot reach, recorded so its absence is not read
 # as an oversight: `noNodejsModules` has NO domain at all (`biome

@@ -36,7 +36,7 @@ honestly blocked on.
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Two more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Two more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
@@ -1197,6 +1197,63 @@ against the control that `test.each` (fixed in biomejs/biome#10680) is
 clean in the same run. Same library as #11453: two rules, one
 unrecognised test API.
 
+**A detector with zero true positives, switched off** (#788).
+`nursery/noConditionalExpect` produced 8 findings on the same tree and
+all 8 are false, re-derived site by site against the pinned 2.5.7:
+
+| site | what it actually is |
+|---|---|
+| `apps/door/src/submit.ts:176` | **production code** — the door's `assert` VERB read as a test assertion |
+| `matrix.test.ts:224,227,229,324,325` | `try`/`catch` where **both** branches assert; at 324 the `try` ends in `throw new Error("unreachable")`, so the `catch` is guaranteed |
+| `boundary.test.ts:682`, `replay.test.ts:925` | `expect` under a **filter over data**, not a control-flow branch |
+
+The rule cannot tell a filter from a branch — "for every act with a null
+payload, assert a tombstone exists" is vacuously true when no act
+qualifies, which is the correct meaning, and it looks identical to a
+branch that might never be taken. And the vacuous-assertion class the
+rule exists to catch was not found anywhere on the tree.
+
+**#783's test-file override could not have contained this**, which is
+why the two are separate rulings: the first site is in `apps/door/src`.
+The `test` domain is org-fixed at `"all"` and is switched on by a
+`vitest` devDependency, so the rule reaches every file in the project,
+and the defect is not file-shaped. Per-site suppression is refused for
+the other reason — a rule wrong as a class, suppressed at every site, is
+the waiver #694 refused.
+
+**The cost is planted rather than asserted, and it is a real cost.** A
+genuinely vacuous test — `try { await doThing() } catch (e) { expect(…) }`
+— which passes having run no assertion at all when the call succeeds, is
+reported with the rule on and **silent** with it off. The org is losing
+a detector; what it is not losing is a true positive, because on the
+first real tree the rule met there were none, and there was one false
+positive in production code.
+
+**The exclusion carries an expiry.** Reported upstream as
+[biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) —
+searched first (`noConditionalExpect in:title` returned nothing),
+confirmed on the pinned 2.5.7 with a minimal reproduction of both
+classes and the control that renaming the imported `assert` to
+`applyVerb` clears the production finding while changing nothing else.
+The rule returns when biome stops reporting a `try`/`catch` in which
+every branch asserts, and stops reading a call whose callee is not an
+assertion import as an assertion — its own sibling
+`noMisplacedAssertion` already carries the import allowlist that would
+fix the second, and in the same run is silent on the file this rule
+reports:
+
+| import of `assert` | `noMisplacedAssertion` | `noConditionalExpect` |
+|---|---|---|
+| `./verb.js` (local) | clean | **reports** |
+| `node:assert` | reports | reports |
+
+The rule is **named `"off"` rather than deleted** from the nursery
+block: `preset: "all"` does not reach nursery, so the org's 87 names are
+an enable-list, and a deleted name is indistinguishable from a rule
+nobody has ruled on. `lint:biome-domains` holds the block against
+`biome-nursery-domains.tsv` in both directions, and `audit:biome-rules`
+keeps the watch.
+
 **Two org controls demanded the opposite edit on the same line**
 (#759). `complexity/useLiteralKeys` wants `row["id"]` written `row.id`.
 `noPropertyAccessFromIndexSignature` — an org tsc dial, named in
@@ -1261,7 +1318,9 @@ exactly how this escaped the first time.
 Measured after: `noReactNativeRawText` 1 → 0; `useExplicitType` 33 and
 `useUnicodeRegex` 30 unchanged, which is the proof that domainless rules
 still run everywhere; `noConditionalExpect` 8 unchanged, the proof that
-the org-fixed domains are untouched. A repo claiming nothing silences
+the org-fixed domains are untouched — that rule is off since #788, so
+the reproducible control is now `useConsistentTestIt`, `test` domain,
+2 unchanged on the same fixture. A repo claiming nothing silences
 34 rules, one claiming `react` silences 28, and the difference is
 exactly react's own six.
 
