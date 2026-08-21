@@ -719,7 +719,11 @@ attestation subject. This is the format OSPS VM-04.02 asks for.
 `CARGO_ENCODED_RUSTFLAGS`), `CARGO_INCREMENTAL=0`,
 `CARGO_CACHE_RUSTC_INFO=0`, `SOURCE_DATE_EPOCH`, and profile determinism via
 `CARGO_PROFILE_<name>_*`. Note `CARGO_PROFILE_RELEASE_STRIP=false`:
-stripping discards the section `cargo-auditable` writes.
+stripping discards the section `cargo-auditable` writes. And
+`CARGO_PROFILE_RELEASE_LTO=fat`: the release default `lto = false` is
+thin *local* LTO across the profile's codegen units, which was measured
+not to reproduce (#778) — `codegen-units = 1` does not substitute for
+it, and upstream rust-lang/rust#126976 is the open bug this sidesteps.
 
 **`slsa-github-generator` is deprecated** as of 2026-08-07 — "no longer
 actively maintained", pointing users to GitHub artifact attestations, with
