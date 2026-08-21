@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.57.0](https://github.com/monumental-archive/.github/compare/v1.56.0...v1.57.0) - 2026-08-21
+
+### Added
+
+- give continuous a dependency commit point (#717) ([#765](https://github.com/monumental-archive/.github/pull/765))
+
+### Fixed
+
+- derive the pgrx upgrade baseline from the extension ([#766](https://github.com/monumental-archive/.github/pull/766))
+- turn useLiteralKeys off, it contradicts a tsc dial (#759) ([#763](https://github.com/monumental-archive/.github/pull/763))
+
 ## [1.56.0](https://github.com/monumental-archive/.github/compare/v1.55.1...v1.56.0) - 2026-08-21
 
 ### Added
