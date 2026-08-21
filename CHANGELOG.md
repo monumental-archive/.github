@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.51.1](https://github.com/monumental-archive/.github/compare/v1.51.0...v1.51.1) - 2026-08-21
+
+### Fixed
+
+- mint fix for the canon's shipped managers ([#675](https://github.com/monumental-archive/.github/pull/675))
+
+### CI
+
+- warm the unsigned gate's toolchain cache ([#674](https://github.com/monumental-archive/.github/pull/674))
+
+### Dependencies
+
+- update jdx/mise to 2026.8.10 ([#663](https://github.com/monumental-archive/.github/pull/663))
+- update dependency ruff to v0.16.3 ([#603](https://github.com/monumental-archive/.github/pull/603))
+- update trivy to 0.74.0 ([#664](https://github.com/monumental-archive/.github/pull/664))
+- lock file maintenance ([#665](https://github.com/monumental-archive/.github/pull/665))
+
 ## [1.51.0](https://github.com/monumental-archive/.github/compare/v1.50.0...v1.51.0) - 2026-08-20
 
 ### Added
