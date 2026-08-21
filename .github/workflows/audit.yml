@@ -1,6 +1,34 @@
 # Scheduled, network-touching checks — everything the deterministic gate
 # deliberately excludes. Failures here page via the Actions UI/notifications
 # rather than blocking merges.
+#
+# WHAT BELONGS HERE RATHER THAN IN repo-audit.yml, stated once because a
+# leg landing on the wrong side of it is invisible from inside the canon
+# (#704). A leg belongs here when its subject is the ORG or a
+# CANON-OWNED artefact: it enumerates the population (adoption,
+# org-pins, drafts, release-tags, signer-surface, caller-permissions,
+# source-vsa, attestations, blast-radius, badges), reads an org setting
+# (actions-allowlist), or reads something only this repository holds —
+# the belt's own config (biome-rules), the workflow templates
+# (template-pins), the pinned SLSA matrix (spec-drift). Those guard on
+# a canon-owned artefact, and lint:canon-policy (#579) is the join that
+# stops a deleted one turning them into silent skips — for the paths it
+# holds. It holds three, so the join has gaps: `docs`, `security/vex`
+# and `slsa/spec-source-matrix.txt` are guarded on and held by nothing.
+# Measured while classifying these legs for #704 and filed as #738,
+# rather than asserted away here.
+#
+# A leg belongs in repo-audit.yml when its subject is a REPOSITORY'S OWN
+# TREE — `git ls-files`, `.github/workflows/`, the lockfile. That test
+# is what #681 and #704 applied: links, actions and action-pins were
+# scheduled here, walked whatever tree they ran in, and so had only ever
+# audited this one. They keep their jobs here as well, because this
+# repository is also a repository: it does not call repo-audit.yml, so
+# these are how its OWN tree is walked.
+#
+# audit:canon-pins stays here and is the one deliberate exception: it IS
+# tree-local, and audit:org-pins performs the same check for every repo
+# from this side, which is where someone looks (#310 finding 1).
 ---
 name: audit
 
