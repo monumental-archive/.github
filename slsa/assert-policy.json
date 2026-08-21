@@ -14,6 +14,11 @@
         "reason": "publishes no releases; it is the signing workflow repository"
       },
       {
+        "repo": "monumental-archive",
+        "tracks": [],
+        "reason": "excluded, not excepted: the private application the organisation exists to serve publishes nothing and consumes the org's artifacts, so no SLSA track applies, it owes no evidence and it bears no board cell — it is accounted for by name here so the reconciliation against the org listing does not read it as an unlisted repository, and so the roster-reading walks that ask no track question (assert permissions) still cover it (#672)"
+      },
+      {
         "repo": "monumental-archive-ledger",
         "tracks": [],
         "reason": "excluded, not excepted: the public anchor for the archive's ledger checkpoint chain publishes no artifact and makes no SLSA claim, so no track applies and it bears no board cell — it is accounted for by name here so the reconciliation against the org listing does not read it as an unlisted repository (#673)"
