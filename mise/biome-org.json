@@ -80,7 +80,10 @@
         "useArraySome": "on",
         "useAwaitThenable": "on",
         "useBaseline": "on",
-        "useConsistentTestIt": "on",
+        "useConsistentTestIt": {
+          "level": "on",
+          "fix": "none"
+        },
         "useDisposables": "on",
         "useDomNodeTextContent": "on",
         "useDomQuerySelector": "on",
@@ -118,6 +121,14 @@
       "preset": "all",
       "complexity": {
         "useLiteralKeys": "off"
+      },
+      "correctness": {
+        "useImportExtensions": {
+          "level": "on",
+          "options": {
+            "forceJsExtensions": true
+          }
+        }
       }
     }
   }

@@ -1018,6 +1018,50 @@ never reaches the tool even if it lies: proven by planting a `biome.json`
 that claimed `qwik` and switched `noNodejsModules` off, and measuring no
 change to either (0 Qwik findings, 33 `noNodejsModules`).
 
+**Two "safe" fixes were not safe, and one of them deleted tests**
+(#758). `fix:biome` promises a fixer runnable without reading its diff
+first. On monumental-archive it made two edits that broke the code.
+
+`nursery/useConsistentTestIt` rewrote `test.prop(...)` to `it.prop(...)`
+and left `import { test } from "@fast-check/vitest"` untouched, so the
+module threw on load: **22 files / 337 tests became 21 / 335**, and
+nothing in the output said a fixer had removed coverage. Swapping the
+rule's preferred direction does not help — measured, with
+`options.function: "test"` an `it` imported by name from vitest is
+renamed to `test(...)` and its import is left behind identically. The
+defect is renaming a call whose callee is an **imported binding**, in
+either direction, so the rule's FIX is off and its diagnostic stays on.
+Reported upstream so the exclusion carries an expiry.
+
+`correctness/useImportExtensions` rewrote `from "./App"` to
+`from "./App.tsx"`, which `moduleResolution: bundler` without
+`allowImportingTsExtensions` rejects (TS5097). This one is **configured
+rather than demoted**, because the rule is right that a relative import
+should carry an extension and only wrong about which. Measured across
+all three project shapes the org has, each at the full dial set:
+
+| project | shipped default | `forceJsExtensions: true` |
+|---|---|---|
+| bundler, no `allowImportingTsExtensions` | `.tsx` → TS5097 | `.js` → **clean** |
+| nodenext + `allowImportingTsExtensions` | `.ts` → clean | `.js` → **clean** |
+| nodenext, plain — `scaffold/tsconfig.json` | `.ts` → TS5097 | `.js` → **clean** |
+
+The third row is the one the issue did not have: the shipped default was
+broken for the scaffold's own default project, so this was never the
+per-repo accident it looked like. `.js` is the extension TypeScript has
+always wanted in a relative specifier — it resolves to the `.ts` file —
+which is why one option covers every case rather than trading one
+project for another. Proven end to end on the fixture: after the change
+the fixer leaves `test.prop` alone, rewrites `./App` to `./App.js`,
+still touches 73 files, and the tree comes out with `TS5097: 0`, 22 test
+files and 337 tests passing.
+
+What this costs the belt is a smaller promise, stated where the promise
+lives: `fix:biome` applies every fix biome calls safe **minus the ones
+the org has measured breaking code**. A rule that starts miscategorising
+tomorrow will still get through; the mitigation is that a fixer runs on
+a branch and its diff reaches a gate, not that the tool is infallible.
+
 **Two org controls demanded the opposite edit on the same line**
 (#759). `complexity/useLiteralKeys` wants `row["id"]` written `row.id`.
 `noPropertyAccessFromIndexSignature` — an org tsc dial, named in
