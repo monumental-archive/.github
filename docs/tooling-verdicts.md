@@ -1031,7 +1031,13 @@ rule's preferred direction does not help — measured, with
 renamed to `test(...)` and its import is left behind identically. The
 defect is renaming a call whose callee is an **imported binding**, in
 either direction, so the rule's FIX is off and its diagnostic stays on.
-Reported upstream so the exclusion carries an expiry.
+
+**The exclusion carries an expiry**, which is the difference between an
+exception and scar tissue: reported upstream as
+[biomejs/biome#11453](https://github.com/biomejs/biome/issues/11453),
+after searching for an existing report and confirming the symmetric
+reproduction on the pinned 2.5.7. When biome reclassifies the fix or
+stops firing on an imported binding, the `fix` key comes out.
 
 `correctness/useImportExtensions` rewrote `from "./App"` to
 `from "./App.tsx"`, which `moduleResolution: bundler` without
@@ -1051,7 +1057,20 @@ broken for the scaffold's own default project, so this was never the
 per-repo accident it looked like. `.js` is the extension TypeScript has
 always wanted in a relative specifier — it resolves to the `.ts` file —
 which is why one option covers every case rather than trading one
-project for another. Proven end to end on the fixture: after the change
+project for another.
+
+**The option is used outside its documented rationale on purpose.**
+biome documents `forceJsExtensions` as "useful if you use the
+`module: node16` setting when building your code with `tsc`", says
+nothing about `moduleResolution: bundler`, and 2.5.7 ships **no
+bundler-aware option at all** — `extensionMappings` and
+`forceJsExtensions` choose which extension is suggested, and neither can
+suppress the suggestion. Read alone, that says no configuration serves
+the bundler case, which is what this lane first concluded and wrote
+down. The table above is the correction, and the rule it repeats for
+this tool: the docs are the cross-check, the pinned binary decides.
+
+Proven end to end on the fixture: after the change
 the fixer leaves `test.prop` alone, rewrites `./App` to `./App.js`,
 still touches 73 files, and the tree comes out with `TS5097: 0`, 22 test
 files and 337 tests passing.
@@ -1061,6 +1080,48 @@ lives: `fix:biome` applies every fix biome calls safe **minus the ones
 the org has measured breaking code**. A rule that starts miscategorising
 tomorrow will still get through; the mitigation is that a fixer runs on
 a branch and its diff reaches a gate, not that the tool is infallible.
+
+**The preset had never met TypeScript that crosses a database
+boundary** (#759, #767), and three of its four largest rules broke on
+that one seam. monumental-archive is the first repo in the org where
+column names and row types enter TypeScript as Postgres spells them —
+901 of 1494 remaining diagnostics, none of them careless code.
+
+| rule | sites | verdict |
+|---|---|---|
+| `complexity/useLiteralKeys` | 590 | **off** — contradicts the org's `noPropertyAccessFromIndexSignature` dial (#759) |
+| `style/useNamingConvention` | 157 | **narrowed** — two property selectors admit the names a database or a container owns |
+| `style/noTernary` | 164 | **off** — 123 sites are expression positions with no statement form |
+
+`noTernary` is off because its remedy is mostly impossible:
+`...(c ? { k: v } : {})` has no if/else form, since an object literal
+admits expressions and not statements. The 41 convertible sites measured
+a wash — `const x = c ? a : b` becomes `let` plus if/else, trading the
+finding for a formatting finding and costing the `const`.
+
+`useNamingConvention` stays **on** and is narrowed to the two selectors
+that touch the boundary: `typeProperty` and `objectLiteralProperty`
+admit `snake_case` and `CONSTANT_CASE` beside `camelCase`. The org
+already ruled this one tool over — sqlfluff's `RF04` flags
+`public`/`method`/`label`, and #672 concluded that renaming a column is
+a migration and not a lint fix — so the same column seen from
+TypeScript cannot become a naming defect. A name the **environment**
+owns is the same class of fact (a container reads `POSTGRES_DB` by that
+exact key) and lands on the same selectors. The widening holds to the
+selector, never to the case style at large, and that is planted rather
+than asserted: on one file carrying `merged_ark`, `POSTGRES_DB`,
+`bad_function_name`, `bad_variable_name`, `bad_class_name` and
+`bad_type_name`, the two property names pass and the other four are
+still reported.
+
+Two corrections to the issue, both from re-deriving rather than
+re-reading. It is **157** findings, not 147, and the split is the point:
+147 are properties and the other **10 are function-scoped
+`CONSTANT_CASE` consts in that repo's own tests**, owned by nothing
+outside TypeScript and still enforced. After the narrowing **11**
+remain — those 10, plus one PascalCase `TextEncoder` in a type literal.
+One per-site `biome-ignore` is what per-site suppression is for; 147 of
+them would have been the waiver #694 refused.
 
 **Two org controls demanded the opposite edit on the same line**
 (#759). `complexity/useLiteralKeys` wants `row["id"]` written `row.id`.
