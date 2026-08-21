@@ -26,6 +26,19 @@ name: ci
           deterministic against the committed floor; this job only makes
           the number visible.
         required: false
+      atlas-token:
+        # forwarding: discretionary — only repos whose tests apply a schema through Atlas Pro carry the secret
+        description: >
+          Atlas Cloud token, exported as ATLAS_TOKEN for the ci job.
+          Optional: absent, nothing reads it. atlas.hcl in a repo that
+          pins a Cloud org for Pro surfaces makes every `atlas` call
+          demand a login, including the one its integration tests make
+          to apply the schema — so a repo that lost this on import
+          (monumental-archive) had a test gate that could never go green
+          (#830). The credential is the repository's own, scoped by
+          Atlas to its org; the gate still forwards nothing it was not
+          handed.
+        required: false
 
 permissions:
   contents: read
@@ -170,6 +183,8 @@ jobs:
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       - name: Run the gate
+        env:
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run ci
 
   # The badge feed, never the gate: uploads the coverage report to
