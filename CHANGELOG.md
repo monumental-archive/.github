@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.58.9](https://github.com/monumental-archive/.github/compare/v1.58.8...v1.58.9) - 2026-08-21
+
+### Fixed
+
+- derive the predecessor from what is installable ([#818](https://github.com/monumental-archive/.github/pull/818))
+
+### Documentation
+
+- name the image subject in the stranger recipe ([#817](https://github.com/monumental-archive/.github/pull/817))
+
 ## [1.58.8](https://github.com/monumental-archive/.github/compare/v1.58.7...v1.58.8) - 2026-08-21
 
 ### Fixed
