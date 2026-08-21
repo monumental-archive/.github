@@ -125,6 +125,38 @@ Phase-1 rules, all proven in iiif-server:
 - Workspaces inherit their version via `[workspace.package]`. That is the
   canonical shape; hand-coupled per-member versions are a conformance gap.
 
+### The coverage floor is derived here too
+
+`.coverage-floor` is derived state, like the version and the changelog
+beside it (#652). [`release/derive-coverage-floor.sh`](../release/derive-coverage-floor.sh)
+measures the tree being released — through
+[`mise/coverage-measure.sh`](../mise/coverage-measure.sh), the same
+measurement `coverage:check` enforces, so the gate and the derivation
+can never come from different flags — and writes
+`floor = measured - band`, band 2 points. The file rides the release
+commit as an `EXTRA_FILES` addition, exactly like the derived pgrx
+upgrade scripts.
+
+The law is a ratchet: **the floor only rises.** A release measuring
+below `floor + band` FAILS here, in the Release PR, before a version
+number is spent; the resolution is tests, or a human consciously
+re-setting the floor with a recorded reason (`reset: <why>` in place of
+the derivation record). Between releases a pull request may spend the
+band — that is what the band is for — but by release time the ceiling
+must be back at or above the previous release's measurement.
+
+It was a hand-typed number until the org measured what that costs:
+stele's ceiling fell 6.5 points in two days with four features landed,
+nothing red and nothing noticed, because the floor sat far enough below
+the ceiling that the headroom became a landing zone. A hand edit that
+disagrees with the file's own record is therefore refused by
+`coverage:check` as drift and never repaired — a floor found wrong is
+evidence the machinery was bypassed.
+
+Opt-in is unchanged and explicit: a repository with no `.coverage-floor`
+skips this step clean and owes nothing. A repository adopts by measuring
+itself, `mise run coverage:adopt`, never by typing a number.
+
 ## The tag
 
 **Umbrella `v*` only.** One tag per release, workspace-wide. Per-crate tags

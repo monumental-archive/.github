@@ -47,7 +47,7 @@ re-score by hand whenever a change lands that a criterion would notice.
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
 | `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
-| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80 (stele holds ≥ 90 today); for the canon, answered by relocation — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust and Go legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
+| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`measured - 2`, rising only, #652), so it holds without anyone maintaining it. For the canon, answered by relocation — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust and Go legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | `stele derive version` + App-minted `v*` tags |
 | `version_tags_signed` | Met | the tag objects **are** signed — Sigstore keyless, by the release workflow. See the `no_user` trap below |
@@ -69,8 +69,11 @@ Silver now stands on one remaining MUST:
 `test_statement_coverage80` was the wall, and its history is kept in
 [tooling-verdicts.md](tooling-verdicts.md) (the kcov entry): the bash
 that no belt-legal tool could measure moved to stele (#392), where
-`go test -cover` supplies the number, the committed `.coverage-floor`
-ratchets it at ≥ 90, and the codecov shield renders it. What remains
+`go test -cover -coverpkg=./...` supplies the number, `.coverage-floor`
+ratchets it, and the codecov shield renders it. The floor is derived
+state since #652 — the release machinery writes it as `measured - 2`
+and it only rises — so the criterion is met by a number nothing hand
+maintains rather than by one nobody was watching. What remains
 in the canon is orchestration — workflow YAML, one-line task bodies,
 one Python join — not a statement-coverage corpus. The honest
 per-repo answers: stele meets the 80 (and Gold's 90) with a measured

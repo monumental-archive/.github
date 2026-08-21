@@ -190,6 +190,20 @@ jobs:
           PREV_MANIFEST: ${{ steps.prepare.outputs.current }}
         run: .org-canon/release/generate-pgrx-upgrade.sh
 
+      - name: Re-derive the coverage floor
+        # Derived state, like the version and the changelog beside it
+        # (#652): measure the tree being released, write
+        # `measured - band`, and let the file ride the release commit.
+        # A measurement below `floor + band` FAILS here — loudly, and
+        # before a version number is spent — rather than lowering the
+        # floor, because the floor only rises. A repository with no
+        # `.coverage-floor` has adopted no ratchet and skips clean.
+        if: steps.prepare.outputs.release == 'true'
+        id: floor
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: .org-canon/release/derive-coverage-floor.sh
+
       - name: Mint the Release-PR token
         # A range of nothing but chore/ci/docs commits bumps no version, so
         # there is nothing to propose, no empty PR to leave lying around —
@@ -214,8 +228,9 @@ jobs:
           PLAN: ${{ steps.prepare.outputs.plan }}
           # Only what the plan could not have known about: the pgrx
           # upgrade scripts, derived against the published release after
-          # the plan was made. Everything else the commit carries is the
-          # plan's own file list (stele#155).
-          EXTRA_FILES: ${{ steps.upgrade.outputs.files }}
+          # the plan was made, and the coverage floor, derived from a
+          # measurement of the tree the plan describes. Everything else
+          # the commit carries is the plan's own file list (stele#155).
+          EXTRA_FILES: ${{ steps.upgrade.outputs.files }} ${{ steps.floor.outputs.files }}
         run: .org-canon/release/open-release-pr.sh
 ...
