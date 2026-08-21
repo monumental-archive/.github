@@ -643,6 +643,23 @@ dir = "{{cwd}}"
 # the reverse of the ruff/biome trap, where a missing config is a
 # silent fallback to something weaker. Tracked files only, on the
 # standing rule.
+#
+# THE BELT SHIPS NO ESCAPE, and does not need to (#708, #694). sqlfluff
+# has two of its own, both repo content, both live under the delivered
+# config — measured on the belt's pin, 4.3.0:
+#   .sqlfluffignore is honoured even though this task gives explicit
+#   paths (a named file leaves the run with a WARNING, exit 0). It is
+#   for GENERATED files — a transcript of what a tool emits, which
+#   conforming would stop being a transcript — with a written reason per
+#   entry, on the _typos.toml footing: repo-shaped, never a silent
+#   lowering. Whether to ignore or rewrite is the repository's call,
+#   decided inside the repository; nothing is declared to the belt.
+#   -- noqa: CODE suppresses one finding, and TRAPS: everything after
+#   `noqa:` is parsed as a comma-separated CODE LIST, so a reason on the
+#   same line is read as further codes and the suppression is discarded
+#   in silence — 1 finding with `-- noqa: RF04 real column`, 0 with
+#   `-- noqa: RF04`, and no warning either way. The reason goes on the
+#   line ABOVE; the noqa carries codes and nothing else.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**' "*.sql")
