@@ -40,6 +40,26 @@
 # (#347): the nudge fired ("well above floor — raise"). Floored a tenth
 # under the reading, per the drift observation above — the same rule
 # release-lab was ratcheted by, not a fresh judgement.
+# edtf floored at 7.4 on the 2026-08-21 post-import reading of 7.5 (#669),
+# a tenth under, per this header's rule. Two things the reading records
+# that the import issue predicted differently, both measured:
+#
+# Signed-Releases reads 10, not depressed. The five newest releases are the
+# edtf-*-v1.2.3 family and each carries a *.provenance.intoto.jsonl asset;
+# release assets travel with a transfer, only attestations do not. Keeping
+# the legacy releases was right, and it is the reason this check is at 10
+# rather than a cost paid for keeping them.
+#
+# CII-Best-Practices dropped 7 -> 0 AT THE TRANSFER, and it is a human step
+# to fix, not a regression to chase: edtf holds bestpractices project 13992
+# at Silver, but the entry binds to github.com/CarlAllenn/edtf, so the
+# issuer reports "no effort ... detected" against the org path. The floor
+# is set BELOW that loss deliberately — re-pointing the entry raises the
+# score, and the ratchet nudge will ask for the floor to follow.
+#
+# Packaging is -1 (inconclusive) by the shared-orchestrator design, and
+# Maintained is 0 until 2026-10-23: the repository was created 2026-07-25
+# and the check's first-90-days cap has not expired.
 .github 7.1
 signer 6.8
 release-lab 7.4
@@ -66,3 +86,4 @@ stele 6.2
 # self-heals. If the score rises past 7.2 after the first release, the
 # ratchet nudge raises this line.
 iiif-server 6.8
+edtf 7.4

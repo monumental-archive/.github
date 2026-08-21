@@ -8,6 +8,7 @@
       { "repo": "release-lab" },
       { "repo": "stele" },
       { "repo": "iiif-server" },
+      { "repo": "edtf" },
       {
         "repo": "signer",
         "tracks": ["source"],
@@ -107,7 +108,8 @@
       ".github": "v1.23.1",
       "iiif-server": "v0.2.0",
       "release-lab": "v0.24.2",
-      "stele": "v0.1.0"
+      "stele": "v0.1.0",
+      "edtf": "v1.3.0"
     }
   },
   "chains": {
