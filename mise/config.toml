@@ -706,11 +706,51 @@ dir = "{{cwd}}"
 # ships no writer, so findings are hand edits by design.
 # Tracked files only — yamllint's own discovery is never used, on the
 # standing lefthook-cache rule.
+#
+# WHAT THIS CHECK IS FOR is YAML a human wrote (#718). A package
+# manager's lockfile is that manager's serialiser output, rewritten
+# wholesale on every install, and grading it checks nothing: its line
+# widths and quoting are the writer's, the repo cannot change them, and
+# the finding cannot be cleared. Measured on monumental-archive #262 at
+# canon v1.53.0 — 865 findings, every one of them in `pnpm-lock.yaml`,
+# every hand-written YAML file in that repo already clean. And measured
+# at the writer, on a lockfile hand-conformed to this very config
+# (pnpm 11.22.0, `pnpm install --lockfile-only`): one run put the `---`
+# back at the top and re-flowed both block mappings to `{...}`. There is
+# also no repo-side lever to reach for — yamllint's whole surface is
+# `-c CONFIG` / `-d DATA` with no ignore file, and a `# yamllint
+# disable-file` line would be a waiver and would not survive the next
+# install either.
+#
+# So this is APPLICABILITY, the same class of rule as "tracked files
+# only": it names the check's subject, once, in the belt. It is NOT a
+# seam, and #694's closure still holds for everything a human writes —
+# the list below is org-owned and CLOSED, a repo cannot extend it, and
+# nothing in a repo declares anything. A file enters the list only with
+# its writer measured, never on its name looking lockfile-shaped.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' "*.yml" "*.yaml")
+# The closed list: files a package manager rewrites wholesale. Each entry
+# is matched by NAME, at the root and at any depth — never by a
+# `*lock*` shape, so `my-pnpm-lock.yaml` is ordinary YAML and is linted.
+locks=(pnpm-lock.yaml)
+subject=(':!vendor/**')
+machine=()
+for lock in "${locks[@]}"; do
+  subject+=(":!${lock}" ":!*/${lock}")
+  machine+=("${lock}" "*/${lock}")
+done
+skipped=$(git ls-files "${machine[@]}")
+if [[ -n ${skipped} ]]; then
+  # Named out loud: a gate that silently drops files reads like one that
+  # read them.
+  echo "lint:yaml: machine-written, outside this check's subject (#718):"
+  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
+  sed 's/^/  /' <<< "${skipped}"
+fi
+files=$(git ls-files "${subject[@]}" "*.yml" "*.yaml")
 [[ -n ${files} ]] || {
-  echo "lint:yaml: no YAML tracked, skipped"
+  echo "lint:yaml: no hand-written YAML tracked, skipped"
   exit 0
 }
 xargs yamllint -c "${ORG_BELT_DIR}/yamllint.yaml" --strict <<< "${files}"
