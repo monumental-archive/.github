@@ -26,4 +26,4 @@ enforced = "Exact pins with checksums (`mise.lock`), SHA-pinned actions, 7-day m
 name = "Build Environment"
 ceiling = "**L0**"
 status = "**Formally L0** at both layers: L1's verify-before-instantiation obligation is implemented, its signed-build-image-provenance obligation belongs to producers who do not meet it (see `slsa-reference.md`)"
-enforced = "Runner image a named, Renovate-rolled pin, enforced by `lint:runner-pin` (#290 found the signer floating on `ubuntu-latest` while this cell claimed otherwise); pgrx bases digest-pinned, org-attested and verified fail-closed before any container runs"
+enforced = "Runner image a named, Renovate-rolled pin, enforced by `lint:runner-pin` (#290 found the signer floating on `ubuntu-latest` while this cell claimed otherwise); pgrx bases digest-pinned, org-attested and verified fail-closed before any container runs; a caller's first-party `FROM` verified against the org signer at the ref its tag implies, before the image build and fail-closed (#715) — the same obligation at the artifact layer, not a level move"

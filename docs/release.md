@@ -483,11 +483,16 @@ the gate. The marker is a comment line whose first token is the marker,
 first in its block, sitting directly above the step it authorises — and
 it authorises that step alone (#676), so prose about the convention
 cannot read as an exemption and one marker cannot carry a file. Base
-images are digest-pinned (`lint:from-digests`), org-
-approved before use (`base-attest.yml`; the pgrx build legs verify the
-approval and fail closed), and `audit:attestations` proves weekly that
-nothing published lacks its evidence set — the difference between "we
-attest" and "nothing ships unattested".
+images are digest-pinned (`lint:from-digests`) and org-approved before
+use, by the mechanism that fits whose bytes they are (tabulated in
+[`build-track.md`](build-track.md)): `base-attest.yml` for the canon's
+own pgrx build environment, which the pgrx build legs verify
+fail-closed, and — for a caller's `FROM` inside the org's own ghcr
+namespace — the oci-image class build's own step, which verifies the
+org signer's attestation over the pinned digest at the ref its tag
+implies, before anything is built (#715). And `audit:attestations`
+proves weekly that nothing published lacks its evidence set — the
+difference between "we attest" and "nothing ships unattested".
 
 ### The repro gate
 

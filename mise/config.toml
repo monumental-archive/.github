@@ -4501,6 +4501,15 @@ dir = "{{cwd}}"
 # (base-attest.yml). Renovate keeps tag AND digest current together, so
 # a pin here never goes stale. Exempt: `FROM scratch` and references to
 # named build stages. Tracked files only, like every belt linter.
+#
+# The FROM parse is dockerfile-bases.sh's, not this task's (#715):
+# build-oci-image.yml's base-approval step asks the same question of
+# the same text on the build path — which bases does this Dockerfile
+# instantiate? — and two parsers of one format are the drift pair a
+# DELIVERED config exists to prevent (#445). The helper refuses loudly
+# on an unreadable file or a FROM naming no image, and errexit carries
+# that refusal out of the command substitution below: a parse that
+# failed must never read here as a Dockerfile with no bases.
 run = '''
 files=$(git ls-files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*")
 [[ -n ${files} ]] || {
@@ -4509,21 +4518,12 @@ files=$(git ls-files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "D
 }
 bad=""
 while IFS= read -r f; do
-  stages=$(grep -iE "^[[:space:]]*FROM[[:space:]]" "${f}" \
-    | sed -nE 's/.*[[:space:]][Aa][Ss][[:space:]]+([A-Za-z0-9_.-]+).*/\1/p')
-  # shellcheck disable=SC2312  # process substitution: capturing first would turn
-  # a Dockerfile with no FROM into one blank line, and `set --` would then read
-  # an unset $2 under set -u. grep's no-match 1 is not a failure here.
-  while IFS= read -r line; do
-    # shellcheck disable=SC2086  # deliberate split: a FROM line's words ARE the
-    # positional parameters this reads $2 and $3 from
-    set -- ${line}
-    ref="$2"
-    case "${ref}" in --platform=*) ref="$3" ;; *) ;; esac
-    case "$(printf "%s" "${ref}" | tr "[:upper:]" "[:lower:]")" in scratch) continue ;; *) ;; esac
-    grep -qxF "${ref}" <<< "${stages}" && continue
+  refs=$("${ORG_BELT_DIR}/dockerfile-bases.sh" "${f}")
+  [[ -n ${refs} ]] || continue
+  while IFS= read -r ref; do
+    [[ -n ${ref} ]] || continue
     [[ ${ref} == *"@sha256:"* ]] || bad="${bad} ${f}(${ref})"
-  done < <(grep -iE "^[[:space:]]*FROM[[:space:]]" "${f}")
+  done <<< "${refs}"
 done <<< "${files}"
 if [[ -n ${bad} ]]; then
   echo "lint:from-digests: FROM without a digest pin:${bad}" >&2

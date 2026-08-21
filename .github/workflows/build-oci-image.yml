@@ -15,6 +15,15 @@
 #   anything is signed. A signature must assert something demonstrated of
 #   the artifact a stranger will pull, never of a local twin.
 #
+#   Every first-party base is verified before it is instantiated
+#   (#715). A `FROM` under this owner's ghcr namespace must carry an
+#   org attestation for the pinned digest, minted by the org signer,
+#   from the ref that could legitimately have produced it — the pgrx
+#   build environment's rule (base-attest.yml plus the fail-closed
+#   check in build-pgrx-extension.yml), generalised to the bases a
+#   caller names. A digest pin says the bytes did not change; the
+#   attestation says whose bytes they are.
+#
 #   This workflow stops after the per-arch digest pushes (#118): the
 #   index is assembled and TAGGED exactly once, post-gate, in
 #   assemble-oci-index.yml — no public reference exists until the
@@ -168,6 +177,137 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Verify every first-party base carries its org attestation
+        # Verify-before-instantiation for the CONSUMER's bases (#715),
+        # the shape build-pgrx-extension.yml has always had for the
+        # canon's own build environment, generalised to the bases a
+        # caller's Dockerfile names. The digest pin
+        # (`lint:from-digests`) proves the bytes did not change; this
+        # proves they are the right bytes — two facts, neither
+        # sufficient alone, and until now the org had only the first
+        # for a first-party base while deleting the per-repo script
+        # that had the second (#670).
+        #
+        # BEFORE the build, and before `prepare` compiles anything: a
+        # base nobody attested must cost seconds, not a full image.
+        # Network-bound (registry plus the attestation API), so it can
+        # never be a `lint:*` — the gate is deterministic
+        # (docs/direction.md) — and a Monday `audit:*` would report a
+        # base already shipped. The class build is the only place left,
+        # which is also the only place that knows the Dockerfile.
+        #
+        # Fail-closed and derived, never declared. The identity comes
+        # from the canon's one declaration (security/identity.toml via
+        # identity.sh, #579); the org PATH comes from the environment,
+        # because a scope is the environment's to supply and an
+        # identity is not (identity.toml's own header). The ref anchor
+        # is derived from the tag the pin carries, the way the deleted
+        # script derived `1.2.3-pg18` -> `refs/tags/v1.2.3`, so the
+        # gate cannot drift from the pin: a versioned publisher can
+        # only have produced these bytes at `refs/tags/v<version>`
+        # (publish.yml's guard admits nothing else) and a continuous
+        # one only from its branch. A declared regex per repository
+        # would be the literal nothing bumps (#314's class).
+        #
+        # What is NOT judged here: a base outside this owner's ghcr
+        # namespace. Its approval mechanism is `base-attest.yml` for
+        # the canon's pgrx set and `lint:from-digests` everywhere else
+        # — see docs/build-track.md, which names which bases are
+        # approved by which mechanism.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNTRUSTED_CONTEXT: ${{ inputs.context }}
+          UNTRUSTED_DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          export ORG_CANON_DIR="${GITHUB_WORKSPACE}/.org-canon"
+          # shellcheck source=/dev/null
+          . "${ORG_CANON_DIR}/mise/identity.sh"
+          signer=$(org_identity signer-workflow)
+          owner=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          prefix="ghcr.io/${owner}/"
+          refs=$("${ORG_CANON_DIR}/mise/dockerfile-bases.sh" \
+            "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}")
+          if [[ -z ${refs} ]]; then
+            echo "::notice::no base to approve (scratch, or stages only)"
+            exit 0
+          fi
+          # gh reads the subject manifest from the registry itself
+          # (measured: a digest under the wrong path fails with
+          # MANIFEST_UNKNOWN before any signature is examined), so a
+          # private first-party base needs the credential this job
+          # already holds.
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          checked=0
+          while IFS= read -r ref; do
+            [[ -n ${ref} ]] || continue
+            if [[ ${ref} != "${prefix}"* ]]; then
+              echo "::notice::base outside ${prefix}: ${ref} — judged by base-attest.yml or lint:from-digests, not here"
+              continue
+            fi
+            if [[ ${ref} != *"@sha256:"* ]]; then
+              echo "::error::${ref} is a first-party base with no digest — there is nothing to verify; pin as image:tag@sha256:…"
+              exit 1
+            fi
+            digest="${ref##*@}"
+            name="${ref%@*}"
+            repo_path="${name%%:*}"
+            tag="${name#"${repo_path}"}"
+            tag="${tag#:}"
+            case "${tag}" in
+              "")
+                emsg="${ref} carries a digest but no tag, so the ref that produced it cannot be derived — pin as"
+                emsg+=" image:tag@sha256:… (Renovate rolls both together)"
+                echo "::error::${emsg}"
+                exit 1
+                ;;
+              latest)
+                # The continuous archetype's stream tag. Its publishes
+                # run from a branch (continuous.yml's guard refuses
+                # tags) and the org's default branch is main.
+                source_ref="refs/heads/main"
+                ;;
+              *)
+                # `1.2.3`, `1.2.3-pg18`, `1.2.3-pg18-artifact`: the
+                # class decorates the version, the version names the
+                # tag. Anything else is a shape this org's publish
+                # path cannot produce, so it is refused rather than
+                # guessed at.
+                core="${tag%%-*}"
+                if [[ ! ${core} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  emsg="${ref}: cannot derive the ref that produced it from tag '${tag}' — org image tags are"
+                  emsg+=" 'latest' or a version, optionally class-decorated (1.2.3-pg18)"
+                  echo "::error::${emsg}"
+                  exit 1
+                fi
+                source_ref="refs/tags/v${core}"
+                ;;
+            esac
+            # --owner and --signer-workflow together are the org claim:
+            # signed by the org's ONE signer, from a repository in this
+            # owner's account. --signer-digest is deliberately absent:
+            # it pins the signer COMMIT, and a base signed at an older
+            # signer than the tree building on it is the normal case,
+            # not a finding (measured: release-lab v0.27.0's index
+            # carries signer e4a285f8 while this tree pins e90a971e).
+            if ! gh attestation verify "oci://${repo_path}@${digest}" \
+              --owner "${owner}" \
+              --predicate-type https://slsa.dev/provenance/v1 \
+              --signer-workflow "${signer}" \
+              --source-ref "${source_ref}" \
+              --deny-self-hosted-runners > /dev/null; then
+              emsg="${ref}: no org attestation for these bytes at ${source_ref} — a first-party base is verified"
+              emsg+=" before it is instantiated (#715); the refusal above is gh's own"
+              echo "::error::${emsg}"
+              exit 1
+            fi
+            echo "::notice::approved first-party base: ${ref} (produced at ${source_ref})"
+            checked=$((checked + 1))
+          done <<< "${refs}"
+          echo "::notice::${checked} first-party base(s) verified"
       - name: Install mise and the caller's pinned toolchain
         if: inputs.prepare != ''
         uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5

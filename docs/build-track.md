@@ -137,3 +137,52 @@ third-obligation artefact — deliberately never passed off as the
 producer provenance it is not. The row moves to L1
 the day base-image provenance arrives signed and the org's
 verification of it is itself attested (#125 watches the runner half).
+
+## Which base is approved by which mechanism
+
+"Base-image approval" named two different scopes in one tree until
+issue #715, which is how a first-party base came to be pinned by
+digest and attributed to nobody. There are three, and each answers a
+different question:
+
+| Base | Mechanism | The question it answers |
+| --- | --- | --- |
+| The canon's pgrx build and smoke images (`docker/pgrx-base-images.toml`) | `base-attest.yml` mints a `base-image-approval/v1` over each pinned digest; `build-pgrx-extension.yml` verifies it fail-closed before any container runs | Did the org check the upstream provenance of this build environment and sign that it did? |
+| A caller's `FROM` under `ghcr.io/<owner>/` | `build-oci-image.yml`'s base-approval step, before the build: `gh attestation verify` against the org signer (`security/identity.toml`) at the ref the pinned tag implies — `refs/tags/v<version>`, or `refs/heads/main` for a `latest` stream | Were these bytes produced by the org's own publish path, at a ref that could legitimately have produced them? |
+| Every other `FROM` | `lint:from-digests` in the gate | Are the bytes pinned, so that whatever is instantiated is what was reviewed? |
+
+The three are not interchangeable, and the middle one is the only one
+whose subject the org **produced**. Its identity is therefore derived,
+never declared: the signer comes from the canon's one identity
+declaration, the org path from `GITHUB_REPOSITORY_OWNER` (scope is the
+environment's to supply — `security/identity.toml`'s own rule), and the
+ref from the tag beside the digest, the way the per-repo script this
+replaced derived `1.2.3-pg18` → `refs/tags/v1.2.3`. A declared regex
+per repository would be the literal nothing bumps (#314's class), and a
+per-repo script would be the second derivation #670 deleted.
+
+Deliberately *not* pinned in that verification: `--signer-digest`. It
+names the signer commit, and a base signed at an older signer than the
+tree building on it is the normal case rather than a finding —
+measured, 2026-08-21: `release-lab@v0.27.0`'s published index carries
+signer `e4a285f8`, while the canon tree pinned `e90a971e`. Pinning it
+would refuse correct bases on every signer bump.
+
+The check is network-bound (registry plus the attestation API), so it
+can never be a `lint:*` — [`direction.md`](direction.md)'s determinism
+rule — and a Monday `audit:*` would report a base already shipped. The
+class build is the only place that is both fail-closed and early, and
+it is the only place that knows the caller's Dockerfile.
+
+**What this does not do**: it does not move the Build Environment row.
+The runner layer is untouched (#125), and the producer obligation this
+discharges is discharged only for bases the org itself published —
+which is a property of those three bases, not of the population.
+`slsa/assert-policy.json`'s `evidence.baseImages` block still describes
+the **first** row only, and says so by naming `pinFile`; it cannot yet
+carry the second, because the pinned engine decodes that document
+strictly and a new key is refused by the loader — measured against
+stele v0.19.1: `assert: policy: jsonx: decode: json: unknown field
+"scope"`, which `lint:policy-load` turns into a red gate. Stating the
+scopes in a table here is the honest half that is available today; the
+policy half needs a field in the engine first.
