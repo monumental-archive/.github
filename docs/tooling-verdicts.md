@@ -1541,7 +1541,16 @@ asserts nothing: the config is delivered with `--config` from
 config case cannot arise — and would fail loud rather than green if it
 did. `fix:sql` is the write-mode
 sibling; `--force` is its non-interactive flag, not an unsafe-fix
-mode. **Zero SQL in the canon** — the task skips clean here, and the
+mode. **No belt escape, by design (#708, #694)** — sqlfluff's own two
+are repo content and work under the delivered `--config`, measured on
+the pinned 4.3.0: `.sqlfluffignore` is honoured even on the explicit
+paths this task passes (the escape for GENERATED files, a reason per
+entry, `_typos.toml` footing), and per-line `-- noqa: CODE` suppresses
+one finding. The noqa carries **one trap worth the row**: text after
+`noqa:` is parsed as more rule codes, so `-- noqa: RF04 real column`
+discards the suppression entirely and warns about nothing — 1 finding,
+where `-- noqa: RF04` gives 0. The reason belongs on the line above.
+**Zero SQL in the canon** — the task skips clean here, and the
 rule set is exercised first in monumental-archive-db, stated outright
 like biome, golangci-lint and the Rust pair. *Reopen:* Jinja-templated
 SQL appearing anywhere in the org (revisit the raw templater).

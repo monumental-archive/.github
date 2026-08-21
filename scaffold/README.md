@@ -18,6 +18,41 @@ deliver a config; it cannot invent a repo's identity. A repo may still
 keep its own `_typos.toml` for domain jargon: typos merges it with the
 org vocabulary the belt supplies.
 
+`.sqlfluffignore` sits on that same `_typos.toml` footing, and it is not
+in this directory because no repo needs one by default. Measured on the
+belt's pin, sqlfluff 4.3.0, against the delivered `--config`: the file
+is honoured **even when the path is given explicitly**, which is the
+question worth asking, since `lint:sql` hands sqlfluff a `git ls-files`
+list rather than letting it walk. A named file drops out of the run with
+a `WARNING` naming the ignore, exit 0. That is the escape for a
+GENERATED file only — a pgrx schema snapshot or any other transcript of
+what a tool emits, where conforming the file to a style rule is what
+breaks it, on the standing rule that a file reformatted away from what
+its writer emits stops being evidence. It is repo content with a written
+reason per entry, never a silent lowering, and never a home for findings
+the repo simply has not fixed. It is not a seam: nothing in the belt
+reads it, nothing in a repo declares anything to the belt, and the org
+ships no escape mechanism of its own (#694).
+
+Suppressing one finding rather than one file is sqlfluff's per-line
+`-- noqa: CODE`, and it carries **one trap, measured in the same probe**:
+everything after `noqa:` is parsed as a comma-separated list of rule
+codes, so a reason written on the same line is read as further codes and
+the whole suppression is silently discarded.
+
+| line ending | findings |
+| --- | --- |
+| `DEFAULT FALSE` | 1 |
+| `DEFAULT FALSE  -- noqa: RF04` | 0 |
+| `DEFAULT FALSE  -- noqa: RF04 — real column` | 1 |
+| `DEFAULT FALSE  -- noqa: RF04 real column` | 1 |
+
+No warning is emitted — grepping the run for `warn|unknown|invalid`
+returns nothing — so the only symptom is a finding that never went away.
+The em dash is not the culprit; plain words behave identically. **The
+reason therefore goes on the line ABOVE, as a `--` comment, and the
+`noqa` carries nothing but its codes** (measured green in that shape).
+
 One consequence to know before reaching for it: a belt-delivered config
 is the SAME file for every repo, so anything genuinely repo-shaped in it
 has nowhere to go. biome's `domains` block was the live example, and
