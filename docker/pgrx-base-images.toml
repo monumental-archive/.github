@@ -30,7 +30,7 @@
 # renovate: pgrx-base-image
 "17" = "postgres:17-trixie@sha256:e42539a54ee3e82e21f19d7eded61b579869585f86b90b5e851ff0d3dd8b4001"
 # renovate: pgrx-base-image
-"18" = "postgres:18-trixie@sha256:7157393f508fd8eb46119937fab39813783fe3e7d4c6316c45c12ce2ea25e61d"
+"18" = "postgres:18-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941"
 
 # The glibc floor the [build] images guarantee, asserted per-build with
 # readelf: an extension whose symbols exceed this fails the release
