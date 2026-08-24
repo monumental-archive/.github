@@ -3171,12 +3171,24 @@ dir = "{{cwd}}"
 # the org's conventions — ecosystem classes, the canary pin, where
 # decisions live — are data in slsa/assert-policy.json. Red means NEW
 # AND UNDECIDED; a decision matching no finding surfaces as stale, a
-# retirement candidate. Guarded on security/vex/ so it runs only in
-# the canon checkout.
+# retirement candidate.
+#
+# Canon-only, on the family's identity guard (#738): security/vex/ is
+# what this leg READS, so on the canon its absence is a red that names
+# it — never the skip that a directory-shaped guard used to buy.
 run = '''
-[[ -d security/vex ]] || {
-  echo "audit:blast-radius: no security/vex/, not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:blast-radius: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+missing=""
+for f in slsa/assert-policy.json security/vex; do
+  [[ -e ${f} ]] || missing="${missing} ${f}"
+done
+[[ -z ${missing} ]] || {
+  echo "audit:blast-radius: on the canon, and input(s) this leg reads are missing:${missing}" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v osv-scanner > /dev/null || {
   echo "audit:blast-radius: osv-scanner missing from the belt" >&2
@@ -3209,9 +3221,18 @@ dir = "{{cwd}}"
 # cryptographically, so the trusted root is fetched here — the trust
 # boundary is the caller\'s to state (stele#19 tracks in-tool fetch).
 run = '''
-[[ -f slsa/assert-policy.json ]] || {
-  echo "audit:attestations: no slsa/assert-policy.json, not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:attestations: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+missing=""
+for f in slsa/assert-policy.json slsa/verify-policy.json; do
+  [[ -e ${f} ]] || missing="${missing} ${f}"
+done
+[[ -z ${missing} ]] || {
+  echo "audit:attestations: on the canon, and input(s) this leg reads are missing:${missing}" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v gh > /dev/null || {
   echo "audit:attestations: gh missing" >&2
@@ -3247,9 +3268,18 @@ dir = "{{cwd}}"
 # (stele#69). The trusted root resolves through TUF from the anchor
 # pinned in the binary; the spec is stele's docs.
 run = '''
-[[ -f slsa/verify-policy.json ]] || {
-  echo "audit:source-vsa: no slsa/verify-policy.json, not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:source-vsa: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+missing=""
+for f in slsa/assert-policy.json slsa/verify-policy.json; do
+  [[ -e ${f} ]] || missing="${missing} ${f}"
+done
+[[ -z ${missing} ]] || {
+  echo "audit:source-vsa: on the canon, and input(s) this leg reads are missing:${missing}" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v stele > /dev/null || {
   echo "audit:source-vsa: stele missing from the belt" >&2
@@ -3285,9 +3315,18 @@ dir = "{{cwd}}"
 # data by construction) are reported by name, so a Monday summary reads
 # as state, not as expected-red noise (dependency-track.md:46).
 run = '''
-[[ -f slsa/verify-policy.json ]] || {
-  echo "audit:badges: no slsa/verify-policy.json, not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:badges: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+# The ratcheted floors are this leg's own data, and the guard above no
+# longer stands in for them (#738): a Scorecard shield judged against a
+# floor file that is not there is a badge nobody is checking.
+floors="security/scorecard-floors.txt"
+[[ -f ${floors} ]] || {
+  echo "audit:badges: on the canon, and the input this leg reads is missing: ${floors}" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v gh > /dev/null || {
   echo "audit:badges: gh missing" >&2
@@ -3304,7 +3343,6 @@ wf_prefix=$(org_identity shield-actions)
 ghcr_prefix=$(org_identity shield-ghcr)
 cc_prefix=$(org_identity shield-codecov)
 cc_api=$(org_identity shield-codecov-api)
-floors="security/scorecard-floors.txt"
 repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
 failed=""
 checked=0
@@ -3877,8 +3915,11 @@ dir = "{{cwd}}"
 # Contents: read across the org; without it this walk can only report
 # that it could not look.
 run = '''
-[[ -f slsa/verify-policy.json ]] || {
-  echo "audit:org-pins: no slsa/verify-policy.json, not the canon, skipped"
+# The identity guard is the whole guard here (#738): this leg reads no
+# tree data at all — the org listing, the clones and the canon's own
+# tags are its inputs — so it has no required input to red on.
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:org-pins: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 command -v gh > /dev/null || {
@@ -4796,8 +4837,11 @@ dir = "{{cwd}}"
 # dying. This is the reconciliation, on the same cadence as every other
 # settings-drift check.
 run = '''
-[[ -d security ]] || {
-  echo "audit:actions-allowlist: not the canon, skipped"
+# The identity guard is the whole guard here (#738): the two things
+# compared are the live org setting and the belt's own enforcement
+# copy, so this leg has no tree input of its own to red on.
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:actions-allowlist: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 command -v gh > /dev/null || {
@@ -5323,9 +5367,14 @@ dir = "{{cwd}}"
 # Prerequisite of the #83 transfers: one consumer is what made the
 # v1.23.1 break survivable, and transfers add consumers.
 run = '''
-[[ -f slsa/assert-policy.json ]] || {
-  echo "audit:caller-permissions: no slsa/assert-policy.json, not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:caller-permissions: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+[[ -f slsa/assert-policy.json ]] || {
+  echo "audit:caller-permissions: on the canon, and the input this leg reads is missing: slsa/assert-policy.json" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v stele > /dev/null || {
   echo "audit:caller-permissions: stele missing from the belt" >&2
@@ -5357,9 +5406,21 @@ dir = "{{cwd}}"
 # or parse failure is "unreadable", never "unchanged" — zero rows means
 # the page shape moved, and that too is a drift signal, named as such.
 run = '''
-[[ -f slsa/spec-source-matrix.txt ]] || {
-  echo "audit:spec-drift: no pinned matrix, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:spec-drift: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+# Both halves have a tree input: the pin the live page is compared
+# against, and the mapping the coverage half asserts over. A canon that
+# has lost either has lost the claim, not the applicability (#738).
+missing=""
+for f in slsa/spec-source-matrix.txt slsa/requirements.toml; do
+  [[ -e ${f} ]] || missing="${missing} ${f}"
+done
+[[ -z ${missing} ]] || {
+  echo "audit:spec-drift: on the canon, and input(s) this leg reads are missing:${missing}" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 if ! page=$(curl -sfL "https://slsa.dev/spec/v1.2/source-requirements"); then
   echo "audit:spec-drift: could not fetch the spec page — nothing was compared" >&2
@@ -5513,9 +5574,15 @@ dir = "{{cwd}}"
 # never consulted: it cannot judge x509-in-the-PGP-slot and would
 # report every signed tag unsigned.
 run = '''
-[[ -d security ]] || {
-  echo "audit:release-tags: not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:release-tags: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+[[ -f slsa/assert-policy.json ]] || {
+  echo "audit:release-tags: on the canon, and the input this leg reads is missing: slsa/assert-policy.json" >&2
+  echo "  the epochs are policy data, so without it no tag can be judged;" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v gh > /dev/null || {
   echo "audit:release-tags: gh missing" >&2
@@ -5571,8 +5638,11 @@ dir = "{{cwd}}"
 # would make this audit red until a human types something — red by
 # default, which is the state that trains people to ignore a check.
 run = '''
-[[ -d security ]] || {
-  echo "audit:drafts: not the canon, skipped"
+# The identity guard is the whole guard here (#738): the probe, the org
+# listing and each repo's releases are the inputs — nothing in the tree
+# — so this leg has no required input to red on.
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:drafts: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 command -v gh > /dev/null || {
@@ -5809,9 +5879,24 @@ dir = "{{cwd}}"
 # `docs/` was swept into it in one pass — measured, the same org
 # citations resolving before and after.
 run = '''
-[[ -d docs && -d security ]] || {
-  echo "audit:citations: not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:citations: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+# docs/ is what this leg walks, and the walk is collected once here: a
+# canon that has lost it reds by name (#738), and a docs/ holding no
+# tracked markdown reds too — resolving zero citations out of zero
+# documents is the "read nothing, report clean" shape, not a clean org.
+[[ -d docs ]] || {
+  echo "audit:citations: on the canon, and the input this leg walks is missing: docs/" >&2
+  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  exit 1
+}
+docs=$(git ls-files ':!vendor/**' "docs/*.md")
+[[ -n ${docs} ]] || {
+  echo "audit:citations: on the canon, and docs/ holds no tracked markdown —" >&2
+  echo "  there is nothing to resolve, so there is nothing to report clean (#738)." >&2
+  exit 1
 }
 command -v gh > /dev/null || {
   echo "audit:citations: gh missing" >&2
@@ -5855,10 +5940,10 @@ fail=""
 # kill the task. Load-bearing for the run-URL collector especially: it
 # matches nothing on this tree today, which is exactly how the strict
 # shell surfaced it (#82 finding 2).
-cited=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -hoE \
-  "(${GITHUB_REPOSITORY_OWNER}/)?(${names})[@ ]v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
-linked=$(git ls-files ':!vendor/**' "docs/*.md" | xargs grep -hoE \
-  "github\.com/${GITHUB_REPOSITORY_OWNER}/(${names})/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
+cited=$(xargs grep -hoE \
+  "(${GITHUB_REPOSITORY_OWNER}/)?(${names})[@ ]v[0-9]+\.[0-9]+\.[0-9]+" <<< "${docs}" | sort -u) || true
+linked=$(xargs grep -hoE \
+  "github\.com/${GITHUB_REPOSITORY_OWNER}/(${names})/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+" <<< "${docs}" | sort -u) || true
 # Both forms normalise to "repo version" before anything is resolved, so
 # the resolver has one shape to answer about. `sed '/^$/d'` and not
 # `grep -v`: an empty collection is legitimate, and grep's exit 1 for
@@ -5874,8 +5959,8 @@ while IFS=' ' read -r repo ver; do
   grep -qxF "${repo} ${ver}" <<< "${tags}" || fail="${fail}
   cited in docs/ as an org release, but no such tag in ${repo}: ${ver}"
 done <<< "${pairs}"
-runs=$(git ls-files ':!vendor/**' "docs/*.md" \
-  | xargs grep -hoE "github\.com/${GITHUB_REPOSITORY_OWNER}/[A-Za-z0-9._-]+/actions/runs/[0-9]+" | sort -u) || true
+runs=$(xargs grep -hoE "github\.com/${GITHUB_REPOSITORY_OWNER}/[A-Za-z0-9._-]+/actions/runs/[0-9]+" \
+  <<< "${docs}" | sort -u) || true
 rn=0
 while IFS= read -r r; do
   [[ -n ${r} ]] || continue
@@ -5892,7 +5977,7 @@ if [[ -n ${fail} ]]; then
   echo "  or the record, never leave them disagreeing (#349 finding 2)" >&2
   exit 1
 fi
-dn=$(git ls-files ':!vendor/**' "docs/*.md" | wc -l | tr -d ' ')
+dn=$(wc -l <<< "${docs}" | tr -d ' ')
 echo "audit:citations: ${dn} doc(s) walked, ${vn} org release citation(s) and ${rn} run URL(s) all resolve"
 '''
 
@@ -5928,9 +6013,16 @@ dir = "{{cwd}}"
 # The canon's self-* variants and gate.yml satisfy the same
 # obligations under their canonical alternate names.
 run = '''
-[[ -d security ]] || {
-  echo "audit:adoption: not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:adoption: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+roster="slsa/assert-policy.json"
+[[ -f ${roster} ]] || {
+  echo "audit:adoption: ${roster} missing — the roster IS the population," >&2
+  echo "  so without it there is nothing to walk (#693); a canon-only audit" >&2
+  echo "  reds on a missing input, never skips (#738)" >&2
+  exit 1
 }
 command -v gh > /dev/null || {
   echo "audit:adoption: gh missing" >&2
@@ -5944,12 +6036,6 @@ command -v gh > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:adoption walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-roster="slsa/assert-policy.json"
-[[ -f ${roster} ]] || {
-  echo "audit:adoption: ${roster} missing — the roster IS the population," >&2
-  echo "  so without it there is nothing to walk (#693)" >&2
-  exit 1
-}
 # One object per line, re-slurped into an array: `gh --paginate` emits
 # one JSON array PER PAGE, and concatenated arrays are not JSON. A
 # single-page org hides that; the org that outgrows a page would not.
@@ -6084,9 +6170,16 @@ dir = "{{cwd}}"
 # instead of an audit's sharp eye). Reads fail closed and say so: a leg
 # that cannot read the signer must not report agreement or drift.
 run = '''
-[[ -d security ]] || {
-  echo "audit:signer-surface: not the canon, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:signer-surface: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+[[ -f security/signing-surface.toml ]] || {
+  echo "audit:signer-surface: on the canon, and the input this leg reads is missing: security/signing-surface.toml" >&2
+  echo "  the declaration is one half of the reconciliation, so without it" >&2
+  echo "  there is nothing to compare the signer against; a canon-only audit" >&2
+  echo "  reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v gh > /dev/null || {
   echo "audit:signer-surface: gh missing" >&2
@@ -6907,32 +7000,50 @@ exit "${status}"
 description = "A tree carrying the belt carries the org's policy documents (#579)"
 dir = "{{cwd}}"
 # The loudness the audit guards' name branch used to buy, relocated
-# (#579). The canon-only audits guard on their policy file alone —
-# belt-in-tree is the fact the run already holds, the
-# lint:audit-scheduled pattern — so a canon whose policy file is
-# deleted would make every one of them skip as "not the canon": the
-# #568 silent-skip shape, on the conformance root itself. This gate
-# lint is the named refusal that replaces it: only the canon tracks
-# mise/config.toml, and a tree that carries the belt owes the policy
-# documents those audits guard on, plus the identity declaration the
-# belt's asserting tasks read. Deterministic, tracked files only.
+# (#579). Only the canon tracks mise/config.toml, so a tree carrying
+# the belt owes the documents the belt's canon-only tasks read, and
+# this gate lint is the named refusal when one goes missing — said in
+# the PR that deletes it, not by a Monday audit finding less to do.
+#
+# THE HELD LIST DOES NOT GROW WITH THE GUARDS, and since #738 it
+# cannot. Every canon-only audit leg guards on exactly one path — the
+# tracked security/identity.toml, held here — and treats the data it
+# reads (docs/, slsa/spec-source-matrix.txt, security/vex, the policy
+# documents) as a REQUIREMENT that reds by name once that guard says
+# this IS the canon. So no guard path can be unheld, and holding every
+# input a leg reads would only restate the task bodies here: the drift
+# shape #658 retired. The three entries below are each held for their
+# own reason — identity.toml because it is the family's guard, and
+# losing it would silently skip every leg at once (the #568 shape on
+# the conformance root itself); the two policy documents because the
+# release and verify workflows read them too, and a PR is a cheaper
+# place to learn they are gone than a release.
+#
+# The test is TRACKEDNESS, and it is the same test the audit guards
+# make — a hold that asks a different question than the guard it backs
+# leaves the gap it was built to close: a file present but untracked
+# would satisfy `-f` here while every leg skipped on it (#738).
+# Deterministic, tracked files only.
 run = '''
-[[ -f mise/config.toml ]] || {
-  echo "lint:canon-policy: no belt in tree, not the canon, skipped"
+git ls-files --error-unmatch mise/config.toml > /dev/null 2>&1 || {
+  echo "lint:canon-policy: no belt tracked in this tree, not the canon, skipped"
   exit 0
 }
 missing=""
 for f in slsa/assert-policy.json slsa/verify-policy.json security/identity.toml; do
-  [[ -f ${f} ]] || missing="${missing} ${f}"
+  git ls-files --error-unmatch "${f}" > /dev/null 2>&1 || missing="${missing} ${f}"
 done
 if [[ -n ${missing} ]]; then
-  echo "lint:canon-policy: this tree carries the belt but is missing:${missing}" >&2
-  echo "  the canon-only audits guard on these documents — without them each" >&2
-  echo "  would skip as 'not the canon', the #568 silent-skip shape (#579)." >&2
+  echo "lint:canon-policy: this tree carries the belt but does not track:${missing}" >&2
+  echo "  security/identity.toml is what every canon-only audit guards on, so" >&2
+  echo "  a canon without it skips the whole family silently — the #568 shape" >&2
+  echo "  on the conformance root (#579, #738). The policy documents are read" >&2
+  echo "  by those legs and by the release path, which red by name; this is" >&2
+  echo "  the earlier refusal, not the only one." >&2
   echo "  Restore the documents; deleting one is a defect, never a skip." >&2
   exit 1
 fi
-echo "lint:canon-policy: belt in tree and every policy document present"
+echo "lint:canon-policy: belt in tree and every policy document tracked"
 '''
 
 [tasks."lint:policy-load"]
