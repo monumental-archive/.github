@@ -1,5 +1,5 @@
 {
-  "schema": 6,
+  "schema": 7,
   "issuer": "https://token.actions.githubusercontent.com",
   "debtFile": "security/attestation-debt.txt",
   "population": {
@@ -22,7 +22,15 @@
       {
         "repo": "monumental-archive-db",
         "tracks": ["source", "build"],
-        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. The dependency track is deliberately absent, not forgotten — that track's enforcement is the release path's commit point refusing an undecided advisory (publish.yml's VEX leg), and the continuous archetype has no such leg, so claiming the track here would claim a mechanism that does not run on this repository's path (#717)"
+        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. The dependency track is deliberately absent, not forgotten — that track's enforcement is the release path's commit point refusing an undecided advisory (publish.yml's VEX leg), and the continuous archetype has no such leg, so claiming the track here would claim a mechanism that does not run on this repository's path (#717)",
+        "surfaces": [
+          {
+            "kind": "continuous-digest",
+            "registry": "ghcr.io/monumental-archive/monumental-archive-db",
+            "tag": "latest",
+            "identity": "^https://github\\.com/monumental-archive/signer/\\.github/workflows/sign\\.yml@"
+          }
+        ]
       },
       {
         "repo": "monumental-archive-ledger",
@@ -94,10 +102,16 @@
       "signerPinPattern": "monumental-archive/signer/.github/workflows/sign\\.yml@([0-9a-f]{40})"
     },
     "baseImages": {
-      "pinFile": "docker/pgrx-base-images.toml",
-      "attestorRepo": ".github",
-      "attestorIdentity": "https://github.com/monumental-archive/.github/.github/workflows/base-attest.yml@refs/heads/main",
-      "predicateType": "https://monumental-archive.github.io/attestations/base-image-approval/v1"
+      "scopes": [
+        {
+          "name": "pgrx-bases",
+          "mechanism": "pin-file",
+          "pinFile": "docker/pgrx-base-images.toml",
+          "attestorRepo": ".github",
+          "attestorIdentity": "https://github.com/monumental-archive/.github/.github/workflows/base-attest.yml@refs/heads/main",
+          "predicateType": "https://monumental-archive.github.io/attestations/base-image-approval/v1"
+        }
+      ]
     },
     "enrichmentFromVersion": "1.41.0",
     "manifestSchemaFromVersion": "1.51.0"

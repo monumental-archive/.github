@@ -19,20 +19,26 @@
 # no `id-token: write` and mints nothing, so the capability boundary
 # the signer split protects is not in play here at all.
 #
-# WHICH tracks is the caller's declaration and WHO is on the board is
-# the canon's. The two meet here: the canon's `slsa/assert-policy.json`
-# arrives with the canon tree and supplies the roster, the caller's
-# `tracks` input supplies its own row, and every other member is zeroed
-# to no tracks so this run judges exactly one repository. The roster is
-# READ from the delivered canon rather than restated per repository —
-# a second copy in four stubs would red all four the day the org gains
-# a repository, and the delivery rule (#445) exists to make that
-# unrepresentable.
+# WHO is on the board is the canon's, and the canon's
+# `slsa/assert-policy.json` arrives with the canon tree to say so. The
+# roster is READ from the delivered canon rather than restated per
+# repository — a second copy in four stubs would red all four the day
+# the org gains a repository, and the delivery rule (#445) exists to
+# make that unrepresentable.
 #
-# The narrowing is mechanical and carries no judgment: it edits
-# membership and nothing else. Every determination — what a level is,
-# what may replace what (stele#135), which cell leaves the board — is
-# the engine's, exactly as it is in the sweep.
+# This used to rewrite that roster before every run, re-emitting the
+# whole population with each other member zeroed to `tracks: []`,
+# because the only mode the engine had measured an ORGANISATION and a
+# one-member roster is refused (correctly: the org form reconciles the
+# declaration against the forge's listing in both directions). stele
+# v0.20.0 scopes a board to one repository natively — `--repo`
+# publishes that repository's own cells and enumerates nothing — so
+# the rewrite is gone and the delivered roster is read as written
+# (#891, stele#259).
+#
+# Every determination — what a level is, what may replace what
+# (stele#135), which cell leaves the board — is the engine's, exactly
+# as it is in the sweep.
 ---
 name: level
 
@@ -73,15 +79,34 @@ jobs:
           version: 2026.8.10
           cache: false
 
-      - name: Declare this repository's population
-        # The board form is the only form that carries stele#135's
-        # never-overwrite rule, and it measures an organisation — so a
-        # self-scoped run is the org roster with every other member
-        # declared to bear no track. A one-member ROSTER cannot be
-        # used: the engine reconciles the declaration against the
-        # forge's listing in both directions and refuses a declaration
-        # that does not account for a listed repository, which is the
-        # right rule and not one to work around.
+      - name: Check this repository against the canon roster
+        # The engine scopes a board to one repository itself now
+        # (stele#259, v0.20.0): `--repo` publishes that repository's own
+        # cells and ENUMERATES NOTHING, so there is no org listing for a
+        # declaration to be reconciled against and no roster to narrow.
+        #
+        # What this deletes is the rewrite that used to stand in for
+        # that: the whole population re-emitted with every other member
+        # zeroed to `tracks: []`, because the only mode available
+        # measured an organisation. It was mechanical and carried no
+        # judgment, which is exactly why the engine could take it.
+        #
+        # What stays is the membership check, which is a different
+        # question and still ours: a repository nobody declared
+        # publishes no levels.
+        #
+        # WHICH TRACKS now comes from the canon roster rather than from
+        # this input, because `--repo` reads the row. The two were
+        # already required to agree — the stub says so in its own
+        # header and the canon's Monday sweep reds when they diverge —
+        # so the answer is unchanged, but the source of it moved and a
+        # disagreement must not become silent. Where the roster states
+        # tracks explicitly, a stub contradicting it fails HERE instead
+        # of being overridden without a word. Where the roster states
+        # none, absent means every track and the sweep keeps owning it;
+        # no track vocabulary is written down here, because a
+        # vocabulary hardcoded in a caller goes stale the day the
+        # engine gains a track.
         #
         # Values reach bash through the environment, never through
         # `${{ }}` interpolation into a shell body.
@@ -91,31 +116,28 @@ jobs:
           set -euo pipefail
           me="${GITHUB_REPOSITORY#*/}"
           policy=.org-canon/slsa/assert-policy.json
-          if ! jq -e --arg me "${me}" \
-            '.population.repositories | map(select(.repo == $me)) | length == 1' \
-            "${policy}" > /dev/null; then
+          row=$(jq -c --arg me "${me}" \
+            '[.population.repositories[] | select(.repo == $me)]' "${policy}")
+          rows=$(jq -r 'length' <<< "${row}")
+          if [[ ${rows} -ne 1 ]]; then
             echo "::error::${me} is not in the canon's declared population — the org has not said this"
             echo "::error::repository bears evidence, and a repository nobody declared publishes no levels"
             exit 1
           fi
-          tracks=$(jq -cn --arg t "${TRACKS}" '$t | split("\\s+"; "") | map(select(length > 0))')
-          declared=$(jq -r 'length' <<< "${tracks}")
-          if [[ ${declared} -eq 0 ]]; then
+          stated=$(jq -cn --arg t "${TRACKS}" \
+            '$t | split("\\s+"; "") | map(select(length > 0)) | sort')
+          count=$(jq -r 'length' <<< "${stated}")
+          if [[ ${count} -eq 0 ]]; then
             echo "::error::the level stub declared no tracks — state at least one of build, source, dependency"
             exit 1
           fi
-          jq --arg me "${me}" --argjson tracks "${tracks}" '
-            .population.repositories = [
-              .population.repositories[]
-              | if .repo == $me then
-                  {repo: .repo, tracks: $tracks,
-                   reason: "this repository declares its own tracks in its level stub"}
-                else
-                  {repo: .repo, tracks: [],
-                   reason: "judged by its own level stub, onto its own levels branch"}
-                end
-            ]' "${policy}" > population-policy.json
-          names=$(jq -r 'join(" ")' <<< "${tracks}")
+          roster=$(jq -c '.[0].tracks // empty | sort' <<< "${row}")
+          if [[ -n ${roster} && ${roster} != "${stated}" ]]; then
+            echo "::error::this stub declares ${stated} but the canon roster declares ${roster}"
+            echo "::error::for ${me}; the roster is what the engine reads, so fix one of them"
+            exit 1
+          fi
+          names=$(jq -r 'join(" ")' <<< "${stated}")
           echo "level: judging ${me} on ${names}"
       - name: Fetch the previously published judgments
         # The engine decides what may replace what, and it can only do
@@ -146,9 +168,9 @@ jobs:
           set -euo pipefail
           rc=0
           stele level \
-            --org "${GITHUB_REPOSITORY_OWNER}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --out-dir levels \
-            --policy population-policy.json || rc=$?
+            --policy .org-canon/slsa/assert-policy.json || rc=$?
           if [[ ${rc} -ne 0 && ${rc} -ne 4 ]]; then
             echo "::error::stele level failed (exit ${rc}) — nothing published"
             exit "${rc}"
