@@ -201,6 +201,12 @@ jobs:
       smoke-test: ${{ inputs.smoke-test }}
       prepare: ${{ inputs.prepare }}
       binary-crate: ${{ inputs.binary-crate }}
+      # Empty by construction, stated rather than defaulted (#843): a
+      # stream has no release view, so no obligation list exists for an
+      # inventory plan to be judged against, and this archetype plans
+      # nothing. The release path derives a class here; this one has
+      # none to derive.
+      plan-class: ""
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
 

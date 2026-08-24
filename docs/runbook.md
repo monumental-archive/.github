@@ -58,6 +58,13 @@ written for two moments: wiring a repository in, and a release going wrong.
    mise-pinned toolchain — which is why the build inputs column is not
    empty for this class and once wrongly was (#775).
 
+   `oci-image` is what you declare either way. What a crate-built image
+   OWES differs — an `sbom-image-*` inventory a Dockerfile-only image
+   does not ship — so the evidence manifest names a second class,
+   `oci-image-crate`, derived from your `binary-crate` declaration
+   rather than stated by you (#843). Declaring it yourself is not a
+   thing: the class list above is the whole caller vocabulary.
+
    `source-archive` is first-class, not canon-only: it is what this
    repository publishes itself (`self-publish.yml`), built twice,
    repro-gated, signed and attached like every other class. Any repo

@@ -672,16 +672,31 @@ declarative equivalent, and the replacement is the runner's own
 `GITHUB_SHA`, which every build step already carries and which is
 identical on both repro legs. Nothing new is invented for it.
 
-One deliberate silence, recorded so it is not read as an oversight:
-the `oci-image` class declares no planned `assetPrefixes` in
-`slsa/assert-policy.json`. An unconditional obligation would be wrong
-— an image assembled from a Dockerfile alone ships no cargo inventory
-and would red the evidence walk forever — and the policy schema has no
-way to say "owed when `binary-crate` is declared". A class that
-declares no planned prefixes has declared no vocabulary, so its plans
-are outside that judgment rather than refused by it (stele's
-`assert-policy-schema.md`); the plans are still shape-, conflict- and
-drift-judged like every other.
+**Two shapes are two classes** (#843). A crate-built image owes an
+`sbom-image-*` document and a Dockerfile-only image owes nothing, and
+an obligation cannot be declared conditionally — `assetPrefixes` can
+say "owed from version X" and nothing else. So `slsa/assert-policy.json`
+declares two: `oci-image`, which owes only its attestation bundle, and
+`oci-image-crate`, which owes the same bundle plus the planned
+`sbom-image-` prefix from `1.60.0`. The class is the unit of
+obligation, and teaching the schema to carry a predicate would have
+re-implemented class membership inside an obligation — a second
+vocabulary for a fact the class name already carries.
+
+The caller declares neither. It declares `oci-image` and it declares
+its `binary-crate`, and `publish.yml`'s guard job derives which class
+that IS — once, from the same fact that decides whether the image leg
+emits a plan at all. That one derived list is what the pre-publish
+plans judgment reads and what the evidence manifest declares, so a
+release cannot pass one and red the other, and there is no second
+caller declaration to drift against the first. Existing crate-built
+image repositories convert at their next publish; their published
+manifests keep saying what was true when they were written.
+
+What this ends is a silence. Before it, the crate-built plan was
+shape-, conflict- and drift-judged but never obligation-judged, so a
+repository that stopped publishing its `sbom-image-*` document reded
+nothing at all.
 
 ### Image metadata: one map, resolved once
 

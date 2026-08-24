@@ -51,6 +51,12 @@
       "oci-image": {
         "bundles": ["attestations-image.intoto.jsonl"]
       },
+      "oci-image-crate": {
+        "bundles": ["attestations-image.intoto.jsonl"],
+        "assetPrefixes": [
+          { "prefix": "sbom-image-", "owedFrom": "1.60.0", "planned": true }
+        ]
+      },
       "rust-binary": {
         "bundles": ["attestations-binaries.intoto.jsonl"],
         "assetPrefixes": [

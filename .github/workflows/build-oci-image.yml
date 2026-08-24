@@ -139,6 +139,24 @@ name: build-oci-image
         required: false
         type: string
         default: ""
+      plan-class:
+        # forwarding: universal
+        description: >
+          The evidence class this leg's inventory plan names (#843). The
+          class is the unit of obligation, and a crate-built image and a
+          Dockerfile-only one owe different evidence — the first an
+          `sbom-image-*` document, the second nothing — so they are two
+          classes rather than one class with two shapes. The caller of
+          publish.yml never states this: its guard job derives the name
+          from the same `binary-crate` declaration that decides whether
+          a plan is emitted at all, and hands it here, so a plan and the
+          evidence manifest cannot name different classes for one image.
+          Empty means plan nothing, which is the continuous archetype:
+          it builds no release view, so there is no obligation list for
+          a plan to be judged against.
+        required: false
+        type: string
+        default: ""
       facts:
         # forwarding: universal
         description: >
@@ -444,10 +462,17 @@ jobs:
           # AND inside an image, and two documents describing one
           # artifact name is a union the engine rightly refuses.
           #
+          # The class name is GIVEN, never chosen here (#843): the one
+          # derivation lives in publish.yml's guard, which reads the same
+          # `binary-crate` declaration this step is gated on. A leg that
+          # picked its own name would be that rule stated twice, and the
+          # day the two spellings differ the plans judgment reds with
+          # "a leg ran for an undeclared class".
+          #
           # Negated deliberately: an empty string is FALSY in a GitHub
-          # expression, so `repro && '' || 'oci-image'` would yield
-          # 'oci-image' on both legs.
-          PLAN_CLASS: ${{ !inputs.repro && 'oci-image' || '' }}
+          # expression, so `repro && '' || inputs.plan-class` would yield
+          # the class on both legs.
+          PLAN_CLASS: ${{ !inputs.repro && inputs.plan-class || '' }}
           PLAN_DOC_PREFIX: sbom-image-
           PLAN_ARTIFACT_SUFFIX: -image
         run: |
@@ -470,10 +495,15 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         # The plan the sbom job folds into the release view. Both arches
         # state the same mapping and the engine collapses them, exactly
-        # as the rust-binary targets and the pgrx cells do. The
-        # continuous archetype builds no release view, so the artifact
-        # it uploads here is simply never fetched.
-        if: ${{ inputs.binary-crate != '' && !inputs.repro }}
+        # as the rust-binary targets and the pgrx cells do.
+        #
+        # Gated on the class, not on the crate (#843): the step above
+        # writes a plan only when it was given a class to plan under, and
+        # `if-no-files-found: error` would otherwise turn "nothing to
+        # plan" into a failed build. The continuous archetype is exactly
+        # that case — it declares a crate and builds no release view — and
+        # it now uploads nothing rather than an artifact nothing fetched.
+        if: ${{ inputs.plan-class != '' && !inputs.repro }}
         with:
           name: sbom-plan-oci-${{ matrix.arch }}
           path: plan/plan.json
