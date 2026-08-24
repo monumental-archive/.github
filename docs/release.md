@@ -1006,6 +1006,21 @@ correctness-by-patching; this is the same knowledge by design):
   `ALTER EXTENSION UPDATE` — the path executes, not merely exists.
   Majors the previous release did not ship skip execution: only
   installations that can exist can be stranded.
+- **The installable set is recorded, not re-inferred** (#825): the same
+  forge walk that picks the predecessor also answers, for every version
+  the upgrade graph names, whether a non-draft release still carries its
+  tarballs — and writes the answer to a tracked `.pgrx-installable`,
+  derived state carrying its own date and version exactly as
+  `.coverage-floor` does, riding the release commit as an `EXTRA_FILES`
+  addition. `lint:pg-upgrade-path` reads it rather than asking the
+  forge, because the gate is deterministic. Without it that check cannot
+  distinguish a version that burned — its Release PR committed an
+  upgrade script and its publish then failed — from one that published
+  and simply was not derived from, whose every installation is
+  stranded; it called both "burned", which is green and untrue for the
+  second. The record may only ever accuse: a `from` half still owes a
+  path whatever the record says, and a tree with no record yet says the
+  question is open instead of closing it.
 - **Reproducible tarballs**, same flags and normalisation as rust-binary,
   named `<ext>-<version>-pg<major>-linux-<arch>.tar.gz`, each shipping
   both the Debian tree and the CloudNativePG ImageVolume layout.

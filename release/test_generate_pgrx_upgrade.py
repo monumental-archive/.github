@@ -49,6 +49,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -398,6 +399,178 @@ class LeavesTheCallersGitAlone(unittest.TestCase):
         self.assertEqual(before_files, after_files, "the shared index lost files")
         self.assertEqual("", status, f"the linked worktree is dirty:\n{status}")
         self.assertEqual(before_digest, after_digest, "the shared index was rewritten")
+
+
+RECORD = ".pgrx-installable"
+LINT = CANON / "mise" / "pg-upgrade-path.sh"
+CARGO = shutil.which("cargo")
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def written_record(root: Path) -> str:
+    """Read the record the derivation wrote into a fixture repository.
+
+    Returns:
+        The whole file, comments and all.
+
+    """
+    return (root / RECORD).read_text()
+
+
+def entries(written: str) -> list[str]:
+    """Take the record's data lines, dropping its comment header.
+
+    Returns:
+        One line per extension the forge was asked about.
+
+    """
+    return [line for line in written.splitlines() if not line.startswith("#")]
+
+
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
+class WritesTheInstallableSet(unittest.TestCase):
+    """#825: the forge walk is recorded, because the gate cannot repeat it.
+
+    Selection asks which versions a non-draft release CARRIES. That is
+    the same question `lint:pg-upgrade-path` needs to tell a burned dead
+    end from a stranded installation and cannot ask, being deterministic
+    and offline. So the answer for EVERY version in the graph is written
+    down here, as derived state, and rides the release commit.
+    """
+
+    def test_it_names_the_versions_the_forge_carries_newest_first(self) -> None:
+        """The real edtf listing carries three of its eleven graph versions."""
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+            repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+            written = written_record(repo.root)
+        self.assertEqual(["edtf_postgres 1.2.3 1.1.2 1.1.0"], entries(written))
+
+    def test_the_burned_head_is_absent_and_that_is_the_whole_point(self) -> None:
+        """1.3.0 is in the graph, carried by nothing, and must not appear.
+
+        This is the fact the lint could not otherwise have. Assert it
+        directly rather than trusting the line above to imply it.
+        """
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+            repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+            written = written_record(repo.root)
+        self.assertNotIn("1.3.0", written)
+
+    def test_it_carries_its_own_derivation(self) -> None:
+        """Derived state states how it was derived, like `.coverage-floor`."""
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+            repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+            written = written_record(repo.root)
+        self.assertIn("# derived: v1.3.1", written)
+        observed = next(
+            ln.split(":", 1)[1].strip()
+            for ln in written.splitlines()
+            if ln.startswith("# observed:")
+        )
+        self.assertRegex(observed, ISO_DATE)
+
+    def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty(
+        self,
+    ) -> None:
+        """Mid-life adoption: asked, and the answer was none. Not silence."""
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+            repo.derive("1.1.0", "1.0.1", "stele-releases.json")
+            written = written_record(repo.root)
+        self.assertEqual(["demo_pg"], entries(written))
+
+    def test_it_rides_the_release_commit(self) -> None:
+        """A record the Release PR does not carry never reaches the gate.
+
+        `files=` feeds EXTRA_FILES in release.yml, so this is the whole
+        delivery path. Run separately from `Repo.derive`, which drops
+        GITHUB_OUTPUT on purpose; the `already reaches` branch settles
+        the record and exits without wanting a container.
+        """
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
+            repo.derive("1.0.1", "1.0.0", "stele-releases.json")
+            out = repo.root / "gh-output"
+            env = hermetic_env(
+                repo.home,
+                PATH=f"{repo.root / 'stubbin'}:{os.environ['PATH']}",
+                VERSION="1.0.1",
+                PREV_MANIFEST="1.0.0",
+                GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
+                GITHUB_REPOSITORY="monumental-archive/under-test",
+                GH_FIXTURE=str(TESTDATA / "stele-releases.json"),
+                GITHUB_OUTPUT=str(out),
+            )
+            result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [BASH, str(SCRIPT)],
+                cwd=repo.root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            emitted = out.read_text()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn(f"files={RECORD}", emitted)
+
+    @unittest.skipUnless(CARGO, "the lint resolves the crate version with cargo")
+    def test_the_lint_reads_exactly_what_this_wrote(self) -> None:
+        """End to end, across the two scripts that must agree on the name.
+
+        The record's filename is written in `generate-pgrx-upgrade.sh`
+        and read in `pg-upgrade-path.sh`. Nothing but this row would
+        notice a rename on one side: the lint would simply find no
+        record and take its interim path, in green, forever.
+        """
+        edges = [("1.1.0", "1.1.2"), ("1.1.2", "1.2.3")]
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges)
+            written = repo.derive("1.2.3", "1.1.2", "edtf-releases.json")
+            self.assertIn("already reaches 1.2.3", written.stdout)
+
+            crate = repo.root / "crates" / "edtf-postgres"
+            (crate / "src").mkdir()
+            (crate / "src" / "lib.rs").write_text("pub fn f() {}\n")
+            # Rust's two homes, threaded explicitly. `hermetic_env`
+            # redirects HOME to keep the caller's git config out of a
+            # fixture, and that hides `~/.cargo` and `~/.rustup` with
+            # it — on a rustup-managed machine the `cargo` on PATH is a
+            # shim, and it exits 1 with "could not choose a version of
+            # cargo to run" rather than anything about HOME.
+            env = hermetic_env(
+                repo.home,
+                CARGO_HOME=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
+                RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
+            )
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [
+                    CARGO,
+                    "generate-lockfile",
+                    "--offline",
+                    "--manifest-path",
+                    str(crate / "Cargo.toml"),
+                ],
+                cwd=repo.root,
+                env=env,
+                check=True,
+                capture_output=True,
+            )
+            linted = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [BASH, str(LINT)],
+                cwd=repo.root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(0, linted.returncode, linted.stdout + linted.stderr)
+        self.assertIn(
+            "every installable edtf_postgres version reaches 1.2.3", linted.stdout
+        )
+        self.assertIn("installable set recorded v1.2.3", linted.stdout)
 
 
 if __name__ == "__main__":
