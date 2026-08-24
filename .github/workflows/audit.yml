@@ -182,6 +182,10 @@ jobs:
   org-pins:
     name: audit / org-wide canon pin freshness
     runs-on: ubuntu-24.04
+    # Environment-scoped for the same reason drafts and baseline-drift
+    # are: the token this needs is org-wide, and a secret referenced
+    # repo-wide is drawable by any job anyone adds to any workflow here.
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -200,12 +204,27 @@ jobs:
 
       - name: Check every org repo's canon references from the canon
         env:
-          # Repo enumeration only; the clones and tag reads are public.
+          # NOT github.token, and the difference is whether this walk
+          # can answer at all: it lists the org, clones every member and
+          # reads its tags, and the population contains a PRIVATE member
+          # (#692). The default job token is entitled in THIS repository
+          # alone — measured 2026-08-21, the listing it is served
+          # returns 8 of the org's 9 repositories, omitting exactly the
+          # private one, and an unauthenticated clone of that member
+          # exits 128. The task's population guard then trips ("token
+          # sees 8 repos, population is 9") and this leg is
+          # CANNOT_JUDGE every Monday — honest, per #730, but never
+          # green. What the token must be able to do is Contents: read
+          # on EVERY member of the population, private ones included;
+          # AUDIT_TOKEN is the org-wide fine-grained PAT this workflow
+          # already carries for reads the public view cannot serve, and
+          # is set to All repositories (#749).
+          #
           # Red means a consumer's canon references have been catchable
           # for over a day and Renovate has not caught them — the alarm
           # audit:canon-pins can only raise inside the lagging repo
           # itself, raised here where someone looks (#310 finding 1).
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:org-pins
 
   biome-rules:
@@ -355,6 +374,10 @@ jobs:
   adoption:
     name: audit / obligation adoption across the org
     runs-on: ubuntu-24.04
+    # Environment-scoped for the same reason drafts and baseline-drift
+    # are: the token this needs is org-wide, and a secret referenced
+    # repo-wide is drawable by any job anyone adds to any workflow here.
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -373,10 +396,25 @@ jobs:
 
       - name: Enumerate the population against the required stub set
         # #349 S7, the #266 rule for every obligation: a repo missing a
-        # stub with no opt-out row is a red, never a silence. Public
-        # metadata; the default token reads it.
+        # stub with no opt-out row is a red, never a silence.
         env:
-          GH_TOKEN: ${{ github.token }}
+          # NOT github.token: this reconciles the roster against the org
+          # listing by name in both directions and then reads every
+          # member's .github/workflows and tags, and the population
+          # contains a PRIVATE member (#692). The default job token is
+          # entitled in THIS repository alone — measured 2026-08-21, the
+          # listing it is served returns 8 of the org's 9 repositories,
+          # omitting exactly the private one, and contents reads on that
+          # member are 404. A roster member the listing does not confirm
+          # is reported ABSENT and never walked, so the leg reds every
+          # Monday on the credential rather than answering anything
+          # about that member's adoption. What the token must be able to
+          # do is Contents: read on EVERY member of the population,
+          # private ones included; AUDIT_TOKEN is the org-wide
+          # fine-grained PAT this workflow already carries for reads the
+          # public view cannot serve, and is set to All repositories
+          # (#749).
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:adoption
 
   citations:
