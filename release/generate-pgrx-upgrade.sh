@@ -97,13 +97,19 @@ fi
 # about 1.3.0 alone, found nothing, and called an extension with eleven
 # published versions a first publish. Installability is a fact about
 # release assets, so it is settled per extension, in the loop below.
-graph_targets=$(
+graph=$(
   python3 - "${controls[@]}" << 'PYEOF'
-import os, re, sys
+import json, os, re, sys
 
 def key(v):
     return tuple(int(part) for part in v.split("."))
 
+# `targets` is the union across every extension and drives predecessor
+# selection, unchanged. `versions` is per extension and includes the
+# `from` halves too, because the installability record below has to
+# answer for every version the graph names, not only the ones something
+# was derived into (#825).
+versions = {}
 targets = set()
 for control in sys.argv[1:]:
     crate_dir = os.path.dirname(control)
@@ -116,24 +122,128 @@ for control in sys.argv[1:]:
         entries = os.listdir(sql_dir)
     except FileNotFoundError:
         continue
+    seen = versions.setdefault(name, set())
     for entry in entries:
         match = pattern.match(entry)
         if not match:
             continue
+        seen.update(match.groups())
         targets.add(match.group(2))
-for target in sorted(targets, key=key, reverse=True):
-    print(target)
+print(json.dumps({
+    "targets": sorted(targets, key=key, reverse=True),
+    "versions": {
+        n: sorted(v, key=key, reverse=True) for n, v in versions.items() if v
+    },
+}))
 PYEOF
 )
+graph_targets=$(jq -r '.targets[]' <<< "${graph}")
 graph_head=$(head -n 1 <<< "${graph_targets}")
 if [[ -z ${graph_head} ]]; then
   echo "no upgrade graph; first publish of this extension needs no upgrade path"
   emit "files="
   exit 0
 fi
+# WHAT THE FORGE ANSWERS IS WRITTEN DOWN, because the gate cannot ask it
+# (#825). `lint:pg-upgrade-path` has to tell a burned dead end from a
+# stranded installation, and a filename cannot: a version that is only
+# ever an upgrade TARGET either burned or published fine and simply was
+# not derived from. That is a fact about release assets, which is the
+# question this script is already asking to pick a predecessor — so it
+# answers it for EVERY version in the graph, once, and commits the
+# answer as derived state alongside the upgrade script itself.
+#
+# One listing, not one per candidate. This used to run a paginated
+# `gh api` per candidate version with `--jq '[...] | first // empty'`,
+# and `--paginate` applies the filter to each page separately: measured
+# on `repos/monumental-archive/edtf/releases?per_page=1`, that form
+# returns one line PER MATCHING PAGE, so two pages each carrying a match
+# would have handed a two-line string to `gh release view`. edtf is
+# already 38 releases — two pages at the default 30 — and stays correct
+# today only because exactly one release carries any given
+# `<ext>-<version>-pg` prefix. Streaming the assets and matching locally
+# has no per-page filter to get wrong, and costs one call instead of N.
+record=".pgrx-installable"
+# Object construction rather than a jq `as $tag` binding: the filter is
+# single-quoted, so a `$name` in it is a jq variable shellcheck cannot
+# tell from an unexpanded shell one (SC2016). Written this way there is
+# nothing to disable and nothing for a reader to double-take at.
+carried=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+  --jq '.[] | select(.draft | not)
+        | {tag: .tag_name, asset: .assets[]?.name}
+        | "\(.tag)\t\(.asset)"' < /dev/null)
+
+installable=$(
+  GRAPH="${graph}" CARRIED="${carried}" RECORD="${record}" VERSION="${VERSION}" \
+    python3 << 'PYEOF'
+import datetime, json, os
+
+graph = json.loads(os.environ["GRAPH"])
+record_path = os.environ["RECORD"]
+
+rows = []
+for line in os.environ["CARRIED"].splitlines():
+    tag, sep, asset = line.partition("\t")
+    if sep:
+        rows.append((tag, asset))
+
+HEADER = """\
+# pgrx installable versions -- DERIVED STATE, not a list to edit (#825).
+#
+# Which extension versions a non-draft release still CARRIES tarballs
+# for, and therefore which versions a database can be sitting on.
+# Written by release/generate-pgrx-upgrade.sh on every Release PR, from
+# the same forge walk that picks the upgrade derivation's predecessor,
+# so the two cannot answer differently.
+#
+# lint:pg-upgrade-path reads this instead of asking the forge, because
+# the gate is deterministic. Without it that check cannot tell a burned
+# dead end -- a version whose Release PR committed an upgrade script and
+# whose publish then failed -- from a published version nothing was
+# derived from, whose every installation is stranded. It used to call
+# both "burned", which is green and untrue for the second.
+#
+# The universe here is the upgrade graph: every version named by a
+# tracked <ext>--<from>--<to>.sql was asked about, and nothing else was.
+# A line names an extension and the versions the forge carried, newest
+# first; an extension whose graph is empty is omitted rather than
+# recorded as carrying nothing, since it was never asked.
+#
+# observed: {observed}
+# derived: {provenance}
+"""
+
+lines = []
+listing = []
+for name in sorted(graph["versions"]):
+    carried_versions = []
+    for candidate in graph["versions"][name]:
+        prefix = f"{name}-{candidate}-pg"
+        tag = next((t for t, asset in rows if asset.startswith(prefix)), None)
+        if tag is None:
+            continue
+        carried_versions.append(candidate)
+        listing.append(f"{name}\t{candidate}\t{tag}")
+    lines.append(" ".join([name, *carried_versions]))
+
+header = HEADER.format(
+    observed=datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
+    provenance="v" + os.environ["VERSION"],
+)
+with open(record_path, "w", encoding="utf-8") as handle:
+    handle.write(header + "\n".join(lines) + "\n")
+
+print("\n".join(listing))
+PYEOF
+)
+echo "installable set recorded in ${record}:"
+sed 's/^/  /' "${record}"
+
+files_out=" ${record}"
+
 if [[ ${graph_head} == "${VERSION}" ]]; then
   echo "upgrade graph already reaches ${VERSION}; nothing to derive"
-  emit "files="
+  emit "files=${files_out# }"
   exit 0
 fi
 if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${graph_head}" ]]; then
@@ -186,8 +296,6 @@ with open("'"${canon}"'/docker/pgrx-base-images.toml", "rb") as f:
 print(json.dumps(t))
 ')
 
-files_out=""
-
 for control in "${controls[@]}"; do
   crate_dir=$(dirname "${control}")
   name=$(basename "${control}" .control)
@@ -210,15 +318,17 @@ for control in "${controls[@]}"; do
   # predecessor; skipping it is not the same as concluding there is no
   # predecessor. Only when NO version in the whole graph is carried has
   # this extension truly never shipped.
+  #
+  # Installability was settled once, above, for every version in the
+  # graph, and written to `${record}`. This reads that answer rather than
+  # asking again, so the predecessor the derivation picks and the set the
+  # gate is handed cannot describe different forges (#825).
   prev=""
   prev_tag=""
   while IFS= read -r candidate; do
     [[ -n ${candidate} ]] || continue
-    prefix="${name}-${candidate}-pg"
-    candidate_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-      --jq "[.[] | select(.draft | not)
-             | select(any(.assets[]; .name | startswith(\"${prefix}\")))
-             | .tag_name] | first // empty" < /dev/null)
+    candidate_tag=$(awk -F'\t' -v ext="${name}" -v want="${candidate}" \
+      '$1 == ext && $2 == want { print $3; exit }' <<< "${installable}")
     if [[ -n ${candidate_tag} ]]; then
       prev="${candidate}"
       prev_tag="${candidate_tag}"
