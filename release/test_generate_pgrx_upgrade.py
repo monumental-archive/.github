@@ -71,6 +71,18 @@ GH_STUB = """#!/usr/bin/env bash
 # Stub `gh` for the derivation tests: answers the release listing from a
 # fixture and refuses everything else, so a test stops at the first step
 # that wants real bytes.
+#
+# `gh api ... --paginate --jq` applies the filter to the COMBINED pages,
+# not per page — measured against release-lab's 59 releases, where
+# `--jq length` answers 59 rather than 30 then 29. So one jq over the
+# whole fixture array is what the real call does, and a fixture may span
+# more than one page without the stub having to pretend to paginate.
+#
+# `gh release view --json tagName` is answered too, because that is what
+# the derivation asked BEFORE #766: the latest release, which for a real
+# `gh` excludes drafts. Without it the pre-fix script could only fail by
+# having its forge call refused, which proves nothing about the tag test
+# that was the actual defect.
 set -uo pipefail
 if [[ ${1:-} == api && ${2:-} == *release* ]]; then
   expr=""
@@ -79,6 +91,34 @@ if [[ ${1:-} == api && ${2:-} == *release* ]]; then
     shift
   done
   jq -r "${expr}" "${GH_FIXTURE}"
+  exit 0
+fi
+if [[ ${1:-} == release && ${2:-} == view ]]; then
+  expr=""
+  want=""
+  shift 2
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --jq) expr="$2"; shift ;;
+      --json | --repo) shift ;;
+      -*) ;;
+      *) want="$1" ;;
+    esac
+    shift
+  done
+  # `gh release view` with no tag answers the LATEST release, which
+  # excludes drafts; with a tag it answers that one. The fields come back
+  # camelCased, unlike the REST listing the fixture is, so the stub
+  # renames them rather than letting a test pass against a shape the real
+  # command never returns.
+  if [[ -n ${want} ]]; then
+    pick=$(jq --arg t "${want}" '[.[] | select(.tag_name == $t)]' "${GH_FIXTURE}")
+  else
+    pick=$(jq '[.[] | select(.draft | not)]' "${GH_FIXTURE}")
+  fi
+  one=$(jq 'first | {tagName: .tag_name, isDraft: .draft, assets}' <<< "${pick}")
+  [[ ${one} != null ]] || exit 1
+  jq -r "${expr:-.}" <<< "${one}"
   exit 0
 fi
 echo "gh stub: refusing '$*' (the test stops here by design)" >&2
@@ -571,6 +611,84 @@ class WritesTheInstallableSet(unittest.TestCase):
             "every installable edtf_postgres version reaches 1.2.3", linted.stdout
         )
         self.assertIn("installable set recorded v1.2.3", linted.stdout)
+
+
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
+class TagHistoryShapes(unittest.TestCase):
+    """The three tag histories the predecessor search must tell apart (#762).
+
+    Selection succeeds silently — the script prints no tag on the happy
+    path — so the assertion is the FETCH it goes on to attempt, which the
+    stub refuses by name on stderr. That is the decision itself rather
+    than a proxy for it: a wrong tag would be a wrong download.
+    """
+
+    def test_always_released_as_v_star(self) -> None:
+        """release-lab: predecessor tarballs live on a plain `v*` tag."""
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
+            result = repo.derive("0.29.0", "0.28.1", "release-lab-releases.json")
+        self.assertIn("release download v0.28.1", result.stderr)
+        self.assertIn("deriving lab_pg: 0.28.1 -> 0.29.0", result.stdout)
+        self.assertNotIn("first publish", result.stdout)
+
+    def test_imported_previous_release_under_another_scheme(self) -> None:
+        """edtf: the same bytes sit on `edtf-postgres-v1.2.3` (#762).
+
+        `v1.2.3` exists in edtf as a tag with no release object, so the
+        tag test this replaced saw "not a v* release" and derived nothing
+        for an extension with eleven published versions.
+        """
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+            result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+        self.assertIn("release download edtf-postgres-v1.2.3", result.stderr)
+        self.assertIn("deriving edtf_postgres: 1.2.3 -> 1.3.1", result.stdout)
+        self.assertNotIn("first publish", result.stdout)
+
+    def test_no_releases_at_all(self) -> None:
+        """signer: the listing is empty, so nothing is installable.
+
+        A non-empty graph with an empty listing is NOT the same input as
+        an empty graph, and this is the row that says so: the script must
+        reach the forge, be told there is nothing, and only then conclude
+        first publish. It must not attempt a download.
+        """
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+            result = repo.derive("1.1.0", "1.0.1", "signer-releases.json")
+        self.assertIn("no non-draft release carries any demo_pg tarball", result.stdout)
+        self.assertIn("first publish", result.stdout)
+        self.assertNotIn("release download", result.stderr)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_the_new_fixtures_carry_the_shapes_they_are_named_for(self) -> None:
+        """Guard the guards: a refreshed capture must not go tautological.
+
+        Same reasoning as the edtf fixture's own shape check — a listing
+        that lost its `v*` tarballs, or a `signer` that acquired a
+        release, would leave the rows above asserting nothing while
+        staying green.
+        """
+        lab = json.loads((TESTDATA / "release-lab-releases.json").read_text())
+        carriers = [
+            r["tag_name"]
+            for r in lab
+            if not r["draft"]
+            and any(a["name"].startswith("lab_pg-0.28.1-pg") for a in r["assets"])
+        ]
+        self.assertEqual(
+            ["v0.28.1"], carriers, "the v*-scheme predecessor must still be v0.28.1"
+        )
+        self.assertEqual(
+            [], json.loads((TESTDATA / "signer-releases.json").read_text())
+        )
+        edtf = json.loads((TESTDATA / "edtf-releases.json").read_text())
+        self.assertNotIn(
+            "v1.2.3",
+            [r["tag_name"] for r in edtf],
+            "edtf's imported scheme is the point: no v1.2.3 release object",
+        )
 
 
 if __name__ == "__main__":
