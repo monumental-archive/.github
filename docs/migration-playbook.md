@@ -42,6 +42,15 @@ a fresh session **started in the target repo's checkout**.
       where the canonical entry `publish.yml` exists).
 - [ ] Rulesets need nothing: they are org-level, `enforcement: active`,
       scope `~ALL` — a transferred repo is covered the moment it lands.
+- [ ] Org secrets and App installations need nothing either: every org
+      secret is readable by all org repositories and all three App
+      installations (tag-mint, renovate, codecov) are all-repositories,
+      so an arriving repo is granted them by arriving. Verify only if
+      the baseline audit reports drift — `audit:baseline-drift` reds on
+      an installation that is not all-repositories. The retired
+      alternative is why this line exists: under the old per-repo
+      selection, tag-mint was on nobody's checklist, and the first
+      import to reach a release died on an unreadable 404 (#757, #751).
 - [ ] Verify: `./settings/repo-baseline.sh check` exits clean; ruleset
       shows `current_user_can_bypass: never`.
 

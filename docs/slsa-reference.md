@@ -507,11 +507,14 @@ Two consequences, in opposite directions:
   needs the `environment` claim and no secret at all. Registry publishing
   from a shared reusable can be pinned to `environment: publish`.
 - **A secret cannot be protected by an environment through a shared
-  workflow.** Repository scoping (`visibility: selected` on an
-  organisation secret) is the only mechanism that restricts *who can read*
-  one; an environment restricts only *when a job runs*. Anything asserting
-  that a key "lives behind" an environment while being consumed by a
-  reusable workflow is asserting something the platform does not do.
+  workflow.** An organisation secret's repository scoping is the only
+  mechanism that restricts *who can read* one; an environment restricts
+  only *when a job runs*. Anything asserting that a key "lives behind" an
+  environment while being consumed by a reusable workflow is asserting
+  something the platform does not do. The org does not use that lever:
+  every org secret is readable by all org repositories by decision
+  (#751), so the reach is bounded by what workflows exist, not by a list
+  ([`release.md`](release.md) states the consideration).
 
 Note also that `actionlint` models the reusable `secrets` context as
 closed over the declared `workflow_call` secrets and rejects both the
