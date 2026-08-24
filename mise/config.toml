@@ -3057,6 +3057,234 @@ done <<< "${cfgs}"
 }
 '''
 
+[tasks."lint:scaffold-assembly"]
+description = "A repository built from scaffold/ survives the org's own fixers and gate (canon only)"
+dir = "{{cwd}}"
+# `scaffold/` is the entire per-repo footprint of the governance stack —
+# what every new repository copies at creation and every import copies at
+# migration — and until this task nothing ever RAN it as a repository
+# (#777). The stubs were linted as text: `lint:tsconfig-dials` reads the
+# dials, `lint:biome` lints the JSON. Neither answers the only question
+# that matters, which is whether a repo assembled from them passes the
+# gate those same stubs opt it into.
+#
+# #758 is what fell through the gap: a repository built verbatim from
+# these stubs deadlocked its own fixer against its own checker —
+# `fix:biome` wrote `./helper.ts`, `tsc` refused it (TS5097), forever —
+# while every canon gate stayed green, because the canon has no
+# TypeScript. A green canon gate is not evidence about the scaffold.
+#
+# So: assemble, fix, then gate, all in a scratch tree. RED BEFORE THE
+# FIXERS IS EXPECTED and is not measured — the assembled tree is checked
+# after `fix:*`, because that is the state a repo is asked to be in.
+# A red is not automatically a defect in `scaffold/` either, so the
+# report names WHICH task spoke and prints what it said; reading it is
+# the point.
+#
+# Deterministic and offline: the belt is already installed, the stubs are
+# tracked files, and every task the assembled gate runs is one the canon
+# already runs on itself. What the assembly cannot provide is printed,
+# never silently dropped — the Rust and Go legs (the belt pins no `rust`
+# or `go`; a repo declares its own), `fix:tracks` (#860), and `ci`'s
+# `test`/`build` collection (the stub `mise.toml` ships a deliberately
+# failing TODO test, which is the scaffold working).
+run = '''
+tracked=$(git ls-files "scaffold/")
+[[ -n ${tracked} ]] || {
+  echo "lint:scaffold-assembly: no tracked scaffold/, not the canon, skipped"
+  exit 0
+}
+command -v mise > /dev/null || {
+  echo "lint:scaffold-assembly: mise missing from the belt" >&2
+  exit 1
+}
+# THE BELT UNDER TEST IS THIS COMMIT'S, not the one the machine happens
+# to wear. ORG_BELT_DIR is right for reading delivered configs and wrong
+# here: locally it resolves through the ~/.config/mise/conf.d symlink to
+# whichever checkout was linked, so a belt change in the branch would be
+# assembled against the belt on main and the run would prove nothing
+# about the pull request. The canon tracks the belt, so the canon's own
+# copy is the answer, in CI and on a laptop alike.
+belt="${PWD}/mise/config.toml"
+git ls-files --error-unmatch "mise/config.toml" > /dev/null 2>&1 || {
+  echo "lint:scaffold-assembly: scaffold/ is tracked but mise/config.toml is not" >&2
+  echo "  the assembled repository is run against this repository's own belt" >&2
+  exit 1
+}
+# stub:destination. A tracked stub must appear here or in the list
+# below, so a stub added to scaffold/ without a decision reds this check
+# instead of escaping it.
+assembled="mise.toml:mise.toml
+tsconfig.json:tsconfig.json
+biome.json.stub:biome.json
+deny.toml:deny.toml
+renovate.json:renovate.json
+lefthook.yml:lefthook.yml
+.editorconfig:.editorconfig
+.bestpractices.json:.bestpractices.json
+.golangci.yml:.golangci.yml
+SECURITY-INSIGHTS.yml:SECURITY-INSIGHTS.yml
+CHANGELOG.md:CHANGELOG.md
+CODEOWNERS:.github/CODEOWNERS"
+# stub:why not. Printed with the run: a stub this check does not
+# exercise is a stub it does not speak for.
+declined="README.md:the directory's own documentation, not a file a repo copies
+README-badges.md:the badge catalogue fix:badges reads from the canon
+REUSE.toml.stub:its holes are the licence identity only the repo can choose (#214)
+CITATION.cff:fix:citation renders it from REUSE.toml; a copy would be hand-filled"
+# task:why not. Both are belt defects this check FOUND and does not fix;
+# each comes out of this list when its issue closes. An excluded task is
+# printed with every run, because an exclusion nobody can see is a hole.
+# The | is not decoration: a task name carries a colon, so this table
+# cannot be split on one.
+excluded="fix:tracks|no applicability guard, so it is red in every consumer (#860)
+fix:shell|runs shfmt -w on stdin where no shell is tracked, under GNU xargs (#860)"
+decided=$(cut -d: -f1 <<< "${assembled}
+${declined}")
+missing=""
+while IFS= read -r f; do
+  stub="${f#scaffold/}"
+  grep -qxF "${stub}" <<< "${decided}" && continue
+  missing="${missing} ${stub}"
+done <<< "${tracked}"
+if [[ -n ${missing} ]]; then
+  echo "lint:scaffold-assembly: tracked stub(s) the assembly does not name:${missing}" >&2
+  echo "  add each to the assembled list with a destination, or to the declined list with" >&2
+  echo "  the reason — an unnamed stub is one nothing ever runs" >&2
+  exit 1
+fi
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+count=0
+while IFS=: read -r stub dest; do
+  [[ -n ${stub} ]] || continue
+  mkdir -p "${tmp}/$(dirname "${dest}")"
+  cp "scaffold/${stub}" "${tmp}/${dest}" || {
+    echo "lint:scaffold-assembly: scaffold/${stub} is tracked but unreadable here" >&2
+    exit 1
+  }
+  count=$((count + 1))
+done <<< "${assembled}"
+# The probe's own scaffolding, which is NOT the scaffold: the smallest
+# repository the stubs describe. Kept minimal and listed in the report,
+# because anything added here can draw findings of its own — a
+# hand-written package.json did exactly that while this was being built.
+#   LICENSE      — lint:licence asks only that the choice was MADE, and
+#                  the choice is the one thing a stub cannot make (#214);
+#                  the canon's own 0BSD text stands in for one.
+#   package.json — `"type": "module"`, without which nodenext reads a
+#                  .ts file as CommonJS and verbatimModuleSyntax refuses
+#                  its export (TS1287). No dependencies, so the empty
+#                  node_modules below is what "installed" means here —
+#                  lint:types otherwise refuses a tracked package.json
+#                  whose dependencies are absent, which is that guard
+#                  working rather than anything about scaffold/.
+#   src/*.ts     — one extensionless relative import: #758's shape, and
+#                  the one line that makes the fixer/checker pair speak.
+mkdir -p "${tmp}/src" "${tmp}/node_modules"
+cp LICENSE "${tmp}/LICENSE"
+printf '{\n  "name": "scaffold-probe",\n  "private": true,\n  "type": "module"\n}\n' \
+  > "${tmp}/package.json"
+printf 'export const helped = (): string => "probe";\n' > "${tmp}/src/helper.ts"
+printf 'import { helped } from "./helper";\n\nexport const main = (): string => helped();\n' \
+  > "${tmp}/src/index.ts"
+# GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE override the working
+# directory, so an inherited one would make this `git init` and commit
+# write into the CALLING repository instead of the scratch tree. Scrubbed
+# for every git and every inner task, not assumed absent.
+clean=(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR)
+(
+  cd "${tmp}"
+  "${clean[@]}" git init -q -b main
+  "${clean[@]}" git config user.name "scaffold probe"
+  "${clean[@]}" git config user.email "probe@invalid"
+  "${clean[@]}" git config commit.gpgsign false
+  "${clean[@]}" git add -A
+  "${clean[@]}" git commit -q -m "chore: assemble a repository from the scaffold" \
+    -m "Signed-off-by: scaffold probe <probe@invalid>"
+) || {
+  echo "lint:scaffold-assembly: the scratch repository could not be committed" >&2
+  exit 1
+}
+# Every belt linter reads `git ls-files`, so an uncommitted tree measures
+# nothing. Committed ONCE, here: the fixers below rewrite files and are
+# meant to, and re-adding afterwards would track whatever a tool left
+# behind (biome-org.generated.json is written into the tree for the
+# length of one run).
+run_task() { # task -> 0, or 1 with the task's own words on stderr
+  local task="${1}" out
+  if out=$(cd "${tmp}" && "${clean[@]}" \
+    MISE_GLOBAL_CONFIG_FILE="${belt}" \
+    MISE_TRUSTED_CONFIG_PATHS="${tmp}" mise run "${task}" 2>&1); then
+    return 0
+  fi
+  echo "lint:scaffold-assembly: ${task} spoke:" >&2
+  grep -v "^mise WARN" <<< "${out}" | tail -20 | sed 's/^/    /' >&2
+  return 1
+}
+tasks_named() { # prefix -> the belt's task names, one per line
+  (cd "${tmp}" && "${clean[@]}" MISE_GLOBAL_CONFIG_FILE="${belt}" \
+    MISE_TRUSTED_CONFIG_PATHS="${tmp}" mise tasks ls --json 2> /dev/null) \
+    | jq -r --arg p "${1}" '.[] | select(.name | startswith($p)) | .name' | sort
+}
+echo "lint:scaffold-assembly: ${count} stub(s) assembled into a scratch repository"
+while IFS=: read -r stub why; do
+  [[ -n ${stub} ]] || continue
+  echo "  not assembled: ${stub} — ${why}"
+done <<< "${declined}"
+echo "  added by the probe, not the scaffold: LICENSE, package.json, src/index.ts,"
+echo "    src/helper.ts, an empty node_modules/ (the repository declares no dependencies)"
+echo "  not exercised: the Rust and Go legs — the belt pins no rust or go toolchain, so"
+echo "    deny.toml and .golangci.yml are assembled as files and their tasks skip clean"
+echo "  not exercised: ci's test/build collection — the stub mise.toml ships a failing"
+echo "    TODO test on purpose, so this runs the lint:* layer the same collection gathers"
+while IFS= read -r line; do
+  [[ -n ${line} ]] || continue
+  echo "  not exercised: ${line%%|*} — ${line#*|}"
+done <<< "${excluded}"
+rc=0
+fix_tasks=$(tasks_named "fix:")
+gate_tasks=$(tasks_named "lint:")
+skipped=$(cut -d'|' -f1 <<< "${excluded}")
+fixers=0
+while IFS= read -r task; do
+  [[ -n ${task} ]] || continue
+  grep -qxF "${task}" <<< "${skipped}" && continue
+  fixers=$((fixers + 1))
+  # shellcheck disable=SC2310  # deliberate: every task runs and the failures are
+  # collected, so one red task cannot hide the rest (the `audit` task's ruling)
+  run_task "${task}" || rc=1
+done <<< "${fix_tasks}"
+# A run that enumerated nothing and reported success would be this check
+# announcing that it checked nothing — the belt always has both families.
+[[ ${fixers} -gt 0 ]] || {
+  echo "lint:scaffold-assembly: the belt named no fix:* tasks inside the assembled repo" >&2
+  exit 1
+}
+if [[ ${rc} -ne 0 ]]; then
+  echo "lint:scaffold-assembly: a fixer failed on a repository built from scaffold/" >&2
+  exit 1
+fi
+gates=0
+while IFS= read -r task; do
+  [[ -n ${task} ]] || continue
+  gates=$((gates + 1))
+  # shellcheck disable=SC2310  # deliberate, as above
+  run_task "${task}" || rc=1
+done <<< "${gate_tasks}"
+[[ ${gates} -gt 0 ]] || {
+  echo "lint:scaffold-assembly: the belt named no lint:* tasks inside the assembled repo" >&2
+  exit 1
+}
+if [[ ${rc} -ne 0 ]]; then
+  echo "lint:scaffold-assembly: a repository built from scaffold/ fails the org's gate" >&2
+  echo "  the task above is what spoke — a red is a defect in scaffold/ only if the task" >&2
+  echo "  is judging a stub; read what it said before changing anything" >&2
+  exit 1
+fi
+echo "lint:scaffold-assembly: ${fixers} fixer(s) then ${gates} gate task(s), all green"
+'''
+
 [tasks."lint:go-tidy"]
 description = "go.mod and go.sum match the source (go mod tidy -diff)"
 dir = "{{cwd}}"
