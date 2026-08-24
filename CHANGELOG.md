@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.61.1](https://github.com/monumental-archive/.github/compare/v1.61.0...v1.61.1) - 2026-08-24
+
+### Fixed
+
+- let fix:rust write the tree it formatted (#892) ([#906](https://github.com/monumental-archive/.github/pull/906))
+- lock file maintenance ([#909](https://github.com/monumental-archive/.github/pull/909))
+- name the org in every registry curl (#907) ([#910](https://github.com/monumental-archive/.github/pull/910))
+- let derive-badges say what it found (#905) ([#913](https://github.com/monumental-archive/.github/pull/913))
+- let citation.sh say which field is missing (#911) ([#915](https://github.com/monumental-archive/.github/pull/915))
+- say why npm could not use trusted publishing (#907) ([#914](https://github.com/monumental-archive/.github/pull/914))
+
 ## [1.61.0](https://github.com/monumental-archive/.github/compare/v1.60.0...v1.61.0) - 2026-08-24
 
 ### Added
