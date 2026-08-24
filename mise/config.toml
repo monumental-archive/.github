@@ -4349,8 +4349,27 @@ dir = "{{cwd}}"
 # nothing publish-side carried the `needs` edge. The fix is a single
 # commit-point job between proof and consequence; this lint makes the
 # fix structural. Deterministic — parses tracked files — so it is
-# gate-eligible. Canon-only: consuming repos hold a one-line caller
-# stub, not the orchestrator.
+# gate-eligible.
+#
+# APPLICABILITY IS THE FILE'S OWN SHAPE, and the predicate is not a new
+# one (#858): "in the canon itself these two files ARE the reusable
+# implementations (they declare workflow_call), not caller stubs" is
+# lint:release-stub's sentence, and lint:capability-boundary selects
+# reusable workflows the same way. A repository that calls the
+# orchestrator declares no workflow_call and implements no phases, so
+# it is not judged — because of what its file IS, not because of what
+# sits next to it.
+#
+# What that replaced was `-d security`, an identity claim by directory
+# name, and it was not merely inelegant: five org repos carry a
+# publish.yml (the filename is canon for trusted publishing), and the
+# only thing keeping their gates green was that none of them happened
+# to have a directory called security/. Creating an untracked one
+# reddened a correct file — measured on iiif-server and edtf. Two of
+# those five write their own multi-job publish workflows rather than a
+# caller stub; whether they belong under this barrier is an org policy
+# question with its own blast radius, and this lint does not answer it
+# by accident.
 #
 # BOTH archetype orchestrators are judged (#717). The continuous path
 # gained the same barrier for the same reason, and a rule that covered
@@ -4381,10 +4400,12 @@ dir = "{{cwd}}"
 run = '''
 orchestrators=""
 for f in .github/workflows/publish.yml .github/workflows/continuous.yml; do
-  [[ -f ${f} ]] && orchestrators="${orchestrators}${f} "
+  [[ -f ${f} ]] || continue
+  grep -qE "^[[:space:]]+workflow_call:" "${f}" || continue
+  orchestrators="${orchestrators}${f} "
 done
-[[ -n ${orchestrators} && -d security ]] || {
-  echo "lint:release-phases: not the canon orchestrator, skipped"
+[[ -n ${orchestrators} ]] || {
+  echo "lint:release-phases: no workflow_call release orchestrator here, skipped"
   exit 0
 }
 red=0
@@ -4717,15 +4738,31 @@ dir = "{{cwd}}"
 # from the one canonical snapshot — jq transforms, never second
 # copies that drift. Only the canon carries the emitter; everywhere
 # else this skips clean.
+#
+# Canon-only, on the family's identity guard (#738, extended to the
+# gate by #858). The fixtures used to be the guard, which read the
+# wrong subject: the EMITTER is what makes this check applicable and
+# the fixtures are what it reads, so deleting them left the emitter in
+# place with nothing exercising it — quietly, in the gate, on the
+# identity half of the Source track.
 run = '''
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "lint:source-attest: no tracked security/identity.toml, not the canon, skipped"
+  exit 0
+}
 fixtures=".github/actions/source-attest/testdata"
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
-[[ -d ${fixtures}/${canon}/rules ]] || {
-  echo "lint:source-attest: no source-attest fixtures, skipped"
-  exit 0
+missing=""
+for f in "${fixtures}/${canon}/rules" slsa/verify-policy.json; do
+  [[ -e ${f} ]] || missing="${missing} ${f}"
+done
+[[ -z ${missing} ]] || {
+  echo "lint:source-attest: on the canon, and input(s) this check reads are missing:${missing}" >&2
+  echo "  a canon-only check reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 command -v stele > /dev/null || {
   echo "lint:source-attest: stele missing from the belt" >&2
@@ -5565,10 +5602,29 @@ dir = "{{cwd}}"
 # copy and diff. A hand edit to a rendered table reddens here with the
 # instruction to edit the data instead — which is what makes the TOML
 # the single source the audits can trust. Deterministic; gate-eligible.
+#
+# Canon-only, on the family's identity guard (#738, extended to the
+# gate by #858). What this replaced guarded on its own data —
+# `slsa/levels.toml && -d docs` — and neither path is held by
+# lint:canon-policy, so a canon that lost either stopped checking that
+# docs/direction.md, the org's one table, still equals what the TOML
+# renders. Green, silently, in the gate. The data is a REQUIREMENT
+# now: every input this re-render reads is named, and its absence on
+# the canon reds instead of excusing the check.
 run = '''
-[[ -f slsa/levels.toml && -d docs ]] || {
-  echo "lint:tracks: no track data, skipped"
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "lint:tracks: no tracked security/identity.toml, not the canon, skipped"
   exit 0
+}
+missing=""
+for f in slsa/levels.toml slsa/requirements.toml docs/direction.md \
+  docs/source-track.md docs/build-track.md docs/dependency-track.md; do
+  [[ -e ${f} ]] || missing="${missing} ${f}"
+done
+[[ -z ${missing} ]] || {
+  echo "lint:tracks: on the canon, and input(s) this render reads are missing:${missing}" >&2
+  echo "  a canon-only check reds on a missing input, never skips (#738)." >&2
+  exit 1
 }
 tmp=$(mktemp -d)
 cp -R docs "${tmp}/docs"
