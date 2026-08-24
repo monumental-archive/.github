@@ -159,10 +159,79 @@ jobs:
             echo "LEGS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
+      - name: Emit the inventory plan (which packages these crates ship)
+        # The artifact-to-package mapping exists with certainty exactly
+        # once — here, over the very tarballs `cargo package` just wrote
+        # and the publisher will upload (#537). Read from those files
+        # rather than from cargo metadata a second time: the packaged set
+        # is the class's scope after the caller's excludes and cargo's own
+        # `publish = false`, and the manifest hashed above is computed
+        # from the same listing, so the planned set and the signed set
+        # cannot differ. Not on the repro leg: the comparator proves
+        # bytes, not inventories.
+        #
+        # plan-producer: rust-crate sbom-cargo-
+        #
+        # The DOCUMENT carries `-crate` and the prefix does not (#833).
+        # `sbom-cargo-` is this class's owed prefix in
+        # slsa/assert-policy.json and it is also `rust-binary`'s, because
+        # both classes ship a cargo closure — so a repository releasing
+        # both (edtf declares rust-crate, rust-binary, pgrx-extension and
+        # wasm-npm) would have one package planned twice under one
+        # document name. Measured against the pinned stele v0.19.1, both
+        # directions: two entries on `sbom-cargo-edtf-cli` refuse
+        # pre-publish with `plan-conflict: document
+        # "sbom-cargo-edtf-cli" is claimed by two different plans`, and
+        # two inventories describing the artifact `edtf-cli` refuse again
+        # at the union with `two documents describe edtf-cli — one
+        # artifact, one inventory`. So the source crate names itself
+        # apart from the binary built out of it, exactly as the pgrx
+        # cells name theirs `<crate>-pg<major>` inside one prefix: the
+        # prefix says what the artifact is MADE OF, the suffix says which
+        # artifact it IS.
+        if: ${{ !inputs.repro }}
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          names=()
+          for c in target/package/*.crate; do
+            [[ -e ${c} ]] || break
+            base="${c##*/}"
+            # The version is cargo's own suffix on every packaged crate,
+            # and the step above already refused a tag that disagrees
+            # with the manifest — so what remains is the package name.
+            name="${base%-"${UNTRUSTED_VERSION}".crate}"
+            if [[ ${name} == "${base}" ]]; then
+              echo "::error::packaged crate ${base} is not named for version ${UNTRUSTED_VERSION}"
+              exit 1
+            fi
+            names+=("${name}")
+          done
+          ((${#names[@]} > 0)) || {
+            echo "::error::cargo package produced no crates — a class that ships nothing plans nothing"
+            exit 1
+          }
+          mkdir -p plan
+          jq -n --args '$ARGS.positional
+             | unique
+             | map({class: "rust-crate",
+                    doc: ("sbom-cargo-" + . + "-crate"),
+                    artifact: (. + "-crate"),
+                    params: {cargoPackage: .}})' \
+            "${names[@]}" > plan/plan.json
+          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !inputs.repro }}
         with:
           name: release-crates
           path: target/package/*.crate
           if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.repro }}
+        with:
+          name: sbom-plan-crate
+          path: plan/plan.json
+          if-no-files-found: error
+          retention-days: 1
 ...

@@ -698,6 +698,56 @@ shape-, conflict- and drift-judged but never obligation-judged, so a
 repository that stopped publishing its `sbom-image-*` document reded
 nothing at all.
 
+### A declared obligation needs a declared producer
+
+**The source crate names itself apart from the binary** (#833). The
+`rust-crate` class declared the planned `sbom-cargo-` prefix from
+machinery `1.42.0` and no build leg ever emitted an inventory plan for
+it, so any release declaring the class refused pre-publish — correctly
+— in `stele assert plans`. Forty canon releases rode past the
+inconsistency before edtf v1.3.1 met it.
+
+`build-rust-crate.yml` now emits the plan, over the very tarballs
+`cargo package` wrote and `cargo publish` will upload: the packaged set
+is the class's scope after the caller's excludes, and the subject
+manifest is hashed from the same listing, so the planned set and the
+signed set cannot differ.
+
+The document is `sbom-cargo-<package>-crate` and the artifact
+`<package>-crate`. The suffix is not decoration. `sbom-cargo-` is also
+`rust-binary`'s owed prefix — both classes ship a cargo closure — so a
+repository releasing both would plan one package twice under one
+document name. Measured against stele v0.19.1, both halves: two entries
+on `sbom-cargo-edtf-cli` refuse pre-publish with `plan-conflict:
+document "sbom-cargo-edtf-cli" is claimed by two different plans`, and
+two inventories describing the artifact `edtf-cli` refuse again at the
+union with `two documents describe edtf-cli — one artifact, one
+inventory`. So the class names its document the way the pgrx cells name
+theirs `<crate>-pg<major>` inside one prefix: the prefix says what the
+artifact is MADE OF, the suffix says which artifact it IS.
+
+**And the join is linted** (`lint:plan-producers`). The obligation table
+and the emitting legs are two committed files; nothing compared them,
+which is the whole reason a class could owe a document nothing produced
+for forty releases. The task now reads both and refuses three ways: a
+planned obligation no leg produces, a leg emitting under a prefix its
+class never declared, and a prefix renamed on one side only. Each
+producer declares itself in a marker beside the place its class name is
+written — `# plan-producer: <class> <prefix>` — and the marker is held to
+the two files around it: the class must declare that prefix as planned,
+and the set of prefixes markers claim must equal the set the legs
+actually emit, so a marker cannot outlive its producer and a producer
+cannot arrive without one. The class is declared rather than derived
+because one producer deliberately does not state its class at all: the
+image leg is GIVEN `oci-image-crate` by `publish.yml`'s guard (#843), so
+its marker lives there, beside the one place that name is written.
+
+The lesson is the one worth keeping. This defect was called
+unforeseeable and it was not: a two-file set difference had one
+inconsistent row in it the whole time. Before reaching for "only a real
+release could have found this", ask what static check would have caught
+it — declaration ↔ producer agreement is always lintable.
+
 ### Image metadata: one map, resolved once
 
 Every image the org publishes carries the `org.opencontainers.image.*`

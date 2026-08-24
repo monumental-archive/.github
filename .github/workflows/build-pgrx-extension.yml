@@ -583,6 +583,8 @@ jobs:
         # plan; the sbom job collapses identical entries and refuses
         # divergent ones. Not on the repro leg: the comparator proves
         # bytes, not inventories.
+        #
+        # plan-producer: pgrx-extension sbom-pgrx-
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
