@@ -115,6 +115,28 @@ def width_of(name: str, current: str) -> int:
     return len(subject)
 
 
+class ResolutionCase(unittest.TestCase):
+    """Base for rows whose rules leave exactly one resolution.
+
+    `effective()` returns EVERY resolution Renovate could reach, because
+    a rule carrying an unmodellable matcher forks the set (#724). A row
+    that plants no such rule must therefore produce exactly one, so this
+    says so rather than indexing past a second and calling it the
+    answer — the assertion is part of what each row proves.
+    """
+
+    def sole(self, source: sb.Template, row: sb.Dep) -> dict:
+        """Resolve a dependency, asserting the resolution is unambiguous.
+
+        Returns:
+            The single reachable resolution.
+
+        """
+        configs = sb.effective(source, row)
+        self.assertEqual(len(configs), 1)
+        return configs[0]
+
+
 class TestMatches(unittest.TestCase):
     """matchPackageNames, including the measured packageName behaviour."""
 
@@ -147,6 +169,19 @@ class TestMatches(unittest.TestCase):
         self.assertTrue(sb.matches("actions/*", "actions/checkout"))
         self.assertFalse(sb.matches("actions/*", "actions/some/nested"))
 
+    def test_a_globstar_segment_matches_zero_directories(self) -> None:
+        """`**/x` selects a root `x`, as minimatch does.
+
+        It matters for matchFileNames, where `**/Cargo.toml` is the
+        ordinary way to name every manifest in a workspace: reading it as
+        "at least one directory deep" would drop the rule for the root
+        manifest and model that dependency at the value the rule
+        overrides — the fail-open #724 exists to close.
+        """
+        self.assertTrue(sb.glob_matches("**/Cargo.toml", "Cargo.toml"))
+        self.assertTrue(sb.glob_matches("**/Cargo.toml", "crates/one/Cargo.toml"))
+        self.assertFalse(sb.glob_matches("**/Cargo.toml", "Cargo.lock"))
+
 
 class TestSelects(unittest.TestCase):
     """Rule matchers, including the AND across matcher kinds."""
@@ -174,13 +209,79 @@ class TestSelects(unittest.TestCase):
         """A rule setting something this task does not render is inert."""
         self.assertFalse(sb.selects({"automerge": True}, dep("ruff")))
 
+    def test_dep_names_does_not_fall_back_to_the_package_name(self) -> None:
+        """The measured difference between the two name matchers (#574).
 
-class TestEffective(unittest.TestCase):
+        matchPackageNames reaches a mise dependency through its
+        backend-stripped packageName; matchDepNames sees only the name
+        the subject renders. Modelling the second as the first would
+        apply a rule Renovate does not.
+        """
+        stele = dep("github:monumental-archive/stele")
+        rules = [
+            {"matchPackageNames": ["monumental-archive/**"]},
+            {"matchDepNames": ["monumental-archive/**"]},
+            {"matchDepNames": ["github:monumental-archive/**"]},
+        ]
+        self.assertEqual(
+            [sb.selects(rule, stele) for rule in rules],
+            [True, False, True],
+        )
+
+    def test_file_names_selects_on_the_declaring_file(self) -> None:
+        """Selection by path reads the origin every walk already records."""
+        row = sb.Dep("postgres", "18", "custom.regex", "docker/images.toml")
+        rules = [
+            {"matchFileNames": ["docker/images.toml"]},
+            {"matchFileNames": ["docker/**"]},
+            {"matchFileNames": ["mise/config.toml"]},
+        ]
+        self.assertEqual(
+            [sb.selects(rule, row) for rule in rules],
+            [True, True, False],
+        )
+
+    def test_an_unmodellable_matcher_is_unresolved_not_dropped(self) -> None:
+        """None is the third answer, and it is not False (#724).
+
+        A rule carrying only `matchUpdateTypes` was dropped entirely
+        before, which models a widening rule at the value it overrides.
+        """
+        self.assertIsNone(sb.selects({"matchUpdateTypes": ["major"]}, dep("ruff")))
+
+    def test_a_modelled_matcher_that_refuses_settles_the_whole_rule(
+        self,
+    ) -> None:
+        """Renovate ANDs, so one refusal is a decision, not a maybe."""
+        rule = {"matchManagers": ["gomod"], "matchUpdateTypes": ["major"]}
+        self.assertEqual(sb.selects(rule, dep("x", manager="mise")), False)
+        self.assertIsNone(sb.selects(rule, dep("x", manager="gomod")))
+
+    def test_every_modelled_matcher_must_hold_together(self) -> None:
+        """Four kinds now, and the AND runs across all of them."""
+        rule = {
+            "matchManagers": ["mise"],
+            "matchDepNames": ["rumdl"],
+            "matchFileNames": ["mise/config.toml"],
+        }
+        rows = [
+            sb.Dep("rumdl", "0.2.53", "mise", "mise/config.toml"),
+            sb.Dep("ruff", "0.2.53", "mise", "mise/config.toml"),
+            sb.Dep("rumdl", "0.2.53", "mise", "mise.toml"),
+            sb.Dep("rumdl", "0.2.53", "aqua", "mise/config.toml"),
+        ]
+        self.assertEqual(
+            [sb.selects(rule, row) for row in rows],
+            [True, False, False, False],
+        )
+
+
+class TestEffective(ResolutionCase):
     """Field resolution: read from the preset, later-wins, never defaulted."""
 
     def test_reads_all_five_from_the_top_level(self) -> None:
         """With no rules, every field comes from the preset as written."""
-        config = sb.effective(owned(preset()), dep("ruff"))
+        config = self.sole(owned(preset()), dep("ruff"))
         self.assertEqual(
             config,
             {k: PRESET[k] for k in sb.MESSAGE_CONFIG},
@@ -192,13 +293,13 @@ class TestEffective(unittest.TestCase):
             {"matchPackageNames": ["*"], "commitMessageTopic": "first"},
             {"matchPackageNames": ["ruff"], "commitMessageTopic": "second"},
         ]
-        config = sb.effective(owned(preset(packageRules=rules)), dep("ruff"))
+        config = self.sole(owned(preset(packageRules=rules)), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "second")
 
     def test_a_rule_leaves_fields_it_does_not_set(self) -> None:
         """Overriding the topic must not disturb the semantic prefix."""
         rules = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "short"}]
-        config = sb.effective(owned(preset(packageRules=rules)), dep("ruff"))
+        config = self.sole(owned(preset(packageRules=rules)), dep("ruff"))
         self.assertEqual(config["semanticCommitType"], "chore")
         self.assertEqual(config["commitMessageExtra"], "to {{newValue}}")
 
@@ -207,11 +308,11 @@ class TestEffective(unittest.TestCase):
         rules = [{"matchManagers": ["gomod"], "semanticCommitType": "fix"}]
         config = owned(preset(packageRules=rules))
         self.assertEqual(
-            sb.effective(config, dep("x", manager="gomod"))["semanticCommitType"],
+            self.sole(config, dep("x", manager="gomod"))["semanticCommitType"],
             "fix",
         )
         self.assertEqual(
-            sb.effective(config, dep("x", manager="mise"))["semanticCommitType"],
+            self.sole(config, dep("x", manager="mise"))["semanticCommitType"],
             "chore",
         )
 
@@ -236,7 +337,7 @@ class TestEffective(unittest.TestCase):
             self.assertIn(field, str(caught.exception))
 
 
-class TestRepoRules(unittest.TestCase):
+class TestRepoRules(ResolutionCase):
     """The repo's own packageRules, folded in after the preset's (#677).
 
     Both directions per #650. The narrowing direction was already true
@@ -267,7 +368,7 @@ class TestRepoRules(unittest.TestCase):
         preset's.
         """
         repo = [{"matchManagers": ["mise"], "semanticCommitType": "fix"}]
-        config = sb.effective(owned(preset(), repo), dep("ruff"))
+        config = self.sole(owned(preset(), repo), dep("ruff"))
         self.assertEqual(config["semanticCommitType"], "fix")
 
     def test_a_repo_rule_widens_a_preset_field(self) -> None:
@@ -277,7 +378,7 @@ class TestRepoRules(unittest.TestCase):
         narrower value — the row the preset-only model got wrong.
         """
         repo = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "a" * 40}]
-        config = sb.effective(owned(preset(), repo), dep("ruff"))
+        config = self.sole(owned(preset(), repo), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "a" * 40)
 
     def test_a_repo_rule_resolves_after_every_preset_rule(self) -> None:
@@ -289,7 +390,7 @@ class TestRepoRules(unittest.TestCase):
         """
         rules = [{"matchPackageNames": ["*"], "commitMessageTopic": "preset-last"}]
         repo = [{"matchPackageNames": ["*"], "commitMessageTopic": "repo"}]
-        config = sb.effective(owned(preset(packageRules=rules), repo), dep("ruff"))
+        config = self.sole(owned(preset(packageRules=rules), repo), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "repo")
 
     def test_later_wins_within_the_repo_list_too(self) -> None:
@@ -302,14 +403,14 @@ class TestRepoRules(unittest.TestCase):
                 "semanticCommitScope": "canon",
             },
         ]
-        config = sb.effective(owned(preset(), repo), dep("monumental-archive/.github"))
+        config = self.sole(owned(preset(), repo), dep("monumental-archive/.github"))
         self.assertEqual(config["semanticCommitType"], "chore")
         self.assertEqual(config["semanticCommitScope"], "canon")
 
     def test_a_repo_rule_that_does_not_select_changes_nothing(self) -> None:
         """Selection is unchanged; only the list it walks grew."""
         repo = [{"matchPackageNames": ["rumdl"], "commitMessageTopic": "other"}]
-        config = sb.effective(owned(preset(), repo), dep("ruff"))
+        config = self.sole(owned(preset(), repo), dep("ruff"))
         self.assertEqual(config["commitMessageTopic"], "{{depName}}")
 
     def test_a_repo_rule_may_not_be_the_only_place_a_field_is_written(
@@ -342,6 +443,174 @@ class TestRepoRules(unittest.TestCase):
         self.assertEqual(findings[0].width, limit + 2)
         narrow = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "rf"}]
         self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), [])
+
+
+class TestNarrowMatchers(ResolutionCase):
+    """The two matcher kinds #724 taught the resolver to read.
+
+    Both were live in this repo's renovate.json when the defect was
+    written, and both were guessed at rather than read: a rule carrying
+    matchDepNames beside matchManagers was applied WHOLESALE to the
+    manager, and a rule carrying only matchFileNames was dropped.
+    """
+
+    def test_a_dep_names_rule_reaches_the_dependency_it_names(self) -> None:
+        """The narrowing plant, and it is the one that failed before.
+
+        `{matchManagers: [mise], matchDepNames: [rumdl]}` is this repo's
+        own shape. Read as the manager alone it narrows every mise
+        dependency in the model; it names one.
+        """
+        repo = [
+            {
+                "matchManagers": ["mise"],
+                "matchDepNames": ["rumdl"],
+                "commitMessageTopic": "r",
+            },
+        ]
+        source = owned(preset(), repo)
+        self.assertEqual(self.sole(source, dep("rumdl"))["commitMessageTopic"], "r")
+        self.assertEqual(
+            self.sole(source, dep("ruff"))["commitMessageTopic"],
+            "{{depName}}",
+        )
+        self.assertEqual(
+            self.sole(source, dep("rumdl", manager="cargo"))["commitMessageTopic"],
+            "{{depName}}",
+        )
+
+    def test_a_file_names_rule_is_read_rather_than_dropped(self) -> None:
+        """The rule the model never saw, now resolved against the origin."""
+        repo = [
+            {
+                "matchFileNames": ["docker/images.toml"],
+                "semanticCommitType": "fix",
+            },
+        ]
+        source = owned(preset(), repo)
+        matched = sb.Dep("postgres", "18", "custom.regex", "docker/images.toml")
+        other = sb.Dep("postgres", "18", "custom.regex", "lefthook.yml")
+        self.assertEqual(self.sole(source, matched)["semanticCommitType"], "fix")
+        self.assertEqual(self.sole(source, other)["semanticCommitType"], "chore")
+
+    def test_judge_goes_red_on_a_widening_file_names_rule(self) -> None:
+        """Plant and measure, both directions, per #650."""
+        row = [sb.Dep("postgres", "18.1", "custom.regex", "docker/images.toml")]
+        limit = width_of("postgres", "18.1")
+        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), [])
+        widen = [
+            {
+                "matchFileNames": ["docker/images.toml"],
+                "commitMessageTopic": "postgres-x",
+            },
+        ]
+        findings = sb.judge(row, owned(PRESET, widen), limit, [])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].width, limit + 2)
+        elsewhere = [
+            {
+                "matchFileNames": ["docker/other.toml"],
+                "commitMessageTopic": "postgres-x",
+            },
+        ]
+        self.assertEqual(sb.judge(row, owned(PRESET, elsewhere), limit, []), [])
+
+
+class TestUnmodellableMatchers(unittest.TestCase):
+    """A matcher no simulation can settle costs margin, never correctness.
+
+    `matchUpdateTypes` and its kin do not exist until Renovate has looked
+    a version up, which is after this task runs. So the rule is resolved
+    BOTH ways and the widest subject is charged — the same construction
+    as the two-subject advisory rendering (#686).
+    """
+
+    def test_a_forked_rule_yields_both_resolutions_in_order(self) -> None:
+        """Two resolutions, the unapplied one first."""
+        repo = [{"matchUpdateTypes": ["major"], "commitMessageTopic": "wide-topic"}]
+        configs = sb.effective(owned(preset(), repo), dep("ruff"))
+        self.assertEqual(
+            [c["commitMessageTopic"] for c in configs],
+            ["{{depName}}", "wide-topic"],
+        )
+
+    def test_a_rule_setting_no_message_field_never_forks(self) -> None:
+        """default.json's live case, and why the org forks nothing today.
+
+        The one unmodellable matcher in force org-wide carries
+        `automerge`, which composes no part of a subject: both branches
+        would be the same resolution.
+        """
+        rules = [{"matchUpdateTypes": ["patch", "minor"], "automerge": True}]
+        configs = sb.effective(owned(preset(packageRules=rules)), dep("ruff"))
+        self.assertEqual(len(configs), 1)
+
+    def test_a_refused_modelled_matcher_forks_nothing(self) -> None:
+        """A rule Renovate cannot apply is not a maybe."""
+        repo = [
+            {
+                "matchManagers": ["gomod"],
+                "matchUpdateTypes": ["major"],
+                "commitMessageTopic": "wide",
+            },
+        ]
+        configs = sb.effective(owned(preset(), repo), dep("ruff", manager="mise"))
+        self.assertEqual([c["commitMessageTopic"] for c in configs], ["{{depName}}"])
+
+    def test_forks_onto_the_same_value_reconverge(self) -> None:
+        """A fork that lands where another did is one resolution."""
+        repo = [
+            {"matchUpdateTypes": ["major"], "commitMessageTopic": "same"},
+            {"matchUpdateTypes": ["minor"], "commitMessageTopic": "same"},
+        ]
+        configs = sb.effective(owned(preset(), repo), dep("ruff"))
+        self.assertEqual(
+            [c["commitMessageTopic"] for c in configs],
+            ["{{depName}}", "same"],
+        )
+
+    def test_the_widening_resolution_is_the_one_charged(self) -> None:
+        """A rule that MIGHT widen is measured as though it does."""
+        row = [dep("ruff", "v1.0.0")]
+        limit = width_of("ruff", "v1.0.0")
+        widen = [{"matchUpdateTypes": ["major"], "commitMessageTopic": "ruff-x"}]
+        findings = sb.judge(row, owned(PRESET, widen), limit, [])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].width, limit + 2)
+
+    def test_a_narrowing_fork_buys_no_margin(self) -> None:
+        """The other direction, which is the same rule read the other way.
+
+        A rule that might NOT apply cannot spend the columns it might not
+        save: the resolution charged is the unnarrowed one, so the
+        dependency stays exactly as wide as it was.
+        """
+        row = [dep("ruff", "v1.0.0")]
+        limit = width_of("ruff", "v1.0.0")
+        narrow = [{"matchUpdateTypes": ["major"], "commitMessageTopic": "rf"}]
+        self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), [])
+        findings = sb.judge(row, owned(PRESET, narrow), limit - 1, [])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].width, limit)
+
+    def test_a_forked_rule_may_not_be_the_only_place_a_field_is_written(
+        self,
+    ) -> None:
+        """The absent-field law holds across every resolution.
+
+        A field only the applied branch carries is absent on the other,
+        so the preset has not written it in the sense the hard error
+        means (#576).
+        """
+        thin = preset(
+            packageRules=[
+                {"matchUpdateTypes": ["major"], "semanticCommitScope": "deps"},
+            ],
+        )
+        del thin["semanticCommitScope"]
+        with self.assertRaises(SystemExit) as caught:
+            sb.effective(owned(thin), dep("ruff"))
+        self.assertIn("semanticCommitScope", str(caught.exception))
 
 
 class TestRender(unittest.TestCase):
@@ -720,6 +989,51 @@ class TestWalks(unittest.TestCase):
         self.assertEqual(found[0].current, "v1.46.0")
         self.assertEqual(found[0].manager, "custom.regex")
 
+    def test_a_custom_manager_names_the_file_it_matched(self) -> None:
+        """The origin is the FILE, not the config declaring the manager.
+
+        Without it `matchFileNames` cannot be resolved for a
+        regex-managed dependency (#724), and `custom.regex` is the
+        manager id of every regex manager alike — so the file is the only
+        thing that tells two of them apart. The declaring config still
+        names the manager in the unresolved report.
+        """
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "images.toml"
+            path.write_text('"18" = "postgres:18.1"\n', encoding="utf-8")
+            manager = {
+                "managerFilePatterns": ["/(^|/)images\\.toml$/"],
+                "matchStrings": ['"[0-9]+" = "postgres:(?<currentValue>[0-9.]+)"'],
+                "depNameTemplate": "postgres",
+            }
+            found = sb.from_custom_managers(
+                [("default.json", {"customManagers": [manager]})],
+                [path],
+                [],
+            )
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].origin, str(path))
+
+    def test_an_unresolvable_match_still_names_its_declaring_config(
+        self,
+    ) -> None:
+        """Which of two regex managers could not be read is the report's job."""
+        report: list[str] = []
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "images.toml"
+            path.write_text('"18" = "postgres:18.1"\n', encoding="utf-8")
+            manager = {
+                "managerFilePatterns": ["/(^|/)images\\.toml$/"],
+                "matchStrings": ['"[0-9]+" = "postgres:(?<currentValue>[0-9.]+)"'],
+            }
+            found = sb.from_custom_managers(
+                [("renovate.json", {"customManagers": [manager]})],
+                [path],
+                report,
+            )
+        self.assertEqual(found, [])
+        self.assertTrue(any("renovate.json" in line for line in report))
+
     def test_an_unreadable_file_is_reported_not_raised(self) -> None:
         """A walk records what it could not read and carries on."""
         report: list[str] = []
@@ -894,6 +1208,41 @@ class TestMainGuards(unittest.TestCase):
         )
         self.assertEqual(status, 0)
         self.assertIn("fits 72 columns", out)
+
+    def test_a_file_names_rule_reaches_a_regex_managed_dependency(self) -> None:
+        """#724 end to end: the origin fix and the matcher, together.
+
+        A repo rule selected by FILE reaches the dependency a custom
+        manager matched in that file. Before, the dependency carried the
+        config that declared the manager as its origin, so no such rule
+        could ever select it — and this repo's live `matchFileNames` rule
+        over docker/pgrx-base-images.toml was invisible to the budget.
+        """
+        manager = {
+            "managerFilePatterns": ["/^docker/images\\.toml$/"],
+            "matchStrings": ['"[0-9]+" = "postgres:(?<currentValue>[a-z0-9.-]+)"'],
+            "depNameTemplate": "postgres",
+        }
+        tree = {
+            "renovate.json": "{}\n",
+            "default.json": json.dumps({**PRESET, "customManagers": [manager]}),
+            "docker/images.toml": '"18" = "postgres:18.1-bookworm"\n',
+        }
+        status, out, _ = self._run(tree)
+        self.assertEqual(status, 0)
+        self.assertIn("fits 72 columns", out)
+
+        widen = {
+            "packageRules": [
+                {
+                    "matchFileNames": ["docker/images.toml"],
+                    "commitMessageTopic": "p" * 60,
+                },
+            ],
+        }
+        status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
+        self.assertEqual(status, 1)
+        self.assertIn("would mint a subject past 72 columns", err)
 
     def test_a_preset_with_no_advisory_suffix_stops_the_task(self) -> None:
         """The sixth field answers the same law as the other five."""

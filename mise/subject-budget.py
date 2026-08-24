@@ -280,64 +280,164 @@ def preset_path(files: list[Path]) -> Path:
     return Path(canon) / "default.json"
 
 
+def glob_matches(pattern: str, *candidates: str) -> bool:
+    """Test one Renovate glob against the strings a matcher selects on.
+
+    Exact values, `*`, and glob patterns, over whatever the caller hands
+    it: a matcher that selects on names passes the dependency's names, one
+    that selects on paths passes its origin. `**` crosses a slash and a
+    single `*` does not, and a `**/` segment matches zero directories the
+    way minimatch's does — `**/Cargo.toml` selects the manifest at the
+    root as well as the one in a member crate.
+
+    Returns:
+        True when the pattern selects any of the candidates.
+
+    """
+    if pattern == "*":
+        return True
+    if not any(ch in pattern for ch in "*?"):
+        return pattern in candidates
+    regex = re.escape(pattern).replace(r"\*\*/", "(?:.*/)?").replace(r"\*\*", ".*")
+    regex = regex.replace(r"\*", "[^/]*").replace(r"\?", ".")
+    return any(re.fullmatch(regex, candidate) for candidate in candidates)
+
+
 def matches(pattern: str, dep_name: str) -> bool:
     """Test a Renovate matchPackageNames pattern against a dependency.
 
-    Exact names, `*`, and glob patterns. Matching is tried against the
-    backend-stripped name too, because Renovate matches on packageName
-    where one exists: `monumental-archive/**` selected the mise dep
-    `github:monumental-archive/stele` on #574, which is how that pull
-    request came out scoped `chore(canon)`.
+    Matching is tried against the backend-stripped name too, because
+    Renovate matches on packageName where one exists: `monumental-archive/**`
+    selected the mise dep `github:monumental-archive/stele` on #574, which
+    is how that pull request came out scoped `chore(canon)`.
 
     Returns:
         True when the pattern selects this dependency.
 
     """
-    if pattern == "*":
-        return True
-    names = {dep_name, BACKEND.sub("", dep_name)}
-    if not any(ch in pattern for ch in "*?"):
-        return pattern in names
-    regex = re.escape(pattern).replace(r"\*\*", ".*").replace(r"\*", "[^/]*")
-    regex = regex.replace(r"\?", ".")
-    return any(re.fullmatch(regex, name) for name in names)
+    return glob_matches(pattern, dep_name, BACKEND.sub("", dep_name))
 
 
-def selects(rule: dict, dep: Dep) -> bool:
+# The packageRule matchers this task can resolve at model time, and how.
+# Named in ONE place because the same table decides both halves of the
+# question: whether a rule admits a dependency, and whether the rule
+# carries a matcher nobody here can answer (#724).
+#
+# matchDepNames is matchPackageNames WITHOUT the packageName fallback,
+# and that difference is the whole reason Renovate carries two matchers:
+# depName is what the subject renders, packageName what the datasource
+# resolves, and the mise backend prefix is exactly where they part
+# (measured on #574).
+#
+# matchFileNames is the dependency's origin, which every native manager
+# already carries as the path it read — and, since #724, so does a
+# regex-managed one.
+MATCHERS = {
+    "matchManagers": lambda values, dep: dep.manager in values,
+    "matchPackageNames": lambda values, dep: any(matches(p, dep.name) for p in values),
+    "matchDepNames": lambda values, dep: any(glob_matches(p, dep.name) for p in values),
+    "matchFileNames": lambda values, dep: any(
+        glob_matches(p, dep.origin) for p in values
+    ),
+}
+
+
+def selects(rule: dict, dep: Dep) -> bool | None:
     """Test whether a packageRule applies to one dependency.
 
-    Only the two matchers the org's preset uses are modelled, and both
-    must hold when both are present — Renovate ANDs across matcher kinds
-    and ORs within one. A rule carrying neither selects nothing here: it
-    is setting something this task does not render.
+    Renovate ANDs across matcher kinds and ORs within one, so a rule
+    carrying a matcher this task cannot read is NARROWER than the ones it
+    can — which is why an unmodelled matcher makes the answer unknown
+    rather than ignorable. Guessing either way is unsound in a measured
+    direction (#724): applying such a rule wholesale narrows every
+    dependency its modelled matchers admit, and dropping it models a
+    widening rule at the preset's narrower value.
+
+    `matchUpdateTypes`, `matchCurrentVersion`, `matchSourceUrls` and
+    their kin are unmodellable rather than unmodelled: an update type
+    does not exist until Renovate has looked a version up, which is after
+    the moment this task runs.
+
+    A rule carrying no matcher at all still selects nothing, unchanged.
+    Renovate rejects such a rule outright, so it is not a wildcard here
+    either; it is a rule setting something this task does not render.
 
     Returns:
-        True when the rule's matchers all admit this dependency.
+        True when every matcher admits this dependency, False when one
+        refuses it, and None when the modelled matchers admit it but an
+        unmodellable one has the last word.
 
     """
-    managers = rule.get("matchManagers")
-    names = rule.get("matchPackageNames")
-    if managers is None and names is None:
+    kinds = [key for key in rule if key.startswith("match")]
+    if not kinds:
         return False
-    if managers is not None and dep.manager not in managers:
-        return False
-    return names is None or any(matches(p, dep.name) for p in names)
+    for key, admits in MATCHERS.items():
+        values = rule.get(key)
+        if values is not None and not admits(values, dep):
+            return False
+    return all(kind in MATCHERS for kind in kinds) or None
 
 
-def apply_rules(config: dict, rules: list[dict], dep: Dep) -> None:
-    """Fold one packageRules list into a resolved config, in order.
+def unique(configs: list[dict]) -> list[dict]:
+    """Drop duplicate resolutions, keeping the order they were reached.
+
+    Two rules can fork onto the same fields, and a fork that reconverges
+    is one resolution rather than two — which is what keeps the branching
+    below bounded by the resolutions that actually differ.
+
+    Returns:
+        One entry per distinct set of message fields.
+
+    """
+    seen: set[tuple] = set()
+    kept: list[dict] = []
+    for config in configs:
+        key = tuple(sorted(config.items()))
+        if key not in seen:
+            seen.add(key)
+            kept.append(config)
+    return kept
+
+
+def apply_rules(configs: list[dict], rules: list[dict], dep: Dep) -> list[dict]:
+    """Fold one packageRules list into every resolution it can reach.
 
     Later wins per field, which is Renovate's own precedence within a
-    list. Mutates `config`; returns nothing, because there is one
-    resolution being built and two lists folded into it.
+    list. A rule this task cannot resolve FORKS the resolution instead of
+    guessing (#724): both the applied and the unapplied config are
+    carried forward, and the widest subject any of them mints is the one
+    charged. An unmodellable matcher therefore costs margin rather than
+    correctness — the same construction as the two-subject advisory
+    rendering (#686).
+
+    A rule that sets no message field cannot change a resolution, so it
+    is never a fork: it would produce two identical entries. That is what
+    keeps the set at one entry for every rule in the org today, where the
+    only unmodellable matcher in force sets `automerge`.
+
+    Returns:
+        Every resolution reachable from the ones given.
+
     """
     for rule in rules:
-        if selects(rule, dep):
-            config.update({k: rule[k] for k in MESSAGE_CONFIG if k in rule})
+        verdict = selects(rule, dep)
+        if verdict is False:
+            continue
+        fields = {k: rule[k] for k in MESSAGE_CONFIG if k in rule}
+        if not fields:
+            continue
+        applied = [{**config, **fields} for config in configs]
+        configs = applied if verdict else unique(configs + applied)
+    return configs
 
 
-def effective(template: Template, dep: Dep) -> dict:
-    """Resolve the message fields Renovate would use for one dependency.
+def effective(template: Template, dep: Dep) -> list[dict]:
+    """Resolve the message fields Renovate could use for one dependency.
+
+    Could rather than would, and that is the whole model: where a rule
+    carries a matcher no simulation can settle before Renovate has looked
+    a version up, BOTH resolutions are reachable and both are returned
+    (#724).
 
     packageRules are applied in order and later wins per field, which is
     Renovate's own precedence. The repo's OWN rules are folded in after
@@ -354,16 +454,22 @@ def effective(template: Template, dep: Dep) -> dict:
     is the rule rather than an accident: a repo may override a field the
     preset already sets, but it may not be the only place one is
     written. Otherwise a consumer that does not extend the canon
-    inherits nothing and the hard error stops meaning what it says.
+    inherits nothing and the hard error stops meaning what it says. It
+    holds across every reachable resolution: a field only a FORKED rule
+    writes is absent on the branch where that rule does not apply, so the
+    preset has not written it in the sense this error means.
 
     Returns:
-        The five message fields, every one of them written by the org.
+        One entry per resolution Renovate could reach, each carrying the
+        five message fields, every one of them written by the org. The
+        first takes every unmodellable rule as not applying, so the list
+        is one entry long wherever nothing forked.
 
     """
     preset = template.preset
-    config = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
-    apply_rules(config, preset.get("packageRules", []), dep)
-    missing = [k for k in MESSAGE_CONFIG if k not in config]
+    base = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
+    configs = apply_rules([base], preset.get("packageRules", []), dep)
+    missing = [k for k in MESSAGE_CONFIG if any(k not in c for c in configs)]
     if missing:
         sys.exit(
             "lint:subject-budget: the owned template does not set "
@@ -372,8 +478,7 @@ def effective(template: Template, dep: Dep) -> dict:
             " explicitly in default.json (#576); this task will not"
             " assume Renovate's default for one.",
         )
-    apply_rules(config, template.repo_rules, dep)
-    return config
+    return apply_rules(configs, template.repo_rules, dep)
 
 
 def advisory_suffix(preset: dict, repo_config: dict) -> str:
@@ -671,6 +776,16 @@ def custom_matches(manager: dict, path: Path, content: str, origin: str) -> list
     patterns are executed over the files they claim rather than guessed
     at.
 
+    The origin recorded is the FILE the match came from, not the config
+    that declared the manager (#724). Every native manager's origin is
+    the file it read and `matchFileNames` is resolved against it, so a
+    regex-managed dependency carrying its declaring config could not be
+    selected by the one matcher that names a path — the manager id is
+    `custom.regex` for every regex manager alike, which leaves the file
+    as the only thing that tells two of them apart. The declaring config
+    still names the unresolvable ones in the report, which is where it
+    identifies WHICH manager could not be read.
+
     Returns:
         One entry per match, named by template or by capture.
 
@@ -687,7 +802,7 @@ def custom_matches(manager: dict, path: Path, content: str, origin: str) -> list
                 deps.append(Dep("", "", "custom.regex", unresolved))
                 continue
             current = groups.get("currentValue") or groups.get("currentDigest") or ""
-            deps.append(Dep(name, current, "custom.regex", origin))
+            deps.append(Dep(name, current, "custom.regex", str(path)))
     return deps
 
 
@@ -760,6 +875,42 @@ def collect(files: list[Path], report: list[str]) -> list[Dep]:
     return deps + from_custom_managers(sources, files, report)
 
 
+def widest_subject(
+    template: Template,
+    dep: Dep,
+    width: int,
+    report: list[str],
+) -> tuple[str, int]:
+    """Charge the widest subject any resolution of one dependency mints.
+
+    Two nested reasons for more than one candidate, and neither is
+    optional. Every resolution the rules can reach is rendered, because a
+    rule carrying an unmodellable matcher may or may not apply (#724);
+    each of those is rendered twice, ordinarily and with the advisory
+    suffix, because Renovate mints both from the one template (#686). The
+    worst case is the widest of them all.
+
+    Returns:
+        That subject and the columns it is charged.
+
+    """
+    found, charged = "", 0
+    for config in effective(template, dep):
+        for value in ("", template.suffix):
+            rendered = {**config, "commitMessageSuffix": value}
+            subject, unmodelled = render(rendered, dep.name, width)
+            line = f"{dep.name}: template field is unresolved — {unmodelled}"
+            if unmodelled and line not in report:
+                report.append(line)
+            # The advisory rendering spends the pull-request-number
+            # allowance on the suffix rather than charging both; the
+            # reasoning is pinned beside PR_TAIL.
+            cost = len(subject) - (len(PR_TAIL) if value else 0)
+            if cost > charged:
+                found, charged = subject, cost
+    return found, charged
+
+
 def judge(
     deps: list[Dep],
     template: Template,
@@ -768,13 +919,14 @@ def judge(
 ) -> list[Finding]:
     """Measure each dependency's widest subject against the ceiling.
 
-    TWO subjects are rendered per dependency, not one (#686): the
-    ordinary one, and the advisory one carrying the template's suffix.
-    Renovate mints both from the same template, so proving only the
-    first proves the template fits for every pull request EXCEPT the one
-    it would hurt most to have wedged. Neither leg is optional, which is
-    why the three sources arrive as one Template rather than as
-    arguments a caller can leave out.
+    SEVERAL subjects are rendered per dependency and the widest is what
+    it is charged — the ordinary subject and the advisory one carrying
+    the template's suffix (#686), each over every resolution the rules
+    can reach (#724). Renovate mints them all from the same template, so
+    proving only the first proves the template fits for every pull
+    request EXCEPT the one it would hurt most to have wedged. No leg is
+    optional, which is why the three sources arrive as one Template
+    rather than as arguments a caller can leave out.
 
     Only the widest overrunning subject is reported per dependency. The
     advisory one is never narrower, and the remedy for both is the same
@@ -792,25 +944,9 @@ def judge(
         if dep.name in seen:
             continue
         seen.add(dep.name)
-        base = effective(template, dep)
         growth = 0 if PSEUDO_VERSION.fullmatch(dep.current) else VERSION_GROWTH
         width = len(dep.current) + growth
-        widest, charged = "", 0
-        for value in ("", template.suffix):
-            subject, unmodelled = render(
-                {**base, "commitMessageSuffix": value},
-                dep.name,
-                width,
-            )
-            line = f"{dep.name}: template field is unresolved — {unmodelled}"
-            if unmodelled and line not in report:
-                report.append(line)
-            # The advisory rendering spends the pull-request-number
-            # allowance on the suffix rather than charging both; the
-            # reasoning is pinned beside PR_TAIL.
-            cost = len(subject) - (len(PR_TAIL) if value else 0)
-            if cost > charged:
-                widest, charged = subject, cost
+        widest, charged = widest_subject(template, dep, width, report)
         if charged > limit:
             findings.append(Finding(charged, dep, widest))
     return sorted(findings, reverse=True)
