@@ -4642,6 +4642,68 @@ command -v stele > /dev/null || {
 stele derive bump --git-dir . --check
 '''
 
+[tasks."lint:workspace-inherit"]
+description = "Every [workspace.package] key is inherited by at least one member (#863)"
+dir = "{{cwd}}"
+# Dead policy nobody could see (#863). `[workspace.package]` inheritance
+# is opt-in per member AND per key: a key declared at the workspace root
+# reaches nothing until a member writes `<key>.workspace = true`. Found
+# by running #820's lint:msrv against release-lab, which reported "no
+# crate declares rust-version, skipped" against a root manifest whose
+# line 26 says `rust-version = "1.97"` — so the MSRV a consumer reads was
+# nothing at all, and clippy's `incompatible_msrv` had no version to
+# compare against and had been inert on every gate run since it was
+# written. Measured both ways on a copy of that tree with a post-MSRV
+# API planted in lab-core: inheritance absent, clippy emits nothing;
+# inheritance present, it objects at 1.85-against-1.63. One line of
+# difference, and the check that fires is the whole of what was lost.
+#
+# The #687/#813 shape — not a check that went red, a check that could
+# not fire — and invisible to every lint in the belt, because they all
+# read the manifest TEXT or the workspace table. This reads cargo's
+# account of the RESOLVED packages, which is the same source msrv-plan.py
+# reads and what a consumer of the published crate actually sees.
+#
+# Only the declared KEYS are read as text, from the root manifest cargo
+# itself names; whether anyone takes them is never text. Grepping the
+# members for `.workspace = true` was rejected on #863 — it is the
+# manifest-text reading that made the class invisible, and it cannot see
+# a key cargo resolved some other way.
+#
+# The rule is minimal and fail-closed: a key NO member takes is red. Not
+# "every member takes every key" — a workspace legitimately declares a
+# key only some members want, and release-lab keeps `description` per
+# crate on purpose. A key nobody takes is dead in a way a partly-taken
+# key is not.
+#
+# CLIPPY_EXCLUDE is deliberately NOT read here, unlike lint:msrv and
+# lint:rust. Those two ask what the gate can COMPILE; this asks what the
+# published manifest says, and a key inherited only by a member outside
+# the compile surface still reaches every consumer of that crate.
+# Filtering by the compile surface would hide a live reader and red a
+# key that has one.
+#
+# Deterministic: the outcome is a function of the tree and the lock.
+# `cargo fetch --locked` first, the lint:rust precedent.
+run = '''
+set -euo pipefail
+root=$(git ls-files ':!vendor/**' "Cargo.toml")
+[[ -n ${root} ]] || {
+  echo "lint:workspace-inherit: no root Cargo.toml tracked, skipped"
+  exit 0
+}
+# A repo with a Cargo.toml has rust pinned as a build input; cargo absent
+# is a broken toolchain, and skipping would be the vacuous-success
+# failure this task exists to refuse.
+command -v cargo > /dev/null || {
+  echo "lint:workspace-inherit: Cargo.toml tracked but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+cargo fetch --locked
+cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/workspace-inherit.py"
+'''
+
 [tasks."lint:gate-stub"]
 description = "A gate stub's trigger set must be closed over the gate's inputs (#427)"
 dir = "{{cwd}}"
