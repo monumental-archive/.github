@@ -60,6 +60,13 @@ jobs:
           ref: 2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
           persist-credentials: false
 
+      # unattested-path: setup-go's `cache:` defaults to true, so this
+      # step warms a Go module cache — same verdict as the checkpoint
+      # cache below, and for the same reason: this workflow builds and
+      # signs nothing, so a poisoned module cache degrades the monitor
+      # and can reach no artifact. Marked rather than disabled because
+      # the monitor is `go run` from source and the cache is the only
+      # thing keeping that off a cold module download twice a day.
       - name: Set up Go from the monitor's own go.mod
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
