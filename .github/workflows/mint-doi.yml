@@ -80,6 +80,16 @@ jobs:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          # Who is calling, for registries whose access policy asks
+          # (#907). Measured 2026-08-24: zenodo.org serves an
+          # unidentified request today, so this is not fixing a live
+          # break the way the crates.io exchange was — it is sent
+          # because identifying the caller is the documented contract,
+          # and because this path mints DOIs, where an unattributed 403
+          # would land AFTER the commitment point.
+          ORG_USER_AGENT: >-
+            monumental-archive-publish
+            (https://github.com/monumental-archive/.github)
         run: |
           set -euo pipefail
           # Helpers split by idempotency (#484). Reads and PUTs converge
@@ -91,11 +101,13 @@ jobs:
           retry=(--retry 5 --retry-all-errors --retry-max-time 120)
           api() {
             # Authenticated non-idempotent call (POST/DELETE): one shot.
-            curl -sSf -H "Authorization: Bearer ${ZENODO_TOKEN}" "$@"
+            curl -sSf -H "User-Agent: ${ORG_USER_AGENT}" \
+              -H "Authorization: Bearer ${ZENODO_TOKEN}" "$@"
           }
           api_idem() {
             # Authenticated idempotent call (GET/PUT): retries.
-            curl -sSf "${retry[@]}" -H "Authorization: Bearer ${ZENODO_TOKEN}" "$@"
+            curl -sSf "${retry[@]}" -H "User-Agent: ${ORG_USER_AGENT}" \
+              -H "Authorization: Bearer ${ZENODO_TOKEN}" "$@"
           }
           pub_get() {
             # PUBLIC read that may REDIRECT: the concept record 302s to
@@ -104,7 +116,7 @@ jobs:
             # that needs none. Measured on canon v1.22.0: the token
             # helper returned the HTML redirect body, jq died on it, and
             # the DOI was lost after the commitment point (#316).
-            curl -sSfL "${retry[@]}" "$@"
+            curl -sSfL "${retry[@]}" -H "User-Agent: ${ORG_USER_AGENT}" "$@"
           }
           oracle() {
             # The state oracle (#484): the concept's latest PUBLISHED
