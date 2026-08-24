@@ -331,10 +331,32 @@ The delivered file is `taplo-org.toml`, not `taplo.toml`, for the reason
 a delivered file under the discovered name is caught by the very refusal
 it enforces. Measured, not predicted — with the natural name this repo's
 own gate reported `tracked: mise/taplo.toml` and exited 1. The same
-collision sits latent in `lint:rust`, which refuses `*/clippy.toml` and
+collision sat latent in `lint:rust`, which refuses `*/clippy.toml` and
 `*/rustfmt.toml` while the belt delivers both under exactly those names;
-it is invisible only because that task skips a repo with no tracked
-`Cargo.toml`.
+it was invisible only because that task skips a repo with no tracked
+`Cargo.toml`, and the canon tracks none.
+
+**For clippy the rename road is closed, and closed in the fail-open
+direction** (#746, 2026-08-24). `CLIPPY_CONF_DIR` names a *directory*,
+and clippy reads `clippy.toml` or `.clippy.toml` inside it and nothing
+else — measured three ways on release-lab with one deliberately invalid
+key in the file: under `clippy.toml` and under `.clippy.toml` clippy
+refuses to start, and under `clippy-org.toml` there is no error at all,
+clippy lints on at its own defaults and exits 0. A `-org` rename here
+would not fail to deliver loudly; it would deliver nothing quietly,
+which is the exact trap the delivery rule exists to prevent. Renaming
+`rustfmt.toml` alone would then put the two Rust configs on two
+different roads to buy nothing, so the road is refused whole.
+
+`lint:rust` instead excludes the two literal delivered paths when — and
+only when — the tree tracks `security/identity.toml`, the canon's own
+identity declaration (#579). The guard is identity, not path: a consumer
+that tracks its own `mise/clippy.toml` is refused exactly as before, so
+no shadow config hides behind the belt's directory layout. This is not
+the `ORG_BELT_DIR` comparison #691 rejected, which assumed the belt
+directory and the working tree name one checkout and went false-negative
+on a second clone; an identity file assumes nothing about where the belt
+arrived from.
 
 The boundary needed a third clause, and #445 supplied it by measurement:
 **a config may only be delivered when the tool treats it as data.** The
