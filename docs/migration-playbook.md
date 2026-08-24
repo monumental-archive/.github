@@ -40,8 +40,15 @@ a fresh session **started in the target repo's checkout**.
 - [ ] `./settings/repo-baseline.sh apply` (from the `.github` checkout —
       settings, immutable OIDC sub claim, and the `publish` environment
       where the canonical entry `publish.yml` exists).
-- [ ] Rulesets need nothing: they are org-level, `enforcement: active`,
-      scope `~ALL` — a transferred repo is covered the moment it lands.
+- [ ] The ORG's rulesets need nothing: they are org-level,
+      `enforcement: active`, scope `~ALL` — a transferred repo is covered
+      the moment it lands. **The repo's OWN rulesets are a different
+      matter**: they survive the transfer and the org-level sweep does
+      not touch them, so delete them in Settings → Rules. This is the
+      one that blocked iiif-server — `protect-main` required five
+      contexts from the pipeline the import was deleting (#671, #876).
+      `repo-baseline.sh check` reports any that survive, and never
+      deletes one.
 - [ ] **Delete the repo's CLASSIC branch protection** (Settings →
       Branches). It survives the transfer, it is a different API object
       from the rulesets so the sweep above does not touch it, and its

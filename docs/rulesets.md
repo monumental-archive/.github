@@ -106,6 +106,17 @@ branch was approved" claimable as an `ORG_SOURCE_` property (decided
 under #120, enforced since 2026-08-10; continuity-ledger Boundary B is
 defined by this narrowing).
 
+**A repository never carries rulesets of its own.** The three above are
+the enforcement, org-level and `~ALL`, so a repo-level ruleset can only
+be redundant with them or contradict them — and the contradiction is not
+theoretical: iiif-server arrived with `protect-main`, whose five required
+contexts named the pipeline its import was deleting, and its first PR sat
+blocked with every org rule satisfied (#671). Rulesets are a different
+API object from classic branch protection and both survive a transfer, so
+`settings/repo-baseline.sh check` reports each of them per repo and
+deletes neither: quietly changing a repository's merge rules from a
+script is the wrong kind of helpful (#761, #876).
+
 **`required_signatures` and the tag rules earn no Scorecard points** —
 there is no probe for either. They are here because the attestation chain
 depends on them: provenance names a tagged commit, and a movable tag
