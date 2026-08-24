@@ -178,11 +178,20 @@ it is the only place that knows the caller's Dockerfile.
 The runner layer is untouched (#125), and the producer obligation this
 discharges is discharged only for bases the org itself published —
 which is a property of those three bases, not of the population.
-`slsa/assert-policy.json`'s `evidence.baseImages` block still describes
-the **first** row only, and says so by naming `pinFile`; it cannot yet
-carry the second, because the pinned engine decodes that document
-strictly and a new key is refused by the loader — measured against
-stele v0.19.1: `assert: policy: jsonx: decode: json: unknown field
-"scope"`, which `lint:policy-load` turns into a red gate. Stating the
-scopes in a table here is the honest half that is available today; the
-policy half needs a field in the engine first.
+
+`slsa/assert-policy.json`'s `evidence.baseImages` block now carries
+TYPED approval scopes (stele#247, epoch 7), so the schema can express
+more than one mechanism. The canon declares the first row's scope,
+`pin-file`, and only that one. The second row is expressible in
+principle as a `provenance-verified` scope and is deliberately not
+declared, for two measured reasons (#891): no base under
+`ghcr.io/monumental-archive/` exists anywhere in the population today
+— the org's only first-party base is `ghcr.io/carlallenn/edtf-postgres`,
+still in the personal namespace ahead of #83's transfers, where the
+scope's prefix-to-repository derivation does not hold — and the scope
+carries a single `identity` template, while this org's claim has two
+independent dimensions: the org's ONE shared signer workflow, and a
+source ref derived from the pinned tag. Declaring it with a constant
+identity would be strictly weaker than the gate that actually runs and
+would manufacture the impression of coverage. The engine gap is
+stele#269; the table above stays the honest account until it ships.
