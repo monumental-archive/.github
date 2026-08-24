@@ -86,57 +86,64 @@ written for two moments: wiring a repository in, and a release going wrong.
    remaining drift it reports.
 5. Attach the org security configuration (Settings → Code security — the
    one manual step on every new repository).
-6. Workspace shape: version via `[workspace.package]` inheritance; a pgrx
+6. Org secrets and App installations: **nothing to do.** Every org secret
+   (`TAG_MINT_APP_PRIVATE_KEY`, `ZENODO_TOKEN`, `CODECOV_TOKEN`) is
+   readable by all organisation repositories, and all three App
+   installations (tag-mint, renovate, codecov) are all-repositories — a
+   repository is granted them by arriving. There is no tick step to
+   forget, which is what killed the first transferred repo's release
+   with a 404 (#757). Verify only if the baseline audit reports drift.
+7. Workspace shape: version via `[workspace.package]` inheritance; a pgrx
    crate is a member but **not** a default-member, and goes in the
    `exclude:` input.
-7. `lint:release-stub` (belt) enforces 2–3 from then on: `release.yml`
+8. `lint:release-stub` (belt) enforces 2–3 from then on: `release.yml`
    present means the stubs must be, pinned, and a root `CHANGELOG.md`
    must be tracked.
-8. Copy `scaffold/CODEOWNERS` to `.github/CODEOWNERS` and grant the
+9. Copy `scaffold/CODEOWNERS` to `.github/CODEOWNERS` and grant the
    `owners` team write access — documentation and reviewer routing now,
    enforcement when a second maintainer flips the Code Owners toggle.
-9. **Score-ready extras**, so the repository badges the day it lands:
-   run `mise run coverage:adopt` to commit a `.coverage-floor` (the
-   floor is DERIVED STATE, #652: the task measures the repo and writes
-   `measured - 2`, the release path re-derives it at every release, and
-   the gate's `coverage:check` enforces it and refuses a hand edit as
-   drift — Silver wants ≥ 80) and pass the `codecov-token`
-   secret to the ci stub for the badge feed; copy
-   `scaffold/REUSE.toml.stub` to the root as `REUSE.toml` (the .stub
-   suffix keeps the placeholder from governing the canon's own tree —
-   any file literally named REUSE.toml rules its subtree) and licence
-   texts into `LICENSES/`; `lint:reuse` then proves real REUSE-spec
-   compliance in the gate, before any registration; add the
-   `<!-- badges:begin -->`/`<!-- badges:end -->` marker pair to the
-   README and run `mise run fix:badges` — the block is derived, never
-   pasted (`scaffold/README-badges.md` is the catalogue, `.badge-states`
-   holds the human-step lines, `lint:badges` reddens hand drift, #316).
+10. **Score-ready extras**, so the repository badges the day it lands:
+    run `mise run coverage:adopt` to commit a `.coverage-floor` (the
+    floor is DERIVED STATE, #652: the task measures the repo and writes
+    `measured - 2`, the release path re-derives it at every release, and
+    the gate's `coverage:check` enforces it and refuses a hand edit as
+    drift — Silver wants ≥ 80) and pass the `codecov-token`
+    secret to the ci stub for the badge feed; copy
+    `scaffold/REUSE.toml.stub` to the root as `REUSE.toml` (the .stub
+    suffix keeps the placeholder from governing the canon's own tree —
+    any file literally named REUSE.toml rules its subtree) and licence
+    texts into `LICENSES/`; `lint:reuse` then proves real REUSE-spec
+    compliance in the gate, before any registration; add the
+    `<!-- badges:begin -->`/`<!-- badges:end -->` marker pair to the
+    README and run `mise run fix:badges` — the block is derived, never
+    pasted (`scaffold/README-badges.md` is the catalogue, `.badge-states`
+    holds the human-step lines, `lint:badges` reddens hand drift, #316).
 
-   Then the two registrations, each a human step ending in a
-   `.badge-states` line — **and in both cases the line goes in last**,
-   because `audit:badges` re-asks each issuer whether a worn shield is
-   still true and fails the repo when it disagrees:
+    Then the two registrations, each a human step ending in a
+    `.badge-states` line — **and in both cases the line goes in last**,
+    because `audit:badges` re-asks each issuer whether a worn shield is
+    still true and fails the repo when it disagrees:
 
-   - **REUSE**: `lint:reuse` must be green first — it proves the tree
-     compliant before anyone is asked to certify it. Register at
-     <https://api.reuse.software/register>: name, email, and the
-     project URL **without a scheme**, `github.com/<org>/<repo>` (the
-     form supplies the surrounding `git://` and `.git`; a repo named
-     `.github` is fine). Confirm by email, then wait for the first
-     crawl — the API answers `uninitialised` until it finishes and
-     `compliant` after, about a minute. Only then set
-     `reuse registered`.
-   - **Best Practices**: post-transfer, since the form binds the repo
-     URL. Answer it from [`best-practices.md`](best-practices.md),
-     which carries the form mechanics, the automation-proposal URLs and
-     the `.bestpractices.json` shortcut — so this is a review, not 190
-     clicks. **Reach 100% on the passing section before** setting
-     `bestpractices <BP_ID>`: the audit gates that shield on the
-     issuer's `badge_percentage_0`, so an id set early publishes a
-     shield that reddens the next Monday cron.
+    - **REUSE**: `lint:reuse` must be green first — it proves the tree
+      compliant before anyone is asked to certify it. Register at
+      <https://api.reuse.software/register>: name, email, and the
+      project URL **without a scheme**, `github.com/<org>/<repo>` (the
+      form supplies the surrounding `git://` and `.git`; a repo named
+      `.github` is fine). Confirm by email, then wait for the first
+      crawl — the API answers `uninitialised` until it finishes and
+      `compliant` after, about a minute. Only then set
+      `reuse registered`.
+    - **Best Practices**: post-transfer, since the form binds the repo
+      URL. Answer it from [`best-practices.md`](best-practices.md),
+      which carries the form mechanics, the automation-proposal URLs and
+      the `.bestpractices.json` shortcut — so this is a review, not 190
+      clicks. **Reach 100% on the passing section before** setting
+      `bestpractices <BP_ID>`: the audit gates that shield on the
+      issuer's `badge_percentage_0`, so an id set early publishes a
+      shield that reddens the next Monday cron.
 
-   Re-run `mise run fix:badges` after each line lands; both the Best
-   Practices and OSPS Baseline shields are derived from the one id.
+    Re-run `mise run fix:badges` after each line lands; both the Best
+    Practices and OSPS Baseline shields are derived from the one id.
 
 ### Continuous (no versions — the artifact's version is its pin set)
 
@@ -158,10 +165,10 @@ That is the whole wiring.
   `pkg/`. Then package Settings: Trusted Publisher (org / repo /
   `publish.yml` / `publish`, allow `npm publish`) and "Require 2FA and
   disallow tokens".
-- **Zenodo**: `ZENODO_TOKEN` is an organisation secret with
-  `visibility: selected` — one production token (scopes `deposit:write`
-  and `deposit:actions`), granted per repo at migration by ticking the
-  repository onto it, never per-repo tokens. Pass `mint-doi: true` +
+- **Zenodo**: `ZENODO_TOKEN` is an organisation secret readable by all
+  organisation repositories — one production token (scopes
+  `deposit:write` and `deposit:actions`), never per-repo tokens and no
+  per-repo grant step. Pass `mint-doi: true` +
   the secret in the publish stub, and render `CITATION.cff` first
   (`fix:citation` — the record's licence and creators come from it).
   The pipeline mints the DOI **after** the release publishes — never
@@ -177,13 +184,17 @@ That is the whole wiring.
   the value, never a copied command snippet. Two grants, deliberately
   different shapes (#316). The
   app (app.codecov.io, "Install Codecov") is installed on the org with
-  **Only select repositories** — never all-repos: its grant includes
-  WRITE on checks, statuses and pull requests, and a breached-before
-  third party gets no standing write surface on repos (the signer, the
-  canon) that consume nothing from it. Tick each coverage-adopting
-  repo onto the installation at migration. The upload credential is
-  the org **global upload token** held once as `CODECOV_TOKEN`
-  (`visibility: selected`, tick the repo on — the ZENODO_TOKEN model);
+  **All repositories** (measured 2026-08-24) — the org-wide grant model
+  every installation and org secret now follows (#751), so a
+  coverage-adopting repo needs no installation step. Its cost is on the
+  record rather than argued away: the installation's grant includes
+  WRITE on checks, statuses and pull requests, and it now stands on
+  every repo, including those (the signer, the canon) that consume
+  nothing from it — an earlier draft of this document scoped it
+  narrowly for exactly that reason. `audit:baseline-drift` asserts the
+  setting stays where the decision put it. The upload credential is
+  the org **global upload token** held once as `CODECOV_TOKEN`, readable
+  by all organisation repositories (the ZENODO_TOKEN model);
   keep Codecov's "upload tokens required" setting ON, because
   tokenless ingest accepts forged reports from anyone. A leak
   pollutes only the badge feed: the gate's ratchet (`coverage:check`)

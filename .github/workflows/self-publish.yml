@@ -40,9 +40,9 @@ jobs:
       # The canon cites itself (#316): a versioned, tagged, SBOM'd,
       # signed release, and the only repo in the org that would
       # otherwise not carry a DOI. Licence and creators come from the
-      # derived CITATION.cff; ZENODO_TOKEN must be ticked onto this
-      # repo (org secret, selected visibility) before the first minting
-      # release merges, or the mint job reddens a published release.
+      # derived CITATION.cff; ZENODO_TOKEN is an org secret readable by
+      # every org repository (#751), so this needs no grant — the mint
+      # job's remaining failure mode is a dead or rotated token.
       mint-doi: true
     permissions:
       # The FULL union the orchestrator's jobs declare, not just the jobs

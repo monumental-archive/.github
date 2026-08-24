@@ -119,6 +119,69 @@ for repo in ${repos}; do
   esac
 done
 
+# App installations, checked once rather than per repo (#751).
+#
+# The org's grant model is all-repositories, for every installation and
+# every org secret alike: an arriving repository is granted them by
+# arriving, and no import carries a tick step. That is a decision (Carl,
+# 2026-08-21), and what lets the playbook state it as "nothing to do" is
+# that a regression is caught HERE — on a Monday — rather than at a
+# transferred repo's first release, where it presented as
+# `GET /repos/…/installation` 404 followed by `Token is not set`, with
+# nothing in the run naming the cause (#757).
+#
+# CHECK ONLY, by ruling and not by limitation: `apply` never touches
+# installations. Selection is not a settings PATCH, and a script that
+# silently widens a third party's reach across every repo in the org is
+# the wrong kind of convenient (#757's ruling, kept).
+if [[ ${mode} == check ]]; then
+  # Named, not enumerated: a token that saw an empty list would pass a
+  # "nothing is selected" loop in silence (#290 finding 7). Each app is
+  # asked for by slug, so a missing one is as red as a narrowed one —
+  # tag-mint uninstalled and tag-mint scoped to a list fail the same
+  # releases.
+  expected_apps="renovate monumental-archive-tag-mint codecov"
+  # No --paginate: this endpoint answers with an OBJECT, and gh's
+  # pagination concatenates bare JSON documents that jq then refuses.
+  # per_page covers a population of three many times over.
+  if ! installations="$(gh api \
+    "orgs/${org}/installations?per_page=100" 2> /dev/null)"; then
+    # Unreadable is drift, not a skip — the packages precedent below.
+    # The endpoint wants an organisation owner's token; if AUDIT_TOKEN
+    # ever stops qualifying, this check is doing nothing, and a check
+    # that quietly does nothing manufactures the impression of coverage.
+    # Report that and nothing else: running the loop over an empty list
+    # would print three "not installed" lines that are not known to be
+    # true, and a check that invents findings is read once and ignored.
+    echo "drift: cannot read org App installations"
+    echo "       (the endpoint wants an org owner's token — check AUDIT_TOKEN)"
+    drift=1
+    expected_apps=""
+  fi
+  for app in ${expected_apps}; do
+    selection="$(jq -r --arg a "${app}" \
+      '.installations[] | select(.app_slug == $a) | .repository_selection' \
+      <<< "${installations}")"
+    case "${selection}" in
+      all) ;;
+      "")
+        echo "drift: App ${app} is not installed on the org"
+        echo "       install it across all repositories:"
+        echo "       https://github.com/organizations/${org}/settings/installations"
+        drift=1
+        ;;
+      *)
+        echo "drift: App ${app} installation is '${selection}', not 'all'"
+        echo "       set it back to All repositories:"
+        echo "       https://github.com/organizations/${org}/settings/installations"
+        echo "       A selected installation strands every repo off the list —"
+        echo "       its first release dies on an unreadable 404 (#757)."
+        drift=1
+        ;;
+    esac
+  done
+fi
+
 # Container packages, checked once rather than per repo.
 #
 # CHECK ONLY, and not by choice: the Packages REST API offers GET, DELETE
@@ -174,7 +237,9 @@ fi
 if [[ ${mode} == check && ${drift} -eq 0 ]]; then
   key_count="$(wc -w <<< "${keys}" | tr -d ' ')"
   emsg="repo-baseline: ${seen_repos} repos checked"
-  emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env each, plus org packages), no drift"
+  app_count="$(wc -w <<< "${expected_apps}" | tr -d ' ')"
+  emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env each,"
+  emsg+=" plus org packages and ${app_count} App installations), no drift"
   echo "${emsg}"
 fi
 

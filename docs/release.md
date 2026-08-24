@@ -179,12 +179,28 @@ caller's environment protection rules, variables and OIDC `environment`
 claim, but not its secrets ([`slsa-reference.md`](slsa-reference.md)). An
 environment governs *when a job runs*, never *who can read a secret*.
 
-The key lives as an organisation secret with `visibility: selected`,
-readable only by the repositories ticked onto it — narrowing it required
-re-supplying the encrypted value, so the App key was rotated first
-(2026-08-09) and verified through both token paths. A repository joining
-the release flow at transfer is added to the selection list; nothing is
-readable org-wide by default.
+The key lives as an organisation secret readable by **all** organisation
+repositories, and the tag-mint App is installed on all of them (Carl,
+2026-08-21; both measured `all` again on 2026-08-24). An earlier draft of
+this document described a per-repo selection list: that model is retired,
+and a repository joining the release flow at transfer is granted nothing.
+Rotation is unchanged — re-supplying the encrypted value is what a scope
+change costs, which is why the App key was rotated first (2026-08-09) and
+verified through both token paths.
+
+**The consideration, stated once.** `TAG_MINT_APP_PRIVATE_KEY` and the
+tag-mint App are now reachable from a workflow in any org repository, the
+private member included (#688) — and the App is the sole bypass actor of
+the `v*` tag lock, so a bespoke workflow anywhere in the org could mint a
+release tag. What is relied on instead is that no repository carries a
+bespoke workflow: imports delete them
+([`migration-playbook.md`](migration-playbook.md)), and `audit:adoption`
+plus the gate stubs are what would notice one. That trust is stated
+rather than implied, because the selection list it replaced was not
+protection in practice — it was invisible when it failed, and its failure
+mode was a transferred repo's first release dying on an uninformative 404
+(#757). What guards the setting now is `audit:baseline-drift`, which
+reds when an installation reports anything but all-repositories (#751).
 
 The default `GITHUB_TOKEN` is never used to push a tag: tags it pushes
 trigger no workflows, and a release that silently triggers nothing looks
@@ -442,10 +458,11 @@ requirement doing real work rather than ceremony.
   after proof, like everything else. (The webhook flip-switch integration
   is deliberately not used: webhooks are Scorecard's one Critical-risk
   check, and the REST job is token-auth and in the pipeline where its
-  failure is visible.) `ZENODO_TOKEN` is an organisation secret,
-  `visibility: selected`, one production token granted per repo. There
-  is no sandbox lever (#316): the lab's rehearsal releases mint real
-  version DOIs under its one concept record — that pile-up is the
+  failure is visible.) `ZENODO_TOKEN` is an organisation secret readable
+  by all organisation repositories — one production token, no per-repo
+  grant, and a citable repo declares `mint-doi: true` and nothing else.
+  There is no sandbox lever (#316): the lab's rehearsal releases mint
+  real version DOIs under its one concept record — that pile-up is the
   design, because a rehearsal against a mirrored sandbox API never
   proves the path the permanent record takes.
 

@@ -11,7 +11,7 @@ accidental.
 | Asset | Held by | If the maintainer is unavailable |
 | --- | --- | --- |
 | GitHub organisation ownership | Carl Allen (2FA: TOTP + passkey + recovery codes, stored in Apple Passwords) | GitHub's [deceased user policy](https://docs.github.com/en/site-policy/other-site-policies/github-deceased-user-policy) or account-recovery flow; recovery codes are in the personal password manager, reachable by the estate |
-| Tag-mint App private key | Org secret, `visibility: selected` | An org owner can rotate: generate a new key on the App, replace the secret. A dead App is break-glass below |
+| Tag-mint App private key | Org secret, readable by all org repositories ([`release.md`](release.md)) | An org owner can rotate: generate a new key on the App, replace the secret. A dead App is break-glass below |
 | crates.io / npm ownership | Carl's registry accounts, trusted publishing only | Registry account recovery; no API tokens exist to leak or lose |
 | Zenodo / DOI | Carl's Zenodo account | Zenodo support; DOIs already minted are permanent regardless |
 | Signing identity | No key exists — Sigstore keyless via `signer`'s workflow identity | Nothing to lose: identity is the workflow ref, recreated by the repository itself |
