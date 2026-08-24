@@ -76,14 +76,21 @@ def owned(
     source: dict,
     repo_rules: list | None = None,
     suffix: str = "",
+    repo_top: dict | None = None,
 ) -> sb.Template:
     """Gather a Template the way main() does, from a test's three parts.
+
+    The repo arrives as its whole document (#725), so a row states its
+    two layers separately — the packageRules it declares and the message
+    fields it writes beside `extends` — and this assembles them the way
+    a renovate.json holds them.
 
     Returns:
         The three sources as one value.
 
     """
-    return sb.Template(source, repo_rules or [], suffix)
+    repo = {**(repo_top or {}), "packageRules": repo_rules or []}
+    return sb.Template(source, repo, suffix)
 
 
 def template(**overrides: object) -> dict:
@@ -443,6 +450,121 @@ class TestRepoRules(ResolutionCase):
         self.assertEqual(findings[0].width, limit + 2)
         narrow = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "rf"}]
         self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), [])
+
+
+class TestRepoTopLevel(ResolutionCase):
+    """The repo's own top-level fields, the middle layer (#725).
+
+    Renovate resolves four layers, not two: the preset's top level, the
+    repo's top level, the preset's packageRules, the repo's. #677 taught
+    the resolver the fourth and left the second unread, so a
+    `semanticCommitType` written beside `extends` was resolved at the
+    preset's value.
+    """
+
+    def test_a_repo_top_level_field_beats_the_preset_top_level(self) -> None:
+        """The layer that was skipped, in one row."""
+        config = self.sole(
+            owned(preset(), repo_top={"semanticCommitType": "refactor"}),
+            dep("ruff"),
+        )
+        self.assertEqual(config["semanticCommitType"], "refactor")
+
+    def test_it_leaves_the_fields_it_does_not_set(self) -> None:
+        """An override is per field, as everywhere else in the model."""
+        config = self.sole(
+            owned(preset(), repo_top={"semanticCommitScope": "belt"}),
+            dep("ruff"),
+        )
+        self.assertEqual(config["semanticCommitScope"], "belt")
+        self.assertEqual(config["semanticCommitType"], "chore")
+
+    def test_a_preset_package_rule_beats_a_repo_top_level_field(self) -> None:
+        """THE precedence row, and the live blast radius with it.
+
+        A rule from either file beats a top-level value from either
+        file. The preset overrides `semanticCommitType` per manager for
+        gomod, cargo and npm only — so the preset's rule wins there,
+        while for mise (and github-actions, and custom.regex) nothing
+        stands between the repo's top-level value and the subject. That
+        asymmetry is the reason this layer is worth reading: those three
+        managers carry every dependency this repo declares.
+        """
+        rules = [{"matchManagers": ["gomod"], "semanticCommitType": "fix"}]
+        source = owned(
+            preset(packageRules=rules),
+            repo_top={"semanticCommitType": "refactor"},
+        )
+        self.assertEqual(
+            self.sole(source, dep("x", manager="gomod"))["semanticCommitType"],
+            "fix",
+        )
+        self.assertEqual(
+            self.sole(source, dep("x", manager="mise"))["semanticCommitType"],
+            "refactor",
+        )
+
+    def test_a_repo_package_rule_beats_the_repo_top_level(self) -> None:
+        """Within one file too: a rule is the narrower statement."""
+        config = self.sole(
+            owned(
+                preset(),
+                [{"matchPackageNames": ["ruff"], "semanticCommitType": "fix"}],
+                repo_top={"semanticCommitType": "refactor"},
+            ),
+            dep("ruff"),
+        )
+        self.assertEqual(config["semanticCommitType"], "fix")
+
+    def test_it_reaches_every_forked_resolution(self) -> None:
+        """The middle layer sits under #724's forks, not beside them."""
+        repo = [{"matchUpdateTypes": ["major"], "commitMessageTopic": "wide"}]
+        configs = sb.effective(
+            owned(preset(), repo, repo_top={"semanticCommitType": "refactor"}),
+            dep("ruff"),
+        )
+        self.assertEqual(len(configs), 2)
+        self.assertEqual(
+            {c["semanticCommitType"] for c in configs},
+            {"refactor"},
+        )
+
+    def test_a_repo_top_level_field_cannot_satisfy_the_absent_field_error(
+        self,
+    ) -> None:
+        """A repo may override any of the five; it may write none of them.
+
+        Same law the repo's packageRules answer to (#677), one layer up:
+        the preset must remain the place every field is written, or a
+        consumer that does not extend the canon inherits nothing and the
+        hard error stops meaning what it says.
+        """
+        thin = preset()
+        del thin["semanticCommitType"]
+        with self.assertRaises(SystemExit) as caught:
+            sb.effective(
+                owned(thin, repo_top={"semanticCommitType": "chore"}),
+                dep("ruff"),
+            )
+        self.assertIn("semanticCommitType", str(caught.exception))
+
+    def test_judge_goes_red_on_a_widening_top_level_field_and_green_without(
+        self,
+    ) -> None:
+        """Plant and measure, both directions, per #650.
+
+        `refactor` is nine columns against `chore`'s five: four columns
+        of fail-OPEN before this layer was read.
+        """
+        row = [dep("ruff", "v1.0.0")]
+        limit = width_of("ruff", "v1.0.0")
+        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), [])
+        widen = owned(PRESET, repo_top={"semanticCommitType": "refactor"})
+        findings = sb.judge(row, widen, limit, [])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].width, limit + len("refactor") - len("chore"))
+        narrow = owned(PRESET, repo_top={"semanticCommitType": "fix"})
+        self.assertEqual(sb.judge(row, narrow, limit, []), [])
 
 
 class TestNarrowMatchers(ResolutionCase):
@@ -1243,6 +1365,34 @@ class TestMainGuards(unittest.TestCase):
         status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
         self.assertEqual(status, 1)
         self.assertIn("would mint a subject past 72 columns", err)
+
+    def test_a_repo_top_level_field_reaches_the_end_to_end_verdict(self) -> None:
+        """#725 driven through main(), both directions.
+
+        The same dependency is green under the preset's `chore` and red
+        under a `semanticCommitType` the repo writes beside its
+        `extends` — the four columns the model could not see. 27
+        characters is the width that tells them apart: 70 columns as
+        `chore`, 74 as `refactor`.
+        """
+        name = "n" * 27
+        tree = {
+            "renovate.json": "{}\n",
+            "default.json": json.dumps(PRESET),
+            "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
+        }
+        status, out, _ = self._run(tree)
+        self.assertEqual(status, 0)
+        self.assertIn("fits 72 columns", out)
+
+        widen = {
+            "extends": ["github>monumental-archive/.github"],
+            "semanticCommitType": "refactor",
+        }
+        status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
+        self.assertEqual(status, 1)
+        self.assertIn("would mint a subject past 72 columns", err)
+        self.assertIn("refactor(deps)", err)
 
     def test_a_preset_with_no_advisory_suffix_stops_the_task(self) -> None:
         """The sixth field answers the same law as the other five."""
