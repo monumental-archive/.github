@@ -32,8 +32,11 @@ jobs:
   release:
     permissions:
       # Stated, not inherited (see gate.yml): the release-pr job inside
-      # release.yml authenticates git-cliff's GitHub API calls with the
-      # caller's token, and `contents: read` is the whole grant that buys.
+      # release.yml reads this repository's own contents with the
+      # caller's token — the checkout, and the `gh release` reads that
+      # derive the pgrx upgrade path — and `contents: read` is the whole
+      # grant that buys. The callee declares the same scope for the same
+      # two readers.
       contents: read
       # Passed through to release.yml's tag job, where gitsign spends it
       # on the keyless tag signature (#349 S4) — the callee's
