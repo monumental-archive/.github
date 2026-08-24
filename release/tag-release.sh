@@ -27,8 +27,44 @@ groups+=",chore(deps)=Dependencies,revert=Reverted"
 order="Breaking,Added,Changed,Fixed,Performance,Documentation"
 order+=",Testing,Build,CI,Dependencies,Reverted"
 
+# Idempotent resume, and it is asked of HEAD rather than of the plan
+# (#864). A re-dispatch onto a commit that already carries its release
+# tag has nothing left to do: the tag is minted, the version is spent,
+# and the work this script exists for is done. That is not a failure,
+# and a release path that reds when it should no-op is what trains
+# people to re-run past red.
+#
+# It has to come BEFORE the plan, and the plan cannot answer it. Once
+# the tag is on HEAD the commit range is empty, so `derive release-plan`
+# correctly reports `release=false` and names no tag at all — the
+# question "is this commit already released?" is invisible to it, and
+# the empty-tag refusal below would fire first anyway. So the tag is
+# read off the commit: the ONE thing HEAD can say for itself.
+#
+# The previous version of this check asked the plan for a tag name and
+# then looked it up, three refusals too late to ever run. Measured in
+# #864, both routes: with the tag on HEAD it died at the empty-tag
+# refusal, and with the tag anywhere else `derive release-plan` refuses
+# `tag-taken` and exits non-zero, which under `set -e` ends the script
+# forty lines above the branch. It described behaviour that could not
+# happen, which is worse than describing nothing.
+#
+# Highest tag wins if a commit somehow carries several: an anomaly
+# worth reporting deterministically rather than arbitrarily.
+resumed=$(git tag --points-at HEAD --list 'v[0-9]*' | sort -V | tail -1)
+if [[ -n ${resumed} ]]; then
+  echo "${resumed} already exists; nothing to do"
+  exit 0
+fi
+
 plan="${RUNNER_TEMP:-/tmp}/tag-plan.json"
-stele derive release-plan \
+# A refusal from the engine is reported as one. Without this the only
+# `tag-taken` route out of here was a bare `set -e` exit: the job went
+# red carrying stele's message and nothing of this script's, so the
+# reader could not tell a refused plan from a crashed binary (#864).
+# The detail is stele's own, already printed above — no plan file is
+# written when it refuses, measured, so there is nothing here to re-read.
+if ! stele derive release-plan \
   --git-dir . \
   --groups "${groups}" \
   --group-order "${order}" \
@@ -36,7 +72,13 @@ stele derive release-plan \
   --compare-url "${repo_url}/compare/" \
   --release-url "${repo_url}/releases/tag/" \
   --pull-url "${repo_url}/pull/" \
-  --out "${plan}"
+  --out "${plan}"; then
+  echo "FAIL: the release plan was refused — see the refusal above" >&2
+  echo "  Nothing was minted and no version was spent. A 'tag-taken'" >&2
+  echo "  refusal means the namespace already carries this version:" >&2
+  echo "  the release is done, or the tag was minted outside this job." >&2
+  exit 1
+fi
 
 version=$(jq -r '.version // ""' "${plan}")
 tag=$(jq -r '.tag // ""' "${plan}")
@@ -45,13 +87,6 @@ if [[ -z ${tag} || -z ${version} ]]; then
   echo "FAIL: the plan names no tag to mint" >&2
   jq -r '(.refusals // [])[] | "  " + .cause + ": " + .detail' "${plan}" >&2
   exit 1
-fi
-
-# Idempotent resume, before any refusal is read: a re-dispatch onto a
-# commit already tagged has nothing to do and is not a failure.
-if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
-  echo "${tag} already exists; nothing to do"
-  exit 0
 fi
 
 refusals=$(jq -r '(.refusals // [])[] | "  " + .cause + ": " + .detail' "${plan}")

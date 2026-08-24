@@ -578,23 +578,19 @@ class TagReleaseRefusals(unittest.TestCase):
         self.assertIn("HEAD is not the release commit", result.stderr)
         self.assertIn("expected: chore: release v", result.stderr)
 
-    @unittest.expectedFailure
     def test_a_commit_already_tagged_is_a_resume_not_a_failure(self) -> None:
-        """KNOWN RED, #864: the documented idempotent resume is unreachable.
+        """A re-dispatch onto a tagged commit is a resume, not a failure.
 
-        `tag-release.sh` says a re-dispatch onto a tagged commit "has
-        nothing to do and is not a failure", and checks it "before any
-        refusal is read". Both halves are wrong: the empty-tag refusal
-        is checked first, and once the tag is on HEAD the plan correctly
-        names no tag — so the run reports `FAIL: the plan names no tag
-        to mint`. Measured both ways in #864.
+        The work is already done — the tag is minted and the version
+        spent — so the run has nothing to do and says so. #864 made
+        this reachable: the resume is asked of HEAD before the plan is
+        derived, because once the tag is on the commit the range is
+        empty and the plan correctly names no tag at all.
 
-        Written as the contract rather than as the defect, and marked
-        expected-failure rather than deleted, so it clears itself: when
-        #864 lands this row passes, `unittest` reports the unexpected
-        success as a failure, and removing the decorator is forced.
-        Pinning the current behaviour instead would make the defect the
-        specification.
+        Written as the contract and marked expected-failure while the
+        defect stood, so that the fix would force the decorator off
+        (#772). It did exactly that: the fix landed, this row reported
+        an unexpected success, and the decorator went with it.
         """
         with TemporaryDirectory() as d:
             repo = self._repo(d, subject="feat: an ordinary change")
