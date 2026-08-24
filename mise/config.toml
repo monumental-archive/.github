@@ -2739,11 +2739,31 @@ echo "lint:rust: clean at every group (restriction minus ${contradiction_count} 
 description = "Apply clippy's machine-applicable suggestions (write mode, never in the gate)"
 dir = "{{cwd}}"
 # The write-mode sibling. `cargo clippy --fix` implies --no-deps and
-# --all-targets, and refuses to run against uncommitted work unless told
-# otherwise — which is the right default for a tool that rewrites source,
-# so the refusal is left in place and a dirty tree is the caller's to
-# resolve. Only a subset of lints is machine-applicable; the rest are the
-# author's judgement, which is why this is a sibling and not a gate.
+# --all-targets. Only a subset of lints is machine-applicable; the rest
+# are the author's judgement, which is why this is a sibling and not a
+# gate.
+#
+# `cargo fix` also refuses to run against uncommitted work, and this task
+# used to leave that refusal in place on the reasoning that "a dirty tree
+# is the caller's to resolve" (#892). No caller could: the dirt is this
+# task's OWN. `cargo fmt` runs six lines below, before clippy, so every
+# repository whose Rust is not already canonical at the belt's
+# rustfmt.toml handed cargo a tree the task had dirtied one step earlier
+# — and `mise run fix`'s other fixers dirtied it again from the side.
+# Measured 2026-08-24 on a pristine clone of iiif-server with no other
+# fixer run: `fix:rust: formatted`, then the refusal naming the seven
+# .rs files cargo fmt had just written, exit 101, 3/3. The clippy leg had
+# therefore never run in such a repository at all.
+#
+# --allow-dirty is the answer rather than an ordering change, because
+# there is no order that helps: the formatter must run first (see below)
+# and its output is the dirt. What the refusal protects against is
+# supplied here by the same thing that supplies it for the other fourteen
+# fixers, none of which asks for a clean tree — a fixer runs on a branch
+# and its diff reaches a gate. One flag and not two: measured on cargo
+# 1.97.1, --allow-dirty admits STAGED changes as well as unstaged, so
+# --allow-staged would add nothing (`git add -p` then `mise run fix` is
+# the case that would otherwise still red).
 run = '''
 set -euo pipefail
 manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
@@ -2817,7 +2837,7 @@ while IFS=$'\t' read -r record spec kind majors _dir; do
 done <<< "${surface}"
 # shellcheck disable=SC2086  # all three hold whole flag words, which
 # cargo and clippy must receive as separate arguments
-cargo clippy --fix --workspace ${excludes} ${features} --locked -- ${ladder}
+cargo clippy --fix --allow-dirty --workspace ${excludes} ${features} --locked -- ${ladder}
 echo "fix:rust:${fixing:- none} rewritten where clippy could"
 # The extension pass. Without it `mise run fix` could not touch a crate
 # the gate now lints, which is the asymmetry #691 named wearing a new
@@ -2831,8 +2851,11 @@ if [[ -n ${extensions} ]]; then
     | org_pgrx_init
   for name in ${extensions}; do
     # shellcheck disable=SC2086  # ${ladder} holds whole flag words
-    cargo clippy --fix -p "${name}" --no-deps --all-targets --locked \
-      --no-default-features --features "pg${ext_majors##*,}" -- ${ladder}
+    # --allow-dirty for the reason the workspace pass carries it, and
+    # doubly so here: the workspace pass ran first and wrote.
+    cargo clippy --fix --allow-dirty -p "${name}" --no-deps --all-targets \
+      --locked --no-default-features --features "pg${ext_majors##*,}" \
+      -- ${ladder}
   done
   echo "fix:rust: pgrx extension(s) fixed at pg${ext_majors##*,}:${extensions}"
 fi
