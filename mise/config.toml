@@ -4958,9 +4958,34 @@ dir = "{{cwd}}"
 # cache steps and rekor-monitor.yml's cache/save, each riding a marker
 # written for a different step.
 #
-# Two shapes are caught: an explicit `uses: actions/cache*`, and a
-# mise-action step without `cache: false` (its default is true — the
-# silent shape). Indentation-keyed parsing is defensible for the reason
+# Three shapes are caught: an explicit `uses: actions/cache*`, and two
+# silent ones — a mise-action step and an `actions/setup-*` step. Both
+# silent shapes are judged on one property: the step must SAY
+# `cache: false`. What is NOT asserted is the upstream default, and
+# that is the point (#732). Measured across the family on 2026-08-24:
+#
+#   setup-go true, setup-node true, setup-python false,
+#   setup-java false, setup-dotnet false
+#
+# — so "the setup family caches by default" is 2/5 true, and reading
+# defaults would need a per-action table that is wrong for three of
+# them today, flips per major (setup-go's flipped between v3 and v7),
+# and drifts as Renovate rolls the pins. That is a restatement with a
+# clock on it. On the SHA this repo pins (setup-go v7.0.0) the default
+# IS true, with `post: dist/cache-save/index.js` and
+# `post-if: success()` — a green job writes an entry.
+#
+# The family is matched by PREFIX, `actions/setup-`, not by a
+# hand-named list: a list is a restatement of an upstream fact, the
+# drift shape #658 deleted lint:belt-available for. Accepted cost of
+# the prefix: a setup action that caches nothing (or defaults it off)
+# still needs the explicit `cache: false`, or its marker, to pass. It
+# is one loud line that stays correct the day upstream flips, never a
+# false pass. Audit, not ban: banning `setup-*` outright would not
+# generalise, since a third-party caching action walks straight past
+# it, while recognising the cache SHAPE does.
+#
+# Indentation-keyed parsing is defensible for the reason
 # lint:input-forwarding's is: actionlint runs ahead of this in the same
 # gate and guarantees well-formed YAML, and the canon's two-space style
 # is uniform. Deterministic, no network — belongs in `ci`.
@@ -4976,17 +5001,18 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 }
 awk '
 function endstep() {
-  declares = has_cache || (has_mise && !has_false)
+  declares = has_cache || (has_dflt && !has_false)
   if (instep && auth && !declares) {
     printf "lint:cold-attested: %s:%d unattested-path marker on a step that declares no cache\n", stepfile, stepline > "/dev/stderr"
     fail = 1
   }
-  if (instep && has_mise && !has_false && !auth) {
-    printf "lint:cold-attested: %s:%d mise-action step caches (no `cache: false`) and carries no unattested-path marker\n", stepfile, stepline > "/dev/stderr"
+  if (instep && has_dflt && !has_false && !auth) {
+    printf "lint:cold-attested: %s:%d %s step does not say `cache: false` and carries no unattested-path marker\n", stepfile, stepline, dfltkind > "/dev/stderr"
     fail = 1
   }
   instep = 0
-  has_mise = 0
+  has_dflt = 0
+  dfltkind = ""
   has_false = 0
   has_cache = 0
   auth = 0
@@ -5053,7 +5079,14 @@ iscmt {
       fail = 1
     }
   }
-  if ($0 ~ /^[^#]*uses:[[:space:]]*jdx\/mise-action@/) has_mise = 1
+  if ($0 ~ /^[^#]*uses:[[:space:]]*jdx\/mise-action@/) {
+    has_dflt = 1
+    dfltkind = "mise-action"
+  }
+  if ($0 ~ /^[^#]*uses:[[:space:]]*actions\/setup-/) {
+    has_dflt = 1
+    dfltkind = "actions/setup-*"
+  }
   if ($0 ~ /^[^#]*cache:[[:space:]]*false/) has_false = 1
 }
 END {
