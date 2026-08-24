@@ -171,6 +171,29 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          # The title is this composition's INPUT, so it must not already
+          # contain its OUTPUT: GitHub appends " (#N)" unconditionally,
+          # and a title ending in this PR's own number mints the
+          # reference twice in the permanent subject. It happened on both
+          # PRs where an author wrote the number in (#783 and #788), and
+          # the 72-column ceiling structurally cannot catch it — an
+          # appended "(#N)" is an unwrappable tail, and committed is
+          # wrap-aware by ruling (mise/committed.toml), so the 78-column
+          # duplicate passed legitimately. This is that mechanism one
+          # composition step short, asked here where the author is
+          # present and the fix is a title edit (#800, #576's test).
+          #
+          # This PR's OWN number only. A title ending in the ISSUE's
+          # reference is the convention — 39 subjects on main carry the
+          # issue ref then the PR's — so a check refusing any trailing
+          # reference would refuse the convention it exists to protect.
+          if [[ ${PR_TITLE} == *"(#${PR_NUMBER})" ]]; then
+            emsg="the PR title already ends in this pull request's own reference (#${PR_NUMBER}),"
+            emsg+=" and the merge appends it again — the permanent subject would carry it twice"
+            emsg+=" — fix the TITLE: it carries the ISSUE reference only, the squash appends the PR's"
+            echo "::error::${emsg}"
+            exit 1
+          fi
           printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${RUNNER_TEMP}/squash-subject"
           export ORG_COMMIT_MSG_FILE="${RUNNER_TEMP}/squash-subject"
           if ! mise run commits:check; then
