@@ -52,6 +52,13 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      # Who is calling, for registries whose access policy asks (#907).
+      # Named here rather than inline so the string is one definition
+      # per workflow, and so `set -u` fails loudly if a curl is moved
+      # out from under it rather than silently sending nothing.
+      ORG_USER_AGENT: >-
+        monumental-archive-publish
+        (https://github.com/monumental-archive/.github)
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,9 +113,32 @@ jobs:
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=crates.io" | jq -r '.value')
           body=$(jq -nc --arg jwt "${oidc}" '{jwt: $jwt}')
+          # THE USER-AGENT IS LOAD-BEARING (#907). crates.io's data
+          # access policy requires a request to identify who is making
+          # it, and its protection layer refuses an unidentified one
+          # BEFORE any trusted-publishing validation happens. Without
+          # this header the exchange dies as HTTP 403 carrying only:
+          #
+          #   "We are unable to process your request at this time. This
+          #    usually means that you are in violation of our API data
+          #    access policy (https://crates.io/data-access). Please
+          #    email help@crates.io and provide the request id <uuid>"
+          #
+          # which names neither the header nor the endpoint, and reads
+          # like a trust-configuration mismatch — three of edtf v1.3.2's
+          # release runs were spent looking at its publisher config,
+          # which was correct the whole time. Measured 2026-08-24 with a
+          # deliberately invalid JWT, so the ONLY difference between the
+          # two requests is this line: UA-less answers 403 with the
+          # boilerplate above, and with it the same request reaches real
+          # validation and answers 400 "Failed to decode JWT".
+          #
+          # If this 403 ever returns, the policy has tightened again —
+          # look at the header before looking at the publisher config.
           token=$(curl -sSf -X POST \
             https://crates.io/api/v1/trusted_publishing/tokens \
             -H 'content-type: application/json' \
+            -H "User-Agent: ${ORG_USER_AGENT}" \
             --data "${body}" | jq -r '.token')
           echo "::add-mask::${token}"
           # The exchanged token is single-use: crates.io records the JWT's

@@ -219,6 +219,18 @@ jobs:
           UNTRUSTED_RELEASE_TAG: ${{ inputs.release-tag }}
           UNTRUSTED_MODE: ${{ inputs.mode }}
           DRY_RUN: ${{ inputs.dry-run }}
+          # Who is calling, for registries whose access policy asks
+          # (#907). This leg pulls published bytes from static.crates.io
+          # and registry.npmjs.org; measured 2026-08-24, neither refuses
+          # an unidentified request today — only the crates.io API host
+          # does, which is what broke the token exchange. Sent anyway,
+          # because identifying the caller is the documented contract
+          # and the alternative is discovering the next tightening the
+          # way this one was discovered: as an unattributed 403 in the
+          # middle of a release.
+          ORG_USER_AGENT: >-
+            monumental-archive-publish
+            (https://github.com/monumental-archive/.github)
         run: |
           set -euo pipefail
           case "${UNTRUSTED_MODE}" in
@@ -306,7 +318,9 @@ jobs:
             # the 404 window while a just-published release propagates.
             fetched=""
             for attempt in 1 2 3 4 5; do
-              if curl -sSfL --retry 5 --retry-connrefused -o "${workdir}/${name}" "${url}"; then
+              if curl -sSfL --retry 5 --retry-connrefused \
+                -H "User-Agent: ${ORG_USER_AGENT}" \
+                -o "${workdir}/${name}" "${url}"; then
                 fetched=1
                 break
               fi
