@@ -1065,32 +1065,61 @@ stops firing on an imported binding, the `fix` key comes out.
 `from "./App.tsx"`, which `moduleResolution: bundler` without
 `allowImportingTsExtensions` rejects (TS5097). This one is **configured
 rather than demoted**, because the rule is right that a relative import
-should carry an extension and only wrong about which. Measured across
-all three project shapes the org has, each at the full dial set:
+should carry an extension and only wrong about which.
 
-| project | shipped default | `forceJsExtensions: true` |
-|---|---|---|
-| bundler, no `allowImportingTsExtensions` | `.tsx` → TS5097 | `.js` → **clean** |
-| nodenext + `allowImportingTsExtensions` | `.ts` → clean | `.js` → **clean** |
-| nodenext, plain — `scaffold/tsconfig.json` | `.ts` → TS5097 | `.js` → **clean** |
+`forceJsExtensions: true` was the first answer and covered two of the
+four TypeScript source extensions (#868). It suggests `.js` whatever the
+source is, which is right for `.ts` and `.tsx` and wrong for `.mts` and
+`.cts`: TypeScript maps `.js`→`.ts`/`.tsx`, `.mjs`→`.mts` and
+`.cjs`→`.cts`, so `./helper.js` cannot resolve `helper.mts`. The fixer
+therefore wrote a specifier `tsc` refused with TS2307 **and biome's own
+`noUnresolvedImports` refused too** — one tool contradicting itself, with
+no repo-side edit that satisfies both. `extensionMappings` states all
+four instead, so each extension maps to the one TypeScript emits.
 
-The third row is the one the issue did not have: the shipped default was
-broken for the scaffold's own default project, so this was never the
-per-repo accident it looked like. `.js` is the extension TypeScript has
-always wanted in a relative specifier — it resolves to the `.ts` file —
-which is why one option covers every case rather than trading one
-project for another.
+Measured on biome 2.5.7 and TypeScript 7.0.2, every option setting
+crossed with every project shape the org has and every source extension,
+at the full dial set. What the fixer writes never depends on the shape:
+
+| option | `.ts` | `.tsx` | `.mts` | `.cts` |
+|---|---|---|---|---|
+| shipped default | `.ts` | `.tsx` | `.mts` | `.cts` |
+| `forceJsExtensions: true` | `.js` | `.js` | `.js` | `.js` |
+| `extensionMappings` (org) | `.js` | `.js` | `.mjs` | `.cjs` |
+
+| project | shipped default | `forceJsExtensions` | `extensionMappings` |
+|---|---|---|---|
+| bundler, no `allowImportingTsExtensions` | TS5097 ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
+| nodenext + `allowImportingTsExtensions` | clean ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
+| nodenext, plain — `scaffold/tsconfig.json` | TS5097 ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
+
+Two things to read off it. The shipped default was broken for the
+scaffold's own default project, so this was never the per-repo accident
+the first issue looked like. And in the `forceJsExtensions` column the
+project shape never changes the answer while the source extension does —
+the extension was the variable the first measurement did not vary, which
+is how a three-shape table can be complete and still miss half the
+population.
+
+✳ `.cts` never reaches a resolution verdict: under the org's
+`verbatimModuleSyntax` + `erasableSyntaxOnly` a `.cts` file can express
+no module syntax at all — ESM `import`/`export` is TS1286/TS1287, and
+`import x = require()` / `export =` is TS1294. The mapping is stated
+because it is what is true, and it does remove TS2307 in all three
+shapes; the two remaining walls are those dials working, each named by
+the compiler, so the belt adds no ban of its own.
 
 **The option is used outside its documented rationale on purpose.**
-biome documents `forceJsExtensions` as "useful if you use the
-`module: node16` setting when building your code with `tsc`", says
-nothing about `moduleResolution: bundler`, and 2.5.7 ships **no
-bundler-aware option at all** — `extensionMappings` and
-`forceJsExtensions` choose which extension is suggested, and neither can
-suppress the suggestion. Read alone, that says no configuration serves
-the bundler case, which is what this lane first concluded and wrote
-down. The table above is the correction, and the rule it repeats for
-this tool: the docs are the cross-check, the pinned binary decides.
+biome documents `forceJsExtensions` for "the `module: node16` setting
+when building your code with `tsc`" and `extensionMappings` for bundling
+to a package; neither mentions `moduleResolution: bundler`, and 2.5.7
+ships **no bundler-aware option at all** — both keys choose which
+extension is suggested, and neither can suppress the suggestion. Read
+alone, that says no configuration serves the bundler case, which is what
+the first lane concluded and wrote down. The tables above are the
+correction, and the rule they repeat for this tool: the docs are the
+cross-check, the pinned binary decides — and a measurement is only as
+wide as the inputs it varied.
 
 Proven end to end on the fixture: after the change
 the fixer leaves `test.prop` alone, rewrites `./App` to `./App.js`,

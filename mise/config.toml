@@ -1285,32 +1285,64 @@ dir = "{{cwd}}"
 # `from "./App.tsx"`, which `moduleResolution: bundler` without
 # `allowImportingTsExtensions` rejects outright (TS5097). The rule is
 # right that a relative import should carry an extension and wrong about
-# WHICH — so it is configured rather than demoted, and
-# `forceJsExtensions` is the option that makes it correct. Measured
-# across all three project shapes the org actually has, each with the
-# full dial set:
+# WHICH — so it is configured rather than demoted. `forceJsExtensions`
+# was that configuration and was half of it (#868): it answers `.js` for
+# every source extension, which is right for `.ts` and `.tsx` and wrong
+# for `.mts` and `.cts`, whose TypeScript counterparts are `.mjs` and
+# `.cjs`. `extensionMappings` states all four instead, so each extension
+# maps to the one TypeScript itself emits and resolves.
 #
-#   bundler, no allowImportingTsExtensions   .tsx TS5097   .js CLEAN
-#   nodenext + allowImportingTsExtensions    .ts  clean    .js CLEAN
-#   nodenext, plain (scaffold/tsconfig.json) .ts  TS5097   .js CLEAN
+# Measured on biome 2.5.7 and TypeScript 7.0.2 — the three option
+# settings crossed with the three project shapes the org has and all four
+# TypeScript source extensions, one extensionless relative import each,
+# full dial set, `fix:biome` then `tsc` then `biome`. What the fixer
+# writes never depends on the project shape, so the specifier is stated
+# once and the verdicts follow it:
 #
-# Note the third row: the shipped default was broken for the SCAFFOLD's
-# own default project, so this was never the per-repo accident the issue
-# took it for. `.js` is also the extension TypeScript has always wanted
-# in a relative specifier — it resolves to the `.ts` file — which is why
-# one option covers every case instead of trading one project for
-# another.
+#                      writes:  .ts   .tsx  .mts   .cts
+#   shipped default             .ts   .tsx  .mts   .cts
+#   forceJsExtensions           .js   .js   .js    .js
+#   extensionMappings           .js   .js   .mjs   .cjs
+#
+#   verdict, per shape           shipped   force        mappings
+#   bundler, no allowImportingTs TS5097 ×4 ok ok ✗ ✗    ok ok ok ✗
+#   nodenext + allowImportingTs  ok ×4     ok ok ✗ ✗    ok ok ok ✗
+#   nodenext, plain (scaffold)   TS5097 ×4 ok ok ✗ ✗    ok ok ok ✗
+#
+# ✗ is TS2307 for `force` and, for `mappings`, the `.cts` note below —
+# never a resolution failure. Read the `force` column: the project shape
+# never changed its answer, the source EXTENSION did, and the extension
+# was the variable the #758 measurement did not vary. Note also that the
+# shipped default was broken for the scaffold's own default project, so
+# this was never the per-repo accident the first issue took it for.
+#
+# What the `.mts` cell cost before this: `./helper.js` cannot resolve
+# `helper.mts`, because TypeScript maps `.js`→`.ts`/`.tsx`, `.mjs`→`.mts`
+# and `.cjs`→`.cts`. So the fixer wrote a specifier `tsc` refused
+# (TS2307) and biome's OWN `noUnresolvedImports` refused as well — one
+# tool contradicting itself, with no repo-side edit that satisfies both.
+#
+# `.cts` is mapped because the mapping is what is true, and it cannot be
+# exercised: under the org's `verbatimModuleSyntax` + `erasableSyntaxOnly`
+# a `.cts` file can express no module syntax at all — ESM import/export
+# is TS1286/TS1287, and `import x = require()` / `export =` is TS1294.
+# The mapping does remove the resolution error (TS2307 is gone in all
+# three shapes); the two walls that remain are those dials working, each
+# named by the compiler in its own message, so the belt adds no ban of
+# its own on top.
 #
 # The option is used OUTSIDE its documented rationale, deliberately, and
 # the table above is why that is safe. biome documents
 # `forceJsExtensions` as "useful if you use the `module: node16` setting
-# when building your code with tsc" — it says nothing about
-# `moduleResolution: bundler`, and 2.5.7 ships NO bundler-aware option:
-# `extensionMappings` and `forceJsExtensions` choose WHICH extension is
-# suggested and neither can suppress the suggestion. Reading the docs
-# alone gives the wrong answer here — it says no configuration can serve
-# the bundler case, which is what this lane first concluded. Measuring
-# says one does, in all three shapes. Docs cross-check, binary decides.
+# when building your code with tsc" and `extensionMappings` as being for
+# bundling to a package — neither mentions `moduleResolution: bundler`,
+# and 2.5.7 ships NO bundler-aware option: both keys choose WHICH
+# extension is suggested and neither can suppress the suggestion.
+# Reading the docs alone gives the wrong answer here — it says no
+# configuration can serve the bundler case, which is what the first lane
+# concluded. Measuring says one does, in all three shapes. Docs
+# cross-check, binary decides — and the correction to the correction is
+# that a measurement is only as wide as the inputs it varied.
 #
 # `nursery/useConsistentTestIt` renamed `test.prop(...)` to
 # `it.prop(...)` and left `import { test } from "@fast-check/vitest"`
@@ -3224,15 +3256,24 @@ done <<< "${assembled}"
 #                  lint:types otherwise refuses a tracked package.json
 #                  whose dependencies are absent, which is that guard
 #                  working rather than anything about scaffold/.
-#   src/*.ts     — one extensionless relative import: #758's shape, and
-#                  the one line that makes the fixer/checker pair speak.
-mkdir -p "${tmp}/src" "${tmp}/node_modules"
+#   src/<ext>/   — one extensionless relative import per TypeScript
+#                  source extension: #758's shape, and the one line that
+#                  makes the fixer/checker pair speak. TWO extensions,
+#                  because #868 was `.js` being right for one of them and
+#                  wrong for the other — a probe that varies neither
+#                  proves neither. Each pair gets its own directory: with
+#                  helper.ts and helper.mts side by side, `./helper` is
+#                  ambiguous and tsc names the wrong counterpart.
+mkdir -p "${tmp}/node_modules"
 cp LICENSE "${tmp}/LICENSE"
 printf '{\n  "name": "scaffold-probe",\n  "private": true,\n  "type": "module"\n}\n' \
   > "${tmp}/package.json"
-printf 'export const helped = (): string => "probe";\n' > "${tmp}/src/helper.ts"
-printf 'import { helped } from "./helper";\n\nexport const main = (): string => helped();\n' \
-  > "${tmp}/src/index.ts"
+for ext in ts mts; do
+  mkdir -p "${tmp}/src/${ext}"
+  printf 'export const helped = (): string => "probe";\n' > "${tmp}/src/${ext}/helper.${ext}"
+  printf 'import { helped } from "./helper";\n\nexport const main = (): string => helped();\n' \
+    > "${tmp}/src/${ext}/index.${ext}"
+done
 # GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE override the working
 # directory, so an inherited one would make this `git init` and commit
 # write into the CALLING repository instead of the scratch tree. Scrubbed
@@ -3291,8 +3332,12 @@ while IFS=: read -r stub why; do
   [[ -n ${stub} ]] || continue
   echo "  not assembled: ${stub} — ${why}"
 done <<< "${declined}"
-echo "  added by the probe, not the scaffold: LICENSE, package.json, src/index.ts,"
-echo "    src/helper.ts, an empty node_modules/ (the repository declares no dependencies)"
+echo "  added by the probe, not the scaffold: LICENSE, package.json, src/ts/ and"
+echo "    src/mts/ (an index and a helper each), an empty node_modules/ — the"
+echo "    repository declares no dependencies, so that is what installed means here"
+echo "  not exercised: .tsx and .cts — the scaffold's tsconfig declares no jsx, which"
+echo "    a .tsx file needs (TS6142), and under verbatimModuleSyntax +"
+echo "    erasableSyntaxOnly a .cts file can hold no module syntax at all (#868)"
 echo "  not exercised: the Rust and Go legs — the belt pins no rust or go toolchain, so"
 echo "    deny.toml and .golangci.yml are assembled as files and their tasks skip clean"
 echo "  not exercised: ci's test/build collection — the stub mise.toml ships a failing"

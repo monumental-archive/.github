@@ -126,7 +126,12 @@
         "useImportExtensions": {
           "level": "on",
           "options": {
-            "forceJsExtensions": true
+            "extensionMappings": {
+              "ts": "js",
+              "tsx": "js",
+              "mts": "mjs",
+              "cts": "cjs"
+            }
           }
         }
       },
