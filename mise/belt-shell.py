@@ -46,6 +46,15 @@ Nothing is excluded. The standalone corpus and the `run:` corpus are
 both clean at `--enable=all` with per-site `# shellcheck disable`
 directives where an idiom is deliberate, so the same code is not held
 to a lower bar for living in a TOML string.
+
+The file also carries the one rule about a body that no shell linter can
+hold an opinion about: a body may not execute `mise run` (#764). A nested
+mise races the parallel lint fan-out and fails to resolve its own
+lockfile — #82, which made `mise run ci` unrunnable locally — and the
+belt had been stating that in a comment while three of its own tasks did
+it. It lives here because this is already the file that decodes a body
+out of any tracked mise config; a second reader would be a second thing
+to keep true.
 """
 
 # Running shfmt and shellcheck IS this file's job, so the subprocess
@@ -109,6 +118,39 @@ UNTERA_RE = re.compile(r"^(\s*)#(\{%.*%\}\s*)$")
 # has at least four fields after one split-limited partition.
 GCC_FIELDS = 4
 
+# `mise run` as a command, and what may legally stand between it and the
+# start of a command. The operators are what ends one command and begins
+# the next — `$(` reaches command position through its `(` — and the
+# words are the ones a command may follow while still being the command:
+# an assignment prefix, and the shell keywords.
+MISE_RUN_RE = re.compile(r"\bmise\s+run\b")
+COMMAND_BREAK_RE = re.compile(r"[;&|(){}`\n]")
+ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+COMMAND_PREFIXES = frozenset(
+    {
+        "!",
+        "if",
+        "elif",
+        "then",
+        "else",
+        "do",
+        "while",
+        "until",
+        "exec",
+        "command",
+        "env",
+        "time",
+        "nohup",
+    },
+)
+# The marker that answers for an invocation, `capability-boundary:`-shaped:
+# absolute by default, and every exception a named, lintable reason. An
+# empty marker is not a marker — the reason is the whole point.
+NESTED_MARKER_RE = re.compile(r"#.*\bnested-mise:\s*\S")
+# What may precede a `#` for it to open a comment: nothing, whitespace, or
+# an operator. Inside a word (`${x#y}`, `url#frag`) it does not.
+COMMENT_OPENERS = frozenset(" \t\n;&|(")
+
 
 class Body(NamedTuple):
     """One task's `run` string, located in the file it was read from."""
@@ -130,6 +172,18 @@ class Config(NamedTuple):
     bodies: list[Body]
     env: set[str]
     shell: str | None
+
+
+class Asserted(NamedTuple):
+    """The findings that are facts about the FILES, not about their shell.
+
+    Both are settled before a body is modelled and survive a run in which
+    the tools decline to read one, so they travel together rather than as
+    two more parameters of the body sweep.
+    """
+
+    pins: list[str]
+    nests: list[str]
 
 
 def locate(text: str) -> dict[str, tuple[int, str]]:
@@ -476,6 +530,146 @@ def unpinned(configs: dict[Path, Config]) -> list[str]:
     return found
 
 
+def scrub(source: str) -> str:
+    """Blank every quoted span and comment tail, preserving offsets.
+
+    Quote state is carried ACROSS lines, because a body's quoted spans
+    routinely are: the awk programs in this belt run to fifty lines
+    inside one `'…'`. Scrubbing line by line would end each span at the
+    newline and read the program text as shell.
+
+    The result is the same length as `source` with its newlines in place,
+    so an offset into it is an offset into the original.
+
+    Returns:
+        The source with quoted and commented characters replaced by
+        spaces.
+
+    """
+    out: list[str] = []
+    quote = ""
+    comment = False
+    prev = ""
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "\n":
+            comment = False
+            out.append(char)
+        elif comment:
+            out.append(" ")
+        elif quote:
+            # A backslash escapes inside "…" and is literal inside '…'.
+            if quote == '"' and char == "\\" and index + 1 < len(source):
+                out.append(" ")
+                index += 1
+            elif char == quote:
+                quote = ""
+            out.append(" ")
+        elif char in {"'", '"'}:
+            quote = char
+            out.append(" ")
+        elif char == "\\" and index + 1 < len(source):
+            out.append("  ")
+            index += 1
+        elif char == "#" and (not prev or prev in COMMENT_OPENERS):
+            comment = True
+            out.append(" ")
+        else:
+            out.append(char)
+        prev = source[index]
+        index += 1
+    return "".join(out)
+
+
+def nested_runs(source: str) -> Iterator[int]:
+    """Find every `mise run` one body EXECUTES, as a 0-based line index.
+
+    Executed, not merely written: a remedy a task echoes to a human MAY
+    say "run mise run fix:x", and lint:audit-scheduled greps the workflows
+    for that very string. Both are quoted, so `scrub` has already removed
+    them; what is left is judged by position, so `echo mise run fix:x`
+    is text too and only a command is a command.
+
+    Yields:
+        The line index, within `source`, of each executed invocation.
+
+    """
+    scrubbed = scrub(source)
+    for match in MISE_RUN_RE.finditer(scrubbed):
+        head = COMMAND_BREAK_RE.split(scrubbed[: match.start()])[-1]
+        if all(
+            word in COMMAND_PREFIXES or ASSIGNMENT_RE.match(word)
+            for word in head.split()
+        ):
+            yield scrubbed.count("\n", 0, match.start())
+
+
+def excused(lines: Sequence[str], index: int) -> bool:
+    """Say whether a marker answers for the invocation on `lines[index]`.
+
+    On the line itself, or anywhere in the run of comment lines directly
+    above it — which is where a reason long enough to BE a reason fits.
+    A blank line or any code between the two ends the block: a marker
+    must sit against the thing it excuses, or it becomes a comment about
+    something else.
+
+    Returns:
+        True when a `# nested-mise: <reason>` marker covers the line.
+
+    """
+    if NESTED_MARKER_RE.search(lines[index]):
+        return True
+    for above in range(index - 1, -1, -1):
+        line = lines[above].strip()
+        if not line.startswith("#"):
+            return False
+        if NESTED_MARKER_RE.search(line):
+            return True
+    return False
+
+
+def nested(configs: dict[Path, Config]) -> list[str]:
+    """Name every task body that executes `mise run` without a marker.
+
+    The structural form of #82's lesson, which the belt had been carrying
+    as a comment while three of its own tasks broke it (#764). A nested
+    mise races the parallel `lint:*` fan-out `ci` runs and fails to
+    resolve its own lockfile; the task that does it is usually a lint
+    reaching for its own `fix:` half, and the red it produces names no
+    finding, which is the least debuggable failure a gate can produce.
+
+    The remedy is a derivation both halves invoke — the `derive-badges.sh`
+    pattern — or mise's own `depends`, which composes tasks without a
+    second mise. Where invoking a task BY NAME is genuinely the job, the
+    marker says so and stays lintable.
+
+    Returns:
+        One finding per unexcused invocation, each carrying the remedy.
+
+    """
+    found: list[str] = []
+    for path, config in sorted(configs.items()):
+        for body in config.bodies:
+            lines = body.source.splitlines()
+            for index in nested_runs(body.source):
+                if excused(lines, index):
+                    continue
+                # A one-liner has one line to point at; a block's body
+                # starts on the line after `run = '''`.
+                real = body.run_line + index + 1 if body.delim else body.run_line
+                found.append(
+                    f"{path}:{real}: {body.name}: the body executes `mise run` — a "
+                    f"nested mise races the parallel lint fan-out and cannot "
+                    f"resolve its own lockfile, which made `mise run ci` unrunnable "
+                    f"locally (#82). Share the step as a script both tasks invoke, "
+                    f"or compose with `depends = [...]`; if dispatching by name is "
+                    f"the job, answer for it with a `# nested-mise: <why>` comment "
+                    f"on or above the line.",
+                )
+    return found
+
+
 def write_mode(configs: dict[Path, Config]) -> int:
     """Rewrite every body in place, and name any splice that did not land.
 
@@ -500,12 +694,13 @@ def check_mode(
     shell: str,
     env: Sequence[str],
     source_path: Sequence[str],
-    pins: Sequence[str],
+    asserted: Asserted,
 ) -> int:
-    """Lint every body, and settle the exit with the pin findings.
+    """Lint every body, and settle the exit with the file findings.
 
-    `pins` is already reported by the caller; it is passed in because a
-    clean body sweep does not make an unpinned config green.
+    `asserted` is already reported by the caller; it is passed in because
+    a clean body sweep does not make an unpinned config, or one that
+    nests a `mise run`, green.
 
     Returns:
         A process exit status.
@@ -529,14 +724,21 @@ def check_mode(
             "bar the belt applies to standalone scripts",
             file=sys.stderr,
         )
-    if pins:
+    if asserted.pins:
         print(
-            f"belt-shell: {len(pins)} config(s) define tasks without pinning the "
-            "task shell — the belt supplies the strict shell as a default, and "
-            "the pin is what makes the file true without it (#700)",
+            f"belt-shell: {len(asserted.pins)} config(s) define tasks without "
+            "pinning the task shell — the belt supplies the strict shell as a "
+            "default, and the pin is what makes the file true without it (#700)",
             file=sys.stderr,
         )
-    if found or pins:
+    if asserted.nests:
+        print(
+            f"belt-shell: {len(asserted.nests)} task body(ies) execute `mise run` "
+            "— the race #82 measured, and the reason every shared derivation in "
+            "the belt is a script both halves invoke (#764)",
+            file=sys.stderr,
+        )
+    if found or asserted.pins or asserted.nests:
         return 1
     print(f"belt-shell: {bodies} task body(ies) shfmt-clean and shellcheck-clean")
     return 0
@@ -583,20 +785,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     configs, shell, env = collect(paths, [Path(f) for f in args.env_from])
 
     # Asserted before the interpreter skip below and before any body is
-    # read: whether a file pins the shell is a fact about the file, not
-    # about what the tools can make of its bodies, so a config the linter
-    # then declines to model must still answer for it.
-    pins = [] if args.write else unpinned(configs)
-    for line in pins:
+    # read: whether a file pins the shell, and whether a body runs a
+    # nested mise, are facts about the file rather than about what the
+    # tools can make of its bodies — so a config the linter then declines
+    # to model must still answer for both. Neither is asserted in write
+    # mode: fix:belt-shell formats bodies, and can no more add a pin than
+    # it can extract a shared derivation for you.
+    asserted = Asserted(
+        [] if args.write else unpinned(configs),
+        [] if args.write else nested(configs),
+    )
+    for line in [*asserted.pins, *asserted.nests]:
         print(line, file=sys.stderr)
 
     if Path(shlex.split(shell)[0]).name not in {"bash", "sh"}:
         print(f"belt-shell: task shell is {shell!r}, not shell — skipped")
-        return 1 if pins else 0
+        return 1 if asserted.pins or asserted.nests else 0
 
     if args.write:
         return write_mode(configs)
-    return check_mode(configs, shell, env, args.source_path, pins)
+    return check_mode(configs, shell, env, args.source_path, asserted)
 
 
 if __name__ == "__main__":
