@@ -6831,6 +6831,106 @@ count=$(wc -w <<< "${keys}" | tr -d " ")
 echo "lint:toolbelt-lock: ${count} tools locked in ${lock}"
 '''
 
+[tasks."audit:lock-arch"]
+description = "Locked assets carry the architecture their platform key declares (release listings — network, not in ci)"
+dir = "{{cwd}}"
+# lint:toolbelt-lock above proves every pinned tool HAS a locked entry.
+# This proves the entry is for the platform it claims. Nothing did, and
+# the gap is not theoretical: three entries across the org resolved an
+# x86_64 asset under a key spelled `macos-arm64` (#811, #854), each with
+# that binary's checksum pinned beside it. The install succeeds, the
+# binary runs emulated, and the lock looks complete — a pin describing a
+# platform other than the one it names, which is a weaker claim than it
+# reads as.
+#
+# audit:*, not lint:*: the offline half of the question (does the asset
+# name disagree with the key?) is answerable from the diff, but the half
+# that matters is not. A disagreement is only a defect if upstream
+# actually publishes a native asset for that platform; where it ships
+# none, aqua's `rosetta2` fallback is CORRECT and a red on it would be
+# a check demanding something that does not exist. That answer lives in
+# a release listing, so this reads one — network-bound by nature, and
+# structurally outside the gate.
+run = '''
+locks=$(git ls-files ':!vendor/**' "mise.lock" "*/mise.lock")
+[[ -n ${locks} ]] || {
+  echo "audit:lock-arch: no mise.lock tracked, skipped"
+  exit 0
+}
+command -v gh > /dev/null || {
+  echo "audit:lock-arch: gh is missing — CANNOT_JUDGE. This check asks a" >&2
+  echo "  release which assets it published; without gh it cannot ask." >&2
+  exit 1
+}
+candidates=$(printf '%s\n' "${locks}" | python3 "${ORG_BELT_DIR}/lock-arch.py")
+# Dated allowances. A KNOWN, FILED, DEFERRED mismatch is carried the way
+# deny.toml carries a skip — with its date and the issue that retires
+# it — and for the same reason: the alternative is a scheduled red that
+# nobody can act on, which is how a check decays into noise. It is NOT
+# an exemption. An allowed entry still prints, in full, on every run, so
+# the log says the defect exists and where its fix lives; and an
+# allowance that stops matching anything FAILS below, because a skip
+# that silently matches nothing is the failure mode deny.toml taught us
+# to refuse. The issue that fixes the defect deletes its line here.
+declared="committed|macos-arm64"
+used=""
+failed=""
+while IFS=$'\t' read -r lock tool platform declared_plat asset repo tag pattern; do
+  [[ -n ${lock} ]] || continue
+  assets=$(gh api "repos/${repo}/releases/tags/${tag}" --jq '.assets[].name' 2> /dev/null) || {
+    echo "audit:lock-arch: CANNOT_JUDGE ${repo}@${tag} — the release listing did not read" >&2
+    echo "  (rate limit, or a tag that no longer exists). Not judged, not passed." >&2
+    exit 1
+  }
+  native=$(grep -Ei "${pattern}" <<< "${assets}" | sed -n 1p || true)
+  if [[ -z ${native} ]]; then
+    echo "audit:lock-arch: ${tool} [${platform}] resolves ${asset}; ${repo}@${tag}"
+    echo "  publishes no ${declared_plat} asset at all, so emulation is the only"
+    echo "  thing upstream offers — not a defect."
+    continue
+  fi
+  allowance=""
+  case "${tool}|${platform}" in
+    "committed|macos-arm64")
+      allowance="2026-08-24, #854 — the fix rides the mise/aqua-registry.yaml channel #811 stands up"
+      ;;
+    *)
+      # Anything not named above is unallowed, which is the point: a new
+      # mismatch reds on arrival rather than joining a tolerated set.
+      allowance=""
+      ;;
+  esac
+  if [[ -n ${allowance} ]]; then
+    used="${used} ${tool}|${platform}"
+    echo "audit:lock-arch: KNOWN DEFECT ${tool} [${platform}] in ${lock} resolves"
+    echo "  ${asset} while ${repo}@${tag} publishes ${native}."
+    echo "  Allowed ${allowance}"
+    continue
+  fi
+  failed="${failed} ${tool}[${platform}]"
+  echo "audit:lock-arch: ${tool} [${platform}] in ${lock} resolves ${asset}," >&2
+  echo "  but ${repo}@${tag} publishes ${native} — the lock names an" >&2
+  echo "  architecture it does not carry." >&2
+done <<< "${candidates}"
+stale=""
+for a in ${declared}; do
+  [[ " ${used} " == *" ${a} "* ]] || stale="${stale} ${a}"
+done
+if [[ -n ${stale} ]]; then
+  echo "audit:lock-arch: allowance(s) matching nothing:${stale}" >&2
+  echo "  the defect they carry is gone; delete the line and its issue reference" >&2
+  exit 1
+fi
+if [[ -n ${failed} ]]; then
+  echo "audit:lock-arch: lock entries naming an architecture they do not carry:${failed}" >&2
+  echo "  a native asset exists for each. Correct the resolution — the belt's" >&2
+  echo "  mise/aqua-registry.yaml is the delivered channel for an aqua package —" >&2
+  echo "  or file the defect and carry a dated allowance beside the others." >&2
+  exit 1
+fi
+echo "audit:lock-arch: ok"
+'''
+
 [tasks."lint:nested-permissions"]
 description = "Every nested `uses:` job states its permissions (startup_failure trap)"
 dir = "{{cwd}}"
