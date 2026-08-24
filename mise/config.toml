@@ -2766,6 +2766,129 @@ echo "fix:rust:${fixing:- none} rewritten where clippy could"
 echo "fix:rust: applied what is machine-applicable — the rest is judgement"
 '''
 
+[tasks."lint:msrv"]
+description = "Every declared rust-version is compiled at a pinned toolchain of exactly that version"
+dir = "{{cwd}}"
+# The promise nobody was keeping (#820). `rust-version` is not a comment:
+# cargo refuses to resolve the package for a downstream user on an older
+# toolchain, so the declared minimum is a public API of the crate and
+# raising the real one is a silent breaking change. edtf carried an
+# `msrv:` job as a REQUIRED status check before its import; it vanished
+# on conformance and nobody ruled that it should, which is the same
+# class as #813 — a check that stopped existing rather than one that
+# went red.
+#
+# NOT `cargo msrv verify`, which is the tool built for this and is the
+# wrong tool here: it resolves the declared toolchain through rustup at
+# run time, and the gate's one hard law is that nothing network-dependent
+# belongs in `ci`. So the repository PINS its MSRV toolchain like every
+# other input — a second entry in `rust`, carried by mise.lock with
+# per-platform checksums and provenance — and this compiles at it. The
+# cost is that the version is now a fact in two files, and the answer to
+# a shared fact in this org is an agreement check, not a convention:
+# msrv-plan.py reads the promise from cargo's own metadata and reds when
+# nothing pins exactly that version, naming both files. Cargo.toml stays
+# the source; the pin is only ever the thing checked against it. What
+# that prevents is not "no check" — it is a GREEN check at the wrong
+# version, which is what bumping the pin alone would otherwise buy.
+#
+# Measured while building this, and the reason the comparison is
+# zero-padded rather than textual: edtf declares `rust-version = "1.82"`
+# and mise publishes rust `1.82.0` with no bare `1.82`, so the org's
+# declared form and the org's pinnable form differ by exactly one
+# component. Also measured, and the reason `+toolchain` works at all
+# here: mise's rust backend installs THROUGH rustup — `mise install
+# rust@1.82.0` puts `1.82.0-<host>` in ~/.rustup/toolchains and
+# `RUSTUP_TOOLCHAIN=1.82.0 rustc --version` reports 1.82.0 — so the
+# second pin is reachable by name, the audit:fuzz precedent for the
+# dated nightly.
+#
+# THE COMPILE SURFACE IS THE GATE'S, and it is stated once: CLIPPY_EXCLUDE
+# and CLIPPY_FEATURES are read here rather than given MSRV-flavoured
+# twins, so a repo declares what the gate can compile in ONE place and
+# this check moves with it. The names say clippy and the meaning is
+# wider — a wart worth keeping, because the alternative is a second list
+# that drifts. A member excluded there while declaring a minimum is
+# UNVERIFIED, and msrv-plan.py prints it as such on every run instead of
+# leaving the hole silent; #813 is what removes the exclusion, and this
+# check widens with it needing no edit.
+#
+# No `--all-targets`: dev-dependencies are not part of the promise. A
+# consumer building this crate compiles its lib and bins, never its test
+# harness, so a proptest or criterion that needs a newer rustc than the
+# crate does is not a broken promise and must not red the gate.
+#
+# Deterministic in the same sense lint:rust is: the outcome is a function
+# of the tree, the lock and two pinned toolchains. `cargo fetch --locked`
+# first, same precedent.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n ${manifests} ]] || {
+  echo "lint:msrv: no Cargo.toml tracked, skipped"
+  exit 0
+}
+# A repo with a Cargo.toml has rust pinned as a build input; cargo absent
+# is a broken toolchain, and skipping would be the vacuous-success
+# failure.
+command -v cargo > /dev/null || {
+  echo "lint:msrv: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+# The pins this reads are mise's own account of them, so mise itself is
+# an input. It is always present inside a mise task; asserted anyway,
+# because the alternative to a red here is a check that silently sees no
+# pins and calls a repo unpinned.
+command -v mise > /dev/null || {
+  echo "lint:msrv: mise missing — the toolchain pins this reads are mise's" >&2
+  exit 1
+}
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+cargo fetch --locked
+mise ls rust --json > "${tmp}/toolchains.json"
+plan=$(cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/msrv-plan.py" \
+    --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}")
+[[ -n ${plan} ]] || {
+  echo "lint:msrv: no crate declares rust-version, skipped"
+  exit 0
+}
+features="${CLIPPY_FEATURES:---all-features}"
+checked=0
+while IFS=$'\t' read -r kind first rest; do
+  [[ -n ${kind} ]] || continue
+  case ${kind} in
+    note)
+      echo "lint:msrv: ${first}"
+      ;;
+    check)
+      checked=$((checked + 1))
+      flags=""
+      for spec in ${rest}; do
+        flags="${flags} -p ${spec}"
+      done
+      echo "lint:msrv: compiling at ${first}: ${rest}"
+      # shellcheck disable=SC2086  # ${features} and ${flags} hold whole
+      # flag WORDS, which cargo must receive as separate arguments
+      RUSTUP_TOOLCHAIN="${first}" cargo check --locked ${features} ${flags}
+      ;;
+    *)
+      echo "lint:msrv: unreadable plan record from msrv-plan.py: ${kind}" >&2
+      exit 1
+      ;;
+  esac
+done <<< "${plan}"
+# Both directions printed, the lint:rust precedent: a run that verified
+# nothing must not read like a run that verified everything.
+if [[ ${checked} -eq 0 ]]; then
+  echo "lint:msrv: every declared minimum sits outside the gate's compile surface"
+  echo "lint:msrv: nothing verified — the exclusions above are what to remove"
+  exit 0
+fi
+echo "lint:msrv: ${checked} declared minimum(s) compiled at the toolchain they name"
+'''
+
 [tasks."lint:go"]
 description = "Go lint + format check (golangci-lint, default: all + curated disables)"
 dir = "{{cwd}}"

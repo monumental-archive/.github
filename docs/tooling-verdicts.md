@@ -50,6 +50,7 @@ honestly blocked on.
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
 | clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus ten named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
+| a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv-plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 
 **clippy, and the three things standing it up settled** (#445). The
 belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
@@ -255,6 +256,66 @@ against that repo before this landed.
 a number the org invented rather than the tool's maximum, so it stays
 enabled and silent until someone argues a threshold. *Reopen:* a nesting
 depth the org actually wants to refuse.
+
+**The declared minimum is compiled, not asserted** (#820). `rust-version`
+is a public API: cargo refuses to resolve the package for a consumer on
+an older toolchain, so raising the real minimum without saying so is a
+silent breaking change. edtf carried an `msrv:` job as a **required**
+status check before its import; it vanished on conformance and nobody
+ruled that it should — the same class as #813, a check that stopped
+existing rather than one that went red. `lint:msrv` replaces it in the
+belt, applicability-guarded on a tracked `Cargo.toml` that declares a
+minimum and skipping clean otherwise.
+
+*The repository pins its MSRV toolchain; the gate does not fetch one.*
+`cargo msrv verify` is the tool built for this and is refused on the
+gate's one hard law — it resolves the declared toolchain through rustup
+at run time, and nothing network-dependent belongs in `ci`. So the MSRV
+toolchain is a second entry in the repo's `rust` list, carried by
+`mise.lock` like every other input, and `lint:msrv` compiles at it with
+`RUSTUP_TOOLCHAIN`. That works because mise's rust backend installs
+*through* rustup — measured: `mise install rust@1.82.0` puts
+`1.82.0-<host>` in `~/.rustup/toolchains`, and `RUSTUP_TOOLCHAIN=1.82.0
+rustc --version` reports 1.82.0 — the same mechanism `audit:fuzz` uses to
+reach a repo's dated nightly.
+
+*Which makes the version a fact in two files, so the two are compared
+rather than either trusted.* `Cargo.toml` stays the source: the promise
+is read from `cargo metadata`, which resolves `rust-version.workspace =
+true` inheritance, and a declared minimum with no pin of exactly that
+version is red with a remedy naming both files. The failure this
+prevents is not "no check" — it is a **green check at the wrong
+version**, which bumping the pin alone would otherwise buy. Matching is
+patch-exact on the zero-padded form: `rust-version = "1.82"` promises
+that 1.82.0 builds, and a green run at 1.82.1 answers a question nobody
+asked. That is not pedantry about a hypothetical, either — mise publishes
+rust `1.82.0` and no bare `1.82`, so the org's declared form and the
+org's pinnable form differ by exactly this component.
+
+*Measured on the two repos that declare a minimum, before this landed.*
+edtf declares 1.82 and pinned no toolchain at it: red, with both files
+named. With `{ version = "1.82.0" }` added to its `rust` list its five
+gate-compiled members build clean at 1.82.0 — the promise was true, and
+had simply gone unverified since the import. Planting `u64::midpoint`
+(stabilised 1.85) in `edtf-core` then reds the same run at E0658 while
+the stable pin compiles it without complaint, which is the whole shape
+of the defect in one diff. release-lab needs no second toolchain at all
+— its minimum *is* its build pin — but it exposed a defect of its own on
+the first run: its `[workspace.package] rust-version` is inherited by no
+member, so cargo reports `null` for all four and the declaration reaches
+neither a consumer nor clippy's `incompatible_msrv`, contradicting the
+comment written beside it. An inert declaration is invisible to
+everything except a check that reads cargo's account rather than the
+file's text.
+
+*The compile surface is the gate's, stated once.* `CLIPPY_EXCLUDE` and
+`CLIPPY_FEATURES` are read here rather than given MSRV-flavoured twins,
+so a repo declares what the gate can compile in one place. The names say
+clippy and the meaning is wider — a wart kept on purpose, because the
+alternative is a second list that drifts. A member excluded there while
+declaring a minimum is therefore **unverified**, and the task prints it
+as such on every run rather than leaving the hole silent; #813 is what
+removes those exclusions, and this check widens with them.
 
 **Config delivery: the belt hands its own configs to its own tools**
 (#445). A config only a belt tool reads lives in `mise/` and is passed to
@@ -2023,6 +2084,16 @@ documentation rather than enforcement.
 - **cargo-audit** — skipped-subsumed: same RustSec DB, strictly a
   subset of `cargo deny check advisories`
   ([`dependency-track.md`](dependency-track.md), recorded verdicts).
+- **cargo-msrv** — verifies (or bisects) a crate's declared minimum
+  Rust version. Right about the thing that matters — one source of
+  truth, no second pin to keep honest — and refused on the gate's one
+  hard law: `cargo msrv verify` resolves the declared toolchain through
+  rustup at run time, and nothing network-dependent belongs in `ci`.
+  The org buys the same property with a pinned second toolchain and an
+  agreement check (`lint:msrv`, above). *Reopen:* a verify mode that
+  takes an already-installed toolchain and fetches nothing, or the org
+  deciding a network fetch of a pinned, checksummed toolchain is not a
+  network dependency in the sense the law means.
 - **cargo-crev** — web-of-trust dependency review. Same boundary as
   cargo-vet below: with one maintainer the web has one node.
   *Reopen:* with cargo-vet.
