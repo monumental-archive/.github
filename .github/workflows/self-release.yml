@@ -31,12 +31,12 @@ concurrency:
 jobs:
   release:
     permissions:
-      # Stated, not inherited (see gate.yml): the release-pr job inside
-      # release.yml reads this repository's own contents with the
-      # caller's token — the checkout, and the `gh release` reads that
-      # derive the pgrx upgrade path — and `contents: read` is the whole
-      # grant that buys. The callee declares the same scope for the same
-      # two readers.
+      # Stated, not inherited (see gate.yml): both jobs inside
+      # release.yml read this repository's own contents with the caller's
+      # token — release-pr's checkout and the `gh release` reads that
+      # derive the pgrx upgrade path, and the tag job's checkout — and
+      # `contents: read` is the whole grant either of them buys. Each
+      # callee job declares the scope it consumes (#850).
       contents: read
       # Passed through to release.yml's tag job, where gitsign spends it
       # on the keyless tag signature (#349 S4) — the callee's
