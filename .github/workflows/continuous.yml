@@ -33,13 +33,25 @@
 # neither runs caller-supplied code. `sign` is a `uses:` of the org
 # signer and the grant exists solely to be passed to it. `commit-point`
 # is defined here with steps of its own, and those steps judge other
-# jobs' results and hand `actions/attest` a predicate assembled from
-# them — it checks out nothing and runs no script of the caller's. The
-# jobs that DO run caller code are `build` (the class build, which
-# holds `contents: read` + `packages: write`), `assemble` and `sbom`,
-# and none of them holds a signing identity. The belt lint is
-# file-scoped rather than job-scoped, so this exception is written down
-# rather than assumed.
+# jobs' results, stage subjects from artifact DATA the earlier jobs
+# produced, and hand `actions/attest` predicates assembled from them —
+# it checks out nothing and runs no script of the caller's. The jobs
+# that DO run caller code are `build` (the class build, which holds
+# `contents: read` + `packages: write`), `assemble` and `sbom`, and
+# none of them holds a signing identity. The belt lint is file-scoped
+# rather than job-scoped, so this exception is written down rather than
+# assumed.
+#
+# That boundary is why the inventory attestations (#859) are signed
+# HERE and not in `sbom`, which is where the document is produced and
+# where it would be more natural to attach it. `sbom` checks out the
+# caller and runs `trivy`, `stele` and two `mise run audit:*` tasks —
+# all caller-supplied — so giving it the grant would mint a
+# certificate bearing this repo's identity while executing someone
+# else's steps, and because the lint is file-scoped nothing would go
+# red. `commit-point` already downloads the inventory to stage the
+# decision's subjects, so signing it here costs an artifact read and
+# keeps the boundary exactly where it is written.
 ---
 name: continuous
 
@@ -419,8 +431,33 @@ jobs:
   # decision that lives only in a job graph is a decision nobody can
   # re-read. The predicate carries no `tag` — this archetype has none,
   # and inventing one would manufacture the version surface the guard
-  # above exists to refuse — and its subjects are the inventories the
-  # decision was made over, each named by the digest a consumer pulls.
+  # above exists to refuse.
+  #
+  # WHERE A STRANGER STARTS (#859). The subjects used to be the
+  # inventory FILES alone, so the store keyed the decision only by the
+  # SBOM bytes' own sha256 — findable only by someone who already held
+  # the bytes it was about, and the bytes were durable nowhere but a
+  # 7-day run artifact. Measured on release-lab run 32676402211: the
+  # decision existed and verified, and no walk from the registry
+  # reached it.
+  #
+  # So the decision's subject list now also carries each per-arch IMAGE
+  # digest, and each inventory is attested against its own image digest
+  # beside it. The file-hash subjects stay: they are what binds the
+  # exact bytes for anyone already holding them. The walk is then
+  # complete with nothing new on the index — `latest` resolves to the
+  # index, the index already carries the build provenance, the index
+  # manifest lists the per-arch digests, and each of those carries its
+  # inventory and is named by the decision.
+  #
+  # The index digest itself is deliberately NOT a subject here, and
+  # that is an ordering fact rather than an omission: `assemble`
+  # creates the index strictly after this job signs, because creating
+  # the `latest` tag is this archetype's irreversible act and gating it
+  # is the whole point of the commit point (#717, #349 finding 1). A
+  # second signature over the same decision after `assemble` was
+  # considered and refused — it splits one decision into two objects a
+  # verifier has to reconcile, and the walk above makes it needless.
   # phase: commit-point
   commit-point:
     name: Commit point — every proof, or nothing publishes
@@ -471,7 +508,36 @@ jobs:
           name: continuous-inventory
           path: inventory
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: oci-digest-*
+          merge-multiple: true
+          path: digests
+
+      - name: Resolve the digests a consumer pulls
+        id: pulled
+        run: |
+          set -euo pipefail
+          # The same read `sbom` makes of the same artifact, and the
+          # same refusal: a missing digest here means we are about to
+          # decide about a partial image, which is the one thing this
+          # job exists to refuse. Lowercased because ghcr paths are, and
+          # GITHUB_REPOSITORY is not.
+          image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          for arch in amd64 arm64; do
+            digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
+            if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::no ${arch} digest at the commit point; refusing to sign about a partial image"
+              exit 1
+            fi
+            echo "${arch}=${digest}" >> "${GITHUB_OUTPUT}"
+          done
       - name: Stage the decision subjects (what the decision covered)
+        env:
+          IMAGE: ${{ steps.pulled.outputs.image }}
+          AMD64: ${{ steps.pulled.outputs.amd64 }}
+          ARM64: ${{ steps.pulled.outputs.arm64 }}
         run: |
           set -euo pipefail
           : > "${RUNNER_TEMP}/decision-subjects.sha256"
@@ -491,6 +557,53 @@ jobs:
             echo "::error::the inventory artifact is empty — a decision over nothing decides nothing"
             exit 1
           }
+          # And the images themselves (#859). A checksums file is
+          # `<hex>  <name>`, which is exactly an in-toto subject, so the
+          # per-arch digests go in beside the file hashes rather than
+          # into a second attestation — one publish is one decision, and
+          # the subject list is the fan-out. The store keys by digest,
+          # so THESE lines are what makes the decision reachable from
+          # the registry; the name is for the reader.
+          for pair in "amd64=${AMD64}" "arm64=${ARM64}"; do
+            arch="${pair%%=*}" digest="${pair#*=}"
+            printf '%s  %s\n' "${digest#sha256:}" "${IMAGE}@${digest} (${arch})" \
+              >> "${RUNNER_TEMP}/decision-subjects.sha256"
+          done
+          covered=$(wc -l < "${RUNNER_TEMP}/decision-subjects.sha256")
+          echo "::notice::decision covers ${covered} subject(s)"
+      # The inventories, each keyed by the image it inventories (#859).
+      # This is what makes the SBOM bytes durable: the run artifact
+      # below expires in seven days and is unsigned, so it is a
+      # debugging convenience and nothing may cite it as evidence. The
+      # bundle is signed, digest-keyed and permanent.
+      #
+      # Two steps rather than a loop or a matrix, and the duplication is
+      # forced twice over: `actions/attest` is an action, so a shell
+      # loop cannot call it, and a matrix would split this job — which
+      # would split the one decision it exists to make. `sbom` hardcodes
+      # the same two architectures in the same order.
+      #
+      # `https://spdx.dev/Document` is SPDX's own predicate type, the
+      # one `actions/attest-sbom` sets and every verifier already
+      # recognises. An org-namespaced type would be inventing a private
+      # name for a standard document and would read as a different kind
+      # of claim.
+      - name: Attest the amd64 inventory against the amd64 image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.pulled.outputs.image }}
+          subject-digest: ${{ steps.pulled.outputs.amd64 }}
+          predicate-type: https://spdx.dev/Document
+          predicate-path: inventory/amd64.spdx.json
+
+      - name: Attest the arm64 inventory against the arm64 image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.pulled.outputs.image }}
+          subject-digest: ${{ steps.pulled.outputs.arm64 }}
+          predicate-type: https://spdx.dev/Document
+          predicate-path: inventory/arm64.spdx.json
+
       - name: Sign the decision under this workflow's identity
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
