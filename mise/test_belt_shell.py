@@ -468,5 +468,177 @@ class Unpinned(unittest.TestCase):
         self.assertIn("pins no task shell", err.getvalue())
 
 
+def nested(body: str) -> list[str]:
+    """Run the nested-mise check over one planted body.
+
+    Returns:
+        The findings, which the row then reads or asserts empty.
+
+    """
+    with TemporaryDirectory() as tmp:
+        path = write(tmp, f"{PIN}\n[tasks.\"lint:probe\"]\nrun = '''\n{body}'''\n")
+        return bs.nested({path: bs.read(path)})
+
+
+class Nested(unittest.TestCase):
+    """Which `mise run` in a body is executed, and which is only written.
+
+    The live evidence for #764 is on the PR: the canon's four sites are
+    three extractions and one marker, and `mise run ci` is clean after.
+    What the table adds is both directions of every branch — an echoed
+    remedy MAY say "run mise run fix:x" to a human, and lint:audit-
+    scheduled greps the workflows for that exact string, so a check that
+    cannot tell text from a command would red the belt for documenting
+    its own rule.
+    """
+
+    def test_a_planted_invocation_reds_naming_the_task_and_line(self) -> None:
+        """The finding has to be actionable: which task, which line."""
+        found = nested('echo "one"\nmise run fix:probe\n')
+        self.assertEqual(len(found), 1)
+        self.assertIn("lint:probe", found[0])
+        # `run = '''` is line 5 of the config `write` lays down, so the
+        # second line of the body is line 7.
+        self.assertIn(":7:", found[0])
+        self.assertIn("nested mise races the parallel lint fan-out", found[0])
+
+    def test_an_unplanted_body_is_green(self) -> None:
+        """The other direction, so the row above is not vacuously true."""
+        self.assertEqual(nested('echo "hello"\n'), [])
+
+    def test_an_echoed_remedy_stays_green(self) -> None:
+        """A message MAY tell a human to run the task. It may not run it."""
+        self.assertEqual(nested('echo "  run mise run fix:probe" >&2\n'), [])
+
+    def test_a_grep_pattern_stays_green(self) -> None:
+        """lint:audit-scheduled greps the workflows for this exact string."""
+        self.assertEqual(
+            nested('grep -rEq "mise run audit:${t}" .github/workflows/\n'),
+            [],
+        )
+
+    def test_a_comment_inside_a_body_stays_green(self) -> None:
+        """The belt states the rule in prose beside the code obeying it."""
+        self.assertEqual(
+            nested("# never obtained via `mise run fix:probe`\ntrue\n"),
+            [],
+        )
+
+    def test_an_unquoted_argument_is_not_a_command(self) -> None:
+        """Position decides, not the presence of the words."""
+        self.assertEqual(nested("echo mise run fix:probe\n"), [])
+
+    def test_a_quoted_span_across_lines_stays_quoted(self) -> None:
+        """The belt's awk programs run to fifty lines inside one `'…'`.
+
+        Scrubbing line by line would end the span at the first newline and
+        read the program's own text as shell — which is how a check like
+        this reds a body that executes nothing.
+        """
+        body = "awk '\nBEGIN { print \"x\" }\nmise run not-a-command\n' file\n"
+        self.assertEqual(nested(body), [])
+
+    def test_an_assignment_prefix_is_still_a_command(self) -> None:
+        """`CITATION_OUT=… mise run fix:citation` was the #764 site itself."""
+        self.assertEqual(
+            len(nested('OUT="${tmp}" mise run fix:probe > /dev/null\n')),
+            1,
+        )
+
+    def test_an_operator_leaves_command_position(self) -> None:
+        """lint:tracks reached its fix half through `&&` inside a subshell."""
+        self.assertEqual(
+            len(nested('(cd "${tmp}" && mise run fix:probe) || true\n')),
+            1,
+        )
+
+    def test_a_command_substitution_is_a_command(self) -> None:
+        """fix:input-forwarding read its API out of `$(mise run …)`."""
+        self.assertEqual(len(nested("missing=$(mise run lint:probe 2>&1)\n")), 1)
+
+    def test_scrub_preserves_offsets(self) -> None:
+        """Findings name lines, so the scrub may not move a character."""
+        source = "echo \"a#b\" 'c'  # tail\nmise run x\n"
+        self.assertEqual(len(bs.scrub(source)), len(source))
+        self.assertEqual(bs.scrub(source).count("\n"), source.count("\n"))
+
+    def test_main_reds_on_a_planted_invocation(self) -> None:
+        """End to end, through the exit status the gate reads."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\nmise run other\n'''\n")
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(bs.main([str(path)]), 1)
+        self.assertIn("execute `mise run`", err.getvalue())
+
+    def test_main_greens_when_the_invocation_is_removed(self) -> None:
+        """The same file with the one line gone, so the red was the line."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\n{CLEAN}'''\n")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(bs.main([str(path)]), 0)
+
+    def test_write_mode_does_not_assert(self) -> None:
+        """fix:belt-shell formats bodies; it cannot extract a helper for you."""
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, f"{PIN}\n[tasks.t]\nrun = '''\nmise run other\n'''\n")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(bs.main([str(path), "--write"]), 0)
+
+    def test_an_env_from_config_is_not_asserted_on(self) -> None:
+        """The belt arrives this way in every consumer; it is not theirs."""
+        with TemporaryDirectory() as tmp:
+            checked = write(tmp, f'{PIN}\n[tasks.t]\nrun = "echo hi"\n')
+            other = Path(tmp) / "belt.toml"
+            other.write_text(
+                "[tasks.b]\nrun = '''\nmise run x\n'''\n",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = bs.main([str(checked), "--env-from", str(other)])
+        self.assertEqual(rc, 0)
+
+
+class NestedMarker(unittest.TestCase):
+    """What excuses an invocation, and what only looks like it does.
+
+    The marker is the only seam the rule allows, so both directions of
+    every branch are driven here: a reason-less marker, and one that has
+    drifted off the line it was written for, are the two ways an
+    exemption stops being one.
+    """
+
+    def test_a_marker_above_the_line_excuses_it(self) -> None:
+        """Where dispatching by name IS the job, the reason is written down."""
+        body = '# nested-mise: dispatching by name is the job\nmise run "${t}"\n'
+        self.assertEqual(nested(body), [])
+
+    def test_a_marker_may_end_a_block_of_comment_lines(self) -> None:
+        """A reason long enough to be a reason takes more than one line."""
+        body = (
+            "# nested-mise: the names come from the caller's own config\n"
+            "# and this task is collected by nothing, so the fan-out the\n"
+            "# race needs never runs it.\n"
+            'mise run "${t}"\n'
+        )
+        self.assertEqual(nested(body), [])
+
+    def test_a_trailing_marker_excuses_its_own_line(self) -> None:
+        """On the line is as close as a marker can sit to what it excuses."""
+        self.assertEqual(
+            nested('mise run "${t}"  # nested-mise: dispatch is the job\n'),
+            [],
+        )
+
+    def test_a_marker_with_no_reason_is_not_a_marker(self) -> None:
+        """An empty exemption is the seam the marker exists to prevent."""
+        self.assertEqual(len(nested("# nested-mise:\nmise run fix:probe\n")), 1)
+
+    def test_code_between_the_marker_and_the_line_breaks_the_block(self) -> None:
+        """A marker must answer for the invocation, not for its neighbour."""
+        body = "# nested-mise: a reason\necho hi\nmise run fix:probe\n"
+        self.assertEqual(len(nested(body)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
