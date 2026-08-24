@@ -96,6 +96,30 @@ jobs:
             echo "::error::${emsg}"
             exit 1
           fi
+          # THE SECOND HALF OF THE SAME QUESTION (#907). The guard above
+          # proves npm CAN do trusted publishing; this proves the runner
+          # OFFERED it. Neither implies the other, and the failure mode
+          # of the missing half is what cost edtf v1.3.2 three release
+          # runs: npm detects the OIDC environment itself, and when it
+          # is absent it does not say so — it falls back to looking for
+          # a stored credential and dies
+          #
+          #   npm error code ENEEDAUTH
+          #   npm error need auth This command requires you to be logged in
+          #
+          # which reads as a missing token secret, sending the reader to
+          # the registry's publisher config, which was correct all along.
+          # Measured while diagnosing that run: the pins on both sides of
+          # the comparison bundle npm 11.17.0, so the version guard was
+          # never the thing failing.
+          if [[ -z ${ACTIONS_ID_TOKEN_REQUEST_URL:-} || -z ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-} ]]; then
+            emsg="the OIDC token endpoint is absent from this job's environment, so npm cannot use trusted"
+            emsg+=" publishing — every job in the call chain must grant id-token: write, including the"
+            emsg+=" caller's own job in its repository"
+            echo "::error::${emsg}"
+            exit 1
+          fi
+          echo "trusted publishing: npm ${have}, OIDC endpoint present"
           # Resumable: a version already on the registry is a completed
           # step, not a failure. The unpublish window makes re-runs real.
           if npm view "${PACKAGE}" version > /dev/null 2>&1; then
@@ -115,5 +139,44 @@ jobs:
           # leading ./ is a GitHub SHORTHAND to npm (owner/repo) — it
           # tried to git-clone dist/<name>.tgz as a repository. Found by
           # the v0.14.0 run.
-          npm publish "./${tarball}" --provenance --access public
+          #
+          # ON FAILURE ONLY, surface npm's own debug log (#907). npm
+          # writes the line naming the step it failed at to a file on
+          # the runner and prints only a path — so three consecutive
+          # re-runs of edtf v1.3.2 were blind by construction, each
+          # ending in the same unexplained ENEEDAUTH. This costs nothing
+          # on a green path: it runs solely when publish has already
+          # failed and the job is going red regardless.
+          #
+          # MASKED, because it is a third-party CLI's log from an
+          # authenticated path landing in a public job log. Lines naming
+          # a credential are dropped outright rather than rewritten —
+          # dropping cannot half-work — and any long opaque token-shaped
+          # run of characters left elsewhere is redacted. The step names
+          # this exists to read (`npm verb publish`, the OIDC calls)
+          # carry no credentials, so the masking cannot eat the evidence.
+          # `rc=$?` inside `if ! cmd` would read the NEGATION's status,
+          # which is 0 — a failed publish would then exit green. Capture
+          # npm's own status instead.
+          rc=0
+          npm publish "./${tarball}" --provenance --access public || rc=$?
+          if [[ ${rc} -ne 0 ]]; then
+            logdir=$(npm config get logs-dir 2> /dev/null || true)
+            [[ -d ${logdir} ]] || logdir="${HOME}/.npm/_logs"
+            log=""
+            if [[ -d ${logdir} ]]; then
+              log=$(find "${logdir}" -name '*-debug-0.log' -type f 2> /dev/null | sort | sed -n '$p')
+            fi
+            if [[ -n ${log} ]]; then
+              echo "::group::npm debug log (masked) — ${log}"
+              sed -E \
+                -e '/[Aa]uthorization|[Bb]earer|_authToken|[Ss]et-[Cc]ookie|npm-otp/d' \
+                -e 's/[A-Za-z0-9_-]{32,}/<redacted>/g' \
+                "${log}" | tail -300
+              echo "::endgroup::"
+            else
+              echo "::warning::npm left no debug log under ${logdir}"
+            fi
+            exit "${rc}"
+          fi
 ...
