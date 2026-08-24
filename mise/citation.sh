@@ -28,7 +28,18 @@ out="${CITATION_OUT:-CITATION.cff}"
   echo "fix:citation: no REUSE.toml, nothing to derive from"
   exit 0
 }
-lic=$(grep -h "SPDX-License-Identifier" REUSE.toml | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | sort -u)
+# `|| true` on all three REUSE.toml reads below (#911, the same defect
+# #905 fixed next door in derive-badges.sh). `grep` exits 1 when nothing
+# matches — which is exactly the "this field is absent" answer each guard
+# here was written to report — and under the `set -euo pipefail` above,
+# `pipefail` carries it out of the pipeline, the command substitution
+# inherits it, and `errexit` kills the script BEFORE the guard runs. All
+# three diagnostics in this file were therefore unreachable code, and a
+# maintainer filling in a REUSE.toml stub got a mute exit 1 from
+# `fix:citation` and from `mise run fix`. Measured 2026-08-24, one absent
+# field at a time. The status is discarded; emptiness is judged below,
+# which is where it was always meant to be judged.
+lic=$(grep -h "SPDX-License-Identifier" REUSE.toml | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | sort -u || true)
 if [[ -z ${lic} || ${lic} == "<SPDX expression>" ]]; then
   echo "fix:citation: REUSE.toml declares no licence expression — fill it first (lint:licence)" >&2
   exit 1
@@ -39,7 +50,7 @@ if [[ ${count} != "1" ]]; then
   echo "${lic}" >&2
   exit 1
 fi
-supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
 person="${supplier%% <*}"
 if [[ -z ${person} ]]; then
   echo "fix:citation: REUSE.toml carries no SPDX-PackageSupplier — the citation needs an author" >&2
@@ -47,7 +58,7 @@ if [[ -z ${person} ]]; then
 fi
 family="${person##* }"
 given="${person% "${family}"}"
-repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
 [[ -n ${repo_url} ]] || {
   echo "fix:citation: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2
   exit 1
