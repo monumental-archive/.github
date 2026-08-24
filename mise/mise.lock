@@ -771,6 +771,7 @@ checksum = "sha256:c43afb7e63ec6d40f2510e7e3540efeba10db96fccbfde6c9ba555c80b7b9
 url = "https://github.com/monumental-archive/stele/releases/download/v0.20.0/stele-0.20.0-linux-amd64.tar.gz"
 url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/526927800"
 provenance = "github-attestations"
+provenance_verified = true
 
 [tools."github:monumental-archive/stele"."platforms.linux-x64-musl"]
 checksum = "sha256:c43afb7e63ec6d40f2510e7e3540efeba10db96fccbfde6c9ba555c80b7b9da8"
