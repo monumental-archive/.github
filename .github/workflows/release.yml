@@ -15,8 +15,8 @@
 # nothing, publishes nothing, and signs nothing: phase 2 (the caller's own
 # publish workflow, triggered by the tag this pushes) does all of that, so
 # provenance names the tag rather than a moving branch. See docs/release.md
-# for the full canon, including why this is git-cliff rather than a release
-# tool.
+# for the full canon, including why this is a derivation step around
+# `stele derive` rather than a release tool.
 #
 # Both jobs authenticate as the org's tag-mint App, with per-job scoped
 # tokens: the Release-PR job gets contents + pull-requests, the tag job gets
@@ -47,12 +47,12 @@ jobs:
     # capability-boundary: this job holds `id-token: write` for exactly
     # one step — gitsign minting the keyless signature on the release
     # tag object (#349 S4). It runs no caller-supplied code: its steps
-    # are the canon's tag-release.sh and git-cliff rendering notes with
-    # the canonical configuration; the caller contributes a tree to
-    # read, never a step to execute. The same case that admitted the
-    # scheduled workflows and verify-release: refusing to sign the tag
-    # in order to protect the identity would leave the release chain's
-    # one unsigned pointer unsigned forever.
+    # are the canon's tag-release.sh and the `stele derive release-plan`
+    # it invokes with the canonical configuration; the caller
+    # contributes a tree to read, never a step to execute. The same case
+    # that admitted the scheduled workflows and verify-release: refusing
+    # to sign the tag in order to protect the identity would leave the
+    # release chain's one unsigned pointer unsigned forever.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.head_commit.message, 'chore: release v')
@@ -66,7 +66,11 @@ jobs:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # git-cliff reads the whole history to build the notes.
+          # `stele derive release-plan`, run by tag-release.sh, derives
+          # the version and the notes from the whole local history: its
+          # --git-dir is "a local clone with full history and tags
+          # fetched (required)", and the engine refuses to network for
+          # refs the workflow did not fetch.
           fetch-depth: 0
           # The tag is pushed with the App token, so the checkout credential
           # is neither needed nor wanted.
@@ -93,14 +97,12 @@ jobs:
 
       - name: Tag and cut the draft release
         env:
+          # The App token, and the only one this step carries: gh reads
+          # GH_TOKEN in preference to GITHUB_TOKEN, so the `gh release`
+          # calls in tag-release.sh and the tag push both authenticate
+          # as the App. The `stele derive release-plan` beside them
+          # reads no token at all — the notes come from local history.
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          # git-cliff reads GITHUB_TOKEN (not GH_TOKEN) for its GitHub
-          # integration; without it the release-notes render runs
-          # anonymous — 60 requests/hour shared across the runner fleet —
-          # and 403s on quota luck. The release-pr job has carried this
-          # since the first time trap 4 fired; the tag job ran on luck
-          # until v0.15.1 spent it: tag minted, draft never cut.
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git config user.name "tag-mint[bot]"
           git config user.email "tag-mint[bot]@users.noreply.github.com"
@@ -127,18 +129,18 @@ jobs:
       (github.event_name == 'release' && github.event.action == 'published')
     runs-on: ubuntu-24.04
     permissions:
-      # git-cliff calls the GitHub API. The canonical cliff.toml renders
-      # `commit.remote.pr_number`, so every changelog entry is linked to
-      # its pull request — which means the API is consulted on every run.
+      # Two readers, both of them ambient-token reads of this
+      # repository's own contents: the checkout below, and the
+      # `gh release` view and asset download generate-pgrx-upgrade.sh
+      # performs against `github.token` to derive the pgrx upgrade path.
       #
-      # Unauthenticated that is 60 requests an hour, shared across every
-      # runner on the same address, so it 403s intermittently and takes
-      # the release with it: `panicked at changelog.rs: Could not get
-      # github metadata: Status(403)`. Observed exactly that way, after
-      # several runs had passed on quota luck alone.
+      # The notes need nothing here. `stele derive release-plan` builds
+      # the changelog from the local history and renders pull-request
+      # links from its own --pull-url template, so producing an entry
+      # consults no GitHub API at all.
       #
-      # Authenticated it is 1000 an hour. `contents: read` is the whole
-      # grant that buys, and it is read-only on a public repository.
+      # `contents: read` is the whole grant either reader buys, and it
+      # is read-only.
       contents: read
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -164,11 +166,9 @@ jobs:
           cache: false
 
       - name: Prepare the release
+        # No token: prepare-release.sh derives the plan from the local
+        # history and writes the tree it names, reaching no forge.
         id: prepare
-        env:
-          # git-cliff reads this for its GitHub integration; without it the
-          # API calls are anonymous and rate-limited to 60 an hour.
-          GITHUB_TOKEN: ${{ github.token }}
         run: .org-canon/release/prepare-release.sh
 
       - name: Derive and prove pgrx upgrade scripts
