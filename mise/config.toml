@@ -1819,6 +1819,108 @@ helper="${ORG_BELT_DIR}/embedded-shell.py"
 python3 "${helper}" ${files}
 '''
 
+[tasks."lint:belt-tree"]
+description = "The belt answering this gate is the belt in this tree (#867)"
+dir = "{{cwd}}"
+# CLAUDE.md promises `mise run ci` locally is exactly what CI runs. That
+# is only true if the belt answering is the belt in the tree under test,
+# and nothing said when it was not. `ORG_BELT_DIR` falls back to the
+# `~/.config/mise/conf.d` symlink whenever MISE_GLOBAL_CONFIG_FILE is
+# unset, and that symlink names ONE canon checkout on the machine —
+# whatever commit it happens to sit on. A fresh canon clone carrying its
+# own complete belt still resolved ORG_BELT_DIR to a DIFFERENT checkout.
+#
+# It fires both ways and the dangerous one is silent. The false red froze
+# a merge queue on 2026-08-24: canon main was reported red on
+# lint:cold-attested while main was green three ways, because the
+# machine's belt was one commit behind and its older task body did not
+# know the cache shape #851 had just added. The false green ships: a lane
+# that DELETES or renames a belt task still passes pre-push, because the
+# machine's belt still has the old one (#857).
+#
+# CONTENT, NOT PATH, and that is measured rather than chosen. In CI the
+# belt arrives as `.org-canon`, a symlink the canon action points at the
+# resolved tree — and even when the canon calls ITSELF that resolves into
+# `_actions/monumental-archive/.github/<sha>`, never the workspace
+# checkout. Measured by reading the action's own `canon resolved:` line
+# out of a real gate run: it named an `_actions` path under the runner's
+# work directory, at the very commit the workspace already held. So the
+# two belts are byte-identical at DIFFERENT paths, and a path-equality
+# guard would red the canon's own gate on every run.
+#
+# Therefore: always green in CI, by construction — the canon action
+# delivers belt and tree at one resolution (#165). This guard is a LOCAL
+# control and must not be mistaken for a CI one.
+#
+# Silent in consumers, structurally: they carry no `mise/` directory at
+# all, so the "a belt beside it" test skips them rather than exempting
+# them. A consumer running a foreign belt is the design, not a defect.
+#
+# What it CANNOT see: which belt supplies the task BODIES is a second,
+# independently resolved thing, and the two disagree in practice — same
+# clone, `mise tasks info` naming the tree's own config while
+# ORG_BELT_DIR named another checkout. A guard living in a task body
+# cannot catch the case where the body itself came from the stale belt:
+# a belt predating this task simply has no task to run. That gap closes
+# once the machine belt carries this, and the failure text names the
+# `mise tasks info` Source line so the other axis stays checkable by
+# hand. Deterministic, no network — belongs in `ci`.
+run = '''
+if [[ ! -f mise/config.toml || ! -f mise/clippy.toml ]]; then
+  echo "lint:belt-tree: no belt in this tree, skipped"
+  exit 0
+fi
+# The remedy is literal text for a human to paste: $PWD must reach them
+# unexpanded, so the single quotes are the point, not an oversight.
+# shellcheck disable=SC2016
+remedy='    MISE_GLOBAL_CONFIG_FILE="$PWD/mise/config.toml" mise run ci'
+if [[ -z ${ORG_BELT_DIR:-} || ! -d ${ORG_BELT_DIR} ]]; then
+  echo "lint:belt-tree: ORG_BELT_DIR is unset or names no directory —" >&2
+  echo "  the belt cannot locate itself, so no delivered config any task" >&2
+  echo "  reads is trustworthy. Re-run pinned to the tree under test:" >&2
+  echo "${remedy}" >&2
+  exit 1
+fi
+if command -v sha256sum > /dev/null 2>&1; then
+  sha256=(sha256sum)
+else
+  sha256=(shasum -a 256)
+fi
+belt_digest() {
+  (
+    cd "$1" || exit 1
+    # Names AND contents: hashing each file leaves its path in the
+    # listing, so a renamed helper is a different belt. __pycache__ is
+    # gitignored residue `mise run test` leaves behind, measured as the
+    # ONLY difference between the belt on disk and the belt in git (39
+    # files either way) — so excluding it compares tracked content
+    # without needing git, which the delivered copy has not got.
+    find . -type f ! -path './__pycache__/*' ! -name '*.pyc' -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 "${sha256[@]}" \
+      | "${sha256[@]}" \
+      | cut -d ' ' -f 1
+  )
+}
+tree_belt=$(belt_digest "${PWD}/mise")
+run_belt=$(belt_digest "${ORG_BELT_DIR}")
+if [[ ${tree_belt} == "${run_belt}" ]]; then
+  echo "lint:belt-tree: the belt answering is this tree's belt"
+  exit 0
+fi
+echo "lint:belt-tree: the belt answering this gate is NOT the belt in" >&2
+echo "  this tree, so the gate is measuring a different revision of the" >&2
+echo "  canon than the one you are changing (#867)." >&2
+echo "    this tree's belt: ${PWD}/mise (${tree_belt:0:12})" >&2
+echo "    belt answering:   ${ORG_BELT_DIR} (${run_belt:0:12})" >&2
+echo "  Re-run pinned to the tree under test:" >&2
+echo "${remedy}" >&2
+echo "  Which belt supplies a task BODY is a separate resolution that can" >&2
+echo "  disagree with this one — read the Source line of:" >&2
+echo "    mise tasks info <task>" >&2
+exit 1
+'''
+
 [tasks."lint:belt-shell"]
 description = "Shell inside mise task `run` bodies is formatted and linted, this file included"
 dir = "{{cwd}}"
