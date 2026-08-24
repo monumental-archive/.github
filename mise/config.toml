@@ -2154,7 +2154,11 @@ dir = "{{cwd}}"
 # is ever renamed away the exclusion stops applying, the contradiction
 # fires, and the gate goes red where someone will read it.
 #
-# THE NINE EXCLUSIONS ARE MECHANICAL CONTRADICTIONS, not taste. clippy's
+# THE EXCLUSIONS ARE MECHANICAL CONTRADICTIONS, not taste. No count is
+# spelled here, and none should be: the run counts the flags it applied
+# and prints that. Written by hand this line and the one it prints
+# disagreed, in the same task body, from the day #687 added an exclusion
+# until #752. clippy's
 # own book says the restriction group must not be enabled wholesale
 # because its lints contradict each other; these are the pairs where
 # obeying one lint is disobeying another, each ruled toward the
@@ -2342,6 +2346,38 @@ fi
 # so; everything else gets --all-features, because an unlinted feature is
 # unlinted code.
 features="${CLIPPY_FEATURES:---all-features}"
+# THE NAMED CONTRADICTIONS, held once so that the count this task prints
+# is the list itself. Written twice they disagreed: the tenth exclusion
+# arrived with #687 and the prose above it still said nine (#752). An
+# eleventh is one line here and the printed count follows it. The two
+# allows that are NOT contradictions stay at the call site below, each
+# with its own reason.
+contradictions=(
+  implicit_return
+  question_mark_used
+  self_named_module_files
+  pub_with_shorthand
+  semicolon_outside_block
+  separated_literal_suffix
+  big_endian_bytes
+  little_endian_bytes
+  arbitrary_source_item_ordering
+  inline_asm_x86_intel_syntax
+)
+allow_contradictions=()
+# Accumulated rather than read off the array's length. mise renders every
+# task body through Tera before bash sees it, and bash's array-length
+# syntax — dollar, brace, hash — is also how a Tera comment OPENS, so the
+# task dies at render time with an unclosed-comment-tag error and never
+# runs (measured; the error names a closing tag, which reads like a
+# corrupt body rather than a template collision). Tera parses shell
+# comments too, so the sequence cannot even be quoted in a remark about
+# it. No body in this belt uses that syntax; this is why.
+contradiction_count=0
+for lint in "${contradictions[@]}"; do
+  allow_contradictions+=("-A" "clippy::${lint}")
+  contradiction_count=$((contradiction_count + 1))
+done
 # THE WHOLE WORKSPACE IS LINTED EVERY RUN, one `-p` pass per crate
 # (#726). Under `-D warnings` a finding IS a compile error, so a red
 # crate emits no metadata and every crate that depends on it is never
@@ -2417,16 +2453,7 @@ while IFS= read -r spec; do
     -D clippy::restriction \
     -A clippy::blanket_clippy_restriction_lints \
     -A clippy::multiple_crate_versions \
-    -A clippy::implicit_return \
-    -A clippy::question_mark_used \
-    -A clippy::self_named_module_files \
-    -A clippy::pub_with_shorthand \
-    -A clippy::semicolon_outside_block \
-    -A clippy::separated_literal_suffix \
-    -A clippy::big_endian_bytes \
-    -A clippy::little_endian_bytes \
-    -A clippy::arbitrary_source_item_ordering \
-    -A clippy::inline_asm_x86_intel_syntax 2>&1 | tee -a "${out}" || pass=$?
+    "${allow_contradictions[@]}" 2>&1 | tee -a "${out}" || pass=$?
   if [[ ${pass} -ne 0 ]]; then
     red="${red} ${name}"
     status=${pass}
@@ -2465,7 +2492,7 @@ if [[ -n ${red} ]]; then
   echo "lint:rust: red:${red}" >&2
   exit "${status}"
 fi
-echo "lint:rust: clean at every group (restriction minus 10 named contradictions)"
+echo "lint:rust: clean at every group (restriction minus ${contradiction_count} named contradictions)"
 '''
 
 [tasks."fix:rust"]
