@@ -299,6 +299,42 @@ for repo in ${repos}; do
         2) drift=1 ;;
         *) ;;
       esac
+      # REPOSITORY-level rulesets (#876) — the sibling of the classic
+      # protection above, and the one that actually blocked iiif-server:
+      # `protect-main` required five contexts from the pipeline the
+      # import was deleting (#671). It survives a transfer, the org-level
+      # sweep does not touch it, and the playbook's "rulesets need
+      # nothing" line was only ever true of the ORG's.
+      #
+      # `includes_parents=false` asks for the repository's OWN rules;
+      # without it the org's three come back and every repo reads as
+      # drift. Whatever comes back is reported as it stands, source and
+      # all, rather than filtered against an expected literal — a value
+      # this script has not heard of is a finding, not something to drop.
+      #
+      # Reported, never deleted, like its two siblings (#761, #751).
+      rulesets_status=0
+      # shellcheck disable=SC2310  # api_probe manages its own exit status
+      api_probe "${repo}'s own rulesets" "Administration: read" "" \
+        "repos/${org}/${repo}/rulesets?includes_parents=false" \
+        || rulesets_status=$?
+      if [[ ${rulesets_status} -ne 0 ]]; then
+        drift=1
+      else
+        # shellcheck disable=SC2312  # process substitution, the packages
+        # block's shape: capturing first turns an empty result into one
+        # blank line, and the producer is jq over a body already read.
+        while IFS=$'\t' read -r rs_name rs_target rs_state rs_source; do
+          [[ -n ${rs_name} ]] || continue
+          echo "drift: ${repo} carries its OWN ruleset '${rs_name}'"
+          echo "       target ${rs_target}, enforcement ${rs_state}, source ${rs_source}"
+          echo "       delete it in Settings -> Rules. The org rules are the"
+          echo "       enforcement (docs/rulesets.md); a repo's own is either"
+          echo "       redundant with them or contradicts them (#876)."
+          drift=1
+        done < <(jq -r '.[] | [.name, .target, .enforcement, .source_type]
+          | @tsv' <<< "${api_body}")
+      fi
       ;;
     *)
       echo "unknown mode: ${mode}" >&2
@@ -428,8 +464,8 @@ if [[ ${mode} == check && ${drift} -eq 0 ]]; then
   emsg="repo-baseline: ${seen_repos} repos checked"
   app_count="$(wc -w <<< "${expected_apps}" | tr -d ' ')"
   emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env"
-  emsg+=" + classic branch protection each, plus org packages and"
-  emsg+=" ${app_count} App installations), no drift"
+  emsg+=" + classic branch protection + own rulesets each, plus org"
+  emsg+=" packages and ${app_count} App installations), no drift"
   echo "${emsg}"
 fi
 
