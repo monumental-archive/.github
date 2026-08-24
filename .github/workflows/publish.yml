@@ -280,6 +280,12 @@ jobs:
     permissions: {}
     outputs:
       version: ${{ steps.check.outputs.version }}
+      # The class list the EVIDENCE declares, which is not always the
+      # list the caller requested (#843). See the derivation below.
+      classes: ${{ steps.check.outputs.classes }}
+      # The class an image leg's inventory plan names, empty when no
+      # crate is declared. Derived here so the name exists once.
+      image-class: ${{ steps.check.outputs.image-class }}
     steps:
       - name: Check the ref and the class
         id: check
@@ -298,6 +304,24 @@ jobs:
             echo "::error::no classes requested — a release that builds nothing is not a release"
             exit 1
           fi
+          # The one spelling of the crate-built image class (#843). It is
+          # written here and nowhere else in the machinery: this job hands
+          # it to the image leg as the class its inventory plan names, and
+          # to the fan-in as the class the evidence manifest declares, so
+          # the plan and the manifest cannot disagree about which class
+          # built the image.
+          image_class="oci-image-crate"
+          # The class list the EVIDENCE declares, derived from the same
+          # `binary-crate` fact that decides whether the image leg emits
+          # an inventory plan at all (#843). The oci-image class carried
+          # two obligation shapes under one name — a Dockerfile-only
+          # image owes no inventory and a crate-built one owes an
+          # `sbom-image-*` document — and the class is the unit of
+          # obligation, so the two shapes are two classes. The caller
+          # still declares `oci-image` and declares its crate; which
+          # class that IS is machinery's answer, never a second caller
+          # declaration to drift against the first.
+          declared=()
           for c in "${requested[@]}"; do
             case "${c}" in
               rust-crate | oci-image | rust-binary | go-binary | wasm-npm | pgrx-extension | source-archive) ;;
@@ -306,6 +330,11 @@ jobs:
                 exit 1
                 ;;
             esac
+            if [[ ${c} == oci-image && -n ${UNTRUSTED_BINARY_CRATE} ]]; then
+              declared+=("${image_class}")
+            else
+              declared+=("${c}")
+            fi
           done
           # A class input naming no requested class is a declaration
           # that does nothing — which is how a caller comes to believe a
@@ -316,9 +345,21 @@ jobs:
             echo "::error::binary-crate is declared but oci-image is not among the classes — it would build nothing"
             exit 1
           fi
+          # Past that refusal, a declared crate means oci-image was
+          # requested, so the image leg has a class to plan under. Stated
+          # as its own output rather than re-derived at the call site:
+          # the leg writes the name it is given.
+          if [[ -z ${UNTRUSTED_BINARY_CRATE} ]]; then
+            image_class=""
+          fi
           version="${GITHUB_REF#refs/tags/v}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          classes_out=$(printf '%s,' "${declared[@]}")
+          classes_out="${classes_out%,}"
+          echo "classes=${classes_out}" >> "${GITHUB_OUTPUT}"
+          echo "image-class=${image_class}" >> "${GITHUB_OUTPUT}"
           echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
+          echo "::notice::the evidence declares ${classes_out}"
   # Every fact the image classes will assert — OCI annotations and config
   # labels — is resolved HERE, once, before anything is built, and the
   # builds consume the map without deriving anything. One resolution per
@@ -523,6 +564,12 @@ jobs:
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
           CLASSES: ${{ inputs.classes }}
+          # What the evidence declares, which the plans judgment reads
+          # and the branch below deliberately does not (#843): which
+          # legs RAN is the caller's list, and which classes OWE is the
+          # derived one. Two questions, two readings, neither guessing
+          # at the other.
+          EVIDENCE_CLASSES: ${{ needs.guard.outputs.classes }}
           PG_MAJORS: ${{ inputs.pg-majors }}
         run: |
           set -euo pipefail
@@ -593,7 +640,7 @@ jobs:
             }
             stele assert plans \
               --policy .org-canon/slsa/assert-policy.json \
-              --classes "${CLASSES}" \
+              --classes "${EVIDENCE_CLASSES}" \
               --machinery-version "${machinery}" \
               --out "${RUNNER_TEMP}/judged-plans.json" \
               plans/sbom-plan-*/plan.json
@@ -825,6 +872,7 @@ jobs:
       smoke-test: ${{ inputs.smoke-test }}
       prepare: ${{ inputs.prepare }}
       binary-crate: ${{ inputs.binary-crate }}
+      plan-class: ${{ needs.guard.outputs.image-class }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
@@ -847,6 +895,10 @@ jobs:
       smoke-test: ${{ inputs.smoke-test }}
       prepare: ${{ inputs.prepare }}
       binary-crate: ${{ inputs.binary-crate }}
+      # Forwarded on the repro leg too, and ignored there by the leg's
+      # own `repro` guard: a rebuild plans nothing, and the class it
+      # would have planned under is still the same one string.
+      plan-class: ${{ needs.guard.outputs.image-class }}
       facts: ${{ needs.facts.outputs.facts }}
       source-epoch: ${{ needs.facts.outputs.epoch }}
       dry-run: ${{ inputs.dry-run }}
@@ -1788,7 +1840,14 @@ jobs:
       # ride with it because the manifest declares them; it is one
       # string, not the per-class inputs this fan-in deliberately has
       # none of.
-      classes: ${{ inputs.classes }}
+      #
+      # The guard's derived list, not the caller's raw one (#843): the
+      # manifest declares what the release OWES, and a crate-built image
+      # owes an inventory a Dockerfile-only one does not. The same
+      # string reached the plans judgment before the commit point, so
+      # the pre-publish check and the evidence walk read one obligation
+      # list from one derivation.
+      classes: ${{ needs.guard.outputs.classes }}
       # One line per artifact of every class that attaches release
       # assets, each carrying the target its leg built, empty when that
       # class did not run. The flat `subjects` output stays what the
