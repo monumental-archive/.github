@@ -82,7 +82,7 @@ disable_backends = ["asdf", "ubi"]
 # it; a change to mise/aqua-registry.yaml needs this line bumped in the
 # commit after it.
 aqua.registries = [
-  "https://raw.githubusercontent.com/monumental-archive/.github/c9a1c6ccdc0fcb7a5f54ce49b540139fc72b04eb/mise/aqua-registry.yaml",
+  "https://raw.githubusercontent.com/monumental-archive/.github/3cb9dd4ff2a75d587e35bbb372045e157df2ffb4/mise/aqua-registry.yaml",
 ]
 
 # THE DEFAULT INLINE SHELL FOR EVERY TASK IN EVERY REPO, not just the ones
@@ -7202,7 +7202,16 @@ candidates=$(printf '%s\n' "${locks}" | python3 "${ORG_BELT_DIR}/lock-arch.py")
 # allowance that stops matching anything FAILS below, because a skip
 # that silently matches nothing is the failure mode deny.toml taught us
 # to refuse. The issue that fixes the defect deletes its line here.
-declared="committed|macos-arm64"
+# CURRENTLY EMPTY, and that is deliberate — do NOT tidy the mechanism
+# away now that #854 has closed the only tenant it ever had. Keeping it
+# at rest was ruled over deleting it because an allowance here is not a
+# seam by either test that matters: it SILENCES nothing, since an
+# allowed entry prints in full on every run naming the defect and where
+# its fix lives; and it cannot OUTLIVE its cause, since an allowance
+# matching nothing fails below. No-seams bans opt-outs that HIDE; this
+# one advertises. The next tenant is not hypothetical either — the one
+# sweep that stood this check up found two mismatches across 48 tools.
+declared=""
 used=""
 failed=""
 while IFS=$'\t' read -r lock tool platform declared_plat asset repo tag pattern; do
@@ -7221,9 +7230,10 @@ while IFS=$'\t' read -r lock tool platform declared_plat asset repo tag pattern;
   fi
   allowance=""
   case "${tool}|${platform}" in
-    "committed|macos-arm64")
-      allowance="2026-08-24, #854 — the fix rides the mise/aqua-registry.yaml channel #811 stands up"
-      ;;
+    # No allowances at present. One is a single arm —
+    #   "<tool>|<platform>") allowance="<date>, #<issue> — <the fix>" ;;
+    # — and adding it, together with its key in `declared` above,
+    # obliges the issue it names to delete both again.
     *)
       # Anything not named above is unallowed, which is the point: a new
       # mismatch reds on arrival rather than joining a tolerated set.
