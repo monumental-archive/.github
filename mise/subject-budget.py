@@ -183,14 +183,21 @@ class Template(NamedTuple):
 
     Three sources, because the org writes the template in three places
     and Renovate reads all three: the extended preset, the repo's own
-    packageRules which resolve after it (#677), and the advisory suffix
-    which lives in the vulnerabilityAlerts block rather than in any rule
+    config which resolves after it (#677), and the advisory suffix which
+    lives in the vulnerabilityAlerts block rather than in any rule
     (#686). Carried as one value so no caller can supply two of the
     three and silently model a subject the bot will not mint.
+
+    The repo arrives as its WHOLE document rather than as its
+    packageRules, because Renovate reads two layers of it and the
+    resolver needs both: a top-level message field beside `extends`
+    overrides the preset's top-level one, and the packageRules override
+    everything (#725). Handing over one key modelled the second layer
+    and silently dropped the first.
     """
 
     preset: dict
-    repo_rules: list[dict]
+    repo: dict
     suffix: str
 
 
@@ -431,6 +438,31 @@ def apply_rules(configs: list[dict], rules: list[dict], dep: Dep) -> list[dict]:
     return configs
 
 
+def unwritten(preset: dict, dep: Dep) -> list[str]:
+    """Name the message fields the PRESET leaves unwritten for one dep.
+
+    Asked of the preset alone, deliberately, and that is what keeps a
+    repo-level value an override rather than a source (#576, #725). A
+    repo may override any of the five; it may not be the only place one
+    is written, whether it writes it in a packageRule (#677) or at its
+    top level. Otherwise a consumer that does not extend the canon
+    inherits nothing and the hard error stops meaning what it says.
+
+    Resolved rather than looked up, because the preset may write a field
+    only in a rule — and only a rule that DEFINITELY applies counts, so
+    a field that exists on one fork and not the other is unwritten here
+    (#724).
+
+    Returns:
+        The absent fields in MESSAGE_CONFIG order, empty when the preset
+        writes all five.
+
+    """
+    base = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
+    configs = apply_rules([base], preset.get("packageRules", []), dep)
+    return [k for k in MESSAGE_CONFIG if any(k not in c for c in configs)]
+
+
 def effective(template: Template, dep: Dep) -> list[dict]:
     """Resolve the message fields Renovate could use for one dependency.
 
@@ -439,21 +471,29 @@ def effective(template: Template, dep: Dep) -> list[dict]:
     a version up, BOTH resolutions are reachable and both are returned
     (#724).
 
-    packageRules are applied in order and later wins per field, which is
-    Renovate's own precedence. The repo's OWN rules are folded in after
-    the preset's, because that is where Renovate puts them: a repo
-    extends the canon, so the extended preset's list resolves first and
-    the repo's appends to it (#677). Modelling the preset alone left a
-    repo-level rule invisible to the simulation that exists to prove
-    these fields fit — fail-SAFE only by luck, since the one such rule
-    in the org narrows (#668's `fix` against the preset's `chore`), and
-    a repo-level `commitMessageTopic` (the remedy this task's own
-    failure message prints) would have widened it green.
+    FOUR layers, in Renovate's order, not two (#725):
 
-    The absent-field check sits BETWEEN the two lists, and that placement
-    is the rule rather than an accident: a repo may override a field the
-    preset already sets, but it may not be the only place one is
-    written. Otherwise a consumer that does not extend the canon
+        preset top-level → repo top-level → preset rules → repo rules
+
+    A repo's own top-level field beats the preset's, because the preset
+    is merged in where `extends` names it; every packageRule from either
+    file then beats both, and the repo's list resolves after the
+    preset's because that is where Renovate appends it (#677).
+
+    The middle layer was the one skipped. Modelling the preset alone
+    left a repo-level RULE invisible (#677) — fail-SAFE only by luck,
+    since the one such rule in the org narrows (#668's `fix` against the
+    preset's `chore`). The layer this reads now is the same defect one
+    step further in: `semanticCommitType` and `semanticCommitScope` are
+    set top-level by the preset and overridden per manager only for
+    gomod, cargo and npm, so for mise, github-actions and custom.regex a
+    repo top-level value wins outright. `refactor` is nine columns
+    against `chore`'s five.
+
+    The absent-field check keeps the placement #677 gave it: after the
+    preset's rules, before the repo's. It is asked of the PRESET ALONE,
+    which is what makes a repo top-level field an override rather than a
+    source — otherwise a consumer that does not extend the canon
     inherits nothing and the hard error stops meaning what it says. It
     holds across every reachable resolution: a field only a FORKED rule
     writes is absent on the branch where that rule does not apply, so the
@@ -466,10 +506,11 @@ def effective(template: Template, dep: Dep) -> list[dict]:
         is one entry long wherever nothing forked.
 
     """
-    preset = template.preset
+    preset, repo = template.preset, template.repo
     base = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
+    base.update({k: repo[k] for k in MESSAGE_CONFIG if k in repo})
     configs = apply_rules([base], preset.get("packageRules", []), dep)
-    missing = [k for k in MESSAGE_CONFIG if any(k not in c for c in configs)]
+    missing = unwritten(preset, dep)
     if missing:
         sys.exit(
             "lint:subject-budget: the owned template does not set "
@@ -478,7 +519,7 @@ def effective(template: Template, dep: Dep) -> list[dict]:
             " explicitly in default.json (#576); this task will not"
             " assume Renovate's default for one.",
         )
-    return apply_rules(configs, template.repo_rules, dep)
+    return apply_rules(configs, repo.get("packageRules", []), dep)
 
 
 def advisory_suffix(preset: dict, repo_config: dict) -> str:
@@ -999,20 +1040,25 @@ def main() -> int:
 
     limit = ceiling()
     preset = load_json(preset_path(files), report)
-    # The repo's own packageRules resolve after the extended preset's,
-    # so they are read from the working tree here and folded in there
-    # (#677). Loaded a second time rather than threaded out of collect()
-    # for the same reason the preset is: the two readers want different
-    # halves of the same file, and one guaranteed-tracked re-read is
-    # cheaper than a return type that carries both.
+    # The repo's own config resolves after the extended preset's, so it
+    # is read from the working tree here and folded in there (#677).
+    # Loaded a second time rather than threaded out of collect() for the
+    # same reason the preset is: the two readers want different halves
+    # of the same file, and one guaranteed-tracked re-read is cheaper
+    # than a return type that carries both.
     repo_config = load_json(Path("renovate.json"), report)
+    # The WHOLE document goes into the template, not its packageRules:
+    # Renovate reads two layers of a repo config and handing over one
+    # key modelled the rules while dropping a top-level message field
+    # beside `extends` (#725).
+    #
     # The sixth field is resolved from the vulnerabilityAlerts block
     # rather than from packageRules, because that is where the org's
     # only suffix lives and where Renovate's own default applies it
     # (#686, #667).
     template = Template(
         preset=preset,
-        repo_rules=repo_config.get("packageRules", []),
+        repo=repo_config,
         suffix=advisory_suffix(preset, repo_config),
     )
     findings = judge(deps, template, limit, report)
