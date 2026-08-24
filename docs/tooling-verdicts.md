@@ -2540,3 +2540,47 @@ if its reason is about the rule, never about reach.
   test — and `stele assert permissions` replaced the 437-line script
   whole, with the three org literals it carried becoming the assert
   policy's `permissions` section. Ruff stays: see the entry above.
+
+## The belt's blind spot is repositories unlike itself (2026-08-24)
+
+Not a tool verdict but a coverage one, recorded here because it is the
+standing reason a green canon gate is weaker evidence than it looks.
+
+Four defects closed in three days — #860, #892, #905, #911 — were one
+finding wearing four costumes: **each existed only outside the tree the
+belt is developed in.** The canon tracks markdown and shell, so
+`fix:markdown` and `fix:shell` never met an empty file list. It tracks
+no `Cargo.toml`, so `fix:rust` never met its own formatter's output.
+It has a level stub and a complete `REUSE.toml`, so `derive-badges.sh`
+and `citation.sh` never met an absent field. Every one of them was
+green here and broken in a consumer, and none was visible to reading —
+each needed a repository shaped differently from this one.
+
+`lint:scaffold-assembly` (#877) exists to shrink exactly this, and it
+does: it assembles a repository from `scaffold/` and runs the org's own
+fixers and gate over it, which is how two of the four were found. The
+residual it cannot reach is worth naming, because its green is
+otherwise easy to over-read:
+
+- **Toolchain legs it does not pin.** The belt pins no `rust` or `go`,
+  so the assembled repository never exercises those tasks. #892 lived
+  there and the check prints that exclusion on every run.
+- **Helper inputs the scaffold deliberately does not carry.**
+  `REUSE.toml.stub` is declined by the assembly on purpose (its holes
+  are the licence identity only the repo can choose, #214), so
+  `fix:citation` returns at its first guard and #911's three sites were
+  never entered. `scaffold/` ships no workflows, so `derive-badges.sh`
+  returns before #905's.
+- **Shapes a stub cannot have.** A repo with a Cargo workspace whose
+  Rust is not yet canonical, a repo with no level stub, a repo whose
+  `REUSE.toml` is half-filled — these are states of a real consumer
+  mid-conformance, not of a freshly assembled scaffold.
+
+So the honest reading: the assembly proves the scaffold is *runnable*,
+not that the belt is *correct on every consumer*. The complement is
+what actually found the other two — run the belt against real consumer
+clones (`edtf`, `iiif-server`) with the belt redirected at the branch,
+in both directions, before believing a fixer works. No check currently
+does that automatically, and standing one up would need those repos'
+trees at gate time, which is the reason it does not exist rather than
+an oversight.
