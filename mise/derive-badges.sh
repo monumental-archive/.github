@@ -19,7 +19,22 @@ set -euo pipefail
   echo "fix:badges: no REUSE.toml, no badge surface, skipped"
   exit 0
 }
-repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+# `|| true` on every no-match-is-an-answer read in this file (#905), and
+# it is load-bearing rather than defensive. `grep` exits 1 when nothing
+# matches and 2 when a path does not exist; under the `set -euo pipefail`
+# above, `pipefail` carries that out of the pipeline, the command
+# substitution inherits it, and `errexit` kills the script THERE — before
+# the line that was written to explain the situation. Every such read
+# below is a question whose answer may legitimately be "none", so the
+# status is discarded and the emptiness is judged by the guard that
+# follows. Line 147's `minting=` already did this; the other four did
+# not, and each one died mute.
+#
+# This one is the sharpest illustration: without the `|| true`, a
+# REUSE.toml lacking the field never reached the message four lines down
+# — `fix:badges` exited 1 with no output at all, and the diagnostic was
+# unreachable code. Measured 2026-08-24.
+repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
 [[ -n ${repo_url} ]] || {
   echo "fix:badges: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2
   exit 1
@@ -94,7 +109,13 @@ fi
 # this whole layer exists to refuse.
 levels_raw="https://raw.githubusercontent.com/${org_path}/levels"
 repo_name="${org_path#*/}"
-stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" .github/workflows/*.y*ml 2> /dev/null | sed -n 1p)
+# No stub is the ordinary answer for a repo that publishes no level
+# cells, and the `if` below already renders the block without SLSA
+# shields for it — the same shape as the coverage shield, which renders
+# iff .coverage-floor exists (#347). `|| true` per the note at the top:
+# an unglobbed `.github/workflows/*.y*ml` makes grep exit 2, a matchless
+# search makes it exit 1, and both used to be fatal and silent (#905).
+stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" .github/workflows/*.y*ml 2> /dev/null | sed -n 1p || true)
 tracks=""
 if [[ -n ${stub} ]]; then
   tracks=$(sed -n 's/^[[:space:]]*tracks:[[:space:]]*//p' "${stub}" | sed -n 1p)
@@ -154,8 +175,12 @@ elif [[ -n ${minting} ]]; then
 fi
 classes=""
 for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
+  # `|| true` per the note at the top: a publish workflow that declares
+  # no `classes:` is a repo with no registry shields, not an error — and
+  # the assignment is the LAST command of this `&&` list, so errexit was
+  # reached here where the `[[ -f ]]` on its left is exempt (#905).
   [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | sed -n 1p \
-    | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'")"
+    | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'" || true)"
 done
 reg_live=""
 if [[ ${classes} == *rust-crate* ]]; then
@@ -230,5 +255,16 @@ awk -v blkfile="${blkfile}" '
   !skip {print}
 ' README.md > README.md.new && mv README.md.new README.md
 rm -f "${blkfile}"
-rendered=$(grep -c "img.shields.io\|scorecard.dev\|codecov.io\|zenodo.org\|badge.svg" <<< "${block}")
+# LATENT, not live, and guarded anyway. `grep -c` exits 1 when the COUNT
+# IS ZERO — the one member of this family that is not about a missing
+# file. Today it cannot fire: the fair-software shield above is added
+# unconditionally, so the block always holds at least one matching line.
+# Measured 2026-08-24 — a minimal repo (REUSE.toml and a marked README,
+# nothing else) renders exactly that one shield and reports `rendered 1
+# line(s)`. The guard is here because the thing keeping it unreachable is
+# an unrelated decision two screens up: make fair-software conditional,
+# as #316 could plausibly want, and this becomes a silent death AFTER
+# README.md has already been rewritten. That is the worst position in the
+# file to leave a landmine, and `|| true` costs nothing.
+rendered=$(grep -c "img.shields.io\|scorecard.dev\|codecov.io\|zenodo.org\|badge.svg" <<< "${block}" || true)
 echo "fix:badges: rendered ${rendered} line(s) into README.md"
