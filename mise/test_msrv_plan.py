@@ -242,7 +242,12 @@ class MainTest(unittest.TestCase):
     """The whole check. Mutation: emit the plan even when nothing matched."""
 
     @staticmethod
-    def invoke(doc: object, listing: object, exclude: str = "") -> tuple:
+    def invoke(
+        doc: object,
+        listing: object,
+        exclude: str = "",
+        pgrx: str = "",
+    ) -> tuple:
         """Run the planner over one workspace and one toolchain listing.
 
         Returns:
@@ -254,7 +259,7 @@ class MainTest(unittest.TestCase):
             json.dumps(listing) if listing is not None else "{",
             encoding="utf-8",
         )
-        argv = ["--toolchains", str(path), "--exclude", exclude]
+        argv = ["--toolchains", str(path), "--exclude", exclude, "--pgrx", pgrx]
         out, err = io.StringIO(), io.StringIO()
         original = msrv_plan.sys.stdin
         msrv_plan.sys.stdin = io.StringIO(
@@ -276,7 +281,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 0, msg=err)
         self.assertEqual(
             out.strip(),
-            "check\t1.82.0\tedtf-core@1.3.1 edtf-cli@1.3.1",
+            "check\t1.82.0\tdefault\tedtf-core@1.3.1 edtf-cli@1.3.1",
         )
 
     def test_a_promise_no_pin_covers_is_red(self) -> None:
@@ -350,7 +355,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 0, msg=err)
         lines = out.strip().splitlines()
         self.assertTrue(lines[0].startswith("note\t"))
-        self.assertEqual(lines[1], "check\t1.82.0\tedtf-core@1.3.1")
+        self.assertEqual(lines[1], "check\t1.82.0\tdefault\tedtf-core@1.3.1")
 
     def test_two_minimums_plan_two_checks(self) -> None:
         """Each at its own pin; neither verified by the other's toolchain."""
@@ -361,7 +366,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 0, msg=err)
         self.assertEqual(
             out.strip().splitlines(),
-            ["check\t1.82.0\ta@1.3.1", "check\t1.90.0\tb@1.3.1"],
+            ["check\t1.82.0\tdefault\ta@1.3.1", "check\t1.90.0\tdefault\tb@1.3.1"],
         )
 
     def test_one_uncovered_minimum_reds_the_whole_plan(self) -> None:
@@ -372,6 +377,44 @@ class MainTest(unittest.TestCase):
         )
         self.assertEqual(status, 1)
         self.assertEqual(out, "")
+
+    def test_a_pgrx_member_is_checked_with_its_own_features(self) -> None:
+        """#813: --all-features cannot compile a crate whose features fight."""
+        status, out, err = self.invoke(
+            metadata(member("edtf-core", "1.82"), member("edtf-postgres", "1.82")),
+            [pin("1.82.0")],
+            pgrx="edtf-postgres:18",
+        )
+        self.assertEqual(status, 0, msg=err)
+        self.assertEqual(
+            out.strip().splitlines(),
+            [
+                "check\t1.82.0\tdefault\tedtf-core@1.3.1",
+                (
+                    "check\t1.82.0\t--no-default-features --features pg18\t"
+                    "edtf-postgres@1.3.1"
+                ),
+            ],
+        )
+
+    def test_a_workspace_of_nothing_but_an_extension_still_plans(self) -> None:
+        """The plain record must not be emitted empty."""
+        status, out, err = self.invoke(
+            metadata(member("ext", "1.82")),
+            [pin("1.82.0")],
+            pgrx="ext:17",
+        )
+        self.assertEqual(status, 0, msg=err)
+        self.assertEqual(
+            out.strip(),
+            "check\t1.82.0\t--no-default-features --features pg17\text@1.3.1",
+        )
+
+    def test_a_pgrx_name_with_no_major_is_ignored(self) -> None:
+        """A malformed pair must not silently drop a crate from the plan."""
+        self.assertEqual(msrv_plan.features("ext:"), {})
+        self.assertEqual(msrv_plan.features(":18"), {})
+        self.assertEqual(msrv_plan.features(""), {})
 
     def test_a_declaration_this_cannot_compare_is_red(self) -> None:
         """Refuse rather than verify a promise the check never read."""

@@ -52,6 +52,12 @@ shared lives here and nowhere else. Five layers:
    `lint:<tool>` task here enforces that tool in every repo with no repo
    change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
    are network-bound or noisy checks, structurally outside the gate.
+   A belt-defined TEST leg is named in `ci` explicitly rather than
+   collected — `test:pgrx` is the only one (#813). `test` belongs to the
+   repo, so the belt cannot define it without colliding; and naming a
+   test `lint:` to reach the wildcard is the accident that put `pg:lint`
+   outside the gate for forty releases. Guarded and skip-clean like every
+   belt task, so a repo with no pgrx crate pays nothing.
 4. **Shared workflows**: `ci.yml` (the reusable gate — callers pin one
    SHA, and `$/.github/actions/canon` delivers the toolbelt at that same
    resolution, #165),

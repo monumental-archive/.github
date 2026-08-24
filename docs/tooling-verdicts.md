@@ -51,6 +51,7 @@ honestly blocked on.
 | clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus ten named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv-plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
+| `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx-postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
 
 **clippy, and the three things standing it up settled** (#445). The
 belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
@@ -111,6 +112,34 @@ conforms to them per site with `#[expect(..., reason = "...")]` — the
 decision being that the ladder is right and the codebase answers to it,
 not the reverse. Read the 97 as what a fixture measures, never as what
 this ladder costs a real repository.
+
+*An eleventh contradiction, and it applies to pgrx crates only (#813).*
+`tests_outside_test_module` demands `#[cfg(test)]`. pgrx demands
+`#[cfg(any(test, feature = "pg_test"))]`, because `cargo pgrx test`
+compiles the tests INTO the extension under that feature and runs them
+inside a live Postgres; under a bare `#[cfg(test)]` they are not built
+into the extension at all and the suite finds nothing. Two tools, one
+module, incompatible attributes — the same test the ten above pass, with
+pgrx standing where the other lint usually stands. Measured on edtf's
+extension crate the first time it was ever linted at this level: **7 of
+73 findings** were this lint, one per `#[pg_test]`, on a module carrying
+exactly the cfg pgrx documents. It is named in `mise/clippy-ladder.sh`
+rather than left to seven `#[expect]` attributes in every pgrx crate in
+the org forever, and it is scoped by derivation — a crate that does not
+depend on pgrx never sees it.
+
+*What that first linting cost, recorded so the next one is not a
+surprise.* The remaining **66** findings on `edtf-postgres` are ordinary
+import debt of the #687 kind, not structural: 26 `missing_assert_message`,
+13 `single_call_fn`, 9 `missing_panics_doc`, 5 `min_ident_chars`, 3
+`default_numeric_fallback`, 2 each `missing_inline_in_public_items` and
+`too_long_first_doc_paragraph`, and singletons including `wildcard_imports`
+on `pgrx::prelude::*` and `inline_modules` on the `pub mod pg_test`
+harness. release-lab's `lab-pg` reads 20 of the same classes. Each was
+checked against pgrx's requirements and none of them is a contradiction —
+which is exactly why they are debt to work through rather than exclusions
+to add. The crate carried it for forty releases because `CLIPPY_EXCLUDE`
+hid it.
 
 *The whole workspace is linted every run, one crate at a time (#726).*
 Under `-D warnings` a clippy finding IS a compile error, so a red crate
@@ -316,6 +345,64 @@ alternative is a second list that drifts. A member excluded there while
 declaring a minimum is therefore **unverified**, and the task prints it
 as such on every run rather than leaving the hole silent; #813 is what
 removes those exclusions, and this check widens with them.
+
+**The gate compiles what the publish path builds** (#813). edtf's v1.3.0
+publish failed all ten pgrx jobs on a parse error, and the gate had been
+green: it had never compiled that crate. A task existed and could not
+matter — `pg:lint` sat outside the `lint:*` wildcard, so `ci` never
+collected it, and it exited 101 on an unmodified tree, so it had never
+once passed. #687's class exactly: not a test that was skipped, a test
+that could not fail. release-lab carried the identical blind spot and had
+simply not published into it yet.
+
+*What replaced it.* `lint:pg-clippy` lints the extension at the org's
+level, `test:pgrx` runs its suite at every major the crate declares, and
+`lint:gate-surface` refuses any tree where a crate the publish path
+builds is held out of the gate. All three are belt tasks, because a
+repo-local task is what failed: the fix for a check nothing collected is
+not a better-written repo task but a task the wildcard takes, in a file no
+repository edits.
+
+*Nothing is declared that can be derived.* A member is a pgrx extension
+when it depends on `pgrx` **and** carries `pgNN` features; its majors are
+those features. So `CLIPPY_EXCLUDE = "edtf-postgres"` — the line that hid
+the crate for forty releases — is deleted rather than corrected, in both
+repositories, and `mise/gate-surface.py` is the single reader that
+`lint:rust`, `lint:msrv`, `lint:pg-clippy`, `test:pgrx` and `fix:rust` all
+consume. Four copies of that answer would have drifted; the exclusion was
+the first copy to.
+
+*Postgres is pinned by the repository and everything else is the belt's.*
+Belt tools install in every repository in the org, so five majors in
+`mise/config.toml` would cost stele, monumental-archive, iiif-server and
+the canon ~200M each for a Postgres they never use — and the org's own
+rule already settles it: the belt carries what the belt needs to run,
+repositories carry what they build with. So the repository pins
+`aqua:theseus-rs/postgresql-binaries` once per major, and the belt owns
+the task, the derivation and the agreement check that every declared major
+has a pin. The full provisioning measurement — both platforms, both
+mechanisms, what each costs — is recorded on #813; the short version is
+that the aqua package installs in seconds with a checksum, carries
+`include/server`, needs no apt or brew package on either platform, and
+leaves the mise install directory untouched after a full `cargo pgrx
+test`.
+
+*The one correction the belt supplies.* The prebuilt macOS `pg_config`
+reports its BUILD machine's flags — an `-isysroot` into an Xcode that does
+not exist here and an `-I` into a Homebrew that does not either — and
+pgrx hands them to clang, so bindgen dies on `inttypes.h`. `pgrx-env.sh`
+prepends the machine's real SDK to both `BINDGEN_EXTRA_CLANG_ARGS` and
+`CFLAGS`; both are needed, because the cshim is compiled by cc-rs, which
+never reads a bindgen variable. Linux needs no correction.
+
+*A trap worth the line it costs.* These tasks pass records to bash `read`
+loops with `IFS` set to tab, and **tab is a whitespace separator, so bash
+collapses a run of them**: an empty field does not arrive empty, it
+vanishes and every field after it shifts left. Measured here as a plain
+crate whose empty major list made its directory arrive as its majors,
+which then handed cargo a package spec as a positional argument. Every
+record field is therefore non-empty by construction (`-`, `default`), and
+a table test asserts it so the placeholders are not tidied away later.
 
 **Config delivery: the belt hands its own configs to its own tools**
 (#445). A config only a belt tool reads lives in `mise/` and is passed to
