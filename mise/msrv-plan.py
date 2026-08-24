@@ -184,6 +184,26 @@ def remedy(
     ]
 
 
+def features(declared: str) -> dict[str, str]:
+    """Read which members need feature flags of their own, and which.
+
+    A pgrx extension cannot be compiled with `--all-features`: its pgNN
+    features contradict each other. `gate-surface.py` derives which
+    members those are and at which major, and hands the pairs here, so
+    this file never has to know what pgrx is (#813).
+
+    Returns:
+        Each such member mapped to the cargo flags that compile it.
+
+    """
+    chosen: dict[str, str] = {}
+    for pair in declared.split(","):
+        name, _, major = pair.partition(":")
+        if name.strip() and major.strip().isdigit():
+            chosen[name.strip()] = f"--no-default-features --features pg{major.strip()}"
+    return chosen
+
+
 def main(argv: list[str] | None = None) -> int:
     """Emit the check plan for one workspace, or the disagreement.
 
@@ -194,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="the org's MSRV verification plan")
     parser.add_argument("--toolchains", type=Path, required=True)
     parser.add_argument("--exclude", default="")
+    parser.add_argument("--pgrx", default="")
     args = parser.parse_args(argv)
 
     try:
@@ -218,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     pinned, absent = pins(listing)
+    extensions = features(args.pgrx)
     records = [f"note\t{line}" for line in unreachable]
     findings: list[str] = []
     for version, specs in sorted(groups.items()):
@@ -225,7 +247,18 @@ def main(argv: list[str] | None = None) -> int:
         if toolchain is None:
             findings.extend(remedy(version, specs, [*pinned.values(), *absent]))
             continue
-        records.append(f"check\t{toolchain}\t{' '.join(specs)}")
+        plain = [spec for spec in specs if spec.split("@")[0] not in extensions]
+        if plain:
+            # `default`, never an empty field: the consumer is a bash
+            # `read` loop with IFS=tab, and bash collapses a run of
+            # whitespace separators, so an empty field shifts every field
+            # after it left by one.
+            records.append(f"check\t{toolchain}\tdefault\t{' '.join(plain)}")
+        records.extend(
+            f"check\t{toolchain}\t{extensions[spec.split('@')[0]]}\t{spec}"
+            for spec in specs
+            if spec.split("@")[0] in extensions
+        )
     if findings:
         print(
             f"{NAME}: the declared minimum and the pinned toolchain disagree",

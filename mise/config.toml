@@ -498,6 +498,15 @@ depends = [
   # The coverage ratchet joins the gate the moment a repo commits a
   # floor; without one it skips clean like every guarded belt task.
   "coverage:check",
+  # The extension suite, named rather than collected (#813). `test` is
+  # the REPOSITORY's task and the belt cannot define it without
+  # colliding with every repo's own, so the belt's own test leg needs a
+  # name of its own and a line here. Calling it `lint:pgrx` to reach the
+  # wildcard was the alternative and is refused: a test named lint to
+  # get itself collected is how `pg:lint` came to sit outside the gate
+  # in the first place. Guarded and skip-clean like every belt task, so
+  # a repo with no pgrx crate pays nothing.
+  "test:pgrx",
 ]
 run = "echo 'ci: all gates green'"
 
@@ -2589,38 +2598,21 @@ fi
 # so; everything else gets --all-features, because an unlinted feature is
 # unlinted code.
 features="${CLIPPY_FEATURES:---all-features}"
-# THE NAMED CONTRADICTIONS, held once so that the count this task prints
-# is the list itself. Written twice they disagreed: the tenth exclusion
-# arrived with #687 and the prose above it still said nine (#752). An
-# eleventh is one line here and the printed count follows it. The two
-# allows that are NOT contradictions stay at the call site below, each
-# with its own reason.
-contradictions=(
-  implicit_return
-  question_mark_used
-  self_named_module_files
-  pub_with_shorthand
-  semicolon_outside_block
-  separated_literal_suffix
-  big_endian_bytes
-  little_endian_bytes
-  arbitrary_source_item_ordering
-  inline_asm_x86_intel_syntax
-)
-allow_contradictions=()
-# Accumulated rather than read off the array's length. mise renders every
-# task body through Tera before bash sees it, and bash's array-length
-# syntax — dollar, brace, hash — is also how a Tera comment OPENS, so the
-# task dies at render time with an unclosed-comment-tag error and never
-# runs (measured; the error names a closing tag, which reads like a
-# corrupt body rather than a template collision). Tera parses shell
-# comments too, so the sequence cannot even be quoted in a remark about
-# it. No body in this belt uses that syntax; this is why.
-contradiction_count=0
-for lint in "${contradictions[@]}"; do
-  allow_contradictions+=("-A" "clippy::${lint}")
-  contradiction_count=$((contradiction_count + 1))
-done
+# THE LADDER LIVES IN THE BELT'S clippy-ladder.sh, not here (#813). It
+# moved the day a SECOND task acquired the same obligation:
+# `lint:pg-clippy` sets this exact level on the pgrx crate the gate never
+# compiled, and a second copy of a ten-name list is the drift #752
+# recorded — the list said ten and the prose above it said nine.
+#
+# Sourcing it also retires #846's hand-rolled counter. That counter
+# existed because bash's array-length syntax — dollar, brace, hash — is
+# also how a Tera comment OPENS, and mise renders every task body through
+# Tera before bash sees it, so a body using it dies at render time and
+# never runs. A .sh file is not a task body and is not rendered, so the
+# count is read off the list itself where it belongs.
+. "${ORG_BELT_DIR}/clippy-ladder.sh"
+ladder=$(org_clippy_ladder)
+contradiction_count=$(org_clippy_contradiction_count)
 # THE WHOLE WORKSPACE IS LINTED EVERY RUN, one `-p` pass per crate
 # (#726). Under `-D warnings` a finding IS a compile error, so a red
 # crate emits no metadata and every crate that depends on it is never
@@ -2656,19 +2648,23 @@ done
 # that compiled a member as an unlinted dependency does not stop that
 # member's own pass reporting it red, and re-running a pass replays the
 # failure rather than serving a green cache.
-command -v jq > /dev/null || {
-  echo "lint:rust: jq missing from the belt" >&2
-  exit 1
-}
 cargo fetch --locked
-# cargo's own account of the population. `workspace_members` and not
-# `workspace_default_members`, for the reason above; `--no-deps` is what
-# holds `packages` to the members themselves. The spec is name@version,
-# which cargo accepts for `-p` and which stays unambiguous.
-members=$(cargo metadata --no-deps --format-version 1 --locked \
-  | jq -r '.workspace_members as $m | .packages[]
-      | select(.id as $i | $m | index($i)) | "\(.name)@\(.version)"')
-[[ -n ${members} ]] || {
+# THE POPULATION COMES FROM THE BELT'S ONE DERIVATION (#813), not from a
+# jq expression here and three more elsewhere. gate-surface.py reads
+# cargo's own account — `workspace_members`, not
+# `workspace_default_members` — and classifies each member, so this task,
+# `lint:pg-clippy`, `test:pgrx` and `lint:msrv` cannot disagree about
+# which crates exist or what kind each one is.
+#
+# A pgrx extension is SKIPPED HERE and linted by `lint:pg-clippy` at the
+# same level: its pgNN features are mutually exclusive, so `--all-features`
+# is a hard error on it, and the old answer was a repo naming it in
+# CLIPPY_EXCLUDE — which is how a published crate went forty releases
+# without being compiled at all. Derived, never declared: the repo says
+# nothing and cannot get it wrong.
+surface=$(cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+[[ -n ${surface} ]] || {
   echo "lint:rust: a Cargo.toml is tracked but cargo metadata names no workspace member" >&2
   exit 1
 }
@@ -2678,30 +2674,30 @@ count=0
 linted=""
 red=""
 excluded=""
-while IFS= read -r spec; do
+extensions=""
+while IFS=$'\t' read -r record spec kind _majors _dir; do
   [[ -n ${spec} ]] || continue
   name="${spec%@*}"
-  if [[ " ${CLIPPY_EXCLUDE:-} " == *" ${name} "* ]]; then
+  if [[ ${record} == excluded ]]; then
     excluded="${excluded} ${name}"
+    continue
+  fi
+  if [[ ${kind} == pgrx ]]; then
+    extensions="${extensions} ${name}"
     continue
   fi
   count=$((count + 1))
   linted="${linted} ${name}"
   pass=0
-  # shellcheck disable=SC2086  # ${features} holds whole flag WORDS
-  # (--all-features), which cargo must receive as separate arguments
+  # shellcheck disable=SC2086  # ${features} and ${ladder} hold whole flag
+  # WORDS, which cargo and clippy must receive as separate arguments
   cargo clippy -p "${spec}" --no-deps --all-targets ${features} --locked --keep-going -- \
-    -D warnings \
-    -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
-    -D clippy::restriction \
-    -A clippy::blanket_clippy_restriction_lints \
-    -A clippy::multiple_crate_versions \
-    "${allow_contradictions[@]}" 2>&1 | tee -a "${out}" || pass=$?
+    ${ladder} 2>&1 | tee -a "${out}" || pass=$?
   if [[ ${pass} -ne 0 ]]; then
     red="${red} ${name}"
     status=${pass}
   fi
-done <<< "${members}"
+done <<< "${surface}"
 # A bare `--features NAME` means different things to the two shapes:
 # cargo accepts a name held by ANY member when one pass covers the
 # workspace, and rejects it for a member that lacks it when each crate
@@ -2730,6 +2726,7 @@ fi
 # that no run of this task can read as a whole workspace when it was not
 # one (#726).
 echo "lint:rust: ${count} crate(s) linted:${linted}"
+[[ -z ${extensions} ]] || echo "lint:rust: pgrx extension(s), linted by lint:pg-clippy:${extensions}"
 [[ -z ${excluded} ]] || echo "lint:rust: excluded by CLIPPY_EXCLUDE:${excluded}"
 if [[ -n ${red} ]]; then
   echo "lint:rust: red:${red}" >&2
@@ -2789,44 +2786,56 @@ features="${CLIPPY_FEATURES:---all-features}"
 # depending on a and both red, ONE `--fix` pass rewrote both and exited
 # 0. The defect #726 names is the gate leg's, and the mirror this leg
 # owes it is the population, not the mechanism.
-command -v jq > /dev/null || {
-  echo "fix:rust: jq missing from the belt" >&2
-  exit 1
-}
+. "${ORG_BELT_DIR}/clippy-ladder.sh"
+ladder=$(org_clippy_ladder)
 cargo fetch --locked
-members=$(cargo metadata --no-deps --format-version 1 --locked \
-  | jq -r '.workspace_members as $m | .packages[]
-      | select(.id as $i | $m | index($i)) | .name')
+# Same derivation as the gate leg, for the same reason: this leg's mirror
+# of #726 is the POPULATION, and a population computed twice is two
+# populations (#813).
+surface=$(cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 excludes=""
 fixing=""
 excluded=""
-for name in ${members}; do
-  if [[ " ${CLIPPY_EXCLUDE:-} " == *" ${name} "* ]]; then
+extensions=""
+ext_majors=""
+while IFS=$'\t' read -r record spec kind majors _dir; do
+  [[ -n ${spec} ]] || continue
+  name="${spec%@*}"
+  if [[ ${record} == excluded ]]; then
     excludes="${excludes} --exclude ${name}"
     excluded="${excluded} ${name}"
+  elif [[ ${kind} == pgrx ]]; then
+    # Held out of the workspace pass and fixed in its own below: its pgNN
+    # features contradict each other, so --all-features cannot compile it.
+    excludes="${excludes} --exclude ${name}"
+    extensions="${extensions} ${name}"
+    ext_majors="${majors}"
   else
     fixing="${fixing} ${name}"
   fi
-done
-# shellcheck disable=SC2086  # both hold whole flag words, which cargo
-# must receive as separate arguments
-cargo clippy --fix --workspace ${excludes} ${features} --locked -- \
-  -D warnings \
-  -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo \
-  -D clippy::restriction \
-  -A clippy::blanket_clippy_restriction_lints \
-  -A clippy::multiple_crate_versions \
-  -A clippy::implicit_return \
-  -A clippy::question_mark_used \
-  -A clippy::self_named_module_files \
-  -A clippy::pub_with_shorthand \
-  -A clippy::semicolon_outside_block \
-  -A clippy::separated_literal_suffix \
-  -A clippy::big_endian_bytes \
-  -A clippy::little_endian_bytes \
-  -A clippy::arbitrary_source_item_ordering \
-  -A clippy::inline_asm_x86_intel_syntax
+done <<< "${surface}"
+# shellcheck disable=SC2086  # all three hold whole flag words, which
+# cargo and clippy must receive as separate arguments
+cargo clippy --fix --workspace ${excludes} ${features} --locked -- ${ladder}
 echo "fix:rust:${fixing:- none} rewritten where clippy could"
+# The extension pass. Without it `mise run fix` could not touch a crate
+# the gate now lints, which is the asymmetry #691 named wearing a new
+# hat: a finding a developer cannot ask the machine to fix is a finding
+# they will fix by hand or not at all.
+if [[ -n ${extensions} ]]; then
+  . "${ORG_BELT_DIR}/pgrx-env.sh"
+  org_pgrx_darwin_flags
+  mise ls "aqua:theseus-rs/postgresql-binaries" --json \
+    | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${ext_majors}" \
+    | org_pgrx_init
+  for name in ${extensions}; do
+    # shellcheck disable=SC2086  # ${ladder} holds whole flag words
+    cargo clippy --fix -p "${name}" --no-deps --all-targets --locked \
+      --no-default-features --features "pg${ext_majors##*,}" -- ${ladder}
+  done
+  echo "fix:rust: pgrx extension(s) fixed at pg${ext_majors##*,}:${extensions}"
+fi
 [[ -z ${excluded} ]] || echo "fix:rust: excluded by CLIPPY_EXCLUDE:${excluded}"
 echo "fix:rust: applied what is machine-applicable — the rest is judgement"
 '''
@@ -2912,16 +2921,47 @@ tmp=$(mktemp -d)
 trap 'rm -rf "${tmp}"' EXIT
 cargo fetch --locked
 mise ls rust --json > "${tmp}/toolchains.json"
-plan=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/msrv-plan.py" \
-    --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}")
+cargo metadata --no-deps --format-version 1 --locked > "${tmp}/metadata.json"
+# The belt's one derivation says which members are pgrx extensions and at
+# which majors (#813); a pgrx crate cannot be compiled with
+# --all-features, so its own flags ride the plan rather than this task
+# guessing. `${major##*,}` is the highest declared, the same choice
+# lint:pg-clippy makes and for the same reason.
+pgrx=""
+extensions=""
+# Assigned before the loop reads it, never spliced in as `<<< "$(...)"`:
+# a command substitution's failure is discarded, so a red derivation
+# would arrive as an EMPTY here-string and this task would report having
+# verified a workspace it never saw (SC2312, and the fail-open shape the
+# gate exists to refuse).
+surface=$(python3 "${ORG_BELT_DIR}/gate-surface.py" \
+  --exclude "${CLIPPY_EXCLUDE:-}" < "${tmp}/metadata.json")
+while IFS=$'\t' read -r record spec kind majors _dir; do
+  [[ ${record} == crate && ${kind} == pgrx ]] || continue
+  extensions="${extensions} ${spec%@*}"
+  pgrx="${pgrx}${pgrx:+,}${spec%@*}:${majors##*,}"
+done <<< "${surface}"
+plan=$(python3 "${ORG_BELT_DIR}/msrv-plan.py" \
+  --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
+  --pgrx "${pgrx}" < "${tmp}/metadata.json")
 [[ -n ${plan} ]] || {
   echo "lint:msrv: no crate declares rust-version, skipped"
   exit 0
 }
+# A pgrx crate needs a Postgres before it can be compiled at all, at the
+# MSRV exactly as at the stable pin. Provisioned only when one is in the
+# plan, so a repo without an extension pays nothing.
+if [[ -n ${extensions} && ${plan} == *"--features pg"* ]]; then
+  . "${ORG_BELT_DIR}/pgrx-env.sh"
+  org_pgrx_darwin_flags
+  majors="${pgrx##*:}"
+  mise ls "aqua:theseus-rs/postgresql-binaries" --json \
+    | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+    | org_pgrx_init > /dev/null
+fi
 features="${CLIPPY_FEATURES:---all-features}"
 checked=0
-while IFS=$'\t' read -r kind first rest; do
+while IFS=$'\t' read -r kind first own rest; do
   [[ -n ${kind} ]] || continue
   case ${kind} in
     note)
@@ -2933,10 +2973,16 @@ while IFS=$'\t' read -r kind first rest; do
       for spec in ${rest}; do
         flags="${flags} -p ${spec}"
       done
+      # A crate with feature flags of its own gets them INSTEAD of the
+      # workspace default, never as well: they contradict each other.
+      # `default` rather than an empty field, because bash collapses a
+      # run of tabs and an empty field would shift the specs into it.
+      use="${features}"
+      [[ ${own} == "default" ]] || use="${own}"
       echo "lint:msrv: compiling at ${first}: ${rest}"
-      # shellcheck disable=SC2086  # ${features} and ${flags} hold whole
-      # flag WORDS, which cargo must receive as separate arguments
-      RUSTUP_TOOLCHAIN="${first}" cargo check --locked ${features} ${flags}
+      # shellcheck disable=SC2086  # ${use} and ${flags} hold whole flag
+      # WORDS, which cargo must receive as separate arguments
+      RUSTUP_TOOLCHAIN="${first}" cargo check --locked ${use} ${flags}
       ;;
     *)
       echo "lint:msrv: unreadable plan record from msrv-plan.py: ${kind}" >&2
@@ -2952,6 +2998,224 @@ if [[ ${checked} -eq 0 ]]; then
   exit 0
 fi
 echo "lint:msrv: ${checked} declared minimum(s) compiled at the toolchain they name"
+'''
+
+[tasks."lint:pg-clippy"]
+description = "The pgrx extension the gate never compiled, at the same clippy level as every other crate"
+dir = "{{cwd}}"
+# The crate that could not fail (#813). edtf's v1.3.0 publish died in all
+# ten pgrx jobs on a parse error, and the gate had been green: it had
+# never compiled that crate. A task existed and could not matter —
+# `pg:lint` sat outside the `lint:*` wildcard so `ci` never collected it,
+# and it exited 101 on an unmodified tree, so it had never once passed.
+# That is #687's class exactly: not a test that was skipped, a test that
+# could not fail.
+#
+# NAMED `lint:` SO THE WILDCARD TAKES IT. The whole defect was a naming
+# accident with a four-hundred-release blast radius, and the fix is not a
+# better repo-local task — it is a belt task the wildcard collects, so no
+# repository can lose it again by not remembering it.
+#
+# The crate is DERIVED, never declared: gate-surface.py calls a member a
+# pgrx extension when it depends on pgrx AND carries pgNN features, so a
+# repository states nothing and cannot state it wrong. `CLIPPY_EXCLUDE`
+# is not how this crate is recognised — it is what used to hide it.
+#
+# ONE MAJOR, THE HIGHEST DECLARED. Its bindings are per-major, so linting
+# all five would multiply the cost by five to re-lint mostly identical
+# code; `test:pgrx` compiles every major anyway, which is where a
+# major-specific break shows up. Highest rather than lowest because that
+# is where a newly-deprecated API surfaces first, and stated here rather
+# than left to be inferred from the code.
+#
+# `--no-deps` is load-bearing and was learned the hard way in edtf: without
+# it clippy also lints the workspace's other crates under
+# --no-default-features, where their lint expectations do not fire and
+# `-D warnings` turns each one into an error.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n ${manifests} ]] || {
+  echo "lint:pg-clippy: no Cargo.toml tracked, skipped"
+  exit 0
+}
+command -v cargo > /dev/null || {
+  echo "lint:pg-clippy: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+cargo fetch --locked
+specs=""
+majors=""
+# Assigned first: a `<<< "$(...)"` discards the derivation's exit status,
+# so a red derivation would read as a workspace with no extension and
+# this task would skip clean having checked nothing.
+surface=$(cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+while IFS=$'\t' read -r record spec kind crate_majors _dir; do
+  [[ ${record} == crate && ${kind} == pgrx ]] || continue
+  specs="${specs} ${spec}:${crate_majors##*,}"
+  majors="${majors}${majors:+,}${crate_majors##*,}"
+done <<< "${surface}"
+[[ -n ${specs} ]] || {
+  echo "lint:pg-clippy: no pgrx extension tracked, skipped"
+  exit 0
+}
+# clippy is a rustup COMPONENT of the repo's own pin, asserted with a
+# remedy and never installed mid-run — the lint:rust reasoning verbatim.
+if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
+  echo "lint:pg-clippy: clippy component missing — declare it with the rust pin in mise.toml:" >&2
+  echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
+  exit 1
+fi
+export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
+. "${ORG_BELT_DIR}/clippy-ladder.sh"
+# The pgrx ladder: the org's, plus the one contradiction a pgrx crate
+# cannot escape (the reason is written at the list, in clippy-ladder.sh).
+ladder=$(org_clippy_pgrx_ladder)
+contradiction_count=$(org_clippy_pgrx_contradiction_count)
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+org_pgrx_darwin_flags
+mise ls "aqua:theseus-rs/postgresql-binaries" --json \
+  | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+  | org_pgrx_init > /dev/null
+count=0
+linted=""
+for entry in ${specs}; do
+  spec="${entry%:*}"
+  major="${entry##*:}"
+  count=$((count + 1))
+  linted="${linted} ${spec%@*}(pg${major})"
+  # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
+  # clippy must receive as separate arguments
+  cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
+    --no-default-features --features "pg${major}" -- ${ladder}
+done
+echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
+echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
+'''
+
+[tasks."test:pgrx"]
+description = "The Postgres extension's own suite, at every major the crate declares"
+dir = "{{cwd}}"
+# The other half of #813, and the half a compile check cannot cover: the
+# extension's SQL-level behaviour. edtf's `pg:test` ran it at one major,
+# from a task nothing collected, so the release containers were the first
+# thing to execute the extension at pg14 through pg17.
+#
+# EVERY MAJOR THE CRATE DECLARES, read from its `[features]` and never
+# guessed — a repository that drops a major must not have the gate keep
+# testing it, and one that adds a major must not have the gate quietly
+# skip it. The stub's `pg-majors` is checked against the same features by
+# `lint:gate-surface` rather than being a second source.
+#
+# NOT NAMED `test`, which is the repository's own task and would collide,
+# and not named `lint:` either, because it is a test and calling it a
+# lint to reach the wildcard would be the naming accident that caused
+# this issue in the first place. It is wired into `ci` explicitly below.
+#
+# Measured cost before it was wired in (recorded on #813): 91s for the
+# first major on the runner and 37s for each one after it, so five majors
+# is about four minutes, and mise-action's cache makes the Postgres
+# install a once-per-pin-bump cost rather than a per-run one.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n ${manifests} ]] || {
+  echo "test:pgrx: no Cargo.toml tracked, skipped"
+  exit 0
+}
+command -v cargo > /dev/null || {
+  echo "test:pgrx: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+crates=""
+majors=""
+# Assigned first, for the reason the sibling tasks give: an empty
+# here-string from a failed derivation would skip this suite silently,
+# which is the exact failure #813 exists to end.
+surface=$(cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+while IFS=$'\t' read -r record spec kind crate_majors dir; do
+  [[ ${record} == crate && ${kind} == pgrx ]] || continue
+  [[ ${dir} != "-" ]] || {
+    echo "test:pgrx: ${spec} is a pgrx extension cargo reports no directory for" >&2
+    exit 1
+  }
+  crates="${crates} ${dir}:${crate_majors}"
+  majors="${majors}${majors:+,}${crate_majors}"
+done <<< "${surface}"
+[[ -n ${crates} ]] || {
+  echo "test:pgrx: no pgrx extension tracked, skipped"
+  exit 0
+}
+cargo fetch --locked
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+org_pgrx_darwin_flags
+mise ls "aqua:theseus-rs/postgresql-binaries" --json \
+  | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+  | org_pgrx_init > /dev/null
+count=0
+tested=""
+for entry in ${crates}; do
+  dir="${entry%%:*}"
+  list="${entry#*:}"
+  for one in ${list//,/ }; do
+    count=$((count + 1))
+    tested="${tested} ${dir}(pg${one})"
+    echo "test:pgrx: ${dir} at pg${one}"
+    (cd "${dir}" && cargo pgrx test "pg${one}")
+  done
+done
+echo "test:pgrx: ${count} suite run(s):${tested}"
+'''
+
+[tasks."lint:gate-surface"]
+description = "Every crate the publish path builds is compiled by the gate"
+dir = "{{cwd}}"
+# THE INVARIANT, so that no repository can recreate the blind spot (#813).
+# Both instances of it were the same shape: a crate the publish path
+# builds, held out of the gate by a repository's own `CLIPPY_EXCLUDE`,
+# with nothing anywhere that compared the two lists. edtf found out at a
+# tag; release-lab had not found out yet.
+#
+# The publish path's crates are read from the stub's own `with:` block —
+# `rust-crate`/`rust-binary` take every member except its declared
+# `exclude`, `pgrx-extension` takes `extension-crate-dir`, `wasm-npm`
+# takes `crate-dir` — and joined against the gate's compile surface. A
+# crate in both the publish set and the exclusion set is red, with the
+# remedy being to delete the exclusion rather than to annotate it: an
+# exclusion hides a WHOLE CRATE, so a member held out of the gate is a
+# member whose first compile is the release's (the recorded burn).
+#
+# It also cross-checks `pg-majors` against the crate's features, because
+# the stub carries a copy of a fact the manifest owns. The features win:
+# they are what cargo compiles.
+#
+# Deterministic and offline — it reads two tracked files.
+run = '''
+set -euo pipefail
+[[ -f .github/workflows/publish.yml ]] || {
+  echo "lint:gate-surface: no publish.yml, nothing is published from here, skipped"
+  exit 0
+}
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n ${manifests} ]] || {
+  echo "lint:gate-surface: no Cargo.toml tracked, skipped"
+  exit 0
+}
+command -v cargo > /dev/null || {
+  echo "lint:gate-surface: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+surface=$(cargo metadata --no-deps --format-version 1 --locked \
+  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" \
+    --publish .github/workflows/publish.yml)
+count=0
+while IFS=$'\t' read -r record _spec _kind _majors _dir; do
+  [[ ${record} == crate ]] || continue
+  count=$((count + 1))
+done <<< "${surface}"
+echo "lint:gate-surface: ${count} crate(s) compiled by the gate, and the publish path builds no others"
 '''
 
 [tasks."lint:go"]
