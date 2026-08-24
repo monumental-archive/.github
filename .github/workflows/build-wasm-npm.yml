@@ -228,6 +228,8 @@ jobs:
         # — what it is MADE OF. The pgrx cells obey the same rule
         # (sbom-pgrx-* documents over cargo closures); the two halves
         # disagreeing silently is the #544 defect.
+        #
+        # plan-producer: wasm-npm sbom-npm-
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}

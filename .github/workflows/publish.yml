@@ -305,7 +305,15 @@ jobs:
             exit 1
           fi
           # The one spelling of the crate-built image class (#843). It is
-          # written here and nowhere else in the machinery: this job hands
+          # written here and nowhere else in the machinery — so the
+          # declaration/producer marker `lint:plan-producers` joins to
+          # the policy is written here too, beside the name, rather than
+          # in the image leg that is GIVEN the class and must not state
+          # it a second time (#833).
+          #
+          # plan-producer: oci-image-crate sbom-image-
+          #
+          # The job hands
           # it to the image leg as the class its inventory plan names, and
           # to the fan-in as the class the evidence manifest declares, so
           # the plan and the manifest cannot disagree about which class
@@ -455,6 +463,7 @@ jobs:
       inventories: ${{ steps.inventories.outputs.list }}
     needs:
       - guard
+      - build
       - build-go
       - build-binary
       - build-wasm
@@ -463,7 +472,8 @@ jobs:
     # The go-binary class reads its SBOM out of the shipped binaries
     # (stele#46), and the manifest-tracking classes hand this job their
     # inventory plans (#537) — the oci-image class among them since it
-    # took a declared binary-crate (#775, closing #773) — the artifact-to-package mapping each
+    # took a declared binary-crate (#775, closing #773), and the
+    # rust-crate class since #833 — the artifact-to-package mapping each
     # build leg holds as its own inputs, consumed at the only moment it
     # is certain. So this job sits downstream of those builds; for a
     # class not requested the edge is vacuous — a skipped build admits,
@@ -471,6 +481,7 @@ jobs:
     # job, and the commit point refuses every publish on its failure.
     if: >-
       ${{ !cancelled() && needs.guard.result == 'success' &&
+          (needs.build.result == 'success' || needs.build.result == 'skipped') &&
           (needs.build-go.result == 'success' || needs.build-go.result == 'skipped') &&
           (needs.build-binary.result == 'success' || needs.build-binary.result == 'skipped') &&
           (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
@@ -530,7 +541,8 @@ jobs:
           echo "BINARIES_DIR=${PWD}/shipped" >> "${GITHUB_ENV}"
       - name: Fetch the inventory plans the build legs emitted
         if: >-
-          ${{ contains(inputs.classes, 'rust-binary') ||
+          ${{ contains(inputs.classes, 'rust-crate') ||
+              contains(inputs.classes, 'rust-binary') ||
               contains(inputs.classes, 'wasm-npm') ||
               contains(inputs.classes, 'pgrx-extension') ||
               (contains(inputs.classes, 'oci-image') && inputs.binary-crate != '') }}

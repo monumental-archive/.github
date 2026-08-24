@@ -249,7 +249,11 @@ jobs:
           STAGE_DIR: staged
           # No plan on the repro leg: the comparator proves bytes, not
           # inventories. The prefix is the rust-binary class's own
-          # planned obligation in slsa/assert-policy.json.
+          # planned obligation in slsa/assert-policy.json — and the
+          # marker below is how `lint:plan-producers` joins the two, so
+          # a prefix renamed on one side reds the gate (#833).
+          #
+          # plan-producer: rust-binary sbom-cargo-
           #
           # Negated deliberately: an empty string is FALSY in a GitHub
           # expression, so `repro && '' || 'rust-binary'` would yield

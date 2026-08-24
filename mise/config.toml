@@ -7018,6 +7018,48 @@ EOF
 echo "lint:policy-load: ${checked} policy document(s) load against the pinned stele"
 '''
 
+[tasks."lint:plan-producers"]
+description = "Every planned SBOM obligation has a build leg that produces it (#833)"
+dir = "{{cwd}}"
+# The join nothing made (#833). `slsa/assert-policy.json` declares, per
+# evidence class, the inventory documents a release owes — `assetPrefixes`
+# entries carrying `planned: true` — and the build legs are what produce
+# them. Two committed files, and until this task nothing compared them.
+#
+# `rust-crate` declared `sbom-cargo-` from machinery 1.42.0 and no leg
+# ever emitted a plan for it. Forty canon releases rode past the
+# inconsistency; the first repository to declare the class in anger
+# refused pre-publish in `stele assert plans` and burned edtf v1.3.1. The
+# defect was visible in a set difference over two tracked files the whole
+# time, which is the lesson: before calling a defect unforeseeable, ask
+# what static check would have caught it. Declaration ↔ producer
+# agreement is always lintable.
+#
+# Deterministic and offline — two sets of tracked files, no runner and no
+# release — so it belongs in the gate rather than among the `audit:*`
+# tasks. Guarded on the policy: a repository committing none skips clean
+# by name. A repository that commits one and tracks no build workflow
+# does NOT skip: every obligation it declares is then unproduced, which
+# is the defect this task exists to name.
+#
+# The mechanism and the reason a marker declares the class rather than a
+# derivation reading it out of each leg live in the helper's own header.
+run = '''
+policy=slsa/assert-policy.json
+git ls-files --error-unmatch "${policy}" > /dev/null 2>&1 || {
+  echo "lint:plan-producers: no committed assert policy, skipped"
+  exit 0
+}
+listing=$(git ls-files '.github/workflows/build-*.yml' '.github/workflows/publish.yml')
+flows=()
+while IFS= read -r f; do
+  if [[ -n ${f} ]]; then flows+=("${f}"); fi
+done << EOF
+${listing}
+EOF
+python3 "${ORG_BELT_DIR}/plan-producers.py" --policy "${policy}" ${flows[@]+"${flows[@]}"}
+'''
+
 [tasks."lint:caller-permissions"]
 description = "Every caller of a workflow_call workflow grants its computed permissions requirement"
 dir = "{{cwd}}"
