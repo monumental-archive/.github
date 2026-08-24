@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.60.0](https://github.com/monumental-archive/.github/compare/v1.59.0...v1.60.0) - 2026-08-24
+
+### Added
+
+- split the crate-built image into its own evidence class ([#844](https://github.com/monumental-archive/.github/pull/844))
+- require a root changelog in versioned repos (#742) ([#847](https://github.com/monumental-archive/.github/pull/847))
+- emit the rust-crate plan and lint the join (#833) ([#861](https://github.com/monumental-archive/.github/pull/861))
+
+### Fixed
+
+- update first-party canon ([#835](https://github.com/monumental-archive/.github/pull/835))
+- update postgres to 06cad38 ([#837](https://github.com/monumental-archive/.github/pull/837))
+- update postgres to e384114 ([#838](https://github.com/monumental-archive/.github/pull/838))
+- update postgres to 5f72c7b ([#839](https://github.com/monumental-archive/.github/pull/839))
+- update postgres to e17e860 ([#840](https://github.com/monumental-archive/.github/pull/840))
+- update postgres to 2fdfb9b ([#841](https://github.com/monumental-archive/.github/pull/841))
+- update aqua:taiki-e/cargo-llvm-cov to 0.9.0 ([#842](https://github.com/monumental-archive/.github/pull/842))
+- draw the org-wide walks from AUDIT_TOKEN (#749) ([#845](https://github.com/monumental-archive/.github/pull/845))
+- count the clippy exclusions the run applied ([#846](https://github.com/monumental-archive/.github/pull/846))
+- refuse a PR title ending in its own reference (#800) ([#848](https://github.com/monumental-archive/.github/pull/848))
+- drop the GITHUB_TOKEN no release step reads (#741) ([#849](https://github.com/monumental-archive/.github/pull/849))
+- catch the setup-* family's silent cache (#732) ([#851](https://github.com/monumental-archive/.github/pull/851))
+- read every matcher a packageRule carries (#724) ([#852](https://github.com/monumental-archive/.github/pull/852))
+
 ## [1.59.0](https://github.com/monumental-archive/.github/compare/v1.58.11...v1.59.0) - 2026-08-21
 
 ### Added
