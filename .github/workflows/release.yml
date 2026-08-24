@@ -58,6 +58,19 @@ jobs:
       startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-24.04
     permissions:
+      # The checkout below clones the CALLER's repository with this job's
+      # ambient token, and a job that declares any permission gets `none`
+      # for every scope it leaves out — so until this line the clone
+      # worked only because every consumer of this workflow is public
+      # (#850). On a private one the tag leg would have died at checkout,
+      # after the Release PR was merged, at the least recoverable moment
+      # on the path.
+      #
+      # This is not an enlargement of the signing job's grant: it is the
+      # grant the job already depended on, made visible where the
+      # capability-boundary argument above is read. It adds no write
+      # surface, so that argument stands as written.
+      contents: read
       id-token: write # gitsign keyless tag signature, nothing else
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
