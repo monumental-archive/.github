@@ -35,16 +35,23 @@ do NOT assert the exit status: past selection the script wants a
 tarball, a container and a live Postgres, which is the publish path's
 job to prove and not something a unit test should pretend to do.
 
+WHAT IT MAY NOT TOUCH. Every subprocess here takes `hermetic_env()`,
+because this harness shells out to `git` and the thing it drives shells
+out to `git` again. #857 records what inheriting the caller's git
+environment cost.
+
 stdlib `unittest`, matching mise/test_*.py - #364 refused a test
 framework as a fourth thing to port.
 
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import textwrap
 import unittest
 from pathlib import Path
@@ -77,6 +84,77 @@ echo "gh stub: refusing '$*' (the test stops here by design)" >&2
 exit 1
 """
 
+# The one place every subprocess in this file gets its environment (#857).
+#
+# git EXPORTS `GIT_DIR` to the hooks it runs in a LINKED worktree - it is
+# absent in the main working tree, which is why instrumenting a hook in an
+# ordinary clone looks exculpatory - and `pre-commit` exports
+# `GIT_INDEX_FILE` there too. So a `git push` from a session worktree ran
+# this harness pointed at the real repository: `git init` + `git add -A`
+# staged the demo fixture into the shared index and marked every real file
+# deleted, while the suite reported OK. Three lanes of the 2026-08-24
+# batch were hit before anyone read a `git status`.
+#
+# `cwd=` is no defence: `GIT_DIR` is an absolute override git obeys
+# wherever it is standing. Only an explicit `env=` is, and it belongs
+# HERE rather than at the call sites, because one call site is not in
+# this file at all - generate-pgrx-upgrade.sh runs `git ls-files
+# '*.control'` for itself, under whatever `derive()` hands it, and no
+# author editing this file would think to go looking for it.
+#
+# HOME is redirected with it so no global git config reaches a fixture,
+# and an identity is set because a redirected HOME leaves git without one
+# the moment a row commits - which the planted row below does.
+GIT_ENV_KEPT = frozenset({"GIT_EDITOR"})
+IDENTITY_NAME = "pgrx upgrade harness"
+IDENTITY_EMAIL = "harness@example.invalid"
+
+
+def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
+    """Build an environment the caller's git state cannot reach into.
+
+    Returns:
+        The caller's environment with every `GIT_*` variable dropped but
+        `GIT_EDITOR`, with HOME and a git identity set, and with any
+        overrides applied last.
+
+    """
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("GIT_") or name in GIT_ENV_KEPT
+    }
+    env.update(
+        HOME=str(home),
+        GIT_EDITOR=env.get("GIT_EDITOR", "true"),
+        GIT_AUTHOR_NAME=IDENTITY_NAME,
+        GIT_AUTHOR_EMAIL=IDENTITY_EMAIL,
+        GIT_COMMITTER_NAME=IDENTITY_NAME,
+        GIT_COMMITTER_EMAIL=IDENTITY_EMAIL,
+    )
+    env.update(overrides)
+    return env
+
+
+def git(args: list[str], cwd: Path, home: Path) -> str:
+    """Run one `git`, blind to the caller's git environment.
+
+    Returns:
+        Its stdout. A wrapper rather than an `env=` argument repeated per
+        call site, so that a call site added later cannot omit the scrub
+        by not knowing it exists.
+
+    """
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
+        [GIT, *args],
+        cwd=cwd,
+        env=hermetic_env(home),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
 
 class Repo:
     """A throwaway pgrx repository with a chosen upgrade graph."""
@@ -90,7 +168,14 @@ class Repo:
         edges: list[tuple[str, str]],
     ) -> None:
         """Lay out a control file, an upgrade graph and the tool pins."""
-        self.root = Path(root)
+        # The repository and the HOME its git runs under are siblings in
+        # the caller's temp directory, never nested: anything git writes
+        # for this fixture would otherwise land inside the very tree it is
+        # about to stage.
+        self.home = Path(root) / "home"
+        self.home.mkdir()
+        self.root = Path(root) / "repo"
+        self.root.mkdir()
         self.name = name
         crate_dir = self.root / "crates" / crate
         (crate_dir / "sql").mkdir(parents=True)
@@ -114,12 +199,8 @@ class Repo:
                 "cargo:cargo-pgrx" = "0.19.2"
                 """)
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        subprocess.run([GIT, "init", "-q", "."], cwd=self.root, check=True)
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        subprocess.run(
-            [GIT, "add", "-A"], cwd=self.root, check=True, capture_output=True
-        )
+        git(["init", "-q", "."], self.root, self.home)
+        git(["add", "-A"], self.root, self.home)
 
     def derive(
         self, version: str, prev_manifest: str, fixture: str
@@ -136,9 +217,13 @@ class Repo:
         gh = bindir / "gh"
         gh.write_text(GH_STUB)
         gh.chmod(0o755)
-        env = dict(os.environ)
-        env.update(
-            PATH=f"{bindir}:{env['PATH']}",
+        # The script runs `git ls-files '*.control'` for itself, so the
+        # scrub has to reach it too - a fixture built hermetically and then
+        # inspected through the caller's `GIT_DIR` is the same defect one
+        # process further down.
+        env = hermetic_env(
+            self.home,
+            PATH=f"{bindir}:{os.environ['PATH']}",
             VERSION=version,
             PREV_MANIFEST=prev_manifest,
             # Not a credential: the script only asserts GH_TOKEN is set, and
@@ -232,6 +317,87 @@ class SelectsThePredecessor(unittest.TestCase):
             result = repo.derive("1.0.1", "1.0.0", "stele-releases.json")
         self.assertIn("already reaches 1.0.1", result.stdout)
         self.assertEqual(0, result.returncode, result.stderr)
+
+
+# Set on the suite this row spawns, so the child declines to spawn one of
+# its own. A marker rather than running one class by name: the row is
+# about what a WHOLE suite run does to an index, and naming a class would
+# quietly stop covering rows added to any other one.
+INNER_RUN = "PGRX_HARNESS_INNER_RUN"
+
+
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
+@unittest.skipIf(os.environ.get(INNER_RUN), "the inner run: this row spawned it")
+class LeavesTheCallersGitAlone(unittest.TestCase):
+    """#857, planted: the hazard itself, run for real on every gate."""
+
+    def test_a_linked_worktrees_index_is_byte_identical_afterwards(self) -> None:
+        """Run the whole suite the way a `pre-push` hook in a worktree does.
+
+        A scratch repository, a linked worktree of it, and exactly the
+        environment git hands a hook standing there: `GIT_DIR`, plus the
+        `GIT_INDEX_FILE` that `pre-commit` adds and that on its own leaves
+        an index referencing objects the repository does not hold
+        (`fatal: unable to read <oid>`). Both are planted on the child
+        only; this row's own git calls take the scrub, which is what keeps
+        the plant from reaching the tree the batch is working in.
+
+        Green has to mean two things, because a green suite WAS the defect
+        (#857): the index is untouched, and the suite that left it
+        untouched actually ran.
+        """
+        expected = unittest.defaultTestLoader.loadTestsFromModule(
+            sys.modules[__name__]
+        ).countTestCases()
+        with TemporaryDirectory() as d:
+            scratch = Path(d)
+            home = scratch / "home"
+            home.mkdir()
+            main = scratch / "main"
+            main.mkdir()
+            (main / "tracked.txt").write_text("a real file, in a real repo\n")
+            git(["init", "-q", "."], main, home)
+            git(["add", "-A"], main, home)
+            git(["commit", "-q", "-m", "seed"], main, home)
+            linked = scratch / "linked"
+            git(["worktree", "add", "-q", str(linked), "-b", "side"], main, home)
+            gitdir = Path(
+                git(["rev-parse", "--absolute-git-dir"], linked, home).strip()
+            )
+            index = gitdir / "index"
+
+            before_digest = hashlib.sha256(index.read_bytes()).hexdigest()
+            before_files = git(["ls-files"], linked, home)
+
+            planted = dict(os.environ)
+            planted.update({
+                INNER_RUN: "1",
+                "GIT_DIR": str(gitdir),
+                "GIT_INDEX_FILE": str(index),
+            })
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            run = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "-v"],
+                cwd=linked,
+                env=planted,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            after_digest = hashlib.sha256(index.read_bytes()).hexdigest()
+            after_files = git(["ls-files"], linked, home)
+            status = git(["status", "--porcelain"], linked, home)
+
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertIn(f"Ran {expected} tests", run.stderr)
+        # Exactly one skip, this row declining to recurse. Any other skip
+        # means the rows that shell out to git did not run, and an index
+        # nothing touched would then prove nothing at all.
+        self.assertIn("OK (skipped=1)", run.stderr)
+        self.assertEqual(before_files, after_files, "the shared index lost files")
+        self.assertEqual("", status, f"the linked worktree is dirty:\n{status}")
+        self.assertEqual(before_digest, after_digest, "the shared index was rewritten")
 
 
 if __name__ == "__main__":
