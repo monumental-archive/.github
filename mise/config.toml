@@ -6590,7 +6590,7 @@ echo "lint:badges: badge block agrees with the derivation"
 '''
 
 [tasks."lint:release-stub"]
-description = "A versioned repo carries the canonical release stubs (release.yml implies publish.yml)"
+description = "A versioned repo carries the canonical release stubs and a root CHANGELOG.md"
 dir = "{{cwd}}"
 # The versioned archetype is two files: release.yml, publish.yml — and
 # the registries pin the publish.yml FILENAME, so a missing or renamed
@@ -6599,6 +6599,16 @@ dir = "{{cwd}}"
 # have one and skip clean. (cliff.toml was the old marker; it retired
 # with git-cliff — stele derive carries the conventions in the shared
 # scripts, .github#505.)
+# The changelog is the third file the archetype needs and the one no
+# check named: `stele derive release-plan --prepare` splices the notes
+# into a root CHANGELOG.md and refuses when it is absent — after the
+# merge, on main, which is the most expensive place the org has to find
+# a missing file (#742, edtf's run in #669). Measured on the real
+# deriver: absent gives `reading CHANGELOG.md: ... no such file or
+# directory`, and a hand-invented preamble whose h2 carries a version
+# gives `already carries a section for <version>` when it carries none
+# — which is why the remedy is the scaffold's file rather than "write
+# one".
 run = '''
 [[ -f .github/workflows/release.yml ]] || {
   echo "lint:release-stub: no release.yml, not a versioned repo, skipped"
@@ -6622,9 +6632,20 @@ for f in .github/workflows/release.yml .github/workflows/publish.yml; do
     bad="${bad} ${f}(no pinned org uses)"
   fi
 done
+# Tracked, not merely present: the release runs from a checkout of the
+# ref, so an untracked file on somebody's disk is not the file the
+# deriver will read.
+changelog=ok
+git ls-files --error-unmatch CHANGELOG.md > /dev/null 2>&1 || changelog=missing
 if [[ -n ${bad} ]]; then
   echo "lint:release-stub: versioned repo with broken release stubs:${bad}" >&2
   echo "  copy scaffold/ from ${canon}; the publish.yml filename is load-bearing" >&2
+fi
+if [[ ${changelog} == missing ]]; then
+  echo "lint:release-stub: versioned repo with no tracked root CHANGELOG.md" >&2
+  echo "  copy scaffold/CHANGELOG.md from ${canon}; the release path derives its notes into it" >&2
+fi
+if [[ -n ${bad} || ${changelog} == missing ]]; then
   exit 1
 fi
 echo "lint:release-stub: ok"
