@@ -141,16 +141,27 @@ jobs:
           key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: gate-cargo-${{ runner.os }}-
 
-      # PRs squash-merge, and the PERMANENT commit subject is the PR
-      # title with GitHub's " (#N)" appended — a subject lint:commits
-      # structurally cannot see, because it walks the branch's commits
-      # and the squash subject exists only at merge. That is how an
-      # 84-character subject reached main past a 72-column ceiling
-      # (v1.26.0's belt merge): every branch commit was clean, the
-      # title was not, and nothing looked. Compose the subject the
-      # merge will mint and hold it to the same tool and config the
-      # branch commits answer to. Values via env, never ${{ }} into
-      # shell (the injection rule).
+      # PRs squash-merge, and the PERMANENT commit message is the PR
+      # title with GitHub's " (#N)" appended, then the PR body — neither
+      # of which lint:commits can see, because it walks the branch's
+      # commits and the squash message exists only at merge. That is how
+      # an 84-character subject reached main past a 72-column ceiling
+      # (v1.26.0's belt merge): every branch commit was clean, the title
+      # was not, and nothing looked. Compose the message the merge will
+      # mint and hold it to the same tool and config the branch commits
+      # answer to. Values via env, never ${{ }} into shell (the
+      # injection rule) — and the BODY especially: it is
+      # attacker-controlled on a fork PR, which is the template
+      # injection shape lint:zizmor exists to refuse.
+      #
+      # The body half is #880, and it is a gap rather than a tolerated
+      # norm — measured before extending, because "everyone's bodies run
+      # long" is the obvious excuse and it is false: zero body-line
+      # failures in 60 consumer commits across five repos. The rule is
+      # wrap-aware, so the bare URLs and trailers that push real bodies
+      # past column 72 pass; what fails is prose and wide tables. The
+      # only failing body on main is 4914509's, which is the commit that
+      # motivated this and the regression fixture for it.
       #
       # HUMAN-AUTHORED TITLES ONLY (#576). A bot owns its titles and
       # regenerates them from a template: on #574 a manual retitle was
@@ -162,12 +173,13 @@ jobs:
       # a dependency, that every title the owned template could mint
       # for it fits. By the time the bot runs, there is nothing to
       # catch.
-      - name: The squash subject is the PR title — hold it to the commit canon
+      - name: The squash message is the PR title and body — hold it to the commit canon
         if: >-
           ${{ github.event_name == 'pull_request'
           && github.event.pull_request.user.type != 'Bot' }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -194,15 +206,27 @@ jobs:
             echo "::error::${emsg}"
             exit 1
           fi
-          printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${RUNNER_TEMP}/squash-subject"
-          export ORG_COMMIT_MSG_FILE="${RUNNER_TEMP}/squash-subject"
+          msg="${RUNNER_TEMP}/squash-message"
+          printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${msg}"
+          # The BODY is the other permanent half (#880). The API serves
+          # it CRLF-terminated, so strip the CR before measuring: a
+          # Windows author must not fail on characters they cannot see.
+          body=${PR_BODY:-}
+          body=${body//$'\r'/}
+          # A body that is empty or only whitespace composes to the
+          # subject alone — exactly the behaviour before this, so the
+          # change is strictly additive and adds no trailing blank.
+          if [[ -n ${body//[[:space:]]/} ]]; then
+            printf '\n%s\n' "${body}" >> "${msg}"
+          fi
+          export ORG_COMMIT_MSG_FILE="${msg}"
           if ! mise run commits:check; then
-            emsg="the PR title becomes the permanent squash subject (plus ' (#${PR_NUMBER})') and it fails the commit canon"
-            emsg+=" — fix the TITLE, not a commit"
+            emsg="the PR title and body become the permanent squash subject (plus ' (#${PR_NUMBER})') and body,"
+            emsg+=" and they fail the commit canon — fix the TITLE or the BODY, not a commit"
             echo "::error::${emsg}"
             exit 1
           fi
-          echo "squash-subject: title mints a conforming subject"
+          echo "squash-message: title and body mint a conforming commit"
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       - name: Run the gate
