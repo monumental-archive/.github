@@ -1,0 +1,22 @@
+# The belt ships no SQL escape and does not need to (#708, #694):
+# `.sqlfluffignore` is sqlfluff's own, it is repo content, it lives under
+# the delivered config, and it is for GENERATED files — a transcript of
+# what a tool emits, which conforming would stop being a transcript. One
+# entry, one written reason, on the `_typos.toml` footing.
+#
+# Both entries are verbatim `cargo pgrx package` output, extracted from
+# published, signed release-lab tarballs and committed unedited as the
+# inputs `release/test_upgrade_script.py` feeds the derivation. Their
+# findings are pgrx's dialect, not ours: `CREATE  FUNCTION` with two
+# spaces (LT01), quoted identifiers (RF06), and no trailing newline
+# (LT12). Reformatting them would make them a fixture I wrote about a
+# tool's output instead of a capture of it, which is the whole reason
+# they are here — see [[fixture-is-not-evidence]] and #772.
+#
+# NOT ignored, deliberately: `release/testdata/lab_pg--0.27.0--0.28.1.sql`,
+# the DERIVED upgrade script from the same tarball. It is our own emission
+# rather than pgrx's, it passes the org's rules unmodified, and #792 ruled
+# exactly that — the org's derived files meet the org's own rules by
+# construction. It stays in the lint so that stops being a claim.
+release/testdata/lab_pg--0.27.0.sql
+release/testdata/lab_pg--0.28.1.sql
