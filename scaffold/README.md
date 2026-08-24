@@ -250,7 +250,11 @@ Conditional stubs, wired per the runbook's "Wiring in a repository"
 section (`docs/runbook.md`): the release/publish workflow templates for
 versioned repos (there is no `cliff.toml` stub — git-cliff retired in
 issue #507, and `stele derive version` carries the conventions),
-`CITATION.cff` where citable —
+`CHANGELOG.md` for those same repos (a preamble and nothing else: the
+release path writes every section below it, and it reads a version
+inside an `h2` as that version's section, so an invented heading naming
+one refuses the release — #742, and `lint:release-stub` requires the
+file wherever `release.yml` exists), `CITATION.cff` where citable —
 rendered by `fix:citation` from `REUSE.toml`, and required by
 `lint:citation` wherever the stub passes `mint-doi: true` (#316) —
 `REUSE.toml` + `README-badges.md` + `SECURITY-INSIGHTS.yml` for the

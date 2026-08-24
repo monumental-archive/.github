@@ -19,7 +19,13 @@ written for two moments: wiring a repository in, and a release going wrong.
    `ORG_COMMIT_SCOPES`. If the repository is citable (its release
    stub passes `mint-doi: true`), render `CITATION.cff` with
    `mise run fix:citation` — derived from `REUSE.toml`, enforced by
-   `lint:citation`, never hand-filled (#316).
+   `lint:citation`, never hand-filled (#316). Copy `CHANGELOG.md` to
+   the root too: the release path derives its notes into a root
+   changelog and refuses when there is none, on `main`, after the merge
+   (#742). Take the stub **verbatim** rather than writing a preamble —
+   the deriver reads a version inside an `h2` as that version's
+   section, so an invented heading that merely mentions one fails with
+   "already carries a section for" a version the file does not have.
 2. Copy the three workflow stubs from
    [`workflow-templates/`](../workflow-templates/): `ci.yml`,
    `release.yml`, `publish.yml` — **the publish.yml filename is
@@ -84,7 +90,8 @@ written for two moments: wiring a repository in, and a release going wrong.
    crate is a member but **not** a default-member, and goes in the
    `exclude:` input.
 7. `lint:release-stub` (belt) enforces 2–3 from then on: `release.yml`
-   present means the stubs must be, pinned.
+   present means the stubs must be, pinned, and a root `CHANGELOG.md`
+   must be tracked.
 8. Copy `scaffold/CODEOWNERS` to `.github/CODEOWNERS` and grant the
    `owners` team write access — documentation and reviewer routing now,
    enforcement when a second maintainer flips the Code Owners toggle.
