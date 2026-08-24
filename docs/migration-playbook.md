@@ -42,6 +42,15 @@ a fresh session **started in the target repo's checkout**.
       where the canonical entry `publish.yml` exists).
 - [ ] Rulesets need nothing: they are org-level, `enforcement: active`,
       scope `~ALL` — a transferred repo is covered the moment it lands.
+- [ ] **Delete the repo's CLASSIC branch protection** (Settings →
+      Branches). It survives the transfer, it is a different API object
+      from the rulesets so the sweep above does not touch it, and its
+      required contexts name the pipeline you are about to delete:
+      iiif-server arrived requiring five, and its first PR sat blocked
+      on "5 of 5 required status checks are expected" with nothing able
+      to report them (#761). Rulesets are the law; classic protection is
+      redundant with them or contradicts them. `repo-baseline.sh check`
+      reports it and never deletes it — this is the hand step.
 - [ ] Org secrets and App installations need nothing either: every org
       secret is readable by all org repositories and all three App
       installations (tag-mint, renovate, codecov) are all-repositories,
