@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>monumental-archive/.github#v1.61.0"],
+  "extends": ["github>monumental-archive/.github#v1.61.1"],
   "packageRules": [
     {
       "description": "The pg majors in pgrx-base-images.toml are the support matrix, not staleness: each key deliberately maps to its own major (building 14 against 18 is not an update, it is a different matrix). Only digest and suffix refreshes within each major flow; new majors enter by adding a key, a reviewed change.",
