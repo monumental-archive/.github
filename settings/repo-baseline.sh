@@ -10,24 +10,117 @@ set -euo pipefail
 
 org="monumental-archive"
 
+# Every read goes through one shape, because a bare `gh` failure is the
+# defect this replaces (#862). gh prints
+#
+#   gh: Resource not accessible by personal access token (HTTP 403)
+#
+# and nothing else — no endpoint, no repository, no permission — and
+# under `set -e` the first one kills the run. Measured 2026-08-24: that
+# one line was the ENTIRE output of a dead `audit:baseline-drift` leg,
+# and learning which call produced it took a workflow dispatch and three
+# log reads. The endpoint is in the script; it belongs in the message.
+#
+#   api_probe <what> <grant> <absent-marker> <endpoint> [gh args…]
+#
+# 0  the object exists, and its body is in `api_body`
+# 1  gh's message matched <absent-marker>, so the object is legitimately
+#    ABSENT. Whether that is drift is the CALLER's call — a branch with
+#    no classic protection is clean, a repo with no publish environment
+#    is not, and only the caller knows which it asked for.
+# 2  the read did not happen. An attributed report is already printed and
+#    the caller only counts it. Never a silent skip: a check that cannot
+#    read is not a repository that is clean (#290 finding 7).
+#
+# Pass an empty marker when no failure is expected — nothing matches it,
+# so every failure reports.
+api_body=""
+api_err="$(mktemp)"
+trap 'rm -f "${api_err}"' EXIT
+
+api_probe() {
+  local what="$1" grant="$2" absent="$3" endpoint="$4"
+  shift 4
+  local status=0 said
+  api_body="$(gh api "${endpoint}" "$@" 2> "${api_err}")" || status=$?
+  if [[ ${status} -eq 0 ]]; then
+    return 0
+  fi
+  said="$(head -1 "${api_err}")"
+  if [[ -n ${absent} && ${said} == *"${absent}"* ]]; then
+    return 1
+  fi
+  echo "drift: cannot read ${what}"
+  echo "       endpoint: ${endpoint}"
+  echo "       needs:    ${grant}"
+  echo "       gh said:  ${said}"
+  return 2
+}
+
+# Same shape for the two writes `apply` performs. A half-applied
+# baseline that died on gh's one sentence is the same defect wearing a
+# different verb.
+api_write() {
+  local what="$1" grant="$2"
+  shift 2
+  local status=0 said
+  gh api "$@" > /dev/null 2> "${api_err}" || status=$?
+  if [[ ${status} -eq 0 ]]; then
+    return 0
+  fi
+  said="$(head -1 "${api_err}")"
+  echo "failed: ${what}" >&2
+  echo "        needs:   ${grant}" >&2
+  echo "        gh said: ${said}" >&2
+  return 1
+}
+
 # True when the repo carries publish.yml as an ENTRY workflow (tag-triggered
 # caller stub), false when absent or when it is a reusable — the canon
 # repo's publish.yml is `workflow_call` and must not grow an environment.
-# shellcheck disable=SC2310  # deliberate predicate: it manages its own exit
-# status (`|| return 1`, then the grep result), so the set -e suspension that
-# calling it in an `if` causes has nothing to suspend.
+#
+# 0 entry, 1 absent-or-reusable, 2 unreadable (already reported). The
+# third is the point: this used to be `|| return 1`, so a 403 read as
+# "no publish.yml" and silently skipped the environment check for that
+# repository — a missing grant presenting as a clean repo.
 publish_yml_is_entry() {
-  local content
-  content="$(gh api "repos/${org}/${1}/contents/.github/workflows/publish.yml" \
-    --jq '.content' 2> /dev/null)" || return 1
-  ! printf '%s\n' "${content}" | base64 -d | grep -q 'workflow_call'
+  local status=0 decoded
+  # shellcheck disable=SC2310  # api_probe manages its own exit status
+  api_probe "${1}'s publish.yml" "Contents: read" "Not Found" \
+    "repos/${org}/${1}/contents/.github/workflows/publish.yml" \
+    --jq '.content' || status=$?
+  if [[ ${status} -ne 0 ]]; then
+    return "${status}"
+  fi
+  # Consume the whole stream rather than `| grep -q`, which exits at the
+  # first match and loses the upstream `printf` the SIGPIPE race — that
+  # printed `write error: Broken pipe` on green runs (#862).
+  decoded="$(printf '%s\n' "${api_body}" | base64 -d)"
+  if [[ ${decoded} == *workflow_call* ]]; then
+    return 1
+  fi
+  return 0
 }
 baseline="$(dirname "$0")/repo-baseline.json"
 mode="${1:?usage: repo-baseline.sh check|apply}"
 
 # REST, not `gh repo list`: that is GraphQL under the hood, and the
 # fine-grained PAT the audit runs with supports only the REST API.
-repos="$(gh api "orgs/${org}/repos?per_page=100" --paginate --jq '.[].name')"
+#
+# This is the call that 403'd on 2026-08-24 and killed the leg saying
+# nothing (#862), so it is attributed and fatal: with no population
+# there is no check to run, and continuing would report a clean org.
+listing_status=0
+# shellcheck disable=SC2310  # api_probe manages its own exit status
+api_probe "the org's repository listing" \
+  "an org owner's token — a fine-grained PAT scoped to SELECTED repositories is refused here" \
+  "" "orgs/${org}/repos?per_page=100" --paginate --jq '.[].name' \
+  || listing_status=$?
+if [[ ${listing_status} -ne 0 ]]; then
+  echo "repo-baseline: nothing was checked — the population is unreadable." >&2
+  exit 1
+fi
+repos="${api_body}"
 
 # Refuse to claim from a blind read (#290 finding 7, the claims.sh/#240
 # pattern): a token that sees an empty or partial population makes the
@@ -47,17 +140,11 @@ fi
 keys="$(jq -r 'keys[]' "${baseline}")"
 drift=0
 
-# Scratch for one call's stderr. `/branches/…/protection` answers 404
-# "Branch not protected" when there is none, which is the CLEAN result —
-# so that one call needs its message, not just its exit status, to tell
-# a clean answer from a failed read.
-protection_err="$(mktemp)"
-trap 'rm -f "${protection_err}"' EXIT
-
 for repo in ${repos}; do
   case "${mode}" in
     apply)
-      gh api -X PATCH "repos/${org}/${repo}" --input "${baseline}" > /dev/null
+      api_write "${repo}: settings baseline PATCH" "Administration: write" \
+        -X PATCH "repos/${org}/${repo}" --input "${baseline}"
       # Immutable OIDC subject claims: the sub claim carries the numeric
       # repository and owner ids alongside the names, so a token still
       # identifies its origin after a rename or transfer. GitHub says new
@@ -68,9 +155,10 @@ for repo in ${repos}; do
       # Safe to change at any point: the format appears in Fulcio OID .24
       # (Token Subject), while --signer-workflow and --signer-digest pin
       # OIDs .9 and .10, which are unaffected.
-      gh api "repos/${org}/${repo}/actions/oidc/customization/sub" \
-        --method PUT -F use_default=true -F use_immutable_subject=true \
-        > /dev/null
+      api_write "${repo}: immutable OIDC subject claim" \
+        "Administration: write" \
+        "repos/${org}/${repo}/actions/oidc/customization/sub" \
+        --method PUT -F use_default=true -F use_immutable_subject=true
       # The `publish` environment is a repo object — one of the three
       # irreducibly caller-side pieces of the release design — and both
       # registries' trusted-publisher configs name it. A repo that carries
@@ -80,14 +168,40 @@ for repo in ${repos}; do
       # attest, which is the one place a pause is unsafe). Entry, not
       # reusable: this repo's own publish.yml is the shared workflow_call
       # workflow, and the canon repo publishes nothing.
+      #
+      # An unreadable publish.yml stops the apply for this repo rather
+      # than guessing: creating the environment where none belongs is a
+      # settings change nobody asked for, and skipping it where one does
+      # leaves a release to fail at its publish step.
+      entry=0
       # shellcheck disable=SC2310  # publish_yml_is_entry manages its own exit status
-      if publish_yml_is_entry "${repo}"; then
-        gh api -X PUT "repos/${org}/${repo}/environments/publish" > /dev/null
-      fi
+      publish_yml_is_entry "${repo}" || entry=$?
+      case ${entry} in
+        0)
+          api_write "${repo}: create the publish environment" \
+            "Administration: write" \
+            -X PUT "repos/${org}/${repo}/environments/publish"
+          ;;
+        2)
+          echo "applied: ${repo} (settings and OIDC only — publish.yml unreadable)"
+          continue
+          ;;
+        *) ;;
+      esac
       echo "applied: ${repo}"
       ;;
     check)
-      actual="$(gh api "repos/${org}/${repo}")"
+      # Every check below reads this body, so an unreadable repo skips to
+      # the next one — counted as drift, never passed over.
+      repo_status=0
+      # shellcheck disable=SC2310  # api_probe manages its own exit status
+      api_probe "${repo}'s settings" "Administration: read" "" \
+        "repos/${org}/${repo}" || repo_status=$?
+      if [[ ${repo_status} -ne 0 ]]; then
+        drift=1
+        continue
+      fi
+      actual="${api_body}"
       for key in ${keys}; do
         want="$(jq -r --arg k "${key}" '.[$k]' "${baseline}")"
         have="$(jq -r --arg k "${key}" '.[$k]' <<< "${actual}")"
@@ -96,19 +210,43 @@ for repo in ${repos}; do
           drift=1
         fi
       done
-      immutable="$(gh api "repos/${org}/${repo}/actions/oidc/customization/sub" \
-        --jq '.use_immutable_subject')"
-      if [[ ${immutable} != "true" ]]; then
-        echo "drift: ${repo} OIDC sub claim is not immutable (${immutable})"
+      oidc_status=0
+      # shellcheck disable=SC2310  # api_probe manages its own exit status
+      api_probe "${repo}'s OIDC subject customisation" \
+        "Administration: read" "" \
+        "repos/${org}/${repo}/actions/oidc/customization/sub" \
+        --jq '.use_immutable_subject' || oidc_status=$?
+      if [[ ${oidc_status} -ne 0 ]]; then
+        drift=1
+      elif [[ ${api_body} != "true" ]]; then
+        echo "drift: ${repo} OIDC sub claim is not immutable (${api_body})"
         drift=1
       fi
+      # Two reads, two absences, and they mean opposite things: no
+      # publish.yml is clean, no publish environment under one is drift.
+      # Neither may be inferred from a failed read (#862).
+      entry=0
       # shellcheck disable=SC2310  # publish_yml_is_entry manages its own exit status
-      if publish_yml_is_entry "${repo}" \
-        && ! gh api "repos/${org}/${repo}/environments/publish" \
-          > /dev/null 2>&1; then
-        echo "drift: ${repo} has publish.yml but no publish environment"
-        drift=1
-      fi
+      publish_yml_is_entry "${repo}" || entry=$?
+      case ${entry} in
+        0)
+          env_status=0
+          # shellcheck disable=SC2310  # api_probe manages its own exit status
+          api_probe "${repo}'s publish environment" "Administration: read" \
+            "Not Found" "repos/${org}/${repo}/environments/publish" \
+            || env_status=$?
+          case ${env_status} in
+            1)
+              echo "drift: ${repo} has publish.yml but no publish environment"
+              drift=1
+              ;;
+            2) drift=1 ;;
+            *) ;;
+          esac
+          ;;
+        2) drift=1 ;;
+        *) ;;
+      esac
       # Web-UI commit signoff is enforced at the org level, and once it is,
       # the repos API refuses the key outright (422 on PATCH, even to the
       # enforced value) — so it cannot live in the baseline JSON. Assert it
@@ -138,29 +276,29 @@ for repo in ${repos}; do
       # a script quietly widening or narrowing merge rules is the wrong kind
       # of helpful. The remedy is the settings page.
       branch="$(jq -r '.default_branch' <<< "${actual}")"
-      if classic="$(gh api \
-        "repos/${org}/${repo}/branches/${branch}/protection" \
-        2> "${protection_err}")"; then
-        # Both shapes: `contexts` is the legacy list and `checks` the
-        # app-aware one, and a protection can carry either.
-        contexts="$(jq -r '
-          [(.required_status_checks.contexts // [])[],
-           (.required_status_checks.checks // [])[].context]
-          | unique | join(", ")' <<< "${classic}")"
-        echo "drift: ${repo} has CLASSIC branch protection on ${branch}"
-        echo "       required contexts: ${contexts:-(none)}"
-        echo "       delete it in Settings -> Branches. The org rulesets are"
-        echo "       the enforcement; a context no workflow reports blocks"
-        echo "       every PR with nothing able to satisfy it (#761)."
-        drift=1
-      elif ! grep -q "Branch not protected" "${protection_err}"; then
-        # 404 is the clean answer; anything else means this check did not
-        # run, which is drift and not silence.
-        reason="$(head -1 "${protection_err}")"
-        echo "drift: cannot read ${repo}'s classic branch protection"
-        echo "       ${reason}"
-        drift=1
-      fi
+      prot_status=0
+      # shellcheck disable=SC2310  # api_probe manages its own exit status
+      api_probe "${repo}'s classic branch protection" \
+        "Administration: read" "Branch not protected" \
+        "repos/${org}/${repo}/branches/${branch}/protection" || prot_status=$?
+      case ${prot_status} in
+        0)
+          # Both shapes: `contexts` is the legacy list and `checks` the
+          # app-aware one, and a protection can carry either.
+          contexts="$(jq -r '
+            [(.required_status_checks.contexts // [])[],
+             (.required_status_checks.checks // [])[].context]
+            | unique | join(", ")' <<< "${api_body}")"
+          echo "drift: ${repo} has CLASSIC branch protection on ${branch}"
+          echo "       required contexts: ${contexts:-(none)}"
+          echo "       delete it in Settings -> Branches. The org rulesets are"
+          echo "       the enforcement; a context no workflow reports blocks"
+          echo "       every PR with nothing able to satisfy it (#761)."
+          drift=1
+          ;;
+        2) drift=1 ;;
+        *) ;;
+      esac
       ;;
     *)
       echo "unknown mode: ${mode}" >&2
@@ -194,17 +332,18 @@ if [[ ${mode} == check ]]; then
   # No --paginate: this endpoint answers with an OBJECT, and gh's
   # pagination concatenates bare JSON documents that jq then refuses.
   # per_page covers a population of three many times over.
-  if ! installations="$(gh api \
-    "orgs/${org}/installations?per_page=100" 2> /dev/null)"; then
-    # Unreadable is drift, not a skip — the packages precedent below.
-    # The endpoint wants an organisation owner's token; if AUDIT_TOKEN
-    # ever stops qualifying, this check is doing nothing, and a check
-    # that quietly does nothing manufactures the impression of coverage.
-    # Report that and nothing else: running the loop over an empty list
-    # would print three "not installed" lines that are not known to be
-    # true, and a check that invents findings is read once and ignored.
-    echo "drift: cannot read org App installations"
-    echo "       (the endpoint wants an org owner's token — check AUDIT_TOKEN)"
+  #
+  # Unreadable is drift, not a skip, and it reports THAT and nothing
+  # else: running the loop over an empty list would print three "not
+  # installed" lines nothing measured, and a check that invents findings
+  # is read once and ignored.
+  apps_status=0
+  # shellcheck disable=SC2310  # api_probe manages its own exit status
+  api_probe "the org's App installations" \
+    "an org owner's token (check AUDIT_TOKEN)" "" \
+    "orgs/${org}/installations?per_page=100" || apps_status=$?
+  installations="${api_body}"
+  if [[ ${apps_status} -ne 0 ]]; then
     drift=1
     expected_apps=""
   fi
