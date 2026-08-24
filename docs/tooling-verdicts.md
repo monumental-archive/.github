@@ -2166,6 +2166,48 @@ documentation rather than enforcement.
   rounding turned half-up, the weakest leg turned into the strongest,
   and a malformed measurement skipped instead of refused) — all seven
   caught.
+  **Amended 2026-08-24 (#772): the release path is tested, and the
+  boundary of what that claim covers is three-way.** `release/` had no
+  tests at all until #816, and the edtf import (#669) found three
+  untested assumptions in a row, each on `main` after a merge. The
+  answer is the same shape as the two amendments above — stdlib
+  `unittest` table rows reached by the ordinary `ci` contract, no tool
+  adopted — and the line it draws is:
+  - **In the gate, deterministically:** every pure decision. The
+    predecessor search over a recorded forge listing
+    (`release/test_generate_pgrx_upgrade.py`, including the three tag
+    histories an import can arrive with); the derive-notes input
+    contract and `prepare-release.sh`'s own tree refusals
+    (`test_prepare_release.py`); the upgrade-script generator's whole
+    statement-classification table and its psql-guard arithmetic
+    (`test_upgrade_script.py`); and the applicability and
+    input-validation branches of `record-draft.sh`,
+    `derive-coverage-floor.sh`, `rust-build.sh`, `open-release-pr.sh`
+    and `tag-release.sh` (`test_release_guards.py`). Mutation-checked,
+    not trusted: eight deliberate defects in the generator, each caught
+    by the row that claims it.
+  - **Container truth, via #813's mechanism, not a second one.** A
+    linter can say a line is 84 columns; it cannot say whether
+    PostgreSQL will load the file. #792 is the proof — the three-line
+    guard passed `lint:sql` and canon v1.58.2 shipped it, and the
+    server rejects a bare `\quit` line because the extension loader
+    ignores only lines beginning with `\echo`. That oracle is written,
+    both directions, in `TheLoadableGuardOracle`, and skipped with #813
+    as its stated reason rather than left absent. #772 deliberately
+    built no Postgres provisioning of its own.
+  - **Full-width integration stays release-lab's.** The candidate
+    package build, the ALTER EXTENSION round trip against a live
+    catalog, and the five artefact classes across PG 14–18 are proven
+    where they always were. Nothing here replaces a lab run; what it
+    replaces is discovering a pure input-to-decision bug by spending a
+    version number.
+  Fixtures are real captures, and where history offered nothing they are
+  mutations of one: the pgrx schemas are `cargo pgrx package` output
+  extracted unedited from published release-lab tarballs, so
+  `.sqlfluffignore` carries them as the generated transcripts they are,
+  while the derived upgrade script beside them stays in `lint:sql` —
+  #792's ruling (a), that the org's derived files meet the org's own
+  rules, held to rather than asserted.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because
