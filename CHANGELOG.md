@@ -10,6 +10,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.61.0](https://github.com/monumental-archive/.github/compare/v1.60.0...v1.61.0) - 2026-08-24
+
+### Added
+
+- add the wasm-pack arch correction and audit (#811) ([#870](https://github.com/monumental-archive/.github/pull/870))
+- record and guard the org-wide grant model (#751) ([#853](https://github.com/monumental-archive/.github/pull/853))
+- run the scaffold as a repository in the gate (#777) ([#877](https://github.com/monumental-archive/.github/pull/877))
+- report classic branch protection as drift (#761) ([#874](https://github.com/monumental-archive/.github/pull/874))
+- select the delivered aqua registry (#811) ([#882](https://github.com/monumental-archive/.github/pull/882))
+- stage the committed arch correction (#854) ([#885](https://github.com/monumental-archive/.github/pull/885))
+- correct the committed architecture (#854) ([#898](https://github.com/monumental-archive/.github/pull/898))
+- refuse a [workspace.package] key nobody inherits (#863) ([#890](https://github.com/monumental-archive/.github/pull/890))
+- report a repo's own rulesets as drift (#876) ([#897](https://github.com/monumental-archive/.github/pull/897))
+- move to stele v0.20.0 and jsonx epoch 7 ([#901](https://github.com/monumental-archive/.github/pull/901))
+- compile the declared MSRV at its pinned rustc (#820) ([#865](https://github.com/monumental-archive/.github/pull/865))
+- compile the pgrx crate the gate never saw (#813) ([#900](https://github.com/monumental-archive/.github/pull/900))
+
+### Fixed
+
+- guard canon-only legs on identity, red on inputs (#738) ([#855](https://github.com/monumental-archive/.github/pull/855))
+- scrub git's environment from the pgrx harness (#857) ([#869](https://github.com/monumental-archive/.github/pull/869))
+- read installability from the release path's record ([#871](https://github.com/monumental-archive/.github/pull/871))
+- let the canon track its own delivered rust configs ([#856](https://github.com/monumental-archive/.github/pull/856))
+- guard canon-only lints on identity and file shape (#858) ([#879](https://github.com/monumental-archive/.github/pull/879))
+- resolve a repo's own top-level message fields (#725) ([#873](https://github.com/monumental-archive/.github/pull/873))
+- catch a gate measuring another belt (#867) ([#878](https://github.com/monumental-archive/.github/pull/878))
+- declare the contents grant the tag job spends ([#883](https://github.com/monumental-archive/.github/pull/883))
+- update monumental-archive/signer to 32fa844 ([#888](https://github.com/monumental-archive/.github/pull/888))
+- refuse a nested mise run inside a task body (#764) ([#866](https://github.com/monumental-archive/.github/pull/866))
+- resume from HEAD's tag, not from the plan's (#864) ([#889](https://github.com/monumental-archive/.github/pull/889))
+- key the evidence by the digests consumers pull ([#887](https://github.com/monumental-archive/.github/pull/887))
+- name the endpoint and grant on a failed read (#862) ([#895](https://github.com/monumental-archive/.github/pull/895))
+- guard every fixer on what it rewrites (#860) ([#893](https://github.com/monumental-archive/.github/pull/893))
+- hold the squash body to the commit canon (#880) ([#886](https://github.com/monumental-archive/.github/pull/886))
+- map each ts extension to the js one tsc resolves (#868) ([#894](https://github.com/monumental-archive/.github/pull/894))
+- lock file maintenance ([#902](https://github.com/monumental-archive/.github/pull/902))
+- relock five tools onto their musl assets (#899) ([#903](https://github.com/monumental-archive/.github/pull/903))
+
+### Testing
+
+- table-test the release scripts' decisions (#772) ([#881](https://github.com/monumental-archive/.github/pull/881))
+
 ## [1.60.0](https://github.com/monumental-archive/.github/compare/v1.59.0...v1.60.0) - 2026-08-24
 
 ### Added
