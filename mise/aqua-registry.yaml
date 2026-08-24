@@ -134,4 +134,166 @@ packages:
           - goos: linux
             replacements:
               arm64: aarch64
+  # committed (#854) — found by the sweep that `audit:lock-arch` now
+  # runs standing, in the belt's OWN lock. Same cause as wasm-pack
+  # above, `rosetta2: true` with no darwin arm64 case, but it reaches
+  # further: committed is a belt tool on the commit-msg, pre-push and
+  # CI path, so every repo and every arm64 machine in the org was
+  # installing an x86_64 binary and running it emulated.
+  #
+  # TWO constraints rather than one, because the two arm64 assets
+  # arrived at different versions — measured against the releases on
+  # 2026-08-24, not inferred from one of them:
+  #
+  #   aarch64-apple-darwin        absent v1.1.5,      present v1.1.6+
+  #   aarch64-unknown-linux-musl  absent thru v1.1.10, present v1.1.11+
+  #
+  # Ordered narrowest first, because aqua takes the FIRST matching
+  # `version_constraint`. A pin in 1.1.6..1.1.10 therefore gets the
+  # darwin correction without being promised a linux arm64 asset that
+  # does not exist, and anything older falls through to upstream's
+  # `rosetta2`, which is correct there.
+  #
+  # The 1.1.11 entry also widens `supported_envs`, and that is a
+  # SECOND defect rather than more of the first: upstream lists
+  # `darwin, windows, amd64`, so on linux/arm64 committed was not the
+  # wrong architecture but NO PACKAGE AT ALL — the belt's lock carries
+  # no linux-arm64 entry for it, and a linux-arm64 machine cannot
+  # install the org's commit linter.
+  #
+  # Package body copied from aqua-registry 6291c29d, plus the two
+  # entries marked below.
+  - type: github_release
+    repo_owner: crate-ci
+    repo_name: committed
+    description: Nitpicking commit history since beabf39
+    version_constraint: "false"
+    version_overrides:
+      - version_constraint: semver("<= 0.1.2") || Version == "v0.1.22"
+        no_asset: true
+      - version_constraint: Version == "v0.2.8"
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: zip
+        windows_arm_emulation: true
+        replacements:
+          amd64: x86_64
+          linux: unknown-linux-musl
+          windows: pc-windows-msvc
+        overrides:
+          - goos: linux
+            format: tar.gz
+        supported_envs:
+          - linux/amd64
+          - windows
+      - version_constraint: semver("<= 0.1.4")
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: zip
+        windows_arm_emulation: true
+        replacements:
+          amd64: x86_64
+          windows: pc-windows-msvc
+        supported_envs:
+          - windows
+      - version_constraint: semver("<= 0.1.15")
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: tar.gz
+        rosetta2: true
+        windows_arm_emulation: true
+        replacements:
+          amd64: x86_64
+          darwin: apple-darwin
+          linux: unknown-linux-gnu
+          windows: pc-windows-msvc
+        overrides:
+          - goos: windows
+            format: zip
+        supported_envs:
+          - darwin
+          - windows
+          - amd64
+      - version_constraint: semver("<= 0.1.20")
+        no_asset: true
+      - version_constraint: Version == "v0.1.21"
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: tar.gz
+        rosetta2: true
+        windows_arm_emulation: true
+        files:
+          - name: committed
+            src: "{{.AssetWithoutExt}}/committed"
+        replacements:
+          amd64: x86_64
+          darwin: apple-darwin
+          linux: unknown-linux-musl
+          windows: pc-windows-msvc
+        overrides:
+          - goos: windows
+            format: zip
+        supported_envs:
+          - darwin
+          - windows
+          - amd64
+      # THE CORRECTION, narrower half first. v1.1.11 is where the
+      # linux arm64 asset appears, and it is what the belt pins.
+      - version_constraint: semver(">= 1.1.11")
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: tar.gz
+        windows_arm_emulation: true
+        replacements:
+          amd64: x86_64
+          darwin: apple-darwin
+          linux: unknown-linux-musl
+          windows: pc-windows-msvc
+        overrides:
+          - goos: windows
+            format: zip
+          - goos: darwin
+            replacements:
+              arm64: aarch64
+          - goos: linux
+            replacements:
+              arm64: aarch64
+        supported_envs:
+          - darwin
+          - windows
+          - amd64
+          - linux/arm64
+      # v1.1.6 through v1.1.10 have the darwin arm64 asset but NOT the
+      # linux one, so this half must not promise linux/arm64.
+      - version_constraint: semver(">= 1.1.6")
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: tar.gz
+        windows_arm_emulation: true
+        replacements:
+          amd64: x86_64
+          darwin: apple-darwin
+          linux: unknown-linux-musl
+          windows: pc-windows-msvc
+        overrides:
+          - goos: windows
+            format: zip
+          - goos: darwin
+            replacements:
+              arm64: aarch64
+        supported_envs:
+          - darwin
+          - windows
+          - amd64
+      - version_constraint: "true"
+        asset: committed-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
+        format: tar.gz
+        rosetta2: true
+        windows_arm_emulation: true
+        replacements:
+          amd64: x86_64
+          darwin: apple-darwin
+          linux: unknown-linux-musl
+          windows: pc-windows-msvc
+        overrides:
+          - goos: windows
+            format: zip
+        supported_envs:
+          - darwin
+          - windows
+          - amd64
 ...
