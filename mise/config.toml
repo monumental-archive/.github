@@ -957,7 +957,24 @@ echo "lint:yaml: ${count} file(s) linted"
 [tasks."fix:markdown"]
 description = "Auto-fix markdown (rumdl)"
 dir = "{{cwd}}"
-run = 'git ls-files ":!vendor/**" "*.md" "*.markdown" | xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" --fix'
+# Guarded on its own subject, like lint:markdown beside it (#860). What
+# this replaced piped the tracked list straight into xargs, and an empty
+# list is not the same event on the two platforms the org runs on: BSD
+# xargs declines to run the command, GNU xargs runs it with NO arguments.
+# Argless rumdl does not fail — it falls back to WALKING THE DIRECTORY
+# and rewriting whatever markdown it finds. Measured 2026-08-24 in a
+# scratch git repo holding one untracked .md: four fixes applied, file
+# rewritten, exit 0. That is the belt's tracked-files-only rule broken
+# silently and in write mode, which is worse than the red its fix:shell
+# sibling produced from the same shape.
+run = '''
+files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
+[[ -n ${files} ]] || {
+  echo "fix:markdown: no markdown tracked, skipped"
+  exit 0
+}
+xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" --fix <<< "${files}"
+'''
 
 # The JS/TS/JSON layer (#82). Extension list is the set biome parses
 # WITHOUT an experimental flag: html/vue/svelte/astro need
@@ -2014,7 +2031,23 @@ python3 "${helper}" --env-from "${ORG_BELT_DIR}/config.toml" \
 [tasks."fix:shell"]
 description = "Rewrite shell to canonical format (shfmt)"
 dir = "{{cwd}}"
-run = 'git ls-files ":!vendor/**" | xargs shfmt --find | xargs shfmt -i 2 -bn -ci -sr -s -w'
+# The same list lint:shell computes, guarded the same way (#860). The
+# second xargs was the defect and a Mac could not see it: on an empty
+# list BSD xargs runs nothing and exits 0, GNU xargs runs `shfmt -w`
+# with no arguments, which reads standard input and refuses — `-w cannot
+# be used on standard input`, exit 1. So `mise run fix` was red on every
+# Linux runner in any repository tracking no shell, and green for
+# whoever wrote it. Measured on the #777 probe's first CI run (canon run
+# 32680564529) and reproduced locally by invoking shfmt the way GNU
+# xargs would.
+run = '''
+files=$(git ls-files ":!vendor/**" | xargs shfmt --find)
+[[ -n ${files} ]] || {
+  echo "fix:shell: no shell tracked, skipped"
+  exit 0
+}
+xargs shfmt -i 2 -bn -ci -sr -s -w <<< "${files}"
+'''
 
 [tasks."fix:belt-shell"]
 description = "Rewrite mise task `run` bodies to the org's shell format (shfmt)"
@@ -3130,9 +3163,11 @@ dir = "{{cwd}}"
 # tracked files, and every task the assembled gate runs is one the canon
 # already runs on itself. What the assembly cannot provide is printed,
 # never silently dropped — the Rust and Go legs (the belt pins no `rust`
-# or `go`; a repo declares its own), `fix:tracks` (#860), and `ci`'s
-# `test`/`build` collection (the stub `mise.toml` ships a deliberately
-# failing TODO test, which is the scaffold working).
+# or `go`; a repo declares its own) and `ci`'s `test`/`build` collection
+# (the stub `mise.toml` ships a deliberately failing TODO test, which is
+# the scaffold working). No FIXER is excluded any more: the two this
+# check found unguarded were the defect, not the assembly, and #860
+# guarded them.
 run = '''
 tracked=$(git ls-files "scaffold/")
 [[ -n ${tracked} ]] || {
@@ -3177,13 +3212,17 @@ declined="README.md:the directory's own documentation, not a file a repo copies
 README-badges.md:the badge catalogue fix:badges reads from the canon
 REUSE.toml.stub:its holes are the licence identity only the repo can choose (#214)
 CITATION.cff:fix:citation renders it from REUSE.toml; a copy would be hand-filled"
-# task:why not. Both are belt defects this check FOUND and does not fix;
-# each comes out of this list when its issue closes. An excluded task is
-# printed with every run, because an exclusion nobody can see is a hole.
-# The | is not decoration: a task name carries a colon, so this table
-# cannot be split on one.
-excluded="fix:tracks|no applicability guard, so it is red in every consumer (#860)
-fix:shell|runs shfmt -w on stdin where no shell is tracked, under GNU xargs (#860)"
+# task:why not. EMPTY, and the check is stronger for it: every fixer the
+# belt names runs against the assembled repository. It was two entries on
+# the day this landed — `fix:tracks` and `fix:shell`, both unguarded,
+# both found HERE and neither fixed here — and #860 guarded them (and a
+# third, `fix:markdown`, that only a GNU runner would have reached).
+# An entry belongs here when this check finds a belt defect it must not
+# also fix, and it names that defect's issue; it comes out when the issue
+# closes. An excluded task is printed with every run, because an
+# exclusion nobody can see is a hole. The | is not decoration: a task
+# name carries a colon, so this table cannot be split on one.
+excluded=""
 decided=$(cut -d: -f1 <<< "${assembled}
 ${declined}")
 missing=""
@@ -5958,7 +5997,32 @@ dir = "{{cwd}}"
 # between tracks:* markers, the fix:badges pattern. Edit the TOML, run
 # this; lint:tracks reddens a hand-edited render. taplo emits the TOML
 # as JSON and jq builds the rows: no hand parsing on either side.
+#
+# Guarded on the DATA IT RENDERS, in the TASK BODY, and on neither of
+# the two other things that look right (#860).
+#
+# Not on the identity anchor lint:tracks took in #858, because no fixer
+# guards on identity — all fifteen guard on their own subject, the way
+# fix:rust asks for a Cargo.toml and fix:citation for a REUSE.toml. That
+# rule and #738's are not in tension: #738 is about a CHECK going quietly
+# green, and lint:tracks still reds BY NAME on any input missing on the
+# canon. A fixer that declines to write asserts nothing.
+#
+# And not in tracks.sh, which is the tempting place now that both halves
+# invoke it. lint:tracks renders into a `mktemp -d` copy carrying docs/
+# and slsa/ and nothing else — no security/identity.toml, and not a git
+# repository at all — so an identity-shaped guard down there would skip
+# in the one place the check depends on the render running, and the diff
+# would compare the untouched copy against itself. Measured 2026-08-24
+# with a forged row planted in docs/direction.md: guard in tracks.sh,
+# `lint:tracks: ok`, exit 0, the org's one table checked by nothing;
+# guard here, exit 1 naming the drift. The helper renders; deciding
+# whether to render at all belongs to the caller that knows the tree.
 run = '''
+[[ -f slsa/levels.toml && -f slsa/requirements.toml ]] || {
+  echo "fix:tracks: no track data, skipped"
+  exit 0
+}
 # From the belt (#445), and invoked directly by both halves rather than
 # one of them running the other: a nested `mise run` inside a task races
 # the parallel lint fan-out and fails to resolve its own lockfile
