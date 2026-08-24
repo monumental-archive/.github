@@ -47,6 +47,13 @@ fi
 keys="$(jq -r 'keys[]' "${baseline}")"
 drift=0
 
+# Scratch for one call's stderr. `/branches/…/protection` answers 404
+# "Branch not protected" when there is none, which is the CLEAN result —
+# so that one call needs its message, not just its exit status, to tell
+# a clean answer from a failed read.
+protection_err="$(mktemp)"
+trap 'rm -f "${protection_err}"' EXIT
+
 for repo in ${repos}; do
   case "${mode}" in
     apply)
@@ -109,6 +116,49 @@ for repo in ${repos}; do
       signoff="$(jq -r '.web_commit_signoff_required' <<< "${actual}")"
       if [[ ${signoff} != "true" ]]; then
         echo "drift: ${repo} web commit signoff is ${signoff} (org enforcement regressed?)"
+        drift=1
+      fi
+      # CLASSIC branch protection on the default branch (#761). It is a
+      # different API object from the org rulesets — `/branches/…/protection`
+      # against `/rulesets` — so it survives a transfer, the import-time
+      # ruleset sweep cannot see it, and until now nothing here looked.
+      # Measured 2026-08-21: iiif-server arrived requiring five contexts from
+      # its deleted pipeline, and its PR #119 sat BLOCKED with every ruleset
+      # rule satisfied and auto-merge armed — "5 of 5 required status checks
+      # are expected", not one of which could ever report.
+      #
+      # NOT the branch object's `protected` flag: measured 2026-08-24, that
+      # is `true` on every repo here because the ORG RULESETS make it true,
+      # while `/branches/main/protection` 404s. A check keyed on it would
+      # fire everywhere and mean nothing.
+      #
+      # Reported, never deleted — `apply` does not touch this either. The
+      # org rulesets are the enforcement (`docs/rulesets.md`), so classic
+      # protection is always redundant with them or contradicting them, and
+      # a script quietly widening or narrowing merge rules is the wrong kind
+      # of helpful. The remedy is the settings page.
+      branch="$(jq -r '.default_branch' <<< "${actual}")"
+      if classic="$(gh api \
+        "repos/${org}/${repo}/branches/${branch}/protection" \
+        2> "${protection_err}")"; then
+        # Both shapes: `contexts` is the legacy list and `checks` the
+        # app-aware one, and a protection can carry either.
+        contexts="$(jq -r '
+          [(.required_status_checks.contexts // [])[],
+           (.required_status_checks.checks // [])[].context]
+          | unique | join(", ")' <<< "${classic}")"
+        echo "drift: ${repo} has CLASSIC branch protection on ${branch}"
+        echo "       required contexts: ${contexts:-(none)}"
+        echo "       delete it in Settings -> Branches. The org rulesets are"
+        echo "       the enforcement; a context no workflow reports blocks"
+        echo "       every PR with nothing able to satisfy it (#761)."
+        drift=1
+      elif ! grep -q "Branch not protected" "${protection_err}"; then
+        # 404 is the clean answer; anything else means this check did not
+        # run, which is drift and not silence.
+        reason="$(head -1 "${protection_err}")"
+        echo "drift: cannot read ${repo}'s classic branch protection"
+        echo "       ${reason}"
         drift=1
       fi
       ;;
@@ -238,8 +288,9 @@ if [[ ${mode} == check && ${drift} -eq 0 ]]; then
   key_count="$(wc -w <<< "${keys}" | tr -d ' ')"
   emsg="repo-baseline: ${seen_repos} repos checked"
   app_count="$(wc -w <<< "${expected_apps}" | tr -d ' ')"
-  emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env each,"
-  emsg+=" plus org packages and ${app_count} App installations), no drift"
+  emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env"
+  emsg+=" + classic branch protection each, plus org packages and"
+  emsg+=" ${app_count} App installations), no drift"
   echo "${emsg}"
 fi
 
