@@ -398,7 +398,7 @@ python = "3.14.7"
 # binary releases, no aqua package), so it is a repo-side build input
 # via the go: backend, the cargo-fuzz pattern — audit:go-vulns asserts
 # it with the remedy.
-"aqua:golangci/golangci-lint" = "2.13.0"
+"aqua:golangci/golangci-lint" = "2.13.1"
 # SQL lint + format check (#403): the THIRD pipx: exception after reuse
 # and yamllint — PyPI-only, no aqua package, riding checksummed uv
 # under the same UV_* floor env. All core rules on (sqlfluff's default
