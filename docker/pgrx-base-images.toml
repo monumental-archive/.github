@@ -24,7 +24,7 @@
 # renovate: pgrx-base-image
 "14" = "postgres:14-trixie@sha256:156f0b253fd61366d5fc2107ad45955027d5612f695a8436ce20167f3fa79bff"
 # renovate: pgrx-base-image
-"15" = "postgres:15-trixie@sha256:5f72c7b5bd616308ccfd2e74d6be16fb06364e5eecbb815fe9dc6ab9761d2111"
+"15" = "postgres:15-trixie@sha256:9b1d34adbce1dd07ee6e94b4a2cf698884b89bd44a6c9c12f5da8f3acbfe4957"
 # renovate: pgrx-base-image
 "16" = "postgres:16-trixie@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94"
 # renovate: pgrx-base-image
