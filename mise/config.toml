@@ -344,7 +344,7 @@ ruff = "0.16.4"
 # as a real nested REUSE.toml). PyPI-only, no aqua package: the pipx
 # backend rides aqua-backed uv (checksummed) — a documented exception in
 # the cargo: class (tooling-verdicts.md).
-"aqua:astral-sh/uv" = "0.12.6"
+"aqua:astral-sh/uv" = "0.12.7"
 # The interpreter every `pipx:` tool venv is built on, pinned here so mise
 # locks it and Renovate bumps it like any other tool rather than uv
 # choosing one per machine (#82). This is not a new cost: a Python was
