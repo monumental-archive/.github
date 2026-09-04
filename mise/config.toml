@@ -455,7 +455,7 @@ python = "3.14.7"
 # properties (charset, end_of_line, insert_final_newline, indent_style,
 # indent_size, trim_trailing_whitespace) plus per-type max_line_length.
 # aqua-backed: checksums, binary releases, no install script.
-"aqua:editorconfig-checker/editorconfig-checker" = "3.11.1"
+"aqua:editorconfig-checker/editorconfig-checker" = "3.11.2"
 # YAML lint (#403): full rule inventory at error, policy in .yamllint.yaml.
 # PyPI-only — no aqua package (404 in the registry; pure Python, no binary
 # releases) — so the SECOND pipx: exception after reuse, riding
