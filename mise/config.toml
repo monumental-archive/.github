@@ -236,7 +236,7 @@ trivy = "0.74.0"
 zizmor = "1.29.0"
 committed = "1.1.11"
 taplo = "0.10.0"
-shfmt = "3.13.1"
+shfmt = "3.14.0"
 # rumdl over markdownlint-cli2: same rule family, aqua-backed instead of
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
 rumdl = "0.2.62"
