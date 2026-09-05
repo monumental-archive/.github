@@ -10,6 +10,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.61.2](https://github.com/monumental-archive/.github/compare/v1.61.1...v1.61.2) - 2026-09-05
+
+### Fixed
+
+- update monumental-archive/signer to acd15d0 ([#920](https://github.com/monumental-archive/.github/pull/920))
+- update aqua:google/osv-scanner to 2.5.1 ([#919](https://github.com/monumental-archive/.github/pull/919))
+- update rumdl to 0.2.56 ([#921](https://github.com/monumental-archive/.github/pull/921))
+- update rumdl to 0.2.58 ([#923](https://github.com/monumental-archive/.github/pull/923))
+- update aqua:golangci/golangci-lint to 2.13.0 ([#924](https://github.com/monumental-archive/.github/pull/924))
+- update aqua:golangci/golangci-lint to 2.13.1 ([#925](https://github.com/monumental-archive/.github/pull/925))
+- update ruff to 0.16.4 ([#926](https://github.com/monumental-archive/.github/pull/926))
+- update lefthook to 2.1.11 ([#927](https://github.com/monumental-archive/.github/pull/927))
+- update github/codeql-action to v4.37.8 ([#928](https://github.com/monumental-archive/.github/pull/928))
+- update monumental-archive/signer to 9c52c01 ([#929](https://github.com/monumental-archive/.github/pull/929))
+- update rumdl to 0.2.60 ([#930](https://github.com/monumental-archive/.github/pull/930))
+- update jdx/mise to 2026.8.11 ([#931](https://github.com/monumental-archive/.github/pull/931))
+- lock file maintenance ([#932](https://github.com/monumental-archive/.github/pull/932))
+- update jdx/mise to 2026.8.12 ([#933](https://github.com/monumental-archive/.github/pull/933))
+- update postgres to 5d1d70e ([#935](https://github.com/monumental-archive/.github/pull/935))
+- update postgres to 1c59e2c ([#934](https://github.com/monumental-archive/.github/pull/934))
+- update postgres to 185c7c7 ([#937](https://github.com/monumental-archive/.github/pull/937))
+- update postgres to 051f7b7 ([#936](https://github.com/monumental-archive/.github/pull/936))
+- update postgres to bb3e1a5 ([#938](https://github.com/monumental-archive/.github/pull/938))
+- update aqua:astral-sh/uv to 0.12.6 ([#939](https://github.com/monumental-archive/.github/pull/939))
+- update postgres to 67f4172 ([#944](https://github.com/monumental-archive/.github/pull/944))
+- update monumental-archive/signer to 8018458 ([#945](https://github.com/monumental-archive/.github/pull/945))
+- update postgres to 4ef4dbc ([#943](https://github.com/monumental-archive/.github/pull/943))
+- update postgres to 156f0b2 ([#946](https://github.com/monumental-archive/.github/pull/946))
+- update postgres to f1c3376 ([#947](https://github.com/monumental-archive/.github/pull/947))
+- update aqua:astral-sh/uv to 0.12.7 ([#951](https://github.com/monumental-archive/.github/pull/951))
+- update postgres to 9b1d34a ([#954](https://github.com/monumental-archive/.github/pull/954))
+- update aqua:golangci/golangci-lint to 2.13.2 ([#952](https://github.com/monumental-archive/.github/pull/952))
+- update github/codeql-action to v4.37.9 ([#948](https://github.com/monumental-archive/.github/pull/948))
+- update editorconfig-checker to 3.11.2 ([#940](https://github.com/monumental-archive/.github/pull/940))
+- update jdx/mise to 2026.8.14 ([#941](https://github.com/monumental-archive/.github/pull/941))
+- update lefthook to 2.1.12 ([#955](https://github.com/monumental-archive/.github/pull/955))
+- update ruff to 0.16.5 ([#949](https://github.com/monumental-archive/.github/pull/949))
+- update rumdl to 0.2.62 ([#950](https://github.com/monumental-archive/.github/pull/950))
+- update jdx/mise-action to v4.3.0 ([#942](https://github.com/monumental-archive/.github/pull/942))
+
 ## [1.61.1](https://github.com/monumental-archive/.github/compare/v1.61.0...v1.61.1) - 2026-08-24
 
 ### Fixed
