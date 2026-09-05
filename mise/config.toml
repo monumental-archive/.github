@@ -266,7 +266,7 @@ jq = "1.8.2"
 # universal layer that dropped Python the moment the canon's own count
 # fell to two would have to re-adopt it for the first adopter who
 # writes one.
-ruff = "0.16.4"
+ruff = "0.16.5"
 # The org's JS/TS/JSON layer (#82), at every rule biome has: `preset:
 # "all"` for the eight stable groups plus each nursery rule NAMED in
 # mise/biome-org.json. 514 rules at 2.5.7, not the 525 this comment
