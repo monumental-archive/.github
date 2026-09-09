@@ -50,7 +50,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       - name: Check the advisory feed against the lock
@@ -75,7 +75,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       - name: Check the public API against the latest published release
@@ -100,7 +100,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       # Bounded libFuzzer runs under AddressSanitizer — cargo-fuzz's own
@@ -171,7 +171,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       # Call-graph-aware advisory scan against https://vuln.go.dev —
@@ -199,7 +199,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       # Link liveness over the caller's own tracked markdown. Network-
@@ -231,7 +231,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       - name: Audit workflows online
@@ -268,7 +268,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       - name: Verify pin comments and release age
@@ -305,7 +305,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       - name: Verify each locked asset is built for the platform it names
@@ -340,7 +340,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.0
+          version: 2026.9.1
           cache: false
 
       # The `lint:*` symmetry the audit surface went without (#704). Every
