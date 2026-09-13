@@ -316,7 +316,7 @@ ruff = "0.16.6"
 # since #652: the release machinery writes it as `measured - band` and
 # it only ever rises, so it can no longer drift below a ceiling nobody
 # is watching.
-"aqua:taiki-e/cargo-llvm-cov" = "0.9.0"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 # The dependency track (docs/dependency-track.md). cargo-deny is the gate
 # half (bans+licenses+sources, deterministic over the lock) and the
 # advisories half (audit:deny, network). cargo-audit is skipped-subsumed:
