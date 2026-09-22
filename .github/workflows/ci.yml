@@ -371,7 +371,7 @@ jobs:
       # which is exactly what it means.
       - name: Upload to Codecov
         if: steps.gen.outputs.skip == 'false'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4 # v7.1.0
         with:
           token: ${{ secrets.codecov-token }}
           # The reports the task actually rendered, derived above by
