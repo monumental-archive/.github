@@ -18,7 +18,7 @@
 # renovate: pgrx-base-image
 "17" = "postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0"
 # renovate: pgrx-base-image
-"18" = "postgres:18-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af"
+"18" = "postgres:18-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
 
 [smoke]
 # renovate: pgrx-base-image
