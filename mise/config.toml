@@ -354,7 +354,7 @@ ruff = "0.16.9"
 # about four seconds rather than the minutes a source build would take.
 # 3.14.6 rather than 3.14.7: the standalone release carrying .7 is six days
 # old and the seven-day floor refuses it.
-python = "3.14.7"
+python = "3.14.8"
 "pipx:reuse" = { version = "6.2.0", uvx_args = "--with charset-normalizer", pipx_args = "--preinstall charset-normalizer" }
 # The chain-link emitter's signing half: `stele emit chain` execs
 # cosign sign-blob under the workflow's ambient identity — the binary
