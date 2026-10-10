@@ -125,7 +125,7 @@ runs:
     # sigstore/cosign-installer is not. The signing tool arriving through
     # the same gate as every other tool is the point, not a workaround.
     - name: Install mise
-      uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
       with:
         version: 2026.9.15
         cache: false
