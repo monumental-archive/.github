@@ -407,7 +407,7 @@ python = "3.14.8"
 # org-wide, the only SQL the org ships (pgrx extensions,
 # monumental-archive-db). Zero SQL in the canon: like biome, golangci
 # and the Rust pair, exercised first in a consumer.
-"pipx:sqlfluff" = "4.3.0"
+"pipx:sqlfluff" = "4.4.0"
 # Semver honesty for published crates (#403): the public API is checked
 # against the latest release on crates.io. audit:*, NEVER lint:* — the
 # baseline is fetched from the registry at run time, and the gate is
