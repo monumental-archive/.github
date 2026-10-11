@@ -418,7 +418,7 @@ python = "3.14.8"
 # recorded as such in docs/tooling-verdicts.md. Needs cargo+rustdoc at
 # run time (repo-side toolchain, the lint:deny shape). Like the other
 # Rust tools, unprovable in the canon — no Rust tracked.
-"github:obi1kenobi/cargo-semver-checks" = "v0.50.0"
+"github:obi1kenobi/cargo-semver-checks" = "v0.51.0"
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must
 # be imported somewhere, or carry a written ignored entry under
 # [package.metadata.cargo-machete] with a reason. Static analysis, no
