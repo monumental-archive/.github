@@ -406,7 +406,7 @@ jobs:
         # taplo comes from the belt: the licence and repository fields are
         # read with a TOML parser, never grep. No tool cache in a job
         # whose output every image build consumes.
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.9.15
           cache: false
@@ -506,7 +506,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         # trivy comes from the belt. No tool cache in a job whose output
         # ships with the release.
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.9.15
           cache: false
