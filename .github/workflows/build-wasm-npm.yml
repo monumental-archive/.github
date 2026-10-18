@@ -246,7 +246,7 @@ jobs:
                     params: {cargoPackage: .}})' \
             <<< "${meta}" > plan/plan.json
           jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:
           name: sbom-plan-wasm
@@ -254,7 +254,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:
           name: npm-package

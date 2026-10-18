@@ -563,7 +563,7 @@ jobs:
           tar --sort=name --owner=0 --group=0 --numeric-owner \
             --mtime="@${epoch}" -C /tmp/out -cf - pkgroot cnpgroot \
             | gzip -n > "dist/${name}-${UNTRUSTED_VERSION}-pg${PG}-linux-${ARCH}.tar.gz"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.repro && 'repro-' || '' }}extension-pg${{ matrix.pg }}-${{ matrix.arch }}
           path: dist/
@@ -606,7 +606,7 @@ jobs:
                         noDefaultFeatures: true}}]' \
             > plan/plan.json
           jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:
           name: sbom-plan-extension-pg${{ matrix.pg }}-${{ matrix.arch }}
@@ -686,7 +686,7 @@ jobs:
             echo "LEGS_EOF"
           } >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:
           name: release-extensions

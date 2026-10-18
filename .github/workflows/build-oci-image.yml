@@ -492,7 +492,7 @@ jobs:
             <<< "${meta}")
           export PACKAGE
           .org-canon/release/rust-build.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # The plan the sbom job folds into the release view. Both arches
         # state the same mapping and the engine collapses them, exactly
         # as the rust-binary targets and the pgrx cells do.
@@ -632,7 +632,7 @@ jobs:
           mkdir -p /tmp/digests
           printf '%s' "${digest}" > "/tmp/digests/${ARCH}"
           echo "::notice::${ARCH} pushed as ${digest}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.dry-run }}
         with:
           name: ${{ inputs.repro && 'repro-' || '' }}oci-digest-${{ matrix.arch }}
