@@ -76,7 +76,7 @@ permissions: {}
 jobs:
   resolve:
     name: Resolve the latest release and its published checksums
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -202,7 +202,7 @@ jobs:
         && (needs.rebuild.result == 'success' || needs.rebuild-go.result == 'success'
           || needs.rebuild-extension.result == 'success')
       }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read # the verdict runs from the caller tree and the canon belt
