@@ -253,7 +253,7 @@ jq = "1.8.2"
 # lint:canon-pins reads canon references only. pinact closes that, brings
 # the seven-day floor to the one layer without it, and supplies the fixer
 # nine other fix:* tasks had and action pins did not.
-"aqua:suzuki-shunsuke/pinact" = "4.1.1"
+"aqua:suzuki-shunsuke/pinact" = "5.0.0"
 # Python lint + format in one binary (#82), at `select = ["ALL"]`. Ruff
 # is a standalone Rust binary: it needs no Python interpreter to run, so
 # it lints Python whether or not one is pinned. (One now is, but for uv's
