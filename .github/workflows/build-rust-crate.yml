@@ -63,7 +63,7 @@ permissions: {}
 jobs:
   build:
     name: Package and prove the crates build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
       contents: read
