@@ -335,7 +335,7 @@ ruff = "0.17.1"
 # cryptographic trace at all. Same Sigstore root of trust as cosign —
 # one identity model, no standing key. aqua-backed: checksums, no
 # install script (docs/tooling-verdicts.md).
-"aqua:sigstore/gitsign" = "0.17.1"
+"aqua:sigstore/gitsign" = "0.18.0"
 # REUSE compliance (#316): the tool the api.reuse.software badge runs,
 # executed in the gate over tracked files so compliance is machine-checked
 # BEFORE registration — "compliant at registration" was an unenforced
