@@ -507,49 +507,49 @@ url_api = "https://api.github.com/repos/sigstore/cosign/releases/assets/66007080
 provenance = "cosign"
 
 [[tools."aqua:sigstore/gitsign"]]
-version = "0.17.1"
+version = "0.18.0"
 backend = "aqua:sigstore/gitsign"
 
 [tools."aqua:sigstore/gitsign"."platforms.linux-arm64"]
-checksum = "sha256:477018736a80b36e703dd58db8d6e158a2c1b8b727af0ab8ffdcce9fdf610ada"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_linux_arm64"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536713"
+checksum = "sha256:dec27cbc6602c62542f738312082d481254c743ff91055ecc394cf3a60be1c01"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_linux_arm64"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660302682"
 provenance = "cosign"
 
 [tools."aqua:sigstore/gitsign"."platforms.linux-arm64-musl"]
-checksum = "sha256:477018736a80b36e703dd58db8d6e158a2c1b8b727af0ab8ffdcce9fdf610ada"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_linux_arm64"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536713"
+checksum = "sha256:dec27cbc6602c62542f738312082d481254c743ff91055ecc394cf3a60be1c01"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_linux_arm64"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660302682"
 provenance = "cosign"
 
 [tools."aqua:sigstore/gitsign"."platforms.linux-x64"]
-checksum = "sha256:69213a8a0813a151e5a47d0060862952ff833a845d57309dff76f7ba6600abae"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_linux_amd64"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536767"
+checksum = "sha256:2bc625472a08fea3bb6a57982c7d8b4978d1032251d305ceef3bf2ded0ca4483"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_linux_amd64"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660302601"
 provenance = "cosign"
 
 [tools."aqua:sigstore/gitsign"."platforms.linux-x64-musl"]
-checksum = "sha256:69213a8a0813a151e5a47d0060862952ff833a845d57309dff76f7ba6600abae"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_linux_amd64"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536767"
+checksum = "sha256:2bc625472a08fea3bb6a57982c7d8b4978d1032251d305ceef3bf2ded0ca4483"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_linux_amd64"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660302601"
 provenance = "cosign"
 
 [tools."aqua:sigstore/gitsign"."platforms.macos-arm64"]
-checksum = "sha256:4994e9629aae6a3fea9c0f770f279b273bad3e86ac8ebd3e9dc90f317428589d"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_darwin_arm64"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536710"
+checksum = "sha256:32db71436dcfcba055517165ac6dfaa8aacbc73c405405259149df4a188ff7b1"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_darwin_arm64"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660314816"
 provenance = "cosign"
 
 [tools."aqua:sigstore/gitsign"."platforms.macos-x64"]
-checksum = "sha256:32c469eee2859694a67df0efee1a17f2574600ad73769a81315f360ee75f89e7"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_darwin_amd64"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536788"
+checksum = "sha256:224253f24e98cd024741c80d8ba7a42a9ce11710ba94b6e88084e7a987406540"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_darwin_amd64"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660314820"
 provenance = "cosign"
 
 [tools."aqua:sigstore/gitsign"."platforms.windows-x64"]
-checksum = "sha256:01bf90e084270af4bf06a211437f1cd6d4a015cc14ff0b39a2ce335a01c4b4c1"
-url = "https://github.com/sigstore/gitsign/releases/download/v0.17.1/gitsign_0.17.1_windows_amd64.exe"
-url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/494536775"
+checksum = "sha256:e94d5e98377397253470b51810e75e1ac2fe1ce6d980848b55efbc393ec91cff"
+url = "https://github.com/sigstore/gitsign/releases/download/v0.18.0/gitsign_0.18.0_windows_amd64.exe"
+url_api = "https://api.github.com/repos/sigstore/gitsign/releases/assets/660302600"
 provenance = "cosign"
 
 [[tools."aqua:suzuki-shunsuke/pinact"]]
