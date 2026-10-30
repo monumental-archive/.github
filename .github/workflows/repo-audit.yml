@@ -33,7 +33,7 @@ permissions:
 jobs:
   deny:
     name: audit / dependency advisories
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -58,7 +58,7 @@ jobs:
 
   semver:
     name: audit / semver against the published baseline
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -83,7 +83,7 @@ jobs:
 
   fuzz:
     name: audit / fuzz targets
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -154,7 +154,7 @@ jobs:
 
   go-vulns:
     name: audit / go vulnerabilities
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -182,7 +182,7 @@ jobs:
 
   links:
     name: audit / links
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -214,7 +214,7 @@ jobs:
 
   actions:
     name: audit / actions (online)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -251,7 +251,7 @@ jobs:
 
   action-pins:
     name: audit / action pin comments and age
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -288,7 +288,7 @@ jobs:
 
   lock-arch:
     name: audit / locked assets match the platform they name
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -323,7 +323,7 @@ jobs:
 
   repo-audits:
     name: audit / this repository's own audit tasks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"

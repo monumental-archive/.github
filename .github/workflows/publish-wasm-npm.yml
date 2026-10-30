@@ -34,7 +34,7 @@ permissions: {}
 jobs:
   publish:
     name: Publish to npm
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # Resolves against the CALLER's repository — measured. Sets the OIDC
     # `environment` claim npm can pin beside the caller's entry filename.
