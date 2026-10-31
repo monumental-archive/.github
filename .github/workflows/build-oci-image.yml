@@ -402,7 +402,7 @@ jobs:
         # is the whole point of #295 — the declaration changes who
         # writes the recipe, never whose rust runs it.
         if: ${{ inputs.prepare != '' || inputs.binary-crate != '' }}
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
         with:
           # mise itself is a build input and floats without this pin
           # (#117: nothing unpinned on an attested path, the installer
