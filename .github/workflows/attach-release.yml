@@ -141,7 +141,7 @@ permissions: {}
 jobs:
   attach:
     name: Attach the evidence bundle and publish
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions: {}
     env:
