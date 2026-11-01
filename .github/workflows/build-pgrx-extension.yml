@@ -101,7 +101,7 @@ jobs:
   # travels at the same SHA as this workflow.
   plan:
     name: Validate the majors against the base-image mapping
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
     steps:
@@ -619,7 +619,7 @@ jobs:
     needs:
       - plan
       - build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions: {}
     outputs:
