@@ -3,12 +3,13 @@
 # (#813). Sourced by belt tasks (`. "${ORG_BELT_DIR}/pgrx-env.sh"`),
 # never executed.
 #
-# Three tasks compile a pgrx extension — `lint:pg-clippy`, `test:pgrx`
-# and `fix:rust`'s extension pass — and each needs the same two things
-# first: a `pg_config` per declared major registered with pgrx, and, on
-# macOS, a correction to flags the prebuilt Postgres recorded on somebody
-# else's machine. Written three times they would drift; written here they
-# cannot.
+# Four tasks compile a pgrx extension — `lint:pg-clippy`, `test:pgrx`,
+# `fix:rust`'s extension pass and the coverage measurement
+# (`coverage:check`, `coverage:adopt` and `coverage:report` share it,
+# #917) — and each needs the same two things first: a `pg_config` per
+# declared major registered with pgrx, and, on macOS, a correction to
+# flags the prebuilt Postgres recorded on somebody else's machine.
+# Written four times they would drift; written here they cannot.
 
 org_pgrx_darwin_flags() { # correct the SDK the prebuilt pg_config names
   # MEASURED, and the one real cost of the aqua-backed mechanism. The
@@ -59,4 +60,53 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
     return 1
   }
   cargo pgrx init "${args[@]}"
+}
+
+org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
+  # For a caller that compiles the WHOLE workspace rather than naming the
+  # extension (#917). `cargo llvm-cov --workspace` reaches a pgrx crate
+  # exactly as `cargo pgrx test` does, and it was the one path that got
+  # no Postgres: measured on release-lab, it died in pgrx-bindgen on
+  # "'inttypes.h' file not found" on macOS, and on a cold runner nothing
+  # had registered a pg_config at all.
+  #
+  # The extension is DERIVED here as everywhere else, from the same file,
+  # so a repository declares nothing. Which is also why a held-out list
+  # that names one is refused rather than honoured: COVERAGE_EXCLUDE was
+  # the last place a repository still declared a pgrx crate, and an
+  # exclusion there is CLIPPY_EXCLUDE under a better name — a coverage
+  # floor derived from a surface missing an entire published artifact.
+  #
+  # A workspace with no extension returns before sourcing anything else,
+  # so it pays for one `cargo metadata` and nothing more.
+  local label="$1" held="$2"
+  local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+  local metadata surface installed plan record spec kind crate_majors _dir member
+  local majors="" named=""
+  # One step per assignment, never a pipeline inside `$(...)`: this file
+  # is sourced, so it cannot rely on its caller having set pipefail, and
+  # a failed derivation that arrived as an empty surface would read as a
+  # workspace with no extension — the skip #813 exists to end.
+  metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
+  surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}") || return 1
+  while IFS=$'\t' read -r record spec kind crate_majors _dir; do
+    [[ ${record} == crate && ${kind} == pgrx ]] || continue
+    for member in ${held}; do
+      [[ ${member} != "${spec%@*}" ]] || named="${named} ${member}"
+    done
+    majors="${majors}${majors:+,}${crate_majors}"
+  done <<< "${surface}"
+  if [[ -n ${named} ]]; then
+    echo "${label}: COVERAGE_EXCLUDE names a pgrx extension:${named}" >&2
+    echo "  delete it from the list. The belt gives this task a Postgres, so the" >&2
+    echo "  crate is measurable, and a floor that leaves out a published crate is" >&2
+    echo "  a floor for something other than what ships (#917). Then re-derive:" >&2
+    echo "    mise run coverage:adopt" >&2
+    return 1
+  fi
+  [[ -n ${majors} ]] || return 0
+  org_pgrx_darwin_flags || return 1
+  installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
+  plan=$(python3 "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}") || return 1
+  org_pgrx_init <<< "${plan}" > /dev/null
 }
