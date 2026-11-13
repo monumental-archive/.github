@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.63.2](https://github.com/monumental-archive/.github/compare/v1.63.1...v1.63.2) - 2026-11-13
+
+### Fixed
+
+- supply ICU's headers to a pgrx build on macOS ([#1137](https://github.com/monumental-archive/.github/pull/1137))
+- initialise a pgrx Postgres one task at a time ([#1140](https://github.com/monumental-archive/.github/pull/1140))
+
 ## [1.63.1](https://github.com/monumental-archive/.github/compare/v1.63.0...v1.63.1) - 2026-11-13
 
 ### Fixed
