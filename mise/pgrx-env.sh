@@ -39,6 +39,88 @@ org_pgrx_darwin_flags() { # correct the SDK the prebuilt pg_config names
   }
   export BINDGEN_EXTRA_CLANG_ARGS="-isysroot ${sdk} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
   export CFLAGS="-isysroot ${sdk} ${CFLAGS:-}"
+  org_pgrx_darwin_icu
+}
+
+org_pgrx_darwin_icu() { # put ICU's headers where the prebuilt Postgres expects them
+  # THE SECOND THING THE BUILD MACHINE LEFT BEHIND, and it only started
+  # to matter at pgrx 0.19.3. The prebuilt macOS Postgres is configured
+  # --with-icu and records
+  #
+  #   -I/opt/homebrew/opt/icu4c@78/include
+  #
+  # It ships ICU's dylibs and none of its headers. Through 0.19.2 that
+  # was invisible: pgrx bound a chosen subset of Postgres's headers and
+  # none of them reached ICU. 0.19.3 binds ALL of them, `pg_locale.h`
+  # includes `unicode/ucol.h`, and a Mac without Homebrew's icu4c dies in
+  # bindgen with "'unicode/ucol.h' file not found" — measured on
+  # release-lab, at pg14 and pg18 alike, in test:pgrx, lint:pg-clippy and
+  # coverage:check together. The Linux runner is unaffected: libicu-dev
+  # is in the image.
+  #
+  # So a pgrx repository pins the headers beside its Postgres, macOS
+  # only, and this adds them to the same two variables the SDK
+  # correction uses and for the same reason (bindgen reads one, cc-rs the
+  # other). Repository-side like the Postgres pin and by the same rule:
+  # the belt carries what the belt needs to run, repos carry what they
+  # build with — in the belt this would cost every repository 121M for
+  # headers one class of crate reads.
+  #
+  # WHICH ICU IS DERIVED, never declared: the major is read out of each
+  # pinned Postgres's own `pg_config --cppflags`, so the pin is checked
+  # against what the server was actually built with. A header set from a
+  # different major would bind against declarations the shipped dylibs
+  # do not have, and nothing downstream would say so.
+  local listing paths path pg_config flags major needed="" icu version where
+  listing=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
+  # ACTIVE entries only, the rule pgrx-postgres.py states: `mise ls`
+  # reports everything installed on the machine, and a copy somebody
+  # installed by hand is not a pin — it passes here and is absent in CI.
+  paths=$(jq -r '.[] | select(.active and .installed) | .install_path' <<< "${listing}") || return 1
+  while read -r path; do
+    [[ -n ${path} ]] || continue
+    for pg_config in "${path}"/bin/pg_config "${path}"/*/bin/pg_config; do
+      [[ -x ${pg_config} ]] || continue
+      flags=$("${pg_config}" --cppflags) || return 1
+      [[ ${flags} =~ icu4c@([0-9]+) ]] || continue
+      major="${BASH_REMATCH[1]}"
+      [[ " ${needed} " == *" ${major} "* ]] || needed="${needed} ${major}"
+    done
+  done <<< "${paths}"
+  # No pinned Postgres names an ICU: nothing was built against one, or no
+  # Postgres is pinned yet and pgrx-postgres.py will say so in its own
+  # words. Either way there is nothing here to correct.
+  needed="${needed# }"
+  [[ -n ${needed} ]] || return 0
+  if [[ ${needed} == *" "* ]]; then
+    echo "pgrx-env: the pinned Postgres builds were compiled against different ICU majors (${needed})" >&2
+    echo "  one include path cannot serve them all — pin Postgres builds that share one" >&2
+    return 1
+  fi
+  icu=$(mise ls "github:unicode-org/icu" --json) || return 1
+  version=$(jq -r '[.[] | select(.active and .installed)] | last | .version // empty' <<< "${icu}") || return 1
+  where=$(jq -r '[.[] | select(.active and .installed)] | last | .install_path // empty' <<< "${icu}") || return 1
+  if [[ -z ${version} || -z ${where} ]]; then
+    echo "pgrx-env: the pinned Postgres was built against ICU ${needed} and ships no headers —" >&2
+    echo "  pgrx binds every Postgres header from 0.19.3, so the build needs them. Pin them" >&2
+    echo "  beside the Postgres in mise.toml (macOS only; the Linux runner has libicu-dev):" >&2
+    echo '  "github:unicode-org/icu" = { version = "<major>.<minor>", version_prefix = "release-",' >&2
+    echo '    asset_pattern = "icu4c-*-sources.tgz", os = ["macos"] }' >&2
+    return 1
+  fi
+  if [[ ${version%%.*} != "${needed}" ]]; then
+    echo "pgrx-env: mise.toml pins ICU ${version}; the pinned Postgres was built against ICU ${needed}" >&2
+    echo "  the headers must be the major the shipped dylibs are — pin a ${needed}.x release" >&2
+    return 1
+  fi
+  if [[ ! -f ${where}/source/common/unicode/utypes.h || ! -f ${where}/source/i18n/unicode/ucol.h ]]; then
+    echo "pgrx-env: ${where} carries no ICU headers under source/common and source/i18n" >&2
+    echo "  the pin must be ICU's SOURCE archive (asset_pattern = \"icu4c-*-sources.tgz\")" >&2
+    return 1
+  fi
+  local include="-I${where}/source/common -I${where}/source/i18n"
+  export BINDGEN_EXTRA_CLANG_ARGS="${include} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
+  export CFLAGS="${include} ${CFLAGS:-}"
 }
 
 org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py

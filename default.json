@@ -59,6 +59,12 @@
       "commitMessageTopic": "postgresql-binaries"
     },
     {
+      "description": "ICU's headers are pinned to the major the pinned Postgres was built against (pgrx-env.sh derives it from pg_config and reds on any other), so a major is never an update here — it arrives with a Postgres build that moved, by hand.",
+      "matchPackageNames": ["github:unicode-org/icu", "unicode-org/icu"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       "description": "32 as minted, 3 past.",
       "matchPackageNames": ["actions/dependency-review-action"],
       "commitMessageTopic": "dependency-review-action"
