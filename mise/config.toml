@@ -5093,8 +5093,15 @@ env = { SHELLCHECK_OPTS = "--enable=all --external-sources --extended-analysis=t
 # actionlint 1.7.12, the newest release. Remove the flag when
 # rhysd/actionlint#711 lands. The regex is anchored to the `$/` prefix
 # so every other malformed `uses:` still goes red.
+#
+# The second -ignore is the same exception for the same reason: GitHub's
+# ubuntu-26.04 runner images (x64 and arm) postdate actionlint 1.7.12,
+# whose label table is compiled in, so every `runs-on: ubuntu-26.04` is
+# reported as an unknown label. Remove it with the first, at the next
+# actionlint release. Anchored to those two labels: any other unknown
+# label — a typo included — still goes red.
 run = '''
-if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color -ignore "specifying action \"\\$/"; else echo "lint:actions: no workflows, skipped"; fi
+if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown'; else echo "lint:actions: no workflows, skipped"; fi
 '''
 
 [tasks."release:preview"]
