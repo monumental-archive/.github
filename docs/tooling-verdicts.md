@@ -628,7 +628,7 @@ worse one.
 
 Three legs, split by what each needs:
 
-- `lint:action-pins` — `-fix=false -no-api`, so it asserts a
+- `lint:action-pins` — `--fix=false --no-api`, so it asserts a
   40-character SHA and the presence of a comment while asking GitHub
   nothing. Deterministic and offline, therefore gate-eligible.
 - `audit:action-pins` — `--verify-comment` resolves each SHA back to its
