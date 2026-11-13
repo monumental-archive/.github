@@ -46,5 +46,5 @@ jobs:
       # measured on stele's standup, where this template's silence was
       # the one gate finding).
       contents: read # checkout of this repo and of the toolbelt
-    uses: monumental-archive/.github/.github/workflows/ci.yml@77ca1a23f6c2a27a6398c3fdcafb1fc4e18cbeba # v1.61.1
+    uses: monumental-archive/.github/.github/workflows/ci.yml@b4617db21b364639e0337be28fbae8aa0108c7c8 # v1.62.0
 ...
