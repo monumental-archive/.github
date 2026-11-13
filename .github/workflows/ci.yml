@@ -47,6 +47,12 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-24.04
+    # A hung gate must fail in minutes, not at GitHub's six-hour default:
+    # on #969 mise never exited after a task failed and the job held a
+    # runner for 6h00m. Sized from the org's own history (2026-11-13, nine
+    # repos, 167 runs): the slowest gate anywhere took 5m56s, so 30 is five
+    # times the worst case and leaves room for a cold cache.
+    timeout-minutes: 30
     env:
       # Both checkouts are trusted mise config roots; nothing else is.
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
