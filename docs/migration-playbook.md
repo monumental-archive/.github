@@ -38,8 +38,11 @@ a fresh session **started in the target repo's checkout**.
       inherit the new-repo default): Settings → Advanced Security, or
       the API attach call in `security/README.md`.
 - [ ] `./settings/repo-baseline.sh apply` (from the `.github` checkout —
-      settings, immutable OIDC sub claim, and the `publish` environment
-      where the canonical entry `publish.yml` exists).
+      settings, immutable OIDC sub claim, the `publish` environment
+      where the canonical entry `publish.yml` exists, and the
+      `merge-queue` ruleset on a public repository). The gate stub's
+      `merge_group` trigger must be on the default branch first, or a
+      queued pull request waits for a check that cannot report.
 - [ ] The ORG's rulesets need nothing: they are org-level,
       `enforcement: active`, scope `~ALL` — a transferred repo is covered
       the moment it lands. **The repo's OWN rulesets are a different
@@ -48,7 +51,8 @@ a fresh session **started in the target repo's checkout**.
       one that blocked iiif-server — `protect-main` required five
       contexts from the pipeline the import was deleting (#671, #876).
       `repo-baseline.sh check` reports any that survive, and never
-      deletes one.
+      deletes one. The single exception is `merge-queue`, which `apply`
+      writes (`rulesets.md`).
 - [ ] **Delete the repo's CLASSIC branch protection** (Settings →
       Branches). It survives the transfer, it is a different API object
       from the rulesets so the sweep above does not touch it, and its

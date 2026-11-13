@@ -19,6 +19,15 @@ name: gate
   push:
     branches:
       - $default-branch
+  # The merge queue's own run: a queued pull request is squashed onto the
+  # real tip of the default branch in a temporary branch, and the
+  # required check must report there or the queue waits for a status
+  # that never arrives. This is what makes rebasing-to-merge unnecessary
+  # (.github#1117). Inert in a repository with no queue; lint:gate-stub
+  # requires it either way.
+  merge_group:
+    types:
+      - checks_requested
 
 permissions:
   contents: read
