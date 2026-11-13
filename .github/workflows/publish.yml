@@ -408,7 +408,7 @@ jobs:
         # whose output every image build consumes.
         uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
-          version: 2026.10.19
+          version: 2026.11.3
           cache: false
 
       # `stele derive facts` (stele#40): the whole fact set from a NAMED
@@ -508,7 +508,7 @@ jobs:
         # ships with the release.
         uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
-          version: 2026.10.19
+          version: 2026.11.3
           cache: false
 
       - name: Fetch the shipped binaries (go-binary)
