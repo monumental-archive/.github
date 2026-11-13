@@ -2127,13 +2127,44 @@ dir = "{{cwd}}"
 # canon entirely and nothing said so.
 # On pull_request events CI sits on GitHub's synthetic merge commit; the
 # PR's real commits are its second parent.
+#
+# In the merge queue (#1117) the range holds something else again: the
+# squash commit GitHub mints, whose subject is the PR title and whose
+# BODY is the PR description verbatim. Its subject is held to the canon
+# here — this is the commit that lands. Its body is not, because it was
+# never this lint's to judge: a human's description is already held on
+# the pull_request run (ci.yml's squash-message step), and a bot's is
+# the upstream project's release notes, which nobody here wrote.
+# Measured on #991: pinact's notes carry a 191-column log line inside a
+# code block, the queue refused it twice, and the PR bounced between
+# green and queued with no change that could ever pass. Before the
+# queue the same commit landed on main unjudged, since a push to main
+# has an empty range.
 run = '''
-if git rev-parse --verify -q origin/main > /dev/null; then
-  tip=HEAD
-  parents=$(git rev-list --parents -n 1 HEAD | wc -w)
-  if [[ ${parents} -gt 2 ]]; then tip="HEAD^2"; fi
-  "${ORG_BELT_DIR}/committed.sh" "origin/main..${tip}"
-else echo "lint:commits: no origin/main, skipped"; fi
+if ! git rev-parse --verify -q origin/main > /dev/null; then
+  echo "lint:commits: no origin/main, skipped"
+  exit 0
+fi
+if [[ ${GITHUB_EVENT_NAME:-} == "merge_group" ]]; then
+  status=0
+  count=0
+  shas=$(git rev-list "origin/main..HEAD")
+  while read -r sha; do
+    [[ -n ${sha} ]] || continue
+    count=$((count + 1))
+    subject=$(mktemp)
+    git log -1 --format=%s "${sha}" > "${subject}"
+    "${ORG_BELT_DIR}/committed.sh" --commit-file "${subject}" || status=1
+    rm -f "${subject}"
+  done <<< "${shas}"
+  [[ ${status} -eq 0 ]] || exit 1
+  echo "lint:commits: ${count} queued squash subject(s) hold the canon"
+  exit 0
+fi
+tip=HEAD
+parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+if [[ ${parents} -gt 2 ]]; then tip="HEAD^2"; fi
+"${ORG_BELT_DIR}/committed.sh" "origin/main..${tip}"
 '''
 
 [tasks."commits:check"]
