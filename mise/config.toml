@@ -455,7 +455,7 @@ python = "3.15.1"
 # properties (charset, end_of_line, insert_final_newline, indent_style,
 # indent_size, trim_trailing_whitespace) plus per-type max_line_length.
 # aqua-backed: checksums, binary releases, no install script.
-"aqua:editorconfig-checker/editorconfig-checker" = "3.11.3"
+"aqua:editorconfig-checker/editorconfig-checker" = "4.0.2"
 # YAML lint (#403): full rule inventory at error, policy in .yamllint.yaml.
 # PyPI-only — no aqua package (404 in the registry; pure Python, no binary
 # releases) — so the SECOND pipx: exception after reuse, riding
@@ -879,7 +879,8 @@ dir = "{{cwd}}"
 # biome, yamllint, rumdl); ec still enforces indent_style (a tab in a
 # space file), charset, end_of_line, insert_final_newline,
 # trim_trailing_whitespace and per-type max_line_length — the checks no
-# other belt tool covers. The binary is named `ec` by aqua.
+# other belt tool covers. From v4 the binary is `editorconfig-checker`;
+# `ec`, the name through 3.x, is gone.
 run = '''
 set -euo pipefail
 files=$(git ls-files ':!vendor/**')
@@ -892,7 +893,7 @@ if ! git ls-files --error-unmatch ".editorconfig" > /dev/null 2>&1; then
   echo "  without it every editorconfig-checker check vacuously passes" >&2
   exit 1
 fi
-xargs ec -disable-indent-size <<< "${files}"
+xargs editorconfig-checker --disable-indent-size <<< "${files}"
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:editorconfig: ${count} file(s) checked"
 '''
