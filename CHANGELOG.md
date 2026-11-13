@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.63.1](https://github.com/monumental-archive/.github/compare/v1.63.0...v1.63.1) - 2026-11-13
+
+### Fixed
+
+- disable exhaustruct's successor in the Go stub ([#1133](https://github.com/monumental-archive/.github/pull/1133))
+- update monumental-archive/signer to 0ea8f64 ([#1135](https://github.com/monumental-archive/.github/pull/1135))
+- give coverage a Postgres and the pin a short title ([#1136](https://github.com/monumental-archive/.github/pull/1136))
+
 ## [1.63.0](https://github.com/monumental-archive/.github/compare/v1.62.0...v1.63.0) - 2026-11-13
 
 ### Added
