@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.63.0](https://github.com/monumental-archive/.github/compare/v1.62.0...v1.63.0) - 2026-11-13
+
+### Added
+
+- catch a machine running behind the toolchain CI uses ([#1129](https://github.com/monumental-archive/.github/pull/1129))
+
+### Fixed
+
+- update first-party canon ([#1130](https://github.com/monumental-archive/.github/pull/1130))
+
 ## [1.62.0](https://github.com/monumental-archive/.github/compare/v1.61.1...v1.62.0) - 2026-11-13
 
 ### Added
