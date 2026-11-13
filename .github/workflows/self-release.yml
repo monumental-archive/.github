@@ -42,7 +42,7 @@ jobs:
       # on the keyless tag signature (#349 S4) — the callee's
       # capability-boundary marker carries the argument.
       id-token: write # gitsign's keyless tag signature (see above)
-    uses: ./.github/workflows/release.yml
+    uses: ./.github/workflows/release.yml # zizmor: ignore[self-repository]
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
 ...

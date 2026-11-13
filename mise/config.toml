@@ -233,7 +233,7 @@ shellcheck = "0.11.0"
 typos = "1.51.1"
 lefthook = "2.2.2"
 trivy = "0.76.1"
-zizmor = "1.29.0"
+zizmor = "1.32.0"
 committed = "1.1.12"
 taplo = "0.10.0"
 shfmt = "3.14.1"
@@ -2194,6 +2194,20 @@ dir = "{{cwd}}"
 # for workflows — it had simply never been pointed at them, so
 # .github/actions/source-attest/action.yml carried a live third-party
 # reference that no check in the org could see (#82).
+#
+# self-repository (zizmor 1.30+) wants every in-repo `uses: ./` written
+# `$/`. For a STEP that is enforced and the canon already conforms. For
+# a JOB calling a reusable workflow it collides with actionlint, which
+# type-checks a call's inputs and secrets against the callee only when
+# the call is spelled `./` — measured on 1.7.12: a misspelt input and a
+# missing required one both red under `./` and both pass under `$/`.
+# GitHub resolves the two forms identically for a workflow call, so the
+# `./` form loses nothing at run time and keeps that check. Each such
+# call therefore carries `# zizmor: ignore[self-repository]` on its own
+# line — the tool's per-site mechanism, so the rule stays live for
+# steps. Remove them, and convert the calls, when actionlint ships `$/`
+# support (rhysd/actionlint#711) — the same trigger as lint:actions'
+# two -ignore flags.
 run = '''
 paths=""
 compgen -G ".github/workflows/*.y*ml" > /dev/null && paths=".github/workflows/"

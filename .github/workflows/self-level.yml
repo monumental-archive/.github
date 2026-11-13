@@ -87,7 +87,7 @@ jobs:
       # lint:caller-permissions checks it against what the callee
       # asks).
       contents: write # pushes this repository's cells to its own levels branch
-    uses: ./.github/workflows/level.yml
+    uses: ./.github/workflows/level.yml # zizmor: ignore[self-repository]
     with:
       tracks: build source dependency
 ...
