@@ -46,7 +46,7 @@ permissions:
 jobs:
   ci:
     name: ci
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # A hung gate must fail in minutes, not at GitHub's six-hour default:
     # on #969 mise never exited after a task failed and the job held a
     # runner for 6h00m. Sized from the org's own history (2026-11-13, nine
@@ -246,7 +246,7 @@ jobs:
     name: coverage upload (badge only)
     needs: ci
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     continue-on-error: true
     permissions:

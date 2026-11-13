@@ -47,7 +47,7 @@ concurrency:
 jobs:
   monitor:
     name: Watch the log for the signer identity
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read # checkout of the pinned monitor source

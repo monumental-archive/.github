@@ -60,7 +60,7 @@ permissions: {}
 jobs:
   level:
     name: judge and publish this repository's levels
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       # Write on the CALLER, which is the repository being judged, and
       # the only thing written is that repository's own levels branch.
