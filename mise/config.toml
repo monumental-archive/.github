@@ -1923,6 +1923,39 @@ helper="${ORG_BELT_DIR}/embedded-shell.py"
 python3 "${helper}" ${files}
 '''
 
+[tasks."lint:belt-current"]
+description = "This machine's mise and belt are as current as CI's"
+dir = "{{cwd}}"
+# The belt keeps every TOOL at the pinned version on every machine, and
+# says nothing about two things that sit underneath it. Both were found
+# on 2026-11-13, on a machine that had not been used since August.
+#
+# mise itself: a standalone install moves only on `mise self-update`.
+# CI was on 2026.10.19 and the laptop on 2026.8.3, which could not
+# install editorconfig-checker 4 (its registry predates the renamed
+# asset) and silently rewrote mise.lock on `mise install`, dropping a
+# field the newer version writes. Nothing was red.
+#
+# The belt checkout: every repository on a machine reads ONE canon
+# checkout through the conf.d symlink. That checkout was 215 commits
+# behind, so every repository was being linted locally with August's
+# tools while its gate ran November's.
+#
+# Both comparisons are derived — the mise version from the canon's own
+# ci.yml, the canon version from the gate stub's pin comment — so no
+# second literal exists to drift and Renovate has nothing extra to bump.
+# Older is red; a NEWER local mise is a note, since refusing to push
+# from a machine that is ahead helps nobody.
+#
+# Always green in CI by construction (the canon action delivers mise
+# and the tree at one resolution), so like lint:belt-tree this is a
+# LOCAL control. It cannot see a checkout that is behind its own remote
+# while the repository under test pins something older still; that
+# needs the network, and the gate has none.
+run = '''
+"${ORG_BELT_DIR}/belt-current.sh"
+'''
+
 [tasks."lint:belt-tree"]
 description = "The belt answering this gate is the belt in this tree (#867)"
 dir = "{{cwd}}"
