@@ -276,7 +276,7 @@ jobs:
   # phase: admit
   guard:
     name: Refuse anything that is not a release tag
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     outputs:
       version: ${{ steps.check.outputs.version }}
@@ -383,7 +383,7 @@ jobs:
     name: Resolve the image facts
     needs: guard
     if: contains(inputs.classes, 'oci-image') || contains(inputs.classes, 'pgrx-extension')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     outputs:
@@ -487,7 +487,7 @@ jobs:
           (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
           (needs.build-extension.result == 'success' || needs.build-extension.result == 'skipped') &&
           (needs.build-oci.result == 'success' || needs.build-oci.result == 'skipped') }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     env:
@@ -1504,7 +1504,7 @@ jobs:
             && needs.build-extension-images.result == 'success'
             && needs.repro-build-extension-images.result == 'success'))
       }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions: {} # compares digests; no caller code, no checkout, no writes
     steps:
@@ -1685,7 +1685,7 @@ jobs:
       fail-fast: false
       matrix:
         inventory: ${{ fromJSON(needs.sbom.outputs.inventories) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       id-token: write # the decision signature, nothing else
@@ -2089,7 +2089,7 @@ jobs:
       - guard
       - attach
     if: ${{ !cancelled() && needs.guard.result == 'success' && needs.attach.result != 'success' && !inputs.dry-run }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {} # it annotates with the App token, not GITHUB_TOKEN
     steps:

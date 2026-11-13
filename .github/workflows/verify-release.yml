@@ -191,7 +191,7 @@ permissions: {}
 jobs:
   verify:
     name: Verify the release (${{ inputs.mode }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       # contents: read scopes the token the verdict step uses to read the

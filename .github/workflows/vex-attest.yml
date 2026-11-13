@@ -57,7 +57,7 @@ concurrency:
 jobs:
   plan:
     name: Resolve the decisions to sign and their subjects
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       attestations: read # the recovery loop reads the store to find its work
@@ -324,7 +324,7 @@ jobs:
     # always(): the refusals are the plan's, and they must redden the run
     # whether the signing legs ran, were skipped, or failed on their own.
     if: always() && needs.plan.outputs.refusals != ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     steps:
       - name: Name what went unsigned

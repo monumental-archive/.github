@@ -65,7 +65,7 @@ concurrency:
 jobs:
   assert:
     name: assert the published board
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Read-only, and that is the #554 change stated in one line: this
     # job used to hold `contents: write` to publish every repository's
     # cells from here.

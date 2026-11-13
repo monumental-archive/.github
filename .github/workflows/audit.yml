@@ -47,7 +47,7 @@ concurrency:
 jobs:
   links:
     name: audit / links
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -69,7 +69,7 @@ jobs:
 
   actions:
     name: audit / actions (online)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -98,7 +98,7 @@ jobs:
 
   action-pins:
     name: audit / action pin comments and age
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -127,7 +127,7 @@ jobs:
 
   lock-arch:
     name: audit / locked assets match the platform they name
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -160,7 +160,7 @@ jobs:
 
   template-pins:
     name: audit / template pin staleness
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -184,7 +184,7 @@ jobs:
 
   canon-pins:
     name: audit / canon pin freshness
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -214,7 +214,7 @@ jobs:
 
   org-pins:
     name: audit / org-wide canon pin freshness
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Environment-scoped for the same reason drafts and baseline-drift
     # are: the token this needs is org-wide, and a secret referenced
     # repo-wide is drawable by any job anyone adds to any workflow here.
@@ -262,7 +262,7 @@ jobs:
 
   biome-rules:
     name: audit / biome nursery coverage
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -288,7 +288,7 @@ jobs:
 
   blast-radius:
     name: audit / advisory blast radius
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -317,7 +317,7 @@ jobs:
 
   attestation-coverage:
     name: audit / attestation coverage
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -346,7 +346,7 @@ jobs:
 
   actions-allowlist:
     name: audit / actions allowlist drift
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Same environment discipline as repo-settings drift, and for the
     # same reason: `orgs/{org}/actions/permissions/selected-actions` is
     # an org-scoped read the default job token CANNOT perform. The old
@@ -379,7 +379,7 @@ jobs:
 
   signer-surface:
     name: audit / signing surface vs live callers
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -406,7 +406,7 @@ jobs:
 
   adoption:
     name: audit / obligation adoption across the org
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Environment-scoped for the same reason drafts and baseline-drift
     # are: the token this needs is org-wide, and a secret referenced
     # repo-wide is drawable by any job anyone adds to any workflow here.
@@ -452,7 +452,7 @@ jobs:
 
   citations:
     name: audit / docs citations resolve
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -479,7 +479,7 @@ jobs:
 
   source-vsa:
     name: audit / source chain coverage
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -506,7 +506,7 @@ jobs:
 
   release-tags:
     name: audit / release tags
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -534,7 +534,7 @@ jobs:
 
   drafts:
     name: audit / draft releases explain themselves
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Environment-scoped for the same reason baseline-drift is: the token
     # this needs is org-wide, and a secret referenced repo-wide is
     # drawable by any job anyone adds to any workflow here.
@@ -583,7 +583,7 @@ jobs:
 
   spec-drift:
     name: audit / spec drift
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -608,7 +608,7 @@ jobs:
 
   caller-permissions:
     name: audit / caller permissions
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -637,7 +637,7 @@ jobs:
 
   badges:
     name: audit / badge truth
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # README and .badge-states reads across org repos
       # The anonymous REST endpoint 401s even for public containers
@@ -674,7 +674,7 @@ jobs:
 
   baseline-drift:
     name: audit / repo settings drift
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The secret lives in this environment, not repo-wide: an org-admin
     # token referenced ambiently is drawable by any job anyone adds to
     # any workflow here; scoped to the environment, only jobs that
