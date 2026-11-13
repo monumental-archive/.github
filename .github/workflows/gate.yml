@@ -21,6 +21,22 @@ name: gate
   push:
     branches:
       - main
+  # The merge queue's own run. A queued pull request is squashed onto the
+  # real tip of main in a temporary `gh-readonly-queue/…` branch and the
+  # required check must report THERE, or the queue waits for a status
+  # that never arrives. This is what retires "behind main": the queue
+  # tests each entry against what it will actually land on, so nobody
+  # rebases a branch to earn a merge. Inert until a ruleset requires the
+  # queue.
+  #
+  # The range lints see the queue's squash commit, not the branch's
+  # commits: its subject is the PR title (already held to the canon on
+  # the pull_request run) and it carries the sign-off the repo's
+  # web-commit-signoff setting writes — measured on main's own squash
+  # commits, every one signed off and verified.
+  merge_group:
+    types:
+      - checks_requested
 
 permissions:
   contents: read
