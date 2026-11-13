@@ -1763,7 +1763,7 @@ dir = "{{cwd}}"
 # comment is what a human and Renovate read to judge whether a pin is
 # current, so its absence is a real defect and not a style point.
 #
-# -no-api keeps this deterministic and offline, which is what makes it
+# --no-api keeps this deterministic and offline, which is what makes it
 # gate-eligible: it asserts a 40-character SHA and a comment, and asks
 # GitHub nothing. Whether the comment is TRUE needs the API and lives in
 # audit:action-pins.
@@ -1778,7 +1778,7 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*
   echo "lint:action-pins: no workflows or actions, skipped"
   exit 0
 }
-xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" -fix=false -no-api <<< "${files}"
+xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --no-api <<< "${files}"
 echo "lint:action-pins: ok"
 '''
 
@@ -6316,7 +6316,7 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
 }
-xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" -fix=false --verify-comment --verify-min-age <<< "${files}"
+xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age <<< "${files}"
 echo "audit:action-pins: ok"
 '''
 
