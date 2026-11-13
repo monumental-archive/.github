@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   publish:
-    uses: ./.github/workflows/publish.yml
+    uses: ./.github/workflows/publish.yml # zizmor: ignore[self-repository]
     with:
       classes: source-archive
       # The canon cites itself (#316): a versioned, tagged, SBOM'd,

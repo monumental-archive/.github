@@ -815,7 +815,7 @@ jobs:
     name: Build
     needs: guard
     if: contains(inputs.classes, 'rust-crate')
-    uses: ./.github/workflows/build-rust-crate.yml
+    uses: ./.github/workflows/build-rust-crate.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited. A `uses:` job with no `permissions:` block
       # takes the WORKFLOW-level default — which is `permissions: {}` above
@@ -837,7 +837,7 @@ jobs:
     name: Rebuild (repro)
     needs: guard
     if: contains(inputs.classes, 'rust-crate')
-    uses: ./.github/workflows/build-rust-crate.yml
+    uses: ./.github/workflows/build-rust-crate.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
     with:
@@ -858,7 +858,7 @@ jobs:
     # SBOM/triage proof. It once waited on the repro gate alone, and lab
     # v0.20.0 reached npm past a red triage gate (#349 finding 1).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
-    uses: ./.github/workflows/publish-rust-crate.yml
+    uses: ./.github/workflows/publish-rust-crate.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout for cargo publish
       id-token: write # crates.io trusted publishing, no token secret
@@ -872,7 +872,7 @@ jobs:
       - guard
       - facts
     if: contains(inputs.classes, 'oci-image')
-    uses: ./.github/workflows/build-oci-image.yml
+    uses: ./.github/workflows/build-oci-image.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller
@@ -896,7 +896,7 @@ jobs:
       - guard
       - facts
     if: contains(inputs.classes, 'oci-image')
-    uses: ./.github/workflows/build-oci-image.yml
+    uses: ./.github/workflows/build-oci-image.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
       packages: write # push per-arch digests (idempotent when reproduced)
@@ -928,7 +928,7 @@ jobs:
       - build-oci
       - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
-    uses: ./.github/workflows/assemble-oci-index.yml
+    uses: ./.github/workflows/assemble-oci-index.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
       packages: write # create and tag the manifest list
@@ -975,7 +975,7 @@ jobs:
         && contains(inputs.classes, 'rust-crate')
         && (needs.publish-crates.result == 'success' || inputs.dry-run)
       }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       # The full verifier set: verify-release declares its verdict-mode
       # signing identity at the job, and a called workflow's permissions
@@ -1035,7 +1035,7 @@ jobs:
       - verify
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'rust-crate') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -1052,7 +1052,7 @@ jobs:
     name: Build binaries
     needs: guard
     if: contains(inputs.classes, 'rust-binary')
-    uses: ./.github/workflows/build-rust-binary.yml
+    uses: ./.github/workflows/build-rust-binary.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller; binaries touch no registry
@@ -1072,7 +1072,7 @@ jobs:
     name: Rebuild binaries (repro)
     needs: guard
     if: contains(inputs.classes, 'rust-binary')
-    uses: ./.github/workflows/build-rust-binary.yml
+    uses: ./.github/workflows/build-rust-binary.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
     with:
@@ -1112,7 +1112,7 @@ jobs:
     name: Build Go binaries
     needs: guard
     if: contains(inputs.classes, 'go-binary')
-    uses: ./.github/workflows/build-go-binary.yml
+    uses: ./.github/workflows/build-go-binary.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller; binaries touch no registry
@@ -1126,7 +1126,7 @@ jobs:
     name: Rebuild Go binaries (repro)
     needs: guard
     if: contains(inputs.classes, 'go-binary')
-    uses: ./.github/workflows/build-go-binary.yml
+    uses: ./.github/workflows/build-go-binary.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
     with:
@@ -1164,7 +1164,7 @@ jobs:
     name: Build source archive
     needs: guard
     if: contains(inputs.classes, 'source-archive')
-    uses: ./.github/workflows/build-source-archive.yml
+    uses: ./.github/workflows/build-source-archive.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller at the tag
@@ -1176,7 +1176,7 @@ jobs:
     name: Rebuild source archive (repro)
     needs: guard
     if: contains(inputs.classes, 'source-archive')
-    uses: ./.github/workflows/build-source-archive.yml
+    uses: ./.github/workflows/build-source-archive.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller at the tag
     with:
@@ -1204,7 +1204,7 @@ jobs:
     name: Build wasm package
     needs: guard
     if: contains(inputs.classes, 'wasm-npm')
-    uses: ./.github/workflows/build-wasm-npm.yml
+    uses: ./.github/workflows/build-wasm-npm.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller
@@ -1218,7 +1218,7 @@ jobs:
     name: Rebuild wasm package (repro)
     needs: guard
     if: contains(inputs.classes, 'wasm-npm')
-    uses: ./.github/workflows/build-wasm-npm.yml
+    uses: ./.github/workflows/build-wasm-npm.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
     with:
@@ -1237,7 +1237,7 @@ jobs:
     # Post-gate: npm's unpublish window closes after 72 hours, so the
     # upload waits on the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
-    uses: ./.github/workflows/publish-wasm-npm.yml
+    uses: ./.github/workflows/publish-wasm-npm.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout for the pinned npm
       id-token: write # npm trusted publishing, no token secret
@@ -1256,7 +1256,7 @@ jobs:
         && contains(inputs.classes, 'wasm-npm')
         && (needs.publish-wasm.result == 'success' || inputs.dry-run)
       }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       # The full verifier set — see the note on `verify` above (#264).
       contents: read # pull-back reads
@@ -1295,7 +1295,7 @@ jobs:
       - verify-wasm
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'wasm-npm') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -1313,7 +1313,7 @@ jobs:
     name: Build extension
     needs: guard
     if: contains(inputs.classes, 'pgrx-extension')
-    uses: ./.github/workflows/build-pgrx-extension.yml
+    uses: ./.github/workflows/build-pgrx-extension.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of the caller; tarballs touch no registry
@@ -1328,7 +1328,7 @@ jobs:
     name: Rebuild extension (repro)
     needs: guard
     if: contains(inputs.classes, 'pgrx-extension')
-    uses: ./.github/workflows/build-pgrx-extension.yml
+    uses: ./.github/workflows/build-pgrx-extension.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
     with:
@@ -1365,7 +1365,7 @@ jobs:
       - build-extension
       - facts
     if: contains(inputs.classes, 'pgrx-extension')
-    uses: ./.github/workflows/build-pgrx-images.yml
+    uses: ./.github/workflows/build-pgrx-images.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — see the note on `build` above.
       contents: read # checkout of canon for the Dockerfile and mapping
@@ -1389,7 +1389,7 @@ jobs:
       - build-extension
       - facts
     if: contains(inputs.classes, 'pgrx-extension')
-    uses: ./.github/workflows/build-pgrx-images.yml
+    uses: ./.github/workflows/build-pgrx-images.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of canon for the Dockerfile and mapping
       packages: write # push the per-major indexes (idempotent when reproduced)
@@ -1415,7 +1415,7 @@ jobs:
         !cancelled() && needs.commit-point.result == 'success'
         && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run
       }}
-    uses: ./.github/workflows/tag-images.yml
+    uses: ./.github/workflows/tag-images.yml # zizmor: ignore[self-repository]
     permissions:
       packages: write # PUT each gated manifest under its tag
     with:
@@ -1843,7 +1843,7 @@ jobs:
           || (needs.sign-extensions.result == 'success'
             && (needs.sign-extension-images.result == 'success' || inputs.dry-run)))
       }}
-    uses: ./.github/workflows/attach-release.yml
+    uses: ./.github/workflows/attach-release.yml # zizmor: ignore[self-repository]
     permissions: {} # it publishes with the App token, not GITHUB_TOKEN
     with:
       version: ${{ needs.guard.outputs.version }}
@@ -1891,7 +1891,7 @@ jobs:
       - build-binary
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'rust-binary') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -1913,7 +1913,7 @@ jobs:
       - build-go
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'go-binary') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -1935,7 +1935,7 @@ jobs:
       - build-source
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'source-archive') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -1957,7 +1957,7 @@ jobs:
       - build-extension
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -1992,7 +1992,7 @@ jobs:
       - assemble-oci
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -2019,7 +2019,7 @@ jobs:
       - build-extension-images
       - attach
     if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # registry resolution plus attestation reads
       id-token: write # the verdict signs itself — verifier.id IS the certificate (#264)
@@ -2050,7 +2050,7 @@ jobs:
     # false — the same transitive quirk attach's own condition exists for.
     # Measured on v0.14.2, where everything succeeded and doi skipped.
     if: ${{ !cancelled() && needs.attach.result == 'success' && inputs.mint-doi && !inputs.dry-run }}
-    uses: ./.github/workflows/mint-doi.yml
+    uses: ./.github/workflows/mint-doi.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # the minting job downloads the released source
     with:

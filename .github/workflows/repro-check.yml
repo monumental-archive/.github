@@ -146,7 +146,7 @@ jobs:
     name: Rebuild the release (binaries)
     needs: resolve
     if: inputs.class == 'rust-binary'
-    uses: ./.github/workflows/build-rust-binary.yml
+    uses: ./.github/workflows/build-rust-binary.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — the startup_failure trap.
       contents: read # checkout of the caller at the released tag
@@ -163,7 +163,7 @@ jobs:
     name: Rebuild the release (Go binaries)
     needs: resolve
     if: inputs.class == 'go-binary'
-    uses: ./.github/workflows/build-go-binary.yml
+    uses: ./.github/workflows/build-go-binary.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — the startup_failure trap.
       contents: read # checkout of the caller at the released tag
@@ -178,7 +178,7 @@ jobs:
     name: Rebuild the release (extension)
     needs: resolve
     if: inputs.class == 'pgrx-extension'
-    uses: ./.github/workflows/build-pgrx-extension.yml
+    uses: ./.github/workflows/build-pgrx-extension.yml # zizmor: ignore[self-repository]
     permissions:
       # Restated, not inherited — the startup_failure trap.
       contents: read # checkout of the caller at the released tag

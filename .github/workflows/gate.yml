@@ -55,5 +55,5 @@ jobs:
       # adding `contents: read` to release.yml broke the release lab.
       # Saying it here makes the contract a diff rather than a mystery.
       contents: read # checkout of this repo and of the toolbelt
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
 ...
