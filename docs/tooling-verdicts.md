@@ -52,6 +52,7 @@ honestly blocked on.
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv-plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 | `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx-postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
+| `github:unicode-org/icu` (repo-side, macOS only, TOFU checksum) | ICU's headers for building a pgrx extension on a Mac: the prebuilt Postgres is configured `--with-icu` and ships the dylibs without the headers, and pgrx binds every Postgres header from 0.19.3. `mise/pgrx-env.sh` adds them to the build and holds the pin to the ICU major each pinned Postgres was built against |
 
 **clippy, and the three things standing it up settled** (#445). The
 belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
@@ -394,6 +395,44 @@ pgrx hands them to clang, so bindgen dies on `inttypes.h`. `pgrx-env.sh`
 prepends the machine's real SDK to both `BINDGEN_EXTRA_CLANG_ARGS` and
 `CFLAGS`; both are needed, because the cshim is compiled by cc-rs, which
 never reads a bindgen variable. Linux needs no correction.
+
+*And the second, which arrived with pgrx 0.19.3.* The same `pg_config`
+records `-I/opt/homebrew/opt/icu4c@78/include`: the prebuilt Postgres is
+configured `--with-icu`, and it ships ICU's dylibs and none of its
+headers. Through 0.19.2 that was invisible, because pgrx bound a chosen
+subset of Postgres's headers and none reached ICU. 0.19.3 binds all of
+them, `pg_locale.h` includes `unicode/ucol.h`, and on a Mac without
+Homebrew's icu4c the build dies in bindgen — measured on release-lab at
+pg14 and pg18 alike, in `test:pgrx`, `lint:pg-clippy` and
+`coverage:check` together. The runner is unaffected: `libicu-dev` is in
+the image. A gate that cannot run locally is the promise in CLAUDE.md
+broken for one class of crate, so the headers are supplied rather than
+the gap excused.
+
+They are pinned by the repository, beside its Postgres and by the same
+rule: `github:unicode-org/icu`, the project's own source archive
+(`asset_pattern = "icu4c-*-sources.tgz"`), restricted with `os =
+["macos"]` so the runner never downloads what it already has. Not aqua —
+ICU publishes no macOS binary and no attestation, only a source archive
+with a detached GPG signature mise does not check, so the lockfile's
+checksum is trust-on-first-use, the cargo-semver-checks precedent and
+stated as such. It costs 28M to fetch and 121M on disk, on a Mac, in a
+repository that builds an extension; in the belt it would cost every
+repository that. Nothing is compiled: bindgen and the cshim read two
+header directories, and the extension links against nothing of ICU's —
+the server that loads it carries its own.
+
+Which ICU is derived, not declared. `pgrx-env.sh` reads the major out of
+each pinned Postgres's own `pg_config --cppflags` and reds if the pin is
+missing, is a different major, or is not the source archive; headers
+from another major would bind declarations the shipped dylibs do not
+have, and nothing downstream would say so. Only ACTIVE mise entries
+count, on both sides — a copy installed by hand is not a pin, and the
+first draft of this check passed on exactly that. The preset disables
+major updates for the package for the same reason: an ICU major moves
+when a Postgres build moves, by hand, never because a newer one exists.
+Measured on release-lab at pgrx 0.19.3: `cargo pgrx test` green at pg14
+and pg18 with the headers supplied, red without.
 
 *A trap worth the line it costs.* These tasks pass records to bash `read`
 loops with `IFS` set to tab, and **tab is a whitespace separator, so bash
