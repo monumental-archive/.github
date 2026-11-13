@@ -141,7 +141,43 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
     echo '  "cargo:cargo-pgrx" = "0.19.2"   # must equal the pgrx dependency' >&2
     return 1
   }
-  cargo pgrx init "${args[@]}"
+  # ONE INIT AT A TIME. `ci` starts every task that needs a Postgres
+  # together, and each registers the same majors into the same
+  # PGRX_HOME. `cargo pgrx init` is idempotent run after run and not run
+  # beside run: two of them both find no data directory, both call
+  # initdb, and the loser dies on
+  #
+  #   initdb: error: directory ".../.pgrx/data-16" exists but is not empty
+  #
+  # Measured on the runner the first time coverage joined the three that
+  # were already there (release-lab#311) — never locally, where the
+  # tasks had only been run one after another. So the init is serialised
+  # with a directory lock: `mkdir` is atomic everywhere and needs no
+  # tool the runner or a Mac might lack. The waiter then runs its own
+  # init over a finished home, which is the idempotent case.
+  #
+  # The lock names its holder so a holder that was killed — mise stops
+  # the sibling tasks when one fails — cannot strand the next run.
+  local home="${PGRX_HOME:-${HOME}/.pgrx}"
+  local lock="${home}.init.lock" holder waited=0 status=0
+  mkdir -p "$(dirname "${home}")"
+  until mkdir "${lock}" 2> /dev/null; do
+    holder=$(cat "${lock}/pid" 2> /dev/null) || holder=""
+    if [[ -n ${holder} ]] && ! kill -0 "${holder}" 2> /dev/null; then
+      rm -rf "${lock}"
+      continue
+    fi
+    waited=$((waited + 1))
+    if [[ ${waited} -gt 600 ]]; then
+      echo "pgrx-env: waited ten minutes for another task's Postgres init (${lock})" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  echo "$$" > "${lock}/pid"
+  cargo pgrx init "${args[@]}" || status=$?
+  rm -rf "${lock}"
+  return "${status}"
 }
 
 org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
