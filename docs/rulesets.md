@@ -106,16 +106,57 @@ branch was approved" claimable as an `ORG_SOURCE_` property (decided
 under #120, enforced since 2026-08-10; continuity-ledger Boundary B is
 defined by this narrowing).
 
-**A repository never carries rulesets of its own.** The three above are
-the enforcement, org-level and `~ALL`, so a repo-level ruleset can only
-be redundant with them or contradict them — and the contradiction is not
-theoretical: iiif-server arrived with `protect-main`, whose five required
-contexts named the pipeline its import was deleting, and its first PR sat
-blocked with every org rule satisfied (#671). Rulesets are a different
-API object from classic branch protection and both survive a transfer, so
+**A repository carries one ruleset of its own, and only that one: the
+merge queue.** The three above are the enforcement, org-level and
+`~ALL`, so any other repo-level ruleset can only be redundant with them
+or contradict them — and the contradiction is not theoretical:
+iiif-server arrived with `protect-main`, whose five required contexts
+named the pipeline its import was deleting, and its first PR sat blocked
+with every org rule satisfied (#671). Rulesets are a different API
+object from classic branch protection and both survive a transfer, so
 `settings/repo-baseline.sh check` reports each of them per repo and
 deletes neither: quietly changing a repository's merge rules from a
 script is the wrong kind of helpful (#761, #876).
+
+## The merge queue
+
+`strict_required_status_checks_policy` means a pull request must be
+current with the default branch to merge, and every merge puts every
+other open pull request behind again. Neither of GitHub's update
+buttons survives the gate — one adds a `Merge branch …` commit
+`lint:commits` refuses, the other rebases server-side into an unsigned
+commit `required_signatures` blocks — so the only route was a local
+rebase and force-push per pull request, per merge.
+
+The queue removes the step rather than easing it. A queued pull request
+is squashed onto the real tip of the default branch in a temporary
+`gh-readonly-queue/…` branch, the gate runs there, and it merges if
+that passes. "Behind" stops being a state. Proven on this repository,
+2026-11-13: #1117 was the first entry; #1107 and #1112 then merged
+while behind; Renovate's #1118 and #1119 went through with nobody
+touching them. The queue's squash commit passes `lint:commits` and
+`lint:dco` and lands verified.
+
+**It is the one rule that cannot be org-level.** GitHub does not offer
+"Require merge queue" to an organisation ruleset, so the org-wide
+statement is made the way the other per-repo settings are:
+[`settings/merge-queue.json`](../settings/merge-queue.json) is the
+ruleset, `settings/repo-baseline.sh apply` creates or corrects it in
+every repository the queue is available to, and `check` reports a
+repository that lacks it or has changed it. Squash, groups of one to
+five, a 15-minute check timeout: the gate's slowest run anywhere in the
+org is under six minutes, and a hung run should leave the queue
+quickly.
+
+**The gate must run on the queue's branch**, so every gate stub carries
+a `merge_group` trigger; `lint:gate-stub` requires it in every
+repository, queue or not, so the trigger is always in place before the
+ruleset arrives.
+
+**Private repositories have no queue.** On the Team plan GitHub offers
+it to public repositories only, so `monumental-archive` keeps the
+rebase route; Renovate rebases its own pull requests there. `apply`
+skips a private repository and `check` expects no ruleset in one.
 
 **`required_signatures` and the tag rules earn no Scorecard points** —
 there is no probe for either. They are here because the attestation chain

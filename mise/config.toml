@@ -5231,6 +5231,16 @@ dir = "{{cwd}}"
 # this lint is the fan-out: it rides the pin bump Renovate does deliver
 # and turns a stale stub red in that repo's own gate, fix in the
 # message. Deterministic — parses tracked files only — so gate-eligible.
+#
+# The second requirement is the merge queue's (#1117). A repository with
+# a queue squashes each entry onto the real tip of its default branch in
+# a temporary branch and waits for the required check to report THERE;
+# a stub without `merge_group` never runs on it, so every queued pull
+# request sits until the queue times it out. The ruleset that turns the
+# queue on is applied from settings/repo-baseline.sh, a different lever
+# on a different day, so the trigger is required everywhere and ahead of
+# it — inert where no queue exists, and already in place where one
+# arrives.
 run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"
@@ -5242,17 +5252,31 @@ canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
+unqueued=""
 for f in .github/workflows/*.y*ml; do
   grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
   grep -qE "^[[:space:]]*pull_request" "${f}" || continue
   grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
+  grep -qE "^[[:space:]]+merge_group:" "${f}" || unqueued="${unqueued} ${f}"
 done
+status=0
 if [[ -n ${bad} ]]; then
   echo "lint:gate-stub: gate caller's pull_request trigger lacks the edited type," >&2
   echo "  so title/base edits keep a stale verdict (#427). Set" >&2
   echo "  types: [opened, synchronize, reopened, edited] in:${bad}" >&2
-  exit 1
+  status=1
 fi
+if [[ -n ${unqueued} ]]; then
+  echo "lint:gate-stub: gate caller has no merge_group trigger, so the merge" >&2
+  echo "  queue's own run never starts and a queued pull request waits for a" >&2
+  echo '  check that cannot report (#1117). Under "on": add' >&2
+  echo "    merge_group:" >&2
+  echo "      types:" >&2
+  echo "        - checks_requested" >&2
+  echo "  in:${unqueued}" >&2
+  status=1
+fi
+[[ ${status} -eq 0 ]] || exit 1
 echo "lint:gate-stub: ok"
 '''
 

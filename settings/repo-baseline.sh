@@ -5,6 +5,8 @@
 #   settings/repo-baseline.sh apply    # PATCH every repo to the baseline
 #
 # These are the per-repo toggles GitHub offers no org-level lever for.
+# So is the merge queue: `merge-queue.json` is the one ruleset a repo
+# carries itself, because GitHub will not let an org ruleset hold it.
 # Run `check` any time; run `apply` after creating or transferring a repo.
 set -euo pipefail
 
@@ -102,6 +104,16 @@ publish_yml_is_entry() {
   return 0
 }
 baseline="$(dirname "$0")/repo-baseline.json"
+# The one ruleset a repository carries itself (docs/rulesets.md). The
+# merge-queue rule does not exist at the organisation level, so the
+# org-wide statement is this file, applied to and checked in every
+# repository the queue is available to.
+queue_ruleset="$(dirname "$0")/merge-queue.json"
+queue_name="$(jq -r '.name' "${queue_ruleset}")"
+# Both sides of the comparison pass through this, so key order and the
+# fields GitHub adds (ids, timestamps, links) can never read as drift.
+queue_shape='{name, target, enforcement, bypass_actors: (.bypass_actors // []),
+  conditions, rules: (.rules | sort_by(.type))}'
 mode="${1:?usage: repo-baseline.sh check|apply}"
 
 # REST, not `gh repo list`: that is GraphQL under the hood, and the
@@ -188,6 +200,41 @@ for repo in ${repos}; do
           ;;
         *) ;;
       esac
+      # The merge queue (docs/rulesets.md). GitHub offers it to public
+      # repositories on this plan and to no private one, so visibility
+      # decides, and it is read rather than assumed: an unreadable
+      # repository gets no ruleset written on a guess.
+      vis_status=0
+      # shellcheck disable=SC2310  # api_probe manages its own exit status
+      api_probe "${repo}'s visibility" "Metadata: read" "" \
+        "repos/${org}/${repo}" --jq '.visibility' || vis_status=$?
+      if [[ ${vis_status} -ne 0 ]]; then
+        echo "applied: ${repo} (settings only — visibility unreadable, queue untouched)"
+        continue
+      fi
+      if [[ ${api_body} != "public" ]]; then
+        echo "applied: ${repo} (no merge queue — GitHub offers none to a ${api_body} repository on this plan)"
+        continue
+      fi
+      own_status=0
+      # shellcheck disable=SC2310  # api_probe manages its own exit status
+      api_probe "${repo}'s own rulesets" "Administration: read" "" \
+        "repos/${org}/${repo}/rulesets?includes_parents=false" \
+        --jq "[.[] | select(.name == \"${queue_name}\") | .id] | first // empty" \
+        || own_status=$?
+      if [[ ${own_status} -ne 0 ]]; then
+        echo "applied: ${repo} (settings only — rulesets unreadable, queue untouched)"
+        continue
+      fi
+      if [[ -n ${api_body} ]]; then
+        api_write "${repo}: update the ${queue_name} ruleset" \
+          "Administration: write" -X PUT \
+          "repos/${org}/${repo}/rulesets/${api_body}" --input "${queue_ruleset}"
+      else
+        api_write "${repo}: create the ${queue_name} ruleset" \
+          "Administration: write" -X POST \
+          "repos/${org}/${repo}/rulesets" --input "${queue_ruleset}"
+      fi
       echo "applied: ${repo}"
       ;;
     check)
@@ -312,7 +359,14 @@ for repo in ${repos}; do
       # all, rather than filtered against an expected literal — a value
       # this script has not heard of is a finding, not something to drop.
       #
+      # One own ruleset is the baseline rather than drift: the merge
+      # queue, which GitHub will not let an org ruleset carry. A public
+      # repository must hold exactly the one in merge-queue.json; a
+      # private one cannot hold a queue at all on this plan, so there it
+      # stays drift like any other.
+      #
       # Reported, never deleted, like its two siblings (#761, #751).
+      visibility="$(jq -r '.visibility' <<< "${actual}")"
       rulesets_status=0
       # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s own rulesets" "Administration: read" "" \
@@ -321,19 +375,48 @@ for repo in ${repos}; do
       if [[ ${rulesets_status} -ne 0 ]]; then
         drift=1
       else
+        own_rulesets="${api_body}"
+        queue_seen=0
         # shellcheck disable=SC2312  # process substitution, the packages
         # block's shape: capturing first turns an empty result into one
         # blank line, and the producer is jq over a body already read.
-        while IFS=$'\t' read -r rs_name rs_target rs_state rs_source; do
+        while IFS=$'\t' read -r rs_id rs_name rs_target rs_state rs_source; do
           [[ -n ${rs_name} ]] || continue
+          if [[ ${rs_name} == "${queue_name}" && ${visibility} == "public" ]]; then
+            queue_seen=1
+            # The listing carries no rules, so the ruleset is read whole.
+            queue_status=0
+            # shellcheck disable=SC2310  # api_probe manages its own exit status
+            api_probe "${repo}'s ${queue_name} ruleset" "Administration: read" "" \
+              "repos/${org}/${repo}/rulesets/${rs_id}" || queue_status=$?
+            if [[ ${queue_status} -ne 0 ]]; then
+              drift=1
+              continue
+            fi
+            want="$(jq -S "${queue_shape}" "${queue_ruleset}")"
+            have="$(jq -S "${queue_shape}" <<< "${api_body}")"
+            if [[ ${want} != "${have}" ]]; then
+              echo "drift: ${repo}'s ${queue_name} ruleset is not the baseline's"
+              echo "       (settings/merge-queue.json) — run: settings/repo-baseline.sh apply"
+              diff <(printf '%s\n' "${want}") <(printf '%s\n' "${have}") \
+                | sed -n 's/^[<>]/       &/p' || true
+              drift=1
+            fi
+            continue
+          fi
           echo "drift: ${repo} carries its OWN ruleset '${rs_name}'"
           echo "       target ${rs_target}, enforcement ${rs_state}, source ${rs_source}"
           echo "       delete it in Settings -> Rules. The org rules are the"
           echo "       enforcement (docs/rulesets.md); a repo's own is either"
           echo "       redundant with them or contradicts them (#876)."
           drift=1
-        done < <(jq -r '.[] | [.name, .target, .enforcement, .source_type]
-          | @tsv' <<< "${api_body}")
+        done < <(jq -r '.[] | [.id, .name, .target, .enforcement, .source_type]
+          | @tsv' <<< "${own_rulesets}")
+        if [[ ${visibility} == "public" && ${queue_seen} -eq 0 ]]; then
+          echo "drift: ${repo} has no ${queue_name} ruleset, so its pull requests"
+          echo "       still need a rebase to merge — run: settings/repo-baseline.sh apply"
+          drift=1
+        fi
       fi
       ;;
     *)
