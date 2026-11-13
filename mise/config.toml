@@ -6333,6 +6333,11 @@ if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; the
   echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
   exit 1
 fi
+# The same provisioning the measurement gets, from the same function, so
+# the report and the number it accompanies are built against one
+# Postgres (#917).
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
 excludes=""
 for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
 # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,

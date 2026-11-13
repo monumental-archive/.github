@@ -76,10 +76,16 @@ if [[ -f Cargo.toml && ${legs} != go ]]; then
     echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
     exit 1
   fi
+  # A pgrx extension in the workspace is compiled by the line below like
+  # any other member, so it is given its Postgres first (#917) — and a
+  # COVERAGE_EXCLUDE that names one is refused there, not honoured.
+  # shellcheck source=mise/pgrx-env.sh
+  . "${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}/pgrx-env.sh"
+  org_pgrx_provision "${label}" "${COVERAGE_EXCLUDE:-}" >&2
   # COVERAGE_EXCLUDE ([env] in the repository's mise.toml): workspace
-  # members whose tests cannot run on the gate runner — the lab's lab-pg
-  # needs a live postgres and is excluded from `test` for the same reason
-  # (#316).
+  # members whose tests cannot run on the gate runner. Never a pgrx
+  # extension — that was its first use (the lab's lab-pg, #316) and is
+  # now refused above.
   excludes=""
   for member in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${member}"; done
   # `--json --summary-only` rather than `--fail-under-lines`: the release

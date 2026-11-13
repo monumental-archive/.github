@@ -51,6 +51,14 @@
       "commitMessageTopic": "cargo-semver-checks"
     },
     {
+      "description": "35 as minted, 8 past (#916).",
+      "matchPackageNames": [
+        "aqua:theseus-rs/postgresql-binaries",
+        "theseus-rs/postgresql-binaries"
+      ],
+      "commitMessageTopic": "postgresql-binaries"
+    },
+    {
       "description": "32 as minted, 3 past.",
       "matchPackageNames": ["actions/dependency-review-action"],
       "commitMessageTopic": "dependency-review-action"
