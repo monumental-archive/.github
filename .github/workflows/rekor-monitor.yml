@@ -10,8 +10,8 @@
 # runs `dawidd6/action-download-artifact` (third-party, single-maintainer)
 # and a slsa-github-generator action, so admitting it meant admitting
 # those: the first dispatch died as startup_failure on the org's own
-# Actions policy. What the reusable actually does is `go run
-# ./cmd/rekor_monitor --once` around a checkpoint file, so this workflow
+# Actions policy. What the reusable actually does is run
+# ./cmd/rekor_monitor --once around a checkpoint file, so this workflow
 # does exactly that with github-owned actions only — the same trade as
 # hand-rolled `docker buildx` over the docker/* actions, and the
 # allowlist stays at four patterns.
@@ -71,7 +71,7 @@ jobs:
       # cache below, and for the same reason: this workflow builds and
       # signs nothing, so a poisoned module cache degrades the monitor
       # and can reach no artifact. Marked rather than disabled because
-      # the monitor is `go run` from source and the cache is the only
+      # the monitor is built from source and the cache is the only
       # thing keeping that off a cold module download twice a day.
       - name: Set up Go from the monitor's own go.mod
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -106,7 +106,50 @@ jobs:
           echo "::error::no checkpoint was restored — the log since the last completed run is unmonitored"
           echo "::error::dispatch this workflow with found=true to start a new checkpoint knowingly"
           exit 1
+      # Built once and run as a binary, not `go run`: the signal below
+      # must reach the monitor itself, and `go run` would take it in the
+      # go command's place (#1145).
+      - name: Build the monitor
+        run: |
+          set -euo pipefail
+          go build -o "${RUNNER_TEMP}/rekor_monitor" ./cmd/rekor_monitor
+      # The checkpoint's hash and its origin and size lines, before the
+      # run and after it. The file is one line, the signed note with its
+      # newlines written as a literal `\n`; the first field names the
+      # log tree, the second is its size. A run that succeeded without
+      # moving the checkpoint is then visible in one place (#1145).
+      - name: Record the checkpoint before the run
+        id: before
+        run: |
+          set -euo pipefail
+          if [[ ! -s checkpoint_log.txt ]]; then
+            echo "checkpoint before: none"
+            echo "sha256=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          line=$(tail -n 1 checkpoint_log.txt)
+          origin=${line%%\\n*}
+          rest=${line#*\\n}
+          size=${rest%%\\n*}
+          sha=$(sha256sum checkpoint_log.txt | cut -d' ' -f1)
+          echo "checkpoint before: sha256 ${sha}"
+          echo "checkpoint before: ${origin} / size ${size}"
+          {
+            echo "sha256=${sha}"
+            echo "origin=${origin}"
+            echo "size=${size}"
+          } >> "${GITHUB_OUTPUT}"
+      # SIGQUIT at 25 minutes, five before the job's own timeout: a Go
+      # program that receives it prints every goroutine's stack and
+      # exits, so a hung run ends with the frame it was stuck in, in its
+      # own log. GOTRACEBACK=all makes "every goroutine" explicit, and
+      # --kill-after keeps a monitor that ignores the signal from eating
+      # the minutes the steps below need. The run printed "Root hash
+      # consistency verified" and then nothing for 29 minutes on 12 of
+      # 13 runs on 2026-11-14 (#1145).
       - name: Run the monitor once
+        env:
+          GOTRACEBACK: all
         run: |
           set -euo pipefail
           cat > /tmp/monitor-config.yaml << 'CONFIG'
@@ -117,11 +160,63 @@ jobs:
                   - https://token\.actions\.githubusercontent\.com
           CONFIG
           config=$(cat /tmp/monitor-config.yaml)
-          go run ./cmd/rekor_monitor \
+          rc=0
+          timeout --signal=QUIT --kill-after=60s 25m \
+            "${RUNNER_TEMP}/rekor_monitor" \
             --file checkpoint_log.txt \
             --once=true \
             --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
-            --config "${config}"
+            --config "${config}" || rc=$?
+          if ((rc == 124 || rc == 137)); then
+            echo "::error::the monitor hung and was stopped at 25 minutes; its goroutine stacks are above"
+          fi
+          exit "${rc}"
+      # A checkpoint that did not move while the log did is a failure,
+      # whatever the monitor exited with: on 2026-10-15 and 2026-10-18
+      # two runs three days apart, with a success between them, both
+      # started from size 2,457,808,563. The log's head is read from
+      # Rekor directly, not from the monitor's output, so a monitor that
+      # said nothing cannot vouch for itself (#1145).
+      - name: Record the checkpoint after the run
+        if: ${{ always() && steps.before.outcome == 'success' }}
+        env:
+          BEFORE_SHA256: ${{ steps.before.outputs.sha256 }}
+          BEFORE_ORIGIN: ${{ steps.before.outputs.origin }}
+          BEFORE_SIZE: ${{ steps.before.outputs.size }}
+        run: |
+          set -euo pipefail
+          if [[ ! -s checkpoint_log.txt ]]; then
+            echo "::error::no checkpoint after the run"
+            exit 1
+          fi
+          line=$(tail -n 1 checkpoint_log.txt)
+          origin=${line%%\\n*}
+          rest=${line#*\\n}
+          size=${rest%%\\n*}
+          sha=$(sha256sum checkpoint_log.txt | cut -d' ' -f1)
+          echo "checkpoint after: sha256 ${sha}"
+          echo "checkpoint after: ${origin} / size ${size}"
+          if [[ -z ${BEFORE_SHA256} ]]; then
+            echo "no checkpoint before the run (found=true): nothing to compare"
+            exit 0
+          fi
+          if [[ ${sha} != "${BEFORE_SHA256}" ]]; then
+            echo "checkpoint advanced: size ${BEFORE_SIZE} -> ${size}"
+            exit 0
+          fi
+          sth=$(curl --fail --silent --show-error --retry 3 \
+            --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
+            https://rekor.sigstore.dev/api/v1/log | jq -r .signedTreeHead)
+          log_origin=$(sed -n 1p <<< "${sth}")
+          log_size=$(sed -n 2p <<< "${sth}")
+          echo "log now: ${log_origin} / size ${log_size}"
+          if [[ ${log_origin} == "${BEFORE_ORIGIN}" && ${log_size} == "${BEFORE_SIZE}" ]]; then
+            echo "checkpoint unchanged and the log has not moved"
+            exit 0
+          fi
+          echo "::error::the checkpoint did not advance although the log grew" \
+            "(checkpoint size ${BEFORE_SIZE}, log size ${log_size})"
+          exit 1
       # unattested-path: the save half of the checkpoint restore
       # marked above — same cache, same reasoning: this workflow
       # builds and signs nothing, and the entry holds only the
