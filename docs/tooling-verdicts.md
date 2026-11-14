@@ -142,6 +142,26 @@ which is exactly why they are debt to work through rather than exclusions
 to add. The crate carried it for forty releases because `CLIPPY_EXCLUDE`
 hid it.
 
+*An `#[expect]` is written against a clippy configuration, not a lint
+name (edtf#201).* So a crate can be held at exactly one. Measured on
+`edtf@3106121`: seven `#[expect(clippy::missing_panics_doc)]` on private
+`#[pg_test]` functions were correct under `lint:pg-clippy`, which
+delivers the org `clippy.toml` and its `check-private-items = true`, and
+a hard error under the repo's own `pg:lint`, which set no
+`CLIPPY_CONF_DIR`: there the lint stops at the `pub` boundary, never
+fires, and an expectation that does not fire is an error under
+`-D warnings`. Neither run was wrong about the code. The suppression
+itself depends on the configuration, which is why a repo-local clippy
+task beside the belt's is not a second opinion but a contradiction, and
+why the remedy was to delete `pg:lint` rather than teach it the org
+ladder. Two corollaries from the same work. An expectation on an
+allow-by-default lint is silent wherever that lint is off, so it proves
+nothing there. And an expectation on `single_call_fn` cannot be
+unconditional if the test module also calls the function: with tests
+compiled the lint has two callers and goes quiet, so the shape that
+survives both targets is
+`#[cfg_attr(not(any(test, feature = "pg_test")), expect(...))]`.
+
 *The whole workspace is linted every run, one crate at a time (#726).*
 Under `-D warnings` a clippy finding IS a compile error, so a red crate
 emits no metadata and every crate that depends on it is never linted at
