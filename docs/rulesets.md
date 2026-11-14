@@ -19,7 +19,14 @@ ruleset edit is never routine.
 - block deletion, block force push (`non_fast_forward`)
 - required linear history
 - required signatures
-- required status check `ci / ci`, strict (branch must be current)
+- required status check `ci / ci`, strict (branch must be current),
+  bound to GitHub Actions (`integration_id: 15368`). The binding is
+  what the source level reads: without it any app could report a check
+  of that name, `ORG_SOURCE_GATED` is not live and every push is
+  attested at L2. It was lost on 2026-08-24 when the rule was removed
+  and re-added in the UI, whose source picker does not offer GitHub
+  Actions for an org ruleset, and restored through the API on
+  2026-11-14 (#1141). Re-adding this rule in the UI drops it again.
 - pull request required; stale reviews dismissed on push; review threads
   must be resolved; allowed merge method `squash` only
 - `bypass_actors` empty
