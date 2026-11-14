@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.64.1](https://github.com/monumental-archive/.github/compare/v1.64.0...v1.64.1) - 2026-11-14
+
+### Fixed
+
+- let the population walks see the private member ([#1154](https://github.com/monumental-archive/.github/pull/1154))
+- update the postgres base images to the november minors ([#1156](https://github.com/monumental-archive/.github/pull/1156))
+
+### Documentation
+
+- record the actions binding on the required check ([#1158](https://github.com/monumental-archive/.github/pull/1158))
+
 ## [1.64.0](https://github.com/monumental-archive/.github/compare/v1.63.2...v1.64.0) - 2026-11-14
 
 ### Added
