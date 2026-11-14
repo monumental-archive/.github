@@ -8081,6 +8081,49 @@ count=$(wc -w <<< "${keys}" | tr -d " ")
 echo "lint:toolbelt-lock: ${count} tools locked in ${lock}"
 '''
 
+[tasks."lint:lock-platforms"]
+description = "mise.lock covers every platform the publish stub builds a binary on"
+dir = "{{cwd}}"
+# lint:toolbelt-lock above proves every pinned tool HAS a locked entry.
+# This proves the entry covers every runner the release will install it
+# on. A binary leg runs `mise install --locked` on its target's own
+# runner, and the gate runs on linux and macos-arm64 only — so a lock
+# missing `macos-x64` is green everywhere until the x86_64-apple-darwin
+# leg asks, after the tag is minted. edtf v1.3.0 burned exactly so:
+# wasm-pack and node carried three platform tables, not four (#810).
+#
+# Two tracked files, read: the targets the publish stub declares (its
+# own binary-targets / go-targets, else the default the canon's
+# publish.yml declares — this belt's own tree, never a copied list), and
+# the lock. Only tools the config names, and only where its `os =`
+# lets them install; a tool with no platform tables at all (cargo:,
+# rust) is outside by construction. Offline and deterministic, so in ci.
+# The remedy is printed, never run: resolving a platform is network-bound
+# and writes the lock, which makes it a fixer's job, not a lint's.
+run = '''
+cfg=""
+for c in mise/config.toml mise.toml .mise.toml; do
+  [[ -f ${c} ]] && {
+    cfg="${c}"
+    break
+  }
+done
+[[ -n ${cfg} ]] || {
+  echo "lint:lock-platforms: no mise config, skipped"
+  exit 0
+}
+lock="mise.lock"
+[[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
+[[ -f ${lock} ]] || {
+  echo "lint:lock-platforms: no ${lock}, skipped"
+  exit 0
+}
+git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
+  | python3 "${ORG_BELT_DIR}/lock-platforms.py" \
+    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
+    --config "${cfg}" --lock "${lock}"
+'''
+
 [tasks."audit:lock-arch"]
 description = "Locked assets carry the architecture their platform key declares (release listings — network, not in ci)"
 dir = "{{cwd}}"
