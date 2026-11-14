@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.65.0](https://github.com/monumental-archive/.github/compare/v1.64.4...v1.65.0) - 2026-11-14
+
+### Added
+
+- pin stele v0.21.0 and name what a registry holds ([#1187](https://github.com/monumental-archive/.github/pull/1187))
+- let a fixed main release itself ([#1184](https://github.com/monumental-archive/.github/pull/1184))
+
+### Fixed
+
+- rename the tool cache so it is saved with the toolchains ([#1182](https://github.com/monumental-archive/.github/pull/1182))
+- update first-party canon ([#1183](https://github.com/monumental-archive/.github/pull/1183))
+
 ## [1.64.4](https://github.com/monumental-archive/.github/compare/v1.64.3...v1.64.4) - 2026-11-14
 
 ### Fixed
