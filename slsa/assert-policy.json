@@ -153,6 +153,7 @@
   },
   "blastRadius": {
     "osEcosystems": ["debian", "alpine", "ubuntu", "rocky", "redhat", "rpm"],
+    "supported": "latest-release",
     "canary": {
       "repo": "release-lab",
       "tag": "v0.17.0",

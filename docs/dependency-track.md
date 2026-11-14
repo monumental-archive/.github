@@ -144,7 +144,27 @@ The org's conventions are data in `slsa/assert-policy.json`: the
 ecosystem classes, the canary pin (RUSTSEC-2021-0127 in
 `release-lab@v0.17.0`), and where decisions live (`security/vex/`).
 
-What stays org policy here: red always means *new and undecided* —
+**Red means the release a consumer would install** (#1167). The walk
+reads every release ever published, but `SECURITY.md` supports only the
+newest of each project, and an old inventory only ages: held to a
+per-advisory decision forever, history buried the one signal that
+matters under findings whose answer was always "upgrade" (42 undecided
+triples on 2026-11-14, every one of them on a release already
+end-of-life or about to be). So the policy declares
+`blastRadius.supported: "latest-release"`, and a finding on an older
+release is a *derived* exception — but only where the upgrade is shown
+to be the remedy: the newest release (greatest stable semver tag) was
+read whole and does not itself carry that advisory in that package
+unexcused. Where it does, or could not be read, the old finding gates
+as before and the report names the repository under
+`supersessionWithheld`. Nobody writes a supersession down, so nobody
+can widen one; and it is a statement about which findings need a
+judgment, never a claim that an old release is unaffected — no VEX is
+derived from it. The rule and its table live in stele
+(`docs/assert-policy-schema.md`, "Superseded releases").
+
+What stays org policy here: on the supported release, red always means
+*new and undecided* —
 a decision is keyed by the dependency, so every release shipping the
 decided `package@version` is covered by derivation, with no product
 list to extend per release (#187). Two triage classes, decided when
