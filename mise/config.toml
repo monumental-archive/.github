@@ -3220,6 +3220,42 @@ echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
 echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
 '''
 
+[tasks."lint:pg-schema"]
+description = "The pgrx extension's SQL surface matches its tracked snapshot"
+dir = "{{cwd}}"
+# The third check the import dropped (#896), after the MSRV job (#820)
+# and the pgrx compile (#813), and the same class as both: not a check
+# that went red, a check that stopped existing. edtf's snapshot diff
+# said it ran in "ci.yml's postgres job"; there was none, and its task
+# sat outside the `lint:*` wildcard, so `ci` never collected it.
+#
+# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface, not a
+# Rust API, which is why cargo-semver-checks is off for one. Nothing
+# else makes a change to that surface visible: a signature change would
+# ship as an ordinary refactor and surface only when somebody's CREATE
+# EXTENSION or ALTER EXTENSION UPDATE failed. And a clean diff is the
+# fact the upgrade-script derivation consumes — an empty upgrade script
+# is correct for this release; a non-empty diff is the list of what the
+# script has to do.
+#
+# An extension that tracks no `schema.snapshot.sql` beside its
+# Cargo.toml is RED, naming the file and `fix:pg-schema` (ruled on
+# #896); only a repository with no extension skips. The derivation,
+# the normalisation and the reasons live in pg-schema.sh and
+# pg-schema.py, shared with the fixer so the two cannot drift.
+run = '"${ORG_BELT_DIR}/pg-schema.sh" check'
+
+[tasks."fix:pg-schema"]
+description = "Write the pgrx extension's SQL surface snapshot (read the diff before committing)"
+dir = "{{cwd}}"
+# The write-mode sibling of `lint:pg-schema`, never in the gate: it
+# generates the surface exactly as the lint does and writes the
+# normalised result to `schema.snapshot.sql` beside the extension. It is
+# for a surface change you INTEND — the lint's diff is the review, and a
+# snapshot regenerated without reading it is the check people learn to
+# ignore.
+run = '"${ORG_BELT_DIR}/pg-schema.sh" write'
+
 [tasks."test:pgrx"]
 description = "The Postgres extension's own suite, at every major the crate declares"
 dir = "{{cwd}}"
