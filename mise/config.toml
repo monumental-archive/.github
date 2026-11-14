@@ -4292,6 +4292,8 @@ command -v gh > /dev/null || {
 # and fix:badges renders the same URLs — the declaration is what both
 # legs agree a shield is.
 . "${ORG_BELT_DIR}/identity.sh"
+# crates.io answers only a client that says who it is (#907, #1161).
+ua="${GITHUB_REPOSITORY_OWNER}/.github audit:badges (https://github.com/${GITHUB_REPOSITORY_OWNER}/.github)"
 sc_prefix=$(org_identity shield-scorecard)
 wf_prefix=$(org_identity shield-actions)
 ghcr_prefix=$(org_identity shield-ghcr)
@@ -4503,11 +4505,20 @@ while read -r repo; do
       https://img.shields.io/crates/v/* | https://img.shields.io/docsrs/*)
         crate="${url##*/}"
         crate="${crate%.svg}"
-        if ! curl -sf "https://crates.io/api/v1/crates/${crate}" > /dev/null; then
-          failed="${failed} ${repo}(crates: ${crate} not on crates.io)"
-        else
-          note "${repo}: crate ${crate} exists"
-        fi
+        # The request identifies itself, and only a 404 is an absence
+        # (#1161). crates.io refuses an unidentified client with a 403
+        # before it looks anything up (#907), and `curl -sf` folded that
+        # refusal into "not on crates.io": edtf-core, published since
+        # July, was reported missing on the first run that reached this
+        # leg. A refusal or an outage is an unanswered question and is
+        # named as one — still red, never an accusation.
+        code=$(curl -s -o /dev/null -w '%{http_code}' -H "User-Agent: ${ua}" \
+          "https://crates.io/api/v1/crates/${crate}" || true)
+        case "${code}" in
+          200) note "${repo}: crate ${crate} exists" ;;
+          404) failed="${failed} ${repo}(crates: ${crate} not on crates.io)" ;;
+          *) failed="${failed} ${repo}(crates: crates.io did not answer for ${crate} — HTTP ${code}, a question unanswered, not an absence)" ;;
+        esac
         ;;
       https://img.shields.io/npm/v/*)
         pkg="${url#https://img.shields.io/npm/v/}"
@@ -4541,6 +4552,75 @@ while read -r repo; do
           note "${repo}: codecov live"
         else
           failed="${failed} ${repo}(codecov: issuer has no data for ${cc} and no declared state covers it)"
+        fi
+        ;;
+      # A repository's OWN shields (#1161): anything it wears outside
+      # the rendered block. They are welcome — the block is what the org
+      # derives, not a ceiling on what a repository may say about itself
+      # — on the one condition every shield here meets: something
+      # answers for it. Three shapes, each asked a question that can
+      # come back no.
+      https://img.shields.io/github/v/release/*)
+        rel="${url#https://img.shields.io/github/v/release/}"
+        rel="${rel%%\?*}"
+        if [[ ${rel} != "${GITHUB_REPOSITORY_OWNER}/${repo}" ]]; then
+          failed="${failed} ${repo}(release: the shield names ${rel}, not this repository)"
+        elif ! gh api "repos/${rel}/releases/latest" > /dev/null 2>&1; then
+          failed="${failed} ${repo}(release: shield worn, no published release)"
+        else
+          note "${repo}: a published release stands behind the release shield"
+        fi
+        ;;
+      https://img.shields.io/badge/license-* | https://img.shields.io/badge/licence-*)
+        # The message is an SPDX expression in shields' escaping (`--`
+        # is a hyphen, the last `-<colour>` is not part of it). Every
+        # identifier in it must be a text under LICENSES/ — the REUSE
+        # layout lint:licence already holds each repository to, so the
+        # shield is checked against the tree and not against GitHub's
+        # licence guess (which reads AGPL-3.0-only as AGPL-3.0).
+        expr="${url#https://img.shields.io/badge/licen?e-}"
+        expr="${expr%-*}"
+        expr="${expr//--/-}"
+        expr="${expr//%20/ }"
+        expr="${expr//[()]/ }"
+        lic_bad=""
+        lic_n=0
+        for id in ${expr}; do
+          case "${id}" in OR | AND | WITH) continue ;; *) ;; esac
+          lic_n=$((lic_n + 1))
+          gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/LICENSES/${id}.txt" > /dev/null 2>&1 \
+            || lic_bad="${lic_bad} ${id}"
+        done
+        if [[ ${lic_n} -eq 0 ]]; then
+          failed="${failed} ${repo}(licence: the shield names no SPDX identifier)"
+        elif [[ -n ${lic_bad} ]]; then
+          failed="${failed} ${repo}(licence: shield names${lic_bad}, and the tree carries no LICENSES/ text for it)"
+        else
+          note "${repo}: licence shield agrees with LICENSES/"
+        fi
+        ;;
+      https://img.shields.io/badge/*)
+        # Any other static shield is a sentence the repository wrote
+        # about itself, and no issuer exists to ask. What can be asked
+        # is whether it names its enforcer: the shield must LINK to a
+        # file in the repository's own tree (the script, test or
+        # workflow that makes the sentence true), and that file must
+        # exist. A static shield linking nowhere, or off to a website,
+        # is a claim with nothing under it.
+        target=$(awk -v u="](${url})](" '{
+          i = index($0, u)
+          if (i) { r = substr($0, i + length(u)); sub(/\).*/, "", r); print r; exit }
+        }' <<< "${body}")
+        target="${target%%#*}"
+        target="${target#./}"
+        if [[ -z ${target} ]]; then
+          failed="${failed} ${repo}(static shield links to nothing — it must link the file in this repository that enforces it: ${url})"
+        elif [[ ${target} == *://* ]]; then
+          failed="${failed} ${repo}(static shield links outside the repository — it must link the file in this tree that enforces it: ${url})"
+        elif ! gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/contents/${target}" > /dev/null 2>&1; then
+          failed="${failed} ${repo}(static shield links ${target}, which is not in the tree: ${url})"
+        else
+          note "${repo}: static shield stands on ${target}"
         fi
         ;;
       *)

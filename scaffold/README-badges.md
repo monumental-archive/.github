@@ -75,7 +75,28 @@ by `.badge-states` lines where a name is not the repo's own
                         names the IMAGE and links its package page, and
                         the audit asks GitHub whether that package
                         exists (the org packages page returns 200 for
-                        any org and proves nothing, #316 addendum C)
+                        any org and proves nothing, #316 addendum C).
+                        The name is derived per class: oci-image pushes
+                        the repository's own name, pgrx-extension the
+                        basename of `extension-crate-dir` (#1161)
+
+A repository's OWN shields — anything it wears BELOW `badges:end`. The
+block is what the organisation derives, not a ceiling: a repository may
+say more about itself, and `lint:badges` reads only the block. The
+Monday audit reads the whole README, so each own shield must be one it
+can ask a question of (#1161):
+
+  release       img.shields.io/github/v/release/<org>/<repo> — the
+                repository has a published release
+  licence       img.shields.io/badge/license-<SPDX>-<colour> — every
+                identifier in the expression has a text under LICENSES/
+  anything else a static img.shields.io/badge/ shield must LINK to the
+                file in the repository's own tree that enforces the
+                claim (a script, a test, a workflow), and that file
+                must exist. Linked nowhere, or to a website, it is red
+
+A shield from any other host is still unrecognised and still red: add
+its check to audit:badges first, then wear it.
 
 Passive observers — NO wiring exists or is needed; they index public
 repos on their own: deps.dev / OpenSSF criticality score, Libraries.io

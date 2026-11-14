@@ -209,7 +209,35 @@ if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* ]]; then
   # The shield names the IMAGE and links its package page — an
   # org-level packages link returns 200 for any org that exists and
   # proves nothing (#316 addendum C).
-  for img in ${repo} $(states_extra ghcr); do
+  # WHICH images is read per class, because each class names its image
+  # differently and only one of them names it after the repository
+  # (#1161). oci-image pushes ghcr.io/<org>/<repo>. pgrx-extension
+  # pushes ghcr.io/<org>/<basename of extension-crate-dir>, lowercased
+  # — build-pgrx-images.yml's own rule, read here from the same stub
+  # input the build reads. The repo name used to be emitted for both,
+  # which was only ever right where a repository happened to ship both
+  # classes: edtf ships the extension alone, and wore a shield for an
+  # image `edtf` that has never existed. A `ghcr <name>` state line
+  # still adds an image no class implies; a name already derived is
+  # not rendered twice.
+  imgs=""
+  [[ ${classes} == *oci-image* ]] && imgs="${repo}"
+  if [[ ${classes} == *pgrx-extension* ]]; then
+    for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
+      [[ -f ${f} ]] || continue
+      ext=$(grep -E "^[^#]*extension-crate-dir:" "${f}" | sed -n 1p \
+        | sed -e "s/.*extension-crate-dir:[[:space:]]*//" -e "s/[[:space:]]*#.*//" | tr -d "\"'" || true)
+      [[ -n ${ext} ]] && imgs="${imgs} $(basename "${ext}" | tr "[:upper:]" "[:lower:]")"
+    done
+    [[ ${classes} == *oci-image* || -n ${imgs} ]] || {
+      echo "fix:badges: classes include pgrx-extension but the publish stub names no extension-crate-dir" >&2
+      exit 1
+    }
+  fi
+  seen=" "
+  for img in ${imgs} $(states_extra ghcr); do
+    [[ ${seen} == *" ${img} "* ]] && continue
+    seen="${seen}${img} "
     emsg="[![ghcr"
     emsg+=" ${img}](https://img.shields.io/badge/ghcr.io-monumental--archive%2F${img//-/--}-blue)]"
     emsg+="(https://github.com/orgs/monumental-archive/packages/container/package/${img})"
