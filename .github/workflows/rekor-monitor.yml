@@ -113,6 +113,28 @@ jobs:
         run: |
           set -euo pipefail
           go build -o "${RUNNER_TEMP}/rekor_monitor" ./cmd/rekor_monitor
+          # PLANT (#1145): measure the runner's timeout against a hung Go program
+          command -v timeout
+          ls -l /usr/bin/timeout
+          timeout --version | head -n 2
+          mkdir -p "${RUNNER_TEMP}/hang"
+          printf '%s\n' 'package main' 'func main() { select {} }' > "${RUNNER_TEMP}/hang/main.go"
+          printf '%s\n' 'module hang' 'go 1.25' > "${RUNNER_TEMP}/hang/go.mod"
+          (cd "${RUNNER_TEMP}/hang" && go build -o "${RUNNER_TEMP}/hangbin" .)
+          for args in "--signal=QUIT --kill-after=60s 3s" "--signal=QUIT 3s" "-s QUIT 3s"; do
+            rc=0
+            SECONDS=0
+            # shellcheck disable=SC2086
+            GOTRACEBACK=all timeout ${args} "${RUNNER_TEMP}/hangbin" || rc=$?
+            echo "PLANT timeout ${args}: rc=${rc} after ${SECONDS}s"
+          done
+          rc=0
+          GOTRACEBACK=all "${RUNNER_TEMP}/hangbin" &
+          pid=$!
+          sleep 2
+          kill -QUIT "${pid}"
+          wait "${pid}" || rc=$?
+          echo "PLANT direct kill -QUIT: rc=${rc}"
       # The checkpoint's hash and its origin and size lines, before the
       # run and after it. The file is one line, the signed note with its
       # newlines written as a literal `\n`; the first field names the
@@ -179,7 +201,7 @@ jobs:
       # Rekor directly, not from the monitor's output, so a monitor that
       # said nothing cannot vouch for itself (#1145).
       - name: Record the checkpoint after the run
-        if: ${{ always() && steps.before.outcome == 'success' }}
+        if: github.run_id == 'PLANT-1145-monitor-skipped'
         env:
           BEFORE_SHA256: ${{ steps.before.outputs.sha256 }}
           BEFORE_ORIGIN: ${{ steps.before.outputs.origin }}
@@ -235,7 +257,7 @@ jobs:
       # weeks from 2026-09-24 the monitor timed out twice a day and this
       # step was skipped every time, so a dead monitor filed nothing.
       - name: File an issue on failure
-        if: ${{ failure() || cancelled() }}
+        if: github.run_id == 'PLANT-1145-monitor-skipped'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
