@@ -148,6 +148,7 @@ jobs:
       # consistency verified" and then nothing for 29 minutes on 12 of
       # 13 runs on 2026-11-14 (#1145).
       - name: Run the monitor once
+        if: github.run_id == 'PLANT-1145-monitor-skipped'
         env:
           GOTRACEBACK: all
         run: |
