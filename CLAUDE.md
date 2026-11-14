@@ -139,9 +139,9 @@ tools, same versions, from the same lockfile. The one difference is
 where: CI runs a pgrx extension's suite on one machine per Postgres
 major (#1148), and locally the same script runs those majors side by
 side. Shared-workflow changes are
-exercised by this repo's own `gate.yml` on every PR; the release half is
-exercised from `release-lab` before any **production** repo moves its
-pin.
+exercised by this repo's own `gate.yml` on every PR, and the release
+half by the canon releasing itself. That is the proof for most
+changes: no repository waits on a lab run to move its pin.
 
 **The canon runs its own release path first, and that is fine** (#367).
 A change to `release.yml`, `publish.yml`, `verify-release.yml` or
@@ -156,12 +156,16 @@ a release-path change sit unreleased to be argued about.
 
 What the canon does **not** prove is breadth: one class is a smoke test.
 `release-lab` publishes `rust-binary,oci-image,wasm-npm,pgrx-extension`
-across PG 14–18 at `dry-run: false` — the full-width proof. So the
-sequence is: **canon release (cheap, first) → lab pin bump and lab
-release (heavy, full width) → production repos.** v1.24.0 is the worked
-example: a verdict-leg check that had never met a real attestation
-refused its own valid decision, the fix shipped as v1.24.1, and the cost
-was one version number.
+across PG 14–18 at `dry-run: false`. **A lab release is not a gate**
+(ruled 2026-11-14): it was the first step of every release-path change
+while a wrong one could drain the org's API budget, and it is no
+longer. Renovate moves every repository's pin as soon as a canon tag
+exists. Cut a lab release on purpose only when a change is specific
+to a class the canon's own release does not ship — an image, an npm
+package, a pgrx extension — and nothing in CI exercises it. v1.24.0
+is the worked example of running the canon first: a verdict-leg check
+that had never met a real attestation refused its own valid decision,
+the fix shipped as v1.24.1, and the cost was one version number.
 
 ## Open items
 

@@ -516,8 +516,10 @@ exit 1. A recipe nobody has watched fail is a recipe nobody has tested.
 ## Canon changes (this repository)
 
 A shared workflow's permissions and inputs are a public contract; adding
-a permission breaks every caller as `startup_failure`. Prove risky
-changes in `release-lab` before any production repo moves its pin. Stub
+a permission breaks every caller as `startup_failure`. The gate and
+the canon's own release prove most changes; `release-lab` is where a
+change specific to a class the canon does not ship is tried, and it
+is not a gate on any other repository's pin (MAINTENANCE.md). Stub
 pins in `workflow-templates/` advance together to one SHA after merges.
 The lab's cycles are cheap by design: version numbers there are spent
 freely — a red run costs a patch number, never a consumer.
