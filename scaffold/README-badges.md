@@ -56,6 +56,10 @@ Universal shields — derived for every repo:
                     reason and its reopen trigger live in
                     tooling-verdicts.md, where they survive the shield's
                     removal
+                    The floor alone is not enough (#1161): the gate
+                    uploads only when its stub passes `codecov-token`,
+                    so fix:badges refuses a floor with no token passed,
+                    and the audit asks Codecov for an actual figure
   DOI               earned by `mint-doi: true` + the concept DOI that
                     CITATION.cff records after the first mint; renders
                     pending until the concept exists
@@ -80,23 +84,31 @@ by `.badge-states` lines where a name is not the repo's own
                         the repository's own name, pgrx-extension the
                         basename of `extension-crate-dir` (#1161)
 
-A repository's OWN shields — anything it wears BELOW `badges:end`. The
-block is what the organisation derives, not a ceiling: a repository may
-say more about itself, and `lint:badges` reads only the block. The
-Monday audit reads the whole README, so each own shield must be one it
-can ask a question of (#1161):
+Tree-fact shields — derived for every repo, no issuer to ask (#1161):
 
-  release       img.shields.io/github/v/release/<org>/<repo> — the
-                repository has a published release
-  licence       img.shields.io/badge/license-<SPDX>-<colour> — every
-                identifier in the expression has a text under LICENSES/
-  anything else a static img.shields.io/badge/ shield must LINK to the
-                file in the repository's own tree that enforces the
-                claim (a script, a test, a workflow), and that file
-                must exist. Linked nowhere, or to a website, it is red
+  license       the SPDX expression REUSE.toml's annotations agree on;
+                where a tree carries several, `licence <expression>`
+                in .badge-states says which is the project's. The
+                audit asks that each identifier has a LICENSES/ text
+  release       versioned repos (a release.yml stub); `release pending`
+                in .badge-states holds it back until the first release
+                is published. The audit asks GitHub for that release
 
-A shield from any other host is still unrecognised and still red: add
-its check to audit:badges first, then wear it.
+A repository's OWN shields. The derivation is not a ceiling: a
+repository may know something no tree fact states (an image-size
+budget, a conformance count). It declares the claim in .badge-states,
+
+  static <path> <label>=<message>
+
+and fix:badges renders it inside the block like every other shield —
+no badge anywhere is written by hand, and `lint:badges` reds one found
+outside the markers. The price of the sentence is its enforcer: <path>
+must be a tracked file (the script, test or workflow that makes the
+claim true) and the shield links it. fix:badges refuses an untracked
+path; the audit asks again from outside.
+
+A shield from any other host is unrecognised and red: add its check to
+audit:badges first, then its render to derive-badges.sh.
 
 Passive observers — NO wiring exists or is needed; they index public
 repos on their own: deps.dev / OpenSSF criticality score, Libraries.io
