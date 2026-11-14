@@ -215,6 +215,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:lock-arch
 
+  lock-idempotent:
+    name: audit / each lock is what mise lock writes today
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.4
+          cache: false
+
+      - name: Regenerate each lock in scratch and diff it
+        env:
+          # Tree-local, beside lock-arch and for its reason: this
+          # repository does not call repo-audit.yml, so this job is how
+          # its OWN mise/mise.lock is walked; the consumer side is the
+          # matching leg there. The whole-file question (#904): is the
+          # committed lock what `mise lock` resolves today? Network —
+          # the registry is the resolver — so never the gate. It WILL
+          # red whenever upstream changes a registry mapping, and that
+          # cost was accepted on #904: a red asks for the #899-style
+          # proof that the newly resolved assets run, not just a
+          # regenerated file. Public reads; the default token serves.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise run audit:lock-idempotent
+
   template-pins:
     name: audit / template pin staleness
     needs: plan
