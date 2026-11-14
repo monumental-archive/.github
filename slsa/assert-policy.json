@@ -118,7 +118,7 @@
       ]
     },
     "enrichmentFromVersion": "1.41.0",
-    "manifestSchemaFromVersion": "1.51.0"
+    "manifestSchemaFromVersion": "1.65.0"
   },
   "tags": {
     "tagPattern": "^v[0-9]",
