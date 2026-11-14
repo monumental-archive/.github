@@ -3220,6 +3220,118 @@ echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
 echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
 '''
 
+[tasks."lint:pg-schema"]
+description = "The pgrx extension's SQL surface matches its tracked snapshot"
+dir = "{{cwd}}"
+# The third check the import dropped (#896), after the MSRV job (#820)
+# and the pgrx compile (#813), and the same class as both: not a check
+# that went red, a check that stopped existing. edtf's snapshot diff
+# said it ran in "ci.yml's postgres job"; there was none, and its task
+# sat outside the `lint:*` wildcard, so `ci` never collected it.
+#
+# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface, not a
+# Rust API, which is why cargo-semver-checks is off for one. Nothing
+# else makes a change to that surface visible: a signature change would
+# ship as an ordinary refactor and surface only when somebody's CREATE
+# EXTENSION or ALTER EXTENSION UPDATE failed. And a clean diff is the
+# fact the upgrade-script derivation consumes — an empty upgrade script
+# is correct for this release; a non-empty diff is the list of what the
+# script has to do.
+#
+# NORMALISED, never raw: comments stripped, statements sorted, so a pure
+# line-number shift cannot red it (the reason is written at
+# pg-schema-normalise.py, and its table tests pin both directions).
+#
+# THE SNAPSHOT IS DERIVED, never configured: `schema.snapshot.sql`,
+# tracked beside the extension's Cargo.toml. A crate that tracks none is
+# skipped clean — the applicability guard, as on release-lab's fixture
+# — and the skip names the file it would guard, so it is never silent.
+#
+# ONE MAJOR, THE HIGHEST DECLARED, `lint:pg-clippy`'s choice and reason:
+# the surface is one set of `#[pg_extern]`s, not five, and `test:pgrx`
+# compiles every major anyway.
+run = '''
+set -euo pipefail
+manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+[[ -n ${manifests} ]] || {
+  echo "lint:pg-schema: no Cargo.toml tracked, skipped"
+  exit 0
+}
+command -v cargo > /dev/null || {
+  echo "lint:pg-schema: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  exit 1
+}
+# Assigned first, one step each: a `<<< "$(...)"` discards the
+# derivation's exit status, and a red derivation would read as a
+# workspace with no extension.
+metadata=$(cargo metadata --no-deps --format-version 1 --locked)
+surface=$(python3 "${ORG_BELT_DIR}/gate-surface.py" <<< "${metadata}")
+targets=""
+majors=""
+found=0
+while IFS=$'\t' read -r record spec kind crate_majors dir; do
+  [[ ${record} == crate && ${kind} == pgrx ]] || continue
+  found=1
+  [[ ${dir} != "-" ]] || {
+    echo "lint:pg-schema: ${spec} is a pgrx extension cargo reports no directory for" >&2
+    exit 1
+  }
+  snapshot="${dir}/schema.snapshot.sql"
+  if ! git ls-files --error-unmatch -- "${snapshot}" > /dev/null 2>&1; then
+    echo "lint:pg-schema: ${spec%@*} tracks no ${snapshot}, skipped"
+    continue
+  fi
+  targets="${targets} ${spec%@*}:${crate_majors##*,}:${dir}"
+  majors="${majors}${majors:+,}${crate_majors##*,}"
+done <<< "${surface}"
+[[ ${found} -eq 1 ]] || {
+  echo "lint:pg-schema: no pgrx extension tracked, skipped"
+  exit 0
+}
+[[ -n ${targets} ]] || exit 0
+command -v cargo-pgrx > /dev/null || {
+  echo "lint:pg-schema: cargo-pgrx missing — a pgrx crate pins it as a build input" >&2
+  exit 1
+}
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+org_pgrx_darwin_flags
+installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
+plan=$(python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}")
+org_pgrx_init <<< "${plan}" > /dev/null
+# The generated surface is kept where a reader can copy it from, under
+# the target directory cargo already ignores, rather than in a temp file
+# that is gone by the time the red is read.
+out="${CARGO_TARGET_DIR:-target}/pg-schema"
+mkdir -p "${out}"
+failed=""
+checked=""
+for entry in ${targets}; do
+  name="${entry%%:*}"
+  rest="${entry#*:}"
+  major="${rest%%:*}"
+  dir="${rest#*:}"
+  snapshot="${dir}/schema.snapshot.sql"
+  raw="${out}/${name}.raw.sql"
+  generated="${out}/${name}.schema.snapshot.sql"
+  cargo pgrx schema "pg${major}" --package "${name}" \
+    --manifest-path "${dir}/Cargo.toml" \
+    --no-default-features --features "pg${major}" --out "${raw}"
+  python3 "${ORG_BELT_DIR}/pg-schema-normalise.py" "${raw}" > "${generated}"
+  if diff -u --label "${snapshot}" --label "generated at pg${major}" \
+    "${snapshot}" "${generated}"; then
+    checked="${checked} ${name}(pg${major})"
+    continue
+  fi
+  failed="${failed} ${name}"
+  echo "lint:pg-schema: ${name}'s SQL surface differs from ${snapshot}" >&2
+  echo "  if the change is intended, commit the generated surface and the upgrade" >&2
+  echo "  script it implies (sql/<extension>--<previous>--<this>.sql):" >&2
+  echo "    cp ${generated} ${snapshot}" >&2
+done
+[[ -z ${failed} ]] || exit 1
+echo "lint:pg-schema: SQL surface matches the snapshot:${checked}"
+'''
+
 [tasks."test:pgrx"]
 description = "The Postgres extension's own suite, at every major the crate declares"
 dir = "{{cwd}}"
