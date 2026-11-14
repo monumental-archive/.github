@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.64.4](https://github.com/monumental-archive/.github/compare/v1.64.3...v1.64.4) - 2026-11-14
+
+### Fixed
+
+- run the coverage upload where no pgrx leg runs ([#1176](https://github.com/monumental-archive/.github/pull/1176))
+
 ## [1.64.3](https://github.com/monumental-archive/.github/compare/v1.64.2...v1.64.3) - 2026-11-14
 
 ### Fixed
