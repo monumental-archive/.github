@@ -341,6 +341,7 @@ jobs:
           # not write into the checkout, and target/ never enters it.
           docker run --rm \
             --env PG --env RUST_VERSION --env PGRX_VERSION --env AUDITABLE_VERSION \
+            --env BUILD_IMAGE \
             --env VERSION="${UNTRUSTED_VERSION}" \
             --env CRATE_DIR="${UNTRUSTED_CRATE_DIR}" \
             --env SOURCE_DATE_EPOCH="${epoch}" \
@@ -351,9 +352,31 @@ jobs:
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
+              # Headers at exactly the server the pinned image already
+              # carries (#1157): unversioned, apt serves the newest
+              # minor, and installing it also upgrades the server, so
+              # the suite would pass against a server the image does
+              # not contain. Textually identical to the install in
+              # release/generate-pgrx-upgrade.sh, asserted by
+              # release/test_generate_pgrx_upgrade.py: the two
+              # containers mount different trees, so they cannot share
+              # one script.
+              server=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
+              if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; then
+                msg="image ${BUILD_IMAGE} carries server ${server}; the apt repository"
+                msg+=" no longer serves its headers — move the image pin in"
+                msg+=" docker/pgrx-base-images.toml"
+                echo "::error::${msg}"
+                exit 1
+              fi
               apt-get install -y -qq --no-install-recommends \
-                "postgresql-server-dev-${PG}" build-essential \
+                "postgresql-server-dev-${PG}=${server}" build-essential \
                 ca-certificates curl pkg-config libclang-dev git
+              after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
+              [[ ${after} == "${server}" ]] || {
+                echo "::error::the build moved the server from ${server} to ${after}"
+                exit 1
+              }
               # Everything after the installs runs as the unprivileged
               # postgres user: initdb refuses root, and the test suite
               # spins up real clusters. Root hands over exactly what the

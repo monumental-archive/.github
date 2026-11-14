@@ -420,9 +420,28 @@ for control in "${controls[@]}"; do
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+# Headers at exactly the server the pinned image already carries
+# (#1157): unversioned, apt serves the newest minor, and the library
+# links against symbols the image's server does not have. Textually
+# identical to the install in build-pgrx-extension.yml, asserted by
+# release/test_generate_pgrx_upgrade.py: the two containers mount
+# different trees, so they cannot share one script.
+server=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
+if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; then
+  msg="image ${BUILD_IMAGE} carries server ${server}; the apt repository"
+  msg+=" no longer serves its headers — move the image pin in"
+  msg+=" docker/pgrx-base-images.toml"
+  echo "::error::${msg}"
+  exit 1
+fi
 apt-get install -y -qq --no-install-recommends \
-  "postgresql-server-dev-${PG}" build-essential \
+  "postgresql-server-dev-${PG}=${server}" build-essential \
   ca-certificates curl pkg-config libclang-dev git
+after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
+[[ ${after} == "${server}" ]] || {
+  echo "::error::the build moved the server from ${server} to ${after}"
+  exit 1
+}
 mkdir -p /build
 cp -a /src/. /build/
 chown -R postgres:postgres /build /work/out \
@@ -451,6 +470,7 @@ cargo pgrx package \
 EOSH
   docker run --rm \
     --env PG="${pg}" --env CRATE_DIR="${crate_dir}" \
+    --env BUILD_IMAGE="${build_image}" \
     --env RUST_VERSION --env PGRX_VERSION \
     --volume "${PWD}:/src:ro" \
     --volume "${work}:/work" \
