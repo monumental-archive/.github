@@ -76,6 +76,31 @@ not drift. `audit:org-pins` watches every org repo from the canon's
 own Monday audit, so a genuinely stuck consumer reddens where someone
 looks rather than only inside itself.
 
+## Releases that need a hand-made bump (#1180)
+
+Renovate can change a version. It cannot run a `fix:*` task or edit a
+stub. A canon release that changes a file the consumer renders (the
+badge block, `CITATION.cff`) or the required shape of a stub (the gate
+stub's triggers or concurrency) therefore turns Renovate's pins-only
+bump red in every repository: the lint at the new pin compares the old
+file with the new derivation. Measured on v1.64.3, which changed the
+rendered badge block and reddened seven bumps (iiif-server#188).
+
+Such a release needs a **hand-made bump** in each repository:
+
+- The pin and the consumer change in **one commit**: move the pins,
+  run the fixer the red lint names (every belt lint whose remedy is a
+  `fix:*` task names it in its failure message) or make the stub edit,
+  and commit both together.
+- **One pull request per repository**, in any order.
+- Renovate's red bump is closed by the hand-made one merging, never by
+  hand.
+
+The author of the change says so: the canon pull request's body
+carries "needs a hand-made bump" in the line for that change, so the
+release notes say it where the consumers read. That line is the whole
+mechanism; there is no tooling behind it.
+
 ## The audit-claims contract (#240, #266, #290, #310)
 
 Every checking task — `audit:*`, `settings/repo-baseline.sh check`, and

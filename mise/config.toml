@@ -648,7 +648,10 @@ config="${ORG_BELT_DIR}/taplo-org.toml"
   echo "  belt that did not arrive would produce a green run at a level nobody chose." >&2
   exit 1
 }
-xargs taplo fmt --config "${config}" --check --diff <<< "${files}"
+xargs taplo fmt --config "${config}" --check --diff <<< "${files}" || {
+  echo "lint:toml: formatting differs from the org's — run fix:toml" >&2
+  exit 1
+}
 xargs taplo lint --config "${config}" <<< "${files}"
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:toml: ${count} file(s) checked"
@@ -680,7 +683,14 @@ description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = '''
 files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
-if [[ -n ${files} ]]; then xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" <<< "${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi
+if [[ -n ${files} ]]; then
+  xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" <<< "${files}" || {
+    echo "lint:markdown: findings above — run fix:markdown for the fixable ones; the rest by hand" >&2
+    exit 1
+  }
+else
+  echo "lint:markdown: no markdown tracked, skipped"
+fi
 '''
 
 [tasks."lint:sql"]
@@ -721,7 +731,10 @@ files=$(git ls-files ':!vendor/**' "*.sql")
   echo "lint:sql: no SQL tracked, skipped"
   exit 0
 }
-xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}"
+xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}" || {
+  echo "lint:sql: findings above — run fix:sql for the fixable ones; the rest by hand" >&2
+  exit 1
+}
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:sql: ${count} file(s) linted"
 '''
@@ -1499,6 +1512,7 @@ done
 if [[ $((errors + warnings + infos)) -ne 0 ]]; then
   xargs biome ci --config-path "${generated}" <<< "${files}" || true
   echo "lint:biome: ${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" >&2
+  echo "  run fix:biome for what biome can write; the rest is by hand" >&2
   exit 1
 fi
 count=$(wc -l <<< "${files}" | tr -d ' ')
@@ -1701,8 +1715,14 @@ files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
   echo "lint:python: no Python tracked, skipped"
   exit 0
 }
-xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" <<< "${files}"
-xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" --check <<< "${files}"
+xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" <<< "${files}" || {
+  echo "lint:python: findings above — run fix:python for ruff's safe fixes; the rest by hand" >&2
+  exit 1
+}
+xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" --check <<< "${files}" || {
+  echo "lint:python: formatting differs from the org's — run fix:python" >&2
+  exit 1
+}
 '''
 
 [tasks."lint:python-target"]
@@ -1880,7 +1900,10 @@ rc="${ORG_BELT_DIR}/shellcheckrc"
   echo "  belt that did not arrive would produce a clean run instead of a red one. Checked here." >&2
   exit 1
 }
-xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}"
+xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}" || {
+  echo "lint:shell: formatting differs from the org's — run fix:shell" >&2
+  exit 1
+}
 xargs shellcheck --rcfile="${rc}" <<< "${files}"
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:shell: ${count} script(s) formatted and linted"
@@ -3350,7 +3373,10 @@ while IFS= read -r m; do
   count=$((count + 1))
   d=$(dirname "${m}")
   cache="$(cd "${d}" && git rev-parse --absolute-git-dir)/golangci-lint"
-  (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run)
+  (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run) || {
+    echo "lint:go: ${d}: findings above — run fix:go for the fixable ones and the format; the rest by hand" >&2
+    exit 1
+  }
 done <<< "${mods}"
 echo "lint:go: ${count} module(s) linted and format-checked"
 '''
@@ -5287,7 +5313,14 @@ env = { SHELLCHECK_OPTS = "--enable=all --external-sources --extended-analysis=t
 # actionlint release. Anchored to those two labels: any other unknown
 # label — a typo included — still goes red.
 run = '''
-if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown'; else echo "lint:actions: no workflows, skipped"; fi
+if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+  actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown' || {
+    echo "lint:actions: actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)" >&2
+    exit 1
+  }
+else
+  echo "lint:actions: no workflows, skipped"
+fi
 '''
 
 [tasks."release:preview"]
