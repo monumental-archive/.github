@@ -289,6 +289,11 @@ jobs:
   blast-radius:
     name: audit / advisory blast radius
     runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -307,17 +312,22 @@ jobs:
 
       - name: Walk every published SBOM and report the blast radius
         env:
-          # Release enumeration and asset download across org repos; the
-          # default token reads public releases. Red means a NEW,
+          # Release enumeration and asset download across org repos, the
+          # private member included. Red means a NEW,
           # UNDECIDED advisory (no VEX in security/vex/), a failed asset
           # verification, an unreadable SBOM, or a missed canary — the
           # decided findings are in the summary, not the failure.
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:blast-radius
 
   attestation-coverage:
     name: audit / attestation coverage
     runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -337,11 +347,11 @@ jobs:
       - name: Prove nothing ships unattested
         env:
           # Release and package enumeration plus attestation-store reads
-          # across org repos; the default token reads public data. Red
+          # across org repos, the private member included. Red
           # means an artifact shipped without its evidence set — a
           # missing SBOM asset, class bundle, continuous-digest
           # attestation, or base-image approval (#117).
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:attestations
 
   actions-allowlist:
@@ -480,6 +490,11 @@ jobs:
   source-vsa:
     name: audit / source chain coverage
     runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -498,15 +513,20 @@ jobs:
 
       - name: Walk every founded chain and verify each link
         env:
-          # Repo enumeration only; history, notes and Sigstore bundles
-          # are public. Red means a hole or a link that fails the
+          # Enumerates the population, private member included; history,
+          # notes and Sigstore bundles are public. Red means a hole or a link that fails the
           # published root of trust (#207).
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:source-vsa
 
   release-tags:
     name: audit / release tags
     runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -526,10 +546,11 @@ jobs:
       - name: Check every org release tag against the signing epoch
         # #349 S4. The task shipped with #353 and docs already cite it as
         # enforcing the epoch forward, but nothing scheduled it — a check
-        # no workflow runs is a check nobody runs (#354). Repo
-        # enumeration only; tags, notes and Sigstore bundles are public.
+        # no workflow runs is a check nobody runs (#354). Enumerates
+        # the population, private member included; the tags, notes and
+        # Sigstore bundles it then reads are public.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:release-tags
 
   drafts:
@@ -609,6 +630,11 @@ jobs:
   caller-permissions:
     name: audit / caller permissions
     runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -629,10 +655,10 @@ jobs:
         # Seam 2 of #358, org-wide half: a consumer whose uses: grant is
         # below what a callee's jobs ask for dies as startup_failure on
         # its next pin bump, and Renovate bumps the SHA without touching
-        # the stub body. A finding is a forecast, not an outage. Public
-        # workflow files only; the default token reads them.
+        # the stub body. A finding is a forecast, not an outage. Reads
+        # every consumer's workflow files, the private member's too.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:caller-permissions
 
   badges:

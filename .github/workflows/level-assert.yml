@@ -66,6 +66,12 @@ jobs:
   assert:
     name: assert the published board
     runs-on: ubuntu-26.04
+    # Environment-scoped for the token below: the measurement
+    # reconciles the org listing against the declared population, and
+    # the default token is served a listing without the private member,
+    # so `stele level --org` refused to enumerate and this job was red
+    # every Monday from 2026-10-12 at the latest (#803, #1143).
+    environment: audit
     # Read-only, and that is the #554 change stated in one line: this
     # job used to hold `contents: write` to publish every repository's
     # cells from here.
@@ -125,7 +131,7 @@ jobs:
         # job found, rather than ending the run before the comparison
         # that names which cells moved.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p measured
