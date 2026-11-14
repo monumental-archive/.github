@@ -25,26 +25,3 @@
 # unknown or mistyped key (exit 3, "Failed to parse configuration file"),
 # so this config cannot silently become a no-op the way a permissive
 # schema would let it.
-
-# The scaffold's deliberate placeholders for a new repo to fill in —
-# `<repo>` (percent-encoded by the time lychee sees it), `BP_ID`,
-# `CONCEPT_DOI`. Excluded by exact token rather than by skipping the
-# scaffold files wholesale: their REAL links still deserve the check.
-# Three patterns here rather than the single alternation they replace on
-# the command line, and the two forms select the same 589 links on this
-# tree (`lychee --dump`, both ways).
-#
-# CARRIED ACROSS UNCHANGED, NOT ENDORSED: measured on the canon at this
-# commit, these three exclude NOTHING — the dump is 589 links with them
-# and 589 without, because `scaffold/README-badges.md` is one long HTML
-# comment and a placeholder inside `<!-- -->` is never a link candidate.
-# (A live run prints "1 Excluded" against this tree and it is NOT these:
-# it is the `mailto:` in CODE_OF_CONDUCT.md, which lychee excludes by
-# default unless --include-mail is passed.)
-# The line they replace claimed the opposite ("lychee resolves them to
-# real requests and 404s"), and that claim is false here today. They are
-# kept because #681 is not the issue that decides whether they still
-# earn their place, and because dropping them would change what the
-# audit means in consumer trees that have never once run it — which is
-# the very condition #681 exists to end. Filed separately.
-exclude = ["%3Crepo%3E", "BP_ID", "CONCEPT_DOI"]
