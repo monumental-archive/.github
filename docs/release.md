@@ -171,7 +171,8 @@ stele's and iiif-server's current releases carried 26 and 11
 undecided advisories, Renovate had landed every fix, and stele's
 Release PR had sat green for twelve weeks.
 
-A repository that adopts `workflow-templates/security-release.yml`
+A repository that adopts the stub
+[`workflow-templates/security-release.yml`](../workflow-templates/security-release.yml)
 closes that gap for one case only. Once a day `security-release.yml`
 asks five questions, in order, and merges the Release PR only on five
 yeses (`release/security-release.sh`, which decides and holds no write

@@ -10,5 +10,12 @@
   "has_issues": true,
   "has_wiki": false,
   "has_projects": false,
-  "has_discussions": false
+  "has_discussions": false,
+  "labels": [
+    {
+      "name": "hold",
+      "color": "b60205",
+      "description": "Stops the scheduled security release from merging this Release PR"
+    }
+  ]
 }

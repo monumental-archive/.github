@@ -1,0 +1,5 @@
+{
+  "name": "Security release",
+  "description": "Once a day, this repository asks whether its supported release ships an advisory that `main` already remedies, and merges its own Release PR when it does. A breaking release, a held one, or a `main` that does not remedy it never releases unattended. Opt-in; needs the release stub beside it (.github#1167).",
+  "categories": ["deployment"]
+}

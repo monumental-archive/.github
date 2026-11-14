@@ -149,14 +149,55 @@ if [[ ${seen_repos} -ne ${expected_repos} ]]; then
   exit 1
 fi
 
-keys="$(jq -r 'keys[]' "${baseline}")"
+# The baseline file holds two kinds of thing. Its scalar keys are the
+# repository object's own fields, sent by PATCH and compared as they stand.
+# `labels` is not a repository field — GitHub's labels are their own
+# objects under /labels — so it is lifted out of both: the PATCH body
+# never carries it, and the key comparison never reads it.
+#
+# The labels are the ones a canon mechanism ACTS on, so a repository
+# without one has a control nobody can use: `hold` is the veto on the
+# scheduled security release (#1188), and a veto that does not exist
+# cannot be applied. Every repository carries them, adopter or not, so
+# the next adopter meets a veto that already works.
+keys="$(jq -r 'del(.labels) | keys[]' "${baseline}")"
+settings_body="$(jq -c 'del(.labels)' "${baseline}")"
+# One compact object per line, read on fd 3 in the loops below: no
+# `mapfile`, which the Mac's /bin/bash 3.2 does not have, and fd 3 so
+# the label writes' own `--input -` stdin is never the list.
+labels="$(jq -c '.labels[]' "${baseline}")"
+label_count="$(jq '.labels | length' "${baseline}")"
 drift=0
 
 for repo in ${repos}; do
   case "${mode}" in
     apply)
       api_write "${repo}: settings baseline PATCH" "Administration: write" \
-        -X PATCH "repos/${org}/${repo}" --input "${baseline}"
+        -X PATCH "repos/${org}/${repo}" --input - <<< "${settings_body}"
+      # The baseline labels: created when absent, set to the baseline's
+      # colour and description when present. A read that fails for any
+      # reason but absence writes nothing — a POST on a guess would 422
+      # over a label that was there all along.
+      while IFS= read -r label <&3; do
+        label_name="$(jq -r '.name' <<< "${label}")"
+        label_status=0
+        # shellcheck disable=SC2310  # api_probe manages its own exit status
+        api_probe "${repo}'s ${label_name} label" "Issues: read" "Not Found" \
+          "repos/${org}/${repo}/labels/${label_name}" || label_status=$?
+        case ${label_status} in
+          0)
+            api_write "${repo}: update the ${label_name} label" \
+              "Issues: write" -X PATCH \
+              "repos/${org}/${repo}/labels/${label_name}" --input - <<< "${label}"
+            ;;
+          1)
+            api_write "${repo}: create the ${label_name} label" \
+              "Issues: write" -X POST \
+              "repos/${org}/${repo}/labels" --input - <<< "${label}"
+            ;;
+          *) ;;
+        esac
+      done 3<<< "${labels}"
       # Immutable OIDC subject claims: the sub claim carries the numeric
       # repository and owner ids alongside the names, so a token still
       # identifies its origin after a rename or transfer. GitHub says new
@@ -257,6 +298,34 @@ for repo in ${repos}; do
           drift=1
         fi
       done
+      # The baseline labels. Absent is drift; so is a colour or
+      # description that is not the baseline's, because the description
+      # is what tells a maintainer what applying the label stops.
+      while IFS= read -r label <&3; do
+        label_name="$(jq -r '.name' <<< "${label}")"
+        label_status=0
+        # shellcheck disable=SC2310  # api_probe manages its own exit status
+        api_probe "${repo}'s ${label_name} label" "Issues: read" "Not Found" \
+          "repos/${org}/${repo}/labels/${label_name}" || label_status=$?
+        case ${label_status} in
+          0)
+            want="$(jq -S '{name, color, description}' <<< "${label}")"
+            have="$(jq -S '{name, color, description}' <<< "${api_body}")"
+            if [[ ${want} != "${have}" ]]; then
+              echo "drift: ${repo}'s ${label_name} label is not the baseline's"
+              echo "       — run: settings/repo-baseline.sh apply"
+              diff <(printf '%s\n' "${want}") <(printf '%s\n' "${have}") \
+                | sed -n 's/^[<>]/       &/p' || true
+              drift=1
+            fi
+            ;;
+          1)
+            echo "drift: ${repo} has no ${label_name} label — run: settings/repo-baseline.sh apply"
+            drift=1
+            ;;
+          *) drift=1 ;;
+        esac
+      done 3<<< "${labels}"
       oidc_status=0
       # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s OIDC subject customisation" \
@@ -546,7 +615,8 @@ if [[ ${mode} == check && ${drift} -eq 0 ]]; then
   key_count="$(wc -w <<< "${keys}" | tr -d ' ')"
   emsg="repo-baseline: ${seen_repos} repos checked"
   app_count="$(wc -w <<< "${expected_apps}" | tr -d ' ')"
-  emsg+=" (${key_count} baseline keys + OIDC sub + signoff + publish env"
+  emsg+=" (${key_count} baseline keys + labels (${label_count}) + OIDC sub"
+  emsg+=" + signoff + publish env"
   emsg+=" + classic branch protection + own rulesets each, plus org"
   emsg+=" packages and ${app_count} App installations), no drift"
   echo "${emsg}"
