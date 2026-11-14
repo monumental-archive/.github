@@ -5,7 +5,7 @@
   "dependency_graph": "enabled",
   "dependency_graph_autosubmit_action": "not_set",
   "dependabot_alerts": "enabled",
-  "dependabot_security_updates": "enabled",
+  "dependabot_security_updates": "disabled",
   "dependabot_delegated_alert_dismissal": "not_set",
   "code_scanning_default_setup": "disabled",
   "code_scanning_options": {
