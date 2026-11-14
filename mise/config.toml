@@ -5041,9 +5041,10 @@ dir = "{{cwd}}"
 # Contents: read across the org; without it this walk can only report
 # that it could not look.
 run = '''
-# The identity guard is the whole guard here (#738): this leg reads no
-# tree data at all — the org listing, the clones and the canon's own
-# tags are its inputs — so it has no required input to red on.
+# The identity guard admits the canon (#738). The one tree input this
+# leg reads is the roster (#680), and the canon owes it, so its absence
+# is red by name below rather than a skip; the org listing, the clones
+# and the canon's own tags are the rest of its inputs.
 git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   echo "audit:org-pins: no tracked security/identity.toml, not the canon, skipped"
   exit 0
@@ -5081,13 +5082,20 @@ latest=$(tail -1 <<< "${tags}")
   exit 0
 }
 repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
-expected_repos=9
-seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
-if [[ ${seen_repos} -ne ${expected_repos} ]]; then
-  echo "audit:org-pins: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2
-  echo "  an unseen repo is unchecked, not clean (#290 finding 7)." >&2
+# The population is reconciled BY NAME against the roster (#680). The
+# roster is the canon's file and this leg runs only in the canon tree
+# the guard above admitted, so it reads the roster from that tree; a
+# tree with no tracked roster is refused by name, never trusted on the
+# listing's own say-so.
+git ls-files --error-unmatch slsa/assert-policy.json > /dev/null 2>&1 || {
+  echo "audit:org-pins: no tracked slsa/assert-policy.json — the roster names" >&2
+  echo "  the population, and without it an unseen repository cannot be told" >&2
+  echo "  from a clean one." >&2
   exit 1
-fi
+}
+"${ORG_BELT_DIR}/roster-reconcile.sh" audit:org-pins slsa/assert-policy.json <<< "${repos}"
+# Reconciled, so this counts the population for the report only.
+seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
 total=0
 stale=""
 failed=""
