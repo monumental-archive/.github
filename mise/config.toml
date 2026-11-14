@@ -49,9 +49,10 @@ disable_backends = ["asdf", "ubi"]
 # The org's aqua registry corrections (mise/aqua-registry.yaml), loaded
 # BEFORE the registry baked into mise. A package named there overrides
 # the baked definition; a package absent from it falls through
-# untouched, so this changes exactly one tool's resolution and nothing
+# untouched, so this changes only the tools named there and nothing
 # else — measured, with `aqua:rhysd/actionlint` still resolving its
-# native asset from the baked registry in the same run.
+# native asset from the baked registry in the same run. One package is
+# named today: `committed` (#854).
 #
 # BY URL RATHER THAN BY PATH, and that is measured rather than
 # preferred. `aqua.registries` accepts an absolute `file://` or an
@@ -66,23 +67,23 @@ disable_backends = ["asdf", "ubi"]
 # machine-specific absolute path, so the URL is what is left. The commit
 # SHA pins its content exactly as every `uses:` pin does.
 #
-# WHEN TO DELETE THIS, and it is not when upstream merges the fix.
+# WHEN TO DELETE AN ENTRY, and it is not when upstream merges the fix.
 # mise does not read aqua-registry HEAD — it reads a snapshot compiled
 # into its own binary (`aqua.baked_registry`, default true), measured on
 # 2026-08-24 to be byte-identical to HEAD at aqua-registry 6291c29d. So
-# the correction is retired by the MISE BUMP carrying a new snapshot,
-# not by the upstream merge (aquaproj/aqua-registry#59338). The test is
-# mechanical: drop the entry, run `mise lock`, and keep the deletion
-# only if the lock does not move. `audit:lock-arch` is the backstop
-# either way — it reds if any lock names an architecture it does not
-# carry.
+# a correction is retired by the MISE BUMP carrying a new snapshot, not
+# by the upstream merge. The test is mechanical: drop the entry, run
+# `mise lock`, and keep the deletion only if the lock does not move.
+# The first entry, #811's, left that way on mise 2026.11.4 (#1202).
+# `audit:lock-arch` is the backstop either way — it reds if any lock
+# names an architecture it does not carry.
 #
 # The SHA is an N-1 self-pin: a commit cannot contain its own (#227), so
-# this names the commit that added the file. Renovate does not manage
-# it; a change to mise/aqua-registry.yaml needs this line bumped in the
-# commit after it.
+# this names the commit that last changed the file (#1217, which
+# retired #811's entry). Renovate does not manage it; a change to
+# mise/aqua-registry.yaml needs this line bumped in the commit after it.
 aqua.registries = [
-  "https://raw.githubusercontent.com/monumental-archive/.github/3cb9dd4ff2a75d587e35bbb372045e157df2ffb4/mise/aqua-registry.yaml",
+  "https://raw.githubusercontent.com/monumental-archive/.github/bd559783136549ab9954f4cf9716540e7ad43605/mise/aqua-registry.yaml",
 ]
 
 # THE DEFAULT INLINE SHELL FOR EVERY TASK IN EVERY REPO, not just the ones
