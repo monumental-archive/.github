@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Table tests for lint:pg-schema's normaliser, both directions (#896).
+"""Table tests for lint:pg-schema and fix:pg-schema, both directions (#896).
 
 The property the normalisation exists for is the one a naive diff gets
 wrong: a pure line-number shift must NOT change the surface, and a
@@ -20,27 +20,47 @@ exactly that statement.
 Mutation-checked, one mutant at a time against the normaliser: the
 `--` strip removed reds 3 rows, the `/* */` strip made line-local reds 4,
 whitespace kept un-collapsed reds 4, the sort removed reds 1 (the
-reorder row — edtf's items happen to generate in sorted order), and the
-empty-surface guard removed reds 2.
+reorder row — edtf's items happen to generate in sorted order). Against
+the judging and writing branches: the tracked guard skipped reds 3, git
+answering "tracked" for everything reds 3, every comparison passing
+reds 2, the write skipped reds 2, the fixer writing raw output
+unnormalised reds 3, and the mode guard removed reds 1.
+
+The judging and writing branches run against real git repositories,
+because "tracked" is git's answer and nothing else's: an extension with
+no tracked snapshot is red with the exact message naming the file and
+the fixer (ruled on #896), a snapshot on disk but never committed is
+the same red, and what `write` produces is what `check` then passes.
+
+GIT ENVIRONMENT IS SCRUBBED (#857): git exports `GIT_DIR` to hooks in a
+linked worktree, and a harness that inherits it writes its fixture into
+the caller's real index when the suite runs from pre-push.
 
 stdlib `unittest`, matching the other mise/test_*.py.
 """
 
 import importlib.util
 import io
+import os
 import re
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
-    "pg_schema_normalise",
-    Path(__file__).with_name("pg-schema-normalise.py"),
+    "pg_schema",
+    Path(__file__).with_name("pg-schema.py"),
 )
-pg_schema_normalise = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pg_schema_normalise)
-normalise = pg_schema_normalise.normalise
+pg_schema = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(pg_schema)
+normalise = pg_schema.normalise
+
+GIT = shutil.which("git") or "git"
+SNAPSHOT = "crates/ext/schema.snapshot.sql"
 
 RAW = """\
 /* <begin connected objects> */
@@ -207,7 +227,7 @@ def run_main(argv: list[str]) -> tuple[int, str, str]:
     """
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        status = pg_schema_normalise.main(argv)
+        status = pg_schema.main(argv)
     return status, out.getvalue(), err.getvalue()
 
 
@@ -221,6 +241,48 @@ def write(text: str) -> str:
     path = Path(tempfile.mkdtemp()) / "raw.sql"
     path.write_text(text, encoding="utf-8")
     return str(path)
+
+
+def scrubbed() -> dict[str, str]:
+    """Build the environment with the `GIT_*` family removed (#857).
+
+    Returns:
+        A copy of the environment safe to run git in a fixture with.
+
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def git(root: Path, *args: str) -> None:
+    """Run git in a fixture repository, never the caller's."""
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run(
+        [GIT, *args],
+        cwd=root,
+        env=scrubbed(),
+        check=True,
+        capture_output=True,
+    )
+
+
+class InRepo(unittest.TestCase):
+    """A fresh git repository as the working directory for each row."""
+
+    def setUp(self) -> None:
+        """Make the repository and the extension directory, and enter it."""
+        self.root = Path(tempfile.mkdtemp())
+        git(self.root, "init", "-q")
+        (self.root / "crates" / "ext").mkdir(parents=True)
+        env = mock.patch.dict(os.environ, scrubbed(), clear=True)
+        env.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(os.chdir, Path.cwd())
+        os.chdir(self.root)
+
+    def track(self, text: str) -> None:
+        """Commit-stage a snapshot with the given content."""
+        (self.root / SNAPSHOT).write_text(text, encoding="utf-8")
+        git(self.root, "add", SNAPSHOT)
 
 
 class Unchanged(unittest.TestCase):
@@ -292,37 +354,122 @@ class Changed(unittest.TestCase):
         self.assertNotEqual(normalise(changed), normalise(RAW))
 
 
-class Main(unittest.TestCase):
-    """The guard branches of the entry point the task calls."""
+class Check(InRepo):
+    """`lint:pg-schema`'s judgment: tracked, readable, equal."""
 
-    def test_surface_is_written_to_stdout(self) -> None:
-        """The green path: the surface on stdout, nothing on stderr."""
-        status, out, err = run_main([write(RAW)])
-        self.assertEqual((status, out, err), (0, EDTF_SNAPSHOT, ""))
+    def test_tracked_matching_snapshot_passes(self) -> None:
+        """The green path: nothing printed, status 0."""
+        self.track(EDTF_SNAPSHOT)
+        self.assertEqual(run_main(["check", write(RAW), SNAPSHOT]), (0, "", ""))
+
+    def test_absent_snapshot_is_red_naming_file_and_fixer(self) -> None:
+        """An extension with no snapshot is red, never a skip (#896)."""
+        status, out, err = run_main(["check", write(RAW), SNAPSHOT])
+        self.assertEqual((status, out), (1, ""))
+        self.assertEqual(
+            err,
+            f"lint:pg-schema: no snapshot tracked at {SNAPSHOT}\n"
+            "  run `mise run fix:pg-schema` to write it, read it, and commit it\n",
+        )
+
+    def test_absent_snapshot_is_red_before_reading_the_generation(self) -> None:
+        """The task's pre-build shortcut passes /dev/null; same message."""
+        status, _, err = run_main(["check", os.devnull, SNAPSHOT])
+        self.assertEqual(status, 1)
+        self.assertIn(f"no snapshot tracked at {SNAPSHOT}", err)
+
+    def test_untracked_file_on_disk_is_the_same_red(self) -> None:
+        """A snapshot written and never committed guards nothing in CI."""
+        (self.root / SNAPSHOT).write_text(EDTF_SNAPSHOT, encoding="utf-8")
+        status, _, err = run_main(["check", write(RAW), SNAPSHOT])
+        self.assertEqual(status, 1)
+        self.assertIn(f"no snapshot tracked at {SNAPSHOT}", err)
+
+    def test_surface_change_is_red_with_the_diff_and_read_it_first(self) -> None:
+        """The diff is the review; the fixer is named after it."""
+        self.track(EDTF_SNAPSHOT)
+        status, out, err = run_main(["check", write(add_argument(RAW)), SNAPSHOT])
+        self.assertEqual(status, 1)
+        self.assertIn('-CREATE FUNCTION "edtf_level"( "input" TEXT )', out)
+        self.assertIn('+CREATE FUNCTION "edtf_level"( "input" TEXT, "_strict"', out)
+        self.assertEqual(
+            err,
+            f"lint:pg-schema: the SQL surface differs from {SNAPSHOT}\n"
+            "  read the diff above first: it is the surface change this commit"
+            " makes\n"
+            "  if it is intended, run `mise run fix:pg-schema` and commit the"
+            " snapshot with\n"
+            "  the upgrade script it implies (sql/<ext>--<previous>--<this>.sql)\n",
+        )
+
+    def test_line_shift_passes_end_to_end(self) -> None:
+        """The normalisation property, through the judging entry point."""
+        self.track(EDTF_SNAPSHOT)
+        status, _, _ = run_main(["check", write(shift_lines(RAW, 1)), SNAPSHOT])
+        self.assertEqual(status, 0)
 
     def test_comment_only_output_is_red_not_an_empty_match(self) -> None:
         """The header block alone is a broken generation, never a match."""
+        self.track("")
         header = RAW.split(BLOCK, 2)[1]
-        status, out, err = run_main([write(BLOCK + header)])
+        status, out, err = run_main(["check", write(BLOCK + header), SNAPSHOT])
         self.assertEqual((status, out), (1, ""))
         self.assertIn("normalised to nothing", err)
 
-    def test_empty_file_is_red(self) -> None:
-        """An empty generation cannot compare equal to an empty snapshot."""
-        status, out, err = run_main([write("")])
-        self.assertEqual((status, out), (1, ""))
-        self.assertIn("normalised to nothing", err)
-
-    def test_missing_file_is_red(self) -> None:
+    def test_missing_generation_is_red(self) -> None:
         """A generation that wrote nothing is named, not skipped."""
+        self.track(EDTF_SNAPSHOT)
         missing = str(Path(tempfile.mkdtemp()) / "absent.sql")
-        status, out, err = run_main([missing])
-        self.assertEqual((status, out), (1, ""))
+        status, _, err = run_main(["check", missing, SNAPSHOT])
+        self.assertEqual(status, 1)
         self.assertIn("cannot read the generated schema", err)
 
-    def test_wrong_argument_count_is_red(self) -> None:
-        """The task passes exactly one path."""
-        for argv in ([], ["a", "b"]):
+
+class Write(InRepo):
+    """`fix:pg-schema`: writes what the lint then passes."""
+
+    def test_written_snapshot_is_what_check_passes(self) -> None:
+        """Absent, written, tracked, green: the fixer's whole contract."""
+        raw = write(RAW)
+        self.assertEqual(run_main(["check", raw, SNAPSHOT])[0], 1)
+        status, out, err = run_main(["write", raw, SNAPSHOT])
+        self.assertEqual(
+            (status, out, err),
+            (0, f"fix:pg-schema: wrote {SNAPSHOT}\n", ""),
+        )
+        self.assertEqual(
+            (self.root / SNAPSHOT).read_text(encoding="utf-8"),
+            EDTF_SNAPSHOT,
+        )
+        git(self.root, "add", SNAPSHOT)
+        self.assertEqual(run_main(["check", raw, SNAPSHOT]), (0, "", ""))
+
+    def test_rewrite_after_a_surface_change_turns_the_lint_green(self) -> None:
+        """The intended-change path: red, write, green."""
+        self.track(EDTF_SNAPSHOT)
+        raw = write(add_argument(RAW))
+        self.assertEqual(run_main(["check", raw, SNAPSHOT])[0], 1)
+        self.assertEqual(run_main(["write", raw, SNAPSHOT])[0], 0)
+        self.assertEqual(run_main(["check", raw, SNAPSHOT]), (0, "", ""))
+
+    def test_empty_generation_writes_nothing(self) -> None:
+        """An unusable generation must not overwrite a good snapshot."""
+        self.track(EDTF_SNAPSHOT)
+        status, _, err = run_main(["write", write(""), SNAPSHOT])
+        self.assertEqual(status, 1)
+        self.assertIn("fix:pg-schema: the generated schema normalised", err)
+        self.assertEqual(
+            (self.root / SNAPSHOT).read_text(encoding="utf-8"),
+            EDTF_SNAPSHOT,
+        )
+
+
+class Usage(unittest.TestCase):
+    """The entry point's argument guard."""
+
+    def test_wrong_arguments_are_red(self) -> None:
+        """The task passes a mode and exactly two paths."""
+        for argv in ([], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"]):
             with self.subTest(argv=argv):
                 status, out, err = run_main(argv)
                 self.assertEqual((status, out), (1, ""))
