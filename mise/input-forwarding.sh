@@ -78,8 +78,11 @@ END {
         printf "lint:input-forwarding: %s:%s does not forward universal %s %s of %s\n",
           cfile[j], cjob[j], dkind[i], dname[i], dbase[i] > "/dev/stderr"
         fail = 1
+        unforwarded = 1
       }
     }
+  if (unforwarded)
+    print "lint:input-forwarding: run fix:input-forwarding to insert the missing forwards" > "/dev/stderr"
   if (fail) exit 1
   print "lint:input-forwarding: every universal input is forwarded at every local call site"
 }
