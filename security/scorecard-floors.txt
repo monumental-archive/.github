@@ -122,3 +122,9 @@ edtf 7.4
 # the org path, which is a human step on bestpractices.dev. Any of them
 # should fire the ratchet nudge — raise this line then, from a reading.
 monumental-archive-db 6.6
+
+# monumental-archive-ledger floored 2026-11-14 on adopting the badge
+# block (#1161): a tenth under the published reading of 7.6
+# (api.scorecard.dev), per the floor-low rule. It had no line before
+# because its README wore no Scorecard shield for the audit to find.
+monumental-archive-ledger 7.5
