@@ -136,4 +136,14 @@ as the toolbelt conventions say.
   visibility rule above for which shape.
 - Dependabot **version updates** are deliberately absent: they are per-repo
   `dependabot.yml` territory and Renovate owns version PRs org-wide.
-  Security configs cover alerts + security updates only.
+- Dependabot **security updates** are off; Dependabot **alerts** are on
+  (#1146). Renovate's advisory path is the remedy: it reads the alerts
+  and skips the release age and the schedule (`default.json`,
+  `vulnerabilityAlerts`). With security updates on, Dependabot opened
+  duplicates of Renovate's own pull requests, outside the org's commit
+  template, red where Renovate's twin was green (seen 2026-11-13 in
+  monumental-archive, stele and iiif-server). One updater, one
+  template. The accepted cost: Renovate cannot remediate an advisory in
+  a transitive cargo dependency (#667), and Dependabot sometimes can.
+  For that set `audit:blast-radius` remains the detector and the weekly
+  lock file maintenance the delivery.
