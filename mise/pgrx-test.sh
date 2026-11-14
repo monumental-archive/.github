@@ -118,7 +118,8 @@ fi
 # separate — a data directory and a port per major.
 root=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])' <<< "${metadata}")
 logs=$(mktemp -d)
-trap 'rm -rf "${logs}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${logs}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 pids=""
 for run in ${runs}; do
   dir="${run%%:*}"
@@ -151,3 +152,4 @@ if [[ -n ${failed} ]]; then
   exit 1
 fi
 echo "${label}: ${count} suite run(s):${tested}"
+org_done=1

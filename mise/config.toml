@@ -1491,7 +1491,8 @@ if [[ -n ${generated_tracked} ]]; then
   echo "lint:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
   exit 1
 fi
-trap 'rm -f "${generated}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
@@ -1518,6 +1519,7 @@ if [[ $((errors + warnings + infos)) -ne 0 ]]; then
 fi
 count=$(wc -l <<< "${files}" | tr -d ' ')
 echo "lint:biome: clean across ${count} files"
+org_done=1
 '''
 
 [tasks."fix:biome"]
@@ -1567,7 +1569,8 @@ if [[ -n ${generated_tracked} ]]; then
   echo "fix:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
   exit 1
 fi
-trap 'rm -f "${generated}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
@@ -1575,6 +1578,7 @@ git ls-files ':!vendor/**' "package.json" "*/package.json" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
     --out "${generated}"
 xargs biome check --config-path "${generated}" --write <<< "${files}"
+org_done=1
 '''
 
 # The delivered domain table, re-derived against the pinned binary (#695).
@@ -2611,7 +2615,8 @@ fi
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 out=""
 fmt_out=""
-trap 'rm -f "${out}" "${fmt_out}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${out}" "${fmt_out}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The rustfmt leg, first because it is seconds against clippy's minutes.
 # rustfmt is a rustup component of the repo's own pin exactly like clippy,
 # asserted with a remedy and never installed.
@@ -2836,6 +2841,7 @@ if [[ -n ${red} ]]; then
   exit "${status}"
 fi
 echo "lint:rust: clean at every group (restriction minus ${contradiction_count} named contradictions)"
+org_done=1
 '''
 
 [tasks."fix:rust"]
@@ -3044,7 +3050,8 @@ command -v mise > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 cargo fetch --locked
 mise ls rust --json > "${tmp}/toolchains.json"
 cargo metadata --no-deps --format-version 1 --locked > "${tmp}/metadata.json"
@@ -3072,6 +3079,7 @@ plan=$(python3 "${ORG_BELT_DIR}/msrv-plan.py" \
   --pgrx "${pgrx}" < "${tmp}/metadata.json")
 [[ -n ${plan} ]] || {
   echo "lint:msrv: no crate declares rust-version, skipped"
+  org_done=1
   exit 0
 }
 # A pgrx crate needs a Postgres before it can be compiled at all, at the
@@ -3121,9 +3129,11 @@ done <<< "${plan}"
 if [[ ${checked} -eq 0 ]]; then
   echo "lint:msrv: every declared minimum sits outside the gate's compile surface"
   echo "lint:msrv: nothing verified — the exclusions above are what to remove"
+  org_done=1
   exit 0
 fi
 echo "lint:msrv: ${checked} declared minimum(s) compiled at the toolchain they name"
+org_done=1
 '''
 
 [tasks."lint:pg-clippy"]
@@ -3570,7 +3580,8 @@ while IFS= read -r line; do
   flags+=("${parts[@]}")
 done < "${ORG_BELT_DIR}/tsc-flags.txt"
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS= read -r cfg; do
   [[ -n ${cfg} ]] || continue
@@ -3592,6 +3603,7 @@ if [[ -n ${escaped} ]]; then
 fi
 covered=$(wc -l < "${tmp}/tracked" | tr -d ' ')
 echo "lint:types: ${count} project(s) checked, ${covered} files covered"
+org_done=1
 '''
 
 # The other half of the TypeScript level, and the half `lint:types`
@@ -3658,7 +3670,8 @@ command -v tsc > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 rc=0
 count=0
 while IFS= read -r cfg; do
@@ -3678,6 +3691,7 @@ done <<< "${cfgs}"
   echo "lint:tsconfig-dials: ${count} config(s) checked, at least one below the org's level" >&2
   exit 1
 }
+org_done=1
 '''
 
 [tasks."lint:scaffold-assembly"]
@@ -3783,7 +3797,8 @@ if [[ -n ${missing} ]]; then
   exit 1
 fi
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS=: read -r stub dest; do
   [[ -n ${stub} ]] || continue
@@ -3939,6 +3954,7 @@ if [[ ${rc} -ne 0 ]]; then
   exit 1
 fi
 echo "lint:scaffold-assembly: ${fixers} fixer(s) then ${gates} gate task(s), all green"
+org_done=1
 '''
 
 [tasks."lint:go-tidy"]
@@ -4158,7 +4174,8 @@ vex="${ORG_CANON_DIR}/security/vex"
   exit 1
 }
 scan=$(mktemp)
-trap 'rm -f "${scan}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${scan}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 while IFS= read -r m; do
   [[ -n ${m} ]] || continue
   d=$(dirname "${m}")
@@ -4175,6 +4192,7 @@ while IFS= read -r m; do
   }
   stele assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
 done <<< "${mods}"
+org_done=1
 '''
 
 [tasks."audit:blast-radius"]
@@ -5324,12 +5342,14 @@ dir = "{{cwd}}"
 # ever be seen. --skip-dirs is gone because there is nothing to skip.
 run = '''
 scratch=$(mktemp -d)
-trap 'rm -rf "${scratch}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # rsync, not cpio: BSD cpio refuses to extract through tracked
 # symlinks (the canon's self-* workflow links), GNU cpio does not —
 # rsync -l recreates them identically on both.
 git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 trivy fs --scanners misconfig,secret --exit-code 1 "${scratch}"
+org_done=1
 '''
 
 [tasks."lint:actions"]
@@ -6000,7 +6020,8 @@ command -v stele > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 head_sha=$(git rev-parse HEAD)
 derive() { # snapshot-dir out-file
   stele derive claims --policy slsa/verify-policy.json \
@@ -6059,6 +6080,7 @@ jq -e '[.controls[].property] | (index("ORG_SOURCE_TAG_IMMUTABLE") == null)
   exit 1
 }
 echo "lint:source-attest: ok — full set derives, blindness refuses, a lapse under-claims"
+org_done=1
 '''
 
 [tasks."lint:actions-allowed"]
@@ -7775,9 +7797,11 @@ git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 || {
   exit 0
 }
 scratch=$(mktemp -d)
-trap 'rm -rf "${scratch}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 reuse --root "${scratch}" lint
+org_done=1
 '''
 
 [tasks."lint:vendored"]
@@ -7855,13 +7879,15 @@ if [[ ! -f REUSE.toml ]]; then
   exit 1
 fi
 tmp=$(mktemp)
-trap 'rm -f "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 CITATION_OUT="${tmp}" bash "${ORG_BELT_DIR}/citation.sh" > /dev/null
 if ! diff -u CITATION.cff "${tmp}"; then
   echo "lint:citation: CITATION.cff drifted from its sources — edit REUSE.toml (or the human fields) and run fix:citation" >&2
   exit 1
 fi
 echo "lint:citation: CITATION.cff agrees with REUSE.toml"
+org_done=1
 '''
 
 [tasks."fix:badges"]
@@ -7971,7 +7997,8 @@ if ! grep -q "<!-- badges:begin -->" README.md; then
   exit 0
 fi
 tmp=$(mktemp)
-trap 'rm -f "${tmp}" "${tmp}.cur"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${tmp}" "${tmp}.cur"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The derivation is invoked directly, never via `mise run fix:badges`: a
 # nested mise inside a task races the parallel lint fan-out and fails to
 # resolve its own lockfile, which made `mise run ci` unrunnable locally
@@ -8000,6 +8027,7 @@ if [[ -n ${stray} ]]; then
   exit 1
 fi
 echo "lint:badges: badge block agrees with the derivation"
+org_done=1
 '''
 
 [tasks."lint:release-stub"]
@@ -8329,7 +8357,8 @@ belt="${ORG_BELT_DIR:-}"
 belt=$(cd "${belt}" && pwd -P)
 before=$(git status --porcelain=v1 --untracked-files=all)
 scratch=$(mktemp -d)
-trap 'rm -rf "${scratch}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 mkdir -p "${scratch}/conf" "${scratch}/belt"
 cp "${belt}/config.toml" "${scratch}/belt/config.toml"
 : > "${scratch}/empty.toml"
@@ -8417,6 +8446,7 @@ if [[ -n ${drifted} ]]; then
   exit 1
 fi
 echo "audit:lock-idempotent: ok — ${n} lock(s), working tree unchanged"
+org_done=1
 '''
 
 [tasks."lint:nested-permissions"]
@@ -9038,12 +9068,24 @@ dir = "{{cwd}}"
 #
 # Comment lines are skipped so that documenting a forbidden form (as the
 # signer now does) is not itself a violation.
+#
+# The second half is a 3.2 BEHAVIOUR rather than a syntax (#1233): with
+# an EXIT trap set, a script that dies on an unset variable exits 0 on
+# 3.2 and 1 on bash 5, because `$?` inside the trap is already 0. So a
+# local run reports success for a script that never finished. Every
+# EXIT trap — in a shell file or a task body of any tracked mise config
+# — carries a completion guard, and the script's last statement is the
+# mark the guard reads. exit-trap.py holds both and prints the shape.
+# Workflow `run:` steps are not held to it: they only ever meet bash 5.
 run = '''
+scripts=$(git ls-files ':!vendor/**' | xargs shfmt --find 2> /dev/null)
+configs=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml")
 files=$(
-  git ls-files ':!vendor/**' | xargs shfmt --find 2> /dev/null
+  printf '%s\n' "${scripts}"
   git ls-files ':!vendor/**' ".github/workflows/*.y*ml"
 )
-[[ -n ${files} ]] || {
+[[ -n ${files//$'\n'/} || -n ${configs} ]] || {
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
 }
@@ -9058,6 +9100,9 @@ while IFS= read -r f; do
   hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
   [[ -n ${hit} ]] && found="${found}\n  ${f}: ${hit}"
 done <<< "${files}"
+traps=0
+# shellcheck disable=SC2086  # the file lists are newline-separated on purpose
+python3 "${ORG_BELT_DIR}/exit-trap.py" ${scripts} ${configs} || traps=$?
 if [[ -n ${found} ]]; then
   echo "lint:bash-portability: bash 4+ syntax found (macOS ships 3.2):" >&2
   printf "%b\n" "${found}" >&2
@@ -9065,6 +9110,7 @@ if [[ -n ${found} ]]; then
   echo "  a release untested. Use tr, case, or an explicit loop instead." >&2
   exit 1
 fi
-count=$(wc -l <<< "${files}" | tr -d " ")
+[[ ${traps} -eq 0 ]] || exit 1
+count=$(grep -c . <<< "${files}" || true)
 echo "lint:bash-portability: ${count} files clean"
 '''
