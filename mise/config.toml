@@ -4760,8 +4760,8 @@ dir = "{{cwd}}"
 # an explicit config a consumer's own file silently outranks the belt —
 # `exclude = [".*"]` beside a README buys a green run over an unchecked
 # tree. An explicit --config replaces that discovery (measured both
-# directions, #681). The org's link policy — the scaffold placeholder
-# exclusions above all — therefore lives in the belt's lychee.toml, and
+# directions, #681). The org's link policy therefore lives in the
+# belt's lychee.toml, and
 # `.lycheeignore`, which lychee reads independently of --config, stays
 # the repo's per-link escape.
 # --include-fragments: without it lychee verifies that a page exists and
