@@ -148,6 +148,13 @@
       "automerge": true
     },
     {
+      "description": "A Go patch release skips the age gate (#1190). Go's patch releases are its security and critical fixes, and the toolchain is pinned through mise, which no advisory feed Renovate reads is joined to — so the vulnerabilityAlerts bypass below never reaches it. Measured 2026-11-14: go 1.27.4 fixed GO-2026-6859, stele's `main` sat on 1.27.3 with no pull request open, and audit:go-vulns refused every release until a hand-made bump (stele#332). Patch only: a new minor keeps the seven days. Both managers name the toolchain `go` (stele's Dependency Dashboard, 2026-11-15): mise for the pin, gomod for go.mod's `go` directive. Placed after the routine-updates rule, so a green patch still merges itself.",
+      "matchManagers": ["mise", "gomod"],
+      "matchPackageNames": ["go"],
+      "matchUpdateTypes": ["patch"],
+      "minimumReleaseAge": "0 days"
+    },
+    {
       "description": "First-party skips the age gate, org-wide: it models third-party supply-chain risk, and applied to our own repos — gated by our own CI — it only guarantees every consumer runs week-stale first-party code (#133, the v0.16.1 VSA failure; the signer digest sat in the same queue). The chore(canon) scope is the other half of a two-config contract (#227): the release notes convention leaves it unmapped and the silent-types rule keeps it out of the version decision, so a canon-pin bump never justifies a release — in the canon itself that ends the self-bump release loop, and in consumers it stops a lint-config update from burning a version number on an artifact that did not change. The age gate is only half the queue (#290 finding 4): prHourlyLimit/prConcurrentLimit are top-level-only, so Renovate's default throttle (2 PRs/hour) applies to first-party too, and on 2026-08-12 the canon bump AND the signer digest sat rate-limited 12+ hours behind thirty third-party PRs. prPriority puts first-party at the front of every queue slot, and groupName collapses the canon bump and signer digest into one PR consuming one slot — first-party effectively never queues, while the global throttle (worth keeping: the 7-day age gate releases third-party in bursts) stays untouched.",
       "matchPackageNames": ["monumental-archive/**"],
       "minimumReleaseAge": "0 days",
