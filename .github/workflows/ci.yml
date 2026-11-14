@@ -162,6 +162,17 @@ jobs:
         with:
           version: 2026.11.3
           cache: true
+          # The cache's NAME, moved by hand when its CONTENTS must change
+          # and its key would not (#1165). mise-action keys on the mise
+          # configs and never re-saves on a hit, so a change to WHAT is
+          # cached that touches no config keeps restoring the old copy:
+          # the Rust toolchains moved inside the cached directory in
+          # v1.64.2, the key stayed the same through v1.64.4, and every
+          # job went on restoring a cache without them and fetching them
+          # again at about ten seconds a toolchain. v2 is that change.
+          # Bump it in all three jobs together; each repository pays one
+          # cold install.
+          cache_key_prefix: mise-v2
 
       # unattested-path: this gate signs and publishes nothing, so
       # the cold-build rule (#117, docs/release.md) permits the Go
@@ -354,6 +365,8 @@ jobs:
         with:
           version: 2026.11.3
           cache: true
+          # Moved with the `gate` job's, for the reason given there.
+          cache_key_prefix: mise-v2
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the cargo cache
@@ -495,6 +508,8 @@ jobs:
         with:
           version: 2026.11.3
           cache: true
+          # Moved with the `gate` job's, for the reason given there.
+          cache_key_prefix: mise-v2
 
       # unattested-path: this gate signs and publishes nothing, so
       # the cold-build rule (#117, docs/release.md) permits the Go
