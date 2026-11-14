@@ -137,17 +137,16 @@ repos="${api_body}"
 # Refuse to claim from a blind read (#290 finding 7, the claims.sh/#240
 # pattern): a token that sees an empty or partial population makes the
 # loop below run zero or few times and exit 0 with no output — a clean
-# check indistinguishable from no check. The count is the org's known
-# population, and growing it is a reviewed edit here, exactly so a
-# narrowed AUDIT_TOKEN repo selection is a red run rather than silence.
-expected_repos=9
+# check indistinguishable from no check. The listing is reconciled BY
+# NAME against the roster in slsa/assert-policy.json (#680), so a
+# narrowed AUDIT_TOKEN repo selection is red with the unseen names, and
+# an import edits the roster and nothing here.
+canon_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+"${canon_root}/mise/roster-reconcile.sh" repo-baseline \
+  "${canon_root}/slsa/assert-policy.json" <<< "${repos}"
+# Reconciled, so the listing IS the population; counted only to say
+# what was covered on success below, never compared to anything.
 seen_repos="$(wc -w <<< "${repos}" | tr -d ' ')"
-if [[ ${seen_repos} -ne ${expected_repos} ]]; then
-  echo "repo-baseline: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2
-  echo "  an unseen repo is unchecked, not clean. Fix the token's repo" >&2
-  echo "  selection, or update expected_repos for a real population change." >&2
-  exit 1
-fi
 
 keys="$(jq -r 'keys[]' "${baseline}")"
 drift=0
