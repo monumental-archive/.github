@@ -1,0 +1,123 @@
+{
+  "schema": 7,
+  "target": "assert blast-radius",
+  "subject": "monumental-archive/stele",
+  "verdict": "FAIL",
+  "population": {
+    "size": 21,
+    "source": "listing",
+    "detail": "SBOMs scanned"
+  },
+  "facts": [
+    {
+      "name": "supportedReleases",
+      "value": "stele@v0.20.0"
+    },
+    {
+      "name": "supportedReleasesAffected",
+      "value": "stele@v0.20.0"
+    }
+  ],
+  "findings": [
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GHSA-2v4p-qf9q-27wj:google.golang.org/grpc@v1.82.1",
+      "detail": "GHSA-2v4p-qf9q-27wj affects google.golang.org/grpc@v1.82.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GHSA-q7gw-24fr-5p69:go.opentelemetry.io/otel/trace@v1.44.0",
+      "detail": "GHSA-q7gw-24fr-5p69 affects go.opentelemetry.io/otel/trace@v1.44.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GHSA-qc2q-p7wx-3px3:google.golang.org/grpc@v1.82.1",
+      "detail": "GHSA-qc2q-p7wx-3px3 affects google.golang.org/grpc@v1.82.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GHSA-vp52-pcj8-j9qc:google.golang.org/grpc@v1.82.1",
+      "detail": "GHSA-vp52-pcj8-j9qc affects google.golang.org/grpc@v1.82.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-5932:golang.org/x/crypto@v0.54.0",
+      "detail": "GO-2026-5932 affects golang.org/x/crypto@v0.54.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6303:golang.org/x/crypto@v0.54.0",
+      "detail": "GO-2026-6303 affects golang.org/x/crypto@v0.54.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6348:google.golang.org/grpc@v1.82.1",
+      "detail": "GO-2026-6348 affects google.golang.org/grpc@v1.82.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6354:golang.org/x/crypto@v0.54.0",
+      "detail": "GO-2026-6354 affects golang.org/x/crypto@v0.54.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6355:golang.org/x/crypto@v0.54.0",
+      "detail": "GO-2026-6355 affects golang.org/x/crypto@v0.54.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6441:google.golang.org/grpc@v1.82.1",
+      "detail": "GO-2026-6441 affects google.golang.org/grpc@v1.82.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6443:google.golang.org/grpc@v1.82.1",
+      "detail": "GO-2026-6443 affects google.golang.org/grpc@v1.82.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6603:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6603 affects golang.org/x/net@v0.57.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6610:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6610 affects golang.org/x/net@v0.57.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6611:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6611 affects golang.org/x/net@v0.57.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6612:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6612 affects golang.org/x/net@v0.57.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6617:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6617 affects golang.org/x/net@v0.57.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6629:golang.org/x/text@v0.40.0",
+      "detail": "GO-2026-6629 affects golang.org/x/text@v0.40.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6860:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6860 affects golang.org/x/net@v0.57.0 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6865:github.com/klauspost/compress@v1.19.1",
+      "detail": "GO-2026-6865 affects github.com/klauspost/compress@v1.19.1 (Go)"
+    },
+    {
+      "subject": "stele@v0.20.0",
+      "assertion": "GO-2026-6866:golang.org/x/net@v0.57.0",
+      "detail": "GO-2026-6866 affects golang.org/x/net@v0.57.0 (Go)"
+    }
+  ]
+}

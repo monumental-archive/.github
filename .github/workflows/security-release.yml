@@ -1,0 +1,156 @@
+# A fixed main becomes a release, org canon (#1167). Callers pin by
+# full SHA:
+#
+#   jobs:
+#     security-release:
+#       uses: monumental-archive/.github/.github/workflows/security-release.yml@<sha> # vX.Y.Z
+#       secrets:
+#         app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
+#
+# The defect: Renovate lands a security fix on main within hours, and
+# then nothing turns it into a release anyone can install. Measured on
+# 2026-11-14, stele's and iiif-server's current releases carried 26 and
+# 11 undecided advisories with every fix already on main; stele's
+# Release PR had been green and unmerged for twelve weeks.
+#
+# So a repository that adopts this stub asks itself, on a schedule:
+# is my supported release affected, and does my main remedy it? Only
+# when both are true — and the pending release is not a breaking one,
+# is not held, and would pass the publish path's own advisory checks —
+# the Release PR is merged, and the ordinary release path does the rest
+# (release.yml tags on that merge, the publish workflow builds, proves
+# and signs). Nothing here tags, builds or signs. docs/release.md, "A
+# fixed main becomes a release", holds the whole argument, including
+# what this takes out of a human's hands and what it leaves there.
+#
+# Two jobs, split on the same line as release.yml: the first reads and
+# decides with no secret at all; the second holds the App token and
+# does exactly one thing with it.
+---
+name: security-release
+
+"on":
+  workflow_call:
+    secrets:
+      app-private-key:
+        # forwarding: universal
+        description: Tag-mint App private key
+        required: true
+
+permissions: {}
+
+jobs:
+  assess:
+    name: Is the supported release affected, and does main remedy it?
+    runs-on: ubuntu-26.04
+    permissions:
+      # Each grant is a read of this repository except the last, and the
+      # last is not on the release path: it is the issue that says "the
+      # supported release is affected and main does not fix it", the one
+      # outcome here that needs a maintainer.
+      contents: read # checkout; this repository's release listing and SBOM assets
+      attestations: read # every SBOM is held against the store before it is scanned
+      pull-requests: read # the Release PR's title, labels and merge state
+      issues: write # the needs-a-maintainer issue, filed once
+    outputs:
+      merge: ${{ steps.decide.outputs.merge }}
+      pr: ${{ steps.decide.outputs.pr }}
+      reason: ${{ steps.decide.outputs.reason }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `stele derive release-plan` derives the pending version from
+          # the whole local history and refuses to network for refs the
+          # workflow did not fetch.
+          fetch-depth: 0
+          persist-credentials: false
+          # A schedule runs on the default branch already; stated so a
+          # dispatch from another ref still judges what would release.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.3
+          # The same reasoning as the release jobs: what this decides
+          # ends in a signed release, so no tool cache.
+          cache: false
+
+      - name: Prepare the release
+        # No token. The same script the Release PR is built from, so the
+        # tree judged below is the tree that would be tagged — version
+        # mirrors and refreshed lockfiles included.
+        id: prepare
+        run: .org-canon/release/prepare-release.sh
+
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ steps.prepare.outputs.plan }}
+          ORG_CANON_DIR: ${{ github.workspace }}/.org-canon
+          FILE_ISSUE: "true"
+        run: |
+          if [[ -z ${PLAN} ]]; then
+            echo "security-release: no — nothing to release: main carries no releasable change since the last tag"
+            echo "merge=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          .org-canon/release/security-release.sh
+      - name: Say what was decided
+        if: always()
+        env:
+          MERGE: ${{ steps.decide.outputs.merge }}
+          REASON: ${{ steps.decide.outputs.reason }}
+        run: |
+          {
+            echo "### security release"
+            echo
+            echo "- release: ${MERGE:-undecided}"
+            echo "- why: ${REASON:-the decision step did not finish}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+  merge:
+    name: Merge the Release PR
+    needs: assess
+    if: needs.assess.outputs.merge == 'true'
+    runs-on: ubuntu-26.04
+    # Nothing ambient: the one credential this job uses is the App
+    # token minted below.
+    permissions: {}
+    steps:
+      - name: Mint the merge token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TAG_MINT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.app-private-key }}
+          # The App, not the ambient token, and for a reason that is the
+          # whole mechanism: a merge made with GITHUB_TOKEN triggers no
+          # workflows, so the tag job would never fire and the merged
+          # Release PR would sit on main releasing nothing — the
+          # silent-success shape release.yml's header warns about.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR: ${{ needs.assess.outputs.pr }}
+          REASON: ${{ needs.assess.outputs.reason }}
+        run: |
+          # Squash, like every merge in the org; where a merge queue
+          # owns the strategy this enqueues instead, which is the same
+          # outcome one gate run later. Never `--auto`: the decision job
+          # required a PR that is mergeable NOW, and arming a merge for
+          # some later state would merge a tree nobody assessed.
+          gh pr merge "${PR}" --repo "${GITHUB_REPOSITORY}" --squash
+          gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --body \
+            "Merged by the scheduled security release: ${REASON}."
+...

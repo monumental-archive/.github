@@ -160,6 +160,73 @@ Opt-in is unchanged and explicit: a repository with no `.coverage-floor`
 skips this step clean and owes nothing. A repository adopts by measuring
 itself, `mise run coverage:adopt`, never by typing a number.
 
+### A fixed main becomes a release
+
+Phase 1 ends at a Release PR, and merging it is a maintainer's click.
+That is right for a release someone chose to make, and it was the one
+manual step on a path that is otherwise unattended — which is how a
+fix can be on `main` and unreleased. Measured on 2026-11-14
+([#1167](https://github.com/monumental-archive/.github/issues/1167)):
+stele's and iiif-server's current releases carried 26 and 11
+undecided advisories, Renovate had landed every fix, and stele's
+Release PR had sat green for twelve weeks.
+
+A repository that adopts `workflow-templates/security-release.yml`
+closes that gap for one case only. Once a day `security-release.yml`
+asks five questions, in order, and merges the Release PR only on five
+yeses (`release/security-release.sh`, which decides and holds no write
+token; a second job holds the App token and does nothing but merge):
+
+1. **Is a release pending that a machine may cut?** A range asking for
+   a breaking bump is not one: a break is the release that needs a
+   coordinated change somewhere else, and it waits for a maintainer.
+2. **Is the Release PR the one `main` now describes, unheld and
+   mergeable?** The `hold` label is the veto.
+3. **Is the supported release affected?** Asked of what was
+   *published* — the release's attested SBOMs, scanned and joined
+   against the canon's decisions by `stele assert blast-radius --repo`
+   — and read from the fact stele states. Only the newest release is
+   supported (`SECURITY.md`), so nothing is cut for an advisory on a
+   release nobody is asked to install.
+4. **Would the release remedy any of it?** At least one affected
+   `package@version` must no longer resolve on the tree being
+   released. Without this the job is a loop: a finding `main` does not
+   fix is still red after the release, and every later commit would
+   cut another.
+5. **Would it survive its own publish?** `audit:deny` and
+   `audit:go-vulns` — the two tasks the publish path runs at the tag —
+   run here first, on the prepared tree. Failing here is free; failing
+   after the tag burns a version number.
+
+Every "no" is a sentence in the run summary naming the question that
+failed. Questions 4 and 5 failing is the one outcome that needs a
+person — the supported release is affected and `main` does not fix
+it — so it opens an issue in the repository, once.
+
+**What this takes out of a maintainer's hands, stated plainly.** For
+the releases it cuts, nobody reads the Release PR before it merges.
+Ordinary updates wait out Renovate's seven-day release age before they
+reach `main`; advisory fixes skip it by design
+(`default.json`, `vulnerabilityAlerts`), so an upstream package
+published as a fix can reach a signed release with no human having
+looked. That was already true of `main`; it is now true of the
+release. The trade is against the measured alternative — a
+known-affected release staying current for a quarter — and it is
+bounded by the three things that never release unattended: a breaking
+change, a held PR, and a `main` that does not remedy the finding.
+
+**What rides along.** The release is whatever `main` holds: a security
+release ships every non-breaking change merged since the last tag, not
+the fix alone. There is no way to ship only the fix without a
+backport, and the support policy has no backports.
+
+It is opt-in per repository, and the canon does not adopt it: a canon
+release fans out to every consumer's pin, and it ships no dependency
+for an advisory to land on. It needs the belt's stele to decode
+`blastRadius.supported` and to state `supportedReleasesAffected`; a
+policy that declares no support window makes every run a "no" that
+says so.
+
 ## The tag
 
 **Umbrella `v*` only.** One tag per release, workspace-wide. Per-crate tags

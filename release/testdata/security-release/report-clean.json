@@ -1,0 +1,21 @@
+{
+  "schema": 7,
+  "target": "assert blast-radius",
+  "subject": "monumental-archive/iiif-server",
+  "verdict": "PASS",
+  "population": {
+    "size": 6,
+    "source": "listing",
+    "detail": "SBOMs scanned"
+  },
+  "facts": [
+    {
+      "name": "releasesWithoutSBOM",
+      "value": "iiif-server@v0.1.0"
+    },
+    {
+      "name": "supportedReleases",
+      "value": "iiif-server@v0.2.3"
+    }
+  ]
+}
