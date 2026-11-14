@@ -34,9 +34,29 @@ name: audit
 
 "on":
   schedule:
-    # Mondays 06:00 UTC — after a weekend of link rot and repo drift.
-    - cron: 0 6 * * 1
-  workflow_dispatch: {}
+    # Mondays, in TWO groups ninety minutes apart, and the gap is the
+    # point (#1169). Measured 2026-11-14, each leg alone and to the
+    # end: attestations 2,389 REST requests, source-vsa 2,556,
+    # release-tags 473+, blast-radius 427, caller-permissions 103 —
+    # about 5,950 between them, against the 5,000 an hour one
+    # installation is served. Run together they starve each other
+    # whoever owns the token. So the source walks (source-vsa,
+    # release-tags, blast-radius: about 3,500) take the second hour and
+    # everything else the first. level-assert.yml (3,736) keeps 05:30
+    # for the same reason. Ninety minutes rather than sixty because a
+    # scheduled run starts late more often than on time. The `plan`
+    # job is the ONLY reader of these two strings.
+    - cron: 0 7 * * 1
+    - cron: 30 8 * * 1
+  workflow_dispatch:
+    inputs:
+      legs:
+        description: Which group to run — never both in one hour (#1169)
+        type: choice
+        default: first
+        options:
+          - first
+          - second
 permissions:
   contents: read
 
@@ -45,8 +65,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: audit / which group this run is
+    runs-on: ubuntu-26.04
+    permissions: {}
+    outputs:
+      legs: ${{ steps.pick.outputs.legs }}
+    steps:
+      - name: Name the group, or fail by name
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          LEGS: ${{ inputs.legs }}
+        # One place maps a trigger to a group, and an unknown trigger is
+        # RED here rather than a leg that quietly never runs: every
+        # other job gates on this output, so a cron edited above and
+        # not below would otherwise skip half the audit in a green run.
+        run: |
+          set -euo pipefail
+          case "${SCHEDULE:-dispatch:${LEGS}}" in
+            "0 7 * * 1" | dispatch:first) legs=first ;;
+            "30 8 * * 1" | dispatch:second) legs=second ;;
+            *)
+              echo "::error::audit: no group is declared for trigger '${SCHEDULE:-dispatch:${LEGS}}' — add it to the plan job"
+              exit 1
+              ;;
+          esac
+          echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
+  # The legs. Every one `needs: plan` and names its group; a leg added
+  # without that pair would run in both hours.
   links:
     name: audit / links
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -69,6 +120,8 @@ jobs:
 
   actions:
     name: audit / actions (online)
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -98,6 +151,8 @@ jobs:
 
   action-pins:
     name: audit / action pin comments and age
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -127,6 +182,8 @@ jobs:
 
   lock-arch:
     name: audit / locked assets match the platform they name
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -160,6 +217,8 @@ jobs:
 
   template-pins:
     name: audit / template pin staleness
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -184,6 +243,8 @@ jobs:
 
   canon-pins:
     name: audit / canon pin freshness
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -214,6 +275,8 @@ jobs:
 
   org-pins:
     name: audit / org-wide canon pin freshness
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped for the same reason drafts and baseline-drift
     # are: the token this needs is org-wide, and a secret referenced
@@ -262,6 +325,8 @@ jobs:
 
   biome-rules:
     name: audit / biome nursery coverage
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -288,11 +353,19 @@ jobs:
 
   blast-radius:
     name: audit / advisory blast radius
+    needs: plan
+    if: needs.plan.outputs.legs == 'second'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
     # listing without it — so the population guard trips and the leg is
     # CANNOT_JUDGE every Monday (#803, #1142).
+    # The token is the audit App's, not AUDIT_TOKEN (#1169): this is
+    # one of five legs that only READ and that cost hundreds or
+    # thousands of requests, and a personal token shares its hour with
+    # every repo's source attestation. The legs still on AUDIT_TOKEN
+    # are the cheap ones (under 30 requests each) and the two that
+    # need a WRITE grant the App is deliberately not given.
     environment: audit
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -303,6 +376,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
 
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
@@ -317,11 +407,13 @@ jobs:
           # UNDECIDED advisory (no VEX in security/vex/), a failed asset
           # verification, an unreadable SBOM, or a missed canary — the
           # decided findings are in the summary, not the failure.
-          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: mise run audit:blast-radius
 
   attestation-coverage:
     name: audit / attestation coverage
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -338,6 +430,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
@@ -351,11 +460,13 @@ jobs:
           # means an artifact shipped without its evidence set — a
           # missing SBOM asset, class bundle, continuous-digest
           # attestation, or base-image approval (#117).
-          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: mise run audit:attestations
 
   actions-allowlist:
     name: audit / actions allowlist drift
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Same environment discipline as repo-settings drift, and for the
     # same reason: `orgs/{org}/actions/permissions/selected-actions` is
@@ -389,6 +500,8 @@ jobs:
 
   signer-surface:
     name: audit / signing surface vs live callers
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -416,6 +529,8 @@ jobs:
 
   adoption:
     name: audit / obligation adoption across the org
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped for the same reason drafts and baseline-drift
     # are: the token this needs is org-wide, and a secret referenced
@@ -462,6 +577,8 @@ jobs:
 
   citations:
     name: audit / docs citations resolve
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -489,6 +606,8 @@ jobs:
 
   source-vsa:
     name: audit / source chain coverage
+    needs: plan
+    if: needs.plan.outputs.legs == 'second'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -504,6 +623,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
 
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
@@ -516,11 +652,13 @@ jobs:
           # Enumerates the population, private member included; history,
           # notes and Sigstore bundles are public. Red means a hole or a link that fails the
           # published root of trust (#207).
-          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: mise run audit:source-vsa
 
   release-tags:
     name: audit / release tags
+    needs: plan
+    if: needs.plan.outputs.legs == 'second'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -536,6 +674,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
 
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
@@ -550,11 +705,13 @@ jobs:
         # the population, private member included; the tags, notes and
         # Sigstore bundles it then reads are public.
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: mise run audit:release-tags
 
   drafts:
     name: audit / draft releases explain themselves
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped for the same reason baseline-drift is: the token
     # this needs is org-wide, and a secret referenced repo-wide is
@@ -604,6 +761,8 @@ jobs:
 
   spec-drift:
     name: audit / spec drift
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -629,6 +788,8 @@ jobs:
 
   caller-permissions:
     name: audit / caller permissions
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -645,6 +806,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
@@ -658,11 +836,13 @@ jobs:
         # the stub body. A finding is a forecast, not an outage. Reads
         # every consumer's workflow files, the private member's too.
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: mise run audit:caller-permissions
 
   badges:
     name: audit / badge truth
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     permissions:
       contents: read # README and .badge-states reads across org repos
@@ -700,6 +880,8 @@ jobs:
 
   baseline-drift:
     name: audit / repo settings drift
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # The secret lives in this environment, not repo-wide: an org-admin
     # token referenced ambiently is drawable by any job anyone adds to
