@@ -53,6 +53,7 @@ honestly blocked on.
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv-plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 | `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx-postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
 | `github:unicode-org/icu` (repo-side, macOS only, TOFU checksum) | ICU's headers for building a pgrx extension on a Mac: the prebuilt Postgres is configured `--with-icu` and ships the dylibs without the headers, and pgrx binds every Postgres header from 0.19.3. `mise/pgrx-env.sh` adds them to the build and holds the pin to the ICU major each pinned Postgres was built against |
+| a canon-written check, no tool (`mise/vendored.sh`, bash) | Every tracked file under any `vendor/` directory pinned byte for byte to an upstream commit (`lint:vendored`), against the `PINNED.toml` beside it — the other half of every `:!vendor/**` in the belt |
 
 **clippy, and the three things standing it up settled** (#445). The
 belt's Rust gate, `lint:rust`. Three rulings worth keeping, because each
@@ -2236,6 +2237,39 @@ would have changed what the audit means while only tidying where it
 was written. *Reopen:* lychee gaining a way to state "no repo-local
 config may apply" in-config, which would make the `--config` argument
 documentation rather than enforcement.
+
+**lint:vendored, the half the vendor/ exclusions left out**
+(#1160). Every belt linter skips tracked files under `vendor/` on
+purpose — vendored text is someone else's, and linting it would mean
+editing it — and with nothing else asking, a tracked file there was
+checked by nothing at all. One repository had built the answer for
+itself: monumental-archive's `scripts/check-vendored-pins.sh`, over
+`vendor/agent-skills/` and `.md` files only. It moved into the belt
+widened to every tracked file under any `vendor/` directory, reading
+the same `PINNED.toml` format unchanged:
+
+- each tracked file is covered by the `PINNED.toml` in its own
+  directory, or the nearest one in an ancestor still under that
+  `vendor/`; a file with no covering manifest is red;
+- a manifest states `repo`, `upstream_path` and a `commit` of exactly
+  40 hex characters — a branch, a tag or a short SHA moves, and is red;
+- every covered file other than the manifest is listed under `[files]`
+  with a sha256 that matches: unlisted, listed-and-untracked and
+  listed-and-different are each red;
+- `[omitted]` is the record of files deliberately not taken, parsed
+  past and never checked.
+
+**It never fetches upstream.** Whether the pinned commit really holds
+these bytes is review's question, asked once when the manifest is
+written; the gate is offline, and asks only whether the tree has moved
+since. Fetching in the gate was proposed and rejected for exactly that
+reason. Go's `vendor/modules.txt` and cargo's `.cargo-checksum.json`
+are the toolchains' own vendoring records, and are not recognised:
+no repository in the org vendors Go or Rust, so they have no consumer
+yet, and that door is #121's. A Go or cargo vendor tree arriving today
+would need a `PINNED.toml` like any other. Skips clean when nothing is
+tracked under `vendor/`, which on 2026-11-15 was every repository but
+one. *Reopen:* a repository vendoring Go modules or crates (#121).
 
 ## Skipped, with rationale and reopen trigger
 

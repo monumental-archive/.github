@@ -7735,6 +7735,23 @@ git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 reuse --root "${scratch}" lint
 '''
 
+[tasks."lint:vendored"]
+description = "Every tracked file under vendor/ matches the upstream commit its PINNED.toml names"
+dir = "{{cwd}}"
+# The other half of every `:!vendor/**` in this file (#1160). Vendored
+# text is someone else's, so the belt's linters skip it — and with
+# nothing else asking, a tracked file under vendor/ was checked by
+# nothing. Lifted from the one repository that had built it for itself
+# (monumental-archive's check-vendored-pins.sh, one subdirectory, `.md`
+# only) and widened to every tracked file under any vendor/ directory,
+# reading the same PINNED.toml format unchanged.
+#
+# Deterministic and offline: it never fetches upstream. Whether the
+# pinned commit really holds these bytes is review's question, asked
+# once when the manifest is written; the gate asks whether the tree has
+# moved since. Skips clean when nothing is tracked under vendor/.
+run = 'bash "${ORG_BELT_DIR}/vendored.sh"'
+
 [tasks."fix:citation"]
 description = "Render CITATION.cff from REUSE.toml (licence, authors, repository) plus the preserved human fields"
 dir = "{{cwd}}"
