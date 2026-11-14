@@ -66,12 +66,17 @@ jobs:
   assert:
     name: assert the published board
     runs-on: ubuntu-26.04
-    # Environment-scoped for the token below: the measurement
+    # KNOWN RED, and deliberately left so (#1143). The measurement
     # reconciles the org listing against the declared population, and
     # the default token is served a listing without the private member,
-    # so `stele level --org` refused to enumerate and this job was red
-    # every Monday from 2026-10-12 at the latest (#803, #1143).
-    environment: audit
+    # so `stele level --org` refuses to enumerate. Drawing AUDIT_TOKEN
+    # instead was tried (#1154) and withdrawn the same day: that token
+    # is one person's PAT, the org walk spends that person's whole
+    # 5000-request hour, and while it was at zero `source-attest /
+    # claims` failed on main in three repositories — it reads the
+    # ruleset through a PAT in the same bucket. A red check is cheaper
+    # than holes in the source chain. The remedy is a token with its
+    # own budget (an App installation), not this one.
     # Read-only, and that is the #554 change stated in one line: this
     # job used to hold `contents: write` to publish every repository's
     # cells from here.
@@ -131,7 +136,7 @@ jobs:
         # job found, rather than ending the run before the comparison
         # that names which cells moved.
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p measured
