@@ -86,6 +86,30 @@ PR = {
     "mergeStateStatus": "CLEAN",
 }
 
+# The real tools the script and the stand-ins call, linked one by one
+# into a private directory that is the whole of PATH beside the
+# stand-ins. Inheriting a system directory instead is what made the
+# missing-toolchain row pass on a laptop and fail on its first runner:
+# the runner ships a `go` in /usr/bin, so "no go on PATH" was a fact
+# about the machine rather than about the row.
+REAL_TOOLS = (
+    "bash",
+    "env",
+    "jq",
+    "awk",
+    "sed",
+    "grep",
+    "tr",
+    "sort",
+    "cut",
+    "cat",
+    "cp",
+    "rm",
+    "mktemp",
+    "head",
+    "tail",
+)
+
 # One stand-in per external command. Each reads its script from files in
 # $FAKE, so a row varies an input by writing a file, never by editing
 # shell.
@@ -131,15 +155,29 @@ class Repo:
     """A throwaway tree, the stand-ins, and the inputs a row may vary."""
 
     def __init__(self, root: Path) -> None:
-        """Lay out the tree, the stand-ins and the passing case's inputs."""
+        """Lay out the tree, the stand-ins and the passing case's inputs.
+
+        Raises:
+            FileNotFoundError: A real tool the script calls is not on
+                PATH. Loud, never a skip: a skipped table reads as a
+                passing one.
+
+        """
         self.root = root
         self.tree = root / "tree"
         self.fake = root / "fake"
         self.bin = root / "bin"
+        self.tools = root / "tools"
         self.canon = root / "canon"
         vex = self.canon / "security" / "vex"
-        for d in (self.tree, self.fake, self.bin, self.canon / "slsa", vex):
+        for d in (self.tree, self.fake, self.bin, self.tools, self.canon / "slsa", vex):
             d.mkdir(parents=True)
+        for tool in REAL_TOOLS:
+            found = shutil.which(tool)
+            if found is None:
+                message = f"{tool} is not on PATH, and the script under test calls it"
+                raise FileNotFoundError(message)
+            (self.tools / tool).symlink_to(found)
         for name, body in FAKES.items():
             path = self.bin / name
             path.write_text(textwrap.dedent(body))
@@ -187,11 +225,9 @@ class Repo:
         """
         out = self.root / "output"
         out.write_text("")
-        # The fakes first, then only what the script's real tools need.
-        # `go` is deliberately absent from the base PATH: a row decides
-        # whether the stand-in is there.
-        jq = Path(shutil.which("jq") or "jq").parent
-        path = os.pathsep.join([str(self.bin), "/usr/bin", "/bin", str(jq)])
+        # The stand-ins, then the linked real tools, and nothing else:
+        # whether `go` exists is a row's decision, never the machine's.
+        path = os.pathsep.join([str(self.bin), str(self.tools)])
         env = {
             "PATH": path,
             "HOME": str(self.root),
