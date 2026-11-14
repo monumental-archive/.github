@@ -37,7 +37,13 @@ name: rekor-monitor
     # interval loses log entries — a shorter one only shortens the window
     # between a forged issuance and its issue being filed.
     - cron: 17 5,17 * * *
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      found:
+        description: Start a new checkpoint (the log before now goes unmonitored)
+        required: false
+        default: "false"
+        type: string
 permissions: {}
 
 concurrency:
@@ -85,6 +91,21 @@ jobs:
           key: rekor-checkpoint-${{ github.run_id }}
           restore-keys: rekor-checkpoint-
 
+      # A run with no checkpoint starts from the head of the log and
+      # finishes in seconds, having monitored nothing before now — and it
+      # is GREEN. Measured 2026-11-13: the first run on ubuntu-26.04 found
+      # no cache ("Cache not found for input keys"), passed in under a
+      # minute, and so silently skipped every entry since the last run
+      # that had completed, on 2026-10-18. Starting from nothing is a
+      # decision a person makes, by dispatch, never something a missing
+      # cache decides (#1145).
+      - name: Refuse to start from no checkpoint
+        if: ${{ hashFiles('checkpoint_log.txt') == '' && github.event.inputs.found != 'true' }}
+        run: |
+          set -euo pipefail
+          echo "::error::no checkpoint was restored — the log since the last completed run is unmonitored"
+          echo "::error::dispatch this workflow with found=true to start a new checkpoint knowingly"
+          exit 1
       - name: Run the monitor once
         run: |
           set -euo pipefail
@@ -113,8 +134,12 @@ jobs:
           path: checkpoint_log.txt
           key: rekor-checkpoint-${{ github.run_id }}
 
+      # `cancelled()` beside `failure()`: the job's own 30-minute timeout
+      # ends it as CANCELLED, which `failure()` does not match. For seven
+      # weeks from 2026-09-24 the monitor timed out twice a day and this
+      # step was skipped every time, so a dead monitor filed nothing.
       - name: File an issue on failure
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
