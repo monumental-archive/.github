@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.64.2](https://github.com/monumental-archive/.github/compare/v1.64.1...v1.64.2) - 2026-11-14
+
+### Fixed
+
+- take the org level walk back off a personal token ([#1162](https://github.com/monumental-archive/.github/pull/1162))
+- update monumental-archive/signer to 50c2de6 ([#1170](https://github.com/monumental-archive/.github/pull/1170))
+- give the org walks a budget of their own ([#1171](https://github.com/monumental-archive/.github/pull/1171))
+- ask crates.io by name and derive the pgrx image ([#1172](https://github.com/monumental-archive/.github/pull/1172))
+- stop rebuilding pgrx and rust toolchains every job ([#1173](https://github.com/monumental-archive/.github/pull/1173))
+
+### Documentation
+
+- record that an expect depends on the clippy config ([#1159](https://github.com/monumental-archive/.github/pull/1159))
+
 ## [1.64.1](https://github.com/monumental-archive/.github/compare/v1.64.0...v1.64.1) - 2026-11-14
 
 ### Fixed
