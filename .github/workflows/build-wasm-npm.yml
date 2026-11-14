@@ -77,6 +77,15 @@ name: build-wasm-npm
           package's tarball filename mangles the scope, so the name cannot
           be reconstructed from the file.
         value: ${{ jobs.build.outputs.package }}
+      registry-subjects:
+        description: >
+          The packed tarball's sha256sum line with its target in front —
+          `package <hex>  <tarball>`. The tarball ships to the npm
+          registry and never to the release, so this is the shape
+          attach-release takes for it (#1168). Built here and published
+          by a later job: the orchestrator passes it on only for a
+          release that really published.
+        value: ${{ jobs.build.outputs.registry-subjects }}
 
 permissions: {}
 
@@ -97,6 +106,7 @@ jobs:
       subjects: ${{ steps.pack.outputs.subjects }}
       artifact-name: npm-package
       package: ${{ steps.pack.outputs.package }}
+      registry-subjects: ${{ steps.pack.outputs.registry-subjects }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -207,12 +217,16 @@ jobs:
             exit 1
           fi
           manifest=$(sha256sum "${tarball}")
+          # registry-subjects — one tarball, one leg: the same digest
+          # the signer is handed, carrying the publisher's name for a
+          # class that varies nothing.
           {
             echo "subjects<<SUBJECTS_EOF"
             printf '%s\n' "${manifest}"
             echo "SUBJECTS_EOF"
+            echo "package=${name}@${version}"
+            echo "registry-subjects=package ${manifest}"
           } >> "${GITHUB_OUTPUT}"
-          echo "package=${name}@${version}" >> "${GITHUB_OUTPUT}"
           printf '%s\n' "${manifest}"
       - name: Emit the inventory plan (which package this artifact ships)
         # The artifact-to-package mapping exists with certainty exactly

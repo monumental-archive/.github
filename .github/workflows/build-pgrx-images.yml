@@ -86,6 +86,14 @@ name: build-pgrx-images
           the signing matrix, and (tag included) the verdict's tag→digest
           binding expectations.
         value: ${{ jobs.collect.outputs.images }}
+      registry-subjects:
+        description: >
+          The same indexes as target-prefixed sha256sum lines, one per
+          PG major — `<major> <hex>  <image>` — the shape attach-release
+          takes for what a class published to a registry instead of
+          beside the release (#1168). The major is this class's target
+          grain, exactly as it is on the tarballs' leg-subjects.
+        value: ${{ jobs.collect.outputs.registry-subjects }}
 
 permissions: {}
 
@@ -323,6 +331,7 @@ jobs:
     permissions: {}
     outputs:
       images: ${{ steps.collect.outputs.images }}
+      registry-subjects: ${{ steps.collect.outputs.registry-subjects }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -344,5 +353,15 @@ jobs:
             exit 1
           fi
           echo "images=${images}" >> "${GITHUB_OUTPUT}"
+          # The set just proved complete, restated in the shape the
+          # manifest step reads: every major names one repository, so
+          # the digest is what tells the five apart and the major is
+          # which leg built it.
+          lines=$(jq -r '.[] | "\(.pg) \(.digest | sub("^sha256:"; ""))  \(.image)"' <<< "${images}")
+          {
+            echo "registry-subjects<<REGISTRY_EOF"
+            printf '%s\n' "${lines}"
+            echo "REGISTRY_EOF"
+          } >> "${GITHUB_OUTPUT}"
           jq -r '.[] | "::notice::pg\(.pg) \(.digest)"' <<< "${images}"
 ...

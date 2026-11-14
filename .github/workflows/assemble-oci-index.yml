@@ -47,6 +47,15 @@ name: assemble-oci-index
           subject: measured in the lab, `gh attestation verify
           oci://<image>:<tag>` resolves the index.
         value: ${{ jobs.manifest.outputs.digest }}
+      registry-subjects:
+        description: >
+          The same index as one target-prefixed sha256sum line —
+          `image <hex>  <image>` — the shape attach-release takes for
+          what a class published to a registry instead of beside the
+          release (#1168). Digest and name are the pair the signer
+          attests, so the manifest's claim and the provenance's subject
+          come from one step.
+        value: ${{ jobs.manifest.outputs.registry-subjects }}
 
 permissions: {}
 
@@ -61,6 +70,7 @@ jobs:
     outputs:
       image: ${{ steps.assemble.outputs.image }}
       digest: ${{ steps.assemble.outputs.digest }}
+      registry-subjects: ${{ steps.assemble.outputs.registry-subjects }}
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -139,8 +149,15 @@ jobs:
             echo "::error::no index digest"
             exit 1
           fi
-          echo "image=${image}" >> "${GITHUB_OUTPUT}"
-          echo "digest=${index}" >> "${GITHUB_OUTPUT}"
+          # registry-subjects — one index, one leg: the class varies
+          # nothing above the per-architecture builds this step just
+          # folded together, so the target is the publisher's name for
+          # the whole of it.
+          {
+            echo "image=${image}"
+            echo "digest=${index}"
+            echo "registry-subjects=image ${index#sha256:}  ${image}"
+          } >> "${GITHUB_OUTPUT}"
           echo "::notice::index ${index}"
       - name: Pull the published bytes back and smoke them
         if: inputs.smoke-test != ''

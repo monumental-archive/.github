@@ -91,6 +91,10 @@
           { "prefix": "sbom-pgrx-", "owedFrom": "1.42.0", "planned": true }
         ],
         "enrichment": ["pgrx-base-images", "pgrx-base"]
+      },
+      "pgrx-extension-image": {
+        "bundles": [],
+        "assetPrefixes": [{ "prefix": "attestations-extimg-pg" }]
       }
     },
     "continuous": {

@@ -710,6 +710,30 @@ caller declaration to drift against the first. Existing crate-built
 image repositories convert at their next publish; their published
 manifests keep saying what was true when they were written.
 
+The pgrx extension images are the same ruling one class over (#1168).
+A pgrx release ships tarballs and per-major images, built by different
+legs and judged by separate verdicts, and they owe different things:
+the tarball leg consumes the pinned base images and claims them, while
+the image leg is `FROM scratch` plus a `COPY` and claims none. So the
+guard declares `pgrx-extension-image` beside `pgrx-extension` whenever
+an extension is requested, and the evidence manifest attributes each
+per-major index to it. Under one class name the audit would demand the
+base-image claims of an artifact whose verdict correctly makes none.
+`pgrx-extension` keeps its `attestations-extimg-pg` obligation, because
+every release published before the split declared only that class and
+still owes the bundles under it.
+
+**What a registry holds is stated, not recovered** (#1168). An image
+index, a per-major extension image and an npm tarball have no file
+among the release's assets, so `checksums.txt` cannot pin them and an
+evidence manifest listing only assets left an image-only release
+naming no artifact at all. Each leg that publishes to a registry emits
+a `registry-subjects` output — the digest and the name its signer
+attests — and `attach-release.yml` hands them to `stele emit manifest`,
+which writes one `registry-subject` entry each (manifest schema 5). The
+Monday audit reads its subjects from there. A rehearsal publishes to no
+registry and claims nothing.
+
 What this ends is a silence. Before it, the crate-built plan was
 shape-, conflict- and drift-judged but never obligation-judged, so a
 repository that stopped publishing its `sbom-image-*` document reded

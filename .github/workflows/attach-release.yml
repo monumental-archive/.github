@@ -76,10 +76,10 @@ name: attach-release
       # into one flag per target; this workflow no longer concatenates
       # anything.
       #
-      # There is deliberately NO input for oci-image or wasm-npm. Those
-      # classes publish to a registry and attach no release asset, so
-      # they own no build subject in this manifest and passing their
-      # build outputs REFUSES. The absent input is the declaration.
+      # oci-image and wasm-npm have no input HERE: those classes publish
+      # to a registry and attach no release asset, so they own no build
+      # subject and passing their build outputs as one REFUSES. What
+      # they published is stated below, as registry subjects.
       #
       # Empty is the ordinary value for a class this release did not
       # build — a skipped job's output is the empty string, and the
@@ -121,6 +121,68 @@ name: attach-release
         description: >
           Target-prefixed sha256sum manifest of the tarballs the
           pgrx-extension class built, one line per tarball.
+        required: false
+        type: string
+        default: ""
+      # What a class published to a REGISTRY instead of beside the
+      # release (#1168). An image or a registry package has no file in
+      # dist/, so no asset list and no checksum manifest can name it —
+      # and a manifest that listed only assets left an image-only
+      # release naming no artifact at all, while a mixed one had its
+      # registry half skipped by the deep audit in silence. These are
+      # where the release says what it shipped there; `stele emit
+      # manifest` writes each as a `registry-subject` entry (manifest
+      # schema 5), and the audit reads them.
+      #
+      # Same shape as the leg subjects above and for the same reason:
+      # one target-prefixed sha256sum line per subject, computed by the
+      # leg from the digests its signer signs. The name is the one the
+      # provenance attests — an image reference, a tarball name — never
+      # a filename this job could look for.
+      #
+      # Empty is the ordinary value twice over: for a class this
+      # release did not build, and for a rehearsal, which publishes to
+      # no registry and must not claim it did.
+      oci-image-registry-subjects:
+        # forwarding: universal
+        description: >
+          Target-prefixed sha256sum line of the image index the
+          oci-image class published: `image <hex>  <image>`.
+        required: false
+        type: string
+        default: ""
+      oci-image-class:
+        # forwarding: universal
+        description: >
+          The class that built the image, as the evidence declares it.
+          The guard derives it (#843) and it is spelled nowhere else, so
+          it arrives rather than being matched out of `classes` here.
+        required: false
+        type: string
+        default: oci-image
+      wasm-npm-registry-subjects:
+        # forwarding: universal
+        description: >
+          Target-prefixed sha256sum line of the tarball the wasm-npm
+          class published to the npm registry.
+        required: false
+        type: string
+        default: ""
+      pgrx-extension-image-registry-subjects:
+        # forwarding: universal
+        description: >
+          Target-prefixed sha256sum manifest of the per-major image
+          indexes a pgrx release published, one line per major.
+        required: false
+        type: string
+        default: ""
+      pgrx-extension-image-class:
+        # forwarding: universal
+        description: >
+          The class those images are attributed to, as the evidence
+          declares it. Derived by the guard beside the image class and
+          spelled nowhere else; empty when no extension was declared,
+          which is also when there are no images to attribute.
         required: false
         type: string
         default: ""
@@ -292,6 +354,11 @@ jobs:
           SUBJECTS_GO_BINARY: ${{ inputs.go-binary-leg-subjects }}
           SUBJECTS_SOURCE_ARCHIVE: ${{ inputs.source-archive-leg-subjects }}
           SUBJECTS_PGRX_EXTENSION: ${{ inputs.pgrx-extension-leg-subjects }}
+          REGISTRY_OCI_IMAGE: ${{ inputs.oci-image-registry-subjects }}
+          OCI_IMAGE_CLASS: ${{ inputs.oci-image-class }}
+          REGISTRY_WASM_NPM: ${{ inputs.wasm-npm-registry-subjects }}
+          REGISTRY_PGRX_EXTENSION_IMAGE: ${{ inputs.pgrx-extension-image-registry-subjects }}
+          PGRX_EXTENSION_IMAGE_CLASS: ${{ inputs.pgrx-extension-image-class }}
         run: |
           set -euo pipefail
           # The machinery version is the canon tree's own, read from the
@@ -327,11 +394,25 @@ jobs:
           # rather than defaulting, because a build subject with no
           # target goes unjudged by every scoped rebuild — silently,
           # which is the failure #637 exists to end.
+          #
+          # The registry subjects ride the same function under their own
+          # flag: the grammar is one, and what differs is only which
+          # population stele places the line in. The flag is part of the
+          # file name so a class that one day has both cannot have one
+          # leg's file overwrite the other's.
+          #
+          # A class NAME that arrives empty beside subjects that do not
+          # is the orchestrator contradicting itself, and is refused
+          # here rather than handed to stele as a leg with no class.
           subject_flags=()
           claim() {
-            local class="$1" legs="$2" line target path
+            local flag="$1" class="$2" legs="$3" line target path
             local -a targets=()
             [[ -n ${legs//[[:space:]]/} ]] || return 0
+            if [[ -z ${class} ]]; then
+              echo "::error::${flag}: subjects arrived with no class to attribute them to"
+              exit 1
+            fi
             while IFS= read -r line; do
               [[ -n ${line//[[:space:]]/} ]] || continue
               target="${line%% *}"
@@ -344,21 +425,24 @@ jobs:
                 echo "::error::${class}: target ${target} is not a plain name — it becomes a file this step writes"
                 exit 1
               fi
-              path="${RUNNER_TEMP}/subjects-${class}-${target}.sha256"
+              path="${RUNNER_TEMP}/${flag}-${class}-${target}.sha256"
               if [[ " ${targets[*]-} " != *" ${target} "* ]]; then
                 targets+=("${target}")
                 : > "${path}"
-                subject_flags+=(--leg-subjects "${class}:${target}=${path}")
+                subject_flags+=("--${flag}" "${class}:${target}=${path}")
               fi
               printf '%s\n' "${line}" >> "${path}"
             done <<< "${legs}"
-            echo "::notice::${class} claims ${#targets[@]} leg(s): ${targets[*]}"
+            echo "::notice::${class} claims ${#targets[@]} ${flag} leg(s): ${targets[*]}"
           }
-          claim rust-crate "${SUBJECTS_RUST_CRATE}"
-          claim rust-binary "${SUBJECTS_RUST_BINARY}"
-          claim go-binary "${SUBJECTS_GO_BINARY}"
-          claim source-archive "${SUBJECTS_SOURCE_ARCHIVE}"
-          claim pgrx-extension "${SUBJECTS_PGRX_EXTENSION}"
+          claim leg-subjects rust-crate "${SUBJECTS_RUST_CRATE}"
+          claim leg-subjects rust-binary "${SUBJECTS_RUST_BINARY}"
+          claim leg-subjects go-binary "${SUBJECTS_GO_BINARY}"
+          claim leg-subjects source-archive "${SUBJECTS_SOURCE_ARCHIVE}"
+          claim leg-subjects pgrx-extension "${SUBJECTS_PGRX_EXTENSION}"
+          claim registry-subjects "${OCI_IMAGE_CLASS}" "${REGISTRY_OCI_IMAGE}"
+          claim registry-subjects wasm-npm "${REGISTRY_WASM_NPM}"
+          claim registry-subjects "${PGRX_EXTENSION_IMAGE_CLASS}" "${REGISTRY_PGRX_EXTENSION_IMAGE}"
           stele emit manifest \
             --classes "${CLASSES}" \
             --store-vsa true \
