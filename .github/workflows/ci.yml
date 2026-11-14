@@ -111,6 +111,23 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # The Rust toolchains live INSIDE the directory the tool cache
+      # below restores (#1165). mise installs rust through rustup, and
+      # rustup's home is ~/.rustup — outside mise's data directory, which
+      # is the one path mise-action caches. So the cache restored every
+      # tool but these, and each job downloaded each pinned toolchain
+      # again: measured on a warm PR at about nine seconds a toolchain,
+      # one after another, plus the components — 5 to 9 seconds for the
+      # install step in a repository that pins no Rust, 39 with two
+      # toolchains, 55 with four, in every job of the gate.
+      #
+      # Only this workflow sets it. Every signing and publishing workflow
+      # installs cold with `cache: false` and keeps rustup where it was,
+      # so nothing attested moves. CARGO_HOME is left alone: the cargo
+      # cache below names ~/.cargo/registry.
+      - name: Keep the Rust toolchains inside the tool cache
+        run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
       # here — a human is waiting on a pull request. The rule covers
@@ -173,12 +190,24 @@ jobs:
       # gate signs and publishes nothing, cargo checks every registry
       # source against Cargo.lock, and GitHub scopes cache writes per
       # branch. Marked per declaration (#676).
+      #
+      # ~/.pgrx/config.toml rides with `target` because the two are one
+      # unit (#1165): pgrx-pg-sys's build script declares
+      # `rerun-if-changed` on that file, so a restored `target` beside
+      # a config.toml written fresh this run is a cache that hits and
+      # then recompiles pgrx-pg-sys and everything above it — measured
+      # as 65 of a leg's 70 seconds. Restored together, the file keeps
+      # the timestamp the cached build was made against, and
+      # `org_pgrx_init` keeps it when the registrations are unchanged.
+      # A path that does not exist — every repository without an
+      # extension — is skipped by the action.
       - name: Restore the cargo caches (unsigned gate only)
         if: ${{ hashFiles('Cargo.lock') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
+            ~/.pgrx/config.toml
             target
           key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: gate-cargo-${{ runner.os }}-
@@ -312,6 +341,10 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # Same placement as the `gate` job's, for the same reason (#1165).
+      - name: Keep the Rust toolchains inside the tool cache
+        run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
       # exactly here, on the same reasoning and with the same accepted
@@ -327,12 +360,14 @@ jobs:
       # exactly here. Keyed per major, because each major's build of the
       # extension is its own artifact set; cargo checks registry sources
       # against Cargo.lock, so a poisoned entry cannot change what
-      # compiles.
+      # compiles. ~/.pgrx/config.toml rides with `target`, as in the
+      # `gate` job and for the reason given there (#1165).
       - name: Restore the cargo caches (unsigned gate only)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
+            ~/.pgrx/config.toml
             target
           key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-
@@ -413,6 +448,10 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # Same placement as the `gate` job's, for the same reason (#1165).
+      - name: Keep the Rust toolchains inside the tool cache
+        run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
       # here — a human is waiting on a pull request. The rule covers
@@ -481,6 +520,7 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
+            ~/.pgrx/config.toml
             target
           key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: gate-cargo-${{ runner.os }}-

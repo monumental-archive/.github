@@ -175,7 +175,47 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
     sleep 1
   done
   echo "$$" > "${lock}/pid"
+  # AN INIT THAT CHANGED NOTHING MUST NOT LOOK LIKE A CHANGE (#1165).
+  # pgrx-pg-sys's build script declares `rerun-if-changed` on
+  # ${PGRX_HOME}/config.toml, and `cargo pgrx init` rewrites that file
+  # on every call — same registrations, new timestamp. Cargo compares
+  # timestamps, so every task that initialised re-ran bindgen and
+  # recompiled pgrx-pg-sys, pgrx, pgrx-tests and the extension, whatever
+  # the target directory already held. Measured with cargo's own
+  # fingerprint log on a second, unchanged `test:pgrx`:
+  #
+  #   dirty: FsStatusOutdated(StaleItem(ChangedFile {
+  #     stale: ".../.pgrx/config.toml" ... }))
+  #
+  # and on the runner as 65 of a leg's 70 seconds, on an exact cache hit.
+  #
+  # So the file's timestamp is kept when its registrations are the ones
+  # it already had. Compared as a sorted set: pgrx writes the majors in
+  # hash order, which differs run to run and means nothing. A real
+  # change — a major added, a Postgres pin moved, which moves the
+  # pg_config path — differs in content, keeps its new timestamp and
+  # rebuilds, which is the case the build script declared the file for.
+  local config="${home}/config.toml" before=""
+  if [[ -f ${config} ]]; then
+    before=$(mktemp) || before=""
+    [[ -z ${before} ]] || cp -p "${config}" "${before}" || {
+      rm -f "${before}"
+      before=""
+    }
+  fi
   cargo pgrx init "${args[@]}" || status=$?
+  if [[ -n ${before} ]]; then
+    # One step per assignment: a sort that failed must read as "changed"
+    # and keep the new timestamp, never as two empty, equal sets.
+    local was="" now=""
+    if [[ ${status} -eq 0 && -f ${config} ]] \
+      && was=$(LC_ALL=C sort "${before}") \
+      && now=$(LC_ALL=C sort "${config}") \
+      && [[ -n ${was} && ${was} == "${now}" ]]; then
+      touch -r "${before}" "${config}"
+    fi
+    rm -f "${before}"
+  fi
   rm -rf "${lock}"
   return "${status}"
 }
