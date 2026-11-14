@@ -39,6 +39,16 @@ once, never consumed live), `profile/`, community health files, docs,
 and this repository's own gate plumbing (`gate.yml`, `self-release.yml`,
 `self-publish.yml`).
 
+**A stub states what the caller grants, passes and gets back. It makes
+no claim about how the callee works (#884).** A stub is copied once and
+never compared again, so a sentence in it about the callee's internals
+goes stale with nothing to notice: "the version derivation's history
+read" outlived the API call it described in four repositories. The
+callee's own comments are the one home for its mechanism, because that
+is where a change to it is made. A grant's comment is a short label
+for what the scope covers (`contents: read # this repository's
+contents, read-only`), never an account of which callee step uses it.
+
 ## What a release means
 
 Every tag `vX.Y.Z` versions all of the above at one SHA — the SHA the
