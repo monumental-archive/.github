@@ -1297,13 +1297,14 @@ What this document owns is the target the imports conform *to*: the
 release path above, the archetypes, and the belt that delivers every
 tool config. A repository carries no copy of a delivered config.
 
-Risky release-machinery changes are proven in the **release lab**
-(`release-lab`) before any production repository
-moves — but the canon runs them first, and cheaply. A change to this
+Release-machinery changes are run by the canon first, and cheaply.
+A change to this
 machinery cannot be rehearsed elsewhere (a consumer may not pin an
 untagged canon SHA, publish accepts only `v*` tags, and
 `self-publish.yml` requests no `dry-run`), so it is released and
 watched: one class, minutes, a version number nobody pins if it reddens.
-The lab then proves it at full width — four classes across PG 14–18.
-Canon first for "does it run", lab for "does it work", production last.
+The **release lab** (`release-lab`) publishes four classes across
+PG 14–18 and is where a change specific to one of those classes is
+tried; it is not a gate, and no repository waits on it to move its
+pin (ruled 2026-11-14).
 See MAINTENANCE.md, "The seam rule".
