@@ -10,12 +10,9 @@ name: release
   push:
     branches:
       - $default-branch
-  # Refresh the open Release PR when a publish completes: the PR is
-  # created before the previous release finishes publishing, so any
-  # derivation that reads "the published release" (the pgrx upgrade
-  # path) would otherwise start from a version about to be superseded
-  # (#358 seam 5). Harmless for repos with no such derivation — the
-  # refresh recomputes the same content.
+  # Refresh the open Release PR when a publish completes (#358 seam 5).
+  # Why the Release PR needs it is the shared workflow's to say, in its
+  # own comments.
   release:
     types:
       - published
@@ -26,39 +23,25 @@ name: release
 permissions: {}
 
 # Never cancel a release mid-flight; queue instead — and the group is the
-# WORKFLOW, never the commit. The Release PR machinery works on two fixed
-# branches (release/next, release-staging/next), so per-commit keying
-# serialised nothing: two pushes to main in quick succession ran two
-# release jobs at once, the second recreated the staging ref under the
-# first, and the first died mid-script on a 403 (measured in release-lab,
-# 2026-08-13 — two merges four minutes apart). The canon's own
-# self-release.yml always keyed on the workflow; this template disagreed
-# with it unnoticed, because the canon does not consume this file.
+# WORKFLOW, never the commit: per-commit keying let two pushes to main
+# four minutes apart run two releases at once, and the first died
+# mid-run (measured in release-lab, 2026-08-13). The canon's own
+# self-release.yml always keyed on the workflow.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
   release:
-    # No `with:` at all. The App is identified by the org-wide variable
-    # TAG_MINT_APP_CLIENT_ID, read by the shared workflow itself, so a
-    # caller carries no App identity and never needs updating when it
-    # changes.
+    # No `with:` at all: the caller passes no App identity, only the
+    # private key below.
     uses: monumental-archive/.github/.github/workflows/release.yml@ab78e166fb2fada397b99d38ea9a1afdc3561c4b # v1.65.0
     permissions:
       # Required, and easy to omit. A `uses:` job with no `permissions:`
       # block inherits the WORKFLOW-level default — `permissions: {}` above
       # — not some ambient grant; without it the run dies as
       # startup_failure with no jobs and no log.
-      #
-      # Two readers buy this scope, both ambient-token reads of this
-      # repository's own contents: the shared workflow's checkouts, and
-      # the `gh release` view and asset download
-      # generate-pgrx-upgrade.sh performs to derive the pgrx upgrade
-      # path. The version derivation is NOT one of them — `stele derive
-      # release-plan` reads the LOCAL history that `fetch-depth: 0`
-      # supplies and consults no GitHub API at all (#850).
-      contents: read
+      contents: read # this repository's contents and releases, read-only
       id-token: write # gitsign's keyless signature on the release tag (#349 S4)
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}

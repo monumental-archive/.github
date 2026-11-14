@@ -3,8 +3,7 @@
 # it pins — same model as the gate, and deliberately not enumerated
 # here. WHICH legs run is repo-audit.yml's business, so a leg the canon
 # adds later reaches this repository on its next pin bump with nothing
-# to edit in this file — which is how the per-tree link and online
-# action checks arrived (#681).
+# to edit in this file (#681).
 ---
 name: audit
 
@@ -23,6 +22,6 @@ concurrency:
 jobs:
   audit:
     permissions:
-      contents: read # the audit reads the tree and the advisory feed
+      contents: read # this repository's contents, read-only
     uses: monumental-archive/.github/.github/workflows/repo-audit.yml@ab78e166fb2fada397b99d38ea9a1afdc3561c4b # v1.65.0
 ...
