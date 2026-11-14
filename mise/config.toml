@@ -4292,8 +4292,31 @@ command -v gh > /dev/null || {
 # and fix:badges renders the same URLs — the declaration is what both
 # legs agree a shield is.
 . "${ORG_BELT_DIR}/identity.sh"
-# crates.io answers only a client that says who it is (#907, #1161).
+# ONE way to ask an issuer (#1161). Every leg that used `curl -sf`
+# folded three different answers into one: the issuer said no, the
+# issuer refused to talk, the issuer was down. All three were reported
+# as the first — crates.io refuses an unidentified client with a 403
+# before it looks anything up (#907), so edtf-core, published since
+# July, was reported "not on crates.io" on the first run that reached
+# the leg. `ask` identifies the client and keeps the status, so a leg
+# says "absent" only on a 404; `unanswered` names everything else as a
+# question nobody answered — still red, never an accusation.
 ua="${GITHUB_REPOSITORY_OWNER}/.github audit:badges (https://github.com/${GITHUB_REPOSITORY_OWNER}/.github)"
+ask_code=""
+ask_body=""
+ask() {
+  local out
+  # Retried, because a single dropped connection is not an answer
+  # either: doi.org reset two of three lookups in one run and served
+  # all three a second later (measured 2026-11-14).
+  out=$(curl -s --retry 3 --retry-all-errors --retry-delay 2 --max-time 30 \
+    -H "User-Agent: ${ua}" -w '\n%{http_code}' "$@" || true)
+  ask_code="${out##*$'\n'}"
+  ask_body="${out%$'\n'*}"
+}
+unanswered() {
+  failed="${failed} ${repo}(${1}: ${2} did not answer — HTTP ${ask_code:-none}, a question unanswered, not an absence)"
+}
 sc_prefix=$(org_identity shield-scorecard)
 wf_prefix=$(org_identity shield-actions)
 ghcr_prefix=$(org_identity shield-ghcr)
@@ -4415,12 +4438,19 @@ while read -r repo; do
         ;;
       https://api.reuse.software/badge/*)
         proj="${url#https://api.reuse.software/badge/}"
-        st=$(curl -sf "https://api.reuse.software/status/${proj}" | jq -r '.status // empty')
-        if [[ ${st} != "compliant" ]]; then
-          failed="${failed} ${repo}(reuse: status '${st:-none}' is not compliant)"
-        else
-          note "${repo}: reuse compliant"
-        fi
+        ask "https://api.reuse.software/status/${proj}"
+        st=$(jq -r '.status // empty' <<< "${ask_body}" 2> /dev/null || true)
+        case "${ask_code}" in
+          200)
+            if [[ ${st} != "compliant" ]]; then
+              failed="${failed} ${repo}(reuse: status '${st:-none}' is not compliant)"
+            else
+              note "${repo}: reuse compliant"
+            fi
+            ;;
+          404) failed="${failed} ${repo}(reuse: ${proj} is not registered at api.reuse.software)" ;;
+          *) unanswered reuse "api.reuse.software" ;;
+        esac
         ;;
       https://img.shields.io/endpoint?url=*)
         # A measured claim (#540, stele#5's endpoint addendum): the
@@ -4496,38 +4526,35 @@ while read -r repo; do
       https://zenodo.org/badge/DOI/*)
         doi="${url#https://zenodo.org/badge/DOI/}"
         doi="${doi%.svg}"
-        if ! curl -sfI "https://doi.org/${doi}" > /dev/null; then
-          failed="${failed} ${repo}(doi: ${doi} does not resolve)"
-        else
-          note "${repo}: DOI resolves"
-        fi
+        # A resolving DOI answers with a redirect to its record; HEAD,
+        # and no -L, because the question is whether doi.org knows the
+        # name, not whether the landing page is up.
+        ask -I "https://doi.org/${doi}"
+        case "${ask_code}" in
+          2?? | 3??) note "${repo}: DOI resolves" ;;
+          404) failed="${failed} ${repo}(doi: ${doi} does not resolve)" ;;
+          *) unanswered doi "doi.org, about ${doi}," ;;
+        esac
         ;;
       https://img.shields.io/crates/v/* | https://img.shields.io/docsrs/*)
         crate="${url##*/}"
         crate="${crate%.svg}"
-        # The request identifies itself, and only a 404 is an absence
-        # (#1161). crates.io refuses an unidentified client with a 403
-        # before it looks anything up (#907), and `curl -sf` folded that
-        # refusal into "not on crates.io": edtf-core, published since
-        # July, was reported missing on the first run that reached this
-        # leg. A refusal or an outage is an unanswered question and is
-        # named as one — still red, never an accusation.
-        code=$(curl -s -o /dev/null -w '%{http_code}' -H "User-Agent: ${ua}" \
-          "https://crates.io/api/v1/crates/${crate}" || true)
-        case "${code}" in
+        ask "https://crates.io/api/v1/crates/${crate}"
+        case "${ask_code}" in
           200) note "${repo}: crate ${crate} exists" ;;
           404) failed="${failed} ${repo}(crates: ${crate} not on crates.io)" ;;
-          *) failed="${failed} ${repo}(crates: crates.io did not answer for ${crate} — HTTP ${code}, a question unanswered, not an absence)" ;;
+          *) unanswered crates "crates.io, about ${crate}," ;;
         esac
         ;;
       https://img.shields.io/npm/v/*)
         pkg="${url#https://img.shields.io/npm/v/}"
         pkg="${pkg%.svg}"
-        if ! curl -sf "https://registry.npmjs.org/${pkg//%2F//}" > /dev/null; then
-          failed="${failed} ${repo}(npm: package not on the registry)"
-        else
-          note "${repo}: npm package exists"
-        fi
+        ask "https://registry.npmjs.org/${pkg//%2F//}"
+        case "${ask_code}" in
+          200) note "${repo}: npm package exists" ;;
+          404) failed="${failed} ${repo}(npm: package not on the registry)" ;;
+          *) unanswered npm "the npm registry" ;;
+        esac
         ;;
       "${ghcr_prefix}"*)
         # The shield names an image; ask GitHub whether that package
@@ -4548,18 +4575,30 @@ while read -r repo; do
       "${cc_prefix}"/*/graph/badge.svg | "${cc_prefix}"/*/branch/*/graph/badge.svg)
         cc="${url#"${cc_prefix}"/}"
         cc="${cc%%/*}"
-        if curl -sf "${cc_api}/${cc}" | jq -e '.name' > /dev/null 2>&1; then
-          note "${repo}: codecov live"
-        else
-          failed="${failed} ${repo}(codecov: issuer has no data for ${cc} and no declared state covers it)"
-        fi
+        # Knowing the repository is not having its coverage (#1161).
+        # This leg used to pass on `.name` alone, which Codecov returns
+        # for any repository its app can see — so edtf and iiif-server,
+        # whose gate stubs never passed the upload token, wore a shield
+        # reading "unknown" and were reported live. The shield is true
+        # only when Codecov holds a coverage figure for the repository.
+        ask "${cc_api}/${cc}"
+        case "${ask_code}" in
+          200)
+            cov=$(jq -r '.totals.coverage // empty' <<< "${ask_body}" 2> /dev/null || true)
+            if [[ -z ${cov} ]]; then
+              failed="${failed} ${repo}(codecov: ${cc} is known to Codecov and has no coverage report — the shield reads unknown; the gate stub must pass codecov-token)"
+            else
+              note "${repo}: codecov holds ${cov}% for ${cc}"
+            fi
+            ;;
+          404) failed="${failed} ${repo}(codecov: issuer has no record of ${cc})" ;;
+          *) unanswered codecov "Codecov, about ${cc}," ;;
+        esac
         ;;
-      # A repository's OWN shields (#1161): anything it wears outside
-      # the rendered block. They are welcome — the block is what the org
-      # derives, not a ceiling on what a repository may say about itself
-      # — on the one condition every shield here meets: something
-      # answers for it. Three shapes, each asked a question that can
-      # come back no.
+      # The shields fix:badges renders from the tree alone (#1161):
+      # release, licence, and the STATIC shields a repository declares
+      # in .badge-states. No issuer computes them, so each is asked the
+      # one question that can come back no.
       https://img.shields.io/github/v/release/*)
         rel="${url#https://img.shields.io/github/v/release/}"
         rel="${rel%%\?*}"
@@ -4582,6 +4621,8 @@ while read -r repo; do
         expr="${expr%-*}"
         expr="${expr//--/-}"
         expr="${expr//%20/ }"
+        expr="${expr//%28/ }"
+        expr="${expr//%29/ }"
         expr="${expr//[()]/ }"
         lic_bad=""
         lic_n=0
@@ -4601,12 +4642,13 @@ while read -r repo; do
         ;;
       https://img.shields.io/badge/*)
         # Any other static shield is a sentence the repository wrote
-        # about itself, and no issuer exists to ask. What can be asked
-        # is whether it names its enforcer: the shield must LINK to a
-        # file in the repository's own tree (the script, test or
-        # workflow that makes the sentence true), and that file must
-        # exist. A static shield linking nowhere, or off to a website,
-        # is a claim with nothing under it.
+        # about itself (`static <path> <label>=<message>` in
+        # .badge-states), and no issuer exists to ask. What can be
+        # asked is whether it names its enforcer: the shield LINKS the
+        # file in the repository's own tree that makes the sentence
+        # true, and that file must exist. fix:badges refuses to render
+        # one whose file is untracked, so this is the same question
+        # asked again from outside, on the default branch.
         target=$(awk -v u="](${url})](" '{
           i = index($0, u)
           if (i) { r = substr($0, i + length(u)); sub(/\).*/, "", r); print r; exit }
@@ -7777,6 +7819,20 @@ BADGES_OUT="${tmp}" "${ORG_BELT_DIR}/derive-badges.sh" > /dev/null
 awk '/<!-- badges:begin -->/{f=1; next} /<!-- badges:end -->/{f=0} f' README.md > "${tmp}.cur"
 if ! diff -u "${tmp}.cur" "${tmp}"; then
   echo "lint:badges: the badge block drifted from the tree's facts — run fix:badges and commit the render" >&2
+  exit 1
+fi
+# The block is the WHOLE badge surface (#1161). A shield written by hand
+# outside the markers is one the derivation never saw: nothing holds it
+# to the tree, and the Monday audit is the first thing to read it. A
+# repository's own claim is declared (`static <path> <label>=<message>`
+# in .badge-states) and rendered with the rest.
+stray=$(awk '/<!-- badges:begin -->/ {f = 1} /<!-- badges:end -->/ {f = 0; next} !f' README.md \
+  | grep -nE '!\[[^]]*\]\(https?://[^)]*(img\.shields\.io|badge\.svg|/badge[)/?]|/badge$|scorecard\.dev|codecov\.io|bestpractices\.dev|api\.reuse\.software)' || true)
+if [[ -n ${stray} ]]; then
+  echo "lint:badges: shield(s) outside the rendered block:" >&2
+  printf '  %s\n' "${stray//$'\n'/$'\n'  }" >&2
+  echo "  every badge is rendered by fix:badges — declare a claim of the repository's own in .badge-states" >&2
+  echo "  as 'static <path> <label>=<message>', where <path> is the tracked file that enforces it" >&2
   exit 1
 fi
 echo "lint:badges: badge block agrees with the derivation"

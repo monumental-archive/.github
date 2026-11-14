@@ -43,6 +43,27 @@ repo="${repo_url##*/}"
 org_path="${repo_url#https://github.com/}"
 state() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2; exit}' .badge-states || true; }
 states_extra() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2}' .badge-states || true; }
+# The rest of a state line, for a value that holds spaces (an SPDX
+# expression is `MIT OR Apache-2.0`).
+state_rest() {
+  [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {sub(/^[^[:space:]]+[[:space:]]+/, ""); print; exit}' .badge-states || true
+}
+# shields.io's static-badge escaping: a literal hyphen or underscore is
+# doubled, and anything a URL or a markdown link would trip on is
+# percent-encoded. `%` first, or the encodings would be re-encoded.
+shield_esc() {
+  local t="${1}"
+  t="${t//%/%25}"
+  t="${t//-/--}"
+  t="${t//_/__}"
+  t="${t// /%20}"
+  t="${t//\//%2F}"
+  t="${t//</%3C}"
+  t="${t//>/%3E}"
+  t="${t//(/%28}"
+  t="${t//)/%29}"
+  printf '%s' "${t}"
+}
 block=""
 add() { block="${block}${1}
 "; }
@@ -158,7 +179,44 @@ else
   emsg+=" .badge-states and re-run fix:badges -->"
   add "${emsg}"
 fi
+# The licence shield (#1161): derived, because the tree already states
+# it. REUSE.toml's annotations carry the SPDX expression every tracked
+# file is under, and lint:reuse holds the tree to it — so where they all
+# say one thing, that thing is the project's licence and no human needs
+# to write it a second time on a badge. Where a tree legitimately
+# carries several (code under one licence, documentation under
+# another), nothing here can know which one is the PROJECT's, and
+# guessing is how a badge comes to lie: the repository says so, once,
+# as `licence <SPDX expression>`.
+lic=$(state_rest licence)
+if [[ -z ${lic} ]]; then
+  lic=$(grep -E "^[[:space:]]*SPDX-License-Identifier[[:space:]]*=" REUSE.toml \
+    | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | sort -u || true)
+fi
+if [[ -z ${lic} ]]; then
+  echo "fix:badges: REUSE.toml carries no SPDX-License-Identifier — the licence shield has nothing to state" >&2
+  exit 1
+fi
+if [[ ${lic} == *$'\n'* ]]; then
+  echo "fix:badges: REUSE.toml names several licence expressions:" >&2
+  printf '  %s\n' "${lic//$'\n'/$'\n'  }" >&2
+  echo "  say which is the project's in .badge-states: 'licence <SPDX expression>'" >&2
+  exit 1
+fi
+lic_esc=$(shield_esc "${lic}")
+add "[![license](https://img.shields.io/badge/license-${lic_esc}-blue)](LICENSES/)"
+# The coverage shield is fed by ONE job: the gate's coverage upload,
+# which skips clean unless the gate stub passes `codecov-token`. A
+# floor with no token passed is therefore a shield with no producer —
+# it renders, Codecov never hears from the repository, and the image
+# reads "unknown" for ever (edtf and iiif-server, #1161). The belt
+# cannot pass the secret for a repository, so it refuses the render.
 if [[ -f .coverage-floor ]]; then
+  if ! grep -qsE "^[^#]*codecov-token:" .github/workflows/*.y*ml; then
+    echo "fix:badges: .coverage-floor is tracked and no workflow passes codecov-token — the coverage shield has no producer" >&2
+    echo "  add to the gate stub's job:  secrets: { codecov-token: \${{ secrets.CODECOV_TOKEN }} }" >&2
+    exit 1
+  fi
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
 fi
 cit=""
@@ -172,6 +230,23 @@ elif [[ -n ${minting} ]]; then
   emsg="<!-- pending (first mint): DOI — the concept DOI lands in CITATION.cff after the first release mints"
   emsg+=" it; re-run fix:badges -->"
   add "${emsg}"
+fi
+# The release shield (#1161): a versioned repository — one carrying the
+# release stub — wears its latest release. `release pending` holds it
+# back until the first one is published, the same set-it-last state the
+# human-step shields use: the audit asks GitHub whether a release
+# exists, and a tree cannot know that.
+if [[ -f .github/workflows/release.yml ]]; then
+  rel_state=$(state release)
+  if [[ ${rel_state} == "pending" ]]; then
+    emsg="<!-- pending (first release): release — remove 'release pending' from .badge-states once the first"
+    emsg+=" release is published, and re-run fix:badges -->"
+    add "${emsg}"
+  else
+    emsg="[![release](https://img.shields.io/github/v/release/${org_path})]"
+    emsg+="(https://github.com/${org_path}/releases/latest)"
+    add "${emsg}"
+  fi
 fi
 classes=""
 for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
@@ -243,6 +318,36 @@ if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* ]]; then
     emsg+="(https://github.com/orgs/monumental-archive/packages/container/package/${img})"
     add "${emsg}"
   done
+fi
+# A repository's OWN shields (#1161). The block is what the tree can
+# say about itself, and a repository may know something no derivation
+# does — an image-size budget, a conformance count. It says so as
+#
+#   static <path> <label>=<message>
+#
+# and the shield is rendered here like every other, so a README has no
+# hand-written badge anywhere and lint:badges covers all of them. The
+# price of the sentence is its enforcer: <path> must be a tracked file
+# — the script, test or workflow that makes the claim true — and the
+# shield links it. A claim with nothing in the tree behind it does not
+# render.
+if [[ -f .badge-states ]]; then
+  while read -r skey spath srest; do
+    [[ ${skey} == "static" ]] || continue
+    if [[ -z ${spath} || ${srest} != *=* || -z ${srest%%=*} || -z ${srest#*=} ]]; then
+      echo "fix:badges: malformed static line — want 'static <path> <label>=<message>': ${skey} ${spath} ${srest}" >&2
+      exit 1
+    fi
+    if ! git ls-files --error-unmatch -- "${spath}" > /dev/null 2>&1; then
+      echo "fix:badges: static shield '${srest}' names ${spath}, which is not a tracked file — a claim needs its enforcer" >&2
+      exit 1
+    fi
+    slabel="${srest%%=*}"
+    smsg="${srest#*=}"
+    slabel_esc=$(shield_esc "${slabel}")
+    smsg_esc=$(shield_esc "${smsg}")
+    add "[![${slabel}](https://img.shields.io/badge/${slabel_esc}-${smsg_esc}-blue)](${spath})"
+  done < <(grep -v "^#" .badge-states || true)
 fi
 # fair-software, computed dot by dot: repository, licence, registry,
 # citation, checklist — filled only where this render's own truth
