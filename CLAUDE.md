@@ -134,8 +134,11 @@ are referenced as
 
 ## Testing
 
-`mise run ci` locally is exactly what CI runs — same tools, same
-versions, same order, from the same lockfile. Shared-workflow changes are
+`mise run ci` locally runs exactly what CI runs — same tasks, same
+tools, same versions, from the same lockfile. The one difference is
+where: CI runs a pgrx extension's suite on one machine per Postgres
+major (#1148), and locally the same script runs those majors side by
+side. Shared-workflow changes are
 exercised by this repo's own `gate.yml` on every PR; the release half is
 exercised from `release-lab` before any **production** repo moves its
 pin.

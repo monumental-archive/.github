@@ -66,5 +66,5 @@ A repo's own file always wins over any default here. Issue and PR
 template *folders* are all-or-nothing: if a repo has anything in its own
 `.github/ISSUE_TEMPLATE`, none of the defaults apply to it.
 
-`mise run ci` locally is exactly what CI runs. If it is green on your
+`mise run ci` locally runs exactly what CI runs. If it is green on your
 machine, it is green in the cloud.

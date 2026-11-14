@@ -44,8 +44,44 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: ci
+  # WHICH POSTGRES MAJORS GET A LEG (#1148). A matrix has to exist before
+  # its jobs do, so the list is made first, alone, and cheaply — the
+  # runner's own cargo and python3, no toolchain install — by the same
+  # derivation every belt task uses (gate-surface.py over the crate's
+  # `pgNN` features). It is a PLAN and is trusted as one: the `gate` job
+  # below re-derives the list from the pinned toolchain and reds on any
+  # difference, so an unpinned tool here can fail a gate and can never
+  # pass one. A tree with no pgrx extension plans `[]` and pays about
+  # twenty seconds for it.
+  plan:
+    name: plan
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      majors: ${{ steps.plan.outputs.majors }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Plan one leg per declared Postgres major
+        id: plan
+        run: |
+          set -euo pipefail
+          majors=$(.org-canon/mise/pgrx-plan.sh .org-canon)
+          echo "majors=${majors}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::pgrx legs planned: ${majors}"
+  # Everything the gate runs except the extension's own suite, which the
+  # `pgrx` legs below run one major each. This was the job named `ci`;
+  # that name now belongs to the final job, because `ci / ci` is the one
+  # check the org ruleset requires and it has to mean "all of it passed".
+  gate:
+    name: gate
+    needs: plan
     runs-on: ubuntu-26.04
     # A hung gate must fail in minutes, not at GitHub's six-hour default:
     # on #969 mise never exited after a task failed and the job held a
@@ -238,8 +274,121 @@ jobs:
       - name: Run the gate
         env:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
+          # The planned legs. With this set, test:pgrx runs no suite here
+          # — the legs do — and instead holds the plan to the list it
+          # derives from the pinned toolchain.
+          ORG_PGRX_FANNED: ${{ needs.plan.outputs.majors }}
         run: mise run ci
 
+  # ONE POSTGRES MAJOR PER RUNNER. Serially, inside the gate job, the
+  # five took the gate from about a minute to 8m14s (release-lab) and
+  # 8m48s (edtf) — paid twice per merge, since the merge queue runs it
+  # again. Each leg runs the SAME task a laptop runs, `test:pgrx`, with
+  # one major named; locally the task runs every major side by side. One
+  # derivation, one unit, two places to run it.
+  #
+  # fail-fast is off: which majors pass is the information, and a leg
+  # cancelled because its neighbour failed reports nothing.
+  pgrx:
+    name: pgrx (pg${{ matrix.major }})
+    needs: plan
+    if: ${{ needs.plan.outputs.majors != '[]' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        major: ${{ fromJSON(needs.plan.outputs.majors) }}
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      # unattested-path: this gate signs and publishes nothing, so the
+      # cold-build rule (#117, docs/release.md) permits the tool cache
+      # exactly here, on the same reasoning and with the same accepted
+      # property as the `gate` job's own install step above.
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.3
+          cache: true
+
+      # unattested-path: this gate signs and publishes nothing, so the
+      # cold-build rule (#117, docs/release.md) permits the cargo cache
+      # exactly here. Keyed per major, because each major's build of the
+      # extension is its own artifact set; cargo checks registry sources
+      # against Cargo.lock, so a poisoned entry cannot change what
+      # compiles.
+      - name: Restore the cargo caches (unsigned gate only)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-
+
+      - name: Run the extension's suite at this major
+        env:
+          ORG_PGRX_MAJOR: ${{ matrix.major }}
+        run: mise run test:pgrx
+
+  # THE REQUIRED CHECK. `ci / ci` is the one context the org ruleset
+  # names, so it must be red unless every part of the gate was green.
+  # `always()` is load-bearing: without it a failed `gate` SKIPS this
+  # job, and a skipped required check counts as passing. The legs may be
+  # skipped only when none were planned.
+  ci:
+    name: ci
+    needs:
+      - plan
+      - gate
+      - pgrx
+    if: ${{ always() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Every part of the gate passed
+        env:
+          PLAN: ${{ needs.plan.result }}
+          GATE: ${{ needs.gate.result }}
+          PGRX: ${{ needs.pgrx.result }}
+          MAJORS: ${{ needs.plan.outputs.majors }}
+        run: |
+          set -euo pipefail
+          status=0
+          if [[ ${PLAN} != "success" ]]; then
+            echo "::error::plan: ${PLAN}"
+            status=1
+          fi
+          if [[ ${GATE} != "success" ]]; then
+            echo "::error::gate: ${GATE}"
+            status=1
+          fi
+          case "${PGRX}" in
+            success) ;;
+            skipped)
+              if [[ ${MAJORS} != "[]" ]]; then
+                echo "::error::pgrx legs were skipped although ${MAJORS} were planned"
+                status=1
+              fi
+              ;;
+            *)
+              echo "::error::pgrx legs: ${PGRX}"
+              status=1
+              ;;
+          esac
+          [[ ${status} -eq 0 ]] || exit 1
+          echo "ci: plan, gate and every pgrx leg (${MAJORS}) passed"
   # The badge feed, never the gate: uploads the coverage report to
   # Codecov on pushes to main. Separate job so the required check  stays deterministic; skips clean without a floor or a token.
   coverage-upload:

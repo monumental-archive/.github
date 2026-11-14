@@ -3219,56 +3219,17 @@ dir = "{{cwd}}"
 # first major on the runner and 37s for each one after it, so five majors
 # is about four minutes, and mise-action's cache makes the Postgres
 # install a once-per-pin-bump cost rather than a per-run one.
+#
+# ONE MAJOR PER RUN, and the majors side by side (#1148). Serially the
+# five took the gate from about one minute to 8m14s on release-lab and
+# 8m48s on edtf, paid twice per merge because the merge queue runs the
+# gate again. The body is `pgrx-test.sh` so that three callers run the
+# same code: this task with nothing set (every major, concurrently —
+# the local form), one leg of ci.yml's fan-out with ORG_PGRX_MAJOR set
+# (one major, one runner), and ci.yml's main job with ORG_PGRX_FANNED
+# set (nothing run, the planned legs checked against the crate).
 run = '''
-set -euo pipefail
-manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
-[[ -n ${manifests} ]] || {
-  echo "test:pgrx: no Cargo.toml tracked, skipped"
-  exit 0
-}
-command -v cargo > /dev/null || {
-  echo "test:pgrx: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
-  exit 1
-}
-crates=""
-majors=""
-# Assigned first, for the reason the sibling tasks give: an empty
-# here-string from a failed derivation would skip this suite silently,
-# which is the exact failure #813 exists to end.
-surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
-while IFS=$'\t' read -r record spec kind crate_majors dir; do
-  [[ ${record} == crate && ${kind} == pgrx ]] || continue
-  [[ ${dir} != "-" ]] || {
-    echo "test:pgrx: ${spec} is a pgrx extension cargo reports no directory for" >&2
-    exit 1
-  }
-  crates="${crates} ${dir}:${crate_majors}"
-  majors="${majors}${majors:+,}${crate_majors}"
-done <<< "${surface}"
-[[ -n ${crates} ]] || {
-  echo "test:pgrx: no pgrx extension tracked, skipped"
-  exit 0
-}
-cargo fetch --locked
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-org_pgrx_darwin_flags
-mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-  | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
-  | org_pgrx_init > /dev/null
-count=0
-tested=""
-for entry in ${crates}; do
-  dir="${entry%%:*}"
-  list="${entry#*:}"
-  for one in ${list//,/ }; do
-    count=$((count + 1))
-    tested="${tested} ${dir}(pg${one})"
-    echo "test:pgrx: ${dir} at pg${one}"
-    (cd "${dir}" && cargo pgrx test "pg${one}")
-  done
-done
-echo "test:pgrx: ${count} suite run(s):${tested}"
+"${ORG_BELT_DIR}/pgrx-test.sh"
 '''
 
 [tasks."lint:gate-surface"]
