@@ -118,7 +118,7 @@ jobs:
           ls -l /usr/bin/timeout
           timeout --version | head -n 2
           mkdir -p "${RUNNER_TEMP}/hang"
-          printf '%s\n' 'package main' 'func main() { select {} }' > "${RUNNER_TEMP}/hang/main.go"
+          printf '%s\n' 'package main' 'import "time"' 'func main() { time.Sleep(time.Hour) }' > "${RUNNER_TEMP}/hang/main.go"
           printf '%s\n' 'module hang' 'go 1.25' > "${RUNNER_TEMP}/hang/go.mod"
           (cd "${RUNNER_TEMP}/hang" && go build -o "${RUNNER_TEMP}/hangbin" .)
           for args in "--signal=QUIT --kill-after=60s 3s" "--signal=QUIT 3s" "-s QUIT 3s"; do
