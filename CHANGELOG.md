@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.64.0](https://github.com/monumental-archive/.github/compare/v1.63.2...v1.64.0) - 2026-11-14
+
+### Added
+
+- run a pgrx extension one major per leg ([#1153](https://github.com/monumental-archive/.github/pull/1153))
+
+### Fixed
+
+- make a dead rekor monitor say so ([#1149](https://github.com/monumental-archive/.github/pull/1149))
+- ask whether a base digest resolves by digest alone ([#1151](https://github.com/monumental-archive/.github/pull/1151))
+
 ## [1.63.2](https://github.com/monumental-archive/.github/compare/v1.63.1...v1.63.2) - 2026-11-13
 
 ### Fixed
