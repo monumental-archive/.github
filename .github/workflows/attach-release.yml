@@ -455,7 +455,16 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          sha256sum ./* | sed 's| \./| |' > checksums.txt
+          # Never written into the directory it hashes (#1196): the
+          # redirect belongs to sed, both halves start together, and a
+          # checksums.txt created before the glob expands was listed at
+          # the empty-file digest (release-lab v0.28.1).
+          [[ ! -e checksums.txt ]] || {
+            echo "::error::dist/checksums.txt exists before it is written"
+            exit 1
+          }
+          sha256sum ./* | sed 's| \./| |' > "${RUNNER_TEMP}/checksums.txt"
+          mv "${RUNNER_TEMP}/checksums.txt" checksums.txt
       - name: Mint the publishing token
         id: token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
