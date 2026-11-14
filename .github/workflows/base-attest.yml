@@ -143,9 +143,19 @@ jobs:
         # next release's build leg.
         env:
           REF: ${{ matrix.ref }}
+        # BY DIGEST ALONE. Given `name:tag@digest`, docker resolves the TAG
+        # and verifies what it finds against the digest, so the moment
+        # upstream republishes the tag the pinned bytes are reported as
+        # "manifest verification failed" while still resolving perfectly.
+        # Measured 2026-11-14 against postgres:18-bookworm: tag+pinned
+        # digest fails, `postgres@<pinned>` succeeds, and the registry
+        # serves the pinned index and all ten of its children with
+        # matching hashes. That made this job red from 2026-10-26, for as
+        # long as a newer upstream build sat in Renovate's stability
+        # window — the opposite of the question it asks (#1144).
         run: |
           set -euo pipefail
-          docker manifest inspect "${REF}" > /dev/null
+          docker manifest inspect "${REF%%:*}@${REF##*@}" > /dev/null
           echo "::notice::${REF} resolves"
       - name: Verify the upstream provenance names this source (#212)
         # Docker Official Images carry BuildKit in-toto provenance
