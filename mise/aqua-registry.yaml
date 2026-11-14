@@ -8,18 +8,26 @@
 # package copied whole, with the correction inserted, rather than just
 # the corrected fragment. A package NOT named here falls through to the
 # baked registry untouched; measured on 2026-08-24 with this file
-# holding wasm-pack alone, while `aqua:rhysd/actionlint` resolved its
+# holding one package, while `aqua:rhysd/actionlint` resolved its
 # native `darwin_arm64` asset from the baked registry in the same run.
 #
-# WHEN THIS FILE DIES, and it is not when you would think (#811). mise
+# WHEN AN ENTRY DIES, and it is not when you would think (#811). mise
 # does not read aqua-registry HEAD: it reads a snapshot compiled into
 # its own binary (`aqua.baked_registry`, default true). On 2026-08-24
-# that snapshot was aqua-registry commit 6291c29d, and it was fetched
-# and diffed byte-for-byte identical to HEAD for wasm-pack. So an
-# upstream merge does NOT retire an entry here — the mise version bump
-# that carries the new snapshot does. The removal trigger is a mise
-# bump, and the test is mechanical: drop the entry, run `mise lock`,
-# and keep the deletion only if the lock is unchanged.
+# that snapshot was aqua-registry commit 6291c29d, byte-for-byte
+# identical to HEAD for the package then corrected here. So an upstream
+# merge does NOT retire an entry here — the mise version bump that
+# carries the new snapshot does. The removal trigger is a mise bump,
+# and the test is mechanical: drop the entry, run `mise lock`, and keep
+# the deletion only if the lock is unchanged.
+#
+# That is how the first entry left (#1202). It corrected the darwin
+# arm64 asset of wasm-bindgen's rust-to-wasm packager; on mise
+# 2026.11.4, with this file out of the way, the baked registry resolved
+# the native `aarch64-apple-darwin` tarball on its own, so the entry
+# was deleted. `committed` below failed the same probe — the baked
+# registry still names its x86_64 tarball for `macos-arm64` — and
+# stays.
 #
 # `audit:lock-arch` is the other half of this file: it reds when a lock
 # resolves an asset whose architecture is not the one its platform key
@@ -27,116 +35,11 @@
 # check that has nothing left to say, not as silence.
 ---
 packages:
-  # wasm-pack (#811). Upstream's current-version entry carries
-  # `rosetta2: true` and one `goos: linux` override mapping
-  # `arm64: aarch64`. There is no darwin case, so on darwin/arm64 there
-  # is no native asset name to build and rosetta2 selects the amd64
-  # one — `macos-arm64` resolved the x86_64 tarball, with that binary's
-  # checksum pinned under a platform key naming a different
-  # architecture.
-  #
-  # rosetta2 was RIGHT when it was written and became wrong under it:
-  # `aarch64-apple-darwin` is absent from v0.13.1 and present from
-  # v0.14.0 on (measured against the release assets, 2026-08-24). So
-  # the correction is constrained to the versions that have the asset
-  # and the fall-through entry keeps emulation for the ones that do
-  # not — deleting `rosetta2` outright would break every version below
-  # 0.14.0.
-  #
-  # Package body copied from aqua-registry 6291c29d, plus the
-  # `semver(">= 0.14.0")` entry below. Order is load-bearing: aqua
-  # takes the FIRST matching `version_constraint`, so this entry must
-  # precede the `"true"` catch-all it narrows.
-  - type: github_release
-    repo_owner: wasm-bindgen
-    repo_name: wasm-pack
-    aliases:
-      - name: rustwasm/wasm-pack
-      - name: drager/wasm-pack
-    description: your favorite rust -> wasm workflow tool
-    version_constraint: "false"
-    version_overrides:
-      - version_constraint: semver("<= 0.2.0")
-        no_asset: true
-      - version_constraint: semver("<= 0.4.2")
-        asset: wasm-pack-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
-        format: tar.gz
-        rosetta2: true
-        files:
-          - name: wasm-pack
-            src: "{{.AssetWithoutExt}}/wasm-pack"
-        replacements:
-          amd64: x86_64
-          darwin: apple-darwin
-          linux: unknown-linux-musl
-        supported_envs:
-          - linux/amd64
-          - darwin
-      - version_constraint: semver("<= 0.10.1")
-        asset: wasm-pack-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
-        format: tar.gz
-        rosetta2: true
-        windows_arm_emulation: true
-        files:
-          - name: wasm-pack
-            src: "{{.AssetWithoutExt}}/wasm-pack"
-        replacements:
-          amd64: x86_64
-          darwin: apple-darwin
-          linux: unknown-linux-musl
-          windows: pc-windows-msvc
-        supported_envs:
-          - darwin
-          - windows
-          - amd64
-      # THE CORRECTION. `arm64: aarch64` is added per-goos rather than
-      # to the shared `replacements` map because windows arm64 has no
-      # `aarch64-pc-windows-msvc` asset and still needs
-      # `windows_arm_emulation`; a shared replacement would name a
-      # Windows tarball that does not exist. Override replacements
-      # MERGE with the shared map rather than replacing it — that is
-      # what upstream's linux override already relies on to keep
-      # `unknown-linux-musl`, and it is why naming `arm64` alone here
-      # is enough.
-      - version_constraint: semver(">= 0.14.0")
-        asset: wasm-pack-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
-        format: tar.gz
-        windows_arm_emulation: true
-        files:
-          - name: wasm-pack
-            src: "{{.AssetWithoutExt}}/wasm-pack"
-        replacements:
-          amd64: x86_64
-          darwin: apple-darwin
-          linux: unknown-linux-musl
-          windows: pc-windows-msvc
-        overrides:
-          - goos: linux
-            replacements:
-              arm64: aarch64
-          - goos: darwin
-            replacements:
-              arm64: aarch64
-      - version_constraint: "true"
-        asset: wasm-pack-{{.Version}}-{{.Arch}}-{{.OS}}.{{.Format}}
-        format: tar.gz
-        rosetta2: true
-        windows_arm_emulation: true
-        files:
-          - name: wasm-pack
-            src: "{{.AssetWithoutExt}}/wasm-pack"
-        replacements:
-          amd64: x86_64
-          darwin: apple-darwin
-          linux: unknown-linux-musl
-          windows: pc-windows-msvc
-        overrides:
-          - goos: linux
-            replacements:
-              arm64: aarch64
   # committed (#854) — found by the sweep that `audit:lock-arch` now
-  # runs standing, in the belt's OWN lock. Same cause as wasm-pack
-  # above, `rosetta2: true` with no darwin arm64 case, but it reaches
+  # runs standing, in the belt's OWN lock. Upstream's entry carries
+  # `rosetta2: true` with no darwin arm64 case, so on darwin/arm64
+  # there is no native asset name to build and rosetta2 selects the
+  # amd64 one — the same cause as #811's entry, but this one reaches
   # further: committed is a belt tool on the commit-msg, pre-push and
   # CI path, so every repo and every arm64 machine in the org was
   # installing an x86_64 binary and running it emulated.
