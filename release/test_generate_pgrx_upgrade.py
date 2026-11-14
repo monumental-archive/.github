@@ -177,6 +177,23 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
     return env
 
 
+def mise_data_dir() -> str:
+    """Name the caller's mise data directory, resolved as mise does.
+
+    Returns:
+        `MISE_DATA_DIR` if set, else `$XDG_DATA_HOME/mise`, else
+        `~/.local/share/mise` - read from the caller's environment, so
+        that a fixture whose HOME is redirected still finds the tools
+        the caller's belt installed.
+
+    """
+    if data_dir := os.environ.get("MISE_DATA_DIR"):
+        return data_dir
+    if xdg := os.environ.get("XDG_DATA_HOME"):
+        return str(Path(xdg) / "mise")
+    return str(Path.home() / ".local" / "share" / "mise")
+
+
 def git(args: list[str], cwd: Path, home: Path) -> str:
     """Run one `git`, blind to the caller's git environment.
 
@@ -580,10 +597,18 @@ class WritesTheInstallableSet(unittest.TestCase):
             # it — on a rustup-managed machine the `cargo` on PATH is a
             # shim, and it exits 1 with "could not choose a version of
             # cargo to run" rather than anything about HOME.
+            #
+            # mise's data directory is under HOME too, and on a machine
+            # where the `cargo` on PATH is a mise shim it is threaded the
+            # same way. Without it, a caller that names a belt through
+            # MISE_GLOBAL_CONFIG_FILE (a linked worktree must) sends the
+            # shim looking for the belt's Rust pin in an empty data
+            # directory: it starts an install and exits 1 (#1201).
             env = hermetic_env(
                 repo.home,
                 CARGO_HOME=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
                 RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
+                MISE_DATA_DIR=mise_data_dir(),
             )
             subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [
