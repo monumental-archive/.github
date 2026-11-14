@@ -4406,6 +4406,9 @@ while read -r repo; do
     failed="${failed} ${repo}(badge block rendered no shields — the derivation always emits the SLSA row, so this block is truncated or unparsable)"
     continue
   fi
+  # The repository wearing these shields, in the form derive-badges.sh
+  # reads from REUSE.toml: an issuer's entry must name it (#1197).
+  wearer="https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}"
   while read -r url; do
     [[ -n ${url} ]] || continue
     checked=$((checked + 1))
@@ -4435,6 +4438,8 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
+        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+          failed="${failed} ${repo}(bestpractices: ${bp_owner})"
         elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
           failed="${failed} ${repo}(bestpractices: passing percentage below 100)"
         elif jq -e '[.lost_baseline_1_at, .lost_baseline_2_at, .lost_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
@@ -4453,6 +4458,8 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
+        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+          failed="${failed} ${repo}(baseline: ${bp_owner})"
         elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
           failed="${failed} ${repo}(baseline: shield worn but the issuer records no achieved level)"
         elif jq -e '[.lost_baseline_1_at, .lost_baseline_2_at, .lost_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
