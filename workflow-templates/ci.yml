@@ -32,9 +32,15 @@ name: gate
 permissions:
   contents: read
 
+# A pull request's runs group by its number, so they can only cancel
+# each other. Everything else groups by ref and is never cancelled: an
+# event on a pull request that has already merged has no merge ref, so
+# its github.ref is the default branch, and a shared group let it cancel
+# the push gate on main (.github#1195). Each commit on the default
+# branch keeps its own verdict. lint:gate-stub requires both lines.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:

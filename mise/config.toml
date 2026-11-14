@@ -5412,7 +5412,18 @@ dir = "{{cwd}}"
 # on a different day, so the trigger is required everywhere and ahead of
 # it — inert where no queue exists, and already in place where one
 # arrives.
+#
+# The third is the concurrency group's (#1195). An event on a pull
+# request that has already merged has no merge ref, so its github.ref is
+# the base branch; a group keyed on the ref alone put it in the same
+# group as the push gate on main, and cancel-in-progress let it cancel
+# that gate — main went red with nothing wrong in it. Grouping by the
+# pull request's number, and cancelling only pull_request runs, gives
+# every commit on the default branch its own verdict. Both lines are
+# required verbatim, and both are printed in the message. The body is
+# raw: `${{` would otherwise open a Tera expression at render.
 run = '''
+{% raw %}
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"
   exit 0
@@ -5424,11 +5435,28 @@ canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 unqueued=""
+ungrouped=""
+# shellcheck disable=SC2016  # ${{ }} is GitHub's expression syntax, matched
+# literally — expanding it here is the defect
+want_group='github.event.pull_request.number || github.ref'
+# shellcheck disable=SC2016
+want_cancel='${{ github.event_name == '"'"'pull_request'"'"' }}'
 for f in .github/workflows/*.y*ml; do
   grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
   grep -qE "^[[:space:]]*pull_request" "${f}" || continue
   grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
   grep -qE "^[[:space:]]+merge_group:" "${f}" || unqueued="${unqueued} ${f}"
+  groups=$(grep -E "^[[:space:]]*group:" "${f}" || true)
+  # Each cancel-in-progress line, indent and trailing comment dropped,
+  # must be exactly the wanted line; every group line must carry the key.
+  # An absent line reds too: `<<<` feeds an empty capture as one empty
+  # line, and grep -v finds it.
+  cancels=$(grep -E "^[[:space:]]*cancel-in-progress:" "${f}" \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//' || true)
+  if grep -vqF "${want_group}" <<< "${groups}" \
+    || grep -vqxF "cancel-in-progress: ${want_cancel}" <<< "${cancels}"; then
+    ungrouped="${ungrouped} ${f}"
+  fi
 done
 status=0
 if [[ -n ${bad} ]]; then
@@ -5447,8 +5475,18 @@ if [[ -n ${unqueued} ]]; then
   echo "  in:${unqueued}" >&2
   status=1
 fi
+if [[ -n ${ungrouped} ]]; then
+  echo "lint:gate-stub: gate caller's concurrency group is shared with events" >&2
+  echo "  on merged pull requests, which then cancel the push gate on the" >&2
+  echo "  default branch (#1195). Under concurrency: set exactly" >&2
+  echo "    group: \${{ github.workflow }}-\${{ ${want_group} }}" >&2
+  echo "    cancel-in-progress: ${want_cancel}" >&2
+  echo "  in:${ungrouped}" >&2
+  status=1
+fi
 [[ ${status} -eq 0 ]] || exit 1
 echo "lint:gate-stub: ok"
+{% endraw %}
 '''
 
 [tasks."lint:capability-boundary"]
