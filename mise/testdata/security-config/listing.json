@@ -1,0 +1,38 @@
+[
+  {
+    "name": "monumental-archive",
+    "private": true
+  },
+  {
+    "name": "edtf",
+    "private": false
+  },
+  {
+    "name": "iiif-server",
+    "private": false
+  },
+  {
+    "name": "monumental-archive-db",
+    "private": false
+  },
+  {
+    "name": "monumental-archive-ledger",
+    "private": false
+  },
+  {
+    "name": "release-lab",
+    "private": false
+  },
+  {
+    "name": "signer",
+    "private": false
+  },
+  {
+    "name": ".github",
+    "private": false
+  },
+  {
+    "name": "stele",
+    "private": false
+  }
+]
