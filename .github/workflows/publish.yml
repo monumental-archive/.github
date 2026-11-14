@@ -286,6 +286,9 @@ jobs:
       # The class an image leg's inventory plan names, empty when no
       # crate is declared. Derived here so the name exists once.
       image-class: ${{ steps.check.outputs.image-class }}
+      # The class the per-major extension images are attributed to
+      # (#1168), empty when no extension is declared. Same reason.
+      extension-image-class: ${{ steps.check.outputs.extension-image-class }}
     steps:
       - name: Check the ref and the class
         id: check
@@ -329,6 +332,19 @@ jobs:
           # still declares `oci-image` and declares its crate; which
           # class that IS is machinery's answer, never a second caller
           # declaration to drift against the first.
+          #
+          # The extension images are the same ruling one class over
+          # (#1168). A pgrx release ships tarballs AND per-major images,
+          # built by different legs, signed separately, judged by
+          # separate verdicts — and owing different things: the tarball
+          # leg consumes the pinned base images and claims them, while
+          # the image leg is FROM scratch plus a COPY and claims none.
+          # Under one class name the evidence manifest could only
+          # attribute an image to the class that owes the base claims,
+          # and the audit would then demand them of an artifact whose
+          # verdict correctly makes none. Two shapes, two classes; the
+          # caller still declares `pgrx-extension` alone.
+          extension_image_class=""
           declared=()
           for c in "${requested[@]}"; do
             case "${c}" in
@@ -342,6 +358,10 @@ jobs:
               declared+=("${image_class}")
             else
               declared+=("${c}")
+            fi
+            if [[ ${c} == pgrx-extension ]]; then
+              extension_image_class="pgrx-extension-image"
+              declared+=("${extension_image_class}")
             fi
           done
           # A class input naming no requested class is a declaration
@@ -361,11 +381,14 @@ jobs:
             image_class=""
           fi
           version="${GITHUB_REF#refs/tags/v}"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
           classes_out=$(printf '%s,' "${declared[@]}")
           classes_out="${classes_out%,}"
-          echo "classes=${classes_out}" >> "${GITHUB_OUTPUT}"
-          echo "image-class=${image_class}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "version=${version}"
+            echo "classes=${classes_out}"
+            echo "image-class=${image_class}"
+            echo "extension-image-class=${extension_image_class}"
+          } >> "${GITHUB_OUTPUT}"
           echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
           echo "::notice::the evidence declares ${classes_out}"
   # Every fact the image classes will assert — OCI annotations and config
@@ -1828,6 +1851,12 @@ jobs:
       - build-go
       - build-source
       - build-extension
+      # And the three that publish to a registry, for the same reason
+      # and under the same argument: each is already an ancestor
+      # through its signer.
+      - assemble-oci
+      - build-wasm
+      - build-extension-images
     if: >-
       ${{
         !cancelled() && needs.guard.result == 'success'
@@ -1870,6 +1899,17 @@ jobs:
       go-binary-leg-subjects: ${{ needs.build-go.outputs.leg-subjects }}
       source-archive-leg-subjects: ${{ needs.build-source.outputs.leg-subjects }}
       pgrx-extension-leg-subjects: ${{ needs.build-extension.outputs.leg-subjects }}
+      # What each registry class published there, which no asset can
+      # say (#1168). A rehearsal publishes to no registry, so it claims
+      # nothing: the image index is not assembled on a dry run and its
+      # output is already empty, while the tarball and the per-major
+      # indexes are BUILT on one and must be withheld here.
+      oci-image-registry-subjects: ${{ needs.assemble-oci.outputs.registry-subjects }}
+      oci-image-class: ${{ needs.guard.outputs.image-class || 'oci-image' }}
+      wasm-npm-registry-subjects: ${{ !inputs.dry-run && needs.build-wasm.outputs.registry-subjects || '' }}
+      pgrx-extension-image-registry-subjects: >-
+        ${{ !inputs.dry-run && needs.build-extension-images.outputs.registry-subjects || '' }}
+      pgrx-extension-image-class: ${{ needs.guard.outputs.extension-image-class }}
       dry-run: ${{ inputs.dry-run }}
     secrets:
       app-private-key: ${{ secrets.app-private-key }}

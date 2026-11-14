@@ -8,6 +8,16 @@ from it, and a finding with no decision here is *undecided* — it fails
 the Monday audit **and** fails any release whose SBOM ships it, until a
 decision is written.
 
+**What needs a decision is what the supported release ships.** Only the
+newest release of each project is supported (`SECURITY.md`), so the
+Monday audit asks for a decision where that release carries an
+advisory. A finding on an older release is answered by the upgrade and
+needs nothing written here — provided the newest release was read whole
+and is not itself red on that advisory in that package
+(`docs/dependency-track.md`, the cron section). A decision is still
+keyed by the dependency and still covers every release shipping that
+`package@version`, old ones included.
+
 Every one of those readers resolves this directory from the canon, so a
 decision written here reaches every repo in the org at its next pin
 bump. None of them is a place to record an exception: they all join on

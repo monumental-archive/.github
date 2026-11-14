@@ -91,6 +91,10 @@
           { "prefix": "sbom-pgrx-", "owedFrom": "1.42.0", "planned": true }
         ],
         "enrichment": ["pgrx-base-images", "pgrx-base"]
+      },
+      "pgrx-extension-image": {
+        "bundles": [],
+        "assetPrefixes": [{ "prefix": "attestations-extimg-pg" }]
       }
     },
     "continuous": {
@@ -114,7 +118,7 @@
       ]
     },
     "enrichmentFromVersion": "1.41.0",
-    "manifestSchemaFromVersion": "1.51.0"
+    "manifestSchemaFromVersion": "1.65.0"
   },
   "tags": {
     "tagPattern": "^v[0-9]",
@@ -149,6 +153,7 @@
   },
   "blastRadius": {
     "osEcosystems": ["debian", "alpine", "ubuntu", "rocky", "redhat", "rpm"],
+    "supported": "latest-release",
     "canary": {
       "repo": "release-lab",
       "tag": "v0.17.0",
