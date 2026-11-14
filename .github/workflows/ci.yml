@@ -429,7 +429,16 @@ jobs:
   coverage-upload:
     name: coverage upload (badge only)
     needs: ci
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # `!cancelled()` and the explicit result are load-bearing (#1161).
+    # An `if:` with no status function gets an implicit `success()`,
+    # and that is false when ANY ancestor was skipped — which the pgrx
+    # leg is in every repository with no extension crate. From the day
+    # that leg arrived this job was skipped in stele and iiif-server on
+    # every push: stele's Codecov figure froze, iiif-server's never
+    # existed, and nothing went red because a skip is not a failure.
+    if: >-
+      ${{ !cancelled() && needs.ci.result == 'success'
+      && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     continue-on-error: true
