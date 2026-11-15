@@ -10,6 +10,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.0](https://github.com/monumental-archive/.github/compare/v1.67.4...v1.68.0) - 2026-11-15
+
+### Added
+
+- ship one image layout and prove both consumers ([#1305](https://github.com/monumental-archive/.github/pull/1305))
+- strip with a debug sibling, pack once, state the floor ([#1312](https://github.com/monumental-archive/.github/pull/1312))
+
+### Fixed
+
+- rule the struct-field pattern pair for the new lint ([#1300](https://github.com/monumental-archive/.github/pull/1300))
+- render the ghcr shield of a continuous publisher ([#1306](https://github.com/monumental-archive/.github/pull/1306))
+- publish per cargo's key, exclude only compiles ([#1307](https://github.com/monumental-archive/.github/pull/1307))
+- publish the decisions where the level judge reads ([#1309](https://github.com/monumental-archive/.github/pull/1309))
+- apply registry tags last, after attach ([#1308](https://github.com/monumental-archive/.github/pull/1308))
+- ship only the crates crates.io will receive ([#1311](https://github.com/monumental-archive/.github/pull/1311))
+
+### Documentation
+
+- record the audit token's issues read grant ([#1304](https://github.com/monumental-archive/.github/pull/1304))
+
 ## [1.67.4](https://github.com/monumental-archive/.github/compare/v1.67.3...v1.67.4) - 2026-11-15
 
 ### Fixed
