@@ -60,8 +60,16 @@ commit-msg:
 
 pre-push:
   jobs:
+    # The gate over the working tree at HEAD, on every push (#1281). A
+    # `script:`, never a `run:`: lefthook skips a pre-push `run:` job
+    # when the push changes no file that exists — a delete-only push, or
+    # a ref pushed while HEAD sits elsewhere — and says so in one grey
+    # line. The script is .lefthook/pre-push/ci.sh in this repository,
+    # found under the consumer's `source_dir` (default `.lefthook/`); a
+    # repo that sets another one gets a failed job, never a skip. It
+    # gates HEAD's tree, not the ref being pushed: push from the
+    # checkout whose HEAD is the branch.
     - name: ci
-      run: >-
-        MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
-        mise run ci
+      script: ci.sh
+      runner: bash
 ...
