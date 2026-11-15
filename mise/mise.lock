@@ -786,43 +786,43 @@ url = "https://github.com/microsoft/typescript-go/releases/download/typescript/v
 url_api = "https://api.github.com/repos/microsoft/typescript-go/releases/assets/470428092"
 
 [[tools."github:monumental-archive/stele"]]
-version = "0.22.0"
+version = "0.22.1"
 backend = "github:monumental-archive/stele"
 
 [tools."github:monumental-archive/stele"."platforms.linux-arm64"]
-checksum = "sha256:d3805ebc7a879db18ba6ad7df0c8fcf0def1c74a16a5f1e55b04472ae5160a46"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.22.0/stele-0.22.0-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/748912762"
+checksum = "sha256:d80b7a120fb22af797b1be7f2a08bf57119c880028f1a16624acf68001a55041"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.22.1/stele-0.22.1-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/751436815"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.linux-arm64-musl"]
-checksum = "sha256:d3805ebc7a879db18ba6ad7df0c8fcf0def1c74a16a5f1e55b04472ae5160a46"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.22.0/stele-0.22.0-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/748912762"
+checksum = "sha256:d80b7a120fb22af797b1be7f2a08bf57119c880028f1a16624acf68001a55041"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.22.1/stele-0.22.1-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/751436815"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.linux-x64"]
-checksum = "sha256:6c8979882e6c047499292524c85faf669a25cba15617f5e1a48d36eab110aa2f"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.22.0/stele-0.22.0-linux-amd64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/748912761"
+checksum = "sha256:dcc146e280416214c903f058aefa0ec175cc2d09e7b820c5ed8b100cdb896821"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.22.1/stele-0.22.1-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/751436802"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.linux-x64-musl"]
-checksum = "sha256:6c8979882e6c047499292524c85faf669a25cba15617f5e1a48d36eab110aa2f"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.22.0/stele-0.22.0-linux-amd64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/748912761"
+checksum = "sha256:dcc146e280416214c903f058aefa0ec175cc2d09e7b820c5ed8b100cdb896821"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.22.1/stele-0.22.1-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/751436802"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.macos-arm64"]
-checksum = "sha256:5a68eb2fce363e8473e9e62d255d5c990aacda964e795162417aced4e3740888"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.22.0/stele-0.22.0-darwin-arm64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/748912746"
+checksum = "sha256:fe335733c3bd760a1990f4345d27bc29e14c4d1ad1cbb5670b6b8491399627b0"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.22.1/stele-0.22.1-darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/751436775"
 provenance = "github-attestations"
 
 [tools."github:monumental-archive/stele"."platforms.macos-x64"]
-checksum = "sha256:360e8ea1e5535800ed64869e26815db97d941944ce953f38d49942f7b9843098"
-url = "https://github.com/monumental-archive/stele/releases/download/v0.22.0/stele-0.22.0-darwin-amd64.tar.gz"
-url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/748912744"
+checksum = "sha256:65b6967c042b2ca56b26f6545e850bf210c1844334650948fc0db26457c8446d"
+url = "https://github.com/monumental-archive/stele/releases/download/v0.22.1/stele-0.22.1-darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/monumental-archive/stele/releases/assets/751436768"
 provenance = "github-attestations"
 
 [[tools."github:obi1kenobi/cargo-semver-checks"]]
