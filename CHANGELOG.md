@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.67.2](https://github.com/monumental-archive/.github/compare/v1.67.1...v1.67.2) - 2026-11-15
+
+### Fixed
+
+- update first-party canon ([#1259](https://github.com/monumental-archive/.github/pull/1259))
+- update monumental-archive/signer to 1b66989 ([#1266](https://github.com/monumental-archive/.github/pull/1266))
+- mint a version doi for every licence the tree states ([#1255](https://github.com/monumental-archive/.github/pull/1255))
+- watch fulcio's certificate log, not rekor ([#1254](https://github.com/monumental-archive/.github/pull/1254))
+- say no verdict when the compare never ran ([#1265](https://github.com/monumental-archive/.github/pull/1265))
+- never open or keep a Release PR from a stale plan ([#1268](https://github.com/monumental-archive/.github/pull/1268))
+- roster the ledger on the source track (#1264) ([#1269](https://github.com/monumental-archive/.github/pull/1269))
+
+### Documentation
+
+- point the project links at the org ([#1267](https://github.com/monumental-archive/.github/pull/1267))
+
 ## [1.67.1](https://github.com/monumental-archive/.github/compare/v1.67.0...v1.67.1) - 2026-11-15
 
 ### Fixed
