@@ -3,9 +3,11 @@
 # signer repository minting a certificate whose SAN matches the pinned
 # identity. Verification pins the path, not the ref; this watches
 # Fulcio's certificate transparency log, the record of every certificate
-# Fulcio issues, so an unexpected issuance surfaces in the run log
-# instead of never. It also sees a certificate issued and never used to
-# sign, which a watch on the signature log could not.
+# Fulcio issues. Every certificate found is reconciled against a signing
+# the org performed, and one that does not reconcile files an issue
+# (#1250) — the org's own releases match on every signing, so a match
+# alone tells nobody anything. The log also shows a certificate issued
+# and never used to sign, which a watch on the signature log could not.
 #
 # The certificate log, not Rekor (#1237). rekor-monitor's Rekor scan
 # reads ten entries per request, one request at a time, against a log
@@ -63,13 +65,18 @@ jobs:
     name: Watch the log for the signer identity
     runs-on: ubuntu-26.04
     timeout-minutes: 15
+    # The audit App's credentials live in this environment, as they do
+    # for audit.yml's legs; the reconciler reads the forge with that
+    # App's token (#1250). The environment carries no protection rules
+    # and no branch policy, so it gates nothing here.
+    environment: audit
     env:
       # Fulcio's certificate transparency log: every certificate Fulcio
       # issues is logged here (RFC 6962 API, `get-sth`/`get-entries`).
       CT_LOG: https://ctfe.sigstore.dev/2022
     permissions:
       contents: read # checkout of the pinned monitor source
-      issues: write # an unexpected issuance must page, not just log
+      issues: write # a certificate that does not reconcile must page, not just log
     steps:
       - name: Check out rekor-monitor (pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,13 +85,16 @@ jobs:
           ref: 2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
           persist-credentials: false
 
-      # The canon's own patch to the monitor, from this same commit.
+      # The canon's own files, from this same commit: the monitor patch
+      # and the reconciler beside it, and the roster the reconciler reads.
       # Checked out after the monitor, which owns the workspace root.
-      - name: Check out the monitor patch
+      - name: Check out the monitor patch and the reconciler
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: canon
-          sparse-checkout: .github/rekor-monitor
+          sparse-checkout: |
+            .github/rekor-monitor
+            slsa
           persist-credentials: false
 
       # Upstream's CT monitor reads one server-capped page per run and
@@ -182,6 +192,7 @@ jobs:
       # 13 runs on 2026-11-14 (#1145). The output is kept for the read
       # check below.
       - name: Run the monitor once
+        id: monitor
         env:
           GOTRACEBACK: all
         run: |
@@ -272,6 +283,64 @@ jobs:
           echo "::error::the checkpoint did not advance although the log grew" \
             "(checkpoint size ${BEFORE_SIZE}, log size ${log_size})"
           exit 1
+      # Read-only, and only what the reconciler reads: workflow runs, and
+      # the workflow files and commits they name. Named here so the
+      # token cannot widen when the App's own grants do. The job itself
+      # still declares no id-token and runs no caller-supplied code.
+      - name: Mint the audit App's read token
+        id: token
+        if: ${{ always() && steps.monitor.outcome == 'success' }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          permission-actions: read
+          permission-contents: read
+          permission-metadata: read
+
+      # Every certificate the monitor found is reconciled against a
+      # signing the org performed (#1250): the run it names exists in a
+      # roster repository, called only the canon's workflows and the
+      # signer at the certificate's digest, a canon file at a
+      # default-branch commit asked for that digest, and the signer
+      # commit is on the signer's default branch. reconcile.py's header
+      # has the conditions. A read that cannot complete exits 2 and
+      # fails the job; nothing is counted as reconciled.
+      - name: Reconcile each certificate the monitor found
+        id: reconcile
+        if: ${{ always() && steps.token.outcome == 'success' }}
+        env:
+          FORGE_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 canon/.github/rekor-monitor/reconcile.py \
+            "${RUNNER_TEMP}/monitor.log" \
+            --root canon \
+            --findings "${RUNNER_TEMP}/findings.json" \
+            --summary "${GITHUB_STEP_SUMMARY}"
+      # One issue per certificate that did not reconcile, deduplicated by
+      # its CT index: a rerun over the same range files nothing twice.
+      - name: File an issue for each certificate that did not reconcile
+        if: ${{ always() && steps.reconcile.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count=$(jq length "${RUNNER_TEMP}/findings.json")
+          for ((i = 0; i < count; i++)); do
+            key=$(jq -r ".[${i}].key" "${RUNNER_TEMP}/findings.json")
+            title=$(jq -r ".[${i}].title" "${RUNNER_TEMP}/findings.json")
+            jq -r ".[${i}].body" "${RUNNER_TEMP}/findings.json" > "${RUNNER_TEMP}/finding.md"
+            existing=$(gh issue list --repo "${GITHUB_REPOSITORY}" --state all \
+              --search "\"${key}\" in:title" --json number --jq '.[0].number // empty')
+            if [[ -n ${existing} ]]; then
+              echo "${key}: already filed as #${existing}"
+              continue
+            fi
+            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${title}" \
+              --body-file "${RUNNER_TEMP}/finding.md"
+          done
+          echo "${count} certificate(s) did not reconcile"
       # unattested-path: the save half of the checkpoint restore
       # marked above — same cache, same reasoning: this workflow
       # builds and signs nothing, and the entry holds only the
@@ -281,8 +350,10 @@ jobs:
       # advanced over entries the monitor did not read must not become
       # the next run's starting point, or those entries are never read
       # (#1237). A failed run leaves the previous checkpoint in place.
+      # Nor past certificates the reconciler could not finish reading
+      # (#1250): the next run reads the range, and them, again.
       - name: Save the advanced checkpoint
-        if: ${{ always() && steps.after.outcome == 'success' }}
+        if: ${{ always() && steps.after.outcome == 'success' && steps.reconcile.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: checkpoint_log.txt
@@ -298,12 +369,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # A monitoring failure and an identity finding land the same way:
-          # loudly. The run log carries the distinction.
-          body="The signer-identity monitor (Fulcio CT log) failed or matched an unexpected certificate for the"
-          body+=" signer identity. Read the run:"
+          # A certificate that did not reconcile files its own issue
+          # above; this one is the monitor or the reconciler failing.
+          body="The signer-identity monitor (Fulcio CT log) failed: the log was not read,"
+          body+=" or a certificate it found could not be reconciled. Read the run:"
           body+=" ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue create --repo "${GITHUB_REPOSITORY}" \
-            --title "rekor-monitor: failure or unexpected signer issuance (run ${GITHUB_RUN_ID})" \
+            --title "rekor-monitor: failure (run ${GITHUB_RUN_ID})" \
             --body "${body}"
 ...
