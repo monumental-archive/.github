@@ -60,11 +60,39 @@ done
 . "$(dirname "${BASH_SOURCE[0]}")/planned-head.sh"
 require_planned_head
 
+# Every forge call this script cannot survive names itself when it is
+# refused (#633). The step died four times on `gh: Resource not accessible
+# by integration (HTTP 403)` and nothing else: no line said which of its
+# calls was refused, so a red that reads as a permissions fact could not be
+# traced to a call, let alone a cause. This is not a retry — a refused call
+# still fails the run, exactly as before. It adds what the forge said about
+# the refusal: the status, the request id GitHub support can look up, and
+# the permissions the endpoint would have accepted.
+#
+# `--include` goes last so the call still reads as the call; gh prints the
+# response headers, a blank line, then the body any `--jq` has filtered.
+forge() {
+  local what=$1 out status=0
+  shift
+  out=$(gh api "$@" --include) || status=$?
+  if ((status != 0)); then
+    {
+      echo "FAIL: could not ${what}"
+      tr -d '\r' <<< "${out}" \
+        | grep -iE '^(HTTP/|x-github-request-id:|x-accepted-github-permissions:)' || true
+    } >&2
+    return "${status}"
+  fi
+  awk 'body { print; next } /^\r?$/ { body = 1 }' <<< "${out}"
+}
+
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
-  gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
+  forge "move the staging ref ${staging} to ${GITHUB_SHA}" \
+    "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method PATCH -f sha="${GITHUB_SHA}" -F force=true > /dev/null
 else
-  gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+  forge "create the staging ref ${staging} at ${GITHUB_SHA}" \
+    "repos/${GITHUB_REPOSITORY}/git/refs" \
     --method POST -f "ref=refs/heads/${staging}" -f sha="${GITHUB_SHA}" > /dev/null
 fi
 cleanup() {
@@ -87,7 +115,8 @@ trap 'rc=$?; cleanup; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}
 # `lint:dco` matches the sign-off against the commit author verbatim, and
 # GitHub authors API-created commits as exactly this identity.
 bot_login="${APP_SLUG}[bot]"
-bot_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq '.id')
+bot_id=$(forge "read the bot user of ${APP_SLUG}" \
+  "users/${APP_SLUG}%5Bbot%5D" --jq '.id')
 bot="${bot_login} <${bot_id}+${bot_login}@users.noreply.github.com>"
 signoff="Signed-off-by: ${bot}"
 
@@ -145,15 +174,17 @@ print(json.dumps({
 PY
 )
 
-oid=$(printf '%s' "${request}" | gh api graphql --input - \
-  --jq '.data.createCommitOnBranch.commit.oid')
+oid=$(printf '%s' "${request}" \
+  | forge "create the release commit on ${staging}" graphql --input - \
+    --jq '.data.createCommitOnBranch.commit.oid')
 if [[ -z ${oid} ]]; then
   echo "FAIL: the API returned no commit" >&2
   exit 1
 fi
 
 # Prove the point of all this rather than assuming it.
-verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${oid}" \
+verified=$(forge "read back the release commit ${oid}" \
+  "repos/${GITHUB_REPOSITORY}/commits/${oid}" \
   --jq '.commit.verification.verified')
 if [[ ${verified} != "true" ]]; then
   echo "FAIL: release commit ${oid} is unsigned; the PR would be unmergeable" >&2
@@ -164,10 +195,12 @@ fi
 # a tree equal to main, so an open PR stays open and simply shows a
 # force-push.
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1; then
-  gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
+  forge "move ${branch} to the release commit ${oid}" \
+    "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
     --method PATCH -f sha="${oid}" -F force=true > /dev/null
 else
-  gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+  forge "create ${branch} at the release commit ${oid}" \
+    "repos/${GITHUB_REPOSITORY}/git/refs" \
     --method POST -f "ref=refs/heads/${branch}" -f sha="${oid}" > /dev/null
 fi
 echo "committed ${oid} to ${branch}, signature verified"

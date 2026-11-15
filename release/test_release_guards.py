@@ -535,6 +535,21 @@ class OpenReleasePrInputs(unittest.TestCase):
 RELEASE_FORGE_STUB = """#!/usr/bin/env bash
 set -uo pipefail
 log() { printf '%s\\n' "$*" >> "${STATE}/calls"; }
+# A call made with --include gets what the real gh prints first: the
+# status line and headers, CRLF-terminated, then a blank line. A call
+# named in ${STATE}/refuse is refused the way the forge refused #633.
+headers() {
+  [[ " $* " == *" --include "* ]] || return 0
+  printf 'HTTP/2.0 %s\r\nX-Github-Request-Id: STUB:633\r\n' "${status:-200 OK}"
+  printf 'X-Accepted-Github-Permissions: contents=write\r\n\r\n'
+}
+refused() {
+  [[ -f ${STATE}/refuse ]] && grep -qxF "$1" "${STATE}/refuse" || return 1
+  status="403 Forbidden" headers "${@:2}"
+  echo '{"message":"Resource not accessible by integration","status":"403"}'
+  echo "gh: Resource not accessible by integration (HTTP 403)" >&2
+  exit 1
+}
 if [[ ${1:-} == api && ${2:-} == graphql ]]; then
   if [[ "$*" == *defaultBranchRef* ]]; then
     log graphql head
@@ -544,18 +559,23 @@ if [[ ${1:-} == api && ${2:-} == graphql ]]; then
   fi
   if grep -q createCommitOnBranch; then
     log graphql createCommitOnBranch
+    refused "graphql createCommitOnBranch" "$@"
+    headers "$@"
     echo "${OID}"
     exit 0
   fi
 fi
 if [[ ${1:-} == api ]]; then
   path=$2 method=GET
+  args=("$@")
   shift 2
   while [[ $# -gt 0 ]]; do
     if [[ $1 == --method ]]; then method=$2; fi
     shift
   done
   log "${method} ${path}"
+  refused "${method} ${path}" "${args[@]}"
+  [[ ${method} == GET && ${path} == */git/ref/heads/* ]] || headers "${args[@]}"
   case "${method} ${path}" in
     "GET users/"*) echo 4242 ;;
     "GET repos/"*"/commits/"*) echo true ;;
@@ -713,6 +733,55 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         self.assertIn("opened the release PR for v1.0.0", result.stdout)
         self.assertNotIn("moved", result.stdout)
         self.assertEqual(list(self.PROCEEDED), self.calls())
+
+    def test_a_refused_call_names_itself_and_what_the_forge_said(self) -> None:
+        """A 403 says which call was refused and carries the headers (#633).
+
+        Four runs died on the forge's one-line refusal with nothing to
+        say which of the script's calls it answered. Each row refuses
+        one call and asserts the run still fails, names that call, and
+        stops exactly there.
+        """
+        staging = f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next"
+        rows = (
+            (
+                f"POST repos/{FORGE_REPO}/git/refs",
+                "create the staging ref release-staging/next at " + self.PLANNED,
+                list(self.PROCEEDED[:3]),
+            ),
+            (
+                "GET users/org-tag-mint%5Bbot%5D",
+                "read the bot user of org-tag-mint",
+                [*self.PROCEEDED[:4], staging],
+            ),
+            (
+                "graphql createCommitOnBranch",
+                "create the release commit on release-staging/next",
+                [*self.PROCEEDED[:5], staging],
+            ),
+            (
+                f"GET repos/{FORGE_REPO}/commits/{self.OID}",
+                "read back the release commit " + self.OID,
+                [*self.PROCEEDED[:6], staging],
+            ),
+        )
+        for refuse, what, calls in rows:
+            with self.subTest(refused=refuse):
+                (self.state / "calls").unlink(missing_ok=True)
+                (self.state / "refuse").write_text(refuse + "\n")
+                self.forge(self.PLANNED)
+                result = self.run_executor()
+                self.assertEqual(1, result.returncode, result.stdout)
+                self.assertEqual(
+                    "gh: Resource not accessible by integration (HTTP 403)\n"
+                    f"FAIL: could not {what}\n"
+                    "HTTP/2.0 403 Forbidden\n"
+                    "X-Github-Request-Id: STUB:633\n"
+                    "X-Accepted-Github-Permissions: contents=write\n",
+                    result.stderr,
+                )
+                self.assertEqual("", result.stdout)
+                self.assertEqual(calls, self.calls())
 
     def test_head_moved_writes_nothing_and_says_why(self) -> None:
         """The measured race: the branch moved while the run was planning."""
