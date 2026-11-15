@@ -255,7 +255,10 @@ roll-forward.
   signer identity, or a monitoring failure — the run log distinguishes.
   An unexpected issuance is a stop-everything event: rotate nothing until
   you know how the identity was minted (the certificate names workflow,
-  repo, ref and commit).
+  repo, ref and commit). Two monitoring failures name themselves: a
+  monitor stopped at 25 minutes ends its log with every goroutine's
+  stack, and a run whose checkpoint did not advance while the log grew
+  says so beside the checkpoint's hash before and after.
 - **repro-check filed an issue**: the reproducibility audit did not pass
   for the class it rebuilt. Read the scope the run states before you
   diagnose, because the two finding kinds mean different things. A digest
