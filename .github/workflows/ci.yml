@@ -41,7 +41,7 @@ name: ci
         required: false
 
 permissions:
-  contents: read
+  contents: read # checkout of the caller and of the toolbelt
 
 jobs:
   # WHICH POSTGRES MAJORS GET A LEG (#1148). A matrix has to exist before

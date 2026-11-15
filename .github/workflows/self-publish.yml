@@ -50,8 +50,8 @@ jobs:
       # startup, before any `if:` skips a class, so a caller that grants
       # less than the whole file demands dies as startup_failure with no
       # jobs and no log. Measured on v1.2.0, this repo's first
-      # self-publish. The template stub's "harmless if unused" comment
-      # exists for exactly this.
+      # self-publish. The template stub's permissions comment says so
+      # for exactly this reason.
       contents: read # the build checks out this repository at the tag
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
