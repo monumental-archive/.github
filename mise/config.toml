@@ -2017,15 +2017,24 @@ dir = "{{cwd}}"
 # all, so the "a belt beside it" test skips them rather than exempting
 # them. A consumer running a foreign belt is the design, not a defect.
 #
-# What it CANNOT see: which belt supplies the task BODIES is a second,
-# independently resolved thing, and the two disagree in practice — same
-# clone, `mise tasks info` naming the tree's own config while
-# ORG_BELT_DIR named another checkout. A guard living in a task body
-# cannot catch the case where the body itself came from the stale belt:
-# a belt predating this task simply has no task to run. That gap closes
-# once the machine belt carries this, and the failure text names the
-# `mise tasks info` Source line so the other axis stays checkable by
-# hand. Deterministic, no network — belongs in `ci`.
+# Which belt supplies the task BODIES is a second, independently
+# resolved thing, and the two disagree in practice — same clone, `mise
+# tasks info` naming the tree's own config while ORG_BELT_DIR named
+# another checkout. Worse in a git worktree nested inside its main
+# checkout (where the desktop app makes them): mise walks up from the
+# working directory, finds the MAIN checkout's mise/config.toml as a
+# parent config, and it outranks MISE_GLOBAL_CONFIG_FILE — so a lane
+# changed a task, ran the gate green, and had tested the old body
+# (#1232). So the task reads its OWN Source first and reds when it is
+# not this tree's mise/config.toml. Whichever body mise resolved is the
+# one running, so this works precisely when the wrong belt answers —
+# provided that belt carries it; a belt predating the check has nothing
+# to run, and that gap closes as the machine belt moves. The delivered
+# hooks set MISE_CEILING_PATHS to the tree's parent, so a push never
+# loads a config above the tree, and the remedy below carries the same
+# ceiling. In CI the workspace's mise/config.toml is a local config and
+# outranks `.org-canon`'s global one, so the Source there is the
+# workspace tree's. Deterministic, no network — belongs in `ci`.
 run = '''
 if [[ ! -f mise/config.toml || ! -f mise/clippy.toml ]]; then
   echo "lint:belt-tree: no belt in this tree, skipped"
@@ -2034,7 +2043,31 @@ fi
 # The remedy is literal text for a human to paste: $PWD must reach them
 # unexpanded, so the single quotes are the point, not an oversight.
 # shellcheck disable=SC2016
-remedy='    MISE_GLOBAL_CONFIG_FILE="$PWD/mise/config.toml" mise run ci'
+remedy='    MISE_CEILING_PATHS="$(dirname "$PWD")" MISE_GLOBAL_CONFIG_FILE="$PWD/mise/config.toml" mise run ci'
+# Which config supplied the body now running. --json for the absolute
+# path: the plain listing abbreviates $HOME to `~`. Both sides through
+# `pwd -P`, so a symlinked parent (macOS /tmp) is not a false red.
+# Guarded, not left to errexit: a mise that cannot answer would kill
+# the task one line above any message saying so.
+own=$(mise tasks info lint:belt-tree --json 2> /dev/null \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["source"])') || own=""
+want="$(cd -P mise && pwd)/config.toml"
+got=""
+own_dir=${own%/*}
+if [[ -n ${own} && -d ${own_dir} ]]; then
+  own_dir=$(cd -P "${own_dir}" && pwd)
+  got="${own_dir}/${own##*/}"
+fi
+if [[ ${got} != "${want}" ]]; then
+  echo "lint:belt-tree: the task bodies running this gate come from" >&2
+  echo "  another tree's belt, not this one's (#1232):" >&2
+  echo "    Source:       ${own}" >&2
+  echo "    this tree's:  ${want}" >&2
+  echo "  mise loaded a config above this tree. Re-run with the ceiling:" >&2
+  echo "${remedy}" >&2
+  exit 1
+fi
+echo "lint:belt-tree: task bodies from ${own}"
 if [[ -z ${ORG_BELT_DIR:-} || ! -d ${ORG_BELT_DIR} ]]; then
   echo "lint:belt-tree: ORG_BELT_DIR is unset or names no directory —" >&2
   echo "  the belt cannot locate itself, so no delivered config any task" >&2

@@ -10,6 +10,16 @@
 #       configs:
 #         - lefthook/org-hooks.yml
 # Then once per clone: lefthook install
+#
+# Every job that runs mise sets MISE_CEILING_PATHS to the parent of the
+# tree's top level first (#1232). mise walks up from the working
+# directory and loads every config it finds, so a worktree nested inside
+# its main checkout (where the desktop app makes them) ran the MAIN
+# checkout's tasks and config — a parent config outranks even
+# MISE_GLOBAL_CONFIG_FILE — and a hook went green on a task body the
+# change had already replaced. The ceiling makes mise load nothing above
+# the tree being committed or pushed, nested or not. It is computed per
+# job because lefthook's `env:` takes literals only.
 
 ---
 pre-commit:
@@ -20,9 +30,13 @@ pre-commit:
   parallel: true
   jobs:
     - name: typos
-      run: mise run lint:typos
+      run: >-
+        MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
+        mise run lint:typos
     - name: actionlint
-      run: mise run lint:actions
+      run: >-
+        MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
+        mise run lint:actions
 
 commit-msg:
   jobs:
@@ -31,7 +45,9 @@ commit-msg:
     # its own. The task composes the org's config with this repo's
     # ORG_COMMIT_SCOPES and passes the result to committed.
     - name: committed
-      run: ORG_COMMIT_MSG_FILE={1} mise run commits:check
+      run: >-
+        MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
+        ORG_COMMIT_MSG_FILE={1} mise run commits:check
     # Catch a missing DCO sign-off here rather than at push, where the fix
     # is an amend or a rebase instead of just redoing the commit.
     - name: dco
@@ -45,5 +61,7 @@ commit-msg:
 pre-push:
   jobs:
     - name: ci
-      run: mise run ci
+      run: >-
+        MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
+        mise run ci
 ...
