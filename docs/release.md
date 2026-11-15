@@ -823,9 +823,27 @@ inconsistency before edtf v1.3.1 met it.
 
 `build-rust-crate.yml` now emits the plan, over the very tarballs
 `cargo package` wrote and `cargo publish` will upload: the packaged set
-is the class's scope after the caller's excludes, and the subject
-manifest is hashed from the same listing, so the planned set and the
-signed set cannot differ.
+is every workspace member, the caller's excludes included (below), and
+the subject manifest is hashed from the same listing, so the planned
+set and the signed set cannot differ.
+
+**`exclude` means only "this job cannot compile it"; publishing is
+Cargo's `publish` key** (#1273). The input used to mean both, and a
+caller could not say one without the other: edtf excludes
+`edtf-postgres` because the crate job has no pgrx environment, and the
+class read that as "never publish" — so the crate's page stayed at
+1.2.3, pointing at the repository it had left. Now an excluded member
+is left out of `cargo test` and of the verified `cargo package`, and a
+second `cargo package --workspace --no-verify` writes its `.crate`
+without compiling it; that run rewrites every verified crate too, and
+the step fails unless each comes out byte-identical. Its compile check
+is the class that owns it. `publish-rust-crate.yml` takes no input: it
+publishes every workspace member whose `publish` key names crates.io,
+which is what `cargo publish --workspace` does by itself. A member that
+must not publish says `publish = false` in its own manifest, as any
+Rust project would; the class never guesses which members are
+extensions, and there is no second input for a question Cargo already
+answers.
 
 The document is `sbom-cargo-<package>-crate` and the artifact
 `<package>-crate`. The suffix is not decoration. `sbom-cargo-` is also

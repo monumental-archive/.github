@@ -13,16 +13,11 @@
 name: publish-rust-crate
 
 "on":
-  workflow_call:
-    inputs:
-      exclude:
-        # forwarding: universal
-        description: >
-          Comma-separated workspace members this class must not touch —
-          the same list the build declared.
-        required: false
-        type: string
-        default: ""
+  # No inputs (#1273). The set to publish is Cargo's own: every
+  # workspace member whose `publish` key names crates.io. publish.yml's
+  # `exclude` says only what the build job cannot compile, and a member
+  # that must not publish says `publish = false` in its own manifest.
+  workflow_call: {}
 
 permissions: {}
 
@@ -78,17 +73,6 @@ jobs:
           version: 2026.11.4
           cache: false
 
-      - name: Resolve the exclusion flags
-        env:
-          UNTRUSTED_EXCLUDE: ${{ inputs.exclude }}
-        run: |
-          set -euo pipefail
-          flags=""
-          IFS=',' read -ra members <<< "${UNTRUSTED_EXCLUDE// /}"
-          for m in "${members[@]}"; do
-            if [[ -n ${m} ]]; then flags="${flags} --exclude ${m}"; fi
-          done
-          echo "EXCLUDE_FLAGS=${flags}" >> "${GITHUB_ENV}"
       - name: Publish
         # Resumable: a crate already at this version is a completed step,
         # not a failure. crates.io is yank-only, so re-running a partly
@@ -109,11 +93,9 @@ jobs:
           #
           # 1. The members this run would publish: workspace members with
           # crates.io among their registries (`publish` null means any),
-          # less the caller's exclusions, with their versions.
-          excluded=" "
-          for word in ${EXCLUDE_FLAGS}; do
-            if [[ ${word} != --exclude ]]; then excluded="${excluded}${word} "; fi
-          done
+          # with their versions. Nothing else narrows it (#1273): a member
+          # the build could not compile still publishes unless its own
+          # manifest says `publish = false`.
           metadata=$(cargo metadata --format-version 1 --no-deps --locked)
           members=$(jq -r '
             .workspace_members as $ws
@@ -136,7 +118,6 @@ jobs:
           pending=0
           while IFS=$'\t' read -r name version; do
             [[ -n ${name} ]] || continue
-            if [[ ${excluded} == *" ${name} "* ]]; then continue; fi
             lower=$(tr '[:upper:]' '[:lower:]' <<< "${name}")
             case ${#lower} in
               1) path="1/${lower}" ;;
@@ -252,5 +233,5 @@ jobs:
           # rather than reusing one.
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           CARGO_REGISTRY_TOKEN="${token}" \
-            cargo publish --workspace --locked --no-verify ${EXCLUDE_FLAGS} ${skip_flags}
+            cargo publish --workspace --locked --no-verify ${skip_flags}
 ...

@@ -206,7 +206,12 @@ name: publish
       exclude:
         description: >
           Comma-separated workspace members the rust-crate and rust-binary
-          classes must not touch — the pgrx-extension crate above all.
+          build jobs cannot compile — the pgrx-extension crate above all.
+          rust-binary does not build them; rust-crate neither tests nor
+          verifies them, but still packages them. It does not affect
+          publishing: whether a member reaches crates.io is its own
+          Cargo `publish` key, so a member that must not publish says
+          `publish = false` (#1273).
         required: false
         type: string
         default: ""
@@ -907,8 +912,6 @@ jobs:
     permissions:
       contents: read # checkout for cargo publish
       id-token: write # crates.io trusted publishing, no token secret
-    with:
-      exclude: ${{ inputs.exclude }}
 
   # phase: build
   build-oci:
