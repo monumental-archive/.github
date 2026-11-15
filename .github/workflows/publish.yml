@@ -626,12 +626,34 @@ jobs:
           # branch so no path can leave it unstated.
           inventories='[""]'
           binaries_speak=1
+          go_binary=0
+          planned=()
           for class in ${CLASSES//,/ }; do
             case "${class}" in
-              go-binary | oci-image) ;;
-              *) binaries_speak=0 ;;
+              go-binary) go_binary=1 ;;
+              oci-image) ;;
+              *)
+                binaries_speak=0
+                planned+=("${class}")
+                ;;
             esac
           done
+          # The reverse of #775's shape, refused the same way and before
+          # either branch is taken: go-binary beside a plan-emitting class
+          # would send the run down the plan branch, where the go-binary
+          # leg has no plan to offer, and the release would publish green
+          # with an inventory that omits the Go binaries (.github#784).
+          # Deleted in the change that gives the go-binary leg a plan.
+          if ((go_binary == 1 && binaries_speak == 0)); then
+            beside=$(
+              IFS=','
+              echo "${planned[*]}"
+            )
+            emsg="go-binary cannot yet ship beside ${beside}: the inventory would omit the Go binaries'"
+            emsg+=" packages (.github#784)"
+            echo "::error::${emsg}"
+            exit 1
+          fi
           if [[ -n ${BINARIES_DIR:-} && ${binaries_speak} -eq 1 ]]; then
             # The oci-image class is in the binaries-speak set because an
             # image whose contents are the shipped Go binaries adds no
