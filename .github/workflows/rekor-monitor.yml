@@ -65,6 +65,11 @@ jobs:
     name: Watch the log for the signer identity
     runs-on: ubuntu-26.04
     timeout-minutes: 15
+    # The audit App's credentials live in this environment, as they do
+    # for audit.yml's legs; the reconciler reads the forge with that
+    # App's token (#1250). The environment carries no protection rules
+    # and no branch policy, so it gates nothing here.
+    environment: audit
     env:
       # Fulcio's certificate transparency log: every certificate Fulcio
       # issues is logged here (RFC 6962 API, `get-sth`/`get-entries`).
