@@ -679,8 +679,33 @@ def index(stmts):
     return funcs, named, other, order
 
 
-prev_stmts = split_statements(read(prev_path))
-new_stmts = split_statements(read(new_path))
+# The PostgreSQL floor block (#1274) is packaging, not schema: the build
+# prepends it to every script that installs or updates to a release,
+# AFTER `cargo pgrx package`, so a previous release's shipped schema
+# begins with it and no package build (this script's candidate
+# included) ever emits it. It is dropped from the previous schema
+# before the diff, and only as the one leading statement: the tag is
+# reserved, so anywhere else in either schema it is a refusal, never
+# something stripped or diffed.
+FLOOR_TAG = "pgrx_floor"
+FLOOR_BLOCK = re.compile(r"\ADO \$pgrx_floor\$\n.*?\n\$pgrx_floor\$;\n+", re.S)
+prev_text = read(prev_path)
+floor = FLOOR_BLOCK.match(prev_text)
+if floor:
+    prev_text = prev_text[floor.end():]
+if FLOOR_TAG in prev_text:
+    sys.exit(
+        f"FAIL: previous schema {ext}--{prev_v}.sql uses the reserved"
+        f" ${FLOOR_TAG}$ tag other than as its one leading floor block"
+    )
+new_text = read(new_path)
+if FLOOR_TAG in new_text:
+    sys.exit(
+        f"FAIL: candidate schema {ext}--{new_v}.sql carries the reserved"
+        f" ${FLOOR_TAG}$ tag; the floor block is packaging, never schema"
+    )
+prev_stmts = split_statements(prev_text)
+new_stmts = split_statements(new_text)
 p_funcs, p_named, p_other, p_order = index(prev_stmts)
 n_funcs, n_named, n_other, n_order = index(new_stmts)
 

@@ -1178,6 +1178,12 @@ correctness-by-patching; this is the same knowledge by design):
   `ALTER EXTENSION UPDATE` — the path executes, not merely exists.
   Majors the previous release did not ship skip execution: only
   installations that can exist can be stranded.
+- **The floor block is packaging, not schema** (#1274): a previous
+  release's shipped `<ext>--<prev>.sql` begins with the PostgreSQL
+  floor block (below), and the candidate, a package build, never
+  carries it. The derivation drops it from the previous schema before
+  the diff, and only as the one leading statement: its dollar-quote tag
+  is reserved, so anywhere else, in either schema, it is a refusal.
 - **The installable set is recorded, not re-inferred** (#825): the same
   forge walk that picks the predecessor also answers, for every version
   the upgrade graph names, whether a non-draft release still carries its
