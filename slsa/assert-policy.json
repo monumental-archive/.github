@@ -22,7 +22,7 @@
       {
         "repo": "monumental-archive-db",
         "tracks": ["source", "build"],
-        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. The dependency track is deliberately absent, not forgotten — that track's enforcement is the release path's commit point refusing an undecided advisory (publish.yml's VEX leg), and the continuous archetype has no such leg, so claiming the track here would claim a mechanism that does not run on this repository's path (#717)",
+        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. The dependency track is deliberately absent, not forgotten, and the reason changed on 2026-11-15: the continuous archetype has its commit point (#717) and this repository has published through it since its stub landed (#670), so the mechanism runs — but the level walk reads the stream's digests and finds no inventory attestation and no decision document on them, so the cell it would publish is unmeasured. The track is declared when a judge can read its evidence, not when the mechanism exists",
         "surfaces": [
           {
             "kind": "continuous-digest",
