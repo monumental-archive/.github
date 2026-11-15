@@ -257,6 +257,32 @@ for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
   [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | sed -n 1p \
     | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'" || true)"
 done
+# A continuous publisher (#1303) pushes an image on every push and has
+# no publish stub, so no class above implies it. Its stub is the
+# tracked file the canon's policy names (evidence.continuous.stubPath)
+# when it CALLS the canon's continuous.yml — stubUses followed by that
+# same path, which is where the callee lives in the canon. Both
+# strings are read from slsa/assert-policy.json, never restated here.
+# The image is the repository's name, lowercased: continuous.yml's own
+# rule (`ghcr.io/<lowercased GITHUB_REPOSITORY>`), read from the same
+# fact the build reads. The canon itself matches nothing: its
+# continuous.yml is the callee and calls no continuous.yml.
+policy="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}/slsa/assert-policy.json"
+cont_path=$(jq -r '.evidence.continuous.stubPath // empty' "${policy}")
+cont_uses=$(jq -r '.evidence.continuous.stubUses // empty' "${policy}")
+if [[ -z ${cont_path} || -z ${cont_uses} ]]; then
+  echo "fix:badges: ${policy} declares no evidence.continuous stubPath and stubUses" >&2
+  exit 1
+fi
+cont_img=""
+if git ls-files --error-unmatch -- "${cont_path}" > /dev/null 2>&1; then
+  # `|| true` per the note at the top: a stub with no such call is a
+  # repository that publishes no continuous image, not an error.
+  cont_call=$(grep -E "^[^#]*uses:" "${cont_path}" | grep -F -- "${cont_uses}${cont_path}@" || true)
+  if [[ -n ${cont_call} ]]; then
+    cont_img=$(tr "[:upper:]" "[:lower:]" <<< "${repo}")
+  fi
+fi
 reg_live=""
 if [[ ${classes} == *rust-crate* ]]; then
   crate=$(state crates)
@@ -279,7 +305,7 @@ if [[ ${classes} == *wasm-npm* ]]; then
   emsg+="(https://www.npmjs.com/package/@monumental-archive/${pkg})"
   add "${emsg}"
 fi
-if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* ]]; then
+if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* || -n ${cont_img} ]]; then
   reg_live=1
   # The shield names the IMAGE and links its package page — an
   # org-level packages link returns 200 for any org that exists and
@@ -308,6 +334,11 @@ if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* ]]; then
       echo "fix:badges: classes include pgrx-extension but the publish stub names no extension-crate-dir" >&2
       exit 1
     }
+  fi
+  # After the pgrx guard, so a continuous image cannot stand in for the
+  # extension-crate-dir that guard asks for.
+  if [[ -n ${cont_img} ]]; then
+    imgs="${imgs} ${cont_img}"
   fi
   seen=" "
   for img in ${imgs} $(states_extra ghcr); do
