@@ -100,6 +100,9 @@ jobs:
             exit 1
           fi
           git apply "${patch}"
+          # PLANT: short read, the loop cut to one page (#1237)
+          sed -i 's/next += int64(len(page))/next += int64(len(page)); break/' pkg/ct/v1/monitor.go
+          grep -n 'break' pkg/ct/v1/monitor.go
           git diff --stat
       # unattested-path: setup-go's `cache:` defaults to true, so this
       # step warms a Go module cache — same verdict as the checkpoint
@@ -182,7 +185,6 @@ jobs:
       # 13 runs on 2026-11-14 (#1145). The output is kept for the read
       # check below.
       - name: Run the monitor once
-        if: ${{ github.run_id == '0' }} # PLANT: unchanged checkpoint (#1237)
         env:
           GOTRACEBACK: all
         run: |
