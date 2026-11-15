@@ -215,6 +215,7 @@ jobs:
       # itself (#1145). The monitor returns exit 0 without writing the
       # checkpoint when its identity search fails; this is what catches it.
       - name: Record the checkpoint after the run
+        id: after
         if: ${{ always() && steps.before.outcome == 'success' }}
         env:
           BEFORE_SHA256: ${{ steps.before.outputs.sha256 }}
@@ -276,8 +277,12 @@ jobs:
       # builds and signs nothing, and the entry holds only the
       # monitor's own CT-log checkpoint. Marked per declaration
       # (#676); the restore step's marker does not carry the file.
+      # Saved only when the check above passed: a checkpoint that
+      # advanced over entries the monitor did not read must not become
+      # the next run's starting point, or those entries are never read
+      # (#1237). A failed run leaves the previous checkpoint in place.
       - name: Save the advanced checkpoint
-        if: always()
+        if: ${{ always() && steps.after.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: checkpoint_log.txt
