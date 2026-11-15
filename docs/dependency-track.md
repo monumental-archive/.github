@@ -320,6 +320,34 @@ stream has none of and which would manufacture the version surface the
 archetype's guard exists to refuse. One decision per publish rather
 than one per version is the only count that changes.
 
+**Where a continuous publish's evidence is published (#1279).** A
+stream has no release to carry assets, so its dependency evidence is
+attested over the images themselves, keyed by each per-architecture
+digest the index lists, and nothing a judge or a stranger needs is
+left in the run artifact, which expires after seven days:
+
+| Document | Subject | Predicate type |
+| --- | --- | --- |
+| The SPDX inventory of that digest | each per-architecture digest | `https://spdx.dev/Document` |
+| The derived OpenVEX decisions | each per-architecture digest | `https://openvex.dev/ns/v0.2.0` |
+| The `release-decision/v1` claim | both digests, plus the file hashes | the org's `release-decision/v1` |
+
+All three are signed by the commit point under the canon's own
+identity,
+`https://github.com/monumental-archive/.github/.github/workflows/continuous.yml@<ref>`,
+and not by the org signer: the signer isolates provenance, and the
+commit point runs no caller code. The roster therefore names both
+workflows in a continuous surface's `identity` pattern
+(`slsa/assert-policy.json`), because that pattern only says whose
+bundles the level walk reads; who may sign provenance is a separate
+field and is not widened by it. Each document is in its standard form
+under its standard type, so a stranger reads the decisions with
+`gh attestation verify oci://<image>@<digest> --owner
+monumental-archive --predicate-type https://openvex.dev/ns/v0.2.0`.
+The decisions are attested only when `stele derive vex` wrote a
+document: with no decision applying it writes none, and an empty
+OpenVEX document would assert nothing.
+
 **A refused continuous publish is loud, and that is load-bearing.** The
 scheduled rebuild exists to remediate base layers nothing can pin, so
 blocking one preserves more exposure than shipping it
