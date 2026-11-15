@@ -99,6 +99,8 @@ jobs:
           # repetition. Token in the header, never the URL — URLs land
           # in logs.
           retry=(--retry 5 --retry-all-errors --retry-max-time 120)
+          # Transient-only retries, for a read whose 404 is an answer.
+          retry_transient=(--retry 5 --retry-max-time 120)
           api() {
             # Authenticated non-idempotent call (POST/DELETE): one shot.
             curl -sSf -H "User-Agent: ${ORG_USER_AGENT}" \
@@ -141,6 +143,33 @@ jobs:
             } >> "${GITHUB_STEP_SUMMARY}"
             echo "::notice::DOI $1 (concept $2)"
           }
+          verify_published() {
+            # The PUBLISHED record states every licence (#1246). The
+            # draft's read-back is checked before the publish; that the
+            # legacy publish keeps the list could not be measured without
+            # minting, and a record over one of two licences is the false
+            # claim #316 removed. It cannot be unpublished — the red is
+            # the signal. Every green exit after a publish passes here,
+            # the #484 convergence paths included; a read that cannot be
+            # completed is unverified, never a pass. One id: no read.
+            # $1 is the published record id, $2 its DOI.
+            if ((${#lic_ids[@]} < 2)); then return 0; fi
+            local want got
+            want=$(jq -c '[.[].id]' <<< "${rights}")
+            # shellcheck disable=SC2310,SC2312  # a failed read must reach
+            # the unverified error below, not abort via set -e
+            if ! got=$(pub_get -H 'Accept: application/vnd.inveniordm.v1+json' "${BASE_URL}/api/records/$1" \
+              | jq -ce '[.metadata.rights[].id]'); then
+              echo "::error::the published record $1 could not be read back — the licences of DOI $2 are unverified"
+              exit 1
+            fi
+            if [[ ${got} != "${want}" ]]; then
+              emsg="the published record's licences read back as ${got}, not ${want} — the DOI $2 states"
+              emsg+=" less than CITATION.cff"
+              echo "::error::${emsg}"
+              exit 1
+            fi
+          }
           repo="${GITHUB_REPOSITORY}"
           title="${repo}"
 
@@ -171,24 +200,68 @@ jobs:
             exit 1
           fi
           creators=$(printf '%s\n' "${name_lines}" | jq -R '{name: .}' | jq -sc '.')
+          # The record states every licence the tree states (#1246). The
+          # expression is plain SPDX ids joined by OR or AND; anything
+          # richer (WITH, parentheses) has no faithful place in a list of
+          # licence ids and refuses by name. A single id is the
+          # degenerate case and takes the same path.
           licence=$(sed -n 's/^license: //p' cff.yaml | sed -n 1p)
-          if [[ ! ${licence} =~ ^[A-Za-z0-9.+-]+$ ]]; then
-            emsg="CITATION.cff license '${licence}' is not a single SPDX id — Zenodo's vocabulary holds ids, not"
-            emsg+=" expressions"
-            echo "::error::${emsg}"
+          lic_refuse() {
+            echo "::error::CITATION.cff license '${licence}' $1 — the record carries plain SPDX ids joined by OR or AND"
             exit 1
-          fi
+          }
+          if [[ -z ${licence//[[:space:]]/} ]]; then lic_refuse "is empty"; fi
+          if [[ ${licence} == *[\(\)]* ]]; then lic_refuse "uses parentheses"; fi
+          read -ra lic_words <<< "${licence}"
+          lic_ids=()
+          for i in "${!lic_words[@]}"; do
+            w="${lic_words[i]}"
+            if ((i % 2 == 1)); then
+              if [[ ${w} != OR && ${w} != AND ]]; then lic_refuse "joins ids with '${w}'"; fi
+            elif [[ ${w} == WITH || ${w} == OR || ${w} == AND ]]; then
+              lic_refuse "has '${w}' where an id belongs"
+            elif [[ ! ${w} =~ ^[A-Za-z0-9.+-]+$ ]]; then
+              lic_refuse "has '${w}', which is not an SPDX id"
+            else
+              lic_ids+=("$(tr "[:upper:]" "[:lower:]" <<< "${w}")")
+            fi
+          done
+          if ((${#lic_ids[@]} == 0)) || ((${#lic_words[@]} % 2 == 0)); then lic_refuse "is not a complete expression"; fi
+          # Each id must be in Zenodo's licence vocabulary, asked before
+          # any deposit exists. A public read (no token); curl retries
+          # transient answers itself, and a 404 is the vocabulary's no.
+          for id in "${lic_ids[@]}"; do
+            vcode=$(curl -sS "${retry_transient[@]}" -o /dev/null -w '%{http_code}' \
+              -H "User-Agent: ${ORG_USER_AGENT}" "${BASE_URL}/api/vocabularies/licenses/${id}")
+            if [[ ${vcode} == 404 ]]; then
+              echo "::error::licence id '${id}' (from CITATION.cff '${licence}') is not in Zenodo's licence vocabulary"
+              exit 1
+            elif [[ ${vcode} != 200 ]]; then
+              echo "::error::Zenodo's licence vocabulary answered HTTP ${vcode} for '${id}' — not minting on an unchecked licence"
+              exit 1
+            fi
+          done
+          rights=$(printf '%s\n' "${lic_ids[@]}" | jq -R '{id: .}' | jq -sc '.')
           desc="Release ${TAG} of ${repo}. Built, proven and signed by the monumental-archive"
           desc+=" release pipeline; verification instructions ship with the GitHub release."
+          # A list of licences cannot say OR from AND, so the expression
+          # itself is quoted, exactly as CITATION.cff has it.
+          if ((${#lic_ids[@]} > 1)); then
+            desc+=" Licensed under the SPDX expression ${licence}, as CITATION.cff states it."
+          fi
+          # The legacy deposit's `license` is ONE string (measured,
+          # #1246: a list answers 400). It carries the first id; for more
+          # than one, the record's `rights` are set to the full list
+          # through the InvenioRDM draft below, before the publish.
           metadata=$(jq -nc \
             --arg title "${title}" \
             --arg desc "${desc}" \
             --arg version "${UNTRUSTED_VERSION}" \
-            --arg licence "${licence}" \
+            --arg licence "${lic_ids[0]}" \
             --argjson creators "${creators}" \
             '{metadata: {title: $title, upload_type: "software",
               description: $desc, version: $version, creators: $creators,
-              access_right: "open", license: ($licence | ascii_downcase)}}')
+              access_right: "open", license: $licence}}')
 
           # The concept, from the identifier CITATION.cff records — a
           # direct fetch that resolves the concept record to its latest
@@ -233,6 +306,7 @@ jobs:
               exit 1
             fi
             if [[ ${latest_version} == "${UNTRUSTED_VERSION}" ]]; then
+              verify_published "${latest}" "${latest_doi}"
               done_summary "${latest_doi}" "${latest_concept}" \
                 "**Already published** — a previous attempt minted this version's DOI; this run converged on it (#484)."
               exit 0
@@ -273,6 +347,30 @@ jobs:
             --data-binary @source.tar.gz -H 'Content-Type: application/octet-stream' > /dev/null
           api_idem -X PUT "${self}" -H 'Content-Type: application/json' \
             --data "${metadata}" > /dev/null
+          # More than one licence: the legacy PUT above set ONE (and
+          # collapses any list already on the draft), so the full list
+          # goes on through the InvenioRDM draft of the same record —
+          # the deposition id IS the record id. Measured on production
+          # Zenodo, drafts only (#1246): without the InvenioRDM media
+          # type /api/records answers in the legacy shape and drops
+          # `rights`; with it, a read-modify-write of {metadata, files}
+          # sets both ids and changes nothing else on the draft (access,
+          # pids and custom_fields read back identical). A PUT, so it
+          # retries; the read-back must name exactly these ids.
+          recid=$(jq -r '.id' <<< "${dep}")
+          if ((${#lic_ids[@]} > 1)); then
+            rdm_draft="${BASE_URL}/api/records/${recid}/draft"
+            rdm=(-H 'Accept: application/vnd.inveniordm.v1+json')
+            rdm_body=$(api_idem "${rdm[@]}" "${rdm_draft}" \
+              | jq -c --argjson r "${rights}" '{metadata: (.metadata | .rights = $r), files: .files}')
+            got=$(api_idem -X PUT "${rdm[@]}" -H 'Content-Type: application/json' \
+              --data "${rdm_body}" "${rdm_draft}" | jq -c '[.metadata.rights[].id]')
+            want=$(jq -c '[.[].id]' <<< "${rights}")
+            if [[ ${got} != "${want}" ]]; then
+              echo "::error::the draft's licences read back as ${got}, not the ${rights} CITATION.cff states — not publishing"
+              exit 1
+            fi
+          fi
           # The commitment point. One POST, no curl retry — then the
           # truth is the archive's state, never curl's exit code (#484,
           # measured on v1.34.1: the publish landed and the response was
@@ -297,8 +395,9 @@ jobs:
             for attempt in 1 2 3; do
               # shellcheck disable=SC2310,SC2312  # a failed re-read means
               # "not recovered", handled by the fall-through — never abort
-              if IFS=$'\t' read -r now_doi now_concept _ now_version < <(oracle) \
+              if IFS=$'\t' read -r now_doi now_concept now_recid now_version < <(oracle) \
                 && [[ ${now_version} == "${UNTRUSTED_VERSION}" ]]; then
+                verify_published "${now_recid}" "${now_doi}"
                 done_summary "${now_doi}" "${now_concept}" \
                   "**Published despite a lost response** — the publish landed; this run recovered the DOI from the record (#484)."
                 exit 0
@@ -316,5 +415,6 @@ jobs:
           (\`identifiers:\`, via fix:citation's preserved field) before
           the next release; later mints resolve the concept from it."
           fi
+          verify_published "${recid}" "${doi}"
           done_summary "${doi}" "${concept}" "${first}"
 ...
