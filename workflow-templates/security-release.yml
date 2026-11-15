@@ -46,7 +46,7 @@ jobs:
       contents: read # this repository's contents and releases, read-only
       attestations: read # this repository's attestations, read-only
       pull-requests: read # this repository's pull requests, read-only
-      issues: write # the "main does not remedy it" issue, the one outcome needing a maintainer
+      issues: write # this repository's issues, read and write
     secrets:
       app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }}
 ...

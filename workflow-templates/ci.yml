@@ -1,7 +1,6 @@
 # The org gate. This stub is a repo's entire CI obligation: everything else
 # (linters, versions, enforcement) arrives via the shared workflow and the
-# toolbelt it pins. Update the SHA when moving to a newer gate; once the
-# .github repo cuts releases, Renovate manages this pin like any other.
+# toolbelt it pins. Renovate manages the pin below like any other.
 ---
 name: gate
 
@@ -51,6 +50,6 @@ jobs:
       # (the gate.yml convention; lint:nested-permissions enforces it —
       # measured on stele's standup, where this template's silence was
       # the one gate finding).
-      contents: read # checkout of this repo and of the toolbelt
+      contents: read # this repository's contents, read-only
     uses: monumental-archive/.github/.github/workflows/ci.yml@7d8202c84e05bf833fe4277c3d27238ece285fab # v1.67.2
 ...

@@ -26,9 +26,9 @@ jobs:
     with:
       smoke-test: scripts/image-smoke.sh
     permissions:
-      contents: read # build checks out this repository
-      packages: write # push per-arch images and the manifest list
-      id-token: write # the signer mints the Sigstore identity
-      attestations: write # the signer persists the provenance
-      artifact-metadata: write # the signer creates the storage record
+      contents: read # this repository's contents, read-only
+      packages: write # this repository's packages, read and write
+      id-token: write # an OIDC token for this run
+      attestations: write # this repository's attestations, read and write
+      artifact-metadata: write # this repository's artifact storage records, read and write
 ...
