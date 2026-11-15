@@ -480,10 +480,12 @@ class LeavesTheCallersGitAlone(unittest.TestCase):
 
         self.assertEqual(0, run.returncode, run.stderr)
         self.assertIn(f"Ran {expected} tests", run.stderr)
-        # Exactly one skip, this row declining to recurse. Any other skip
-        # means the rows that shell out to git did not run, and an index
-        # nothing touched would then prove nothing at all.
-        self.assertIn("OK (skipped=1)", run.stderr)
+        # Exactly one skip, this row declining to recurse, plus the floor
+        # rows where this machine has no Postgres: they start a server
+        # and never touch git. Any other skip means the rows that shell
+        # out to git did not run, and an index nothing touched would then
+        # prove nothing at all.
+        self.assertIn(f"OK (skipped={expected_inner_skips()})", run.stderr)
         self.assertEqual(before_files, after_files, "the shared index lost files")
         self.assertEqual("", status, f"the linked worktree is dirty:\n{status}")
         self.assertEqual(before_digest, after_digest, "the shared index was rewritten")
@@ -1179,6 +1181,20 @@ class WarnsBelowTheFloor(unittest.TestCase):
         """A newer server than the build's prints nothing."""
         result = self.psql(self.block(self.num - 1))
         self.assertEqual((0, ""), (result.returncode, result.stderr))
+
+
+def expected_inner_skips() -> int:
+    """Count the skips a whole-suite run of this file owes (#857 row).
+
+    Returns:
+        One for the row declining to recurse, plus every floor row
+        where this machine has no Postgres to start.
+
+    """
+    skips = 1
+    if not (PG_BIN or ON_RUNNER):
+        skips += len(unittest.TestLoader().getTestCaseNames(WarnsBelowTheFloor))
+    return skips
 
 
 if __name__ == "__main__":
