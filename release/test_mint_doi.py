@@ -103,6 +103,20 @@ case "${method} ${path}" in
   "PUT /api/files/b/"*) body='{}' ;;
   "PUT /api/deposit/depositions/101") body='{}' ;;
   "GET /api/records/101/draft") body=$(cat "${STUB_DRAFT}") ;;
+  "GET /api/records/100/versions/latest")
+    body='{"doi":"10.5281/zenodo.101","conceptdoi":"10.5281/zenodo.100",
+      "id":101,"metadata":{"version":"1.3.5"}}'
+    ;;
+  "GET /api/records/101")
+    # The published record: the captured draft's shape, with the rights
+    # STUB_PUBLISHED names - or a read that fails as curl -f would.
+    case ${STUB_PUBLISHED} in
+      both) ids='[{"id": "mit"}, {"id": "apache-2.0"}]' ;;
+      one) ids='[{"id": "mit"}]' ;;
+      *) echo "curl: (22) The requested URL returned error: 503" >&2; exit 22 ;;
+    esac
+    body=$(jq -c --argjson r "${ids}" '.metadata.rights = $r' "${STUB_DRAFT}")
+    ;;
   "PUT /api/records/101/draft")
     if [[ -n ${STUB_COLLAPSE:-} ]]; then
       body=$(jq -c '.metadata.rights |= .[:1]' <<< "${data}")
@@ -150,23 +164,33 @@ def step_body() -> str:
     return "\n".join(body) + "\n"
 
 
-def citation(licence: str) -> str:
-    """Render this repository's CITATION.cff as a first mint with `licence`.
+def citation(licence: str, concept: str | None = None) -> str:
+    """Render this repository's CITATION.cff with `licence`.
+
+    Args:
+        licence: the `license:` line's value.
+        concept: the concept DOI to record; None renders a first mint.
 
     Returns:
-        The file's text: the identifiers block dropped, `license:` set.
+        The file's text: `license:` set, the identifiers block dropped
+        or its value replaced.
 
     """
     out = []
     skipping = False
-    for line in (CANON / "CITATION.cff").read_text().splitlines():
-        if line.startswith("identifiers:"):
+    for raw in (CANON / "CITATION.cff").read_text().splitlines():
+        line = raw
+        if line.startswith("identifiers:") and concept is None:
             skipping = True
             continue
         if skipping and line.startswith(" "):
             continue
         skipping = False
-        out.append(f"license: {licence}" if line.startswith("license:") else line)
+        if line.startswith("license:"):
+            line = f"license: {licence}"
+        elif concept is not None and line.strip().startswith("value:"):
+            line = f"{line.split('value:')[0]}value: {concept}"
+        out.append(line)
     return "\n".join(out) + "\n"
 
 
@@ -193,6 +217,16 @@ class Run:
             if m == method and u.startswith(url)
         ]
 
+    def published_reads(self) -> list[tuple[str, str, str]]:
+        """Pick out the reads of the published record itself.
+
+        Returns:
+            Each GET of /api/records/101 - not its draft - as logged.
+
+        """
+        url = "https://zenodo.org/api/records/101"
+        return [r for r in self.requests if r[0] == "GET" and r[1] == url]
+
     def legacy_metadata(self) -> dict[str, object]:
         """Decode the legacy deposit's metadata PUT.
 
@@ -204,13 +238,24 @@ class Run:
         return json.loads(self.bodies[i])["metadata"]
 
 
-def run_step(licence: str, *, collapse: bool = False) -> Run:
+def run_step(
+    licence: str,
+    *,
+    collapse: bool = False,
+    published: str = "both",
+    concept: str | None = None,
+) -> Run:
     """Run the shipped body with CITATION.cff stating `licence`.
 
     Args:
         licence: the `license:` line's value.
         collapse: make the stub's RDM PUT answer one licence, as if the
             write had not taken.
+        published: what a read of the published record answers - "both"
+            ids, "one", or "fail".
+        concept: a concept DOI for CITATION.cff to record; its latest
+            version is this release, so the run is a rerun after a
+            publish (#484).
 
     Returns:
         The run's status, output and the stub's request log.
@@ -225,7 +270,7 @@ def run_step(licence: str, *, collapse: bool = False) -> Run:
             (stubs / name).write_text(body)
             (stubs / name).chmod(0o755)
         cff = tmp / "cff.b64"
-        cff.write_text(base64.b64encode(citation(licence).encode()).decode())
+        cff.write_text(base64.b64encode(citation(licence, concept).encode()).decode())
         summary = tmp / "summary"
         env = {
             **os.environ,
@@ -242,6 +287,7 @@ def run_step(licence: str, *, collapse: bool = False) -> Run:
             "STUB_CFF_B64": str(cff),
             "STUB_DRAFT": str(DRAFT),
             "STUB_VOCAB": VOCAB,
+            "STUB_PUBLISHED": published,
         }
         if collapse:
             env["STUB_COLLAPSE"] = "1"
@@ -372,6 +418,16 @@ class TwoIds(unittest.TestCase):
         self.assertEqual(sent["metadata"], draft["metadata"])
         self.assertEqual(sent["files"], draft["files"])
 
+    def test_the_published_record_is_read_back_after_the_publish(self) -> None:
+        """The published record's licences are read, with the RDM shape."""
+        (publish,) = self.run_.made(
+            "POST", "/api/deposit/depositions/101/actions/publish"
+        )
+        reads = self.run_.published_reads()
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0][2], RDM)
+        self.assertGreater(self.run_.requests.index(reads[0]), publish)
+
     def test_and_takes_the_same_path(self) -> None:
         """AND is accepted and quoted the same way as OR."""
         run = run_step("MIT AND Apache-2.0")
@@ -380,6 +436,64 @@ class TwoIds(unittest.TestCase):
             "Licensed under the SPDX expression MIT AND Apache-2.0,",
             run.legacy_metadata()["description"],
         )
+
+
+TWO = '["mit","apache-2.0"]'
+SHORT = (
+    "::error::the published record's licences read back as"
+    f' ["mit"], not {TWO} — the DOI 10.5281/zenodo.101 states less than'
+    " CITATION.cff"
+)
+
+
+class ThePublishedRecord(unittest.TestCase):
+    """The published record is verified; it cannot be unpublished."""
+
+    def test_a_published_record_with_one_id_is_red_by_name(self) -> None:
+        """Publish kept one of two ids: red, naming the DOI."""
+        run = run_step("MIT OR Apache-2.0", published="one")
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(SHORT, run.stdout)
+        self.assertEqual(
+            len(run.made("POST", "/api/deposit/depositions/101/actions/publish")),
+            1,
+        )
+
+    def test_a_read_that_fails_is_unverified_never_a_pass(self) -> None:
+        """A published record that cannot be read is red as unverified."""
+        run = run_step("MIT OR Apache-2.0", published="fail")
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::the published record 101 could not be read back — the"
+            " licences of DOI 10.5281/zenodo.101 are unverified",
+            run.stdout,
+        )
+        self.assertNotIn("::notice::DOI", run.stdout)
+
+    def test_a_rerun_over_a_published_record_with_one_id_is_red(self) -> None:
+        """The #484 convergence path reaches the same check."""
+        run = run_step(
+            "MIT OR Apache-2.0", published="one", concept="10.5281/zenodo.100"
+        )
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(SHORT, run.stdout)
+        self.assertEqual(run.made("POST", "/api/deposit/depositions"), [])
+        self.assertEqual(len(run.published_reads()), 1)
+
+    def test_a_rerun_over_a_published_record_with_both_is_green(self) -> None:
+        """A rerun over a complete record converges green."""
+        run = run_step("MIT OR Apache-2.0", concept="10.5281/zenodo.100")
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("::notice::DOI 10.5281/zenodo.101", run.stdout)
+        self.assertEqual(run.made("POST", "/api/deposit/depositions"), [])
+        self.assertEqual(len(run.published_reads()), 1)
+
+    def test_one_id_never_reads_the_published_record(self) -> None:
+        """0BSD, fresh or rerun: no published read, whatever it would say."""
+        for concept in (None, "10.5281/zenodo.100"):
+            run = run_step("0BSD", published="fail", concept=concept)
+            self.assertEqual(run.returncode, 0, run.stdout)
+            self.assertEqual(run.published_reads(), [])
 
 
 class Refusals(unittest.TestCase):
