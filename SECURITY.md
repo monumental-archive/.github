@@ -18,6 +18,8 @@ public issues, discussions, or pull requests.
   we will coordinate any public disclosure with you.
 - Fixed vulnerabilities are disclosed through GitHub security advisories on
   the affected repository once a patched release is available.
+- You will be credited by name in the advisory and the release notes
+  unless you ask not to be named.
 
 ## Supported versions and end of life
 

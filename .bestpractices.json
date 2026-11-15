@@ -368,7 +368,7 @@
   "vulnerabilities_fixed_60_days_status": "Met",
   "vulnerabilities_fixed_60_days_justification": "There are no known unpatched vulnerabilities of medium or higher severity. Renovate and Dependabot open updates continuously, trivy runs in the gate, and the dependency track records VEX decisions keyed by package and version.",
   "vulnerability_report_credit_status": "N/A",
-  "vulnerability_report_credit_justification": "No vulnerability report has been resolved in the last 12 months, so there is no reporter to credit. SECURITY.md commits to crediting reporters who do not request anonymity.",
+  "vulnerability_report_credit_justification": "No vulnerability report has been resolved in the last 12 months, so there is no reporter to credit. SECURITY.md commits to crediting reporters who do not request anonymity. https://github.com/monumental-archive/.github/blob/main/SECURITY.md#what-to-expect",
   "vulnerability_report_private_status": "Met",
   "vulnerability_report_private_justification": "GitHub private vulnerability reporting is enabled and is the documented channel in SECURITY.md, so reports stay private until an advisory is published. https://github.com/monumental-archive/.github/blob/main/SECURITY.md",
   "vulnerability_report_process_status": "Met",
