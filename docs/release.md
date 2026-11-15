@@ -862,10 +862,10 @@ it, so any release declaring the class refused pre-publish — correctly
 inconsistency before edtf v1.3.1 met it.
 
 `build-rust-crate.yml` now emits the plan, over the very tarballs
-`cargo package` wrote and `cargo publish` will upload: the packaged set
-is every workspace member, the caller's excludes included (below), and
-the subject manifest is hashed from the same listing, so the planned
-set and the signed set cannot differ.
+`cargo package` wrote and `cargo publish` will upload: the set is
+exactly the members crates.io will receive, the caller's excludes
+included (below), and the subject manifest is hashed from the same
+listing, so the planned set and the signed set cannot differ.
 
 **`exclude` means only "this job cannot compile it"; publishing is
 Cargo's `publish` key** (#1273). The input used to mean both, and a
@@ -884,6 +884,22 @@ must not publish says `publish = false` in its own manifest, as any
 Rust project would; the class never guesses which members are
 extensions, and there is no second input for a question Cargo already
 answers.
+
+**The subjects are what crates.io receives, from one definition**
+(#1310). `cargo package` does not read the `publish` key: it writes a
+`.crate` for a `publish = false` member too, and the class once hashed,
+planned and uploaded that crate as a release subject, which the
+verifier then fetches from `static.crates.io` and cannot find, after
+the release's other crates are public. `release/crates-io-members.sh`
+is now the one answer to "which crates does this release ship": the
+workspace members whose `publish` key names crates.io (unset means any
+registry). The Package step removes every packaged crate it does not
+name, one log line each, before anything hashes it, and fails by name
+on one it names that cargo did not write; the publisher uploads the
+same set. A member that does not publish is still tested and still
+verified by `cargo package`; only its `.crate` leaves the subject set.
+The verifier is not taught to skip a crate crates.io does not serve:
+a crate that failed to publish would read the same.
 
 The document is `sbom-cargo-<package>-crate` and the artifact
 `<package>-crate`. The suffix is not decoration. `sbom-cargo-` is also

@@ -23,9 +23,12 @@ bytes no longer read it; a member with `publish = false` (`"publish":
 WHAT RUNS. The `run:` body of the `Publish` step, cut out of
 `.github/workflows/publish-rust-crate.yml` as shipped, under `bash -c`,
 with stub `curl` and `cargo` first on PATH. `jq` and `sha256sum` are the
-real ones. The stub `curl` answers the index from a directory laid out
-like the index host, so a wrong path layout reads as 404 and fails the
-"some published" row rather than passing quietly.
+real ones, and so is release/crates-io-members.sh, the member set
+the step shares with the build (#1310), reached through a
+`.org-canon` link as the canon action lays it out. The stub `curl`
+answers the index from a directory laid out like the index host, so a
+wrong path layout reads as 404 and fails the "some published" row
+rather than passing quietly.
 
 FIXTURES ARE REAL. Captured 2026-11-15:
 
@@ -213,6 +216,9 @@ def run_publish(
                 dest.with_name(dest.name + ".status").write_text(answer)
             else:
                 shutil.copy(INDEX / answer, dest)
+        # The canon action links the resolved canon tree here; the
+        # step reaches the shared member helper through it (#1310).
+        (tmp / ".org-canon").symlink_to(CANON)
         metadata = tmp / "metadata.json"
         captured = json.loads(METADATA.read_text())
         for package in captured["packages"]:
