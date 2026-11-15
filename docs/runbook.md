@@ -251,18 +251,35 @@ roll-forward.
 - **Tag-mint App dead**: break-glass in
   [`continuity.md`](continuity.md) — an org owner disables the tag
   ruleset, mints by hand, re-enables, records the event.
-- **rekor-monitor filed an issue**: a monitoring failure of the watch
-  on Fulcio's certificate transparency log for the signer identity. A
-  match is printed in the run log (`Found <SAN> <issuer> <index>`) and
-  pages nobody; the org's own releases match on every signing. An
-  unexpected issuance is a stop-everything event: rotate nothing until
-  you know how the identity was minted (the certificate names workflow,
-  repo, ref and commit). Three monitoring failures name themselves: a
-  monitor stopped at 10 minutes ends its log with every goroutine's
-  stack; a run whose checkpoint did not advance while the log's signed
-  tree head moved says so beside the checkpoint's hash before and
-  after; and a short read, where the monitor read fewer entries than
-  the checkpoint advanced over, quotes both ranges. A run with no
+- **rekor-monitor: a certificate did not reconcile** (an issue titled
+  `certificate at CT index N did not reconcile (<conditions>)`, one per
+  certificate): the monitor found a certificate for the signer identity
+  that the reconciler could not tie to a signing the org performed
+  (#1250). This is a stop-everything event: rotate nothing until you
+  know how the identity was minted. The issue names the failed
+  conditions and quotes every claim read from the CT entry, including
+  the run that asked for it (`run_invocation_uri`). Open that run. If it
+  is a real org signing, the failed condition is the defect: a canon
+  workflow at an unmerged commit (`canon-branch`), a signer pinned
+  outside the canon (`direct`), or a reusable workflow outside the canon
+  in a signing run (`foreign`). Fix that and record it on the issue. If
+  the run does not exist, or is not the org's (`run`), or never called
+  the signer at that digest (`signer-in-run`, `chain`), treat the
+  identity as compromised: find the push to the signer repository that
+  minted it (`signer-branch` names a commit off its default branch).
+  Reconciled certificates are listed in the run summary, one line each,
+  with the run and the canon file that asked for the signer.
+- **rekor-monitor filed an issue** (`rekor-monitor: failure (run N)`):
+  the watch on Fulcio's certificate transparency log failed, or a
+  certificate it found could not be reconciled because a forge read did
+  not complete (403, throttling). A failed run saves no checkpoint, so
+  the next run reads the same range again. Three monitoring failures
+  name themselves: a monitor stopped at 10 minutes ends its log with
+  every goroutine's stack; a run whose checkpoint did not advance
+  while the log's signed tree head moved says so beside the
+  checkpoint's hash before and after; and a short read, where the
+  monitor read fewer entries than the checkpoint advanced over, quotes
+  both ranges. A run with no
   checkpoint to restore refuses to start; dispatch with `found=true` to
   found one at the log's head, knowingly. A backlog of several hours
   (missed runs) can exceed the runner's memory, since the monitor holds
