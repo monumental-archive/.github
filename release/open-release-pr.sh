@@ -54,6 +54,12 @@ for v in version title branch staging; do
   }
 done
 
+# Nothing is written for a plan the default branch has moved past
+# (#1260); the reasoning lives with the check.
+# shellcheck source=release/planned-head.sh
+. "$(dirname "${BASH_SOURCE[0]}")/planned-head.sh"
+require_planned_head
+
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method PATCH -f sha="${GITHUB_SHA}" -F force=true > /dev/null

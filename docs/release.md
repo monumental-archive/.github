@@ -118,6 +118,11 @@ Phase-1 rules, all proven in iiif-server:
   a version-keyed branch opens a second pull request whenever new commits
   change the bump, abandoning the first at a version that will never ship.
   The version belongs in the title, body and commit, not the ref.
+- **A run acts only for the commit `main` is at** (#1260). Both
+  Release-PR writers read the default branch's head before their first
+  write and write nothing if it has moved since the run planned. When
+  `main` holds nothing to release, an open Release PR is closed with a
+  comment saying so; the branch is left for the next release.
 - The release PR's commit is created through the GitHub API
   (`createCommitOnBranch`), so it is signed by GitHub and satisfies
   `required_signatures`; the script asserts the commit is `verified` rather

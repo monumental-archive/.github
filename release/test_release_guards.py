@@ -17,10 +17,14 @@ that cannot be told from a pass is the defect.
 WHAT IS NOT HERE, deliberately. `derive-coverage-floor.sh`'s measuring
 branch shells into the belt's `coverage-measure.sh`; `rust-build.sh`
 past its input validation runs a real `cargo auditable build`;
-`tag-release.sh` past its refusals signs with gitsign and pushes;
-`open-release-pr.sh` past its validation calls the GraphQL API. None of
-those is a pure input-to-decision mapping, and #772 kept the container
-integration legs with release-lab on exactly that line.
+`tag-release.sh` past its refusals signs with gitsign and pushes.
+None of those is a pure input-to-decision mapping, and #772 kept the
+container integration legs with release-lab on exactly that line.
+`open-release-pr.sh` is the exception that proves it: its one decision
+past validation — is this plan still for the commit the default branch
+is at (#1260) — is read from the forge, so its rows drive the real
+script end to end against a stubbed `gh` and assert the forge calls it
+made, in order, not only how it exited.
 
 WHAT IT MAY NOT TOUCH. Every subprocess here takes `hermetic_env()`,
 the contract `test_generate_pgrx_upgrade.py` states for #857: every
@@ -47,6 +51,31 @@ BASH = shutil.which("bash")
 GIT = shutil.which("git")
 JQ = shutil.which("jq")
 STELE = shutil.which("stele")
+
+
+def _parses(script: str) -> bool:
+    """Report whether this machine's bash can parse a release script.
+
+    macOS ships bash 3.2, which cannot parse a heredoc carrying an
+    apostrophe inside `$(...)` — open-release-pr.sh's PR body is one.
+    The runner's bash can. A row that drives the script past that line
+    therefore runs where the release path runs and skips, by name,
+    where it never will; the rows that stop before it run everywhere.
+
+    Returns:
+        True when `bash -n` accepts the script.
+
+    """
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    return (
+        subprocess.run(
+            [BASH, "-n", str(RELEASE / script)], capture_output=True, check=False
+        ).returncode
+        == 0
+    )
+
+
+OPEN_PR_PARSES = _parses("open-release-pr.sh")
 
 # `gh` for the record-draft rows. It answers the two reads the script
 # makes from a fixture the test writes, and captures the notes body the
@@ -495,6 +524,383 @@ class OpenReleasePrInputs(unittest.TestCase):
             result = run_script("open-release-pr.sh", Path(d), **self._full_env(plan))
         self.assertEqual(1, result.returncode)
         self.assertIn("FAIL: the plan states no branch", result.stderr)
+
+
+# `gh` for the Release-PR rows: a forge that answers every call
+# open-release-pr.sh and close-release-pr.sh make and records each one,
+# one normalised line per call, so a row can assert exactly what was
+# written and in what order. A ref read answers "absent", so a run that
+# proceeds creates both refs; the open pull requests are a state file,
+# and a close keeps the comment it was given.
+RELEASE_FORGE_STUB = """#!/usr/bin/env bash
+set -uo pipefail
+log() { printf '%s\\n' "$*" >> "${STATE}/calls"; }
+if [[ ${1:-} == api && ${2:-} == graphql ]]; then
+  if [[ "$*" == *defaultBranchRef* ]]; then
+    log graphql head
+    [[ -f ${STATE}/head ]] || { echo "gh: HTTP 502" >&2; exit 1; }
+    cat "${STATE}/head"
+    exit 0
+  fi
+  if grep -q createCommitOnBranch; then
+    log graphql createCommitOnBranch
+    echo "${OID}"
+    exit 0
+  fi
+fi
+if [[ ${1:-} == api ]]; then
+  path=$2 method=GET
+  shift 2
+  while [[ $# -gt 0 ]]; do
+    if [[ $1 == --method ]]; then method=$2; fi
+    shift
+  done
+  log "${method} ${path}"
+  case "${method} ${path}" in
+    "GET users/"*) echo 4242 ;;
+    "GET repos/"*"/commits/"*) echo true ;;
+    "GET repos/"*"/git/ref/heads/"*) exit 1 ;;
+  esac
+  exit 0
+fi
+if [[ ${1:-} == pr ]]; then
+  case "${2:-}" in
+    list)
+      log pr list
+      [[ ! -f ${STATE}/list-fails ]] || { echo "gh: HTTP 502" >&2; exit 1; }
+      [[ ! -f ${STATE}/open ]] || cat "${STATE}/open"
+      ;;
+    create) log pr create ;;
+    close)
+      log pr close "$3"
+      number=$3
+      while [[ $# -gt 0 ]]; do
+        if [[ $1 == --comment ]]; then
+          printf '%s' "$2" > "${STATE}/comment-${number}"
+        fi
+        shift
+      done
+      ;;
+    *) log pr "$2" "$3" ;;
+  esac
+  exit 0
+fi
+echo "gh stub: refusing '$*'" >&2
+exit 1
+"""
+
+
+FORGE_REPO = "monumental-archive/under-test"
+
+
+class ReleaseForge:
+    """A fixture directory with the stubbed forge first on PATH."""
+
+    REPO = FORGE_REPO
+    PLANNED = "a" * 40
+    MOVED = "b" * 40
+
+    def setUp(self) -> None:
+        """Lay out a fixture with a stub on PATH and an empty call log."""
+        self._dir = TemporaryDirectory()
+        self.root = Path(self._dir.name)
+        self.state = self.root / "state"
+        self.state.mkdir()
+        bindir = self.root / "stubbin"
+        bindir.mkdir()
+        gh = bindir / "gh"
+        gh.write_text(RELEASE_FORGE_STUB)
+        gh.chmod(0o755)
+        self.bindir = bindir
+
+    def tearDown(self) -> None:
+        """Remove the fixture."""
+        self._dir.cleanup()
+
+    def forge(self, head: str | None) -> None:
+        """Set the default branch head the forge reports; None fails the read."""
+        marker = self.state / "head"
+        if head is None:
+            marker.unlink(missing_ok=True)
+        else:
+            marker.write_text(head + "\n")
+
+    def calls(self) -> list[str]:
+        """Read back the forge calls the script made, in order.
+
+        Returns:
+            One normalised line per call; empty when it made none.
+
+        """
+        log = self.state / "calls"
+        return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+    def stubbed(self) -> dict[str, str]:
+        """Build the inputs every row shares: the stub, its state, the repo.
+
+        Returns:
+            The environment a row extends with the script's own inputs.
+
+        """
+        return {
+            "PATH": f"{self.bindir}:{os.environ['PATH']}",
+            "STATE": str(self.state),
+            # Not a credential: the stub reads none.
+            "GH_TOKEN": "stub",
+            "GITHUB_REPOSITORY": self.REPO,
+            "GITHUB_SHA": self.PLANNED,
+            "GITHUB_EVENT_NAME": "push",
+        }
+
+
+@unittest.skipUnless(JQ, "jq reads the plan document")
+class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
+    """A run acts only for the commit the default branch is at (#1260).
+
+    Measured on edtf: a maintain job planned at one commit, the Release
+    PR merged ten minutes into its run, and the job then opened a second
+    Release PR for the version that had just shipped. Every row here
+    runs the real script against a stubbed forge.
+    """
+
+    OID = "c" * 40
+    PROCEEDED = (
+        "graphql head",
+        f"GET repos/{FORGE_REPO}/git/ref/heads/release-staging/next",
+        f"POST repos/{FORGE_REPO}/git/refs",
+        "GET users/org-tag-mint%5Bbot%5D",
+        "graphql createCommitOnBranch",
+        f"GET repos/{FORGE_REPO}/commits/{OID}",
+        f"GET repos/{FORGE_REPO}/git/ref/heads/release/next",
+        f"POST repos/{FORGE_REPO}/git/refs",
+        "pr list",
+        "pr create",
+        f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
+    )
+
+    def setUp(self) -> None:
+        """Lay out the stubbed forge and a plan with something to release."""
+        super().setUp()
+        self.plan = self.root / "plan.json"
+        self.plan.write_text(
+            '{"schema": 7, "release": true, "version": "1.0.0",'
+            ' "commit": {"subject": "chore: release v1.0.0",'
+            ' "additions": [], "deletions": []},'
+            ' "branch": {"name": "release/next",'
+            ' "staging": "release-staging/next"}}'
+        )
+
+    def run_executor(
+        self, cwd: Path | None = None, **env: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Run open-release-pr.sh for a push of PLANNED.
+
+        Returns:
+            The completed process.
+
+        """
+        inputs = self.stubbed()
+        inputs.update(OID=self.OID, PLAN=str(self.plan), APP_SLUG="org-tag-mint")
+        inputs.update(env)
+        return run_script("open-release-pr.sh", cwd or self.root, **inputs)
+
+    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
+    def test_head_at_the_planned_commit_proceeds_as_today(self) -> None:
+        """The branch has not moved: the PR is opened exactly as before."""
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("opened the release PR for v1.0.0", result.stdout)
+        self.assertNotIn("moved", result.stdout)
+        self.assertEqual(list(self.PROCEEDED), self.calls())
+
+    def test_head_moved_writes_nothing_and_says_why(self) -> None:
+        """The measured race: the branch moved while the run was planning."""
+        self.forge(self.MOVED)
+        result = self.run_executor()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            f"main moved to {self.MOVED} while this run was planning;"
+            " the run for that commit maintains the Release PR\n",
+            result.stdout,
+        )
+        self.assertEqual(["graphql head"], self.calls())
+
+    def test_a_head_read_that_fails_is_never_read_as_unchanged(self) -> None:
+        """No answer, or an answer that is not a commit, fails by name."""
+        for label, head in (("refused", None), ("null", "null"), ("empty", "")):
+            with self.subTest(read=label):
+                (self.state / "calls").unlink(missing_ok=True)
+                self.forge(head)
+                result = self.run_executor()
+                self.assertEqual(1, result.returncode, result.stdout)
+                self.assertIn(
+                    f"FAIL: could not read the default branch head of {self.REPO}",
+                    result.stderr,
+                )
+                self.assertEqual("", result.stdout)
+                self.assertEqual(["graphql head"], self.calls())
+
+    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
+    @unittest.skipUnless(GIT, "the refresh compares against a checkout")
+    def test_a_release_refresh_compares_the_checked_out_commit(self) -> None:
+        """On release: published, GITHUB_SHA is the tag; HEAD is the plan's."""
+        repo = self.root / "repo"
+        repo.mkdir()
+        home = self.root / ".home"
+        home.mkdir()
+
+        def git(*args: str) -> str:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            return subprocess.run(
+                [GIT, *args],
+                cwd=repo,
+                env=hermetic_env(home),
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        git("init", "-q", ".")
+        git("config", "commit.gpgSign", "false")
+        git("config", "core.hooksPath", str(repo / ".githooks-none"))
+        git("commit", "-q", "--allow-empty", "-m", "fix: checked out")
+        checked_out = git("rev-parse", "HEAD")
+        tagged = self.PLANNED
+        self.assertNotEqual(tagged, checked_out)
+        cases = (
+            ("head is the checkout", checked_out, 0, "opened the release PR"),
+            ("head is the tag", tagged, 0, f"main moved to {tagged}"),
+        )
+        for label, head, status, said in cases:
+            with self.subTest(case=label):
+                (self.state / "calls").unlink(missing_ok=True)
+                self.forge(head)
+                result = self.run_executor(
+                    cwd=repo, GITHUB_EVENT_NAME="release", GITHUB_SHA=tagged
+                )
+                self.assertEqual(status, result.returncode, result.stderr)
+                self.assertIn(said, result.stdout)
+                expected = (
+                    list(self.PROCEEDED) if head == checked_out else ["graphql head"]
+                )
+                self.assertEqual(expected, self.calls())
+
+
+class CloseReleasePr(ReleaseForge, unittest.TestCase):
+    """Nothing to release means no Release PR (#1260).
+
+    The second half of the edtf measurement: the later run that found
+    nothing to release left the stale v1.3.4 PR standing. Each row runs
+    the real close-release-pr.sh against the stubbed forge and asserts
+    the calls it made and what it said, not only how it exited.
+    """
+
+    BRANCH = "release/next"
+
+    def close(self, **env: str) -> subprocess.CompletedProcess[str]:
+        """Run close-release-pr.sh for a push of PLANNED.
+
+        Returns:
+            The completed process.
+
+        """
+        inputs = self.stubbed()
+        inputs.update(RELEASE_BRANCH=self.BRANCH)
+        inputs.update(env)
+        return run_script("close-release-pr.sh", self.root, **inputs)
+
+    def comment(self, number: int) -> str:
+        """Read back the comment a close carried.
+
+        Returns:
+            The comment text, or the empty string when none was closed.
+
+        """
+        path = self.state / f"comment-{number}"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def test_an_open_release_pr_is_closed_with_the_comment(self) -> None:
+        """The stale PR is closed, once, saying why."""
+        self.forge(self.PLANNED)
+        (self.state / "open").write_text("245\n")
+        result = self.close()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["graphql head", "pr list", "pr close 245"], self.calls())
+        self.assertEqual(
+            f"main holds nothing to release at {self.PLANNED};"
+            " closed by the release workflow",
+            self.comment(245),
+        )
+        self.assertIn("closed PR #245", result.stdout)
+
+    def test_no_open_release_pr_writes_nothing(self) -> None:
+        """The quiet case says so and makes no write."""
+        self.forge(self.PLANNED)
+        result = self.close()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            f"no open Release PR on {self.BRANCH}; nothing to close\n", result.stdout
+        )
+        self.assertEqual(["graphql head", "pr list"], self.calls())
+
+    def test_head_moved_closes_nothing(self) -> None:
+        """A stale run must not close a PR a newer run just opened."""
+        self.forge(self.MOVED)
+        (self.state / "open").write_text("246\n")
+        result = self.close()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            f"main moved to {self.MOVED} while this run was planning;"
+            " the run for that commit maintains the Release PR\n",
+            result.stdout,
+        )
+        self.assertEqual(["graphql head"], self.calls())
+        self.assertEqual("", self.comment(246))
+
+    def test_a_head_read_that_fails_closes_nothing_and_fails(self) -> None:
+        """The same guard as the open path: an unread head is not a match."""
+        self.forge(None)
+        (self.state / "open").write_text("247\n")
+        result = self.close()
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            f"FAIL: could not read the default branch head of {self.REPO}",
+            result.stderr,
+        )
+        self.assertEqual(["graphql head"], self.calls())
+
+    def test_a_list_that_fails_is_never_read_as_none_open(self) -> None:
+        """An unread list would leave the stale PR looking like the quiet case."""
+        self.forge(self.PLANNED)
+        (self.state / "list-fails").write_text("")
+        result = self.close()
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            f"FAIL: could not list the open pull requests on {self.BRANCH}",
+            result.stderr,
+        )
+        self.assertNotIn("nothing to close", result.stdout)
+        self.assertEqual(["graphql head", "pr list"], self.calls())
+
+    def test_each_required_input_is_named_when_it_is_missing(self) -> None:
+        """No default branch name, repository or commit: each is named."""
+        self.forge(self.PLANNED)
+        for missing in (
+            "RELEASE_BRANCH",
+            "GH_TOKEN",
+            "GITHUB_REPOSITORY",
+            "GITHUB_SHA",
+        ):
+            with self.subTest(missing=missing):
+                (self.state / "calls").unlink(missing_ok=True)
+                inputs = self.stubbed()
+                inputs.update(RELEASE_BRANCH=self.BRANCH)
+                del inputs[missing]
+                result = run_script("close-release-pr.sh", self.root, **inputs)
+                self.assertEqual(1, result.returncode, result.stdout)
+                self.assertIn(missing, result.stderr)
+                self.assertEqual([], self.calls())
 
 
 @unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")

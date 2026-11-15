@@ -421,6 +421,32 @@ class TheTreeDecisions(unittest.TestCase):
         self.assertEqual("false", emitted["release"])
         self.assertNotIn("version", emitted)
 
+    def test_the_release_branch_is_emitted_on_both_paths_and_agrees(self) -> None:
+        """One spelling of the release branch, on both paths (#1260).
+
+        A nothing plan names no branch, so the step that closes a stale
+        Release PR reads the prepare step's `branch` output. On a release
+        the plan's own `.branch.name` must be that same value, or the
+        open and close legs would maintain different branches.
+        """
+        with TemporaryDirectory() as d:
+            tree = Tree(d)
+            result, releasing = tree.prepare()
+            planned = tree.plan()["branch"]["name"]
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("true", releasing["release"])
+        self.assertTrue(planned)
+        self.assertEqual(planned, releasing["branch"])
+        with TemporaryDirectory() as d:
+            tree = Tree(d)
+            tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
+            tree.write("docs/notes.md", "notes\n")
+            tree.commit("docs: write some notes")
+            result, quiet = tree.prepare()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("false", quiet["release"])
+        self.assertEqual(releasing["branch"], quiet["branch"])
+
     def test_a_leftover_next_sql_stub_refuses_with_the_remedy(self) -> None:
         """Derived state written by hand is a refusal, never a rename (#132).
 
