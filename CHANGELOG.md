@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.67.4](https://github.com/monumental-archive/.github/compare/v1.67.3...v1.67.4) - 2026-11-15
+
+### Fixed
+
+- update monumental-archive/signer to dd3d082 ([#1295](https://github.com/monumental-archive/.github/pull/1295))
+
 ## [1.67.3](https://github.com/monumental-archive/.github/compare/v1.67.2...v1.67.3) - 2026-11-15
 
 ### Fixed
