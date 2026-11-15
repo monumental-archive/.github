@@ -352,7 +352,8 @@ jobs:
           DO $pgrx_floor$
           BEGIN
             IF current_setting('server_version_num')::int < @NUM@ THEN
-              RAISE WARNING '@EXT@ @VERSION@ was built against PostgreSQL @XY@; this server is %. If loading fails below, update PostgreSQL to @XY@ or newer.',
+              RAISE WARNING '@EXT@ @VERSION@ was built against PostgreSQL @XY@; this server is %.'
+                ' If loading fails below, update PostgreSQL to @XY@ or newer.',
                 current_setting('server_version');
             END IF;
           END
@@ -419,7 +420,9 @@ jobs:
               chown -R postgres:postgres /build /out \
                 "$(/usr/bin/pg_config --pkglibdir)" \
                 "$(/usr/bin/pg_config --sharedir)/extension"
-              exec su -w PG,VERSION,CRATE_DIR,RUST_VERSION,PGRX_VERSION,AUDITABLE_VERSION,SOURCE_DATE_EPOCH,FLOOR_TEMPLATE,FLOOR_XY,FLOOR_NUM \
+              keep=PG,VERSION,CRATE_DIR,RUST_VERSION,PGRX_VERSION,AUDITABLE_VERSION,SOURCE_DATE_EPOCH
+              keep+=,FLOOR_TEMPLATE,FLOOR_XY,FLOOR_NUM
+              exec su -w "${keep}" \
                 postgres -s /bin/bash -c '\''
                 set -euo pipefail
                 export HOME=/var/lib/postgresql
