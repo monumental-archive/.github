@@ -30,7 +30,7 @@ fi
 cfg="$(mktemp)"
 # Not `exec committed`: that would replace this shell and the trap would
 # never fire, leaking a config file per commit on every developer machine.
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${cfg}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 cat "${ORG_BELT_DIR}/committed.toml" > "${cfg}"
 

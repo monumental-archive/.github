@@ -21,11 +21,23 @@ printed with every finding so the message hands over the lines to paste.
 An explicit non-zero exit keeps its code; an early `exit 0` sets the
 mark first, or it reads as the death it cannot be told apart from.
 
-Two rules, both facts about the text, read here because
+The printed guard is POSIX (#1251), so a `#!/bin/sh` script can carry
+it: on Ubuntu `/bin/sh` is dash, which has no `[[`, and on macOS it is
+bash 3.2, which has the defect. Measured on 3.2.57 and dash: an
+unset-variable death exits 1 under bash and keeps dash's own 2, a clean
+run exits 0, `exit 3` keeps 3. `rc=0` on the line before the trap is
+what tells shellcheck `rc` is assigned (it reads the references inside
+the trap string and not the assignment), so the shape needs no waiver.
+The bash form, `[[ ... ]]`, stays accepted where the shell is bash — a
+bash shebang, or a task body, which the belt runs under bash — and is
+red anywhere else: it does not run under the shell the script names.
+
+Three rules, all facts about the text, read here because
 `lint:bash-portability` is the lint that holds scripts to bash 3.2:
 
   - every `trap ... EXIT` carries the guard, verbatim around its
     cleanup;
+  - the bash form of the guard appears only where the shell is bash;
   - a script or task body with an EXIT trap ends on `org_done=1`.
 
 Shell files are read whole. Task bodies are read out of mise configs by
@@ -61,8 +73,15 @@ _SPEC.loader.exec_module(_BELT_SHELL)
 # handler rather than setting one, and owes nothing.
 TRAP_RE = re.compile(r"^\s*trap\s.*\bEXIT\b")
 RESET_RE = re.compile(r"^\s*trap\s+-\s")
-# The guard, verbatim around a cleanup of the script's own.
-GUARD_RE = re.compile(
+# The guard, verbatim around a cleanup of the script's own, in either
+# form: POSIX, valid under any `sh`, and bash's `[[ ]]`.
+POSIX_RE = re.compile(
+    r"^\s*trap 'rc=\$\?; .+; "
+    r'\[ -n "\$\{org_done:-\}" \] \|\| \[ "\$\{rc\}" -ne 0 \] \|\| rc=1; '
+    r'exit "\$\{rc\}"'
+    r"' EXIT\s*$",
+)
+BASH_RE = re.compile(
     r"^\s*trap 'rc=\$\?; .+; "
     r'\[\[ -n \$\{org_done:-\} \|\| \$\{rc\} -ne 0 \]\] \|\| rc=1; exit "\$\{rc\}"'
     r"' EXIT\s*$",
@@ -70,24 +89,34 @@ GUARD_RE = re.compile(
 # The mark, at top level, optionally followed by a comment.
 MARK_RE = re.compile(r"^org_done=1(?:\s+#.*)?\s*$")
 COMMENT_RE = re.compile(r"^\s*#")
+# A bash shebang: the interpreter, or `env`'s first argument, is `bash`.
+BASH_SHEBANG_RE = re.compile(r"^#!\s*\S*/(?:env\s+(?:-\S+\s+)*)?bash(?:\s|$)")
 
 # The guard as a script carries it, for the message and the table tests.
 GUARD = (
+    "trap 'rc=$?; {cleanup}; "
+    '[ -n "${{org_done:-}}" ] || [ "${{rc}}" -ne 0 ] || rc=1; exit "${{rc}}"'
+    "' EXIT"
+)
+# The bash form, accepted where the shell is bash and never printed.
+BASH_GUARD = (
     "trap 'rc=$?; {cleanup}; "
     '[[ -n ${{org_done:-}} || ${{rc}} -ne 0 ]] || rc=1; exit "${{rc}}"'
     "' EXIT"
 )
 # shellcheck reads the references inside a trap string and not the
-# assignment, so the guard reports SC2154 on `rc` without this (measured
-# on shellcheck 0.11.0 at the org's `enable=all`).
-DIRECTIVE = "# shellcheck disable=SC2154  # rc is assigned inside the trap string"
+# assignment, so without an assignment it can see, the guard reports
+# SC2154 on `rc` (measured on shellcheck 0.11.0 at the org's
+# `enable=all`). A plain assignment before the trap is that, and asks
+# no repository for a waiver.
+PREASSIGN = "rc=0"
 MARK = "org_done=1"
 SHAPE = f"""\
   on bash 3.2 (macOS) a script with an EXIT trap that dies on an unset
   variable exits 0 (#1233). The trap fails a run that never reached
   its last statement, and an explicit non-zero exit keeps its code:
 
-    {DIRECTIVE}
+    {PREASSIGN}
     {GUARD.format(cleanup="<cleanup>")}
     ...
     {MARK}
@@ -95,11 +124,20 @@ SHAPE = f"""\
   An early `exit 0` after the trap sets {MARK} first."""
 
 
-def findings(path: str, base: int, what: str, source: str) -> Iterator[str]:
+def findings(
+    path: str,
+    base: int,
+    what: str,
+    source: str,
+    *,
+    bash: bool,
+) -> Iterator[str]:
     """Judge one script: its EXIT traps, then its last statement.
 
     `base` is the file line before the script's first, so a finding in a
-    task body points at the line of the config that holds it.
+    task body points at the line of the config that holds it. `bash`
+    says whether the script runs under bash, where the `[[ ]]` form of
+    the guard is valid.
 
     Yields:
         One message per finding, as `path:line: [what]problem`.
@@ -115,10 +153,16 @@ def findings(path: str, base: int, what: str, source: str) -> Iterator[str]:
         if not TRAP_RE.match(line) or RESET_RE.match(line):
             continue
         traps += 1
-        if not GUARD_RE.match(line):
-            yield (
-                f"{path}:{base + lineno}: {what}EXIT trap without the completion guard"
-            )
+        if POSIX_RE.match(line):
+            continue
+        if BASH_RE.match(line):
+            if not bash:
+                yield (
+                    f"{path}:{base + lineno}: {what}EXIT trap guard uses [[ ]],"
+                    " which the script's shell does not run: it has no bash shebang"
+                )
+            continue
+        yield f"{path}:{base + lineno}: {what}EXIT trap without the completion guard"
     if traps and not MARK_RE.match(lines[last - 1]):
         yield (
             f"{path}:{base + last}: {what}has an EXIT trap and its last statement"
@@ -126,20 +170,24 @@ def findings(path: str, base: int, what: str, source: str) -> Iterator[str]:
         )
 
 
-def scripts(path: Path) -> Iterator[tuple[int, str, str]]:
+def scripts(path: Path) -> Iterator[tuple[int, str, str, bool]]:
     """Every script one file contributes, with where to point at it.
 
     Yields:
-        (base line, label, source): the whole file for shell, each task
-        body for a config. A `'''` body starts on the line after `run =`.
+        (base line, label, source, bash): the whole file for shell, each
+        task body for a config. A `'''` body starts on the line after
+        `run =`. A task body runs under the belt's bash; a file runs
+        under its shebang, and one without a bash shebang is not bash.
 
     """
     if path.suffix == ".toml":
         for body in _BELT_SHELL.read(path).bodies:
             base = body.run_line if body.delim else body.run_line - 1
-            yield base, f"task {body.name}: ", body.source
+            yield base, f"task {body.name}: ", body.source, True
     else:
-        yield 0, "", path.read_text(encoding="utf-8")
+        source = path.read_text(encoding="utf-8")
+        first = source.split("\n", 1)[0]
+        yield 0, "", source, bool(BASH_SHEBANG_RE.match(first))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -156,9 +204,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     found: list[str] = []
     checked = 0
     for name in args.files:
-        for base, what, source in scripts(Path(name)):
+        for base, what, source, bash in scripts(Path(name)):
             checked += 1
-            found.extend(findings(name, base, what, source))
+            found.extend(findings(name, base, what, source, bash=bash))
     if found:
         for line in found:
             print(f"exit-trap: {line}", file=sys.stderr)

@@ -38,7 +38,7 @@ org="monumental-archive"
 # so every failure reports.
 api_body=""
 api_err="$(mktemp)"
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${api_err}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 
 api_probe() {
