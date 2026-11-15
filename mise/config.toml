@@ -2581,6 +2581,16 @@ dir = "{{cwd}}"
 #                              _ne_bytes, because explicit endianness is
 #                              what reproducibility requires
 #   inline_asm_x86_intel_syntax — Rust's own asm! default is Intel
+#   unneeded_field_pattern   — bans `field: _` and demands `..`; rust
+#                              1.99's rest_pattern_accessible_field
+#                              bans `..` and demands `field: _`. Every
+#                              way of ignoring a field trips one of
+#                              them (measured at 1.99.1). Ruled for
+#                              the NEW lint, against the idiomatic
+#                              form: its reason is correctness — a
+#                              field added later must be handled at
+#                              every destructure — and this one's is
+#                              brevity (iiif-server#181)
 #   arbitrary_source_item_ordering — demands alphabetical source
 #                              items. The org has already decided
 #                              this question twice the other way, in

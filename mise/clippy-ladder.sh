@@ -24,7 +24,7 @@
 # properties of how the org runs clippy rather than pairs of lints that
 # contradict each other.
 
-# THE NAMED CONTRADICTIONS. An eleventh is one line, and every count a
+# THE NAMED CONTRADICTIONS. One more is one line, and every count a
 # task prints follows it — which is the point of the list being here
 # rather than spelled in prose. `docs/tooling-verdicts.md` is the counted
 # source and says why each one is mechanical rather than taste.
@@ -39,6 +39,7 @@ ORG_CLIPPY_CONTRADICTIONS=(
   little_endian_bytes
   arbitrary_source_item_ordering
   inline_asm_x86_intel_syntax
+  unneeded_field_pattern
 )
 
 org_clippy_ladder() { # -> the flags that ride clippy's `--`, on one line
@@ -68,7 +69,7 @@ org_clippy_ladder() { # -> the flags that ride clippy's `--`, on one line
 }
 
 # THE ONE FURTHER CONTRADICTION A PGRX EXTENSION CANNOT ESCAPE (#813).
-# Same test as the ten above — obeying the lint means disobeying
+# Same test as the list above — obeying the lint means disobeying
 # something else — and here the something else is pgrx itself.
 #
 # `tests_outside_test_module` demands `#[cfg(test)]`. pgrx demands
@@ -83,7 +84,7 @@ org_clippy_ladder() { # -> the flags that ride clippy's `--`, on one line
 # 73 findings were this lint, one per `#[pg_test]`, on a module carrying
 # exactly the cfg pgrx documents. It is named here rather than left to
 # seven `#[expect]` attributes in every pgrx crate in the org forever,
-# for the reason the ten above are named here: it is a property of the
+# for the reason the list above is named here: it is a property of the
 # tools, not a judgement about this code.
 ORG_CLIPPY_PGRX_CONTRADICTIONS=(
   tests_outside_test_module
