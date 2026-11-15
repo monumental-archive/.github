@@ -10,6 +10,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.67.1](https://github.com/monumental-archive/.github/compare/v1.67.0...v1.67.1) - 2026-11-15
+
+### Fixed
+
+- update monumental-archive/signer to 3ede177 ([#1244](https://github.com/monumental-archive/.github/pull/1244))
+- skip short commit shas in the delivered typos config ([#1252](https://github.com/monumental-archive/.github/pull/1252))
+- leave pg-schema snapshots out of lint:sql and fix:sql ([#1253](https://github.com/monumental-archive/.github/pull/1253))
+- accept a posix exit-trap guard with no waiver ([#1256](https://github.com/monumental-archive/.github/pull/1256))
+
 ## [1.67.0](https://github.com/monumental-archive/.github/compare/v1.66.0...v1.67.0) - 2026-11-15
 
 ### Added
