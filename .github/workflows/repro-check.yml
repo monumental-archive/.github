@@ -375,3 +375,4 @@ jobs:
           gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "repro-check: ${TAG} ${CLASS} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
             --body "${body}"
+...
