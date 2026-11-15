@@ -1,0 +1,165 @@
+{
+  "id": "24249135",
+  "created": "2026-11-15T15:27:35.828055+00:00",
+  "updated": "2026-11-15T15:27:37.205958+00:00",
+  "links": {
+    "self": "https://zenodo.org/api/records/24249135/draft",
+    "self_html": "https://zenodo.org/uploads/24249135",
+    "preview_html": "https://zenodo.org/records/24249135?preview=1",
+    "reserve_doi": "https://zenodo.org/api/records/24249135/draft/pids/doi",
+    "self_iiif_manifest": "https://zenodo.org/api/iiif/draft:24249135/manifest",
+    "self_iiif_sequence": "https://zenodo.org/api/iiif/draft:24249135/sequence/default",
+    "files": "https://zenodo.org/api/records/24249135/draft/files",
+    "media_files": "https://zenodo.org/api/records/24249135/draft/media-files",
+    "versions": "https://zenodo.org/api/records/24249135/versions",
+    "record": "https://zenodo.org/api/records/24249135",
+    "record_html": "https://zenodo.org/records/24249135",
+    "publish": "https://zenodo.org/api/records/24249135/draft/actions/publish",
+    "review": "https://zenodo.org/api/records/24249135/draft/review",
+    "access_links": "https://zenodo.org/api/records/24249135/access/links",
+    "access_grants": "https://zenodo.org/api/records/24249135/access/grants",
+    "access_users": "https://zenodo.org/api/records/24249135/access/users",
+    "access_request": "https://zenodo.org/api/records/24249135/access/request",
+    "access": "https://zenodo.org/api/records/24249135/access",
+    "communities": "https://zenodo.org/api/records/24249135/communities",
+    "communities-suggestions": "https://zenodo.org/api/records/24249135/communities-suggestions",
+    "quota_increase": "https://zenodo.org/api/records/24249135/quota-increase",
+    "requests": "https://zenodo.org/api/records/24249135/requests"
+  },
+  "revision_id": 7,
+  "parent": {
+    "id": "24249134",
+    "access": {
+      "grants": [],
+      "owned_by": {
+        "user": "1815987"
+      },
+      "links": [],
+      "settings": {
+        "allow_user_requests": false,
+        "allow_guest_requests": false,
+        "accept_conditions_text": null,
+        "secret_link_expiration": 0
+      }
+    },
+    "communities": {},
+    "pids": {}
+  },
+  "versions": {
+    "is_latest": false,
+    "is_latest_draft": true,
+    "index": 1
+  },
+  "is_published": false,
+  "is_draft": true,
+  "expires_at": "2026-11-15 15:27:35.828044+00:00",
+  "pids": {},
+  "metadata": {
+    "resource_type": {
+      "id": "software",
+      "title": {
+        "de": "Software",
+        "en": "Software"
+      }
+    },
+    "creators": [
+      {
+        "person_or_org": {
+          "type": "personal",
+          "name": "monumental-archive",
+          "family_name": "monumental-archive"
+        }
+      }
+    ],
+    "title": "DRAFT measurement monumental-archive/.github#1246 - never published",
+    "publisher": "Zenodo",
+    "publication_date": "2026-11-15",
+    "version": "0.0.0",
+    "rights": [
+      {
+        "id": "mit",
+        "title": {
+          "en": "MIT License"
+        },
+        "description": {
+          "en": "A short and simple permissive license with conditions only requiring preservation of copyright and license notices. Licensed works, modifications, and larger works may be distributed under different terms and without source code."
+        },
+        "props": {
+          "url": "https://opensource.org/licenses/MIT",
+          "scheme": "spdx"
+        }
+      }
+    ],
+    "description": "Measurement draft; deleted by the same run."
+  },
+  "custom_fields": {},
+  "access": {
+    "record": "public",
+    "files": "public",
+    "embargo": {
+      "active": false,
+      "reason": null
+    },
+    "status": "open"
+  },
+  "files": {
+    "enabled": true,
+    "order": [],
+    "count": 0,
+    "total_bytes": 0,
+    "entries": {}
+  },
+  "media_files": {
+    "enabled": false,
+    "order": [],
+    "count": 0,
+    "total_bytes": 0,
+    "entries": {}
+  },
+  "status": "draft",
+  "ui": {
+    "publication_date_l10n_medium": "Nov 15, 2026",
+    "publication_date_l10n_long": "November 15, 2026",
+    "created_date_l10n_long": "November 15, 2026",
+    "updated_date_l10n_long": "November 15, 2026",
+    "resource_type": {
+      "id": "software",
+      "title_l10n": "Software"
+    },
+    "custom_fields": {},
+    "access_status": {
+      "id": "open",
+      "title_l10n": "Open",
+      "description_l10n": "The record and files are publicly accessible.",
+      "icon": "unlock",
+      "embargo_date_l10n": null,
+      "message_class": ""
+    },
+    "creators": {
+      "creators": [
+        {
+          "person_or_org": {
+            "type": "personal",
+            "name": "monumental-archive",
+            "family_name": "monumental-archive"
+          }
+        }
+      ],
+      "affiliations": []
+    },
+    "description_stripped": "Measurement draft; deleted by the same run.",
+    "version": "0.0.0",
+    "rights": [
+      {
+        "id": "mit",
+        "title_l10n": "MIT License",
+        "description_l10n": "A short and simple permissive license with conditions only requiring preservation of copyright and license notices. Licensed works, modifications, and larger works may be distributed under different terms and without source code.",
+        "props": {
+          "url": "https://opensource.org/licenses/MIT",
+          "scheme": "spdx"
+        }
+      }
+    ],
+    "is_draft": true
+  }
+}
