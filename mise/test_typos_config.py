@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Table tests for the delivered typos config's commit-SHA skip (#1249).
+
+The v1.67.1 release PR went red on its own generated changelog: typos
+read the letters inside the abbreviated SHA `3ede177` as a word.
+The belt's `mise/typos.toml` now skips a standalone lowercase hex token
+of seven or more characters that contains a digit. The rows here run the
+PINNED typos against the DELIVERED file, with `--isolated` so no
+implicit config can stand in for it.
+
+Every green row has a control: the same input under typos' defaults is
+red, so a row cannot pass because the input was never a finding. Red
+rows assert the exact message, not just the exit status (#650). The
+misspellings are assembled at runtime — written out here, they would
+red this repository's own `lint:typos`.
+
+stdlib `unittest`, matching the other mise/test_*.py. Run through the
+gate as `mise run test`, which `ci` collects.
+"""
+
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import tempfile
+import unittest
+from pathlib import Path
+
+BELT = Path(__file__).resolve().parent
+CONFIG = BELT / "typos.toml"
+CHANGELOG_LINE = BELT / "testdata" / "typos" / "changelog-v1.67.1.txt"
+TYPOS = shutil.which("typos")
+
+# The run typos found inside the SHA, and what it asked for.
+RUN = "e" + "de"
+RUN_MESSAGE = f"`{RUN}` should be `edge`"
+
+# A real misspelling with no hex in it.
+PROSE = "t" + "eh"
+PROSE_MESSAGE = f"`{PROSE}` should be `the`"
+
+# Seven letters, all a-f, no digit, and a misspelling typos knows: found
+# by running the pinned typos over every seven-letter a-f string.
+HEX_WORD = "ebe" + "dded"
+HEX_WORD_MESSAGE = f"`{HEX_WORD}` should be `embedded`"
+
+# The first digit at every position the config enumerates, each with
+# the run beside it: positions 0 to 6 have an entry each, 7 rides on
+# the open-ended last one.
+BY_POSITION = [
+    f"1{RUN}111",
+    f"e1{RUN}11",
+    f"ed1{RUN}1",
+    f"{RUN}1{RUN}",
+    f"c{RUN}1{RUN}",
+    f"cc{RUN}1{RUN}",
+    f"ccc{RUN}1{RUN}",
+    f"cccc{RUN}1{RUN}",
+]
+
+
+def typos(text: str, *, belt: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run the pinned typos over one file holding `text`.
+
+    Returns:
+        The completed process, stdout and stderr captured.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "input.md"
+        target.write_text(text + "\n", encoding="utf-8")
+        args = [TYPOS, "--isolated"]
+        if belt:
+            args += ["-c", str(CONFIG)]
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [*args, str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=tmp,
+        )
+
+
+class TyposShaTest(unittest.TestCase):
+    """A short SHA is skipped; words around and like it are not."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Refuse to run without the pinned binary: a skip is fail-open.
+
+        Raises:
+            RuntimeError: typos is not on PATH.
+
+        """
+        if TYPOS is None:
+            msg = "typos is not on PATH; run through `mise run test`"
+            raise RuntimeError(msg)
+
+    def assert_green(self, text: str) -> None:
+        """Red under typos' defaults, green under the belt config."""
+        control = typos(text, belt=False)
+        self.assertEqual(control.returncode, 2, control.stdout)
+        result = typos(text)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def assert_red(self, text: str, message: str) -> str:
+        """Red under the belt config with exactly `message`.
+
+        Returns:
+            typos' stdout, for further assertions.
+
+        """
+        result = typos(text)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(message, result.stdout)
+        return result.stdout
+
+    def test_the_release_sha_passes(self) -> None:
+        """`3ede177`, the token that reddened the v1.67.1 release PR."""
+        self.assert_green(f"3{RUN}177")
+
+    def test_the_release_changelog_line_passes(self) -> None:
+        """The release PR's CHANGELOG line, verbatim from the fixture."""
+        self.assert_green(CHANGELOG_LINE.read_text(encoding="utf-8").rstrip("\n"))
+
+    def test_every_digit_position_passes(self) -> None:
+        """Each enumerated entry, by where the first digit sits."""
+        for token in BY_POSITION:
+            with self.subTest(token=token):
+                self.assert_green(token)
+
+    def test_a_misspelling_beside_the_sha_still_reds(self) -> None:
+        """The skip covers the SHA, not the line it is on."""
+        out = self.assert_red(f"3{RUN}177 {PROSE}", PROSE_MESSAGE)
+        self.assertNotIn(RUN_MESSAGE, out)
+
+    def test_an_all_letter_hex_misspelling_is_still_checked(self) -> None:
+        """No digit, no skip: a-f-only words stay words."""
+        self.assert_red(HEX_WORD, HEX_WORD_MESSAGE)
+
+    def test_a_short_hex_token_is_still_checked(self) -> None:
+        """Below seven characters the token is not taken for a SHA."""
+        self.assert_red(f"{RUN}12", RUN_MESSAGE)
+
+
+if __name__ == "__main__":
+    unittest.main()
