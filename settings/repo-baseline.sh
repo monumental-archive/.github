@@ -38,7 +38,8 @@ org="monumental-archive"
 # so every failure reports.
 api_body=""
 api_err="$(mktemp)"
-trap 'rm -f "${api_err}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${api_err}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 
 api_probe() {
   local what="$1" grant="$2" absent="$3" endpoint="$4"
@@ -621,4 +622,5 @@ if [[ ${mode} == check && ${drift} -eq 0 ]]; then
   echo "${emsg}"
 fi
 
-exit "${drift}"
+[[ ${drift} -eq 0 ]] || exit "${drift}"
+org_done=1
