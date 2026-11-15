@@ -48,7 +48,7 @@ honestly blocked on.
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
-| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus ten named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
+| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus eleven named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv-plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 | `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx-postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
@@ -71,7 +71,7 @@ anything, so the contradiction it was hiding fires and the gate reddens
 where someone reads it. The same reasoning should govern any future belt
 list.
 
-*The ten exclusions are mechanical, not taste.* clippy's own book says
+*The eleven exclusions are mechanical, not taste.* clippy's own book says
 the restriction group must not be enabled wholesale, because its lints
 contradict each other — enabling it as a group even makes clippy lint
 you for doing so (`blanket_clippy_restriction_lints`, allowed here with
@@ -100,6 +100,24 @@ same reason recorded. A lint that contradicts two standing rulings is
 mechanical to exclude; leaving it on would have meant the belt enforcing
 in Rust exactly what the belt forbids in TOML and YAML.
 
+The eleventh, `unneeded_field_pattern`, is the first pair ruled
+*against* the idiomatic form (2026-11-15, iiif-server#181). Rust 1.99
+added `rest_pattern_accessible_field` to the restriction group, and the
+two lints are mirror images: each one's "use instead" example is the
+other's finding. Measured at 1.99.1 with both on, all four ways of
+ignoring a field fail — `A { .. }` and `A { w, .. }` on the new lint,
+`A { w: _, h: _ }` and `A { w, h: _ }` on the old — so no repository
+could conform, and the bump reddened iiif-server (75 findings) and edtf
+(11) on arrival. Which of the two goes was decided on their stated
+reasons. The old lint's is brevity: `..` "is shorter". The new lint's is
+correctness: a rest pattern "might lead to unhandled fields when the
+struct changes". That is the argument the ladder already enforces for
+enums through `wildcard_enum_match_arm`, where a catch-all arm is banned
+so that a new variant must be handled; keeping `..` for struct fields
+would have been the inconsistent ruling. So the old lint is excluded and
+the new one stands. On a toolchain older than 1.99 the exclusion costs
+only the old lint, since the new one does not exist there.
+
 *The ladder was recalibrated against a real codebase (#687).* The 97
 findings above are release-lab's — a fixture of small crates — and the
 canon tracks no Rust at all, so until 2026-08-21 nothing had run this
@@ -115,13 +133,13 @@ decision being that the ladder is right and the codebase answers to it,
 not the reverse. Read the 97 as what a fixture measures, never as what
 this ladder costs a real repository.
 
-*An eleventh contradiction, and it applies to pgrx crates only (#813).*
+*One further contradiction, and it applies to pgrx crates only (#813).*
 `tests_outside_test_module` demands `#[cfg(test)]`. pgrx demands
 `#[cfg(any(test, feature = "pg_test"))]`, because `cargo pgrx test`
 compiles the tests INTO the extension under that feature and runs them
 inside a live Postgres; under a bare `#[cfg(test)]` they are not built
 into the extension at all and the suite finds nothing. Two tools, one
-module, incompatible attributes — the same test the ten above pass, with
+module, incompatible attributes — the same test the ones above pass, with
 pgrx standing where the other lint usually stands. Measured on edtf's
 extension crate the first time it was ever linted at this level: **7 of
 73 findings** were this lint, one per `#[pg_test]`, on a module carrying
