@@ -33,10 +33,14 @@
 #   CARGO_INCREMENTAL=0        incremental artifacts embed local state
 #   --remap-path-prefix        no runner paths inside the binary
 #   CARGO_PROFILE_RELEASE_STRIP=false
-#                              stripping would destroy the .dep-v0
-#                              section cargo-auditable writes, which is
-#                              the image-side dependency surface a
-#                              scanner reads out of published bytes
+#                              no strip at build time. Not what keeps
+#                              cargo-auditable's .dep-v0 section, the
+#                              dependency surface a scanner reads out
+#                              of published bytes: it is non-allocated
+#                              PROGBITS, GNU strip keeps it at
+#                              --strip-debug and --strip-unneeded, and
+#                              only llvm-strip --strip-all removes it
+#                              (measured, #1274)
 #   CARGO_PROFILE_RELEASE_LTO=fat
 #                              the release profile's default is thin
 #                              LOCAL LTO across 16 codegen units, and
@@ -193,7 +197,7 @@ export CARGO_PROFILE_RELEASE_LTO=fat
 export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE:-${PWD}}=/build"
 
 # `auditable`: the shipped binary carries its dependency tree in the
-# .dep-v0 linker section (stripping is already off to preserve it), so
+# .dep-v0 linker section (which GNU strip would keep, #1274), so
 # image and binary scanners see the Rust surface of the artifact itself
 # (docs/dependency-track.md).
 cargo auditable build --locked --release --target "${target}" "${build_flags[@]}"

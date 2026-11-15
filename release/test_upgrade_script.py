@@ -51,6 +51,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -407,6 +408,115 @@ class TheStatementDecisions(unittest.TestCase):
             )
         self.assertEqual(1, result.returncode)
         self.assertIn("unterminated statement", result.stdout + result.stderr)
+
+
+WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
+
+
+def floor_block(version: str = "0.27.0") -> str:
+    """Return the floor block exactly as the build prepends it (#1274).
+
+    The template is read out of the build workflow's quoted heredoc and
+    filled the way the build fills it, followed by the blank line the
+    build leaves before the generated schema.
+
+    Returns:
+        The block that heads a published `lab_pg--<version>.sql`.
+
+    """
+    lines = WORKFLOW.read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.endswith("<< 'FLOOR'"))
+    end = next(i for i in range(start, len(lines)) if lines[i].strip() == "FLOOR")
+    block = textwrap.dedent("\n".join(lines[start + 1 : end]))
+    for field, value in (
+        ("@NUM@", "180007"),
+        ("@XY@", "18.7"),
+        ("@EXT@", "lab_pg"),
+        ("@VERSION@", version),
+    ):
+        block = block.replace(field, value)
+    return block + "\n\n"
+
+
+PREV_REFUSED = (
+    "FAIL: previous schema lab_pg--0.27.0.sql uses the reserved"
+    " $pgrx_floor$ tag other than as its one leading floor block\n"
+)
+NEW_REFUSED = (
+    "FAIL: candidate schema lab_pg--0.28.1.sql carries the reserved"
+    " $pgrx_floor$ tag; the floor block is packaging, never schema\n"
+)
+
+
+class TheFloorBlock(unittest.TestCase):
+    """The floor block is packaging, not schema (#1274).
+
+    A previous release's shipped schema begins with it; the candidate,
+    a package build, never does. Dropped from the previous schema as its
+    one leading statement, refused anywhere else, in either schema.
+    """
+
+    def test_a_leading_block_derives_what_the_bare_pair_derives(self) -> None:
+        """The block changes nothing: the real oracle pair, and a delta."""
+        news = (REAL_NEW, REAL_NEW + a_function("lab_extra"))
+        for new in news:
+            with self.subTest(delta=new is not REAL_NEW), TemporaryDirectory() as d:
+                bare, bare_script = Derivation(d).run(REAL_PREV, new)
+                floored, floored_script = Derivation(d).run(
+                    floor_block() + REAL_PREV, new
+                )
+            self.assertEqual(0, floored.returncode, floored.stderr)
+            self.assertEqual(
+                (bare.returncode, bare.stderr, bare_script),
+                (floored.returncode, floored.stderr, floored_script),
+            )
+        with TemporaryDirectory() as d:
+            _, script = Derivation(d).run(floor_block() + REAL_PREV, REAL_NEW)
+        self.assertEqual(REAL_DERIVED, script)
+
+    def test_without_the_block_nothing_changes(self) -> None:
+        """A previous release from before #1274 derives as it always did."""
+        with TemporaryDirectory() as d:
+            result, script = Derivation(d).run(REAL_PREV, REAL_NEW)
+        self.assertEqual((0, ""), (result.returncode, result.stderr))
+        self.assertEqual(REAL_DERIVED, script)
+
+    def test_the_tag_anywhere_else_is_refused_by_name(self) -> None:
+        """A block that is not the one leading statement is never stripped."""
+        block = floor_block()
+        rows = [
+            ("after the generated schema", REAL_PREV + "\n" + block, REAL_NEW),
+            ("two leading blocks", block + block + REAL_PREV, REAL_NEW),
+            (
+                "after a leading comment",
+                "-- a comment\n" + block + REAL_PREV,
+                REAL_NEW,
+            ),
+            (
+                "a function body quoted with the tag",
+                REAL_PREV + "SELECT $pgrx_floor$ x $pgrx_floor$;\n",
+                REAL_NEW,
+            ),
+        ]
+        for name, prev, new in rows:
+            with self.subTest(name), TemporaryDirectory() as d:
+                result, script = Derivation(d).run(prev, new)
+            self.assertEqual(
+                (1, PREV_REFUSED, ""), (result.returncode, result.stderr, script)
+            )
+
+    def test_a_candidate_carrying_the_block_is_refused_not_diffed(self) -> None:
+        """The candidate is a package build; the block there is a defect."""
+        rows = [
+            ("leading", REAL_PREV, floor_block("0.28.1") + REAL_NEW),
+            ("both sides", floor_block() + REAL_PREV, floor_block("0.28.1") + REAL_NEW),
+        ]
+        for name, prev, new in rows:
+            with self.subTest(name), TemporaryDirectory() as d:
+                result, script = Derivation(d).run(prev, new)
+            self.assertEqual(
+                (1, NEW_REFUSED, ""), (result.returncode, result.stderr, script)
+            )
 
 
 @unittest.skip(
