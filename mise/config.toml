@@ -1533,7 +1533,7 @@ if [[ -n ${generated_tracked} ]]; then
   echo "lint:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
   exit 1
 fi
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
@@ -1611,7 +1611,7 @@ if [[ -n ${generated_tracked} ]]; then
   echo "fix:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
   exit 1
 fi
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
@@ -2690,7 +2690,7 @@ fi
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 out=""
 fmt_out=""
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${out}" "${fmt_out}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The rustfmt leg, first because it is seconds against clippy's minutes.
 # rustfmt is a rustup component of the repo's own pin exactly like clippy,
@@ -3125,7 +3125,7 @@ command -v mise > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 cargo fetch --locked
 mise ls rust --json > "${tmp}/toolchains.json"
@@ -3655,7 +3655,7 @@ while IFS= read -r line; do
   flags+=("${parts[@]}")
 done < "${ORG_BELT_DIR}/tsc-flags.txt"
 tmp=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS= read -r cfg; do
@@ -3745,9 +3745,8 @@ command -v tsc > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
-trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 rc=0
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS= read -r cfg; do
   [[ -n ${cfg} ]] || continue
@@ -3872,7 +3871,7 @@ if [[ -n ${missing} ]]; then
   exit 1
 fi
 tmp=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS=: read -r stub dest; do
@@ -4249,7 +4248,7 @@ vex="${ORG_CANON_DIR}/security/vex"
   exit 1
 }
 scan=$(mktemp)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${scan}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 while IFS= read -r m; do
   [[ -n ${m} ]] || continue
@@ -5448,7 +5447,7 @@ dir = "{{cwd}}"
 # ever be seen. --skip-dirs is gone because there is nothing to skip.
 run = '''
 scratch=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # rsync, not cpio: BSD cpio refuses to extract through tracked
 # symlinks (the canon's self-* workflow links), GNU cpio does not —
@@ -6126,7 +6125,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 head_sha=$(git rev-parse HEAD)
 derive() { # snapshot-dir out-file
@@ -7945,7 +7944,7 @@ git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 || {
   exit 0
 }
 scratch=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 reuse --root "${scratch}" lint
@@ -8027,7 +8026,7 @@ if [[ ! -f REUSE.toml ]]; then
   exit 1
 fi
 tmp=$(mktemp)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 CITATION_OUT="${tmp}" bash "${ORG_BELT_DIR}/citation.sh" > /dev/null
 if ! diff -u CITATION.cff "${tmp}"; then
@@ -8145,7 +8144,7 @@ if ! grep -q "<!-- badges:begin -->" README.md; then
   exit 0
 fi
 tmp=$(mktemp)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${tmp}" "${tmp}.cur"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The derivation is invoked directly, never via `mise run fix:badges`: a
 # nested mise inside a task races the parallel lint fan-out and fails to
@@ -8505,7 +8504,7 @@ belt="${ORG_BELT_DIR:-}"
 belt=$(cd "${belt}" && pwd -P)
 before=$(git status --porcelain=v1 --untracked-files=all)
 scratch=$(mktemp -d)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 mkdir -p "${scratch}/conf" "${scratch}/belt"
 cp "${belt}/config.toml" "${scratch}/belt/config.toml"

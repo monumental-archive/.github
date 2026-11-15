@@ -65,7 +65,7 @@ cleanup() {
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method DELETE > /dev/null 2>&1 || true
 }
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; cleanup; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 
 # The release commit signs itself off like any other (OSPS-LE-01.01, and

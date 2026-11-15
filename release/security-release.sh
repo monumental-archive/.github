@@ -176,7 +176,7 @@ fi
 # one that reds on a blind scanner.
 policy=$(mktemp)
 report=$(mktemp)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${policy}" "${report}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 jq 'del(.blastRadius.canary)' "${canon}/slsa/assert-policy.json" > "${policy}"
 
@@ -214,7 +214,7 @@ findings=$(jq -r --arg s "${supported}" \
   '.findings[]? | select(.subject == $s) | [.assertion, .detail] | @tsv' "${report}" | sort -u)
 
 resolved=$(mktemp)
-# shellcheck disable=SC2154  # rc is assigned inside the trap string
+rc=0
 trap 'rc=$?; rm -f "${policy}" "${report}" "${resolved}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 if [[ -f go.mod ]]; then
   # A module with no toolchain to resolve it is a loud failure, never a
