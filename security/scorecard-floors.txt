@@ -121,7 +121,18 @@ edtf 7.4
 # is 0 until the Best Practices project (13998) is re-registered against
 # the org path, which is a human step on bestpractices.dev. Any of them
 # should fire the ratchet nudge — raise this line then, from a reading.
-monumental-archive-db 6.6
+#
+# Ratcheted 6.6 -> 7.6 on the 2026-11-15 reading of 7.7, a tenth under
+# per this header's rule; the score read 7.7 at 16:05 and again at 17:13
+# UTC, the second at the commit that wired the continuous stub (#670).
+# Of the three movements above, one happened: Maintained healed to 10,
+# and SAST and Pinned-Dependencies read 10 as well. The other two did
+# not, and the prediction for one was wrong. Packaging is still -1 with
+# the stub in the tree — inconclusive by the shared-orchestrator design
+# this header already names, not something the stub returns.
+# CII-Best-Practices is still 0: project 13998 still binds to the
+# pre-transfer path, the same human step as before.
+monumental-archive-db 7.6
 
 # monumental-archive-ledger floored 2026-11-14 on adopting the badge
 # block (#1161): a tenth under the published reading of 7.6
