@@ -6246,6 +6246,48 @@ fi
 echo "audit:actions-allowlist: live org allowlist matches the belt"
 '''
 
+[tasks."audit:security-config"]
+description = "The security configuration records equal what is live, attachments and private shape included (network, canon only)"
+dir = "{{cwd}}"
+# #1213: security/org-default.json and org-private.json are the record
+# of the org's code security settings, and nothing compared them with
+# the live org — a record edit or a UI click left them disagreeing with
+# nothing red. mise/security-config.py holds the four comparisons and
+# says why each is shaped as it is; its table tests are built from the
+# live answers fetched for #1213.
+#
+# The configuration the public record describes is DERIVED (the org's
+# default for new public repositories), never named by id. A read the
+# token cannot make is CANNOT_JUDGE naming the grant, never a pass.
+run = '''
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:security-config: no tracked security/identity.toml, not the canon, skipped"
+  exit 0
+}
+# Canon-only, so a missing input is red by name, never a skip (#738).
+for f in security/org-default.json security/org-private.json slsa/assert-policy.json; do
+  [[ -f ${f} ]] || {
+    echo "audit:security-config: ${f} missing — it is an input this audit holds to live" >&2
+    exit 1
+  }
+done
+command -v gh > /dev/null || {
+  echo "audit:security-config: gh missing" >&2
+  exit 1
+}
+[[ -n ${GH_TOKEN:-} ]] || {
+  echo "audit:security-config: GH_TOKEN is unset — CANNOT_JUDGE. The reads need" >&2
+  echo "  organisation permission Administration: read and repository" >&2
+  echo "  permission Administration: read (#1213)." >&2
+  exit 1
+}
+. "${ORG_BELT_DIR}/identity.sh"
+owner=$(org_identity owner)
+python3 "${ORG_BELT_DIR}/security-config.py" --owner "${owner}" \
+  --record security/org-default.json --private-record security/org-private.json \
+  --roster slsa/assert-policy.json
+'''
+
 [tasks."lint:from-digests"]
 description = "Every FROM in a tracked Dockerfile is digest-pinned (a tag is a moving pointer into the build)"
 dir = "{{cwd}}"

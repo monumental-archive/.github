@@ -1,0 +1,24 @@
+{
+  "name": "monumental-archive",
+  "private": true,
+  "security_and_analysis": {
+    "code_security": {
+      "status": "disabled"
+    },
+    "secret_scanning": {
+      "status": "disabled"
+    },
+    "secret_scanning_push_protection": {
+      "status": "disabled"
+    },
+    "dependabot_security_updates": {
+      "status": "enabled"
+    },
+    "secret_scanning_non_provider_patterns": {
+      "status": "disabled"
+    },
+    "secret_scanning_validity_checks": {
+      "status": "disabled"
+    }
+  }
+}
