@@ -54,44 +54,11 @@ for v in version title branch staging; do
   }
 done
 
-# A run acts only for the commit the default branch is at (#1260). The
-# plan was made when the job started, and the job measures the tree, so
-# it runs for minutes; if the branch moves in that time — the Release PR
-# itself being merged is the case that was measured — this plan is stale,
-# and a PR opened from it names a version that already exists. The run for
-# the newer commit maintains the PR, so this one writes nothing.
-#
-# The concurrency group cannot say this: it serialises runs, it does not
-# tell a run its commit is stale. The window left between this read and
-# the first write is backstopped by tag-release.sh, which refuses to mint
-# on a stale path; no second lock.
-#
-# On a push the run planned from GITHUB_SHA. On a release-published
-# refresh GITHUB_SHA is the tagged commit and the checkout is the default
-# branch, so the commit the plan was made from is the one checked out.
-planned="${GITHUB_SHA}"
-if [[ ${GITHUB_EVENT_NAME:-} == release ]]; then
-  planned=$(git rev-parse HEAD)
-fi
-# A read that cannot be completed is a failure by name, never "unchanged":
-# reading an error as a match is exactly the stale write this guards.
-# The owner and name are written into the query rather than bound as
-# GraphQL variables: a single-quoted `$owner` is a GraphQL variable that
-# the linter cannot tell from an unexpanded shell one (SC2016).
-head_query="{ repository(owner: \"${GITHUB_REPOSITORY%%/*}\","
-head_query+=" name: \"${GITHUB_REPOSITORY#*/}\")"
-head_query+=" { defaultBranchRef { target { oid } } } }"
-head=$(gh api graphql -f query="${head_query}" \
-  --jq '.data.repository.defaultBranchRef.target.oid') || head=""
-if [[ ! ${head} =~ ^[0-9a-f]{40}$ ]]; then
-  echo "FAIL: could not read the default branch head of ${GITHUB_REPOSITORY}" >&2
-  exit 1
-fi
-if [[ ${head} != "${planned}" ]]; then
-  echo "main moved to ${head} while this run was planning;" \
-    "the run for that commit maintains the Release PR"
-  exit 0
-fi
+# Nothing is written for a plan the default branch has moved past
+# (#1260); the reasoning lives with the check.
+# shellcheck source=release/planned-head.sh
+. "$(dirname "${BASH_SOURCE[0]}")/planned-head.sh"
+require_planned_head
 
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \

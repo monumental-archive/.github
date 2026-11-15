@@ -218,10 +218,11 @@ jobs:
         run: .org-canon/release/derive-coverage-floor.sh
 
       - name: Mint the Release-PR token
-        # A range of nothing but chore/ci/docs commits bumps no version, so
-        # there is nothing to propose, no empty PR to leave lying around —
-        # and no token to mint.
-        if: steps.prepare.outputs.release == 'true'
+        # Minted on both paths. A range of nothing but chore/ci/docs
+        # commits bumps no version and proposes nothing, but a Release PR
+        # may still be open from before — opened by a run that planned
+        # before its own merge landed, or for a fix since reverted — and
+        # closing it takes the same write grant as opening one (#1260).
         id: token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -246,4 +247,18 @@ jobs:
           # the commit carries is the plan's own file list (stele#155).
           EXTRA_FILES: ${{ steps.upgrade.outputs.files }} ${{ steps.floor.outputs.files }}
         run: .org-canon/release/open-release-pr.sh
+
+      - name: Close a Release PR left with nothing to release
+        # Merging a Release PR is the commitment point, and its title
+        # names a version: one left open when main holds nothing to
+        # release would tag a version that exists, or one main no longer
+        # carries. The branch is the prepare step's output, never the
+        # plan's — a nothing plan names no branch. The script makes the
+        # same head check as the step above, so a stale run cannot close
+        # a PR a newer run just opened.
+        if: steps.prepare.outputs.release == 'false'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          RELEASE_BRANCH: ${{ steps.prepare.outputs.branch }}
+        run: .org-canon/release/close-release-pr.sh
 ...

@@ -15,6 +15,8 @@
 #   version  bare version, e.g. 0.2.0
 #   current  the version being released FROM, for the pgrx upgrade derivation
 #   plan     path to the emitted plan document, which open-release-pr.sh executes
+#   branch   the release branch, on BOTH paths: close-release-pr.sh reads it
+#            when there is nothing to release, and a nothing plan names none
 #
 # Leaves the working tree modified; open-release-pr.sh commits it via the API.
 set -euo pipefail
@@ -48,6 +50,15 @@ if [[ -f fuzz/Cargo.lock ]]; then also="${also:+${also},}fuzz/Cargo.lock"; fi
 
 plan="${RUNNER_TEMP:-/tmp}/release-plan.json"
 
+# The release branch is the caller's fact, not the plan's: the engine is
+# told it and echoes it back, and only when there is something to release
+# (a nothing plan is `{"schema":7,"release":false}`, measured on stele
+# v0.22.0). The step that closes a Release PR left with nothing to release
+# needs it on exactly that path (#1260), so it is spelled here, once,
+# handed to the engine, and emitted on both paths. One branch, never one
+# per version: see open-release-pr.sh.
+release_branch="release/next"
+
 # One call: derive the plan and, with --prepare, write the tree it
 # describes — the version mirrors (workspace or single crate, internal
 # path-dependency constraints, CITATION.cff version and date-released)
@@ -67,6 +78,7 @@ stele derive release-plan \
   --compare-url "${repo_url}/compare/" \
   --release-url "${repo_url}/releases/tag/" \
   --pull-url "${repo_url}/pull/" \
+  --branch "${release_branch}" \
   --prepare \
   --out "${plan}"
 
@@ -78,6 +90,8 @@ if [[ -n ${refusals} ]]; then
   echo "${refusals}" >&2
   exit 1
 fi
+
+emit "branch=${release_branch}"
 
 releasing=$(jq -r '.release' "${plan}")
 if [[ ${releasing} != true ]]; then
