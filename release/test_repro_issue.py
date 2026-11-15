@@ -75,11 +75,7 @@ def step_script() -> str:
     if len(starts) != 1:
         msg = f"expected one {STEP!r} in {WORKFLOW}, found {len(starts)}"
         raise AssertionError(msg)
-    runs = [
-        i
-        for i in range(starts[0] + 1, len(lines))
-        if lines[i].strip() == "run: |"
-    ]
+    runs = [i for i in range(starts[0] + 1, len(lines)) if lines[i].strip() == "run: |"]
     if not runs:
         msg = f"no 'run: |' under {STEP!r}"
         raise AssertionError(msg)
