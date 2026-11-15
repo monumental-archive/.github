@@ -251,14 +251,28 @@ roll-forward.
 - **Tag-mint App dead**: break-glass in
   [`continuity.md`](continuity.md) — an org owner disables the tag
   ruleset, mints by hand, re-enables, records the event.
-- **rekor-monitor filed an issue**: an unexpected certificate for the
-  signer identity, or a monitoring failure — the run log distinguishes.
-  An unexpected issuance is a stop-everything event: rotate nothing until
+- **rekor-monitor filed an issue**: a monitoring failure of the watch
+  on Fulcio's certificate transparency log for the signer identity. A
+  match is printed in the run log (`Found <SAN> <issuer> <index>`) and
+  pages nobody; the org's own releases match on every signing. An
+  unexpected issuance is a stop-everything event: rotate nothing until
   you know how the identity was minted (the certificate names workflow,
-  repo, ref and commit). Two monitoring failures name themselves: a
-  monitor stopped at 25 minutes ends its log with every goroutine's
-  stack, and a run whose checkpoint did not advance while the log grew
-  says so beside the checkpoint's hash before and after.
+  repo, ref and commit). Three monitoring failures name themselves: a
+  monitor stopped at 10 minutes ends its log with every goroutine's
+  stack; a run whose checkpoint did not advance while the log's signed
+  tree head moved says so beside the checkpoint's hash before and
+  after; and a short read, where the monitor read fewer entries than
+  the checkpoint advanced over, quotes both ranges. A run with no
+  checkpoint to restore refuses to start; dispatch with `found=true` to
+  found one at the log's head, knowingly. A backlog of several hours
+  (missed runs) can exceed the runner's memory, since the monitor holds
+  the whole range at once: found again and record the gap here.
+- **Never watched (recorded 2026-11-15, #1237)**: issuance to the
+  signer identity before the certificate-log checkpoint was founded.
+  The Rekor scan this replaced completed no run after 2026-10-18, so
+  certificates issued from then until the founding run on `main` were
+  never checked. The CT log is not back-filled (hundreds of millions of
+  entries); the founding run's log prints the tree size it started at.
 - **repro-check filed an issue**: the reproducibility audit did not pass
   for the class it rebuilt. Read the scope the run states before you
   diagnose, because the two finding kinds mean different things. A digest

@@ -26,7 +26,7 @@ honestly blocked on.
 | zizmor (offline in gate, online in audit) + actionlint | Workflow hygiene, the capability-boundary's supporting cast |
 | OpenSSF Scorecard (org-owned workflow) | The external report card; publishes because monitoring beats blindness |
 | CodeQL (org security configuration) | Code scanning across the org |
-| rekor-monitor (org-owned workflow) | Transparency-log watch for forged signer identities — the reason the id-token rule was narrowed |
+| rekor-monitor (org-owned workflow) | Fulcio certificate-log watch for forged signer identities (#1237) — the reason the id-token rule was narrowed |
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate |

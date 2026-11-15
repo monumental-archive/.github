@@ -1,0 +1,71 @@
+ct-paging.patch — applied by .github/workflows/rekor-monitor.yml to
+sigstore/rekor-monitor at the pinned commit before `go build`, with
+`git apply --check` first, so a change upstream to either hunk fails
+the step by name instead of applying fuzzily (#1237).
+
+What upstream does (2cbcfa26, and main fbc5fc4, 2026-11-13):
+GetCTLogEntries calls ctclient.GetEntries(start, end) once.
+certificate-transparency-go sends one get-entries request and does not
+page, and ctfe.sigstore.dev caps a response by size (604 of 2,001 and
+900 of 4,901 requested, measured 2026-11-15). The monitor then writes
+its checkpoint at the log head, so everything past the first page is
+never read, and the run is green. Measured on a real signer
+certificate at CT index 443,908,396: found in 443908300..443908500,
+missed with exit 0 in 443907396..443909396.
+
+What this patch changes:
+1. GetCTLogEntries loops get-entries from start to end, advancing by
+   the number of entries each response actually returned. A response
+   with no entries before the end is an error, never a loop.
+2. It prints one line, `ct-monitor-read: count=N start=S end=E`, which
+   the workflow checks against the range between the old checkpoint
+   and the new one: the monitor cannot advance its checkpoint over
+   certificates it did not read.
+3. The RFC 6962 end index is tree_size - 1, the last entry the signed
+   tree head covers. Upstream passes tree_size, one past it; that
+   entry exists only if the log has grown since the head was read,
+   and get-entries answers 400 for an index beyond the log.
+
+Remove this patch, and its apply step, when the pinned rekor-monitor
+pages get-entries by itself.
+
+diff --git a/cmd/ct_monitor/main.go b/cmd/ct_monitor/main.go
+index 1d0caf9..d9eade1 100644
+--- a/cmd/ct_monitor/main.go
++++ b/cmd/ct_monitor/main.go
+@@ -121,7 +121,7 @@ func (l CTMonitorLogic) GetStartIndex(prev cmd.Checkpoint, _ cmd.LogInfo) *int64
+ 
+ func (l CTMonitorLogic) GetEndIndex(cur cmd.LogInfo) *int64 {
+ 	currentSTH := cur.(*ctgo.SignedTreeHead)
+-	checkpointEndIndex := int64(currentSTH.TreeSize) //nolint: gosec // G115
++	checkpointEndIndex := int64(currentSTH.TreeSize) - 1 //nolint: gosec // G115
+ 	return &checkpointEndIndex
+ }
+ 
+diff --git a/pkg/ct/v1/monitor.go b/pkg/ct/v1/monitor.go
+index 63c33db..eaac2cb 100644
+--- a/pkg/ct/v1/monitor.go
++++ b/pkg/ct/v1/monitor.go
+@@ -27,10 +27,19 @@ import (
+ )
+ 
+ func GetCTLogEntries(ctx context.Context, logClient *ctclient.LogClient, startIndex int64, endIndex int64) ([]ct.LogEntry, error) {
+-	entries, err := logClient.GetEntries(ctx, startIndex, endIndex)
+-	if err != nil {
+-		return nil, fmt.Errorf("error retrieving certificate transparency log entries: %v", err)
++	var entries []ct.LogEntry
++	for next := startIndex; next <= endIndex; {
++		page, err := logClient.GetEntries(ctx, next, endIndex)
++		if err != nil {
++			return nil, fmt.Errorf("error retrieving certificate transparency log entries: %v", err)
++		}
++		if len(page) == 0 {
++			return nil, fmt.Errorf("zero-progress page: no entries at index %d of range %d..%d", next, startIndex, endIndex)
++		}
++		entries = append(entries, page...)
++		next += int64(len(page))
+ 	}
++	fmt.Fprintf(os.Stderr, "ct-monitor-read: count=%d start=%d end=%d\n", len(entries), startIndex, endIndex)
+ 	return entries, nil
+ }
+ 

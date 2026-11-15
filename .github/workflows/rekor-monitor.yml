@@ -1,27 +1,30 @@
-# Rekor identity monitoring — the detective control for the one risk
+# Signer-identity monitoring — the detective control for the one risk
 # `--signer-workflow` verification cannot prevent: a branch push in the
 # signer repository minting a certificate whose SAN matches the pinned
-# identity. Verification pins the path, not the ref; this watches the
-# transparency log for every certificate issued to that identity, so an
-# unexpected issuance surfaces as a filed issue instead of never.
+# identity. Verification pins the path, not the ref; this watches
+# Fulcio's certificate transparency log, the record of every certificate
+# Fulcio issues, so an unexpected issuance surfaces in the run log
+# instead of never. It also sees a certificate issued and never used to
+# sign, which a watch on the signature log could not.
+#
+# The certificate log, not Rekor (#1237). rekor-monitor's Rekor scan
+# reads ten entries per request, one request at a time, against a log
+# growing by about a million entries an hour: no run completed after
+# 2026-10-18. The CT log is read in bulk (`get-entries`, hundreds of
+# certificates per request). The file keeps its name so the workflow
+# stays dispatchable and its history in one place; the monitor it
+# runs is still sigstore/rekor-monitor, now its ./cmd/ct_monitor.
 #
 # SELF-CONTAINED, deliberately. sigstore/rekor-monitor ships a reusable
 # workflow, and this org briefly allowlisted it — but its base workflow
 # runs `dawidd6/action-download-artifact` (third-party, single-maintainer)
 # and a slsa-github-generator action, so admitting it meant admitting
 # those: the first dispatch died as startup_failure on the org's own
-# Actions policy. What the reusable actually does is run
-# ./cmd/rekor_monitor --once around a checkpoint file, so this workflow
-# does exactly that with github-owned actions only — the same trade as
-# hand-rolled `docker buildx` over the docker/* actions, and the
-# allowlist stays at four patterns.
-#
-# Known gap, recorded in issue #28 and accepted: identity matching covers
-# the hashedrekord entry type only, and GitHub artifact attestations are
-# DSSE — so this watches the identity's use in signing flows generally,
-# not each attestation individually. A detective control with a gap beats
-# declining to watch the log; revisit when rekor-monitor grows DSSE
-# identity matching.
+# Actions policy. What the reusable actually does is run the monitor
+# --once around a checkpoint file, so this workflow does exactly that
+# with github-owned actions only — the same trade as hand-rolled
+# `docker buildx` over the docker/* actions, and the allowlist stays at
+# four patterns.
 #
 # The checkpoint rides the Actions cache. That is safe HERE and would not
 # be in a build workflow: nothing downstream is signed, main's cache is
@@ -33,10 +36,15 @@ name: rekor-monitor
 
 "on":
   schedule:
-    # Twice daily. The monitor advances from its stored checkpoint, so no
-    # interval loses log entries — a shorter one only shortens the window
-    # between a forged issuance and its issue being filed.
-    - cron: 17 5,17 * * *
+    # Hourly, sized by measurement (#1237). The CT log grew 6,519
+    # entries in 338 s on 2026-11-15 (19.3/s, about 69,000 an hour; 16.6/s
+    # averaged over the 12 hours before). The patched monitor read
+    # 70,001 entries in 104 s at a peak of 2.97 GB resident. So an
+    # hour's growth takes about two minutes, and the 10-minute QUIT
+    # below is five times that. Memory, not time, bounds catch-up: the
+    # monitor holds every entry of the range at once, so a backlog of
+    # several hours (missed runs) fails loudly rather than slowly.
+    - cron: 17 * * * *
   workflow_dispatch:
     inputs:
       found:
@@ -54,7 +62,11 @@ jobs:
   monitor:
     name: Watch the log for the signer identity
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 15
+    env:
+      # Fulcio's certificate transparency log: every certificate Fulcio
+      # issues is logged here (RFC 6962 API, `get-sth`/`get-entries`).
+      CT_LOG: https://ctfe.sigstore.dev/2022
     permissions:
       contents: read # checkout of the pinned monitor source
       issues: write # an unexpected issuance must page, not just log
@@ -66,6 +78,29 @@ jobs:
           ref: 2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
           persist-credentials: false
 
+      # The canon's own patch to the monitor, from this same commit.
+      # Checked out after the monitor, which owns the workspace root.
+      - name: Check out the monitor patch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: canon
+          sparse-checkout: .github/rekor-monitor
+          persist-credentials: false
+
+      # Upstream's CT monitor reads one server-capped page per run and
+      # writes its checkpoint at the log head; the patch's header has the
+      # measurement. `--check` first, so a pin whose code moved fails
+      # here by name rather than building something unpatched (#1237).
+      - name: Patch the monitor to read the whole range
+        run: |
+          set -euo pipefail
+          patch=canon/.github/rekor-monitor/ct-paging.patch
+          if ! git apply --check "${patch}"; then
+            echo "::error::ct-paging.patch does not apply to the pinned rekor-monitor; re-derive it or drop it if upstream pages"
+            exit 1
+          fi
+          git apply "${patch}"
+          git diff --stat
       # unattested-path: setup-go's `cache:` defaults to true, so this
       # step warms a Go module cache — same verdict as the checkpoint
       # cache below, and for the same reason: this workflow builds and
@@ -79,7 +114,7 @@ jobs:
           go-version-file: ./go.mod
 
       # unattested-path: this workflow builds and signs nothing — the
-      # cache holds the monitor's own Rekor checkpoint, which is exactly
+      # cache holds the monitor's own CT-log checkpoint, which is exactly
       # the state it exists to carry between runs (consistency proofs
       # need the previous checkpoint). Poisoning it degrades the monitor,
       # never an artifact; the cold-build rule (lint:cold-attested)
@@ -88,8 +123,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: checkpoint_log.txt
-          key: rekor-checkpoint-${{ github.run_id }}
-          restore-keys: rekor-checkpoint-
+          key: ct-checkpoint-${{ github.run_id }}
+          restore-keys: ct-checkpoint-
 
       # A run with no checkpoint starts from the head of the log and
       # finishes in seconds, having monitored nothing before now — and it
@@ -112,12 +147,11 @@ jobs:
       - name: Build the monitor
         run: |
           set -euo pipefail
-          go build -o "${RUNNER_TEMP}/rekor_monitor" ./cmd/rekor_monitor
-      # The checkpoint's hash and its origin and size lines, before the
-      # run and after it. The file is one line, the signed note with its
-      # newlines written as a literal `\n`; the first field names the
-      # log tree, the second is its size. A run that succeeded without
-      # moving the checkpoint is then visible in one place (#1145).
+          go build -o "${RUNNER_TEMP}/ct_monitor" ./cmd/ct_monitor
+      # The checkpoint's hash and its tree size and root hash, before the
+      # run and after it. The file is one line, the CT log's signed tree
+      # head as JSON. A run that succeeded without moving the checkpoint
+      # is then visible in one place (#1145).
       - name: Record the checkpoint before the run
         id: before
         run: |
@@ -127,19 +161,16 @@ jobs:
             echo "sha256=" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          line=$(tail -n 1 checkpoint_log.txt)
-          origin=${line%%\\n*}
-          rest=${line#*\\n}
-          size=${rest%%\\n*}
+          size=$(tail -n 1 checkpoint_log.txt | jq -r .tree_size)
+          root=$(tail -n 1 checkpoint_log.txt | jq -r .sha256_root_hash)
           sha=$(sha256sum checkpoint_log.txt | cut -d' ' -f1)
           echo "checkpoint before: sha256 ${sha}"
-          echo "checkpoint before: ${origin} / size ${size}"
+          echo "checkpoint before: size ${size} / root ${root}"
           {
             echo "sha256=${sha}"
-            echo "origin=${origin}"
             echo "size=${size}"
           } >> "${GITHUB_OUTPUT}"
-      # SIGQUIT at 25 minutes, five before the job's own timeout: a Go
+      # SIGQUIT at 10 minutes, five before the job's own timeout: a Go
       # program that receives it prints every goroutine's stack and
       # exits, so a hung run ends with the frame it was stuck in, in its
       # own log. GOTRACEBACK=all makes "every goroutine" explicit. No
@@ -148,7 +179,8 @@ jobs:
       # the grace period, so the monitor died with exit 137 at 25:00 and
       # wrote no stack (measured 2026-11-14). The run printed "Root hash
       # consistency verified" and then nothing for 29 minutes on 12 of
-      # 13 runs on 2026-11-14 (#1145).
+      # 13 runs on 2026-11-14 (#1145). The output is kept for the read
+      # check below.
       - name: Run the monitor once
         env:
           GOTRACEBACK: all
@@ -163,27 +195,30 @@ jobs:
           CONFIG
           config=$(cat /tmp/monitor-config.yaml)
           rc=0
-          timeout --signal=QUIT 25m \
-            "${RUNNER_TEMP}/rekor_monitor" \
+          timeout --signal=QUIT 10m \
+            "${RUNNER_TEMP}/ct_monitor" \
+            --url "${CT_LOG}" \
             --file checkpoint_log.txt \
             --once=true \
             --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
-            --config "${config}" || rc=$?
+            --config "${config}" 2>&1 | tee "${RUNNER_TEMP}/monitor.log" || rc=$?
           if ((rc == 124)); then
-            echo "::error::the monitor hung and was stopped at 25 minutes; its goroutine stacks are above"
+            echo "::error::the monitor hung and was stopped at 10 minutes; its goroutine stacks are above"
           fi
           exit "${rc}"
       # A checkpoint that did not move while the log did is a failure,
       # whatever the monitor exited with: on 2026-10-15 and 2026-10-18
       # two runs three days apart, with a success between them, both
-      # started from size 2,457,808,563. The log's head is read from
-      # Rekor directly, not from the monitor's output, so a monitor that
-      # said nothing cannot vouch for itself (#1145).
+      # started from size 2,457,808,563. The log's head is the CT log's
+      # signed tree head, read from the log directly, not from the
+      # monitor's output, so a monitor that said nothing cannot vouch for
+      # itself (#1145). The monitor returns exit 0 without writing the
+      # checkpoint when its identity search fails; this is what catches it.
       - name: Record the checkpoint after the run
+        id: after
         if: ${{ always() && steps.before.outcome == 'success' }}
         env:
           BEFORE_SHA256: ${{ steps.before.outputs.sha256 }}
-          BEFORE_ORIGIN: ${{ steps.before.outputs.origin }}
           BEFORE_SIZE: ${{ steps.before.outputs.size }}
         run: |
           set -euo pipefail
@@ -191,28 +226,46 @@ jobs:
             echo "::error::no checkpoint after the run"
             exit 1
           fi
-          line=$(tail -n 1 checkpoint_log.txt)
-          origin=${line%%\\n*}
-          rest=${line#*\\n}
-          size=${rest%%\\n*}
+          size=$(tail -n 1 checkpoint_log.txt | jq -r .tree_size)
+          root=$(tail -n 1 checkpoint_log.txt | jq -r .sha256_root_hash)
           sha=$(sha256sum checkpoint_log.txt | cut -d' ' -f1)
           echo "checkpoint after: sha256 ${sha}"
-          echo "checkpoint after: ${origin} / size ${size}"
+          echo "checkpoint after: size ${size} / root ${root}"
           if [[ -z ${BEFORE_SHA256} ]]; then
             echo "no checkpoint before the run (found=true): nothing to compare"
             exit 0
           fi
           if [[ ${sha} != "${BEFORE_SHA256}" ]]; then
             echo "checkpoint advanced: size ${BEFORE_SIZE} -> ${size}"
+            # The checkpoint moved over entries BEFORE_SIZE..size-1. The
+            # patched monitor says what it read; it must have read every
+            # one of them, or it advanced over certificates it never saw.
+            read_line=$(grep '^ct-monitor-read: ' "${RUNNER_TEMP}/monitor.log" || true)
+            if [[ -z ${read_line} ]]; then
+              echo "::error::the checkpoint advanced but the monitor reported no read"
+              exit 1
+            fi
+            echo "${read_line}"
+            if [[ ! ${read_line} =~ count=([0-9]+)\ start=([0-9]+)\ end=([0-9]+) ]]; then
+              echo "::error::unreadable read line from the monitor"
+              exit 1
+            fi
+            count=${BASH_REMATCH[1]}
+            start=${BASH_REMATCH[2]}
+            end=${BASH_REMATCH[3]}
+            if ((start > BEFORE_SIZE || end != size - 1 || count != end - start + 1)); then
+              echo "::error::short read: the monitor read ${count} entries of ${start}..${end}," \
+                "but the checkpoint advanced over ${BEFORE_SIZE}..$((size - 1))"
+              exit 1
+            fi
+            echo "read covers the advance: ${count} entries, ${start}..${end}"
             exit 0
           fi
-          sth=$(curl --fail --silent --show-error --retry 3 \
+          log_size=$(curl --fail --silent --show-error --retry 3 \
             --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
-            https://rekor.sigstore.dev/api/v1/log | jq -r .signedTreeHead)
-          log_origin=$(sed -n 1p <<< "${sth}")
-          log_size=$(sed -n 2p <<< "${sth}")
-          echo "log now: ${log_origin} / size ${log_size}"
-          if [[ ${log_origin} == "${BEFORE_ORIGIN}" && ${log_size} == "${BEFORE_SIZE}" ]]; then
+            "${CT_LOG}/ct/v1/get-sth" | jq -r .tree_size)
+          echo "log now: size ${log_size}"
+          if [[ ${log_size} == "${BEFORE_SIZE}" ]]; then
             echo "checkpoint unchanged and the log has not moved"
             exit 0
           fi
@@ -222,16 +275,20 @@ jobs:
       # unattested-path: the save half of the checkpoint restore
       # marked above — same cache, same reasoning: this workflow
       # builds and signs nothing, and the entry holds only the
-      # monitor's own Rekor checkpoint. Marked per declaration
+      # monitor's own CT-log checkpoint. Marked per declaration
       # (#676); the restore step's marker does not carry the file.
+      # Saved only when the check above passed: a checkpoint that
+      # advanced over entries the monitor did not read must not become
+      # the next run's starting point, or those entries are never read
+      # (#1237). A failed run leaves the previous checkpoint in place.
       - name: Save the advanced checkpoint
-        if: always()
+        if: ${{ always() && steps.after.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: checkpoint_log.txt
-          key: rekor-checkpoint-${{ github.run_id }}
+          key: ct-checkpoint-${{ github.run_id }}
 
-      # `cancelled()` beside `failure()`: the job's own 30-minute timeout
+      # `cancelled()` beside `failure()`: the job's own 15-minute timeout
       # ends it as CANCELLED, which `failure()` does not match. For seven
       # weeks from 2026-09-24 the monitor timed out twice a day and this
       # step was skipped every time, so a dead monitor filed nothing.
@@ -243,7 +300,7 @@ jobs:
           set -euo pipefail
           # A monitoring failure and an identity finding land the same way:
           # loudly. The run log carries the distinction.
-          body="The Rekor identity monitor failed or matched an unexpected certificate for the"
+          body="The signer-identity monitor (Fulcio CT log) failed or matched an unexpected certificate for the"
           body+=" signer identity. Read the run:"
           body+=" ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue create --repo "${GITHUB_REPOSITORY}" \
