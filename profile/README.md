@@ -14,16 +14,16 @@ This organisation holds the archive's engineering: the record deserves
 infrastructure as durable as the subject, so it is built on open
 standards, implemented exactly:
 
-- **[edtf](https://github.com/CarlAllenn/edtf)** — Extended Date/Time
+- **[edtf](https://github.com/monumental-archive/edtf)** — Extended Date/Time
   Format (ISO 8601-2) in Rust, levels 0–2 in full: historical dates are
   approximate, and the archive records that honestly rather than
   rounding it away.
-- **[iiif-server](https://github.com/CarlAllenn/iiif-server)** — the IIIF
+- **[iiif-server](https://github.com/monumental-archive/iiif-server)** — the IIIF
   Image API, 3.0 and 2.1 with the complete feature table, as one static
   pure-Rust binary serving the photographic record.
 - **The archive database** — PostGIS, schema as code, with an anchored
   checkpoint ledger keeping the record of the record tamper-evident, on
-  [monumental-archive-db](https://github.com/CarlAllenn/monumental-archive-db):
+  [monumental-archive-db](https://github.com/monumental-archive/monumental-archive-db):
   the official Postgres image plus PostGIS, pgaudit, and `edtf_postgres` —
   multi-arch, tested before publish, cosign-signed.
 
