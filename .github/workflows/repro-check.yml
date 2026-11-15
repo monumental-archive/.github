@@ -227,6 +227,7 @@ jobs:
           cache: false
 
       - name: Compare rebuilt digests with the published ones
+        id: compare
         # The judgment is `stele verify repro` (stele#96): the RELEASED
         # manifest is the population and the rebuild is the lookup, so
         # a published artifact the rebuild failed to produce at all is
@@ -323,8 +324,29 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
           MANIFEST: ${{ needs.resolve.outputs.manifest }}
           CLASS: ${{ inputs.class }}
+          # Which step failed decides what the issue may say (#1262).
+          # `failure()` is true for ANY failed step in this job, and a
+          # mise download that died five times on curl exit 22 filed
+          # release-lab#305 as a pinning defect against a release whose
+          # bytes matched. Only a comparison that ran and failed is a
+          # verdict; anything else (skipped, cancelled) is no verdict,
+          # and is still filed, because an audit that could not judge
+          # must be seen.
+          COMPARE: ${{ steps.compare.outcome }}
         run: |
           set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [[ ${COMPARE} != failure ]]; then
+            body="The reproducibility audit set out to rebuild ${TAG} with the ${CLASS} class workflow,"
+            body+=" and no verdict was reached: the job failed before the comparison ran"
+            body+=" (the compare step was ${COMPARE})."
+            body+=" Nothing is known about the published bytes from this run."
+            body+=" Read the run to see which step failed, then dispatch it again: ${run_url}"
+            gh issue create --repo "${GITHUB_REPOSITORY}" \
+              --title "repro-check: ${TAG} ${CLASS} could not be compared (run ${GITHUB_RUN_ID})" \
+              --body "${body}"
+            exit 0
+          fi
           # Named, never implied. One run rebuilds ONE class, so a finding
           # belongs to that class and to the population the verdict
           # actually judged. The old wording asserted "a build input has
@@ -349,7 +371,7 @@ jobs:
           body+=" A digest that DIFFERS from the published one means a build input escaped the pinning."
           body+=" An artifact reported ABSENT is one in the judged population this rebuild did not produce;"
           body+=" read the scope the run states before treating it as a pinning defect."
-          body+=" Read the run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body+=" Read the run: ${run_url}"
           gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "repro-check: ${TAG} ${CLASS} did not rebuild to the published bytes (run ${GITHUB_RUN_ID})" \
             --body "${body}"
