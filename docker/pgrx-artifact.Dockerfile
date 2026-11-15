@@ -3,10 +3,15 @@
 # its CVE surface is structurally empty, and it cannot be used as a base
 # by mistake.
 #
-# Ships BOTH layouts from one image, deliberately:
-#   /usr/…               the Debian tree, for `COPY --from` consumers
-#   /lib, /share/…       the CloudNativePG extension-ImageVolume layout
-# Choosing one would break the other; the duplicate is ~2 MB.
+# ONE layout, the same on every PG major, read by both consumers (#1298):
+#   /lib                the shared library
+#   /share/extension    the control file and the SQL scripts
+# A `COPY --from` consumer reads any path in the source image, so it
+# copies these two into its own server's directories; CloudNativePG's
+# extension ImageVolume mounts the image whole and points PostgreSQL's
+# extension_control_path and dynamic_library_path at it (18 and above).
+# No distribution's path is baked in: the destination is the consumer's,
+# and theirs to name. docs/release.md gives both recipes.
 #
 # FROM scratch means no RUN steps and therefore no execution: both
 # architectures assemble on one runner with --platform and no emulation is
@@ -17,8 +22,7 @@ FROM scratch
 
 ARG TARGETARCH
 
-COPY staged/${TARGETARCH}/pkgroot/ /
-COPY staged/${TARGETARCH}/cnpgroot/ /
+COPY staged/${TARGETARCH}/image/ /
 
 # Data-only: there is no process to run and no shell to run it with. USER
 # is set anyway so that if someone does `docker run` this by mistake, the

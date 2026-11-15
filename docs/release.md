@@ -1138,15 +1138,45 @@ correctness-by-patching; this is the same knowledge by design):
 - **Reproducible tarballs**, same flags and normalisation as rust-binary,
   named `<ext>-<version>-pg<major>-linux-<arch>.tar.gz`, each shipping
   both the Debian tree and the CloudNativePG ImageVolume layout.
-- **One artifact image per PG major**, `FROM scratch`, both layouts, both
+- **One artifact image per PG major**, `FROM scratch`, both
   architectures assembled in one build (nothing executes, so nothing is
   emulated), built in-run from the same verified tarballs the release
-  attests — one byte path, no post-release download. Each index is
-  signed under the org identity and proved the way a consumer uses it:
-  pulled by digest, `COPY --from` into a stock postgres,
-  `CREATE EXTENSION`. The runnable convenience image deliberately does
-  not exist in canon: its CVE posture would be its base's, refreshable
-  only by a release.
+  attests — one byte path, no post-release download. The runnable
+  convenience image deliberately does not exist in canon: its CVE
+  posture would be its base's, refreshable only by a release.
+- **The image holds one layout, the same on every major** (#1298):
+  `/lib` (the shared library) and `/share/extension` (the control file
+  and the SQL scripts), and nothing else. No distribution's path is
+  baked in — the destination is the consumer's, and theirs to name.
+  `COPY --from` reads any path in the source image, so one layout
+  serves both consumers. Copying it into a server's own directories,
+  on any major (Debian's paths shown):
+
+  ```dockerfile
+  FROM ghcr.io/<owner>/<ext>@sha256:<digest> AS ext
+  FROM postgres:<major>-trixie
+  COPY --from=ext /lib/ /usr/lib/postgresql/<major>/lib/
+  COPY --from=ext /share/extension/ /usr/share/postgresql/<major>/extension/
+  ```
+
+  Loading it where it is mounted — CloudNativePG's extension
+  ImageVolume, or any directory — needs PostgreSQL 18 or above, which
+  added `extension_control_path`. With the image at `/extensions/ext`:
+
+  ```ini
+  extension_control_path = '/extensions/ext/share:$system'
+  dynamic_library_path = '/extensions/ext/lib:$libdir'
+  ```
+
+  Write them into `postgresql.conf` (or `ALTER SYSTEM`), not through
+  `pg_ctl -o`: a shell eats `$system` and `$libdir`. Below 18 there is
+  no `extension_control_path`, so the copy is the only recipe. Each
+  index is signed under the org identity and proved the way a consumer
+  uses it, pulled by digest: the copy into a stock postgres and
+  `CREATE EXTENSION` on every major; on 18 and above also the mount at
+  `/extensions/ext` through those two settings, with no file of the
+  extension under the system directories. That second proof is our
+  half of CloudNativePG's contract, and all we claim of it.
 
 ### wasm-npm and the second provenance
 

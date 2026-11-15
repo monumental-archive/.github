@@ -5,10 +5,13 @@
 # the same identity (docs/release.md).
 #
 # FROM scratch executes nothing, so both platforms assemble in one build
-# with no emulation involved — there is nothing to emulate. The consumer
-# proof afterwards pulls the pushed index back BY DIGEST and does what the
-# README tells consumers to do: COPY --from into a stock postgres and
-# CREATE EXTENSION.
+# with no emulation involved — there is nothing to emulate. The image
+# carries one layout, /lib and /share/extension, on every major (#1298).
+# The consumer proof afterwards pulls the pushed index back BY DIGEST and
+# does what docs/release.md tells consumers to do: COPY --from into a
+# stock postgres and CREATE EXTENSION — and on 18 and above, mounts the
+# image whole and loads it through extension_control_path and
+# dynamic_library_path, with nothing under the system directories.
 #
 # Since #118 the build pushes UNTAGGED (by digest): the per-major tag
 # is applied post-gate by tag-images.yml, putting the exact manifest
@@ -182,6 +185,21 @@ jobs:
             fi
             mkdir -p "staged/${arch}"
             tar -xzf "${tarball}" -C "staged/${arch}"
+            # The image's one layout (#1298), the same on every major:
+            # /lib and /share/extension, built from the Debian tree the
+            # tarball installs. Read from pkgroot/ only — the tarball's
+            # second copy is going away (#1274).
+            lib="staged/${arch}/pkgroot/usr/lib/postgresql/${PG}/lib"
+            share="staged/${arch}/pkgroot/usr/share/postgresql/${PG}/extension"
+            for dir in "${lib}" "${share}"; do
+              if [[ ! -d ${dir} ]]; then
+                echo "::error::${tarball} has no ${dir#"staged/${arch}/"}"
+                exit 1
+              fi
+            done
+            mkdir -p "staged/${arch}/image/lib" "staged/${arch}/image/share/extension"
+            cp -a "${lib}/." "staged/${arch}/image/lib/"
+            cp -a "${share}/." "staged/${arch}/image/share/extension/"
           done
       - name: Resolve the image name
         id: name
@@ -278,13 +296,15 @@ jobs:
           with open(".org-canon/docker/pgrx-base-images.toml", "rb") as f:
               print(tomllib.load(f)["build"]["'"${PG}"'"])
           ')
-          # By digest, never by tag, and exactly the documented pattern:
-          # COPY --from into a stock postgres, then CREATE EXTENSION.
+          # By digest, never by tag, and exactly the documented recipes
+          # (docs/release.md). Every major: COPY --from the image's one
+          # layout into a stock postgres's own directories, then
+          # CREATE EXTENSION.
           cat > /tmp/consumer.Dockerfile << EOF
           FROM ${IMAGE}@${digest} AS ext
           FROM ${build}
-          COPY --from=ext /usr/lib/postgresql/${PG}/lib/ /usr/lib/postgresql/${PG}/lib/
-          COPY --from=ext /usr/share/postgresql/${PG}/extension/ /usr/share/postgresql/${PG}/extension/
+          COPY --from=ext /lib/ /usr/lib/postgresql/${PG}/lib/
+          COPY --from=ext /share/extension/ /usr/share/postgresql/${PG}/extension/
           EOF
           docker buildx build --file /tmp/consumer.Dockerfile --load \
             --tag "consumer-proof:pg${PG}" /tmp
@@ -299,6 +319,48 @@ jobs:
               psql -c \"CREATE EXTENSION ${ext};\"
             "
           '
+          # 18 and above: the image mounted whole, outside the system
+          # directories, and loaded through PostgreSQL's own two path
+          # settings — our half of CloudNativePG's extension ImageVolume
+          # contract, and all we claim. Below 18 there is no
+          # extension_control_path, so there is nothing to prove.
+          if ((PG < 18)); then
+            echo "pg${PG}: below 18, no extension_control_path; path proof not applicable"
+            exit 0
+          fi
+          cat > /tmp/consumer-path.Dockerfile << EOF
+          FROM ${IMAGE}@${digest} AS ext
+          FROM ${build}
+          COPY --from=ext / /extensions/ext/
+          EOF
+          docker buildx build --file /tmp/consumer-path.Dockerfile --load \
+            --tag "consumer-path-proof:pg${PG}" /tmp
+          mkdir -p /tmp/path-proof
+          # Quoted heredocs throughout: `$system` and `$libdir` are
+          # PostgreSQL's tokens, and passed through `pg_ctl -o` the shell
+          # eats them (measured), so the settings go into postgresql.conf.
+          cat > /tmp/path-proof/proof.sh << 'PROOF'
+          set -euo pipefail
+          control=$(ls /extensions/ext/share/extension/*.control | sed -n 1p)
+          ext=$(basename "${control}" .control)
+          found=$(find /usr/lib/postgresql /usr/share/postgresql -name "${ext}*")
+          if [[ -n ${found} ]]; then
+            echo "::error::${ext} files under the system directories; the path proof would not prove the path:"
+            printf '%s\n' "${found}"
+            exit 1
+          fi
+          echo "no file named ${ext}* under the system directories"
+          bin=$(ls -d /usr/lib/postgresql/*/bin | sed -n 1p)
+          "${bin}/initdb" -D /tmp/pgdata -A trust > /dev/null
+          cat >> /tmp/pgdata/postgresql.conf << 'CONF'
+          extension_control_path = '/extensions/ext/share:$system'
+          dynamic_library_path = '/extensions/ext/lib:$libdir'
+          CONF
+          "${bin}/pg_ctl" -D /tmp/pgdata -o "-c listen_addresses=" -w start > /dev/null
+          psql -c "CREATE EXTENSION ${ext};"
+          PROOF
+          docker run --rm --user postgres -v /tmp/path-proof:/proof:ro \
+            "consumer-path-proof:pg${PG}" bash /proof/proof.sh
       - name: Assert the published metadata equals the facts
         if: ${{ !inputs.dry-run && !inputs.repro }}
         env:
