@@ -64,9 +64,10 @@ are 2FA-required org-wide. There are no cryptographic secrets to
 access: signing is keyless (Sigstore), the certificate minted from the
 workflow's ambient OIDC identity per run — nothing to store, rotate,
 steal, or back up. The compromise-remediation story is the identity's:
-certificates are minutes-lived, every signing lands in Rekor, and the
-org's rekor-monitor workflow watches the log for signatures under org
-identities that the org did not make.
+certificates are minutes-lived, every certificate Fulcio issues lands
+in its certificate transparency log, and the org's rekor-monitor
+workflow watches that log for certificates issued to the signer
+identity that the org did not ask for (#1237).
 
 **Control effectiveness.** The claims in every VSA are read from
 GitHub's rules API at emission time, not asserted from configuration

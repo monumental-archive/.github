@@ -117,8 +117,9 @@ run, minutes-lived, and every signature lands in Rekor. Nothing is stored,
 rotated, backed up or stealable, so the questions about secret storage,
 memory protection and rotation cadence have no subject. Remediation for a
 compromised identity is detection rather than rotation: `rekor-monitor`
-watches the log for certificates minted under org identities that the org
-did not make, and an unexpected issuance is a stop-everything event
+watches Fulcio's certificate transparency log for certificates issued to
+the signer identity that the org did not ask for (#1237), and an
+unexpected issuance is a stop-everything event
 ([`runbook.md`](runbook.md)).
 
 **Known limit.** Anything that can push a branch in `signer` mints a

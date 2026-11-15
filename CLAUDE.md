@@ -88,9 +88,10 @@ shared lives here and nowhere else. Five layers:
   identity, and nothing would go red. `lint:capability-boundary` enforces
   it. The rule was previously an absolute ban on `id-token` in this repo;
   it was narrowed because the ban also blocked standalone scheduled
-  workflows that run no caller code (Scorecard publishing, Rekor identity
-  monitoring) — and declining to monitor the log for forged signer
-  identities in order to protect the signer was self-defeating.
+  workflows that run no caller code (Scorecard publishing, watching
+  Fulcio's certificate log for the signer identity) — and declining to
+  monitor the log for forged signer identities in order to protect the
+  signer was self-defeating.
 - **This repo must stay public.** Private `.github` repos serve no default
   community health files. Everything here is world-readable; write
   accordingly.
