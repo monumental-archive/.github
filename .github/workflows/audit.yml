@@ -992,7 +992,9 @@ jobs:
       # read-only grant does not qualify; verified empirically 2026-08-09).
       # It also carries Contents: read AND write, which this job does not
       # need and the drafts job cannot work without (#604) — do not narrow
-      # the token to what this one line describes.
+      # the token to what this one line describes. And Issues: read, for
+      # the baseline label read, needed only on the private member: a
+      # public repository's labels need no grant (#1263).
       GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
       # Fine-grained PATs offer no Packages permission (measured
       # 2026-08-12), so the org-packages visibility check carries its own
