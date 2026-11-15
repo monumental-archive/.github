@@ -54,6 +54,45 @@ for v in version title branch staging; do
   }
 done
 
+# A run acts only for the commit the default branch is at (#1260). The
+# plan was made when the job started, and the job measures the tree, so
+# it runs for minutes; if the branch moves in that time — the Release PR
+# itself being merged is the case that was measured — this plan is stale,
+# and a PR opened from it names a version that already exists. The run for
+# the newer commit maintains the PR, so this one writes nothing.
+#
+# The concurrency group cannot say this: it serialises runs, it does not
+# tell a run its commit is stale. The window left between this read and
+# the first write is backstopped by tag-release.sh, which refuses to mint
+# on a stale path; no second lock.
+#
+# On a push the run planned from GITHUB_SHA. On a release-published
+# refresh GITHUB_SHA is the tagged commit and the checkout is the default
+# branch, so the commit the plan was made from is the one checked out.
+planned="${GITHUB_SHA}"
+if [[ ${GITHUB_EVENT_NAME:-} == release ]]; then
+  planned=$(git rev-parse HEAD)
+fi
+# A read that cannot be completed is a failure by name, never "unchanged":
+# reading an error as a match is exactly the stale write this guards.
+head_query='query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef { target { oid } }
+  }
+}'
+head=$(gh api graphql -f query="${head_query}" \
+  -f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" \
+  --jq '.data.repository.defaultBranchRef.target.oid') || head=""
+if [[ ! ${head} =~ ^[0-9a-f]{40}$ ]]; then
+  echo "FAIL: could not read the default branch head of ${GITHUB_REPOSITORY}" >&2
+  exit 1
+fi
+if [[ ${head} != "${planned}" ]]; then
+  echo "main moved to ${head} while this run was planning;" \
+    "the run for that commit maintains the Release PR"
+  exit 0
+fi
+
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method PATCH -f sha="${GITHUB_SHA}" -F force=true > /dev/null
