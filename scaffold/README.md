@@ -210,10 +210,11 @@ is all rights reserved — the opposite of publishing anything — and
 
 - `.bestpractices.json` — OpenSSF Best Practices pre-fill (#347). The
   badge app reads this file from the repo root and proposes answers, so
-  registering a new repo starts from ~50 answers already made rather
-  than a blank form — the *majority* still differ per repo and are left
-  as `?`, so treat this as a head start, not a shortcut. Derived from
-  the canon's
+  registering a new repo starts from the org-wide answers already made
+  rather than a blank form — the *majority* still differ per repo and
+  are left as `?`, so treat this as a head start, not a shortcut. Each
+  pre-set answer cites its control by URL, and `lint:bestpractices`
+  holds it there (#1288). Derived from the canon's
   earned entry ([project 14058](https://www.bestpractices.dev/projects/14058)),
   trimmed to answers that are true **org-wide because the controls are
   inherited**: the org rulesets and security configuration, the DCO, the

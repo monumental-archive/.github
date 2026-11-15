@@ -8073,7 +8073,7 @@ set -euo pipefail
 '''
 
 [tasks."lint:bestpractices"]
-description = "`.bestpractices.json` uses key names the badge app accepts; repos without one skip clean"
+description = "`.bestpractices.json` uses key names the badge app accepts, and the stub cites the canon; repos without one skip clean"
 dir = "{{cwd}}"
 # The regression guard for a failure that was invisible for a day. The
 # badge app builds its input whitelist from the criteria YAML keys —
@@ -8093,6 +8093,16 @@ dir = "{{cwd}}"
 # in network-bound tasks that run on a runner). Those limits are
 # documented in docs/best-practices.md; this guards the one failure that
 # is silent.
+#
+# The stub a new repository copies, scaffold/.bestpractices.json, gets
+# one more check (#1288): every answer that is not `?` cites, by URL
+# under the canon repository, the org-level control that makes it true
+# of every repository. The stub answered for the canon on every copier
+# — its licence, its lockfile, its documents — and the site publishes
+# what it proposes. Still no parser: the file is one key per line, so
+# each `_status` line names its criterion and value, and the matching
+# `_justification` line is found by key. A file not laid out that way
+# is red by name, rather than read wrongly.
 run = '''
 files=$(git ls-files ':!vendor/**' ".bestpractices.json" "*/.bestpractices.json" ".project.d/bestpractices.json")
 [[ -n ${files} ]] || {
@@ -8114,6 +8124,37 @@ while IFS= read -r f; do
   if ((size > 100000)); then
     echo "lint:bestpractices: ${f}: ${size} bytes exceeds MAX_FILE_SIZE (100000);" >&2
     echo "  the app checks the size before downloading and skips the file entirely" >&2
+    rc=1
+  fi
+  [[ ${f} == scaffold/.bestpractices.json ]] || continue
+  . "${ORG_BELT_DIR}/identity.sh"
+  canon_owner=$(org_identity owner)
+  canon_repo=$(org_identity repo)
+  canon_url="https://github.com/${canon_owner}/${canon_repo}/"
+  # Mixed case is real: require_2FA, secure_2FA.
+  status_re='^  "[A-Za-z0-9_]+_status": "[^"]*",?$'
+  keys=$(grep -oE '"[A-Za-z0-9_]+_status":' "${f}" | wc -l | tr -d " ")
+  lines=$(grep -cE "${status_re}" "${f}" || true)
+  if [[ ${keys} != "${lines}" ]]; then
+    echo "lint:bestpractices: ${f}: ${keys} status keys, ${lines} on lines of their own;" >&2
+    echo "  the stub is read one key per line, as json.dumps(indent=2) writes it" >&2
+    rc=1
+    continue
+  fi
+  unsourced=""
+  while IFS= read -r line; do
+    [[ -n ${line} ]] || continue
+    criterion=$(sed -E 's/^  "([A-Za-z0-9_]+)_status".*/\1/' <<< "${line}")
+    value=$(sed -E 's/^[^:]*: "([^"]*)".*/\1/' <<< "${line}")
+    [[ ${value} != "?" ]] || continue
+    justification=$(grep -F "\"${criterion}_justification\": " "${f}" || true)
+    grep -qF "${canon_url}" <<< "${justification}" || unsourced="${unsourced} ${criterion}"
+  done <<< "$(grep -E "${status_re}" "${f}" || true)"
+  if [[ -n ${unsourced} ]]; then
+    echo "lint:bestpractices: ${f}: pre-set answers that cite no URL under ${canon_url}:" >&2
+    for c in ${unsourced}; do echo "  ${c}" >&2; done
+    echo "  the stub answers only what an org-level control makes true of every" >&2
+    echo '  repository, and cites that control; answer the rest "?" (#1288)' >&2
     rc=1
   fi
 done <<< "${files}"

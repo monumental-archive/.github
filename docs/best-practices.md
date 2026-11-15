@@ -8,8 +8,9 @@ the org-wide evidence; anything repo-specific is marked.
 The canon's own entry is
 [project 14058](https://www.bestpractices.dev/projects/14058), answered in
 full across all six sections on 2026-08-13 — **it is the worked example,
-and `.bestpractices.json` at this repository's root is the machine copy
-every other repository starts from**. Six sections, not three: the
+and `.bestpractices.json` at this repository's root is its machine
+copy**; other repositories start from the stub in `scaffold/`, which
+carries only the org-wide answers (below). Six sections, not three: the
 metal series (passing, silver, gold) and the OSPS Baseline series
 (baseline-1, -2, -3) are answered on the same entry. Read
 [Form mechanics](#form-mechanics) before touching a form — the ordering
@@ -162,6 +163,18 @@ Two supported mechanisms, both better than the form:
   [`scaffold/.bestpractices.json`](../scaffold/.bestpractices.json) is
   the stub a new repo copies — the `?` entries there are exactly the
   questions that repo must answer for itself.
+
+  **The stub's pre-set answers are org-level only** (#1288). An answer
+  stays pre-set only when an org-level control makes it true of every
+  repository — a default community health file, an org ruleset, the
+  org security configuration, the repository baseline, the shared
+  gate — and its justification cites that control by a URL in this
+  repository; `lint:bestpractices` reds any other. Everything else is
+  `?`. The reason is that the site publishes what the file proposes
+  the moment a repository is registered: the stub once answered for
+  the canon, so the canon's licence, lockfile and documents read as
+  Met on repositories they are false for. A `?` costs a copier one
+  answer; a canon-shaped answer publishes a false claim.
   [Spec](https://github.com/ossf/best-practices-badge/blob/main/docs/bestpractices-json.md).
 
   **Never build one by renaming `projects/<id>.json`.** The download and
