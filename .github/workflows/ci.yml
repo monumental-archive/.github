@@ -185,8 +185,19 @@ jobs:
       # registry sources against Cargo.lock, so a poisoned entry
       # cannot change what compiles — and GitHub scopes cache writes
       # per branch, so a pull request cannot write the default
-      # branch's entries. Restore-keys make a stale cache a slower
-      # run, never a wrong one.
+      # branch's entries. A stale cache is a slower run, never a
+      # wrong one.
+      #
+      # The Go cache takes an exact hit or nothing (#1285): no
+      # restore-keys. With them, a go.sum change restored the last
+      # cache, the run added to it and saved the whole under the new
+      # key, so every module version ever used rode along (stele:
+      # 1.87 GB restored in 3m58s, where one run's fill is 775 MB in
+      # 17s). The cost taken instead: a go.sum change is one cold run
+      # per ref (pull request, queue, main), 247s on stele, about
+      # what every run paid to unpack the carried-over cache. Both
+      # paths stay cached: modules alone measured 241s against 62s
+      # (#1181). v2 leaves the oversized v1 entries behind.
       - name: Restore the Go caches (unsigned gate only)
         if: ${{ hashFiles('go.sum') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -194,8 +205,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: gate-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: gate-go-${{ runner.os }}-
+          key: gate-go-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
@@ -522,8 +532,19 @@ jobs:
       # registry sources against Cargo.lock, so a poisoned entry
       # cannot change what compiles — and GitHub scopes cache writes
       # per branch, so a pull request cannot write the default
-      # branch's entries. Restore-keys make a stale cache a slower
-      # run, never a wrong one.
+      # branch's entries. A stale cache is a slower run, never a
+      # wrong one.
+      #
+      # The Go cache takes an exact hit or nothing (#1285): no
+      # restore-keys. With them, a go.sum change restored the last
+      # cache, the run added to it and saved the whole under the new
+      # key, so every module version ever used rode along (stele:
+      # 1.87 GB restored in 3m58s, where one run's fill is 775 MB in
+      # 17s). The cost taken instead: a go.sum change is one cold run
+      # per ref (pull request, queue, main), 247s on stele, about
+      # what every run paid to unpack the carried-over cache. Both
+      # paths stay cached: modules alone measured 241s against 62s
+      # (#1181). v2 leaves the oversized v1 entries behind.
       - name: Restore the Go caches (unsigned gate only)
         if: ${{ hashFiles('go.sum') != '' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -531,8 +552,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: gate-go-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: gate-go-${{ runner.os }}-
+          key: gate-go-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
