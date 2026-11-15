@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.67.0](https://github.com/monumental-archive/.github/compare/v1.66.0...v1.67.0) - 2026-11-15
+
+### Added
+
+- hold the security records to the live org ([#1239](https://github.com/monumental-archive/.github/pull/1239))
+
+### Fixed
+
+- stop the local gate at the tree it runs in ([#1234](https://github.com/monumental-archive/.github/pull/1234))
+- fail an EXIT-trapped script that never reached its end ([#1238](https://github.com/monumental-archive/.github/pull/1238))
+- print where a hung monitor is stuck ([#1211](https://github.com/monumental-archive/.github/pull/1211))
+- refuse go-binary beside a plan-emitting class ([#1242](https://github.com/monumental-archive/.github/pull/1242))
+- drop stale-action-refs findings on the signer in the audit ([#1243](https://github.com/monumental-archive/.github/pull/1243))
+
 ## [1.66.0](https://github.com/monumental-archive/.github/compare/v1.65.0...v1.66.0) - 2026-11-14
 
 ### Added
