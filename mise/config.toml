@@ -4885,6 +4885,17 @@ dir = "{{cwd}}"
 # (measured on zizmor 1.29.0). So the token is asserted up front, and
 # the offline-degradation WARN is fatal — a token that is present but
 # rejected degrades the same way, and only zizmor knows.
+#
+# THE SIGNER IS NEVER TAGGED (#1152). zizmor 1.32's stale-action-refs
+# reports every pin no tag points at, and the signer's SHA is its whole
+# identity (mise/pinact.yaml), so its references red the audit for a
+# true fact that is not a defect. zizmor-signer.py drops exactly those:
+# audit stale-action-refs AND a reference in the signer's repository,
+# read from security/identity.toml, never written here. A second
+# comment on the `uses:` line was measured and hides the pin from
+# Renovate; a zizmor.yml ignore would hide a stale third-party pin. The
+# green path is one JSON run; when anything remains, zizmor runs again
+# in its own format so the finding is shown as zizmor writes it.
 run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "audit:actions: no workflows, skipped"
@@ -4895,15 +4906,35 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "  API-backed audit this task exists for; refusing to pass blind" >&2
   exit 1
 }
+. "${ORG_BELT_DIR}/identity.sh"
+signer_wf=$(org_identity signer-workflow)
+blind() {
+  if grep -q "running in offline mode" "$1"; then
+    echo "audit:actions: zizmor degraded to offline despite GH_TOKEN —" >&2
+    echo "  the online audits did not run; a green result would be blind" >&2
+    exit 1
+  fi
+}
 err=$(mktemp)
+json=$(mktemp)
+status=0
+zizmor --persona=auditor --format=json .github/workflows/ > "${json}" 2> "${err}" || status=$?
+blind "${err}"
+# 0 is clean and 10-14 are findings by severity; anything else is zizmor
+# failing, and its output is no finding list to filter.
+if ((status != 0 && (status < 10 || status > 14))); then
+  cat "${err}" >&2
+  exit "${status}"
+fi
+left=0
+python3 "${ORG_BELT_DIR}/zizmor-signer.py" --signer-workflow "${signer_wf}" < "${json}" || left=$?
+((left == 0)) && exit 0
+((left == 1)) || exit "${left}"
 status=0
 zizmor --persona=auditor .github/workflows/ 2> "${err}" || status=$?
 cat "${err}" >&2
-if grep -q "running in offline mode" "${err}"; then
-  echo "audit:actions: zizmor degraded to offline despite GH_TOKEN —" >&2
-  echo "  the online audits did not run; a green result would be blind" >&2
-  exit 1
-fi
+blind "${err}"
+((status != 0)) || status=1
 exit "${status}"
 '''
 

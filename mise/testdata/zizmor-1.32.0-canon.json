@@ -1,0 +1,1168 @@
+[
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/continuous.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 639,
+              "column": 2
+            },
+            "end_point": {
+              "row": 650,
+              "column": 70
+            },
+            "offset_span": {
+              "start": 30132,
+              "end": 30672
+            }
+          },
+          "feature": "  sign:\n    name: Sign image\n    needs: assemble\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      image-name: ${{ needs.assemble.outputs.image }}\n      image-digest: ${{ needs.assemble.outputs.digest }}\n      bundle-artifact: attestation-bundle-image\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/continuous.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 642,
+              "column": 10
+            },
+            "end_point": {
+              "row": 642,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 30189,
+              "end": 30282
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-image"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 967,
+              "column": 2
+            },
+            "end_point": {
+              "row": 984,
+              "column": 17
+            },
+            "offset_span": {
+              "start": 46594,
+              "end": 47500
+            }
+          },
+          "feature": "  sign-image:\n    name: Sign image\n    needs: assemble-oci\n    if: ${{ !cancelled() && needs.assemble-oci.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      image-name: ${{ needs.assemble-oci.outputs.image }}\n      image-digest: ${{ needs.assemble-oci.outputs.digest }}\n      bundle-artifact: attestation-bundle-image\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # Runs no caller code, so it can hold the writes the build job must not.\n  # It pulls the published bytes back and hashes them: the attested subject\n  # is what shipped, not what we hoped shipped.\n  # phase: attest",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# Runs no caller code, so it can hold the writes the build job must not.",
+            "# It pulls the published bytes back and hashes them: the attested subject",
+            "# is what shipped, not what we hoped shipped.",
+            "# phase: attest"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-image"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 971,
+              "column": 10
+            },
+            "end_point": {
+              "row": 971,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 46791,
+              "end": 46884
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1017,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1051,
+              "column": 17
+            },
+            "offset_span": {
+              "start": 48898,
+              "end": 50981
+            }
+          },
+          "feature": "  sign:\n    name: Sign\n    needs: verify\n    if: ${{ !cancelled() && needs.verify.result == 'success' && contains(inputs.classes, 'rust-crate') }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ needs.verify.outputs.subjects }}\n      bundle-artifact: attestation-bundle-crates\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # The verdict beside the evidence — AFTER the evidence is public. Every\n  # vsa job below runs downstream of attach, against the published,\n  # immutable release (#209): verify-release's verdict mode re-proves the\n  # public bytes, opens and verifies the signed provenance over them\n  # (signer identity to the pinned commit, buildType and\n  # externalParameters to this run, subjects to the manifest), and only\n  # then assembles the verification summary — every predicate field an\n  # output of a check it just ran (#208) — and signs it ITSELF (#264):\n  # verifier.id is the certificate subject, so \"who computed this\n  # verdict\" is a cryptographic fact rather than a predicate field the\n  # org signer would have signed on faith. Verdicts are the org's second\n  # root of trust (docs/runbook.md); provenance stays under the signer.\n  # The VSA lives in the attestation store alone: the release sealed at\n  # publish, before any verdict existed, and the store is where the\n  # runbook's consumer recipe reads. A stranger gates on it instead of\n  # re-deriving the whole verification; a stranger who distrusts verdicts\n  # still has the provenance bundle in the release. Skipped on dry-run —\n  # and verdict mode refuses a dry-run on its own: a rehearsal must never\n  # sign \"PASSED\". Every vsa job restates doi's !cancelled() pattern:\n  # the implicit success() looks THROUGH attach to its legitimately-\n  # skipped class ancestors and goes false (measured on v0.14.2).\n  # phase: attest",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# The verdict beside the evidence — AFTER the evidence is public. Every",
+            "# vsa job below runs downstream of attach, against the published,",
+            "# immutable release (#209): verify-release's verdict mode re-proves the",
+            "# public bytes, opens and verifies the signed provenance over them",
+            "# (signer identity to the pinned commit, buildType and",
+            "# externalParameters to this run, subjects to the manifest), and only",
+            "# then assembles the verification summary — every predicate field an",
+            "# output of a check it just ran (#208) — and signs it ITSELF (#264):",
+            "# verifier.id is the certificate subject, so \"who computed this",
+            "# verdict\" is a cryptographic fact rather than a predicate field the",
+            "# org signer would have signed on faith. Verdicts are the org's second",
+            "# root of trust (docs/runbook.md); provenance stays under the signer.",
+            "# The VSA lives in the attestation store alone: the release sealed at",
+            "# publish, before any verdict existed, and the store is where the",
+            "# runbook's consumer recipe reads. A stranger gates on it instead of",
+            "# re-deriving the whole verification; a stranger who distrusts verdicts",
+            "# still has the provenance bundle in the release. Skipped on dry-run —",
+            "# and verdict mode refuses a dry-run on its own: a rehearsal must never",
+            "# sign \"PASSED\". Every vsa job restates doi's !cancelled() pattern:",
+            "# the implicit success() looks THROUGH attach to its legitimately-",
+            "# skipped class ancestors and goes false (measured on v0.14.2).",
+            "# phase: attest"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1021,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1021,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 49053,
+              "end": 49146
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-binaries"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1108,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1132,
+              "column": 16
+            },
+            "offset_span": {
+              "start": 53168,
+              "end": 54457
+            }
+          },
+          "feature": "  sign-binaries:\n    name: Sign binaries\n    needs:\n      - build-binary\n      - commit-point\n    # The Sigstore entry is append-only — an irreversible step, so it\n    # sits downstream of the bit-for-bit proof (#118).\n    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-binary') }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ needs.build-binary.outputs.subjects }}\n      bundle-artifact: attestation-bundle-binaries\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # The go-binary class: same shape as rust-binary — release assets, no\n  # registry, GitHub's release attestation binds tag, commit and asset\n  # digests at publish — with the toolchain matrix gone by construction\n  # (CGO_ENABLED=0 and the caller's one pinned go cover every leg,\n  # stele#7). Repro-gated from its first release, not optional: a Go\n  # build under the class's hermetic env is bit-reproducible, so the\n  # gate extends the org's strongest claim to this class from day one.\n  # phase: build",
+          "comments": [
+            "# main",
+            "# The Sigstore entry is append-only — an irreversible step, so it",
+            "# sits downstream of the bit-for-bit proof (#118).",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# The go-binary class: same shape as rust-binary — release assets, no",
+            "# registry, GitHub's release attestation binds tag, commit and asset",
+            "# digests at publish — with the toolchain matrix gone by construction",
+            "# (CGO_ENABLED=0 and the caller's one pinned go cover every leg,",
+            "# stele#7). Repro-gated from its first release, not optional: a Go",
+            "# build under the class's hermetic env is bit-reproducible, so the",
+            "# gate extends the org's strongest claim to this class from day one.",
+            "# phase: build"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-binaries"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1116,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1116,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 53510,
+              "end": 53603
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-go"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1161,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1184,
+              "column": 16
+            },
+            "offset_span": {
+              "start": 55418,
+              "end": 56601
+            }
+          },
+          "feature": "  sign-go:\n    name: Sign Go binaries\n    needs:\n      - build-go\n      - commit-point\n    # The Sigstore entry is append-only — an irreversible step, so it\n    # sits downstream of the bit-for-bit proof (#118).\n    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'go-binary') }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ needs.build-go.outputs.subjects }}\n      bundle-artifact: attestation-bundle-go-binaries\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # The source-archive class: the artifact is the tagged tree itself, for\n  # repositories whose deliverable is their own content — the org canon\n  # above all. Like binaries it has no registry to pull back from: it\n  # becomes a release asset, GitHub's release attestation binds tag,\n  # commit and asset digests at publish, and the signed subjects are the\n  # same bytes the attach job uploads.\n  # phase: build",
+          "comments": [
+            "# main",
+            "# The Sigstore entry is append-only — an irreversible step, so it",
+            "# sits downstream of the bit-for-bit proof (#118).",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# The source-archive class: the artifact is the tagged tree itself, for",
+            "# repositories whose deliverable is their own content — the org canon",
+            "# above all. Like binaries it has no registry to pull back from: it",
+            "# becomes a release asset, GitHub's release attestation binds tag,",
+            "# commit and asset digests at publish, and the signed subjects are the",
+            "# same bytes the attach job uploads.",
+            "# phase: build"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-go"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1169,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1169,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 55751,
+              "end": 55844
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-source"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1209,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1224,
+              "column": 16
+            },
+            "offset_span": {
+              "start": 57418,
+              "end": 58090
+            }
+          },
+          "feature": "  sign-source:\n    name: Sign source archive\n    needs:\n      - build-source\n      - commit-point\n    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'source-archive') }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ needs.build-source.outputs.subjects }}\n      bundle-artifact: attestation-bundle-source\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # phase: build",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# phase: build"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-source"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1215,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1215,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 57640,
+              "end": 57733
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-wasm"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1294,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1310,
+              "column": 17
+            },
+            "offset_span": {
+              "start": 60634,
+              "end": 61431
+            }
+          },
+          "feature": "  sign-wasm:\n    name: Sign wasm package\n    needs: verify-wasm\n    if: ${{ !cancelled() && needs.verify-wasm.result == 'success' && contains(inputs.classes, 'wasm-npm') }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ needs.verify-wasm.outputs.subjects }}\n      bundle-artifact: attestation-bundle-npm\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # Same verdict, wasm leg — see the note on `vsa` above. build-wasm is\n  # in needs only for the package name the re-pull needs to reconstruct\n  # the registry path.\n  # phase: attest",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# Same verdict, wasm leg — see the note on `vsa` above. build-wasm is",
+            "# in needs only for the package name the re-pull needs to reconstruct",
+            "# the registry path.",
+            "# phase: attest"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-wasm"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1298,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1298,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 60815,
+              "end": 60908
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-extensions"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1364,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1382,
+              "column": 16
+            },
+            "offset_span": {
+              "start": 63448,
+              "end": 64322
+            }
+          },
+          "feature": "  sign-extensions:\n    name: Sign extension tarballs\n    needs:\n      - build-extension\n      - commit-point\n    if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ needs.build-extension.outputs.subjects }}\n      bundle-artifact: attestation-bundle-extensions\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # The artifact images assemble from the SAME tarballs the signer just\n  # attested — one byte path — and each per-major index gets its own\n  # signature under the same identity.\n  # phase: build",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# The artifact images assemble from the SAME tarballs the signer just",
+            "# attested — one byte path — and each per-major index gets its own",
+            "# signature under the same identity.",
+            "# phase: build"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-extensions"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1370,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1370,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 63681,
+              "end": 63774
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-extension-images"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1447,
+              "column": 2
+            },
+            "end_point": {
+              "row": 1487,
+              "column": 16
+            },
+            "offset_span": {
+              "start": 66780,
+              "end": 68801
+            }
+          },
+          "feature": "  sign-extension-images:\n    name: Sign extension image pg${{ matrix.pg }}\n    needs:\n      - build-extension-images\n      - tag-extension-images\n    if: ${{\n        !cancelled() && needs.tag-extension-images.result == 'success'\n        && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run\n      }}\n    strategy:\n      fail-fast: false\n      matrix:\n        include: ${{ fromJSON(needs.build-extension-images.outputs.images) }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      image-name: ${{ matrix.image }}\n      image-digest: ${{ matrix.digest }}\n      bundle-artifact: attestation-bundle-extimg-pg${{ matrix.pg }}\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # The repro gate (#118): every public or permanent effect — the\n  # crates.io/npm uploads, the ghcr tags, the Sigstore entries, the\n  # release itself — sits downstream of this job, which compares the\n  # first build's outputs against an independent rebuild's, full width:\n  # sha256 subject manifests for the file classes, per-arch (oci) and\n  # per-major-index (pgrx) digests for the image classes. Mismatch\n  # fails the release outright — no warn-and-ship path, because a warn\n  # path converts the control into a log line. Skew-proofing is free by\n  # construction here: both builds are relative `uses:` in this same\n  # run, resolved at the caller's pinned SHA, so a mismatch can only\n  # mean NONDETERMINISM, never version skew.\n  #\n  # Nothing here ever emits SLSA_BUILD_REPRODUCED: a same-platform\n  # rebuild can never earn it, by design (docs/tooling-verdicts.md).\n  # Fan-in mirrors attach: !cancelled() plus explicit result checks,\n  # because the implicit success() looks THROUGH to legitimately\n  # skipped class ancestors and goes false (measured on v0.14.2).\n  # phase: prove",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# The repro gate (#118): every public or permanent effect — the",
+            "# crates.io/npm uploads, the ghcr tags, the Sigstore entries, the",
+            "# release itself — sits downstream of this job, which compares the",
+            "# first build's outputs against an independent rebuild's, full width:",
+            "# sha256 subject manifests for the file classes, per-arch (oci) and",
+            "# per-major-index (pgrx) digests for the image classes. Mismatch",
+            "# fails the release outright — no warn-and-ship path, because a warn",
+            "# path converts the control into a log line. Skew-proofing is free by",
+            "# construction here: both builds are relative `uses:` in this same",
+            "# run, resolved at the caller's pinned SHA, so a mismatch can only",
+            "# mean NONDETERMINISM, never version skew.",
+            "#",
+            "# Nothing here ever emits SLSA_BUILD_REPRODUCED: a same-platform",
+            "# rebuild can never earn it, by design (docs/tooling-verdicts.md).",
+            "# Fan-in mirrors attach: !cancelled() plus explicit result checks,",
+            "# because the implicit success() looks THROUGH to legitimately",
+            "# skipped class ancestors and goes false (measured on v0.14.2).",
+            "# phase: prove"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/publish.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-extension-images"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 1460,
+              "column": 10
+            },
+            "end_point": {
+              "row": 1460,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 67228,
+              "end": 67321
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "stale-action-refs",
+    "desc": "commit hash does not point to a Git tag",
+    "url": "https://docs.zizmor.sh/audits/#stale-action-refs",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Low",
+      "persona": "Pedantic"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/vex-attest.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-vex"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 297,
+              "column": 2
+            },
+            "end_point": {
+              "row": 317,
+              "column": 70
+            },
+            "offset_span": {
+              "start": 14299,
+              "end": 15301
+            }
+          },
+          "feature": "  sign-vex:\n    name: Sign ${{ matrix.decision }}\n    needs: plan\n    if: needs.plan.outputs.any == 'true'\n    strategy:\n      # One decision's signing failure must not hide the state of the\n      # rest — base-attest.yml's rule, for the same reason.\n      fail-fast: false\n      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}\n    uses: monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273 # main\n    with:\n      subjects: ${{ matrix.subjects }}\n      predicate-type: https://openvex.dev/ns/v0.2.0\n      predicate: ${{ matrix.predicate }}\n      # One bundle per leg: a shared artifact name would make two legs\n      # collide on upload, and the bundle is evidence about ONE decision.\n      bundle-artifact: attestation-bundle-vex-${{ matrix.slug }}\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the claim\n      artifact-metadata: write # the signer creates the storage record",
+          "comments": [
+            "# main",
+            "# One decision's signing failure must not hide the state of the",
+            "# rest — base-attest.yml's rule, for the same reason.",
+            "# One bundle per leg: a shared artifact name would make two legs",
+            "# collide on upload, and the bundle is evidence about ONE decision.",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the claim",
+            "# the signer creates the storage record"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/vex-attest.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign-vex"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 306,
+              "column": 10
+            },
+            "end_point": {
+              "row": 306,
+              "column": 103
+            },
+            "offset_span": {
+              "start": 14640,
+              "end": 14733
+            }
+          },
+          "feature": "monumental-archive/signer/.github/workflows/sign.yml@cffec9441210d46f237099d8785098aacf5b8273",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  }
+]
