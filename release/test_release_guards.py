@@ -588,7 +588,7 @@ class OpenReleasePrHead(unittest.TestCase):
     PLANNED = "a" * 40
     MOVED = "b" * 40
     OID = "c" * 40
-    PROCEEDED = [
+    PROCEEDED = (
         "graphql head",
         f"GET repos/{REPO}/git/ref/heads/release-staging/next",
         f"POST repos/{REPO}/git/refs",
@@ -600,7 +600,7 @@ class OpenReleasePrHead(unittest.TestCase):
         "pr list",
         "pr create",
         f"DELETE repos/{REPO}/git/refs/heads/release-staging/next",
-    ]
+    )
 
     def setUp(self) -> None:
         """Lay out a fixture with a plan, a stub on PATH and a call log."""
@@ -660,7 +660,6 @@ class OpenReleasePrHead(unittest.TestCase):
             "OID": self.OID,
             "PLAN": str(self.plan),
             # Not a credential: the stub reads none.
-            # ruff: ignore[hardcoded-password-func-arg]
             "GH_TOKEN": "stub",
             "GITHUB_REPOSITORY": self.REPO,
             "GITHUB_SHA": self.PLANNED,
@@ -678,7 +677,7 @@ class OpenReleasePrHead(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("opened the release PR for v1.0.0", result.stdout)
         self.assertNotIn("moved", result.stdout)
-        self.assertEqual(self.PROCEEDED, self.calls())
+        self.assertEqual(list(self.PROCEEDED), self.calls())
 
     def test_head_moved_writes_nothing_and_says_why(self) -> None:
         """The measured race: the branch moved while the run was planning."""
@@ -747,7 +746,9 @@ class OpenReleasePrHead(unittest.TestCase):
                 )
                 self.assertEqual(status, result.returncode, result.stderr)
                 self.assertIn(said, result.stdout)
-                expected = self.PROCEEDED if head == checked_out else ["graphql head"]
+                expected = (
+                    list(self.PROCEEDED) if head == checked_out else ["graphql head"]
+                )
                 self.assertEqual(expected, self.calls())
 
 

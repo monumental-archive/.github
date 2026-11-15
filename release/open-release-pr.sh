@@ -75,13 +75,13 @@ if [[ ${GITHUB_EVENT_NAME:-} == release ]]; then
 fi
 # A read that cannot be completed is a failure by name, never "unchanged":
 # reading an error as a match is exactly the stale write this guards.
-head_query='query($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) {
-    defaultBranchRef { target { oid } }
-  }
-}'
+# The owner and name are written into the query rather than bound as
+# GraphQL variables: a single-quoted `$owner` is a GraphQL variable that
+# the linter cannot tell from an unexpanded shell one (SC2016).
+head_query="{ repository(owner: \"${GITHUB_REPOSITORY%%/*}\","
+head_query+=" name: \"${GITHUB_REPOSITORY#*/}\")"
+head_query+=" { defaultBranchRef { target { oid } } } }"
 head=$(gh api graphql -f query="${head_query}" \
-  -f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" \
   --jq '.data.repository.defaultBranchRef.target.oid') || head=""
 if [[ ! ${head} =~ ^[0-9a-f]{40}$ ]]; then
   echo "FAIL: could not read the default branch head of ${GITHUB_REPOSITORY}" >&2
