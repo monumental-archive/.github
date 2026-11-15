@@ -26,9 +26,10 @@ from the forge.
                  the signer only through the canon;
   signer-branch  D is on the signer repository's default branch.
 
-"The canon" is the repository this runs in (GITHUB_REPOSITORY). No list
-of signer callers is kept: the chain link is read at the commit the run
-used.
+"The canon" is the repository this runs in (GITHUB_REPOSITORY), and
+the signer is `signer` under the canon's owner: no organisation is named
+in this tool. No list of signer callers is kept: the chain link is read
+at the commit the run used.
 
 The claims are read from the CT log entry itself, never from the
 monitor's output line beyond its index. A certificate that fails a
@@ -64,11 +65,8 @@ if TYPE_CHECKING:
 
 CT_LOG = os.environ.get("CT_LOG", "https://ctfe.sigstore.dev/2022")
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-ORG = "monumental-archive"
-SIGNER_REPO = f"{ORG}/signer"
-SIGNER_SIGN = f"{SIGNER_REPO}/.github/workflows/sign.yml"
-SIGNER_WORKFLOW = f"https://github.com/{SIGNER_SIGN}@"
-USER_AGENT = "monumental-archive/.github/rekor-monitor"
+SIGN_PATH = ".github/workflows/sign.yml"
+USER_AGENT = "rekor-monitor-reconcile"
 
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
@@ -340,12 +338,23 @@ class Forge:
 # --- reconciliation ----------------------------------------------------------
 
 
-def _pins_signer(text: str, digest: str) -> bool:
-    return re.search(rf"uses:\s*{re.escape(SIGNER_SIGN)}@{digest}\b", text) is not None
+def signer_of(canon: str) -> str:
+    """Name the signer repository: `signer` under the canon's own owner.
+
+    Returns:
+        The signer repository as `owner/signer`; the owner is never written
+        into this tool, it is the owner of the repository it runs in.
+
+    """
+    return f"{canon.split('/', maxsplit=1)[0]}/signer"
 
 
-def _calls_signer(text: str) -> bool:
-    return re.search(rf"uses:\s*{re.escape(SIGNER_SIGN)}@", text) is not None
+def _pins_signer(text: str, sign: str, digest: str) -> bool:
+    return re.search(rf"uses:\s*{re.escape(sign)}@{digest}\b", text) is not None
+
+
+def _calls_signer(text: str, sign: str) -> bool:
+    return re.search(rf"uses:\s*{re.escape(sign)}@", text) is not None
 
 
 @dataclass
@@ -454,7 +463,7 @@ def _candidates(
     candidates = []
     for workflow in run.get("referenced_workflows", []):
         path, _, ref = workflow["path"].partition("@")
-        if path == SIGNER_SIGN:
+        if path == f"{signer_of(canon)}/{SIGN_PATH}":
             signer_shas.add(workflow["sha"])
         elif path.startswith(f"{canon}/"):
             candidates.append((path.removeprefix(f"{canon}/"), workflow["sha"]))
@@ -479,7 +488,8 @@ def _check_direct(verdict: Verdict, run: dict, forge: Forge, canon: str) -> None
     repo = run["repository"]["full_name"]
     if repo == canon:
         return
-    if _calls_signer(forge.contents(repo, run["path"], run["head_sha"])):
+    sign = f"{signer_of(canon)}/{SIGN_PATH}"
+    if _calls_signer(forge.contents(repo, run["path"], run["head_sha"]), sign):
         verdict.fail(
             "direct",
             f"{repo}'s {run['path']} at {run['head_sha']} calls the signer itself",
@@ -502,8 +512,9 @@ def _check_chain(
                 "canon-branch",
                 f"{canon}/{path} at {sha} is not on {canon}'s default branch",
             )
+    sign = f"{signer_of(canon)}/{SIGN_PATH}"
     for path, sha in candidates:
-        if _pins_signer(forge.contents(canon, path, sha), digest):
+        if _pins_signer(forge.contents(canon, path, sha), sign, digest):
             verdict.detail.append(
                 f"chain {canon}/{path}@{sha[:12]} calls sign.yml@{digest[:12]}"
             )
@@ -523,11 +534,16 @@ def reconcile(
 
     """
     verdict = Verdict(index, claims)
+    signer = signer_of(canon)
     digest = claims.get("build_signer_digest", "")
     san = claims.get("san", "")
-    if not DIGEST.fullmatch(digest) or not san.startswith(SIGNER_WORKFLOW):
+    if not DIGEST.fullmatch(digest) or not san.startswith(
+        f"https://github.com/{signer}/{SIGN_PATH}@"
+    ):
         verdict.fail(
-            "signer-in-run", f"signer claim unreadable: SAN {san!r}, digest {digest!r}"
+            "signer-in-run",
+            f"signer claim unreadable: SAN {san!r} is not {signer}'s sign.yml,"
+            f" or digest {digest!r} is not a commit",
         )
         return verdict
     run = _read_run(verdict, forge, members)
@@ -535,12 +551,12 @@ def reconcile(
         candidates = _candidates(verdict, run, digest, canon)
         _check_direct(verdict, run, forge, canon)
         _check_chain(verdict, candidates, forge, digest, canon)
-    if forge.on_default_branch(SIGNER_REPO, digest):
+    if forge.on_default_branch(signer, digest):
         verdict.detail.append(f"signer {digest[:12]} on default branch")
     else:
         verdict.fail(
             "signer-branch",
-            f"signer commit {digest} is not on {SIGNER_REPO}'s default branch",
+            f"signer commit {digest} is not on {signer}'s default branch",
         )
     return verdict
 
@@ -596,7 +612,13 @@ def main(argv: list[str]) -> int:
     if args.monitor_log:
         indexes += found_indexes(Path(args.monitor_log).read_text(encoding="utf-8"))
     indexes = sorted(set(indexes))
-    canon = os.environ.get("GITHUB_REPOSITORY") or f"{ORG}/.github"
+    canon = os.environ.get("GITHUB_REPOSITORY", "")
+    if "/" not in canon:
+        print(
+            "::error::GITHUB_REPOSITORY is not set:"
+            " the canon, and so the signer, is unknown"
+        )
+        return EXIT_READ_ERROR
     forge = Forge(os.environ.get("FORGE_TOKEN"))
     members = roster(args.root, canon.split("/", maxsplit=1)[0])
 

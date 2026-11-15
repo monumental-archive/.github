@@ -22,6 +22,7 @@ import copy
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -374,6 +375,24 @@ class Failing(unittest.TestCase):
             f" is not on {CANON}'s default branch",
         )
 
+    def test_signer_is_named_by_the_canons_owner(self) -> None:
+        """Run under another owner, the same certificate names a foreign signer."""
+        members = rc.roster(ROOT, "elsewhere")
+        verdict = rc.reconcile(
+            RELEASE,
+            claims_of(RELEASE),
+            rc.Forge(None, get=FakeForge()),
+            members,
+            "elsewhere/.github",
+        )
+        self.assertEqual(rc.signer_of("elsewhere/.github"), "elsewhere/signer")
+        self.assert_fails(
+            verdict,
+            RELEASE,
+            "signer-in-run",
+            "is not elsewhere/signer's sign.yml",
+        )
+
     def test_signer_off_its_default_branch(self) -> None:
         """The signer commit is not on the signer's default branch."""
         fake = FakeForge()
@@ -401,7 +420,12 @@ def run_main(fake: FakeForge, *indexes: int) -> tuple[int, str, Path, Path]:
     argv += ["--root", str(ROOT), "--findings", str(findings)]
     argv += ["--summary", str(summary)]
     out = io.StringIO()
-    with mock.patch.object(rc, "http_json", fake), redirect_stdout(out):
+    env = {"GITHUB_REPOSITORY": CANON}
+    with (
+        mock.patch.object(rc, "http_json", fake),
+        mock.patch.dict(os.environ, env),
+        redirect_stdout(out),
+    ):
         code = rc.main(argv)
     return code, out.getvalue(), findings, summary
 
@@ -425,6 +449,17 @@ class Cli(unittest.TestCase):
         self.assertIn("HTTP 403", out)
         self.assertFalse(findings.exists())
         self.assertFalse(summary.exists())
+
+    def test_no_canon_is_an_error(self) -> None:
+        """Without GITHUB_REPOSITORY there is no canon and no signer to check."""
+        out = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": ""}),
+            redirect_stdout(out),
+        ):
+            code = rc.main(["--index", str(RELEASE), "--root", str(ROOT)])
+        self.assertEqual(code, 2)
+        self.assertIn("::error::GITHUB_REPOSITORY is not set", out.getvalue())
 
     def test_summary_names_both_real_signings(self) -> None:
         """Each reconciled certificate is one summary line naming its run."""
