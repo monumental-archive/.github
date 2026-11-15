@@ -92,17 +92,13 @@ jobs:
           # these exact bytes on a Mac, where /bin/bash is 3.2.
           #
           # 1. The members this run would publish: workspace members with
-          # crates.io among their registries (`publish` null means any),
-          # with their versions. Nothing else narrows it (#1273): a member
-          # the build could not compile still publishes unless its own
-          # manifest says `publish = false`.
+          # crates.io among their registries, with their versions. Nothing
+          # else narrows it (#1273): a member the build could not compile
+          # still publishes unless its own manifest says `publish = false`.
+          # The set is the canon helper's, the same one the build read to
+          # decide its release subjects (#1310) — one definition.
+          members=$(.org-canon/release/crates-io-members.sh)
           metadata=$(cargo metadata --format-version 1 --no-deps --locked)
-          members=$(jq -r '
-            .workspace_members as $ws
-            | .packages[]
-            | select(.id as $id | $ws | index($id))
-            | select(.publish == null or (.publish | index("crates-io")))
-            | "\(.name)\t\(.version)"' <<< "${metadata}")
           target_dir=$(jq -r '.target_directory' <<< "${metadata}")
 
           # 2. Ask the sparse index, the static host, for each exact

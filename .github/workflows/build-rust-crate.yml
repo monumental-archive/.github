@@ -148,26 +148,61 @@ jobs:
         # byte-identical, or the bytes hashed and published would not be
         # the bytes that were verified. Measured on a fixture workspace,
         # cargo 1.97.1: the second run reproduces the first byte for byte.
+        #
+        # Then the subject set is cut to what crates.io will receive
+        # (#1310). `cargo package` does not read the `publish` key, so it
+        # writes a crate for a `publish = false` member too, and every
+        # crate left in target/package is hashed, planned, uploaded as a
+        # release asset and fetched back from static.crates.io by the
+        # verifier — which fails on one the registry never got, after
+        # the release's other crates are public. So a crate the canon
+        # helper does not name is removed here, after it was packaged
+        # (and verified, unless excluded), before anything hashes it; and
+        # a crate the helper names that cargo did not write fails by
+        # name. The helper is the one the publisher reads, so the
+        # subjects and the uploads are one set by construction.
         run: |
           set -euo pipefail
           # Bash 3.2-clean: release/test_build_rust_crate.py runs these
           # exact bytes on a Mac, where /bin/bash is 3.2.
           # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
           cargo package --workspace --locked ${EXCLUDE_FLAGS}
-          if [[ -z ${EXCLUDE_FLAGS// /} ]]; then exit 0; fi
-          verified=$(sha256sum target/package/*.crate)
-          cargo package --workspace --locked --no-verify
-          changed=0
-          while read -r sum crate; do
-            [[ -n ${crate} ]] || continue
-            now=$(sha256sum "${crate}" | cut -d' ' -f1)
-            if [[ ${now} != "${sum}" ]]; then
-              echo "::error::${crate##*/} changed when packaged again" \
-                "without verifying: ${sum} verified, ${now} now"
-              changed=1
+          if [[ -n ${EXCLUDE_FLAGS// /} ]]; then
+            verified=$(sha256sum target/package/*.crate)
+            cargo package --workspace --locked --no-verify
+            changed=0
+            while read -r sum crate; do
+              [[ -n ${crate} ]] || continue
+              now=$(sha256sum "${crate}" | cut -d' ' -f1)
+              if [[ ${now} != "${sum}" ]]; then
+                echo "::error::${crate##*/} changed when packaged again" \
+                  "without verifying: ${sum} verified, ${now} now"
+                changed=1
+              fi
+            done <<< "${verified}"
+            if [[ ${changed} -ne 0 ]]; then exit 1; fi
+          fi
+          published=$(.org-canon/release/crates-io-members.sh)
+          ships=" "
+          missing=0
+          while IFS=$'\t' read -r name version; do
+            [[ -n ${name} ]] || continue
+            ships="${ships}${name}-${version}.crate "
+            if [[ ! -f target/package/${name}-${version}.crate ]]; then
+              echo "::error::${name} ${version} publishes to crates.io," \
+                "but cargo package wrote no ${name}-${version}.crate"
+              missing=1
             fi
-          done <<< "${verified}"
-          if [[ ${changed} -ne 0 ]]; then exit 1; fi
+          done <<< "${published}"
+          if [[ ${missing} -ne 0 ]]; then exit 1; fi
+          for c in target/package/*.crate; do
+            [[ -e ${c} ]] || break
+            if [[ ${ships} != *" ${c##*/} "* ]]; then
+              rm -- "${c}"
+              echo "${c##*/} is not published to crates.io (publish key);" \
+                "not a release subject"
+            fi
+          done
       - name: Compute the subject manifest
         id: hash
         run: |
@@ -191,10 +226,12 @@ jobs:
         # The artifact-to-package mapping exists with certainty exactly
         # once — here, over the very tarballs `cargo package` just wrote
         # and the publisher will upload (#537). Read from those files
-        # rather than from cargo metadata a second time: the packaged set
-        # is every workspace member, the caller's excludes included
-        # (#1273), and the manifest hashed above is computed from the same
-        # listing, so the planned set and the signed set cannot differ. Not on the repro leg: the comparator proves
+        # rather than from cargo metadata a second time: what the Package
+        # step leaves is exactly the members crates.io will receive — the
+        # caller's excludes included (#1273), `publish = false` members
+        # removed (#1310) — and the manifest hashed above is computed from
+        # the same listing, so the planned set, the signed set and the
+        # published set cannot differ. Not on the repro leg: the comparator proves
         # bytes, not inventories.
         #
         # plan-producer: rust-crate sbom-cargo-

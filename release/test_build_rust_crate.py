@@ -10,12 +10,22 @@ member is left out of `cargo test` and the verified `cargo package`,
 then packaged by a second `cargo package --workspace --no-verify` run,
 which must rewrite every verified crate byte for byte.
 
+#1310: `cargo package` does not read the `publish` key, so a
+`publish = false` member's crate was a release subject - hashed,
+planned, and fetched back from static.crates.io by the verifier, which
+would fail on a crate the registry never received. The Package step
+now keeps exactly the crates release/crates-io-members.sh names (the
+helper the publisher reads too) and fails by name on one it names that
+cargo did not write.
+
 WHAT RUNS. The `run:` bodies of `Package`, `Compute the subject
 manifest` and `Emit the inventory plan`, cut out of
 `.github/workflows/build-rust-crate.yml` as shipped, in order, under
 `bash -c`, with a stub `cargo` first on PATH. `sha256sum`, `sed` and
-`jq` are the real ones; GITHUB_OUTPUT is a real file the hash step
-writes and the test reads back.
+`jq` are the real ones, and so is the canon helper, reached through a
+`.org-canon` link to this tree exactly as the canon action lays it
+out; GITHUB_OUTPUT is a real file the hash step writes and the test
+reads back.
 
 THE STUB IS CARGO'S MEASURED SHAPE. Measured 2026-11-16 on a fixture
 workspace with real cargo 1.97.1 (three members: one plain, one whose
@@ -62,11 +72,14 @@ STEPS = (
 )
 
 CARGO_STUB = """#!/usr/bin/env bash
-# Stub `cargo package`, in cargo's measured shape: a verified run that
-# reaches STUB_UNCOMPILABLE fails the way the pgrx crate does; every
-# member not --exclude'd is written; --no-verify writes from
-# STUB_SECOND when the row planted bytes there.
+# Stub `cargo`, in cargo's measured shape. `metadata` answers
+# STUB_METADATA. `package`: a verified run that reaches
+# STUB_UNCOMPILABLE fails the way the pgrx crate does; every member not
+# --exclude'd is written whatever its `publish` key says (cargo package
+# does not read it); --no-verify writes from STUB_SECOND when the row
+# planted bytes there; a member in STUB_UNWRITTEN is never written.
 set -euo pipefail
+if [[ $1 == metadata ]]; then cat "${STUB_METADATA}"; exit 0; fi
 printf '%s\\n' "$*" >> "${STUB_LOG}"
 [[ $1 == package ]] || { echo "cargo stub: refusing $*" >&2; exit 101; }
 excluded=" "
@@ -81,6 +94,7 @@ done
 mkdir -p target/package
 for m in ${STUB_MEMBERS}; do
   if [[ ${excluded} == *" ${m} "* ]]; then continue; fi
+  if [[ " ${STUB_UNWRITTEN} " == *" ${m} "* ]]; then continue; fi
   if [[ ${verify} -eq 1 && ${m} == "${STUB_UNCOMPILABLE}" ]]; then
     echo "error: failed to compile pgrx-pg-sys" >&2
     exit 101
@@ -156,10 +170,30 @@ class Run:
         return body.split("SUBJECTS_EOF\n", 1)[0]
 
 
+def metadata(publish: dict[str, list[str] | None]) -> dict[str, object]:
+    """Build `cargo metadata --no-deps` for a workspace, as cargo shapes it.
+
+    Returns:
+        The fields the helper reads: members, ids, versions, `publish`.
+
+    """
+    ids = {m: f"path+file:///work/{m}#{VERSION}" for m in publish}
+    return {
+        "packages": [
+            {"name": m, "version": VERSION, "id": ids[m], "publish": key}
+            for m, key in publish.items()
+        ],
+        "workspace_members": list(ids.values()),
+        "target_directory": "/work/target",
+    }
+
+
 def run_steps(
     excludes: str,
     second: dict[str, bytes] | None = None,
     members: tuple[str, ...] = MEMBERS,
+    publish: dict[str, list[str]] | None = None,
+    unwritten: tuple[str, ...] = (),
 ) -> Run:
     """Run the shipped step bodies in order, as the job does.
 
@@ -167,6 +201,9 @@ def run_steps(
         excludes: EXCLUDE_FLAGS, as the resolve step writes them.
         second: bytes the --no-verify run writes instead, per member.
         members: the workspace members cargo packages.
+        publish: each member's `publish` key as cargo metadata reports
+            it, where the row sets one; unset (null) otherwise.
+        unwritten: members cargo package writes no crate for.
 
     Returns:
         The run's status, output, cargo log and what it left behind.
@@ -181,6 +218,9 @@ def run_steps(
             p.mkdir()
         (stubs / "cargo").write_text(CARGO_STUB)
         (stubs / "cargo").chmod(0o755)
+        (work / ".org-canon").symlink_to(CANON)
+        keys = {m: (publish or {}).get(m) for m in members}
+        (tmp / "metadata.json").write_text(json.dumps(metadata(keys)))
         for m in members:
             (first / f"{m}-{VERSION}.crate").write_bytes(crate_bytes(m))
         for m, b in (second or {}).items():
@@ -199,6 +239,8 @@ def run_steps(
             "STUB_VERSION": VERSION,
             "STUB_FIRST": str(first),
             "STUB_SECOND": str(planted),
+            "STUB_METADATA": str(tmp / "metadata.json"),
+            "STUB_UNWRITTEN": " ".join(unwritten),
         }
         out, err, rc = "", "", 0
         for name in STEPS:
@@ -300,6 +342,73 @@ class PackageWithoutExclusion(unittest.TestCase):
         run = run_steps("  ", members=("edtf-core",))
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
         self.assertEqual(["package --workspace --locked"], run.cargo)
+
+
+class SubjectsAreWhatCratesIoReceives(unittest.TestCase):
+    """The Package step keeps exactly the helper's set (#1310)."""
+
+    def test_a_publish_false_member_leaves_every_subject_list(self) -> None:
+        """Packaged and verified, then removed before anything hashes it."""
+        run = run_steps(
+            "",
+            members=("edtf-core", "edtf-cli", "edtf-internal"),
+            publish={"edtf-cli": ["crates-io"], "edtf-internal": []},
+        )
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+        self.assertEqual(["package --workspace --locked"], run.cargo)
+        self.assertEqual(
+            [
+                (
+                    f"edtf-internal-{VERSION}.crate is not published to crates.io"
+                    " (publish key); not a release subject"
+                )
+            ],
+            [x for x in run.stdout.splitlines() if "release subject" in x],
+        )
+        ships = ("edtf-cli", "edtf-core")
+        self.assertEqual([f"{m}-{VERSION}.crate" for m in ships], run.packaged)
+        self.assertEqual(
+            "".join(f"{digest(m)}  {m}-{VERSION}.crate\n" for m in ships),
+            run.manifest(),
+        )
+        self.assertEqual(list(ships), [x["params"]["cargoPackage"] for x in run.plan])
+
+    def test_another_registry_only_is_not_a_subject(self) -> None:
+        """A member publishing elsewhere is not crates.io's to serve."""
+        run = run_steps(
+            "", members=("edtf-core", "edtf-mirror"), publish={"edtf-mirror": ["x"]}
+        )
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+        self.assertEqual([f"edtf-core-{VERSION}.crate"], run.packaged)
+        self.assertEqual(
+            [
+                (
+                    f"edtf-mirror-{VERSION}.crate is not published to crates.io"
+                    " (publish key); not a release subject"
+                )
+            ],
+            [x for x in run.stdout.splitlines() if "release subject" in x],
+        )
+
+    def test_an_excluded_publish_false_member_is_removed_too(self) -> None:
+        """Packaged by the --no-verify run, then cut like any other."""
+        run = run_steps(EXCLUDE, publish={UNCOMPILABLE: []})
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+        self.assertEqual(
+            [f"edtf-cli-{VERSION}.crate", f"edtf-core-{VERSION}.crate"], run.packaged
+        )
+        self.assertNotIn(UNCOMPILABLE, run.manifest())
+
+    def test_a_named_crate_cargo_did_not_write_fails_by_name(self) -> None:
+        """Nothing the publisher will upload goes unhashed."""
+        run = run_steps("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",))
+        self.assertNotEqual(0, run.returncode)
+        self.assertEqual(
+            f"::error::edtf-cli {VERSION} publishes to crates.io,"
+            f" but cargo package wrote no edtf-cli-{VERSION}.crate\n",
+            run.stdout,
+        )
+        self.assertEqual("", run.outputs)
 
 
 if __name__ == "__main__":
