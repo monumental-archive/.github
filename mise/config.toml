@@ -725,11 +725,38 @@ dir = "{{cwd}}"
 #   in silence — 1 finding with `-- noqa: RF04 real column`, 0 with
 #   `-- noqa: RF04`, and no warning either way. The reason goes on the
 #   line ABOVE; the noqa carries codes and nothing else.
+#
+# THE BELT SKIPS THE FILES IT OWNS (#1240). `fix:pg-schema` writes each
+# pgrx extension's `schema.snapshot.sql` as pgrx emits it, normalised
+# only for ordering and comments, and `lint:pg-schema` diffs against
+# exactly that — so sqlfluff's fixes would make the snapshot differ
+# from its generator, and its findings are a red no edit can clear.
+# The snapshots are left out of the file list handed to sqlfluff, and
+# they are named by pg-snapshots.sh, the helper `lint:pg-schema` takes
+# them from: derived from the extension crates, never a filename match,
+# so a hand-written `schema.snapshot.sql` outside an extension is still
+# linted. A repository's own .sqlfluffignore keeps working beside it.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' "*.sql")
-[[ -n ${files} ]] || {
+tracked=$(git ls-files ':!vendor/**' "*.sql")
+[[ -n ${tracked} ]] || {
   echo "lint:sql: no SQL tracked, skipped"
+  exit 0
+}
+# Assigned first: a red derivation must red the task, never read as
+# "the belt owns nothing" and hand sqlfluff the snapshots.
+owned=$("${ORG_BELT_DIR}/pg-snapshots.sh")
+owned=$(cut -f1 <<< "${owned}")
+files=""
+skipped=0
+while IFS= read -r file; do
+  case $'\n'"${owned}"$'\n' in
+    *$'\n'"${file}"$'\n'*) skipped=$((skipped + 1)) ;;
+    *) files="${files}${files:+$'\n'}${file}" ;;
+  esac
+done <<< "${tracked}"
+[[ -n ${files} ]] || {
+  echo "lint:sql: only belt-owned SQL tracked (${skipped} pg-schema snapshot(s)), skipped"
   exit 0
 }
 xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}" || {
@@ -737,7 +764,7 @@ xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}" || {
   exit 1
 }
 count=$(wc -l <<< "${files}" | tr -d " ")
-echo "lint:sql: ${count} file(s) linted"
+echo "lint:sql: ${count} file(s) linted, ${skipped} pg-schema snapshot(s) left to lint:pg-schema"
 '''
 
 [tasks."fix:sql"]
@@ -746,11 +773,26 @@ dir = "{{cwd}}"
 # The write-mode sibling, never in the gate. --force is the
 # non-interactive mode, not an unsafe-fix flag: sqlfluff fix applies
 # only its own rule fixes, the same class as fix:python's safe fixes.
+# It leaves out the same pg-schema snapshots `lint:sql` does, from the
+# same helper (#1240): rewriting one is what turns `lint:pg-schema` red.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' "*.sql")
-[[ -n ${files} ]] || {
+tracked=$(git ls-files ':!vendor/**' "*.sql")
+[[ -n ${tracked} ]] || {
   echo "fix:sql: no SQL tracked, skipped"
+  exit 0
+}
+owned=$("${ORG_BELT_DIR}/pg-snapshots.sh")
+owned=$(cut -f1 <<< "${owned}")
+files=""
+while IFS= read -r file; do
+  case $'\n'"${owned}"$'\n' in
+    *$'\n'"${file}"$'\n'*) ;;
+    *) files="${files}${files:+$'\n'}${file}" ;;
+  esac
+done <<< "${tracked}"
+[[ -n ${files} ]] || {
+  echo "fix:sql: only belt-owned SQL tracked, skipped"
   exit 0
 }
 xargs sqlfluff fix --config "${ORG_BELT_DIR}/sqlfluff.cfg" --force <<< "${files}"

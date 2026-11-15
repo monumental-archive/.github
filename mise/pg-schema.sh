@@ -4,10 +4,11 @@
 # extracted so the lint and its fixer generate the surface the same way
 # and cannot drift into judging one surface and writing another.
 #
-# THE EXTENSION IS DERIVED, never declared: gate-surface.py calls a
-# member a pgrx extension when it depends on pgrx AND carries pgNN
-# features. The snapshot's path is derived too — `schema.snapshot.sql`
-# beside the extension's Cargo.toml — so a repository configures nothing.
+# THE EXTENSION IS DERIVED, never declared, and so is its snapshot's
+# path — `schema.snapshot.sql` beside the extension's Cargo.toml — so a
+# repository configures nothing. Both come from pg-snapshots.sh, the
+# one answer lint:sql also takes to leave these files to this task
+# (#1240): the two cannot disagree about which files the belt owns.
 #
 # SKIPS ONLY WHEN THERE IS NO EXTENSION. An extension that tracks no
 # snapshot is red (ruled on #896): a skip would let any extension leave
@@ -40,22 +41,17 @@ command -v cargo > /dev/null || {
   exit 1
 }
 
-# Assigned first, one step each: a `<<< "$(...)"` discards the
-# derivation's exit status, and a red derivation would read as a
-# workspace with no extension — the skip this task must not take.
-metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}")
+# Assigned first: a `<<< "$(...)"` discards the helper's exit status,
+# and a red derivation would read as a workspace with no extension —
+# the skip this task must not take.
+records=$("${belt}/pg-snapshots.sh")
 targets=()
 majors=""
-while IFS=$'\t' read -r record spec kind crate_majors dir; do
-  [[ ${record} == crate && ${kind} == pgrx ]] || continue
-  [[ ${dir} != "-" ]] || {
-    echo "${label}: ${spec} is a pgrx extension cargo reports no directory for" >&2
-    exit 1
-  }
-  targets+=("${spec%@*}:${crate_majors##*,}:${dir}")
-  majors="${majors}${majors:+,}${crate_majors##*,}"
-done <<< "${surface}"
+while IFS=$'\t' read -r snapshot name major dir; do
+  [[ -n ${snapshot} ]] || continue
+  targets+=("${name}:${major}:${dir}:${snapshot}")
+  majors="${majors}${majors:+,}${major}"
+done <<< "${records}"
 [[ -n ${majors} ]] || {
   echo "${label}: no pgrx extension tracked, skipped"
   exit 0
@@ -68,7 +64,7 @@ done <<< "${surface}"
 if [[ ${mode} == check ]]; then
   missing=0
   for target in "${targets[@]}"; do
-    snapshot="${target#*:*:}/schema.snapshot.sql"
+    snapshot="${target#*:*:*:}"
     git ls-files --error-unmatch -- "${snapshot}" > /dev/null 2>&1 || {
       python3 "${belt}/pg-schema.py" check /dev/null "${snapshot}" || missing=1
     }
@@ -97,8 +93,9 @@ for target in "${targets[@]}"; do
   name="${target%%:*}"
   rest="${target#*:}"
   major="${rest%%:*}"
-  dir="${rest#*:}"
-  snapshot="${dir}/schema.snapshot.sql"
+  rest="${rest#*:}"
+  dir="${rest%%:*}"
+  snapshot="${rest#*:}"
   raw="${out}/${name}.raw.sql"
   cargo pgrx schema "pg${major}" --package "${name}" \
     --manifest-path "${dir}/Cargo.toml" \

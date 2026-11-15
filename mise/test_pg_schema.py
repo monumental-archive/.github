@@ -41,11 +41,13 @@ stdlib `unittest`, matching the other mise/test_*.py.
 
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -61,6 +63,9 @@ normalise = pg_schema.normalise
 
 GIT = shutil.which("git") or "git"
 SNAPSHOT = "crates/ext/schema.snapshot.sql"
+BELT = Path(__file__).resolve().parent
+BASH = shutil.which("bash") or "bash"
+SQLFLUFF = shutil.which("sqlfluff") or "sqlfluff"
 
 RAW = """\
 /* <begin connected objects> */
@@ -462,6 +467,255 @@ class Write(InRepo):
             (self.root / SNAPSHOT).read_text(encoding="utf-8"),
             EDTF_SNAPSHOT,
         )
+
+
+# release-lab's tracked `crates/lab-pg/schema.snapshot.sql` at its
+# v1.66.0 bump (release-lab@f46c3e3), as `fix:pg-schema` wrote it: the
+# file that reddened `lint:sql` with LT05 and RF06 (#1240). Real, so the
+# rows below plant the red that was measured, not one written to order.
+LAB_SNAPSHOT = (
+    'CREATE FUNCTION "lab_answer"() RETURNS INT STRICT LANGUAGE c AS '
+    "'MODULE_PATHNAME', 'lab_answer_wrapper';\n"
+    'CREATE FUNCTION "lab_version"() RETURNS TEXT STRICT LANGUAGE c AS '
+    "'MODULE_PATHNAME', 'lab_version_wrapper';\n"
+)
+# SQL the delivered config passes: the file that must still be linted.
+CLEAN_SQL = "SELECT 1;\n"
+
+# Stands in for cargo: answers `metadata` with the planted document and
+# fails anything else, so a row that reaches for a build is red.
+CARGO_SHIM = """#!/usr/bin/env bash
+[[ ${1:-} == metadata ]] || exit 99
+[[ -f ${PLANT_METADATA} ]] || exit 101
+cat "${PLANT_METADATA}"
+"""
+# Records the paths sqlfluff was handed, then runs the REAL sqlfluff on
+# them under the delivered config, so its exit status is sqlfluff's own.
+SQLFLUFF_SHIM = """#!/usr/bin/env bash
+for arg in "$@"; do
+  [[ ${arg} == *.sql ]] && printf '%s\\n' "${arg}" >> "${PLANT_SQLFLUFF_LOG}"
+done
+exec "${PLANT_SQLFLUFF}" "$@"
+"""
+
+
+def task_body(name: str) -> str:
+    """Read a task's run string out of the belt as mise would render it.
+
+    Returns:
+        The body with any `{% raw %}` / `{% endraw %}` lines removed.
+
+    """
+    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
+    run = config["tasks"][name]["run"]
+    return "".join(
+        line
+        for line in run.splitlines(keepends=True)
+        if line.strip() not in {"{% raw %}", "{% endraw %}"}
+    )
+
+
+class SqlSkipsOwnedSnapshots(unittest.TestCase):
+    """lint:sql and fix:sql leave the belt's snapshots to pg-schema (#1240).
+
+    The body under test is each task's own `run` string from
+    mise/config.toml, run by bash in a planted repository with the real
+    pg-snapshots.sh and gate-surface.py behind it. Only cargo is a shim
+    (the canon pins no Rust); sqlfluff is the belt's own, wrapped to
+    record the file list, which every row asserts.
+
+    Mutation-checked, one mutant at a time: the exclusion emptied reds 5
+    rows; a filename match (`*schema.snapshot.sql`) in place of the
+    derivation reds 4; the helper's exit status swallowed (`|| true`)
+    reds 1; a root crate's path left as `./schema.snapshot.sql` reds 1.
+    """
+
+    def setUp(self) -> None:
+        """Make a repository, the shims, and an empty member list."""
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        git(self.root, "init", "-q")
+        self.shims = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.shims, ignore_errors=True)
+        for name, text in (("cargo", CARGO_SHIM), ("sqlfluff", SQLFLUFF_SHIM)):
+            shim = self.shims / name
+            shim.write_text(text, encoding="utf-8")
+            shim.chmod(0o755)
+        self.log = self.shims / "sqlfluff.log"
+        self.metadata = self.shims / "metadata.json"
+        self.packages: list[dict] = []
+
+    def member(self, where: str, *, pgrx: bool) -> None:
+        """Plant a tracked crate, an extension when `pgrx` is set."""
+        crate = self.root / where
+        crate.mkdir(parents=True, exist_ok=True)
+        (crate / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+        git(self.root, "add", str(Path(where) / "Cargo.toml"))
+        name = Path(where).name if where != "." else "rootext"
+        self.packages.append({
+            "id": f"path+file://{crate}#0.1.0",
+            "name": name,
+            "version": "0.1.0",
+            "features": {"pg17": [], "pg18": [], "pg_test": []} if pgrx else {},
+            "dependencies": [{"name": "pgrx" if pgrx else "serde"}],
+            "manifest_path": str(crate / "Cargo.toml"),
+        })
+
+    def sql(self, path: str, text: str) -> None:
+        """Plant and track one SQL file."""
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text(text, encoding="utf-8")
+        git(self.root, "add", path)
+
+    def run_task(self, task: str) -> tuple[int, str, str, list[str]]:
+        """Run one task body in the planted repository.
+
+        Returns:
+            Exit status, stdout, stderr, and the SQL paths sqlfluff was
+            handed (empty when it never ran).
+
+        """
+        doc = {
+            "workspace_root": str(self.root),
+            "workspace_members": [pkg["id"] for pkg in self.packages],
+            "packages": self.packages,
+        }
+        if self.packages:
+            self.metadata.write_text(json.dumps(doc), encoding="utf-8")
+        env = scrubbed() | {
+            "ORG_BELT_DIR": str(BELT),
+            "PATH": f"{self.shims}{os.pathsep}{os.environ['PATH']}",
+            "PLANT_METADATA": str(self.metadata),
+            "PLANT_SQLFLUFF": SQLFLUFF,
+            "PLANT_SQLFLUFF_LOG": str(self.log),
+        }
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [BASH, "-euo", "pipefail", "-c", task_body(task)],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        handed = (
+            self.log.read_text(encoding="utf-8").splitlines()
+            if self.log.exists()
+            else []
+        )
+        return done.returncode, done.stdout, done.stderr, sorted(handed)
+
+    def test_the_planted_snapshot_is_one_sqlfluff_reds(self) -> None:
+        """Precondition: without the skip, the snapshot row would be red."""
+        path = self.root / "snapshot.sql"
+        path.write_text(LAB_SNAPSHOT, encoding="utf-8")
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [SQLFLUFF, "lint", "--config", str(BELT / "sqlfluff.cfg"), str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("LT05", done.stdout)
+        self.assertIn("RF06", done.stdout)
+
+    def test_extension_snapshot_is_left_out_and_lint_is_green(self) -> None:
+        """The snapshot sqlfluff would red is not handed to sqlfluff."""
+        self.member("crates/ext", pgrx=True)
+        self.sql(SNAPSHOT, LAB_SNAPSHOT)
+        self.sql("crates/ext/sql/ext--0.1.0--0.2.0.sql", CLEAN_SQL)
+        status, out, err, handed = self.run_task("lint:sql")
+        self.assertEqual((status, err), (0, ""))
+        self.assertEqual(handed, ["crates/ext/sql/ext--0.1.0--0.2.0.sql"])
+        self.assertIn(
+            "lint:sql: 1 file(s) linted, 1 pg-schema snapshot(s) left to "
+            "lint:pg-schema\n",
+            out,
+        )
+
+    def test_extension_at_the_workspace_root_is_left_out(self) -> None:
+        """A root crate's snapshot is spelled the way git ls-files spells it."""
+        self.member(".", pgrx=True)
+        self.sql("schema.snapshot.sql", LAB_SNAPSHOT)
+        self.sql("sql/up.sql", CLEAN_SQL)
+        status, _, err, handed = self.run_task("lint:sql")
+        self.assertEqual((status, err), (0, ""))
+        self.assertEqual(handed, ["sql/up.sql"])
+
+    def test_same_name_outside_an_extension_is_still_linted(self) -> None:
+        """Derived from the crates, never matched by filename."""
+        self.member("crates/ext", pgrx=True)
+        self.member("crates/plain", pgrx=False)
+        self.sql(SNAPSHOT, LAB_SNAPSHOT)
+        self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
+        self.sql("db/schema.snapshot.sql", CLEAN_SQL)
+        status, out, err, handed = self.run_task("lint:sql")
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            handed,
+            ["crates/plain/schema.snapshot.sql", "db/schema.snapshot.sql"],
+        )
+        self.assertIn("crates/plain/schema.snapshot.sql] FAIL", out)
+        self.assertIn("lint:sql: findings above", err)
+
+    def test_no_extension_excludes_nothing(self) -> None:
+        """A Rust workspace with no pgrx member owns no SQL."""
+        self.member("crates/plain", pgrx=False)
+        self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
+        self.sql("db/up.sql", CLEAN_SQL)
+        status, _, _, handed = self.run_task("lint:sql")
+        self.assertEqual(status, 1)
+        self.assertEqual(handed, ["crates/plain/schema.snapshot.sql", "db/up.sql"])
+
+    def test_no_cargo_manifest_excludes_nothing_and_asks_no_cargo(self) -> None:
+        """No Cargo.toml tracked: the shim would exit 101 if asked."""
+        self.sql("schema.snapshot.sql", CLEAN_SQL)
+        self.sql("db/up.sql", CLEAN_SQL)
+        status, out, err, handed = self.run_task("lint:sql")
+        self.assertEqual((status, err), (0, ""))
+        self.assertEqual(handed, ["db/up.sql", "schema.snapshot.sql"])
+        self.assertIn("lint:sql: 2 file(s) linted, 0 pg-schema", out)
+
+    def test_only_belt_owned_sql_skips_without_sqlfluff(self) -> None:
+        """Nothing left to lint is a skip, not sqlfluff with no paths."""
+        self.member("crates/ext", pgrx=True)
+        self.sql(SNAPSHOT, LAB_SNAPSHOT)
+        status, out, err, handed = self.run_task("lint:sql")
+        self.assertEqual((status, err, handed), (0, "", []))
+        self.assertEqual(
+            out,
+            "lint:sql: only belt-owned SQL tracked "
+            "(1 pg-schema snapshot(s)), skipped\n",
+        )
+
+    def test_a_red_derivation_reds_the_lint_before_sqlfluff(self) -> None:
+        """A broken cargo must not read as "the belt owns nothing"."""
+        self.member("crates/ext", pgrx=True)
+        self.sql(SNAPSHOT, LAB_SNAPSHOT)
+        self.sql("db/up.sql", CLEAN_SQL)
+        self.packages.clear()  # no metadata document: the shim exits 101
+        status, _, _, handed = self.run_task("lint:sql")
+        self.assertEqual((status, handed), (101, []))
+
+    def test_fix_leaves_the_snapshot_byte_for_byte(self) -> None:
+        """fix:sql hands sqlfluff the same list and never rewrites it."""
+        self.member("crates/ext", pgrx=True)
+        self.sql(SNAPSHOT, LAB_SNAPSHOT)
+        self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
+        status, _, _, handed = self.run_task("fix:sql")
+        self.assertEqual(handed, ["crates/plain/schema.snapshot.sql"])
+        self.assertEqual(
+            (self.root / SNAPSHOT).read_text(encoding="utf-8"),
+            LAB_SNAPSHOT,
+        )
+        self.assertNotEqual(
+            (self.root / "crates/plain/schema.snapshot.sql").read_text(
+                encoding="utf-8",
+            ),
+            LAB_SNAPSHOT,
+        )
+        self.assertEqual(status, 0)
 
 
 class Usage(unittest.TestCase):
