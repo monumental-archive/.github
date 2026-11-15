@@ -230,10 +230,11 @@ jobs:
   # the index (docs/dependency-track.md, "SBOMs are class-shaped":
   # trivy over the published image BY DIGEST, "not a local twin").
   #
-  # Why here and not in the assemble job that already renders one: the
-  # SBOM assemble renders is taken AFTER `imagetools create --tag`, and
-  # the tag is this archetype's irreversible act. A gate downstream of
-  # it would decide about an image the world already has. The per-arch
+  # Why here and not in the assemble job that already renders one:
+  # assemble runs only once the commit point has opened, and the
+  # `latest` tag — this archetype's irreversible act — follows it as
+  # soon as the index is signed (#1280). A gate downstream of it would
+  # decide about an image already committed to the world. The per-arch
   # digests, by contrast, exist and are public reference-less — the
   # same property #118 relies on — so they are the last moment at which
   # refusing still prevents something.
@@ -654,7 +655,8 @@ jobs:
   # and its immutability story is the digest attestation — but it is no
   # longer ungated for dependency triage: creating the tag is the act
   # that makes these bytes the stream, so it happens downstream of the
-  # commit point or not at all (#717).
+  # commit point or not at all (#717). The index is pushed by digest
+  # with no tag; `tag` names it, last, once it is signed (#1280).
   # phase: publish
   assemble:
     name: Assemble the image index
@@ -667,7 +669,7 @@ jobs:
     uses: ./.github/workflows/assemble-oci-index.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
-      packages: write # create and tag the manifest list
+      packages: write # push the manifest list by digest
     with:
       version: latest
       smoke-test: ${{ inputs.smoke-test }}
@@ -686,4 +688,28 @@ jobs:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
+
+  # The `latest` tag, last (#1280): a name for an index already pushed
+  # by digest, gated and signed, applied by the same manifest PUT the
+  # versioned path uses. A stream has no release to wait for, so the
+  # signature is the last thing before the name; a run that dies before
+  # it leaves `latest` on the previous stream image. The tag job for a
+  # failed sign does not run, and a failed tag job is a red run with an
+  # idempotent re-run.
+  # phase: publish
+  tag:
+    name: Tag the image index
+    needs:
+      - assemble
+      - commit-point
+      - sign
+    if: ${{
+        !cancelled() && needs.commit-point.result == 'success'
+        && needs.sign.result == 'success'
+      }}
+    uses: ./.github/workflows/tag-images.yml # zizmor: ignore[self-repository]
+    permissions:
+      packages: write # PUT the signed index manifest under latest
+    with:
+      images: ${{ needs.assemble.outputs.images }}
 ...

@@ -25,9 +25,9 @@
 #   attestation says whose bytes they are.
 #
 #   This workflow stops after the per-arch digest pushes (#118): the
-#   index is assembled and TAGGED exactly once, post-gate, in
-#   assemble-oci-index.yml — no public reference exists until the
-#   repro gate has compared the per-arch digests bit for bit.
+#   index is assembled exactly once, post-gate, in assemble-oci-index.yml
+#   and pushed by digest; its tag is applied by tag-images.yml after the
+#   release publishes (#1280) — no public reference exists until then.
 #
 # No `docker/*` actions: `docker buildx` and `docker login` are preinstalled
 # on the runners, proven in the lab, and using them keeps the organisation's

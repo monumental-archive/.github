@@ -5817,6 +5817,16 @@ dir = "{{cwd}}"
 #      runs precisely when the barrier did NOT open), so it is the one
 #      phase that could become a route around the commit point. It
 #      cannot: nothing downstream can depend on it, and it signs nothing
+#   8. a job that calls tag-images.yml needs `attach` directly, or, in
+#      an orchestrator with no attach job (the continuous archetype), a
+#      job that calls the signer's sign.yml (#1280). A registry tag is
+#      the last thing a release does: a name for bytes already uploaded,
+#      gated, signed and released. A tag job that needs only
+#      commit-point runs beside the crates.io and npm uploads, and a run
+#      that burns at one of them leaves a named, pullable image of a
+#      version that was never released — edtf v1.3.2 and v1.3.3. A
+#      stream has no release, so its signature is the last thing before
+#      the name
 run = '''
 orchestrators=""
 for f in .github/workflows/publish.yml .github/workflows/continuous.yml; do
@@ -5856,15 +5866,18 @@ for f in ${orchestrators}; do
   /^    needs:$/ { nblock = 1; needs[job] = ""; next }
   nblock && /^      - / { needs[job] = needs[job] (needs[job] == "" ? "" : ",") $2; next }
   nblock { nblock = 0 }
+  /^    uses: \.\/\.github\/workflows\/tag-images\.yml/ { tagger[job] = 1 }
+  /^    uses: monumental-archive\/signer\/\.github\/workflows\/sign\.yml@/ { signer[job] = 1 }
   /^      id-token: write/ { idtok[job] = 1 }
   /^      contents: write/ { cwrite[job] = 1 }
   /needs\.commit-point\.result == .success./ { testscp[job] = 1 }
   END {
     bad = ""
     valid = ",admit,build,prove,commit-point,publish,attest,record,"
-    cp = ""; proves = ""
+    cp = ""; proves = ""; hasattach = 0
     for (i = 1; i <= n; i++) {
       j = order[i]; p = phase[j]
+      if (j == "attach") hasattach = 1
       if (index(valid, "," p ",") == 0) bad = bad "\n  " j ": unknown phase \"" p "\""
       if (p == "commit-point") { if (cp != "") bad = bad "\n  " j ": second commit-point (" cp " already is)"; cp = j }
       if (p == "prove") proves = proves "," j
@@ -5905,6 +5918,14 @@ for f in ${orchestrators}; do
       }
       if ((p == "admit" || p == "build" || p == "prove") && (j in idtok || j in cwrite))
         bad = bad "\n  " p " job " j " holds id-token or contents write — pre-barrier jobs sign and publish nothing"
+      if ((j in tagger) && hasattach && index("," needs[j] ",", ",attach,") == 0)
+        bad = bad "\n  tag job " j " calls tag-images.yml without needing attach — a registry tag is the last thing a release does (#1280)"
+      if ((j in tagger) && !hasattach) {
+        signed = 0; m = split(needs[j], e, ",")
+        for (k = 1; k <= m; k++) if (e[k] in signer) signed = 1
+        if (!signed)
+          bad = bad "\n  tag job " j " calls tag-images.yml without needing a sign.yml job — with no attach, a tag names only signed bytes (#1280)"
+      }
       if (p == "record") {
         if (j in idtok)
           bad = bad "\n  record job " j " holds id-token — a record writes down what happened, it signs nothing"

@@ -1,14 +1,16 @@
 # The oci-image index assembly, extracted from build-oci-image.yml
-# (#118): the index is assembled and TAGGED exactly once, HERE,
-# downstream of the repro gate — the per-arch digest pushes are the
-# build's last act, the gate compares them bit for bit, and only then
-# does a public reference come into existence. The rebuild never tags
-# anything, and there is no index-level compare because the index is
-# built exactly once (the same single-byte-path argument that covers
-# the pgrx artifact images assembling from attested tarballs).
+# (#118): the index is assembled exactly once, HERE, downstream of the
+# repro gate — the per-arch digest pushes are the build's last act and
+# the gate compares them bit for bit. The rebuild never tags anything,
+# and there is no index-level compare because the index is built
+# exactly once (the same single-byte-path argument that covers the pgrx
+# artifact images assembling from attested tarballs).
 #
-# Everything downstream of the tag is unchanged from the original
-# manifest job: pull-back smoke by digest, facts equality, the
+# The index is pushed BY DIGEST, with no tag (#1280). A registry tag is
+# the last thing a release does: tag-images.yml names this digest after
+# attach has published the release, so a run that burns between here
+# and attach leaves an index nobody can pull as this version. Everything
+# after the push reads by digest: pull-back smoke, facts equality, the
 # report-only scan, and the image SBOM from the published bytes.
 ---
 name: assemble-oci-index
@@ -47,6 +49,12 @@ name: assemble-oci-index
           subject: measured in the lab, `gh attestation verify
           oci://<image>:<tag>` resolves the index.
         value: ${{ jobs.manifest.outputs.digest }}
+      images:
+        description: >
+          The index as a one-element JSON array of {image, tag, digest} —
+          the shape tag-images.yml takes, so the tag job after attach
+          names exactly the digest pushed and signed here.
+        value: ${{ jobs.manifest.outputs.images }}
       registry-subjects:
         description: >
           The same index as one target-prefixed sha256sum line —
@@ -66,10 +74,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write # create the manifest list
+      packages: write # push the manifest list by digest
     outputs:
       image: ${{ steps.assemble.outputs.image }}
       digest: ${{ steps.assemble.outputs.digest }}
+      images: ${{ steps.assemble.outputs.images }}
       registry-subjects: ${{ steps.assemble.outputs.registry-subjects }}
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -139,14 +148,45 @@ jobs:
           ANNOS=()
           while IFS= read -r kv; do ANNOS+=(--annotation "index:${kv}"); done <<< "${pairs}"
           printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          docker buildx imagetools create \
+          # Build the index manifest without pushing it: --dry-run prints
+          # the exact bytes a tagged create would push, annotations
+          # included, plus one trailing newline (measured, buildx 0.36:
+          # byte-identical to the manifest a tagged create stored once
+          # that newline is dropped). The sources are already in this
+          # repository, so there is nothing to copy across.
+          docker buildx imagetools create --dry-run \
             "${ANNOS[@]}" \
-            --tag "${image}:${UNTRUSTED_VERSION}" \
-            "${image}@${AMD}" "${image}@${ARM}"
-          index=$(docker buildx imagetools inspect "${image}:${UNTRUSTED_VERSION}" \
+            "${image}@${AMD}" "${image}@${ARM}" > /tmp/index.out
+          tail -c 1 /tmp/index.out > /tmp/index.last
+          last=$(od -An -tx1 /tmp/index.last)
+          if [[ ${last// /} != 0a ]]; then
+            echo "::error::imagetools --dry-run output does not end in a newline; refusing to guess the manifest bytes"
+            exit 1
+          fi
+          size=$(wc -c < /tmp/index.out)
+          head -c "$((size - 1))" /tmp/index.out > /tmp/index.json
+          ctype=$(jq -r '.mediaType // empty' /tmp/index.json)
+          if [[ ${ctype} != application/vnd.oci.image.index.v1+json ]]; then
+            echo "::error::the assembled index is '${ctype:-no media type}', not an OCI image index"
+            exit 1
+          fi
+          index="sha256:$(sha256sum /tmp/index.json | cut -d' ' -f1)"
+          # PUT those bytes under their own digest — a reference that is
+          # a content address, not a name — and require the registry to
+          # answer that digest: the manifest-PUT pattern tag-images.yml
+          # uses, with the digest standing where the tag would.
+          name="${image#ghcr.io/}"
+          token=$(curl -sSf -u "${GITHUB_ACTOR}:${GH_TOKEN}" \
+            "https://ghcr.io/token?scope=repository:${name}:pull,push&service=ghcr.io" \
+            | jq -r '.token')
+          curl -sSf -X PUT -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: ${ctype}" \
+            --data-binary @/tmp/index.json \
+            "https://ghcr.io/v2/${name}/manifests/${index}" > /dev/null
+          answered=$(docker buildx imagetools inspect "${image}@${index}" \
             --format '{{json .Manifest}}' | jq -r '.digest')
-          if [[ ! ${index} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::no index digest"
+          if [[ ${answered} != "${index}" ]]; then
+            echo "::error::the registry answered ${answered:-no digest} for the index pushed as ${index}"
             exit 1
           fi
           # registry-subjects — one index, one leg: the class varies
@@ -157,6 +197,9 @@ jobs:
             echo "image=${image}"
             echo "digest=${index}"
             echo "registry-subjects=image ${index#sha256:}  ${image}"
+            jq -cn --arg image "${image}" --arg tag "${UNTRUSTED_VERSION}" \
+              --arg digest "${index}" \
+              '"images=" + ([{image: $image, tag: $tag, digest: $digest}] | tojson)' -r
           } >> "${GITHUB_OUTPUT}"
           echo "::notice::index ${index}"
       - name: Pull the published bytes back and smoke them

@@ -389,6 +389,155 @@ class RecordDraftProse(unittest.TestCase):
         self.assertNotIn("Fixed forward", posted)
 
 
+RUN = "https://example/run/1"
+NOTHING_PUBLIC = (
+    "`v1.0.0` was tagged, and its publish run failed before anything"
+    " became public. Tags are immutable, so this version number is spent:"
+    " nothing shipped under it and nothing can. This draft is the record"
+    " of that, not a release in flight."
+)
+SOME_PUBLIC_HEAD = (
+    "`v1.0.0` was tagged, and its publish run failed after these became"
+    " public, and they remain:\n\n"
+)
+SOME_PUBLIC_TAIL = (
+    "\nTags are immutable, so this version number is spent: the release"
+    " never published, and nothing more can ship under it. This draft is"
+    " the record of that, not a release in flight."
+)
+
+
+class RecordDraftRegistries(unittest.TestCase):
+    """What a burn left on the registries, read from its job results (#1280).
+
+    The uploads run beside each other after the commit point, so a run
+    that dies at one may already have shipped another, and "nothing
+    became public" is then false.
+    """
+
+    def burn(self, registries: str) -> str:
+        """Record a burn with these job results and return the body.
+
+        Returns:
+            The notes body the script posted.
+
+        """
+        with TemporaryDirectory() as d:
+            recorder = DraftRecorder(d)
+            result = recorder.record(
+                REPO="o/r",
+                TAG="v1.0.0",
+                KIND="burn",
+                RUN_URL=RUN,
+                REGISTRIES=registries,
+            )
+            posted = recorder.posted()
+        self.assertEqual(0, result.returncode, result.stderr)
+        return posted
+
+    def test_nothing_public_when_every_registry_job_skipped(self) -> None:
+        """A run that died before its commit point keeps the old sentence."""
+        posted = self.burn(
+            "crates.io=skipped\nnpm=skipped\n"
+            "ghcr.io (extension images)=skipped\nghcr.io (image)=\n"
+        )
+        self.assertIn(NOTHING_PUBLIC, posted)
+        self.assertNotIn("remain", posted)
+
+    def test_nothing_public_when_no_registry_list_is_given(self) -> None:
+        """The backfill and older callers pass no list: the sentence is unchanged."""
+        posted = self.burn("")
+        self.assertIn(NOTHING_PUBLIC, posted)
+
+    def test_some_public_names_each_registry_that_succeeded(self) -> None:
+        """The shape edtf v1.3.3 burned in: npm and image tags out, crates.io red."""
+        posted = self.burn(
+            "crates.io=failure\nnpm=success\n"
+            "ghcr.io (extension images)=success\nghcr.io (image)=skipped\n"
+        )
+        self.assertIn(
+            SOME_PUBLIC_HEAD
+            + "- npm\n- ghcr.io (extension images)\n"
+            + "- crates.io: may be partly published\n"
+            + SOME_PUBLIC_TAIL,
+            posted,
+        )
+        self.assertNotIn("before anything", posted)
+        self.assertNotIn("nothing shipped under it", posted)
+        self.assertNotIn("ghcr.io (image)", posted)
+
+    def test_one_partly_published_is_listed_alone(self) -> None:
+        """A failed upload is neither public nor nothing: it may be partial."""
+        posted = self.burn("crates.io=failure\nnpm=skipped\n")
+        self.assertIn(
+            SOME_PUBLIC_HEAD
+            + "- crates.io: may be partly published\n"
+            + SOME_PUBLIC_TAIL,
+            posted,
+        )
+        self.assertNotIn("before anything", posted)
+
+    def test_a_cancelled_upload_may_be_partly_published(self) -> None:
+        """Cancelled mid-upload is the same claim as failed mid-upload."""
+        posted = self.burn("npm=cancelled\n")
+        self.assertIn("- npm: may be partly published\n", posted)
+
+    def refused(self, message: str, **env: str) -> None:
+        """Assert the run refuses with this message and posts nothing."""
+        with TemporaryDirectory() as d:
+            recorder = DraftRecorder(d)
+            result = recorder.record(REPO="o/r", TAG="v1.0.0", **env)
+            posted = recorder.posted()
+        self.assertEqual(1, result.returncode)
+        self.assertEqual(f"record-draft: {message}\n", result.stderr)
+        self.assertEqual("", posted)
+
+    def test_a_registry_list_without_a_run_is_refused(self) -> None:
+        """Job results are evidence of a run; with no run they cite nothing."""
+        self.refused(
+            "REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL",
+            KIND="burn",
+            REGISTRIES="npm=success",
+        )
+
+    def test_a_registry_list_on_a_rehearsal_is_refused(self) -> None:
+        """A dry run publishes to no registry, so a list there is a wrong call."""
+        self.refused(
+            "REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL",
+            KIND="rehearsal",
+            RUN_URL=RUN,
+            REGISTRIES="npm=success",
+        )
+
+    def test_a_line_without_a_result_is_refused(self) -> None:
+        """A line is <registry>=<job result>, never a bare name."""
+        self.refused(
+            "REGISTRIES line 'npm' is not <registry>=<job result>",
+            KIND="burn",
+            RUN_URL=RUN,
+            REGISTRIES="npm",
+        )
+
+    def test_a_line_without_a_registry_is_refused(self) -> None:
+        """An unnamed result could not say what became public."""
+        self.refused(
+            "REGISTRIES line '=success' is not <registry>=<job result>",
+            KIND="burn",
+            RUN_URL=RUN,
+            REGISTRIES="=success",
+        )
+
+    def test_an_unknown_result_is_refused_by_name(self) -> None:
+        """A result outside GitHub's set is never guessed public or not."""
+        self.refused(
+            "REGISTRIES: npm has job result 'neutral', not success, failure,"
+            " cancelled, skipped or empty",
+            KIND="burn",
+            RUN_URL=RUN,
+            REGISTRIES="npm=neutral",
+        )
+
+
 class CoverageFloorApplicability(unittest.TestCase):
     """`derive-coverage-floor.sh` decides whether it applies at all (#652)."""
 
