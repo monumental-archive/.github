@@ -28,7 +28,7 @@
             "kind": "continuous-digest",
             "registry": "ghcr.io/monumental-archive/monumental-archive-db",
             "tag": "latest",
-            "identity": "^https://github\\.com/monumental-archive/signer/\\.github/workflows/sign\\.yml@"
+            "identity": "^https://github\\.com/monumental-archive/(signer/\\.github/workflows/sign\\.yml|\\.github/\\.github/workflows/continuous\\.yml)@"
           }
         ]
       },

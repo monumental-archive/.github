@@ -333,10 +333,11 @@ jobs:
         # bought the hard way. Network-bound (the OSV feed), which is
         # fine on a publish path and never in the `ci` gate.
         #
-        # The derived document is not attached to anything: a stream has
-        # no release to carry an asset. It travels as a run artifact
-        # beside the inventories, and the decision signed at the commit
-        # point is what a consumer verifies.
+        # A stream has no release to carry the derived document as an
+        # asset, so it travels as a run artifact beside the inventories
+        # and the commit point attests it over each per-arch digest
+        # (#1279) — the run artifact itself expires and is evidence of
+        # nothing.
         env:
           SUBJECTS: ${{ steps.inventory.outputs.subjects }}
           # The instant this publish describes, resolved once in the
@@ -603,6 +604,42 @@ jobs:
           subject-digest: ${{ steps.pulled.outputs.arm64 }}
           predicate-type: https://spdx.dev/Document
           predicate-path: inventory/arm64.spdx.json
+
+      # The decisions, published where the level judge reads them
+      # (#1279): the OpenVEX document `sbom` derived, attested over each
+      # per-arch digest beside that digest's inventory, in the same
+      # two-step shape for the same reasons. Before this the document
+      # was attached to nothing, so a continuous member's Dependency
+      # cell was unmeasured however many advisories it had decided.
+      #
+      # `https://openvex.dev/ns/v0.2.0` is OpenVEX's own context URI,
+      # the type vex-attest.yml already signs under: the standard
+      # document under its standard type, so a stranger reads it with
+      # `gh attestation verify --predicate-type` and a judge recognises
+      # it by content, with no private predicate to learn. It is never
+      # folded into the `release-decision` predicate for that reason.
+      #
+      # Skipped when no document exists: `stele derive vex` writes none
+      # when no decision applies, on purpose — an OpenVEX document with
+      # no statements asserts nothing — and a placeholder written here
+      # to fill the gap would be exactly that empty assertion.
+      - name: Attest the amd64 decisions against the amd64 image
+        if: ${{ hashFiles('inventory/continuous.vex.openvex.json') != '' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.pulled.outputs.image }}
+          subject-digest: ${{ steps.pulled.outputs.amd64 }}
+          predicate-type: https://openvex.dev/ns/v0.2.0
+          predicate-path: inventory/continuous.vex.openvex.json
+
+      - name: Attest the arm64 decisions against the arm64 image
+        if: ${{ hashFiles('inventory/continuous.vex.openvex.json') != '' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.pulled.outputs.image }}
+          subject-digest: ${{ steps.pulled.outputs.arm64 }}
+          predicate-type: https://openvex.dev/ns/v0.2.0
+          predicate-path: inventory/continuous.vex.openvex.json
 
       - name: Sign the decision under this workflow's identity
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
