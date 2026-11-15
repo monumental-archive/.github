@@ -100,9 +100,6 @@ jobs:
             exit 1
           fi
           git apply "${patch}"
-          # PLANT: short read, the loop cut to one page (#1237)
-          sed -i 's/next += int64(len(page))/next += int64(len(page)); break/' pkg/ct/v1/monitor.go
-          grep -n 'break' pkg/ct/v1/monitor.go
           git diff --stat
       # unattested-path: setup-go's `cache:` defaults to true, so this
       # step warms a Go module cache — same verdict as the checkpoint
