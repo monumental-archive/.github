@@ -11,6 +11,15 @@ which refuses the whole workspace when any member exists. It now asks
 the sparse index for each member first and excludes the ones already
 there - if they are the same bytes.
 
+#1273: the step also read the caller's `exclude` as "never publish",
+so edtf-postgres - excluded only because the crate job cannot compile
+it - stayed at 1.2.3 on crates.io. The set to publish is now Cargo's
+own: every workspace member whose `publish` key names crates.io. The
+caller's old exclusion still rides in the environment of every row
+here, as edtf's caller would have set it, so a row proves the step's
+bytes no longer read it; a member with `publish = false` (`"publish":
+[]` in cargo metadata, measured on cargo 1.97.1) is the only way out.
+
 WHAT RUNS. The `run:` body of the `Publish` step, cut out of
 `.github/workflows/publish-rust-crate.yml` as shipped, under `bash -c`,
 with stub `curl` and `cargo` first on PATH. `jq` and `sha256sum` are the
@@ -63,8 +72,8 @@ USER_AGENT = (
     "monumental-archive-publish (https://github.com/monumental-archive/.github)"
 )
 OIDC_URL = "https://oidc.invalid/token?api-version=2.0"
-CALLER_EXCLUDES = " --exclude edtf-postgres"
-PUBLISH = "publish --workspace --locked --no-verify --exclude edtf-postgres"
+OLD_CALLER_EXCLUDES = " --exclude edtf-postgres"
+PUBLISH = "publish --workspace --locked --no-verify"
 
 CURL_STUB = """#!/usr/bin/env bash
 # Stub `curl`: the OIDC request and the token exchange answer canned
@@ -173,7 +182,7 @@ class Run:
 def run_publish(
     index: dict[str, str],
     crate: bytes | None = None,
-    excludes: str = CALLER_EXCLUDES,
+    unpublished: tuple[str, ...] = (),
 ) -> Run:
     """Run the shipped body with the index serving `index`.
 
@@ -182,8 +191,8 @@ def run_publish(
             or a bare status code to answer that status.
         crate: the bytes `cargo package` produces for edtf-core 1.3.3;
             the real uploaded crate when None.
-        excludes: the caller's EXCLUDE_FLAGS, as the previous step
-            writes them.
+        unpublished: members whose manifest says `publish = false`,
+            written into the captured metadata as cargo reports it.
 
     Returns:
         The run's status, output and the stubs' logs.
@@ -204,13 +213,19 @@ def run_publish(
                 dest.with_name(dest.name + ".status").write_text(answer)
             else:
                 shutil.copy(INDEX / answer, dest)
+        metadata = tmp / "metadata.json"
+        captured = json.loads(METADATA.read_text())
+        for package in captured["packages"]:
+            if package["name"] in unpublished:
+                package["publish"] = []
+        metadata.write_text(json.dumps(captured))
         (crates / "edtf-core-1.3.3.crate").write_bytes(
             CRATE.read_bytes() if crate is None else crate
         )
         env = {
             **os.environ,
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "EXCLUDE_FLAGS": excludes,
+            "EXCLUDE_FLAGS": OLD_CALLER_EXCLUDES,
             "ORG_USER_AGENT": USER_AGENT,
             "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "stub-request-token",
             "ACTIONS_ID_TOKEN_REQUEST_URL": OIDC_URL,
@@ -218,7 +233,7 @@ def run_publish(
             "STUB_INDEX": str(served),
             "STUB_CRATES": str(crates),
             "STUB_TARGET": str(tmp / "target"),
-            "STUB_METADATA": str(METADATA),
+            "STUB_METADATA": str(metadata),
         }
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-c", publish_body()],
@@ -298,8 +313,7 @@ class PublishResumes(unittest.TestCase):
     def test_all_published_runs_no_cargo_publish_and_exits_0(self) -> None:
         """A finished leg is success, and it mints no token."""
         others = ("calendars", "normalize", "wasm", "cli", "postgres")
-        excludes = "".join(f" --exclude edtf-{m}" for m in others)
-        run = run_publish(CORE, excludes=excludes)
+        run = run_publish(CORE, unpublished=tuple(f"edtf-{m}" for m in others))
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
         self.assertEqual([], run.publishes())
         self.assertEqual(
@@ -337,16 +351,43 @@ class PublishResumes(unittest.TestCase):
         self.assertEqual([], run.publishes())
 
     def test_every_index_read_names_the_org_and_the_layout(self) -> None:
-        """One read per member the caller did not exclude, each with the UA."""
+        """One read per member that publishes, each with the UA."""
         run = run_publish(WASM)
         reads = [(u, a) for u, a in run.curl if u.startswith("https://index.")]
         self.assertEqual(
             [
                 (f"https://index.crates.io/ed/tf/edtf-{m}", USER_AGENT)
-                for m in ("core", "calendars", "normalize", "wasm", "cli")
+                for m in ("core", "calendars", "normalize", "wasm", "cli", "postgres")
             ],
             reads,
         )
+
+
+class PublishFollowsCargo(unittest.TestCase):
+    """Cargo's `publish` key decides, never the build's exclusion (#1273)."""
+
+    def test_a_member_the_build_excluded_still_publishes(self) -> None:
+        """edtf-postgres: in the old exclusion, `publish` unset - it ships."""
+        run = run_publish(WASM)
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+        self.assertIn(
+            ("https://index.crates.io/ed/tf/edtf-postgres", USER_AGENT), run.curl
+        )
+        self.assertEqual([PUBLISH], run.publishes())
+        self.assertNotIn("--exclude", run.publishes()[0])
+
+    def test_a_publish_false_member_is_not_in_the_set(self) -> None:
+        """`publish = false` is the one way out, and it is the manifest's."""
+        run = run_publish(CORE, unpublished=("edtf-postgres",))
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+        self.assertEqual(
+            [
+                f"https://index.crates.io/ed/tf/edtf-{m}"
+                for m in ("core", "calendars", "normalize", "wasm", "cli")
+            ],
+            [u for u, _ in run.curl if u.startswith("https://index.")],
+        )
+        self.assertEqual([f"{PUBLISH} --exclude edtf-core"], run.publishes())
 
 
 if __name__ == "__main__":
