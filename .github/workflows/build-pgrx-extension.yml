@@ -348,7 +348,8 @@ jobs:
           # The @…@ fields are filled inside the container, where the
           # server's version is read; release/test_generate_pgrx_upgrade.py
           # runs this text against a live server.
-          FLOOR_TEMPLATE=$(cat << 'FLOOR'
+          FLOOR_TEMPLATE=$(
+            cat << 'FLOOR'
           DO $pgrx_floor$
           BEGIN
             IF current_setting('server_version_num')::int < @NUM@ THEN
