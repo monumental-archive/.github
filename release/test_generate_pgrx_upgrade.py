@@ -716,5 +716,151 @@ class TagHistoryShapes(unittest.TestCase):
         )
 
 
+WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
+HEADER_PIN = '"postgresql-server-dev-${PG}=${server}"'
+SERVER_UNCHANGED = '[[ ${after} == "${server}" ]] || {'
+DPKG_STUB = """#!/usr/bin/env bash
+# dpkg-query -W -f=<fmt> <pkg>: answer the server version on record.
+cat "${STUB_STATE}"
+"""
+APT_CACHE_STUB = """#!/usr/bin/env bash
+# apt-cache show <pkg>=<version>: served iff it is in the served list.
+grep -qxF -- "$2" "${STUB_SERVED}"
+"""
+APT_GET_STUB = """#!/usr/bin/env bash
+# apt-get install ...: record the arguments; an unpinned dependency
+# drags the server to STUB_MOVE_TO when that is set.
+printf '%s\\n' "$@" >> "${STUB_ARGS}"
+if [[ -n ${STUB_MOVE_TO:-} ]]; then
+  printf '%s' "${STUB_MOVE_TO}" > "${STUB_STATE}"
+fi
+"""
+
+
+def header_install(text: str) -> list[str]:
+    """Cut the header install out of a site, indentation and comments off.
+
+    Returns:
+        The lines from the server read to the close of the
+        server-unchanged check. Extracted from the shipped bytes, so a
+        site that drifts from the other, or loses the check, fails here
+        rather than in a release.
+
+    """
+    lines = [line.strip() for line in text.splitlines()]
+    start = next(
+        i for i, line in enumerate(lines) if line.startswith("server=$(dpkg-query")
+    )
+    end = next(i for i in range(start, len(lines)) if lines[i] == "}")
+    return [line for line in lines[start : end + 1] if not line.startswith("#")]
+
+
+def run_header_install(
+    served: list[str], move_to: str = ""
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run the shipped block against stub dpkg-query, apt-cache, apt-get.
+
+    Returns:
+        The completed process and the arguments apt-get received.
+
+    """
+    block = "\n".join(header_install(SCRIPT.read_text()))
+    with TemporaryDirectory() as d:
+        tmp = Path(d)
+        stubs = tmp / "bin"
+        stubs.mkdir()
+        for name, body in (
+            ("dpkg-query", DPKG_STUB),
+            ("apt-cache", APT_CACHE_STUB),
+            ("apt-get", APT_GET_STUB),
+        ):
+            (stubs / name).write_text(body)
+            (stubs / name).chmod(0o755)
+        (tmp / "state").write_text("18.6-1.pgdg120+1")
+        (tmp / "served").write_text("".join(f"{s}\n" for s in served))
+        (tmp / "args").write_text("")
+        env = {
+            **os.environ,
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "PG": "18",
+            "BUILD_IMAGE": "postgres:18-bookworm@sha256:planted",
+            "STUB_STATE": str(tmp / "state"),
+            "STUB_SERVED": str(tmp / "served"),
+            "STUB_ARGS": str(tmp / "args"),
+            "STUB_MOVE_TO": move_to,
+        }
+        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, "-euo", "pipefail", "-c", block],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result, (tmp / "args").read_text().splitlines()
+
+
+class InstallsHeadersAtTheImagesServer(unittest.TestCase):
+    """Headers at exactly the server the pinned image carries (#1157).
+
+    November's minors: apt served 18.7 headers into an 18.6 image, and
+    the library linked against `heap_datum_check`, which the image's
+    server does not export. Both build sites install the same block.
+    """
+
+    def test_both_sites_pin_the_headers_and_check_the_server(self) -> None:
+        """Each site names the pinned headers and the unchanged check."""
+        for site in (SCRIPT, WORKFLOW):
+            text = site.read_text()
+            with self.subTest(site=site.name):
+                block = "\n".join(header_install(text))
+                self.assertIn(HEADER_PIN, block)
+                self.assertIn(SERVER_UNCHANGED, block)
+                self.assertNotIn('"postgresql-server-dev-${PG}" ', text)
+                self.assertIn("--env BUILD_IMAGE", text)
+
+    def test_the_two_sites_are_textually_identical(self) -> None:
+        """They cannot share a script; they must not drift apart."""
+        self.assertEqual(
+            header_install(SCRIPT.read_text()),
+            header_install(WORKFLOW.read_text()),
+        )
+
+    def test_installs_the_headers_at_the_server_version(self) -> None:
+        """Every minor served, the image's own is the one installed."""
+        result, args = run_header_install([
+            "postgresql-server-dev-18=18.4-1.pgdg120+1",
+            "postgresql-server-dev-18=18.6-1.pgdg120+1",
+            "postgresql-server-dev-18=18.7-1.pgdg120+1",
+        ])
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("postgresql-server-dev-18=18.6-1.pgdg120+1", args)
+        self.assertNotIn("postgresql-server-dev-18", args)
+
+    def test_refuses_with_the_remedy_when_apt_dropped_the_headers(self) -> None:
+        """The skew is a red with its cause and its fix in it."""
+        result, args = run_header_install(["postgresql-server-dev-18=18.7-1.pgdg120+1"])
+        self.assertEqual(1, result.returncode)
+        self.assertEqual(
+            "::error::image postgres:18-bookworm@sha256:planted carries server"
+            " 18.6-1.pgdg120+1; the apt repository no longer serves its"
+            " headers — move the image pin in docker/pgrx-base-images.toml\n",
+            result.stdout,
+        )
+        self.assertEqual([], args)
+
+    def test_refuses_a_build_that_moved_the_server(self) -> None:
+        """An install that upgrades the server is caught after the fact."""
+        result, _ = run_header_install(
+            ["postgresql-server-dev-18=18.6-1.pgdg120+1"],
+            move_to="18.7-1.pgdg120+1",
+        )
+        self.assertEqual(1, result.returncode)
+        self.assertEqual(
+            "::error::the build moved the server from 18.6-1.pgdg120+1"
+            " to 18.7-1.pgdg120+1\n",
+            result.stdout,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

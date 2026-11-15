@@ -10,6 +10,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.66.0](https://github.com/monumental-archive/.github/compare/v1.65.0...v1.66.0) - 2026-11-14
+
+### Added
+
+- pin every tracked file under vendor/ with lint:vendored ([#1221](https://github.com/monumental-archive/.github/pull/1221))
+- lint the lock against the declared release platforms ([#1227](https://github.com/monumental-archive/.github/pull/1227))
+- ship the security-release stub and the hold label ([#1226](https://github.com/monumental-archive/.github/pull/1226))
+- audit each mise.lock against a fresh mise lock ([#1231](https://github.com/monumental-archive/.github/pull/1231))
+- check pgrx sql surfaces against their snapshot ([#1223](https://github.com/monumental-archive/.github/pull/1223))
+
+### Fixed
+
+- update first-party canon ([#1192](https://github.com/monumental-archive/.github/pull/1192))
+- update jdx/mise to 2026.11.4 ([#1193](https://github.com/monumental-archive/.github/pull/1193))
+- update monumental-archive/stele to v0.22.0 ([#1206](https://github.com/monumental-archive/.github/pull/1206))
+- pin pgrx headers to the image's server version ([#1207](https://github.com/monumental-archive/.github/pull/1207))
+- write checksums.txt outside the directory it hashes ([#1208](https://github.com/monumental-archive/.github/pull/1208))
+- skip the release age for go patch updates ([#1209](https://github.com/monumental-archive/.github/pull/1209))
+- group pull request runs by number, never cancel main ([#1210](https://github.com/monumental-archive/.github/pull/1210))
+- turn off dependabot security updates, keep alerts ([#1212](https://github.com/monumental-archive/.github/pull/1212))
+- name each lint's fixer and document hand-made bumps ([#1214](https://github.com/monumental-archive/.github/pull/1214))
+- drop the wasm-pack registry correction ([#1217](https://github.com/monumental-archive/.github/pull/1217))
+- red a Best Practices entry bound to another repository ([#1219](https://github.com/monumental-archive/.github/pull/1219))
+- wait out a registry 404, fail fast on anything else ([#1220](https://github.com/monumental-archive/.github/pull/1220))
+- reconcile the org listing against the roster by name ([#1222](https://github.com/monumental-archive/.github/pull/1222))
+- drop the three exclusions that exclude nothing ([#1216](https://github.com/monumental-archive/.github/pull/1216))
+- pin the aqua registry to the corrected file ([#1229](https://github.com/monumental-archive/.github/pull/1229))
+- skip crates already on the index when publishing ([#1230](https://github.com/monumental-archive/.github/pull/1230))
+
+### Documentation
+
+- stop naming a lab release as a gate ([#1200](https://github.com/monumental-archive/.github/pull/1200))
+- state grants in stubs, never the callee's internals ([#1215](https://github.com/monumental-archive/.github/pull/1215))
+- stop naming the dropped exclusions in audit:links ([#1228](https://github.com/monumental-archive/.github/pull/1228))
+
+### Testing
+
+- thread mise's data directory through the pgrx fixture ([#1205](https://github.com/monumental-archive/.github/pull/1205))
+
 ## [1.65.0](https://github.com/monumental-archive/.github/compare/v1.64.4...v1.65.0) - 2026-11-14
 
 ### Added

@@ -70,6 +70,8 @@ no() {
   echo "security-release: no — $1"
   emit "merge=false"
   emit "reason=$1"
+  # Declining is a completed run, so it carries the EXIT trap's mark.
+  org_done=1
   exit 0
 }
 
@@ -174,7 +176,8 @@ fi
 # one that reds on a blind scanner.
 policy=$(mktemp)
 report=$(mktemp)
-trap 'rm -f "${policy}" "${report}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${policy}" "${report}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 jq 'del(.blastRadius.canary)' "${canon}/slsa/assert-policy.json" > "${policy}"
 
 status=0
@@ -211,7 +214,8 @@ findings=$(jq -r --arg s "${supported}" \
   '.findings[]? | select(.subject == $s) | [.assertion, .detail] | @tsv' "${report}" | sort -u)
 
 resolved=$(mktemp)
-trap 'rm -f "${policy}" "${report}" "${resolved}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${policy}" "${report}" "${resolved}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 if [[ -f go.mod ]]; then
   # A module with no toolchain to resolve it is a loud failure, never a
   # skip: skipped, every Go finding would compare against nothing and
@@ -296,3 +300,4 @@ echo "security-release: yes — merge Release PR #${number} (${subject})"
 emit "merge=true"
 emit "pr=${number}"
 emit "reason=${supported} is affected and main remedies it"
+org_done=1

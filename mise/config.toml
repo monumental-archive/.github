@@ -49,9 +49,10 @@ disable_backends = ["asdf", "ubi"]
 # The org's aqua registry corrections (mise/aqua-registry.yaml), loaded
 # BEFORE the registry baked into mise. A package named there overrides
 # the baked definition; a package absent from it falls through
-# untouched, so this changes exactly one tool's resolution and nothing
+# untouched, so this changes only the tools named there and nothing
 # else — measured, with `aqua:rhysd/actionlint` still resolving its
-# native asset from the baked registry in the same run.
+# native asset from the baked registry in the same run. One package is
+# named today: `committed` (#854).
 #
 # BY URL RATHER THAN BY PATH, and that is measured rather than
 # preferred. `aqua.registries` accepts an absolute `file://` or an
@@ -66,23 +67,23 @@ disable_backends = ["asdf", "ubi"]
 # machine-specific absolute path, so the URL is what is left. The commit
 # SHA pins its content exactly as every `uses:` pin does.
 #
-# WHEN TO DELETE THIS, and it is not when upstream merges the fix.
+# WHEN TO DELETE AN ENTRY, and it is not when upstream merges the fix.
 # mise does not read aqua-registry HEAD — it reads a snapshot compiled
 # into its own binary (`aqua.baked_registry`, default true), measured on
 # 2026-08-24 to be byte-identical to HEAD at aqua-registry 6291c29d. So
-# the correction is retired by the MISE BUMP carrying a new snapshot,
-# not by the upstream merge (aquaproj/aqua-registry#59338). The test is
-# mechanical: drop the entry, run `mise lock`, and keep the deletion
-# only if the lock does not move. `audit:lock-arch` is the backstop
-# either way — it reds if any lock names an architecture it does not
-# carry.
+# a correction is retired by the MISE BUMP carrying a new snapshot, not
+# by the upstream merge. The test is mechanical: drop the entry, run
+# `mise lock`, and keep the deletion only if the lock does not move.
+# The first entry, #811's, left that way on mise 2026.11.4 (#1202).
+# `audit:lock-arch` is the backstop either way — it reds if any lock
+# names an architecture it does not carry.
 #
 # The SHA is an N-1 self-pin: a commit cannot contain its own (#227), so
-# this names the commit that added the file. Renovate does not manage
-# it; a change to mise/aqua-registry.yaml needs this line bumped in the
-# commit after it.
+# this names the commit that last changed the file (#1217, which
+# retired #811's entry). Renovate does not manage it; a change to
+# mise/aqua-registry.yaml needs this line bumped in the commit after it.
 aqua.registries = [
-  "https://raw.githubusercontent.com/monumental-archive/.github/3cb9dd4ff2a75d587e35bbb372045e157df2ffb4/mise/aqua-registry.yaml",
+  "https://raw.githubusercontent.com/monumental-archive/.github/bd559783136549ab9954f4cf9716540e7ad43605/mise/aqua-registry.yaml",
 ]
 
 # THE DEFAULT INLINE SHELL FOR EVERY TASK IN EVERY REPO, not just the ones
@@ -648,7 +649,10 @@ config="${ORG_BELT_DIR}/taplo-org.toml"
   echo "  belt that did not arrive would produce a green run at a level nobody chose." >&2
   exit 1
 }
-xargs taplo fmt --config "${config}" --check --diff <<< "${files}"
+xargs taplo fmt --config "${config}" --check --diff <<< "${files}" || {
+  echo "lint:toml: formatting differs from the org's — run fix:toml" >&2
+  exit 1
+}
 xargs taplo lint --config "${config}" <<< "${files}"
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:toml: ${count} file(s) checked"
@@ -680,7 +684,14 @@ description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = '''
 files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
-if [[ -n ${files} ]]; then xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" <<< "${files}"; else echo "lint:markdown: no markdown tracked, skipped"; fi
+if [[ -n ${files} ]]; then
+  xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" <<< "${files}" || {
+    echo "lint:markdown: findings above — run fix:markdown for the fixable ones; the rest by hand" >&2
+    exit 1
+  }
+else
+  echo "lint:markdown: no markdown tracked, skipped"
+fi
 '''
 
 [tasks."lint:sql"]
@@ -721,7 +732,10 @@ files=$(git ls-files ':!vendor/**' "*.sql")
   echo "lint:sql: no SQL tracked, skipped"
   exit 0
 }
-xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}"
+xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}" || {
+  echo "lint:sql: findings above — run fix:sql for the fixable ones; the rest by hand" >&2
+  exit 1
+}
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:sql: ${count} file(s) linted"
 '''
@@ -1477,7 +1491,8 @@ if [[ -n ${generated_tracked} ]]; then
   echo "lint:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
   exit 1
 fi
-trap 'rm -f "${generated}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
@@ -1499,10 +1514,12 @@ done
 if [[ $((errors + warnings + infos)) -ne 0 ]]; then
   xargs biome ci --config-path "${generated}" <<< "${files}" || true
   echo "lint:biome: ${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" >&2
+  echo "  run fix:biome for what biome can write; the rest is by hand" >&2
   exit 1
 fi
 count=$(wc -l <<< "${files}" | tr -d ' ')
 echo "lint:biome: clean across ${count} files"
+org_done=1
 '''
 
 [tasks."fix:biome"]
@@ -1552,7 +1569,8 @@ if [[ -n ${generated_tracked} ]]; then
   echo "fix:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
   exit 1
 fi
-trap 'rm -f "${generated}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
   | python3 "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
@@ -1560,6 +1578,7 @@ git ls-files ':!vendor/**' "package.json" "*/package.json" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
     --out "${generated}"
 xargs biome check --config-path "${generated}" --write <<< "${files}"
+org_done=1
 '''
 
 # The delivered domain table, re-derived against the pinned binary (#695).
@@ -1701,8 +1720,14 @@ files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
   echo "lint:python: no Python tracked, skipped"
   exit 0
 }
-xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" <<< "${files}"
-xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" --check <<< "${files}"
+xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" <<< "${files}" || {
+  echo "lint:python: findings above — run fix:python for ruff's safe fixes; the rest by hand" >&2
+  exit 1
+}
+xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" --check <<< "${files}" || {
+  echo "lint:python: formatting differs from the org's — run fix:python" >&2
+  exit 1
+}
 '''
 
 [tasks."lint:python-target"]
@@ -1880,7 +1905,10 @@ rc="${ORG_BELT_DIR}/shellcheckrc"
   echo "  belt that did not arrive would produce a clean run instead of a red one. Checked here." >&2
   exit 1
 }
-xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}"
+xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}" || {
+  echo "lint:shell: formatting differs from the org's — run fix:shell" >&2
+  exit 1
+}
 xargs shellcheck --rcfile="${rc}" <<< "${files}"
 count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:shell: ${count} script(s) formatted and linted"
@@ -1993,15 +2021,24 @@ dir = "{{cwd}}"
 # all, so the "a belt beside it" test skips them rather than exempting
 # them. A consumer running a foreign belt is the design, not a defect.
 #
-# What it CANNOT see: which belt supplies the task BODIES is a second,
-# independently resolved thing, and the two disagree in practice — same
-# clone, `mise tasks info` naming the tree's own config while
-# ORG_BELT_DIR named another checkout. A guard living in a task body
-# cannot catch the case where the body itself came from the stale belt:
-# a belt predating this task simply has no task to run. That gap closes
-# once the machine belt carries this, and the failure text names the
-# `mise tasks info` Source line so the other axis stays checkable by
-# hand. Deterministic, no network — belongs in `ci`.
+# Which belt supplies the task BODIES is a second, independently
+# resolved thing, and the two disagree in practice — same clone, `mise
+# tasks info` naming the tree's own config while ORG_BELT_DIR named
+# another checkout. Worse in a git worktree nested inside its main
+# checkout (where the desktop app makes them): mise walks up from the
+# working directory, finds the MAIN checkout's mise/config.toml as a
+# parent config, and it outranks MISE_GLOBAL_CONFIG_FILE — so a lane
+# changed a task, ran the gate green, and had tested the old body
+# (#1232). So the task reads its OWN Source first and reds when it is
+# not this tree's mise/config.toml. Whichever body mise resolved is the
+# one running, so this works precisely when the wrong belt answers —
+# provided that belt carries it; a belt predating the check has nothing
+# to run, and that gap closes as the machine belt moves. The delivered
+# hooks set MISE_CEILING_PATHS to the tree's parent, so a push never
+# loads a config above the tree, and the remedy below carries the same
+# ceiling. In CI the workspace's mise/config.toml is a local config and
+# outranks `.org-canon`'s global one, so the Source there is the
+# workspace tree's. Deterministic, no network — belongs in `ci`.
 run = '''
 if [[ ! -f mise/config.toml || ! -f mise/clippy.toml ]]; then
   echo "lint:belt-tree: no belt in this tree, skipped"
@@ -2010,7 +2047,31 @@ fi
 # The remedy is literal text for a human to paste: $PWD must reach them
 # unexpanded, so the single quotes are the point, not an oversight.
 # shellcheck disable=SC2016
-remedy='    MISE_GLOBAL_CONFIG_FILE="$PWD/mise/config.toml" mise run ci'
+remedy='    MISE_CEILING_PATHS="$(dirname "$PWD")" MISE_GLOBAL_CONFIG_FILE="$PWD/mise/config.toml" mise run ci'
+# Which config supplied the body now running. --json for the absolute
+# path: the plain listing abbreviates $HOME to `~`. Both sides through
+# `pwd -P`, so a symlinked parent (macOS /tmp) is not a false red.
+# Guarded, not left to errexit: a mise that cannot answer would kill
+# the task one line above any message saying so.
+own=$(mise tasks info lint:belt-tree --json 2> /dev/null \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["source"])') || own=""
+want="$(cd -P mise && pwd)/config.toml"
+got=""
+own_dir=${own%/*}
+if [[ -n ${own} && -d ${own_dir} ]]; then
+  own_dir=$(cd -P "${own_dir}" && pwd)
+  got="${own_dir}/${own##*/}"
+fi
+if [[ ${got} != "${want}" ]]; then
+  echo "lint:belt-tree: the task bodies running this gate come from" >&2
+  echo "  another tree's belt, not this one's (#1232):" >&2
+  echo "    Source:       ${own}" >&2
+  echo "    this tree's:  ${want}" >&2
+  echo "  mise loaded a config above this tree. Re-run with the ceiling:" >&2
+  echo "${remedy}" >&2
+  exit 1
+fi
+echo "lint:belt-tree: task bodies from ${own}"
 if [[ -z ${ORG_BELT_DIR:-} || ! -d ${ORG_BELT_DIR} ]]; then
   echo "lint:belt-tree: ORG_BELT_DIR is unset or names no directory —" >&2
   echo "  the belt cannot locate itself, so no delivered config any task" >&2
@@ -2587,7 +2648,8 @@ fi
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 out=""
 fmt_out=""
-trap 'rm -f "${out}" "${fmt_out}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${out}" "${fmt_out}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The rustfmt leg, first because it is seconds against clippy's minutes.
 # rustfmt is a rustup component of the repo's own pin exactly like clippy,
 # asserted with a remedy and never installed.
@@ -2812,6 +2874,7 @@ if [[ -n ${red} ]]; then
   exit "${status}"
 fi
 echo "lint:rust: clean at every group (restriction minus ${contradiction_count} named contradictions)"
+org_done=1
 '''
 
 [tasks."fix:rust"]
@@ -3020,7 +3083,8 @@ command -v mise > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 cargo fetch --locked
 mise ls rust --json > "${tmp}/toolchains.json"
 cargo metadata --no-deps --format-version 1 --locked > "${tmp}/metadata.json"
@@ -3048,6 +3112,7 @@ plan=$(python3 "${ORG_BELT_DIR}/msrv-plan.py" \
   --pgrx "${pgrx}" < "${tmp}/metadata.json")
 [[ -n ${plan} ]] || {
   echo "lint:msrv: no crate declares rust-version, skipped"
+  org_done=1
   exit 0
 }
 # A pgrx crate needs a Postgres before it can be compiled at all, at the
@@ -3097,9 +3162,11 @@ done <<< "${plan}"
 if [[ ${checked} -eq 0 ]]; then
   echo "lint:msrv: every declared minimum sits outside the gate's compile surface"
   echo "lint:msrv: nothing verified — the exclusions above are what to remove"
+  org_done=1
   exit 0
 fi
 echo "lint:msrv: ${checked} declared minimum(s) compiled at the toolchain they name"
+org_done=1
 '''
 
 [tasks."lint:pg-clippy"]
@@ -3195,6 +3262,42 @@ done
 echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
 echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
 '''
+
+[tasks."lint:pg-schema"]
+description = "The pgrx extension's SQL surface matches its tracked snapshot"
+dir = "{{cwd}}"
+# The third check the import dropped (#896), after the MSRV job (#820)
+# and the pgrx compile (#813), and the same class as both: not a check
+# that went red, a check that stopped existing. edtf's snapshot diff
+# said it ran in "ci.yml's postgres job"; there was none, and its task
+# sat outside the `lint:*` wildcard, so `ci` never collected it.
+#
+# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface, not a
+# Rust API, which is why cargo-semver-checks is off for one. Nothing
+# else makes a change to that surface visible: a signature change would
+# ship as an ordinary refactor and surface only when somebody's CREATE
+# EXTENSION or ALTER EXTENSION UPDATE failed. And a clean diff is the
+# fact the upgrade-script derivation consumes — an empty upgrade script
+# is correct for this release; a non-empty diff is the list of what the
+# script has to do.
+#
+# An extension that tracks no `schema.snapshot.sql` beside its
+# Cargo.toml is RED, naming the file and `fix:pg-schema` (ruled on
+# #896); only a repository with no extension skips. The derivation,
+# the normalisation and the reasons live in pg-schema.sh and
+# pg-schema.py, shared with the fixer so the two cannot drift.
+run = '"${ORG_BELT_DIR}/pg-schema.sh" check'
+
+[tasks."fix:pg-schema"]
+description = "Write the pgrx extension's SQL surface snapshot (read the diff before committing)"
+dir = "{{cwd}}"
+# The write-mode sibling of `lint:pg-schema`, never in the gate: it
+# generates the surface exactly as the lint does and writes the
+# normalised result to `schema.snapshot.sql` beside the extension. It is
+# for a surface change you INTEND — the lint's diff is the review, and a
+# snapshot regenerated without reading it is the check people learn to
+# ignore.
+run = '"${ORG_BELT_DIR}/pg-schema.sh" write'
 
 [tasks."test:pgrx"]
 description = "The Postgres extension's own suite, at every major the crate declares"
@@ -3350,7 +3453,10 @@ while IFS= read -r m; do
   count=$((count + 1))
   d=$(dirname "${m}")
   cache="$(cd "${d}" && git rev-parse --absolute-git-dir)/golangci-lint"
-  (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run)
+  (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run) || {
+    echo "lint:go: ${d}: findings above — run fix:go for the fixable ones and the format; the rest by hand" >&2
+    exit 1
+  }
 done <<< "${mods}"
 echo "lint:go: ${count} module(s) linted and format-checked"
 '''
@@ -3507,7 +3613,8 @@ while IFS= read -r line; do
   flags+=("${parts[@]}")
 done < "${ORG_BELT_DIR}/tsc-flags.txt"
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS= read -r cfg; do
   [[ -n ${cfg} ]] || continue
@@ -3529,6 +3636,7 @@ if [[ -n ${escaped} ]]; then
 fi
 covered=$(wc -l < "${tmp}/tracked" | tr -d ' ')
 echo "lint:types: ${count} project(s) checked, ${covered} files covered"
+org_done=1
 '''
 
 # The other half of the TypeScript level, and the half `lint:types`
@@ -3595,7 +3703,8 @@ command -v tsc > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 rc=0
 count=0
 while IFS= read -r cfg; do
@@ -3615,6 +3724,7 @@ done <<< "${cfgs}"
   echo "lint:tsconfig-dials: ${count} config(s) checked, at least one below the org's level" >&2
   exit 1
 }
+org_done=1
 '''
 
 [tasks."lint:scaffold-assembly"]
@@ -3720,7 +3830,8 @@ if [[ -n ${missing} ]]; then
   exit 1
 fi
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 count=0
 while IFS=: read -r stub dest; do
   [[ -n ${stub} ]] || continue
@@ -3876,6 +3987,7 @@ if [[ ${rc} -ne 0 ]]; then
   exit 1
 fi
 echo "lint:scaffold-assembly: ${fixers} fixer(s) then ${gates} gate task(s), all green"
+org_done=1
 '''
 
 [tasks."lint:go-tidy"]
@@ -4095,7 +4207,8 @@ vex="${ORG_CANON_DIR}/security/vex"
   exit 1
 }
 scan=$(mktemp)
-trap 'rm -f "${scan}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${scan}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 while IFS= read -r m; do
   [[ -n ${m} ]] || continue
   d=$(dirname "${m}")
@@ -4112,6 +4225,7 @@ while IFS= read -r m; do
   }
   stele assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
 done <<< "${mods}"
+org_done=1
 '''
 
 [tasks."audit:blast-radius"]
@@ -4380,6 +4494,9 @@ while read -r repo; do
     failed="${failed} ${repo}(badge block rendered no shields — the derivation always emits the SLSA row, so this block is truncated or unparsable)"
     continue
   fi
+  # The repository wearing these shields, in the form derive-badges.sh
+  # reads from REUSE.toml: an issuer's entry must name it (#1197).
+  wearer="https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}"
   while read -r url; do
     [[ -n ${url} ]] || continue
     checked=$((checked + 1))
@@ -4409,6 +4526,8 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
+        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+          failed="${failed} ${repo}(bestpractices: ${bp_owner})"
         elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
           failed="${failed} ${repo}(bestpractices: passing percentage below 100)"
         elif jq -e '[.lost_baseline_1_at, .lost_baseline_2_at, .lost_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
@@ -4427,6 +4546,8 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
+        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+          failed="${failed} ${repo}(baseline: ${bp_owner})"
         elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
           failed="${failed} ${repo}(baseline: shield worn but the issuer records no achieved level)"
         elif jq -e '[.lost_baseline_1_at, .lost_baseline_2_at, .lost_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
@@ -4727,8 +4848,8 @@ dir = "{{cwd}}"
 # an explicit config a consumer's own file silently outranks the belt —
 # `exclude = [".*"]` beside a README buys a green run over an unchecked
 # tree. An explicit --config replaces that discovery (measured both
-# directions, #681). The org's link policy — the scaffold placeholder
-# exclusions above all — therefore lives in the belt's lychee.toml, and
+# directions, #681). The org's link policy therefore lives in the
+# belt's lychee.toml, and
 # `.lycheeignore`, which lychee reads independently of --config, stays
 # the repo's per-link escape.
 # --include-fragments: without it lychee verifies that a page exists and
@@ -5015,9 +5136,10 @@ dir = "{{cwd}}"
 # Contents: read across the org; without it this walk can only report
 # that it could not look.
 run = '''
-# The identity guard is the whole guard here (#738): this leg reads no
-# tree data at all — the org listing, the clones and the canon's own
-# tags are its inputs — so it has no required input to red on.
+# The identity guard admits the canon (#738). The one tree input this
+# leg reads is the roster (#680), and the canon owes it, so its absence
+# is red by name below rather than a skip; the org listing, the clones
+# and the canon's own tags are the rest of its inputs.
 git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   echo "audit:org-pins: no tracked security/identity.toml, not the canon, skipped"
   exit 0
@@ -5055,13 +5177,20 @@ latest=$(tail -1 <<< "${tags}")
   exit 0
 }
 repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name')
-expected_repos=9
-seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
-if [[ ${seen_repos} -ne ${expected_repos} ]]; then
-  echo "audit:org-pins: token sees ${seen_repos} repos, population is ${expected_repos} —" >&2
-  echo "  an unseen repo is unchecked, not clean (#290 finding 7)." >&2
+# The population is reconciled BY NAME against the roster (#680). The
+# roster is the canon's file and this leg runs only in the canon tree
+# the guard above admitted, so it reads the roster from that tree; a
+# tree with no tracked roster is refused by name, never trusted on the
+# listing's own say-so.
+git ls-files --error-unmatch slsa/assert-policy.json > /dev/null 2>&1 || {
+  echo "audit:org-pins: no tracked slsa/assert-policy.json — the roster names" >&2
+  echo "  the population, and without it an unseen repository cannot be told" >&2
+  echo "  from a clean one." >&2
   exit 1
-fi
+}
+"${ORG_BELT_DIR}/roster-reconcile.sh" audit:org-pins slsa/assert-policy.json <<< "${repos}"
+# Reconciled, so this counts the population for the report only.
+seen_repos=$(wc -w <<< "${repos}" | tr -d " ")
 total=0
 stale=""
 failed=""
@@ -5246,12 +5375,14 @@ dir = "{{cwd}}"
 # ever be seen. --skip-dirs is gone because there is nothing to skip.
 run = '''
 scratch=$(mktemp -d)
-trap 'rm -rf "${scratch}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # rsync, not cpio: BSD cpio refuses to extract through tracked
 # symlinks (the canon's self-* workflow links), GNU cpio does not —
 # rsync -l recreates them identically on both.
 git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 trivy fs --scanners misconfig,secret --exit-code 1 "${scratch}"
+org_done=1
 '''
 
 [tasks."lint:actions"]
@@ -5287,7 +5418,14 @@ env = { SHELLCHECK_OPTS = "--enable=all --external-sources --extended-analysis=t
 # actionlint release. Anchored to those two labels: any other unknown
 # label — a typo included — still goes red.
 run = '''
-if compgen -G ".github/workflows/*.y*ml" > /dev/null; then actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown'; else echo "lint:actions: no workflows, skipped"; fi
+if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+  actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown' || {
+    echo "lint:actions: actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)" >&2
+    exit 1
+  }
+else
+  echo "lint:actions: no workflows, skipped"
+fi
 '''
 
 [tasks."release:preview"]
@@ -5412,7 +5550,18 @@ dir = "{{cwd}}"
 # on a different day, so the trigger is required everywhere and ahead of
 # it — inert where no queue exists, and already in place where one
 # arrives.
+#
+# The third is the concurrency group's (#1195). An event on a pull
+# request that has already merged has no merge ref, so its github.ref is
+# the base branch; a group keyed on the ref alone put it in the same
+# group as the push gate on main, and cancel-in-progress let it cancel
+# that gate — main went red with nothing wrong in it. Grouping by the
+# pull request's number, and cancelling only pull_request runs, gives
+# every commit on the default branch its own verdict. Both lines are
+# required verbatim, and both are printed in the message. The body is
+# raw: `${{` would otherwise open a Tera expression at render.
 run = '''
+{% raw %}
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"
   exit 0
@@ -5424,11 +5573,28 @@ canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 unqueued=""
+ungrouped=""
+# shellcheck disable=SC2016  # ${{ }} is GitHub's expression syntax, matched
+# literally — expanding it here is the defect
+want_group='github.event.pull_request.number || github.ref'
+# shellcheck disable=SC2016
+want_cancel='${{ github.event_name == '"'"'pull_request'"'"' }}'
 for f in .github/workflows/*.y*ml; do
   grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
   grep -qE "^[[:space:]]*pull_request" "${f}" || continue
   grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
   grep -qE "^[[:space:]]+merge_group:" "${f}" || unqueued="${unqueued} ${f}"
+  groups=$(grep -E "^[[:space:]]*group:" "${f}" || true)
+  # Each cancel-in-progress line, indent and trailing comment dropped,
+  # must be exactly the wanted line; every group line must carry the key.
+  # An absent line reds too: `<<<` feeds an empty capture as one empty
+  # line, and grep -v finds it.
+  cancels=$(grep -E "^[[:space:]]*cancel-in-progress:" "${f}" \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//' || true)
+  if grep -vqF "${want_group}" <<< "${groups}" \
+    || grep -vqxF "cancel-in-progress: ${want_cancel}" <<< "${cancels}"; then
+    ungrouped="${ungrouped} ${f}"
+  fi
 done
 status=0
 if [[ -n ${bad} ]]; then
@@ -5447,8 +5613,18 @@ if [[ -n ${unqueued} ]]; then
   echo "  in:${unqueued}" >&2
   status=1
 fi
+if [[ -n ${ungrouped} ]]; then
+  echo "lint:gate-stub: gate caller's concurrency group is shared with events" >&2
+  echo "  on merged pull requests, which then cancel the push gate on the" >&2
+  echo "  default branch (#1195). Under concurrency: set exactly" >&2
+  echo "    group: \${{ github.workflow }}-\${{ ${want_group} }}" >&2
+  echo "    cancel-in-progress: ${want_cancel}" >&2
+  echo "  in:${ungrouped}" >&2
+  status=1
+fi
 [[ ${status} -eq 0 ]] || exit 1
 echo "lint:gate-stub: ok"
+{% endraw %}
 '''
 
 [tasks."lint:capability-boundary"]
@@ -5877,7 +6053,8 @@ command -v stele > /dev/null || {
   exit 1
 }
 tmp=$(mktemp -d)
-trap 'rm -rf "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 head_sha=$(git rev-parse HEAD)
 derive() { # snapshot-dir out-file
   stele derive claims --policy slsa/verify-policy.json \
@@ -5936,6 +6113,7 @@ jq -e '[.controls[].property] | (index("ORG_SOURCE_TAG_IMMUTABLE") == null)
   exit 1
 }
 echo "lint:source-attest: ok — full set derives, blindness refuses, a lapse under-claims"
+org_done=1
 '''
 
 [tasks."lint:actions-allowed"]
@@ -6066,6 +6244,48 @@ if [[ -n ${fail} ]]; then
   exit 1
 fi
 echo "audit:actions-allowlist: live org allowlist matches the belt"
+'''
+
+[tasks."audit:security-config"]
+description = "The security configuration records equal what is live, attachments and private shape included (network, canon only)"
+dir = "{{cwd}}"
+# #1213: security/org-default.json and org-private.json are the record
+# of the org's code security settings, and nothing compared them with
+# the live org — a record edit or a UI click left them disagreeing with
+# nothing red. mise/security-config.py holds the four comparisons and
+# says why each is shaped as it is; its table tests are built from the
+# live answers fetched for #1213.
+#
+# The configuration the public record describes is DERIVED (the org's
+# default for new public repositories), never named by id. A read the
+# token cannot make is CANNOT_JUDGE naming the grant, never a pass.
+run = '''
+git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+  echo "audit:security-config: no tracked security/identity.toml, not the canon, skipped"
+  exit 0
+}
+# Canon-only, so a missing input is red by name, never a skip (#738).
+for f in security/org-default.json security/org-private.json slsa/assert-policy.json; do
+  [[ -f ${f} ]] || {
+    echo "audit:security-config: ${f} missing — it is an input this audit holds to live" >&2
+    exit 1
+  }
+done
+command -v gh > /dev/null || {
+  echo "audit:security-config: gh missing" >&2
+  exit 1
+}
+[[ -n ${GH_TOKEN:-} ]] || {
+  echo "audit:security-config: GH_TOKEN is unset — CANNOT_JUDGE. The reads need" >&2
+  echo "  organisation permission Administration: read and repository" >&2
+  echo "  permission Administration: read (#1213)." >&2
+  exit 1
+}
+. "${ORG_BELT_DIR}/identity.sh"
+owner=$(org_identity owner)
+python3 "${ORG_BELT_DIR}/security-config.py" --owner "${owner}" \
+  --record security/org-default.json --private-record security/org-private.json \
+  --roster slsa/assert-policy.json
 '''
 
 [tasks."lint:from-digests"]
@@ -7652,10 +7872,29 @@ git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 || {
   exit 0
 }
 scratch=$(mktemp -d)
-trap 'rm -rf "${scratch}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files -z | rsync -a0 --files-from=- . "${scratch}"
 reuse --root "${scratch}" lint
+org_done=1
 '''
+
+[tasks."lint:vendored"]
+description = "Every tracked file under vendor/ matches the upstream commit its PINNED.toml names"
+dir = "{{cwd}}"
+# The other half of every `:!vendor/**` in this file (#1160). Vendored
+# text is someone else's, so the belt's linters skip it — and with
+# nothing else asking, a tracked file under vendor/ was checked by
+# nothing. Lifted from the one repository that had built it for itself
+# (monumental-archive's check-vendored-pins.sh, one subdirectory, `.md`
+# only) and widened to every tracked file under any vendor/ directory,
+# reading the same PINNED.toml format unchanged.
+#
+# Deterministic and offline: it never fetches upstream. Whether the
+# pinned commit really holds these bytes is review's question, asked
+# once when the manifest is written; the gate asks whether the tree has
+# moved since. Skips clean when nothing is tracked under vendor/.
+run = 'bash "${ORG_BELT_DIR}/vendored.sh"'
 
 [tasks."fix:citation"]
 description = "Render CITATION.cff from REUSE.toml (licence, authors, repository) plus the preserved human fields"
@@ -7715,13 +7954,15 @@ if [[ ! -f REUSE.toml ]]; then
   exit 1
 fi
 tmp=$(mktemp)
-trap 'rm -f "${tmp}"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 CITATION_OUT="${tmp}" bash "${ORG_BELT_DIR}/citation.sh" > /dev/null
 if ! diff -u CITATION.cff "${tmp}"; then
   echo "lint:citation: CITATION.cff drifted from its sources — edit REUSE.toml (or the human fields) and run fix:citation" >&2
   exit 1
 fi
 echo "lint:citation: CITATION.cff agrees with REUSE.toml"
+org_done=1
 '''
 
 [tasks."fix:badges"]
@@ -7831,7 +8072,8 @@ if ! grep -q "<!-- badges:begin -->" README.md; then
   exit 0
 fi
 tmp=$(mktemp)
-trap 'rm -f "${tmp}" "${tmp}.cur"' EXIT
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -f "${tmp}" "${tmp}.cur"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The derivation is invoked directly, never via `mise run fix:badges`: a
 # nested mise inside a task races the parallel lint fan-out and fails to
 # resolve its own lockfile, which made `mise run ci` unrunnable locally
@@ -7860,6 +8102,7 @@ if [[ -n ${stray} ]]; then
   exit 1
 fi
 echo "lint:badges: badge block agrees with the derivation"
+org_done=1
 '''
 
 [tasks."lint:release-stub"]
@@ -7978,6 +8221,49 @@ count=$(wc -w <<< "${keys}" | tr -d " ")
 echo "lint:toolbelt-lock: ${count} tools locked in ${lock}"
 '''
 
+[tasks."lint:lock-platforms"]
+description = "mise.lock covers every platform the publish stub builds a binary on"
+dir = "{{cwd}}"
+# lint:toolbelt-lock above proves every pinned tool HAS a locked entry.
+# This proves the entry covers every runner the release will install it
+# on. A binary leg runs `mise install --locked` on its target's own
+# runner, and the gate runs on linux and macos-arm64 only — so a lock
+# missing `macos-x64` is green everywhere until the x86_64-apple-darwin
+# leg asks, after the tag is minted. edtf v1.3.0 burned exactly so:
+# wasm-pack and node carried three platform tables, not four (#810).
+#
+# Two tracked files, read: the targets the publish stub declares (its
+# own binary-targets / go-targets, else the default the canon's
+# publish.yml declares — this belt's own tree, never a copied list), and
+# the lock. Only tools the config names, and only where its `os =`
+# lets them install; a tool with no platform tables at all (cargo:,
+# rust) is outside by construction. Offline and deterministic, so in ci.
+# The remedy is printed, never run: resolving a platform is network-bound
+# and writes the lock, which makes it a fixer's job, not a lint's.
+run = '''
+cfg=""
+for c in mise/config.toml mise.toml .mise.toml; do
+  [[ -f ${c} ]] && {
+    cfg="${c}"
+    break
+  }
+done
+[[ -n ${cfg} ]] || {
+  echo "lint:lock-platforms: no mise config, skipped"
+  exit 0
+}
+lock="mise.lock"
+[[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
+[[ -f ${lock} ]] || {
+  echo "lint:lock-platforms: no ${lock}, skipped"
+  exit 0
+}
+git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
+  | python3 "${ORG_BELT_DIR}/lock-platforms.py" \
+    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
+    --config "${cfg}" --lock "${lock}"
+'''
+
 [tasks."audit:lock-arch"]
 description = "Locked assets carry the architecture their platform key declares (release listings — network, not in ci)"
 dir = "{{cwd}}"
@@ -8086,6 +8372,156 @@ if [[ -n ${failed} ]]; then
   exit 1
 fi
 echo "audit:lock-arch: ok"
+'''
+
+[tasks."audit:lock-idempotent"]
+description = "Each committed mise.lock is what `mise lock` writes today (registry resolution — network, not in ci)"
+dir = "{{cwd}}"
+# lint:toolbelt-lock proves every pinned tool HAS an entry and
+# audit:lock-arch proves each entry carries the architecture its key
+# names — both per entry. Neither asks the whole-file question: is this
+# lock what mise would write NOW? #899 is that gap by instance: five
+# tools sat on `linux-gnu` assets their registry entries no longer
+# mapped, invisibly, until #854 regenerated the lock for an unrelated
+# reason and moved ten entries nobody had touched. Undetected drift
+# makes regeneration hostile — whoever runs `mise lock` next inherits
+# it in their own diff (#904).
+#
+# Deliberately almost trivial: copy each lock and the config beside it
+# to a scratch directory, run `mise lock` THERE, and red on any
+# difference. No logic about registries, libc, platforms or assets —
+# `mise lock` already IS the resolver; this only asserts the committed
+# answer still matches it. Rejected (#904): folding into
+# audit:lock-arch (a different question), a lint:* form (resolution
+# needs the registry, so it cannot be deterministic), and re-deriving
+# entries field by field (reimplementing the resolver to check it).
+#
+# Scratch, never the tree: the check must not be the thing that
+# rewrites the lock, so it asserts — not assumes — that `git status`
+# is unchanged when it ends. The scratch run sees only the subject's
+# own config plus a COPY of the delivered belt as its global config
+# (the belt's [settings], including the aqua.registries override, are
+# part of how every lock was resolved); MISE_CONFIG_DIR points at an
+# empty directory so no conf.d fragment on the machine joins in. Where
+# the subject IS the belt (this repository's mise/mise.lock) the
+# global config is empty instead of a second copy of itself.
+# MISE_LOCKED is unset for the scratch run: the audit jobs set it to 1,
+# and `mise lock` under it did not finish in ten minutes on 2026.11.4
+# where the same run without it took 85 seconds (measured for #904).
+#
+# THE ACCEPTED COST, decided on #904 and restated here so the next
+# person to meet a red knows it is deliberate: this leg WILL red
+# whenever upstream changes a registry mapping. That is recurring and
+# actionable, and the work is not just regenerating — it is the
+# #899-style proof that the newly resolved assets actually run (for
+# #899: every binary executed inside ubuntu:24.04 on both
+# architectures). The org took on that obligation knowingly.
+run = '''
+locks=$(git ls-files ':!vendor/**' "mise.lock" "*/mise.lock")
+[[ -n ${locks} ]] || {
+  echo "audit:lock-idempotent: no mise.lock tracked, skipped"
+  exit 0
+}
+belt="${ORG_BELT_DIR:-}"
+[[ -n ${belt} && -f ${belt}/config.toml ]] || {
+  echo "audit:lock-idempotent: CANNOT_JUDGE — the belt did not arrive" >&2
+  echo "  (ORG_BELT_DIR is empty). Every lock was resolved under the belt's" >&2
+  echo "  settings, so a run without it would judge a different resolver." >&2
+  exit 1
+}
+belt=$(cd "${belt}" && pwd -P)
+before=$(git status --porcelain=v1 --untracked-files=all)
+scratch=$(mktemp -d)
+# shellcheck disable=SC2154  # rc is assigned inside the trap string
+trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
+mkdir -p "${scratch}/conf" "${scratch}/belt"
+cp "${belt}/config.toml" "${scratch}/belt/config.toml"
+: > "${scratch}/empty.toml"
+drifted=""
+n=0
+while IFS= read -r lock; do
+  [[ -n ${lock} ]] || continue
+  n=$((n + 1))
+  d=$(dirname "${lock}")
+  work="${scratch}/tree${n}"
+  mkdir -p "${work}/${d}"
+  cp "${lock}" "${work}/${d}/mise.lock"
+  copied=0
+  for c in mise.toml .mise.toml config.toml; do
+    tracked=$(git ls-files "${d}/${c}")
+    [[ -n ${tracked} ]] || continue
+    cp "${d}/${c}" "${work}/${d}/${c}"
+    copied=1
+  done
+  [[ ${copied} -eq 1 ]] || {
+    echo "audit:lock-idempotent: ${lock} has no tracked config beside it —" >&2
+    echo "  nothing to regenerate it from. A lock without its config is a" >&2
+    echo "  stray; delete it or commit the config that produced it." >&2
+    drifted="${drifted} ${lock}"
+    continue
+  }
+  global="${scratch}/belt/config.toml"
+  here=$(cd "${d}" && pwd -P)
+  [[ ${here} == "${belt}" ]] && global="${scratch}/empty.toml"
+  if ! (cd "${work}/${d}" \
+    && env -u MISE_LOCKED \
+      MISE_CONFIG_DIR="${scratch}/conf" \
+      MISE_GLOBAL_CONFIG_FILE="${global}" \
+      MISE_TRUSTED_CONFIG_PATHS="${scratch}" \
+      mise lock > "${scratch}/log" 2>&1); then
+    cat "${scratch}/log" >&2
+    echo "audit:lock-idempotent: CANNOT_JUDGE ${lock} — \`mise lock\` failed in" >&2
+    echo "  scratch (above). Not judged, not passed." >&2
+    exit 1
+  fi
+  fresh="${work}/${d}/mise.lock"
+  cmp -s "${lock}" "${fresh}" && {
+    echo "audit:lock-idempotent: ${lock} is what \`mise lock\` writes today"
+    continue
+  }
+  drifted="${drifted} ${lock}"
+  # Name the entries, not just the file: each [[tools.X]] block keyed by
+  # tool and occurrence (a tool pinned as an array has several).
+  for side in "${lock}" "${fresh}"; do
+    awk '/^\[\[tools\./ { t = $0; gsub(/^\[\[tools\.|\]\]$|"/, "", t); k = t "#" (++seen[t]) }
+      k != "" { b[k] = b[k] $0 "\n" }
+      END { for (x in b) { gsub(/\n/, "\\n", b[x]); print x "\t" b[x] } }' "${side}"
+    echo "--"
+  done > "${scratch}/blocks"
+  named=$(awk -F'\t' '$0 == "--" { side++; next }
+    side == 0 { a[$1] = $2; next } side == 1 { f[$1] = $2 }
+    END {
+      for (k in a) if (!(k in f)) print "  " k " (dropped)"; else if (a[k] != f[k]) print "  " k
+      for (k in f) if (!(k in a)) print "  " k " (added)"
+    }' "${scratch}/blocks" | sort)
+  echo "audit:lock-idempotent: ${lock} is NOT what \`mise lock\` writes today." >&2
+  if [[ -n ${named} ]]; then
+    echo "  entries that moved (tool#occurrence):" >&2
+    echo "${named}" >&2
+  else
+    echo "  the difference is outside every [[tools.*]] entry:" >&2
+  fi
+  diff -u "${lock}" "${fresh}" | sed 's/^/    /' >&2 || true
+done <<< "${locks}"
+after=$(git status --porcelain=v1 --untracked-files=all)
+if [[ ${before} != "${after}" ]]; then
+  echo "audit:lock-idempotent: the working tree CHANGED during the check —" >&2
+  echo "  it must run entirely in scratch. Before:" >&2
+  echo "${before:-    (clean)}" >&2
+  echo "  After:" >&2
+  echo "${after:-    (clean)}" >&2
+  exit 1
+fi
+if [[ -n ${drifted} ]]; then
+  echo "audit:lock-idempotent: drifted from today's resolution:${drifted}" >&2
+  echo "  Regenerating is not the whole fix, and that is the accepted cost" >&2
+  echo "  (#904): prove the newly resolved assets actually run (#899 ran every" >&2
+  echo "  binary in ubuntu:24.04 on both architectures), then commit the lock" >&2
+  echo "  in a change of its own." >&2
+  exit 1
+fi
+echo "audit:lock-idempotent: ok — ${n} lock(s), working tree unchanged"
+org_done=1
 '''
 
 [tasks."lint:nested-permissions"]
@@ -8707,12 +9143,24 @@ dir = "{{cwd}}"
 #
 # Comment lines are skipped so that documenting a forbidden form (as the
 # signer now does) is not itself a violation.
+#
+# The second half is a 3.2 BEHAVIOUR rather than a syntax (#1233): with
+# an EXIT trap set, a script that dies on an unset variable exits 0 on
+# 3.2 and 1 on bash 5, because `$?` inside the trap is already 0. So a
+# local run reports success for a script that never finished. Every
+# EXIT trap — in a shell file or a task body of any tracked mise config
+# — carries a completion guard, and the script's last statement is the
+# mark the guard reads. exit-trap.py holds both and prints the shape.
+# Workflow `run:` steps are not held to it: they only ever meet bash 5.
 run = '''
+scripts=$(git ls-files ':!vendor/**' | xargs shfmt --find 2> /dev/null)
+configs=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml")
 files=$(
-  git ls-files ':!vendor/**' | xargs shfmt --find 2> /dev/null
+  printf '%s\n' "${scripts}"
   git ls-files ':!vendor/**' ".github/workflows/*.y*ml"
 )
-[[ -n ${files} ]] || {
+[[ -n ${files//$'\n'/} || -n ${configs} ]] || {
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
 }
@@ -8727,6 +9175,9 @@ while IFS= read -r f; do
   hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
   [[ -n ${hit} ]] && found="${found}\n  ${f}: ${hit}"
 done <<< "${files}"
+traps=0
+# shellcheck disable=SC2086  # the file lists are newline-separated on purpose
+python3 "${ORG_BELT_DIR}/exit-trap.py" ${scripts} ${configs} || traps=$?
 if [[ -n ${found} ]]; then
   echo "lint:bash-portability: bash 4+ syntax found (macOS ships 3.2):" >&2
   printf "%b\n" "${found}" >&2
@@ -8734,6 +9185,7 @@ if [[ -n ${found} ]]; then
   echo "  a release untested. Use tr, case, or an explicit loop instead." >&2
   exit 1
 fi
-count=$(wc -l <<< "${files}" | tr -d " ")
+[[ ${traps} -eq 0 ]] || exit 1
+count=$(grep -c . <<< "${files}" || true)
 echo "lint:bash-portability: ${count} files clean"
 '''

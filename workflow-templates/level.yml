@@ -22,14 +22,12 @@ name: level
 # to secrets, so the classic exploit is a workflow that then checks out
 # the triggering pull request's head and executes it.
 #
-# Ignored here because this stub does none of that, and neither does
-# its callee. Nothing is checked out — not this repository, not the
-# triggering ref — and no step reads workspace content or any
-# attacker-influenced field of the event. The single thing read from
-# the triggering context is `workflow_run.conclusion`, a value GitHub
-# computes, in an `if:`. The judgment itself reads the forge, the
-# attestation store and published artifacts, never a tree. The callee
-# is pinned by SHA and declares no `id-token`.
+# Ignored here because this stub does none of that. It checks out
+# nothing, passes the callee no field of the event, and reads one thing
+# from the triggering context: `workflow_run.conclusion`, a value GitHub
+# computes, in an `if:`. The callee is pinned by SHA; that it executes
+# no caller code is stated in its own header, where it can be checked
+# against the code.
 #
 # The alternative was refused upstream: `release: published` fires
 # while the publish workflow is still attaching the evidence being
@@ -87,7 +85,7 @@ jobs:
       # lint:caller-permissions checks it against what the callee
       # asks).
       contents: write # pushes this repository's cells to its own levels branch
-    uses: monumental-archive/.github/.github/workflows/level.yml@ab78e166fb2fada397b99d38ea9a1afdc3561c4b # v1.65.0
+    uses: monumental-archive/.github/.github/workflows/level.yml@80343686f9142180ff405f5c3476184c28d44504 # v1.66.0
     with:
       tracks: build source dependency
 ...

@@ -8,11 +8,11 @@
 # CANON-OWNED artefact: it enumerates the population (adoption,
 # org-pins, drafts, release-tags, signer-surface, caller-permissions,
 # source-vsa, attestations, blast-radius, badges), reads an org setting
-# (actions-allowlist), or reads something only this repository holds —
-# the belt's own config (biome-rules), the workflow templates
-# (template-pins), the pinned SLSA matrix (spec-drift). Those guard on
-# a canon-owned artefact, and lint:canon-policy (#579) is the join that
-# stops a deleted one turning them into silent skips — for the paths it
+# (actions-allowlist, security-config), or reads something only this
+# repository holds — the belt's own config (biome-rules), the workflow
+# templates (template-pins), the pinned SLSA matrix (spec-drift). Those
+# guard on a canon-owned artefact, and lint:canon-policy (#579) is the
+# join that stops a deleted one turning them into silent skips — for the paths it
 # holds. It holds three, so the join has gaps: `docs`, `security/vex`
 # and `slsa/spec-source-matrix.txt` are guarded on and held by nothing.
 # Measured while classifying these legs for #704 and filed as #738,
@@ -214,6 +214,42 @@ jobs:
           # shipped amd64. A public read; the default token serves.
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:lock-arch
+
+  lock-idempotent:
+    name: audit / each lock is what mise lock writes today
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.4
+          cache: false
+
+      - name: Regenerate each lock in scratch and diff it
+        env:
+          # Tree-local, beside lock-arch and for its reason: this
+          # repository does not call repo-audit.yml, so this job is how
+          # its OWN mise/mise.lock is walked; the consumer side is the
+          # matching leg there. The whole-file question (#904): is the
+          # committed lock what `mise lock` resolves today? Network —
+          # the registry is the resolver — so never the gate. It WILL
+          # red whenever upstream changes a registry mapping, and that
+          # cost was accepted on #904: a red asks for the #899-style
+          # proof that the newly resolved assets run, not just a
+          # regenerated file. Public reads; the default token serves.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise run audit:lock-idempotent
 
   template-pins:
     name: audit / template pin staleness
@@ -497,6 +533,63 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:actions-allowlist
+
+  security-config:
+    name: audit / security configuration records vs live
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    # #1213: the records in security/ against the live org — the
+    # derived default configuration both ways, its attachments, and the
+    # private member's effective settings. About a dozen requests, all
+    # reads. The code-security endpoints and a repository's
+    # security_and_analysis need Administration: read on the
+    # organisation and on the repositories, which the default job token
+    # cannot have.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        id: mise
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.4
+          cache: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what this leg reads: the org listing, the
+          # code security configurations, and each repository's
+          # security settings. Named so the token cannot widen when the
+          # App's grants do.
+          permission-metadata: read
+          permission-organization-administration: read
+          permission-administration: read
+          # Every repository in the installation: the subject is the
+          # population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Hold the security records to the live org
+        # Runs after a refused mint too: until the App holds both
+        # Administration grants the mint is refused, and the leg's
+        # honest output is the CANNOT_JUDGE line naming them, not a
+        # bare mint failure (#1213).
+        if: ${{ !cancelled() && steps.mise.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:security-config
 
   signer-surface:
     name: audit / signing surface vs live callers

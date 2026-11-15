@@ -39,6 +39,16 @@ once, never consumed live), `profile/`, community health files, docs,
 and this repository's own gate plumbing (`gate.yml`, `self-release.yml`,
 `self-publish.yml`).
 
+**A stub states what the caller grants, passes and gets back. It makes
+no claim about how the callee works (#884).** A stub is copied once and
+never compared again, so a sentence in it about the callee's internals
+goes stale with nothing to notice: "the version derivation's history
+read" outlived the API call it described in four repositories. The
+callee's own comments are the one home for its mechanism, because that
+is where a change to it is made. A grant's comment is a short label
+for what the scope covers (`contents: read # this repository's
+contents, read-only`), never an account of which callee step uses it.
+
 ## What a release means
 
 Every tag `vX.Y.Z` versions all of the above at one SHA — the SHA the
@@ -75,6 +85,31 @@ it — treat a brief stale reading after a release as the steady state,
 not drift. `audit:org-pins` watches every org repo from the canon's
 own Monday audit, so a genuinely stuck consumer reddens where someone
 looks rather than only inside itself.
+
+## Releases that need a hand-made bump (#1180)
+
+Renovate can change a version. It cannot run a `fix:*` task or edit a
+stub. A canon release that changes a file the consumer renders (the
+badge block, `CITATION.cff`) or the required shape of a stub (the gate
+stub's triggers or concurrency) therefore turns Renovate's pins-only
+bump red in every repository: the lint at the new pin compares the old
+file with the new derivation. Measured on v1.64.3, which changed the
+rendered badge block and reddened seven bumps (iiif-server#188).
+
+Such a release needs a **hand-made bump** in each repository:
+
+- The pin and the consumer change in **one commit**: move the pins,
+  run the fixer the red lint names (every belt lint whose remedy is a
+  `fix:*` task names it in its failure message) or make the stub edit,
+  and commit both together.
+- **One pull request per repository**, in any order.
+- Renovate's red bump is closed by the hand-made one merging, never by
+  hand.
+
+The author of the change says so: the canon pull request's body
+carries "needs a hand-made bump" in the line for that change, so the
+release notes say it where the consumers read. That line is the whole
+mechanism; there is no tooling behind it.
 
 ## The audit-claims contract (#240, #266, #290, #310)
 

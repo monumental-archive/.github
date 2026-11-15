@@ -1,0 +1,58 @@
+[
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "edtf",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "iiif-server",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "monumental-archive-db",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "monumental-archive-ledger",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "release-lab",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "signer",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": ".github",
+      "private": false
+    }
+  },
+  {
+    "status": "enforced",
+    "repository": {
+      "name": "stele",
+      "private": false
+    }
+  }
+]

@@ -249,6 +249,58 @@ jobs:
             exit 1
           fi
           record='^[0-9a-f]{64}  [^[:space:]]'
+          # Pull one published file, telling "not served yet" from
+          # "failed" (#1204). A registry answers 404 for a while after
+          # it accepted a publish: release-lab v0.28.2's tarball was
+          # still a 404 nine seconds after npm's own timestamp for the
+          # version, past the old 75-second budget, and the release
+          # stopped after npm had the package. So a 404 is waited on,
+          # sleeping min(attempt * 10, 60) seconds, for ten minutes in
+          # all. Anything else (a 5xx, a refused connection, a bad
+          # status) gets three tries and fails naming the status: a
+          # registry that is down is not waited on for ten minutes.
+          # curl's own --retry is gone on purpose; it retried a 503
+          # inside every try, so "three tries" would have been eighteen.
+          # The only registry fetch with a propagation window in this
+          # workflow: the lockfile fetch in the verdict leg reads the
+          # source at a commit, where absence is an answer. The test
+          # (release/test_verify_fetch.py) lifts this function out of
+          # this file by its first and last lines; keep both.
+          fetch_published() {
+            local name="$1" url="$2" dest="$3"
+            local attempt=0 waited=0 failures=0 nap status rc
+            local budget=600
+            while true; do
+              attempt=$((attempt + 1))
+              rc=0
+              status=$(curl -sSL -o "${dest}" -w '%{http_code}' \
+                -H "User-Agent: ${ORG_USER_AGENT}" "${url}") || rc=$?
+              if ((rc == 0)) && [[ ${status} == 2?? ]]; then
+                return 0
+              fi
+              if ((rc == 0)) && [[ ${status} == 404 ]]; then
+                if ((waited >= budget)); then
+                  echo "::error::${name}: not served after 10 minutes"
+                  return 1
+                fi
+                nap=$((attempt * 10))
+                ((nap <= 60)) || nap=60
+                ((nap <= budget - waited)) || nap=$((budget - waited))
+                echo "${name}: not served yet (404, attempt ${attempt}), retrying in ${nap}s"
+              else
+                ((rc == 0)) || status="no HTTP status (curl exit ${rc})"
+                failures=$((failures + 1))
+                if ((failures >= 3)); then
+                  echo "::error::${name}: failed with ${status}"
+                  return 1
+                fi
+                nap=$((failures * 10))
+                echo "${name}: failed with ${status} (try ${failures} of 3), retrying in ${nap}s"
+              fi
+              sleep "${nap}"
+              waited=$((waited + nap))
+            done
+          }
           # The pulled bytes outlive this step on purpose: the verdict
           # step verifies the attestation bundles against these exact
           # files, so both checks open the same evidence.
@@ -314,23 +366,7 @@ jobs:
                 ;;
             esac
             echo "::group::${name}"
-            # --retry covers transient server errors; the outer loop covers
-            # the 404 window while a just-published release propagates.
-            fetched=""
-            for attempt in 1 2 3 4 5; do
-              if curl -sSfL --retry 5 --retry-connrefused \
-                -H "User-Agent: ${ORG_USER_AGENT}" \
-                -o "${workdir}/${name}" "${url}"; then
-                fetched=1
-                break
-              fi
-              echo "fetch of ${name} not ready (attempt ${attempt}), retrying"
-              sleep $((attempt * 5))
-            done
-            if [[ -z ${fetched} ]]; then
-              echo "::error::${name}: the published bytes could not be fetched"
-              exit 1
-            fi
+            fetch_published "${name}" "${url}" "${workdir}/${name}"
             actual=$(sha256sum "${workdir}/${name}" | cut -d' ' -f1)
             if [[ ${actual} != "${digest}" ]]; then
               echo "::error::${name}: built ${digest}, registry served ${actual}"

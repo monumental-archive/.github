@@ -6,10 +6,10 @@
 name: gate
 
 "on":
-  # `edited` is load-bearing: the shared gate lints the squash subject
-  # from the PR title, and title/base changes arrive only as `edited`
-  # events — without it a fixed title stays red and a broken one stays
-  # green (.github#427). Do not slim back to the default types.
+  # `edited` is load-bearing: the gate's verdict covers the pull
+  # request's title and base, and changes to those arrive only as
+  # `edited` events — without it a fixed title stays red and a broken
+  # one stays green (.github#427). Do not slim back to the default types.
   pull_request:
     types:
       - opened
@@ -32,9 +32,15 @@ name: gate
 permissions:
   contents: read
 
+# A pull request's runs group by its number, so they can only cancel
+# each other. Everything else groups by ref and is never cancelled: an
+# event on a pull request that has already merged has no merge ref, so
+# its github.ref is the default branch, and a shared group let it cancel
+# the push gate on main (.github#1195). Each commit on the default
+# branch keeps its own verdict. lint:gate-stub requires both lines.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:
@@ -46,5 +52,5 @@ jobs:
       # measured on stele's standup, where this template's silence was
       # the one gate finding).
       contents: read # checkout of this repo and of the toolbelt
-    uses: monumental-archive/.github/.github/workflows/ci.yml@ab78e166fb2fada397b99d38ea9a1afdc3561c4b # v1.65.0
+    uses: monumental-archive/.github/.github/workflows/ci.yml@80343686f9142180ff405f5c3476184c28d44504 # v1.66.0
 ...
