@@ -121,7 +121,26 @@ if [[ ${1:-} == release && ${2:-} == view ]]; then
   jq -r "${expr:-.}" <<< "${one}"
   exit 0
 fi
+# `gh release download` is answered only when a row hands the stub a
+# previous archive to serve (GH_PREV_TARBALL), and then only by writing
+# that archive to --output: the rows that read the archive's layout need
+# the script to get past the download, and no further than the next
+# container, which the stub `docker` refuses.
+if [[ ${1:-} == release && ${2:-} == download && -n ${GH_PREV_TARBALL:-} ]]; then
+  out=""
+  while [[ $# -gt 0 ]]; do
+    if [[ $1 == --output ]]; then out="$2"; fi
+    shift
+  done
+  cp "${GH_PREV_TARBALL}" "${out}"
+  exit 0
+fi
 echo "gh stub: refusing '$*' (the test stops here by design)" >&2
+exit 1
+"""
+
+DOCKER_STUB = """#!/usr/bin/env bash
+echo "docker stub: refusing '$*' (the test stops here by design)" >&2
 exit 1
 """
 
@@ -261,9 +280,17 @@ class Repo:
         git(["add", "-A"], self.root, self.home)
 
     def derive(
-        self, version: str, prev_manifest: str, fixture: str
+        self,
+        version: str,
+        prev_manifest: str,
+        fixture: str,
+        prev_tarball: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run the real derivation with a stub forge.
+
+        `prev_tarball`, when given, is the archive the stub forge serves
+        for the predecessor's download, and a stub `docker` refusing by
+        name ends the run at the candidate build that follows.
 
         Returns:
             The completed process; callers assert on its stdout, since the
@@ -272,9 +299,12 @@ class Repo:
         """
         bindir = self.root / "stubbin"
         bindir.mkdir(exist_ok=True)
-        gh = bindir / "gh"
-        gh.write_text(GH_STUB)
-        gh.chmod(0o755)
+        stubs = [("gh", GH_STUB)]
+        if prev_tarball is not None:
+            stubs.append(("docker", DOCKER_STUB))
+        for stub, body in stubs:
+            (bindir / stub).write_text(body)
+            (bindir / stub).chmod(0o755)
         # The script runs `git ls-files '*.control'` for itself, so the
         # scrub has to reach it too - a fixture built hermetically and then
         # inspected through the caller's `GIT_DIR` is the same defect one
@@ -289,6 +319,7 @@ class Repo:
             GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
             GITHUB_REPOSITORY="monumental-archive/under-test",
             GH_FIXTURE=str(TESTDATA / fixture),
+            GH_PREV_TARBALL=str(prev_tarball or ""),
         )
         env.pop("GITHUB_OUTPUT", None)
         # ruff: ignore[subprocess-without-shell-equals-true]
@@ -716,6 +747,94 @@ class TagHistoryShapes(unittest.TestCase):
         )
 
 
+def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
+    """Pack a predecessor tarball with these files under `top`.
+
+    Returns:
+        The archive's path. Packed the way the release packs (a staging
+        directory archived by its top-level name), so the layout is the
+        only thing a row varies.
+
+    """
+    stage = dest / "stage"
+    for rel in files:
+        path = stage / top / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+    archive = dest / "prev.tar.gz"
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run(
+        [shutil.which("tar"), "-czf", str(archive), "-C", str(stage), top],
+        check=True,
+    )
+    return archive
+
+
+PREV_FILES = [
+    "usr/lib/postgresql/18/lib/lab_pg.so",
+    "usr/share/postgresql/18/extension/lab_pg.control",
+    "usr/share/postgresql/18/extension/lab_pg--0.28.1.sql",
+]
+NO_ROOT = (
+    "FAIL: v0.28.1 tarball has no usr/lib/postgresql/18/lib under its package root"
+)
+
+
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
+class ReadsThePreviousArchive(unittest.TestCase):
+    """Every top level the predecessor's archive may have (#780, #1274).
+
+    #1274 packs the tarball from `pkgroot/` alone: the CloudNativePG
+    mirror beside it is gone. The derivation must still find the
+    package root and the previous schema, and reach the candidate
+    build, which the stub `docker` refuses by name. A layout it cannot
+    read stops before that with its own message.
+    """
+
+    @staticmethod
+    def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess:
+        """Derive lab_pg 0.29.0 from a 0.28.1 archive of this shape.
+
+        Returns:
+            The completed process.
+
+        """
+        with TemporaryDirectory() as d:
+            archive = previous_archive(Path(d), top, files)
+            repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
+            return repo.derive("0.29.0", "0.28.1", "release-lab-releases.json", archive)
+
+    def test_pkgroot_and_nothing_else(self) -> None:
+        """The #1274 tarball: `pkgroot/` is the archive's only top level."""
+        result = self.run_with("pkgroot", PREV_FILES)
+        self.assertIn("deriving lab_pg: 0.28.1 -> 0.29.0 (pg18)", result.stdout)
+        self.assertIn("docker stub: refusing 'run --rm", result.stderr)
+        self.assertNotIn("FAIL:", result.stderr)
+
+    def test_an_imported_archive_packed_from_root(self) -> None:
+        """An imported repository's tarball carries `./usr/...` directly."""
+        result = self.run_with(".", PREV_FILES)
+        self.assertIn("docker stub: refusing 'run --rm", result.stderr)
+        self.assertNotIn("FAIL:", result.stderr)
+
+    def test_neither_layout_is_refused_by_name(self) -> None:
+        """A root holding neither shape stops before any container."""
+        result = self.run_with("cnpgroot", ["lib/lab_pg.so"])
+        self.assertIn(NO_ROOT, result.stderr)
+        self.assertNotIn("docker stub", result.stderr)
+        self.assertEqual(1, result.returncode)
+
+    def test_no_previous_schema_is_refused_by_name(self) -> None:
+        """A package root without the previous schema stops before a build."""
+        result = self.run_with("pkgroot", PREV_FILES[:2])
+        self.assertIn(
+            "FAIL: v0.28.1 tarball carries no generated schema lab_pg--0.28.1.sql",
+            result.stderr,
+        )
+        self.assertNotIn("docker stub", result.stderr)
+        self.assertEqual(1, result.returncode)
+
+
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
 HEADER_PIN = '"postgresql-server-dev-${PG}=${server}"'
 SERVER_UNCHANGED = '[[ ${after} == "${server}" ]] || {'
@@ -860,6 +979,206 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
             " to 18.7-1.pgdg120+1\n",
             result.stdout,
         )
+
+
+def floor_template(text: str) -> str:
+    """Cut the floor block's template out of the build workflow (#1274).
+
+    Returns:
+        The quoted heredoc's body, indentation off: the shipped bytes
+        the build fills and prepends, never a copy of them.
+
+    """
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.endswith("<< 'FLOOR'"))
+    end = next(i for i in range(start, len(lines)) if lines[i].strip() == "FLOOR")
+    return textwrap.dedent("\n".join(lines[start + 1 : end]))
+
+
+def fill(template: str, num: int, xy: str) -> str:
+    """Fill the template the way the build does, field by field.
+
+    Returns:
+        The DO block a build at server `xy` (`num`) would prepend.
+
+    """
+    for field, value in (
+        ("@NUM@", str(num)),
+        ("@XY@", xy),
+        ("@EXT@", FLOOR_EXT),
+        ("@VERSION@", FLOOR_VERSION),
+    ):
+        template = template.replace(field, value)
+    return template
+
+
+def postgres_bindir() -> Path | None:
+    """Find the gate's own Postgres: `PG_BINDIR`, else the Debian layout.
+
+    The runner image carries PostgreSQL under /usr/lib/postgresql/<N>/bin
+    (installed, service disabled), which is all these rows need: a server
+    they start themselves on a private socket.
+
+    Returns:
+        The newest major's bin directory, or None where there is none.
+
+    """
+    if override := os.environ.get("PG_BINDIR"):
+        return Path(override)
+    found = sorted(
+        Path("/usr/lib/postgresql").glob("*/bin/initdb"),
+        key=lambda p: int(p.parent.parent.name),
+    )
+    return found[-1].parent if found else None
+
+
+FLOOR_EXT = "demo_ext"
+FLOOR_VERSION = "9.8.7"
+PG_BIN = postgres_bindir()
+# The gate's runner carries a Postgres, so there a missing one is a
+# defect, never a skip that reads like a pass (#364). A machine without
+# one skips by name.
+ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
+
+
+class FloorTemplateShape(unittest.TestCase):
+    """The template carries every field the build fills, and its tag."""
+
+    def test_every_field_and_the_tag(self) -> None:
+        """Each placeholder is there, and none survives the fill."""
+        template = floor_template(WORKFLOW.read_text())
+        for field in ("@NUM@", "@XY@", "@EXT@", "@VERSION@"):
+            with self.subTest(field=field):
+                self.assertIn(field, template)
+        self.assertTrue(template.startswith("DO $pgrx_floor$\n"))
+        self.assertTrue(template.endswith("\n$pgrx_floor$;"))
+        self.assertNotIn("@", fill(template, 180007, "18.7"))
+
+
+@unittest.skipUnless(PG_BIN or ON_RUNNER, "no Postgres on this machine")
+class WarnsBelowTheFloor(unittest.TestCase):
+    """The floor block alone, against a live server (#1274).
+
+    The gate's own server stands in for the one a person installs on:
+    a floor set above its version is the older-server case and must
+    warn with the exact sentence; a floor at its version is the build's
+    own server and must say nothing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Start a throwaway server on a private socket, no TCP.
+
+        Raises:
+            AssertionError: on the gate's runner with no Postgres found,
+                where a skip would read like a pass.
+
+        """
+        if PG_BIN is None:
+            msg = "the gate's runner carries no /usr/lib/postgresql/*/bin"
+            raise AssertionError(msg)
+        cls.tmp = TemporaryDirectory()
+        tmp = Path(cls.tmp.name)
+        cls.data = tmp / "data"
+        cls.sock = tmp
+        run = [str(PG_BIN / "initdb"), "-D", str(cls.data), "-A", "trust"]
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([*run, "-U", "postgres", "-N"], check=True, capture_output=True)
+        opts = f"-c listen_addresses= -k {cls.sock}"
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
+            [
+                str(PG_BIN / "pg_ctl"),
+                "-D",
+                str(cls.data),
+                "-o",
+                opts,
+                "-w",
+                "-l",
+                str(tmp / "log"),
+                "start",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        cls.num = int(cls.psql("SHOW server_version_num").stdout.strip())
+        cls.version = cls.psql("SHOW server_version").stdout.strip()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """Stop the server and drop its directory."""
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
+            [str(PG_BIN / "pg_ctl"), "-D", str(cls.data), "-m", "immediate", "stop"],
+            check=False,
+            capture_output=True,
+        )
+        cls.tmp.cleanup()
+
+    @classmethod
+    def psql(cls, sql: str) -> subprocess.CompletedProcess[str]:
+        """Run one command string against the throwaway server.
+
+        Returns:
+            The completed process; stderr carries any WARNING.
+
+        """
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
+            [
+                str(PG_BIN / "psql"),
+                "-X",
+                "-q",
+                "-tA",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-h",
+                str(cls.sock),
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-c",
+                sql,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @staticmethod
+    def block(num: int) -> str:
+        """Fill the shipped template with a floor of `num`.
+
+        Returns:
+            The DO block, its X.Y derived from `num` as the build does.
+
+        """
+        xy = f"{num // 10000}.{num % 10000}"
+        return fill(floor_template(WORKFLOW.read_text()), num, xy)
+
+    def test_below_the_floor_warns_with_the_sentence(self) -> None:
+        """A server one minor older than the build's warns, exactly."""
+        floor = self.num + 1
+        xy = f"{floor // 10000}.{floor % 10000}"
+        result = self.psql(self.block(floor))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            f"WARNING:  {FLOOR_EXT} {FLOOR_VERSION} was built against PostgreSQL"
+            f" {xy}; this server is {self.version}. If loading fails below,"
+            f" update PostgreSQL to {xy} or newer.\n",
+            result.stderr,
+        )
+
+    def test_at_the_floor_is_silent(self) -> None:
+        """The build's own server prints nothing."""
+        result = self.psql(self.block(self.num))
+        self.assertEqual((0, ""), (result.returncode, result.stderr))
+
+    def test_above_the_floor_is_silent(self) -> None:
+        """A newer server than the build's prints nothing."""
+        result = self.psql(self.block(self.num - 1))
+        self.assertEqual((0, ""), (result.returncode, result.stderr))
 
 
 if __name__ == "__main__":

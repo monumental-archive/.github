@@ -1194,8 +1194,39 @@ correctness-by-patching; this is the same knowledge by design):
   path whatever the record says, and a tree with no record yet says the
   question is open instead of closing it.
 - **Reproducible tarballs**, same flags and normalisation as rust-binary,
-  named `<ext>-<version>-pg<major>-linux-<arch>.tar.gz`, each shipping
-  both the Debian tree and the CloudNativePG ImageVolume layout.
+  two per cell, both subjects (checksummed, signed, in the manifest):
+  `<ext>-<version>-pg<major>-linux-<arch>.tar.gz` holds the Debian
+  tree once, under `pkgroot/`, and
+  `<ext>-<version>-pg<major>-linux-<arch>-debug.tar.gz` holds its debug
+  info, under `debugroot/` (#1274). The build does not strip; the cell
+  then splits each library the Debian `-dbgsym` way — `objcopy
+  --only-keep-debug`, `strip --strip-unneeded`, `objcopy
+  --add-gnu-debuglink`, GNU binutils, never `llvm-strip` — and asserts
+  the result: `.dep-v0` (cargo-auditable's section) and
+  `.gnu_debuglink` present, no `.debug_info`, no `.symtab`, and the same
+  dynamic function count as before the split. Installing, and the debug
+  info beside it (gdb then finds it through the debuglink):
+
+  ```sh
+  tar -xzf <ext>-<version>-pg<major>-linux-<arch>.tar.gz -C / --strip-components=1 pkgroot
+  tar -xzf <ext>-<version>-pg<major>-linux-<arch>-debug.tar.gz -C / --strip-components=1 debugroot
+  ```
+
+- **The PostgreSQL floor is stated where the failure happens.** A cell
+  builds against the server its pinned image carries, its newest minor,
+  and a library built against a newer minor can need a server symbol
+  an older one lacks (18.7 added `heap_datum_check`; edtf 1.3.4's pg18
+  library fails on 18.6 with `undefined symbol`). So every script that
+  installs or updates to the release — `<ext>--<version>.sql` and each
+  `<ext>--*--<version>.sql` — begins with a `DO` block that raises a
+  WARNING when the server is older than the one the build used: it
+  names the build's `X.Y`, this server's version, and says to update
+  PostgreSQL to `X.Y` or newer if loading fails below. The rule: the
+  floor is the minor the build image carried, read in the packaged
+  script's first lines, and in the build log's `::notice::`. A
+  warning, never a refusal — most minors do not move the floor, so a
+  library usually loads on an older one. Older minors are not tested,
+  and we do not claim them.
 - **One artifact image per PG major**, `FROM scratch`, both
   architectures assembled in one build (nothing executes, so nothing is
   emulated), built in-run from the same verified tarballs the release
