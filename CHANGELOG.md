@@ -10,6 +10,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.67.3](https://github.com/monumental-archive/.github/compare/v1.67.2...v1.67.3) - 2026-11-15
+
+### Fixed
+
+- correct the db repo's floor and roster reason ([#1275](https://github.com/monumental-archive/.github/pull/1275))
+- name the call a refused release-pr step died on ([#1270](https://github.com/monumental-archive/.github/pull/1270))
+- reconcile each signer certificate with a signing ([#1271](https://github.com/monumental-archive/.github/pull/1271))
+- name the signer by the canon's owner ([#1284](https://github.com/monumental-archive/.github/pull/1284))
+- restore the gate's go cache only on an exact key ([#1287](https://github.com/monumental-archive/.github/pull/1287))
+- run the pre-push gate as a script so it is never skipped ([#1282](https://github.com/monumental-archive/.github/pull/1282))
+- pre-set only org-level answers in the bestpractices stub ([#1289](https://github.com/monumental-archive/.github/pull/1289))
+- update monumental-archive/signer to 3dc4846 ([#1292](https://github.com/monumental-archive/.github/pull/1292))
+- call a fuzz probe failure stale only when it is ([#1294](https://github.com/monumental-archive/.github/pull/1294))
+
+### Documentation
+
+- state stub permission grants in the caller's terms ([#1286](https://github.com/monumental-archive/.github/pull/1286))
+- commit to crediting vulnerability reporters ([#1293](https://github.com/monumental-archive/.github/pull/1293))
+
 ## [1.67.2](https://github.com/monumental-archive/.github/compare/v1.67.1...v1.67.2) - 2026-11-15
 
 ### Fixed
