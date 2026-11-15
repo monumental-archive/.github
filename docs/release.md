@@ -328,8 +328,24 @@ one writer, [`release/record-draft.sh`](../release/record-draft.sh):
 
 | Path | Written by | Says |
 | --- | --- | --- |
-| the publish failed | `publish.yml`'s `burn-record` job | burned version, the run that burned it |
+| the publish failed | `publish.yml`'s `burn-record` job | burned version, the run that burned it, what became public |
 | `dry-run: true` | `attach-release.yml` | rehearsal, deliberately unpublished |
+
+**A burn record says what got out** (#1280). The registry uploads run
+side by side after the commit point and none can be taken back, so a
+run that burns at one may already have shipped another. `burn-record`
+hands the writer the result of every job that publishes to a registry
+— the crates.io and npm uploads and the two image-tag jobs — and the
+sentence follows them:
+
+- none ran, or all were skipped: the run "failed before anything
+  became public", as before;
+- otherwise it "failed after these became public, and they remain:",
+  one line per registry whose job succeeded, and one line "may be
+  partly published" per registry whose job failed or was cancelled.
+
+The tag jobs follow `attach`, so in a burn they are always skipped: a
+burn can leave crates and npm packages, never a named image.
 
 Deleting the draft was the previous instruction and is **rejected**: it
 destroys the only artifact of the failed attempt other than run logs, which
@@ -606,9 +622,10 @@ their build workflows (`publish-rust-crate.yml`, `publish-wasm-npm.yml`
 — trusted publishing survives because both registries pin the CALLER's
 entry filename, `workflow_ref`, never `job_workflow_ref`); image
 builds stop after untagged digest pushes, with the oci index assembled
-and tagged exactly once post-gate (`assemble-oci-index.yml`) and the
-pgrx per-major tags applied post-gate by manifest PUT
-(`tag-images.yml`), digest preserved by construction. Rebuild legs
+exactly once post-gate and pushed by digest, untagged
+(`assemble-oci-index.yml`), and every tag — the oci index's and the
+pgrx per-major ones — applied by manifest PUT (`tag-images.yml`),
+digest preserved by construction. Rebuild legs
 skip smoke tests — the gate proves bytes; the first build already
 proved behaviour — and upload nothing matching the `release-*` glob
 that attach fans in on. The scheduled `repro-check` stays untouched:
@@ -616,6 +633,29 @@ it re-verifies published history from cold, which the release-time
 gate does not cover. And nothing here ever claims
 `SLSA_BUILD_REPRODUCED` — a same-platform rebuild can never earn it,
 by design ([`tooling-verdicts.md`](tooling-verdicts.md)).
+
+**Where the tags sit: last** (#1280). Downstream of the gate is not
+enough, because everything downstream of the commit point runs side
+by side: the crates.io and npm uploads, the image index push, and —
+until #1280 — the image tags. When one upload failed, the others had
+already gone out, and edtf's v1.3.2 and v1.3.3 burned at crates.io
+leaving `1.3.2-pg*` and `1.3.3-pg*` images anyone could pull: a
+database built from one is on an extension version with no
+`ALTER EXTENSION UPDATE` path, because upgrade scripts start only from
+released versions. A registry tag is a name for bytes already
+uploaded, gated and signed, and nothing before `attach` reads one —
+every pre-attach reader (smoke, facts, scan, SBOM, the signers) uses
+the digest — so both tag jobs need `attach` and run only once the
+release is out. `lint:release-phases` holds that edge. The verdict
+jobs that prove the tag binding wait for the tag job in turn.
+
+What a burn can therefore leave on a registry: crates and an npm
+package (both irreversible, and published before `attach` because the
+verifier must fetch the published bytes to prove them), and **untagged**
+image digests — no name, not listed, and the registry's to collect. If
+a tag job fails *after* `attach`, the release is published and its
+tags are missing: a red run with an idempotent re-run, never a burn,
+because `burn-record` keys on `attach`.
 
 ### The verdict beside the evidence
 

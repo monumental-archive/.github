@@ -18,10 +18,11 @@
 #
 #   build (twice, independently) -> smoke test -> repro gate (every
 #   irreversible step blocks on the bit-for-bit proof, #118) -> registry
-#   publish / index tag -> pull the published bytes back and prove
-#   them -> attest -> verify as a stranger would -> publish the release ->
-#   verdict (every class: re-prove the now-immutable public artifacts,
-#   open their evidence, sign the VSA into the attestation store)
+#   publish (images by digest, untagged) -> pull the published bytes
+#   back and prove them -> attest -> verify as a stranger would ->
+#   publish the release -> registry tags, last (#1280) -> verdict (every
+#   class: re-prove the now-immutable public artifacts, open their
+#   evidence, sign the VSA into the attestation store)
 #
 # The reusable workflows below are referenced relatively (`./`). Measured
 # in the lab: a relative reference resolves against THIS repository, at the
@@ -961,9 +962,10 @@ jobs:
       dry-run: ${{ inputs.dry-run }}
       repro: true
 
-  # The index is assembled and TAGGED exactly once, here, post-gate
-  # (#118): the builds pushed per-arch digests only, the gate compared
-  # them, and this is the first moment a public reference exists.
+  # The index is assembled exactly once, here, post-gate (#118): the
+  # builds pushed per-arch digests only and the gate compared them. It
+  # is pushed by digest with NO tag (#1280) — the name comes last, from
+  # tag-image after attach, exactly as the pgrx images get theirs.
   # phase: publish
   assemble-oci:
     name: Assemble the image index
@@ -976,7 +978,7 @@ jobs:
     uses: ./.github/workflows/assemble-oci-index.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # checkout of the caller
-      packages: write # create and tag the manifest list
+      packages: write # push the manifest list by digest
     with:
       version: ${{ needs.guard.outputs.version }}
       smoke-test: ${{ inputs.smoke-test }}
@@ -1000,6 +1002,27 @@ jobs:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
       artifact-metadata: write # the signer creates the storage record
+
+  # The index's one advertised tag, applied after attach and only then
+  # (#1280) — see tag-extension-images. The digest it names is the one
+  # sign-image signed and the release's manifest declares.
+  # phase: publish
+  tag-image:
+    name: Tag the image index
+    needs:
+      - assemble-oci
+      - commit-point
+      - attach
+    if: ${{
+        !cancelled() && needs.commit-point.result == 'success'
+        && needs.attach.result == 'success'
+        && contains(inputs.classes, 'oci-image') && !inputs.dry-run
+      }}
+    uses: ./.github/workflows/tag-images.yml # zizmor: ignore[self-repository]
+    permissions:
+      packages: write # PUT the gated index manifest under its tag
+    with:
+      images: ${{ needs.assemble-oci.outputs.images }}
 
   # Runs no caller code, so it can hold the writes the build job must not.
   # It pulls the published bytes back and hashes them: the attested subject
@@ -1447,17 +1470,26 @@ jobs:
       dry-run: ${{ inputs.dry-run }}
       repro: true
 
-  # The per-major tags, applied post-gate by manifest PUT — the exact
-  # bytes the gate compared land under the advertised names, digests
-  # preserved by construction (#118).
+  # The per-major tags, applied by manifest PUT — the exact bytes the
+  # gate compared land under the advertised names, digests preserved by
+  # construction (#118). A registry tag is the LAST thing a release does
+  # (#1280): it is a name for bytes already uploaded, gated and signed,
+  # and nothing before attach reads one, so it waits for attach. A run
+  # that burns before attach leaves digests with no name — nothing a
+  # stranger can pull as this version, and the registry's to collect. A
+  # tag job that fails AFTER attach is a published release with its tags
+  # missing: a red run with an idempotent re-run, never a burn, because
+  # burn-record keys on attach. `lint:release-phases` holds the order.
   # phase: publish
   tag-extension-images:
     name: Tag extension images
     needs:
       - build-extension-images
       - commit-point
+      - attach
     if: ${{
         !cancelled() && needs.commit-point.result == 'success'
+        && needs.attach.result == 'success'
         && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run
       }}
     uses: ./.github/workflows/tag-images.yml # zizmor: ignore[self-repository]
@@ -1466,14 +1498,18 @@ jobs:
     with:
       images: ${{ needs.build-extension-images.outputs.images }}
 
+  # Signs the digest, which needs no name: sign.yml takes image-name and
+  # image-digest only, so the signature is in place before the tag that
+  # will point at it exists (#1280).
   # phase: attest
   sign-extension-images:
     name: Sign extension image pg${{ matrix.pg }}
     needs:
       - build-extension-images
-      - tag-extension-images
+      - commit-point
     if: ${{
-        !cancelled() && needs.tag-extension-images.result == 'success'
+        !cancelled() && needs.commit-point.result == 'success'
+        && needs.build-extension-images.result == 'success'
         && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run
       }}
     strategy:
@@ -2044,7 +2080,8 @@ jobs:
   # One verdict covers the class's whole image set (a subject line per
   # index), signed over the verdict job's re-proved manifest exactly like
   # the file classes — the subject names are the untagged references the
-  # signer attested.
+  # signer attested. The tag binding is read only once the tag job has
+  # applied it, which is after attach (#1280).
   # phase: attest
   vsa-image:
     name: Assemble and sign image VSA
@@ -2053,7 +2090,12 @@ jobs:
       - guard
       - assemble-oci
       - attach
-    if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
+      - tag-image
+    if: ${{
+        !cancelled() && needs.attach.result == 'success'
+        && needs.tag-image.result == 'success'
+        && contains(inputs.classes, 'oci-image') && !inputs.dry-run
+      }}
     uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # pull-back plus attestation reads
@@ -2080,7 +2122,12 @@ jobs:
       - guard
       - build-extension-images
       - attach
-    if: ${{ !cancelled() && needs.attach.result == 'success' && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run }}
+      - tag-extension-images
+    if: ${{
+        !cancelled() && needs.attach.result == 'success'
+        && needs.tag-extension-images.result == 'success'
+        && contains(inputs.classes, 'pgrx-extension') && !inputs.dry-run
+      }}
     uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: read # registry resolution plus attestation reads
@@ -2150,6 +2197,16 @@ jobs:
     needs:
       - guard
       - attach
+      # Every job that publishes to a registry, for its result only
+      # (#1280): the uploads run beside each other after the commit
+      # point, so a run that burns at one may already have shipped
+      # another, and the record must say which. The two tag jobs follow
+      # attach and are skipped in any burn; they are named so a class
+      # added later is not silently left out of the record.
+      - publish-crates
+      - publish-wasm
+      - tag-extension-images
+      - tag-image
     if: ${{ !cancelled() && needs.guard.result == 'success' && needs.attach.result != 'success' && !inputs.dry-run }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -2175,5 +2232,10 @@ jobs:
           TAG: ${{ github.ref_name }}
           KIND: burn
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REGISTRIES: |-
+            crates.io=${{ needs.publish-crates.result }}
+            npm=${{ needs.publish-wasm.result }}
+            ghcr.io (extension images)=${{ needs.tag-extension-images.result }}
+            ghcr.io (image)=${{ needs.tag-image.result }}
         run: .org-canon/release/record-draft.sh
 ...

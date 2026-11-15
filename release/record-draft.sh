@@ -36,6 +36,17 @@
 #                  a maintainer completes it. audit:drafts deliberately
 #                  does not require it: an audit that goes red until a
 #                  human types something is red by default.
+#   REGISTRIES     one `<registry>=<job result>` line per job of the run
+#                  that publishes to a registry (#1280): the crates.io and
+#                  npm uploads and the image-tag jobs. A burn is not a
+#                  release, but the uploads run beside each other after
+#                  the commit point and cannot be taken back, so a run
+#                  that dies at one of them may already have shipped
+#                  another — and a record saying "nothing became public"
+#                  would then be false. A result is what GitHub reports
+#                  for the job: success, failure, cancelled, skipped, or
+#                  empty when the job is not in the run. Evidence of a
+#                  run, so it needs RUN_URL and KIND=burn.
 set -euo pipefail
 
 repo="${REPO:-${GITHUB_REPOSITORY:-}}"
@@ -43,6 +54,7 @@ tag="${TAG:-}"
 kind="${KIND:-}"
 run_url="${RUN_URL:-}"
 fixed_forward="${FIXED_FORWARD:-}"
+registries="${REGISTRIES:-}"
 
 [[ -n ${repo} ]] || {
   echo "record-draft: REPO is unset" >&2
@@ -59,6 +71,40 @@ case "${kind}" in
     exit 1
     ;;
 esac
+
+# What became public, read from the job results before anything is read
+# from the forge, so a malformed list never reaches a release. A success
+# is public and stays public (neither registry takes a version back, and
+# a tag is only applied once the release itself is out); a failure or a
+# cancellation may have stopped part-way through an upload, and the
+# record says exactly that rather than guessing either way.
+public=""
+partial=""
+if [[ -n ${registries} ]]; then
+  if [[ ${kind} != "burn" || -z ${run_url} ]]; then
+    echo "record-draft: REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL" >&2
+    exit 1
+  fi
+  while IFS= read -r line; do
+    [[ -n ${line} ]] || continue
+    if [[ ${line} != *=* || -z ${line%=*} ]]; then
+      echo "record-draft: REGISTRIES line '${line}' is not <registry>=<job result>" >&2
+      exit 1
+    fi
+    name="${line%=*}"
+    result="${line##*=}"
+    case "${result}" in
+      success) public+="- ${name}"$'\n' ;;
+      failure | cancelled) partial+="- ${name}: may be partly published"$'\n' ;;
+      skipped | "") ;;
+      *)
+        echo "record-draft: REGISTRIES: ${name} has job result '${result}'," \
+          "not success, failure, cancelled, skipped or empty" >&2
+        exit 1
+        ;;
+    esac
+  done <<< "${registries}"
+fi
 
 # A read that fails is never read as "no record yet": that would write a
 # second record onto an annotated draft, or annotate a release that has
@@ -86,16 +132,28 @@ if [[ ${kind} == "burn" ]]; then
   # failed run for a tag that never had one is a fabricated citation —
   # the shape audit:citations exists to catch — so the sentence follows
   # the evidence rather than the other way round.
-  if [[ -n ${run_url} ]]; then
-    explain="\`${tag}\` was tagged, and its publish run failed before anything"
-    explain+=" became public."
+  #
+  # And a run that died after a registry upload is a third claim: the
+  # release never published, but something did, and a stranger reading
+  # the record must learn what (#1280).
+  if [[ -n ${public}${partial} ]]; then
+    explain="\`${tag}\` was tagged, and its publish run failed after these"
+    explain+=" became public, and they remain:"$'\n\n'
+    explain+="${public}${partial}"$'\n'
+    explain+="Tags are immutable, so this version number is spent: the"
+    explain+=" release never published, and nothing more can ship under it."
   else
-    explain="\`${tag}\` was tagged and never published; no publish run for it"
-    explain+=" survives in the record."
+    if [[ -n ${run_url} ]]; then
+      explain="\`${tag}\` was tagged, and its publish run failed before anything"
+      explain+=" became public."
+    else
+      explain="\`${tag}\` was tagged and never published; no publish run for it"
+      explain+=" survives in the record."
+    fi
+    explain+=" Tags are immutable, so this version number is"
+    explain+=" spent: nothing shipped under it and nothing can."
   fi
-  explain+=" Tags are immutable, so this version number is"
-  explain+=" spent: nothing shipped under it and nothing can. This draft is"
-  explain+=" the record of that, not a release in flight."
+  explain+=" This draft is the record of that, not a release in flight."
   run_label="Burned by"
 else
   headline="**Rehearsal — deliberately left unpublished.**"
