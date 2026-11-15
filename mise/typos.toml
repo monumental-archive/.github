@@ -16,6 +16,33 @@
 # Data, not prose; regenerated, never edited.
 extend-exclude = ["release/spdx-license-data.json"]
 
+[default]
+# Abbreviated commit SHAs are not words (#1249). typos reads the letters
+# between the digits of `3ede177` as `ede` and asks for "edge", which
+# reddened the v1.67.1 release PR's generated CHANGELOG — and the next
+# SHA has a different run, so no vocabulary entry can keep up.
+#
+# Skipped: a standalone lowercase hex token of 7+ characters containing
+# at least one digit. The digit is the point: `defaced` and `acceded`
+# are all a–f letters, and a misspelling spelled only in a–f letters
+# (typos knows one for "embedded") must still be checked. typos' regex engine refuses look-ahead (measured on 1.52.0:
+# "look-around ... is not supported", exit 78), so the digit is required
+# by position instead: one entry per place the first digit can sit —
+# p hex characters, a digit, then at least 6-p more — and typos skips
+# what any entry matches. There is no upper bound because none is
+# observable: typos already skips hex tokens of 32+ characters on its
+# own (measured: 31 red, 32/40/64 green), so any cap of 32 or more
+# changes nothing. `mise/test_typos_config.py` drives the rows.
+extend-ignore-re = [
+  '\b[0-9][0-9a-f]{6,}\b',
+  '\b[0-9a-f][0-9][0-9a-f]{5,}\b',
+  '\b[0-9a-f]{2}[0-9][0-9a-f]{4,}\b',
+  '\b[0-9a-f]{3}[0-9][0-9a-f]{3,}\b',
+  '\b[0-9a-f]{4}[0-9][0-9a-f]{2,}\b',
+  '\b[0-9a-f]{5}[0-9][0-9a-f]+\b',
+  '\b[0-9a-f]{6,}[0-9][0-9a-f]*\b',
+]
+
 [default.extend-words]
 # in-toto's attestation bundles are named `<artifact>.intoto.jsonl`. That
 # filename is fixed by the in-toto spec and is what OpenSSF Scorecard's
