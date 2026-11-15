@@ -25,20 +25,24 @@
 # MISE_CEILING_PATHS: mise loads every config from the working directory
 # up, so a worktree nested in its main checkout ran the MAIN checkout's
 # tasks (#1232). The ceiling stops it at the tree being pushed.
-# ONE RUN PER PUSH. lefthook runs a script from EVERY source directory
-# that holds it, the tree's own `.lefthook/` before the remote's. The
-# canon consumes itself, so its tree carries this file and the remote
-# checkout carries it again: measured, `mise run ci` ran twice per push.
-# The remote copy defers to the tree's, which lefthook has already run —
-# in the canon that is the copy under review. Hooks are developer
-# convenience and CI cannot be overridden, so a tree that plants its own
-# copy here bypasses nothing the gate on GitHub does not catch.
+#
+# ONE RUN PER PUSH, IN THE CANON ONLY. lefthook runs a script from
+# EVERY source directory that holds it, the tree's own `.lefthook/`
+# before the remote's. The canon consumes itself, so its tree carries
+# this file and the remote checkout carries it again: measured, `mise
+# run ci` ran twice per push. In the canon the remote copy defers to the
+# tree's, which lefthook has already run and which is the copy under
+# review. "The canon" is the #738 question every canon-only guard asks:
+# does the tree TRACK security/identity.toml. Plain git, so it needs no
+# belt. Anywhere else both copies run: a consumer that plants its own
+# `.lefthook/pre-push/ci.sh` adds a run, and the canon's gate still runs.
 set -euo pipefail
 
 top="$(git rev-parse --show-toplevel)"
 tree="${top}/.lefthook/pre-push/ci.sh"
-if [[ -f ${tree} && ! ${BASH_SOURCE[0]} -ef ${tree} ]]; then
-  echo "pre-push: ${tree} ran the gate for this push; not running it twice"
+if git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 \
+  && [[ -f ${tree} && ! ${BASH_SOURCE[0]} -ef ${tree} ]]; then
+  echo "pre-push: the canon tree's ${tree} ran the gate for this push; not running it twice"
   exit 0
 fi
 MISE_CEILING_PATHS="$(dirname "${top}")" exec mise run ci

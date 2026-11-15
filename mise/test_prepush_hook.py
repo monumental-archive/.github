@@ -36,6 +36,7 @@ from pathlib import Path
 CANON = Path(__file__).resolve().parent.parent
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
 SCRIPT = CANON / ".lefthook" / "pre-push" / "ci.sh"
+IDENTITY = CANON / "security" / "identity.toml"
 LEFTHOOK = shutil.which("lefthook")
 GIT = shutil.which("git")
 
@@ -68,6 +69,12 @@ def plant_canon(tree: Path) -> None:
     shutil.copy2(HOOKS, tree / "lefthook" / "org-hooks.yml")
     (tree / ".lefthook" / "pre-push").mkdir(parents=True, exist_ok=True)
     shutil.copy2(SCRIPT, tree / ".lefthook" / "pre-push" / "ci.sh")
+
+
+def plant_identity(tree: Path) -> None:
+    """Copy the canon's identity declaration into `tree`."""
+    (tree / "security").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(IDENTITY, tree / "security" / "identity.toml")
 
 
 def write(cwd: Path, name: str) -> None:
@@ -274,18 +281,55 @@ class PrePushGate(unittest.TestCase):
         self.assertIn("script does not exist: ci.sh", done.stdout + done.stderr)
         self.assertFalse(self.marker.exists())
 
-    def test_the_self_consuming_canon_gates_once(self) -> None:
-        """A tree that carries the script itself runs the gate once, not twice.
+    def test_the_canon_tree_gates_once(self) -> None:
+        """The canon carries the script itself and runs the gate once.
 
         lefthook runs a script from every source directory holding it.
-        The canon's tree and its remote checkout both do; the remote
-        copy defers to the tree's, which lefthook runs first.
+        The canon's tree and its remote checkout both do, so the remote
+        copy defers to the tree's, which lefthook runs first — but only
+        where the tree TRACKS security/identity.toml, the question every
+        canon-only guard asks (#738).
         """
         clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "canon-like")
+        self.git(clone, "switch", "-q", "-c", "canon")
+        plant_canon(clone)
+        plant_identity(clone)
+        self.commit(clone, "be the canon")
+        done = self.push(clone, "origin", "canon")
+        self.assert_gated(done)
+        self.assertIn("not running it twice", done.stdout + done.stderr)
+
+    def test_a_consumer_planting_its_own_script_still_gets_the_gate(self) -> None:
+        """A consumer's own ci.sh cannot switch the canon's gate off.
+
+        The planted copy exits 0 without gating. It runs, and so does the
+        canon's: the remote copy defers only in the canon.
+        """
+        clone = self.consumer()
+        self.git(clone, "switch", "-q", "-c", "planted")
+        own = clone / ".lefthook" / "pre-push" / "ci.sh"
+        own.parent.mkdir(parents=True)
+        own.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        own.chmod(0o755)
+        self.commit(clone, "plant a script")
+        self.assert_gated(self.push(clone, "origin", "planted"))
+
+    def test_an_untracked_identity_does_not_make_a_canon(self) -> None:
+        """Identity on disk but not tracked: not the canon, both copies run.
+
+        The guard asks trackedness, as #738's guards do, so a stray file
+        cannot pass for the declaration. The tree's copy here is the
+        canon's own, so the marker records two runs.
+        """
+        clone = self.consumer()
+        self.git(clone, "switch", "-q", "-c", "stray")
         plant_canon(clone)
         self.commit(clone, "carry the hook")
-        self.assert_gated(self.push(clone, "origin", "canon-like"))
+        plant_identity(clone)
+        done = self.push(clone, "origin", "stray")
+        output = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, output)
+        self.assertEqual(self.marker.read_text(encoding="utf-8"), GATE_RAN * 2, output)
 
 
 if __name__ == "__main__":
