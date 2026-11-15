@@ -614,5 +614,124 @@ class TagReleaseRefusals(unittest.TestCase):
         self.assertIn(f"{tag} already exists; nothing to do", result.stdout)
 
 
+class InventoryClassRefusal(unittest.TestCase):
+    """publish.yml's inventory step, run for real over stubbed tools (#784).
+
+    The step chooses one way to build the inventory for the whole
+    release, and go-binary beside a plan-emitting class used to take the
+    plan branch and publish green without the Go binaries' packages. The
+    rows run the step's own `run:` block, extracted from the workflow,
+    so the refusal under test is the one that ships. `stele`, `git` and
+    `date` are stubs: the passing rows need only reach the end of the
+    binaries branch, and GNU `date -d` is not the Mac's.
+    """
+
+    STEP = "Derive the per-artifact inventories and the release view"
+    MESSAGE = (
+        "::error::go-binary cannot yet ship beside rust-binary: the inventory"
+        " would omit the Go binaries' packages (.github#784)"
+    )
+
+    DERIVED = "derive sbom --out dist/tool-1.0.0.spdx.json"
+
+    @classmethod
+    def _block(cls) -> str:
+        workflow = CANON / ".github/workflows/publish.yml"
+        lines = workflow.read_text(encoding="utf-8").splitlines()
+        name = f"- name: {cls.STEP}"
+        start = next(i for i, line in enumerate(lines) if line.strip() == name)
+        run = next(i for i in range(start, len(lines)) if lines[i].strip() == "run: |")
+        body = []
+        indent = None
+        for line in lines[run + 1 :]:
+            if not line.strip():
+                body.append("")
+                continue
+            width = len(line) - len(line.lstrip())
+            if indent is None:
+                indent = width
+            if width < indent:
+                break
+            body.append(line[indent:])
+        return "\n".join(body) + "\n"
+
+    def _run(self, classes: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+        root = Path(self.enterContext(TemporaryDirectory()))
+        stubs = root / ".stubs"
+        stubs.mkdir()
+        calls = root / ".stele-calls"
+        (stubs / "stele").write_text(
+            "#!/usr/bin/env bash\n"
+            f'echo "$*" >> {calls}\n'
+            "out=\n"
+            "while [[ $# -gt 0 ]]; do [[ $1 == --out ]] && out=$2; shift; done\n"
+            'echo \'{"packages":[{"name":"stub"}]}\' > "${out}"\n',
+            encoding="utf-8",
+        )
+        (stubs / "git").write_text(
+            "#!/usr/bin/env bash\n[[ $1 == log ]] && echo 1700000000\nexit 0\n",
+            encoding="utf-8",
+        )
+        (stubs / "date").write_text(
+            "#!/usr/bin/env bash\necho 2023-11-14T22:13:20Z\n",
+            encoding="utf-8",
+        )
+        for stub in stubs.iterdir():
+            stub.chmod(0o755)
+        bins = root / ".bins"
+        bins.mkdir()
+        (bins / "tool_linux_amd64").write_text("binary\n", encoding="utf-8")
+        script = root / ".step.sh"
+        script.write_text(self._block(), encoding="utf-8")
+        home = root / ".home"
+        home.mkdir()
+        env = hermetic_env(
+            home,
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            CLASSES=classes,
+            EVIDENCE_CLASSES=classes,
+            VERSION="1.0.0",
+            SBOM_BASENAME="tool",
+            PG_MAJORS="",
+            BINARIES_DIR=str(bins),
+            GITHUB_REPOSITORY="monumental-archive/tool",
+            GITHUB_ENV=str(root / ".env"),
+            GITHUB_OUTPUT=str(root / ".output"),
+            RUNNER_TEMP=str(root / ".rt"),
+        )
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        result = subprocess.run(
+            [BASH, str(script)],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result, calls
+
+    def test_go_binary_beside_a_plan_class_is_refused_by_name(self) -> None:
+        """go-binary,rust-binary stops by name before anything is derived."""
+        result, calls = self._run("go-binary,rust-binary")
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        self.assertIn(self.MESSAGE, result.stdout.splitlines())
+        self.assertFalse(calls.exists(), "refused after an inventory was derived")
+
+    def test_go_binary_beside_an_image_still_derives_from_the_binaries(self) -> None:
+        """go-binary,oci-image takes the binaries branch as before."""
+        result, calls = self._run("go-binary,oci-image")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("release inventory: 1 packages", result.stdout)
+        self.assertIn(self.DERIVED, calls.read_text(encoding="utf-8"))
+
+    def test_go_binary_alone_still_derives_from_the_binaries(self) -> None:
+        """go-binary alone takes the binaries branch as before."""
+        result, calls = self._run("go-binary")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("release inventory: 1 packages", result.stdout)
+        self.assertNotIn("go-binary cannot yet ship", result.stdout)
+        self.assertIn(self.DERIVED, calls.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
