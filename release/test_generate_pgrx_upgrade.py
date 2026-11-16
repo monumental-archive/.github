@@ -1057,14 +1057,10 @@ class FloorTemplateShape(unittest.TestCase):
         self.assertNotIn("@", fill(template, 180007, "18.7"))
 
 
-@unittest.skipUnless(PG_BIN or ON_RUNNER, "no Postgres on this machine")
-class WarnsBelowTheFloor(unittest.TestCase):
-    """The floor block alone, against a live server (#1274).
+class LiveServer(unittest.TestCase):
+    """A throwaway server from the gate's own Postgres, shared by the rows.
 
-    The gate's own server stands in for the one a person installs on:
-    a floor set above its version is the older-server case and must
-    warn with the exact sentence; a floor at its version is the build's
-    own server and must say nothing.
+    Holds no rows itself, so the loader never starts it on its own.
     """
 
     @classmethod
@@ -1118,8 +1114,12 @@ class WarnsBelowTheFloor(unittest.TestCase):
         cls.tmp.cleanup()
 
     @classmethod
-    def psql(cls, sql: str) -> subprocess.CompletedProcess[str]:
+    def psql(cls, sql: str, *args: str) -> subprocess.CompletedProcess[str]:
         """Run one command string against the throwaway server.
+
+        `args` replace the default `-c sql`: the snapshot row passes
+        `-v ext=… -f <file>` as the proof does, since psql interpolates
+        `:'ext'` only in a script it reads, never in `-c`.
 
         Returns:
             The completed process; stderr carries any WARNING.
@@ -1140,13 +1140,23 @@ class WarnsBelowTheFloor(unittest.TestCase):
                 "postgres",
                 "-d",
                 "postgres",
-                "-c",
-                sql,
+                *(args or ("-c", sql)),
             ],
             capture_output=True,
             text=True,
             check=False,
         )
+
+
+@unittest.skipUnless(PG_BIN or ON_RUNNER, "no Postgres on this machine")
+class WarnsBelowTheFloor(LiveServer):
+    """The floor block alone, against a live server (#1274).
+
+    The gate's own server stands in for the one a person installs on:
+    a floor set above its version is the older-server case and must
+    warn with the exact sentence; a floor at its version is the build's
+    own server and must say nothing.
+    """
 
     @staticmethod
     def block(num: int) -> str:
@@ -1183,6 +1193,49 @@ class WarnsBelowTheFloor(unittest.TestCase):
         self.assertEqual((0, ""), (result.returncode, result.stderr))
 
 
+def snapshot_sql(text: str) -> str:
+    """Pull the shipped snapshot query out of the derivation script.
+
+    Returns:
+        The quoted heredoc's body: the exact text the proof feeds psql.
+
+    Raises:
+        AssertionError: when the script no longer writes that heredoc.
+
+    """
+    match = re.search(
+        r"cat > \"\$\{work\}/snapshot\.sql\" << 'EOSQL'\n(.*?\n)EOSQL\n",
+        text,
+        re.DOTALL,
+    )
+    if match is None:
+        msg = "no snapshot.sql heredoc in generate-pgrx-upgrade.sh"
+        raise AssertionError(msg)
+    return match.group(1)
+
+
+@unittest.skipUnless(PG_BIN or ON_RUNNER, "no Postgres on this machine")
+class SnapshotReadsTheCatalog(LiveServer):
+    """The shipped snapshot query, against a live server (#1324).
+
+    `plpgsql` is an extension every server carries, so its member rows
+    are there to read without building anything. Until #1324 the query
+    died at parse time on `"char" || unknown`, and the proof compared
+    two empty files.
+    """
+
+    def test_plpgsql_members_are_read(self) -> None:
+        """The query exits 0 and returns the extension's member rows."""
+        with TemporaryDirectory() as tmp:
+            sql = Path(tmp) / "snapshot.sql"
+            sql.write_text(snapshot_sql(SCRIPT.read_text()), encoding="utf-8")
+            result = self.psql("", "-v", "ext=plpgsql", "-f", str(sql))
+        self.assertEqual((0, ""), (result.returncode, result.stderr))
+        rows = [r for r in result.stdout.splitlines() if r.startswith("(")]
+        self.assertGreaterEqual(len(rows), 1, result.stdout)
+        self.assertIn("(language,,plpgsql,plpgsql) | ", rows)
+
+
 def expected_inner_skips() -> int:
     """Count the skips a whole-suite run of this file owes (#857 row).
 
@@ -1193,7 +1246,8 @@ def expected_inner_skips() -> int:
     """
     skips = 1
     if not (PG_BIN or ON_RUNNER):
-        skips += len(unittest.TestLoader().getTestCaseNames(WarnsBelowTheFloor))
+        for live in (WarnsBelowTheFloor, SnapshotReadsTheCatalog):
+            skips += len(unittest.TestLoader().getTestCaseNames(live))
     return skips
 
 
