@@ -248,6 +248,32 @@ roll-forward.
   the burn, and `audit:drafts` reports any draft that is not
   ([`release.md`](release.md), "A draft explains itself"). Complete its
   `Fixed forward in:` line when the fix ships.
+- **Tag push refused: the default branch's workflows moved** (the tag
+  job's `::error` begins "the push of vX.Y.Z was refused"; GitHub's text
+  is "refusing to allow a GitHub App to create or update workflow …
+  without `workflows` permission"). A commit changing
+  `.github/workflows/` (usually a canon bump) merged after the release
+  commit, and GitHub compares the new tag's workflow files with the
+  default branch's tip (#1322, [`release.md`](release.md)). Nothing was
+  minted and the version is not spent. A re-run alone is refused again.
+  Recover, as measured on edtf v1.3.5:
+  1. Land one change on the default branch that reverts every
+     workflow-changing commit merged after the release commit, so that
+     `git diff <release-commit> origin/<default> -- .github/workflows`
+     is empty (edtf#261 reverted the canon bump; the trees were then
+     equal).
+  2. Re-run the failed **Tag on Release PR merge** job of the original
+     release run. It runs at the release commit; a `workflow_dispatch`
+     would run at the default branch's head, which is not a release
+     commit, and is refused.
+  3. Once the tag exists, land the reverted change again (Renovate
+     reopens its own PR). Until the tag exists, "Maintain the Release
+     PR" fails with "CHANGELOG.md already carries a section for X.Y.Z";
+     that is expected and clears with the tag.
+
+  Do not queue a workflow-changing merge behind a Release PR. The tag
+  job reaches its push within seconds, but two queue entries merging
+  seconds apart can still beat it.
 - **Tag-mint App dead**: break-glass in
   [`continuity.md`](continuity.md) — an org owner disables the tag
   ruleset, mints by hand, re-enables, records the event.

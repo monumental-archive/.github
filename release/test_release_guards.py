@@ -39,8 +39,10 @@ Run through the gate as `mise run test`, which `ci` collects.
 """
 
 import os
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import tomllib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1236,6 +1238,256 @@ class TagReleaseRefusals(unittest.TestCase):
             result = self._run(repo)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn(f"{tag} already exists; nothing to do", result.stdout)
+
+
+TAG_INSTALL_STEP = "- name: Install the tools the tag step runs, and nothing else"
+
+
+def tag_job_installs(workflow: str) -> list[str]:
+    """Read the tag job's `install_args` out of release.yml's text.
+
+    Returns:
+        The tool keys the job installs, in the order written.
+
+    Raises:
+        ValueError: the step or its install_args line is missing, so a
+            row would judge nothing.
+
+    """
+    lines = workflow.splitlines()
+    starts = [i for i, ln in enumerate(lines) if ln.strip() == TAG_INSTALL_STEP]
+    if len(starts) != 1:
+        msg = "release.yml no longer carries exactly one tag install step"
+        raise ValueError(msg)
+    for line in lines[starts[0] + 1 :]:
+        if line.strip().startswith("- name:"):
+            break
+        key, _, value = line.strip().partition(":")
+        if key == "install_args":
+            return value.split()
+    msg = "the tag install step names no install_args"
+    raise ValueError(msg)
+
+
+def belt_tools() -> dict[str, str]:
+    """Map each belt tool's command name to its `[tools]` key.
+
+    Returns:
+        Command name (the key's last `/`- or `:`-separated segment) to
+        the key as mise/config.toml writes it.
+
+    """
+    config = tomllib.loads((CANON / "mise" / "config.toml").read_text("utf-8"))
+    return {re.split(r"[/:]", key)[-1]: key for key in config["tools"]}
+
+
+def uninstalled_calls(script: str, installs: list[str]) -> list[str]:
+    """Name the belt tools a script calls that a job does not install.
+
+    A call is the tool's command name as a whole word on a line that is
+    not a comment — `gpg.x509.program=gitsign` counts, `# gitsign`
+    does not.
+
+    Returns:
+        The `[tools]` keys called and not installed, sorted.
+
+    """
+    code = "\n".join(
+        ln for ln in script.splitlines() if not ln.lstrip().startswith("#")
+    )
+    called = {
+        key
+        for name, key in belt_tools().items()
+        if re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", code)
+    }
+    return sorted(called - set(installs))
+
+
+class TagJobInstalls(unittest.TestCase):
+    """The tag job installs every belt tool tag-release.sh calls (#1322).
+
+    The job installs a named list rather than the whole belt, so that
+    the push is reached in seconds; the cost is that a tool the script
+    starts calling would be missing on the runner, and the release
+    would fail at the most expensive moment. These rows make that a
+    test failure instead.
+    """
+
+    WORKFLOW = (CANON / ".github/workflows/release.yml").read_text("utf-8")
+    SCRIPT = (RELEASE / "tag-release.sh").read_text("utf-8")
+
+    def test_every_install_is_a_belt_tool_key(self) -> None:
+        """A misspelt key would install nothing and say nothing."""
+        keys = set(belt_tools().values())
+        installs = tag_job_installs(self.WORKFLOW)
+        self.assertEqual([], [k for k in installs if k not in keys])
+
+    def test_the_job_installs_what_the_script_calls(self) -> None:
+        """The real job against the real script: nothing missing."""
+        installs = tag_job_installs(self.WORKFLOW)
+        self.assertEqual([], uninstalled_calls(self.SCRIPT, installs))
+        self.assertEqual(
+            ["aqua:sigstore/gitsign", "github:monumental-archive/stele", "jq"],
+            sorted(installs),
+        )
+
+    def test_a_dropped_install_is_named(self) -> None:
+        """Planted: the job without gitsign, which signs the tag."""
+        installs = [
+            k for k in tag_job_installs(self.WORKFLOW) if k != "aqua:sigstore/gitsign"
+        ]
+        self.assertEqual(
+            ["aqua:sigstore/gitsign"], uninstalled_calls(self.SCRIPT, installs)
+        )
+
+    def test_a_new_call_is_named(self) -> None:
+        """Planted: the script starts calling another belt tool."""
+        script = self.SCRIPT + '\ncosign verify-blob "${tag}"\n'
+        self.assertEqual(
+            ["aqua:sigstore/cosign"],
+            uninstalled_calls(script, tag_job_installs(self.WORKFLOW)),
+        )
+
+    def test_a_tool_named_only_in_a_comment_is_not_a_call(self) -> None:
+        """Prose about a tool installs nothing and needs nothing."""
+        script = self.SCRIPT + "\n# cosign could verify this one day\n"
+        self.assertEqual([], uninstalled_calls(script, tag_job_installs(self.WORKFLOW)))
+
+
+# A stand-in for gitsign: git's x509 signing contract is the signature on
+# stdout and a SIG_CREATED line on the status fd. Nothing here verifies
+# the signature; the rows are about what happens after it is made.
+GITSIGN_STUB = """#!/usr/bin/env bash
+cat > /dev/null
+printf '\\n[GNUPG:] SIG_CREATED ' >&2
+printf -- '-----BEGIN SIGNED MESSAGE-----\\nAA==\\n-----END SIGNED MESSAGE-----\\n'
+"""
+
+# GitHub's refusal, as edtf's release run 43786670848 printed it, sent by
+# a pre-receive hook so git relays it with the same `remote:` prefix.
+WORKFLOW_REFUSAL = (
+    "error: GH013: Repository rule violations found for refs/tags/v1.1.0.\n"
+    "- refusing to allow a GitHub App to create or update workflow"
+    " `.github/workflows/audit.yml` without `workflows` permission\n"
+)
+
+TAG_REFUSED = (
+    "::error::the push of v1.1.0 was refused: a workflow-changing commit"
+    " reached the default branch after the release commit, so its workflow"
+    " files differ from the release commit's, and GitHub will not let the"
+    " tag-mint App create a ref that would change them. v1.1.0 has not been"
+    " minted and 1.1.0 is not spent. Land one change on the default branch"
+    " that makes its workflow files equal to the release commit's again (the"
+    " commit that moved them, reverted), then re-run this job"
+    " (docs/runbook.md).\n"
+)
+
+
+@unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
+class TagReleasePush(unittest.TestCase):
+    """What `tag-release.sh` says when the tag push itself fails (#1322).
+
+    The rows reach the push for real: a release commit the plan accepts,
+    a stand-in signer, and an `origin` whose pre-receive hook answers
+    the way GitHub answered edtf's v1.3.5 push.
+    """
+
+    def _run(self, hook: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
+        """Run the tag step against a remote whose hook prints `hook`.
+
+        Returns:
+            The completed process, the fixture's local tags after it,
+            and the remote's tags after it.
+
+        """
+        root = Path(self.enterContext(TemporaryDirectory()))
+        home = root / "home"
+        home.mkdir()
+        env = hermetic_env(home)
+        remote = root / "remote.git"
+        repo = root / "repo"
+        repo.mkdir()
+
+        def git(cwd: Path, *args: str) -> str:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            return subprocess.run(
+                [GIT, *args],
+                cwd=cwd,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+
+        git(root, "init", "-q", "--bare", str(remote))
+        if hook:
+            pre = remote / "hooks" / "pre-receive"
+            pre.write_text(f"#!/usr/bin/env bash\nprintf %s {hook!r} >&2\nexit 1\n")
+            pre.chmod(0o755)
+        git(repo, "init", "-q", ".")
+        git(repo, "config", "commit.gpgSign", "false")
+        git(repo, "config", "core.hooksPath", str(repo / ".githooks-none"))
+        (repo / "a.txt").write_text("x\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "feat: initial")
+        git(repo, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+        (repo / "b.txt").write_text("y\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "feat: a change")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "chore: release v1.1.0")
+        git(repo, "remote", "add", "origin", str(remote))
+        stubs = root / "stubs"
+        stubs.mkdir()
+        (stubs / "gitsign").write_text(GITSIGN_STUB)
+        (stubs / "gitsign").chmod(0o755)
+        # The draft release after an accepted push needs the forge; the
+        # stand-in refuses, so no row can reach the network.
+        (stubs / "gh").write_text("#!/usr/bin/env bash\nexit 1\n")
+        (stubs / "gh").chmod(0o755)
+        (repo / ".rt").mkdir()
+        result = run_script(
+            "tag-release.sh",
+            repo,
+            GITHUB_REPOSITORY="monumental-archive/under-test",
+            RUNNER_TEMP=str(repo / ".rt"),
+            PATH=f"{stubs}:{os.environ['PATH']}",
+        )
+        local = git(repo, "tag", "--list", "v1.1.0")
+        pushed = git(remote, "tag", "--list", "v1.1.0")
+        return result, local, pushed
+
+    def test_the_workflow_refusal_is_named_and_mints_nothing(self) -> None:
+        """GitHub's workflows-permission refusal becomes one ::error and a remedy."""
+        result, local, pushed = self._run(WORKFLOW_REFUSAL)
+        self.assertEqual(1, result.returncode, result.stderr)
+        errors = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
+        self.assertEqual([TAG_REFUSED.rstrip("\n")], errors)
+        self.assertTrue(result.stdout.endswith(TAG_REFUSED), result.stdout)
+        self.assertNotIn("pushed v1.1.0", result.stdout)
+        self.assertNotIn("GH013", result.stderr)
+        self.assertEqual("", local)
+        self.assertEqual("", pushed)
+
+    def test_an_unrelated_push_failure_keeps_gits_own_output(self) -> None:
+        """Any other refusal passes through as before: git's text, git's status."""
+        result, local, pushed = self._run("error: some other rule said no\n")
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertIn("remote: error: some other rule said no", result.stderr)
+        self.assertIn("[remote rejected] v1.1.0 -> v1.1.0", result.stderr)
+        self.assertNotIn("::error::", result.stdout)
+        self.assertNotIn("pushed v1.1.0", result.stdout)
+        self.assertEqual("v1.1.0\n", local)
+        self.assertEqual("", pushed)
+
+    def test_an_accepted_push_says_so(self) -> None:
+        """The baseline: with no refusal the tag lands and the script says so.
+
+        It stops at the draft release, which needs the forge; the row is
+        about the push.
+        """
+        result, _, pushed = self._run("")
+        self.assertIn("pushed v1.1.0 (signed)", result.stdout)
+        self.assertEqual("v1.1.0\n", pushed)
 
 
 class InventoryClassRefusal(unittest.TestCase):

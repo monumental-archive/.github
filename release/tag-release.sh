@@ -201,7 +201,37 @@ git -c gpg.format=x509 \
   -c gpg.x509.program=gitsign \
   -c gitsign.rekorMode=offline \
   tag -s "${tag}" -m "${tag}"
-git push origin "${tag}"
+
+# One refusal is named rather than passed through (#1322). GitHub judges
+# an App creating a ref by comparing that ref's workflow files with the
+# default branch's TIP, and the tag-mint App holds no `workflows`
+# permission, by decision (#165). So a workflow-changing commit merged
+# after the release commit — a canon bump queued behind the Release PR,
+# which changes every pin — makes the push of this tag refusable, and no
+# re-run can mint it until the default branch's workflow files equal the
+# release commit's again. Measured on edtf v1.3.5: refused twice, minted
+# on the third run once edtf#261 had put the tree back. The bare git
+# output names a ruleset and a permission and says nothing of either.
+#
+# A refused push mints nothing and spends nothing, so the local tag is
+# dropped with it: nothing in this job may claim the tag exists. Any
+# other push failure keeps git's own output and status, as before.
+push_log="${RUNNER_TEMP:-/tmp}/tag-push-$$.log"
+push_rc=0
+git push origin "${tag}" 2> "${push_log}" || push_rc=$?
+if [[ ${push_rc} -ne 0 ]] \
+  && grep -qF "refusing to allow a GitHub App to create or update workflow" "${push_log}"; then
+  git tag -d "${tag}" > /dev/null
+  echo "::error::the push of ${tag} was refused: a workflow-changing commit reached the default" \
+    "branch after the release commit, so its workflow files differ from the release commit's, and" \
+    "GitHub will not let the tag-mint App create a ref that would change them. ${tag} has not been" \
+    "minted and ${version} is not spent. Land one change on the default branch that makes its" \
+    "workflow files equal to the release commit's again (the commit that moved them, reverted)," \
+    "then re-run this job (docs/runbook.md)."
+  exit 1
+fi
+cat "${push_log}" >&2
+[[ ${push_rc} -eq 0 ]] || exit "${push_rc}"
 echo "pushed ${tag} (signed)"
 
 # Release notes are the changelog section for this version — the same text
