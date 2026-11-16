@@ -1236,6 +1236,210 @@ class SnapshotReadsTheCatalog(LiveServer):
         self.assertIn("(language,,plpgsql,plpgsql) | ", rows)
 
 
+PSQL_ERROR = (
+    'psql:/work/snapshot.sql:19: ERROR:  operator is not unique: "char" || unknown\n'
+)
+
+# Answers the proof's psql calls the way the real one does: a snapshot
+# reads the row file for its database, `error` prints psql's own
+# message and exits 3 only under ON_ERROR_STOP (0 without it, as the
+# real psql does), and the count query on stdin answers STUB_COUNT.
+PSQL_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${STUB_LOG}"
+db='' file='' cmd='' stop=0
+while (($#)); do
+  case $1 in
+    -d) db=$2; shift ;;
+    -f) file=$2; shift ;;
+    -c) cmd=$2; shift ;;
+    -v) [[ $2 == ON_ERROR_STOP=1 ]] && stop=1; shift ;;
+  esac
+  shift
+done
+if [[ -n ${file} ]]; then
+  rows="${STUB_ROWS}/${db}"
+  if [[ $(< "${rows}") == error ]]; then
+    printf '%s' "${STUB_ERROR}" >&2
+    ((stop)) && exit 3
+    exit 0
+  fi
+  cat "${rows}"
+elif [[ ${cmd} == *extversion* ]]; then
+  echo "${NEW}"
+elif [[ -z ${cmd} ]]; then
+  cat > /dev/null
+  echo "${STUB_COUNT}"
+fi
+"""
+
+# Runs the inner script the proof hands it, as the postgres user would.
+SU_STUB = """#!/usr/bin/env bash
+while (($#)) && [[ $1 != -c ]]; do shift; done
+exec bash -c "$2"
+"""
+
+TRUE_STUB = "#!/usr/bin/env bash\nexit 0\n"
+
+ROW_A = (
+    '(function,public,,"public.a()") | CREATE OR REPLACE FUNCTION public.a()\n'
+    " RETURNS void\n"
+)
+ROW_B = "(type,public,b,public.b) | b:-1:U:b_in:b_out\n"
+
+
+def proof_sh(text: str) -> str:
+    """Pull proof.sh out of the derivation script.
+
+    Returns:
+        The quoted heredoc's body, the script the build image runs.
+
+    Raises:
+        AssertionError: when the script no longer writes that heredoc.
+
+    """
+    match = re.search(
+        r"cat > \"\$\{work\}/proof\.sh\" << 'EOSH'\n(.*?\n)EOSH\n",
+        text,
+        re.DOTALL,
+    )
+    if match is None:
+        msg = "no proof.sh heredoc in generate-pgrx-upgrade.sh"
+        raise AssertionError(msg)
+    return match.group(1)
+
+
+class ProofReadsBeforeItCompares(unittest.TestCase):
+    """proof.sh with a stand-in psql, one row per outcome (#1324).
+
+    The shipped script runs as written but for one rewrite: its
+    container paths (/usr/lib/postgresql, /usr/share/postgresql, /tmp,
+    /work) are moved under a scratch root, since the rows run on the
+    host. `su`, `cp`, `createdb` and the server binaries stand in as
+    no-ops; psql answers from the row's files.
+    """
+
+    @staticmethod
+    def run_proof(
+        upgraded: str, fresh: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        """Run the shipped proof.sh against the given snapshot answers.
+
+        Returns:
+            The completed run, and the argument line of every psql call.
+
+        """
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stubs = root / "stubs"
+            server = root / "usr" / "lib" / "postgresql" / "18" / "bin"
+            rows = root / "rows"
+            for d in (stubs, server, rows, root / "tmp", root / "work"):
+                d.mkdir(parents=True)
+            for path, body in (
+                (stubs / "psql", PSQL_STUB),
+                (stubs / "su", SU_STUB),
+                (stubs / "cp", TRUE_STUB),
+                (stubs / "createdb", TRUE_STUB),
+                (server / "initdb", TRUE_STUB),
+                (server / "pg_ctl", TRUE_STUB),
+            ):
+                path.write_text(body, encoding="utf-8")
+                path.chmod(0o755)
+            (rows / "upgraded").write_text(upgraded, encoding="utf-8")
+            (rows / "fresh").write_text(fresh, encoding="utf-8")
+            (root / "work" / "snapshot.sql").write_text(
+                snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
+            )
+            script = proof_sh(SCRIPT.read_text())
+            for prefix in (
+                "/usr/lib/postgresql/",
+                "/usr/share/postgresql/",
+                # The proof's own container path, moved OFF the host's
+                # /tmp: the opposite of what the rule guards against.
+                # ruff: ignore[hardcoded-temp-file]
+                "/tmp/",
+                "/work/",
+            ):
+                script = script.replace(prefix, f"{root}{prefix}")
+            log = root / "psql.log"
+            env = hermetic_env(
+                root,
+                PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+                PG="18",
+                NAME="demo_ext",
+                PREV="1.0.0",
+                NEW="1.1.0",
+                STUB_LOG=str(log),
+                STUB_ROWS=str(rows),
+                STUB_ERROR=PSQL_ERROR,
+                STUB_COUNT="2",
+            )
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            result = subprocess.run(
+                [BASH, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        return result, calls
+
+    def test_an_sql_error_stops_the_step_with_psqls_message(self) -> None:
+        """The step stops with psql's own status and message."""
+        result, _ = self.run_proof("error", ROW_A + ROW_B)
+        self.assertEqual(3, result.returncode)
+        self.assertEqual(PSQL_ERROR, result.stderr)
+        self.assertNotIn("proof:", result.stdout)
+        self.assertNotIn("::error::", result.stdout)
+
+    def test_an_empty_snapshot_is_refused_by_name(self) -> None:
+        """Either database's empty read fails with the exact message."""
+        for empty, upgraded, fresh in (
+            ("upgraded", "", ROW_A + ROW_B),
+            ("fresh", ROW_A + ROW_B, ""),
+        ):
+            with self.subTest(empty=empty):
+                result, _ = self.run_proof(upgraded, fresh)
+                self.assertEqual(1, result.returncode)
+                self.assertEqual(
+                    f"::error::{empty} catalog snapshot of demo_ext is empty"
+                    " — the proof read nothing\n",
+                    result.stdout,
+                )
+
+    def test_equal_snapshots_pass_with_the_object_count(self) -> None:
+        """The success line says how many objects it compared."""
+        result, _ = self.run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
+        self.assertEqual((0, ""), (result.returncode, result.stderr))
+        self.assertEqual(
+            "proof: demo_ext 1.0.0 -> 1.1.0 upgraded catalog identical"
+            " to fresh install (2 objects)\n",
+            result.stdout,
+        )
+
+    def test_different_snapshots_fail_with_the_diff(self) -> None:
+        """A differing catalog keeps the existing message."""
+        result, _ = self.run_proof(ROW_A, ROW_A + ROW_B)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("+" + ROW_B, result.stdout)
+        self.assertTrue(
+            result.stdout.endswith(
+                "::error::upgraded demo_ext catalog differs from a fresh 1.1.0"
+                " install — the derived script is unsound; see the diff above\n"
+            ),
+            result.stdout,
+        )
+
+    def test_every_psql_call_stops_on_error(self) -> None:
+        """No psql in the proof can fail and exit 0."""
+        _, calls = self.run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
+        self.assertEqual(7, len(calls), calls)
+        for call in calls:
+            with self.subTest(call=call):
+                self.assertTrue(call.startswith("-v ON_ERROR_STOP=1 "), call)
+
+
 def expected_inner_skips() -> int:
     """Count the skips a whole-suite run of this file owes (#857 row).
 

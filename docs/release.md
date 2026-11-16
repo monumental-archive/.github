@@ -1223,8 +1223,13 @@ correctness-by-patching; this is the same knowledge by design):
   candidate package plus the derived script, `ALTER EXTENSION UPDATE`,
   and the upgraded catalog must match a fresh install of the candidate
   exactly — read through `pg_depend`, because `pg_dump` cannot see
-  extension members. An underivable or unsound change therefore fails
-  the Release PR, pre-tag and free, never the publish. Data
+  extension members. The read is itself checked: an SQL error stops
+  the proof with psql's own message, an empty read is refused by name
+  (an extension has at least one member), and the success line says
+  how many objects it compared. Until #1324 the read died at parse
+  time and two empty files compared equal. An underivable or unsound
+  change therefore fails the Release PR, pre-tag and free, never the
+  publish. Data
   migrations — the one thing no schema mechanism can derive — go in an
   optional version-free `sql/next-data.sql`, folded into the derived
   script (and consumed by the release commit) under the same proof. At
