@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.3](https://github.com/monumental-archive/.github/compare/v1.68.2...v1.68.3) - 2026-11-16
+
+### Fixed
+
+- update first-party canon ([#1320](https://github.com/monumental-archive/.github/pull/1320))
+- mint the tag first and name a workflows refusal ([#1323](https://github.com/monumental-archive/.github/pull/1323))
+- update jdx/mise to 2026.11.5 ([#1325](https://github.com/monumental-archive/.github/pull/1325))
+
+### Documentation
+
+- say both archetypes bear build and dependency evidence ([#1319](https://github.com/monumental-archive/.github/pull/1319))
+
 ## [1.68.2](https://github.com/monumental-archive/.github/compare/v1.68.1...v1.68.2) - 2026-11-16
 
 ### Fixed
