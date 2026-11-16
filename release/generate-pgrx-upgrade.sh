@@ -861,7 +861,9 @@ EOPY
 
   # Prove it: the exact consumer sequence, then catalog equality. pg_dump
   # cannot see extension members, so equality is read from pg_depend with
-  # per-kind definitions.
+  # per-kind definitions. prokind, typtype and typcategory are "char",
+  # which has no || of its own: uncast, the query dies at parse time
+  # (#1324), so each is cast to text, and typlen with them.
   cat > "${work}/snapshot.sql" << 'EOSQL'
 SELECT pg_identify_object(d.classid, d.objid, 0)::text
        || ' | ' ||
@@ -869,9 +871,9 @@ SELECT pg_identify_object(d.classid, d.objid, 0)::text
          WHEN d.classid = 'pg_proc'::regclass AND p.prokind = 'f'
            THEN pg_get_functiondef(d.objid)
          WHEN d.classid = 'pg_proc'::regclass
-           THEN p.prokind || ':' || pg_get_function_identity_arguments(d.objid)
+           THEN p.prokind::text || ':' || pg_get_function_identity_arguments(d.objid)
          WHEN d.classid = 'pg_type'::regclass
-           THEN t.typtype || ':' || t.typlen || ':' || t.typcategory
+           THEN t.typtype::text || ':' || t.typlen::text || ':' || t.typcategory::text
                 || ':' || t.typinput::text || ':' || t.typoutput::text
          ELSE ''
        END
@@ -895,7 +897,7 @@ su -w PG,NAME,PREV postgres -s /bin/bash -c '
   "${bin}/initdb" -D /tmp/pgdata -A trust > /dev/null
   "${bin}/pg_ctl" -D /tmp/pgdata -o "-c listen_addresses=" -w start > /dev/null
   createdb upgraded
-  psql -d upgraded -c "CREATE EXTENSION ${NAME} VERSION '\''${PREV}'\'';" > /dev/null
+  psql -v ON_ERROR_STOP=1 -d upgraded -c "CREATE EXTENSION ${NAME} VERSION '\''${PREV}'\'';" > /dev/null
 '
 # The candidate package lands over the old — exactly what a package
 # upgrade does — together with the derived script under proof.
@@ -904,24 +906,35 @@ cp -a "/new${ext}/." "${ext}/"
 cp /work/upgrade.sql "${ext}/${NAME}--${PREV}--${NEW}.sql"
 su -w PG,NAME,PREV,NEW postgres -s /bin/bash -c '
   set -euo pipefail
-  psql -d upgraded -c "ALTER EXTENSION ${NAME} UPDATE TO '\''${NEW}'\'';" > /dev/null
-  got=$(psql -d upgraded -tA -c \
+  psql -v ON_ERROR_STOP=1 -d upgraded -c "ALTER EXTENSION ${NAME} UPDATE TO '\''${NEW}'\'';" > /dev/null
+  got=$(psql -v ON_ERROR_STOP=1 -d upgraded -tA -c \
     "SELECT extversion FROM pg_extension WHERE extname = '\''${NAME}'\'';")
   if [[ ${got} != "${NEW}" ]]; then
     echo "::error::upgrade left extversion ${got}, wanted ${NEW}"
     exit 1
   fi
   createdb fresh
-  psql -d fresh -c "CREATE EXTENSION ${NAME} VERSION '\''${NEW}'\'';" > /dev/null
-  psql -d upgraded -tA -v ext="${NAME}" -f /work/snapshot.sql > /tmp/upgraded.snap
-  psql -d fresh -tA -v ext="${NAME}" -f /work/snapshot.sql > /tmp/fresh.snap
+  psql -v ON_ERROR_STOP=1 -d fresh -c "CREATE EXTENSION ${NAME} VERSION '\''${NEW}'\'';" > /dev/null
+  # ON_ERROR_STOP: without it psql exits 0 on an SQL error, the snapshot
+  # is empty, and two empty files compare equal (#1324). An extension has
+  # at least one member object, so an empty snapshot read nothing.
+  for db in upgraded fresh; do
+    psql -v ON_ERROR_STOP=1 -d "${db}" -tA -v ext="${NAME}" -f /work/snapshot.sql > "/tmp/${db}.snap"
+    if [[ ! -s /tmp/${db}.snap ]]; then
+      echo "::error::${db} catalog snapshot of ${NAME} is empty — the proof read nothing"
+      exit 1
+    fi
+  done
   if ! diff -u /tmp/upgraded.snap /tmp/fresh.snap; then
     emsg="::error::upgraded ${NAME} catalog differs from a fresh ${NEW} install — the derived script is"
     emsg+=" unsound; see the diff above"
     echo "${emsg}"
     exit 1
   fi
-  echo "proof: ${NAME} ${PREV} -> ${NEW} upgraded catalog identical to fresh install"
+  # Rows, not lines: a function definition spans several lines.
+  objects=$(psql -v ON_ERROR_STOP=1 -d fresh -tA -v ext="${NAME}" \
+    <<< "SELECT count(*) FROM ($(< /work/snapshot.sql)) AS snapshot;")
+  echo "proof: ${NAME} ${PREV} -> ${NEW} upgraded catalog identical to fresh install (${objects} objects)"
 '
 EOSH
   docker run --rm \
