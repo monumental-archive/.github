@@ -7,12 +7,14 @@
 # lives in the canon and arrives with the shared workflow, so nothing
 # here restates who else exists.
 #
-# `tracks: build source dependency` is the ordinary case. A repository
-# that publishes no releases bears no build or dependency evidence and
-# says `tracks: source` — that is not a shortfall, it is a fact about
-# the repository, and declaring it is what keeps a permanently grey
-# cell off the board. The canon's declared population must agree, and
-# the canon's weekly sweep reds if the two disagree.
+# `tracks: build source dependency` is the ordinary case, on both
+# archetypes: a versioned repository bears build and dependency
+# evidence on its releases, a continuous one on its digest stream. A
+# repository that publishes neither bears no build or dependency
+# evidence and says `tracks: source` — that is not a shortfall, it is a
+# fact about the repository, and declaring it is what keeps a
+# permanently grey cell off the board. The canon's declared population
+# must agree, and the canon's weekly sweep reds if the two disagree.
 ---
 name: level
 
