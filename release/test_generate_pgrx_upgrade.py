@@ -1351,16 +1351,25 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
                 snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
             )
             script = proof_sh(SCRIPT.read_text())
-            for prefix in (
-                "/usr/lib/postgresql/",
-                "/usr/share/postgresql/",
-                # The proof's own container path, moved OFF the host's
-                # /tmp: the opposite of what the rule guards against.
-                # ruff: ignore[hardcoded-temp-file]
-                "/tmp/",
-                "/work/",
-            ):
-                script = script.replace(prefix, f"{root}{prefix}")
+            # One pass, never a replace() per prefix: on Linux the scratch
+            # root is itself under /tmp/, so a later replace() rewrote the
+            # paths an earlier one produced (/tmp/x/tmp/x/usr/...) and no
+            # stand-in was found. The Mac's /var/folders root hid it.
+            container = re.compile(
+                "|".join(
+                    re.escape(prefix)
+                    for prefix in (
+                        "/usr/lib/postgresql/",
+                        "/usr/share/postgresql/",
+                        # The proof's own container path, moved OFF the
+                        # host's /tmp: the opposite of the rule's concern.
+                        # ruff: ignore[hardcoded-temp-file]
+                        "/tmp/",
+                        "/work/",
+                    )
+                )
+            )
+            script = container.sub(lambda m: f"{root}{m.group(0)}", script)
             log = root / "psql.log"
             env = hermetic_env(
                 root,
