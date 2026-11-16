@@ -21,8 +21,8 @@
       },
       {
         "repo": "monumental-archive-db",
-        "tracks": ["source", "build"],
-        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. The dependency track is deliberately absent, not forgotten, and the reason changed on 2026-11-15: the continuous archetype has its commit point (#717) and this repository has published through it since its stub landed (#670), so the mechanism runs — but the level walk reads the stream's digests and finds no inventory attestation and no decision document on them, so the cell it would publish is unmeasured. The track is declared when a judge can read its evidence, not when the mechanism exists",
+        "tracks": ["source", "build", "dependency"],
+        "reason": "the first continuous member: it publishes a digest stream and no releases at all, so the evidence walk reads it through evidence.continuous rather than through a release contract, and tags.epochs carries no line for it because it has no tags to epoch. Its surface's identity names two workflows because the pattern only says whose bundles the level walk reads: the org signer's sign.yml signs the index provenance, and continuous.yml's commit point attests each per-architecture digest's inventory and OpenVEX decisions (#1279); who may sign provenance is a separate field and is not widened by it",
         "surfaces": [
           {
             "kind": "continuous-digest",
