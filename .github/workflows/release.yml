@@ -92,13 +92,25 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
-      - name: Install mise and the pinned toolchain
+      - name: Install the tools the tag step runs, and nothing else
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.4
           # No tool cache in a job that tags a release (cache poisoning):
           # everything downstream of this tag gets signed.
           cache: false
+          # The tag is minted first, before anything it does not need
+          # (#1322). A bare install here installs EVERYTHING in scope —
+          # the belt and the caller's own mise.toml — and on edtf that
+          # was 48 tools in 236 s, cargo-pgrx compiled from source, while
+          # the push it was waiting to make took four seconds. A
+          # workflow-changing merge landing in that window makes the push
+          # refusable (see tag-release.sh). So only the belt tools
+          # tag-release.sh itself runs are installed: `stele` derives the
+          # plan, `gitsign` signs the tag, `jq` reads the plan. git and
+          # gh are the runner's. `release/test_release_guards.py` holds
+          # this list to the script's calls.
+          install_args: jq github:monumental-archive/stele aqua:sigstore/gitsign
 
       - name: Mint the tag token
         id: token

@@ -233,6 +233,46 @@ for an advisory to land on. It needs the belt's stele to decode
 policy that declares no support window makes every run a "no" that
 says so.
 
+### Nothing workflow-changing merges behind a Release PR
+
+GitHub judges an App creating a ref by comparing that ref's workflow
+files with the **default branch's tip**, and the tag-mint App holds no
+`workflows` permission, by decision (#165: an App that can write
+workflows can rewrite the release path it runs in). So once a commit
+that changes `.github/workflows/` lands after the Release PR's merge,
+the push of the release tag is refused:
+
+```text
+remote: - refusing to allow a GitHub App to create or update
+  workflow `.github/workflows/audit.yml` without `workflows`
+  permission
+```
+
+The release commit is on the default branch, the version is not
+tagged, nothing publishes, and no re-run can succeed until the default
+branch's workflow files equal the release commit's again. Every
+repository auto-merges canon bumps, and a canon bump changes every
+workflow pin, so this is the ordinary way to meet it: edtf v1.3.5 was
+stranded by its canon bump (edtf#260) merging from the same queue
+batch as its Release PR (edtf#259), three minutes later (#1322).
+
+Two things narrow the window, and neither closes it:
+
+- **The tag is minted first.** The tag job installs only the belt
+  tools `tag-release.sh` runs (`stele`, `gitsign`, `jq`), not the
+  belt and the caller's `mise.toml`, so the push comes seconds after
+  the job starts rather than minutes (edtf's install was 48 tools in
+  236 seconds, for a push that took four). A test holds the install
+  list to the script's calls.
+- **Do not queue a workflow-changing merge behind a Release PR.** Let
+  the tag land first. Nothing enforces this; two queue entries merging
+  seconds apart can still beat the push.
+
+When it fires, `tag-release.sh` names it in one `::error` instead of
+passing git's output through: nothing was minted, the version is not
+spent, and the recovery is the runbook's ("Tag push refused: the
+default branch's workflows moved"). The worked example is edtf#261.
+
 ## The tag
 
 **Umbrella `v*` only.** One tag per release, workspace-wide. Per-crate tags
