@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.4](https://github.com/monumental-archive/.github/compare/v1.68.3...v1.68.4) - 2026-11-16
+
+### Fixed
+
+- make the pgrx upgrade proof read the catalog ([#1326](https://github.com/monumental-archive/.github/pull/1326))
+
 ## [1.68.3](https://github.com/monumental-archive/.github/compare/v1.68.2...v1.68.3) - 2026-11-16
 
 ### Fixed
