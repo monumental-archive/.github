@@ -160,7 +160,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.5
+          version: 2026.11.6
           cache: true
           # The cache's NAME, moved by hand when its CONTENTS must change
           # and its key would not (#1165). mise-action keys on the mise
@@ -373,7 +373,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.5
+          version: 2026.11.6
           cache: true
           # Moved with the `gate` job's, for the reason given there.
           cache_key_prefix: mise-v2
@@ -516,7 +516,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.5
+          version: 2026.11.6
           cache: true
           # Moved with the `gate` job's, for the reason given there.
           cache_key_prefix: mise-v2
