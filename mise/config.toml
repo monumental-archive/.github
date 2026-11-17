@@ -4937,14 +4937,18 @@ dir = "{{cwd}}"
 # the offline-degradation WARN is fatal — a token that is present but
 # rejected degrades the same way, and only zizmor knows.
 #
-# THE SIGNER IS NEVER TAGGED (#1152). zizmor 1.32's stale-action-refs
-# reports every pin no tag points at, and the signer's SHA is its whole
-# identity (mise/pinact.yaml), so its references red the audit for a
-# true fact that is not a defect. zizmor-signer.py drops exactly those:
-# audit stale-action-refs AND a reference in the signer's repository,
-# read from security/identity.toml, never written here. A second
-# comment on the `uses:` line was measured and hides the pin from
-# Renovate; a zizmor.yml ignore would hide a stale third-party pin. The
+# THE SIGNER IS NEVER TAGGED (#1152, #1340). zizmor 1.32's
+# stale-action-refs reports every pin no tag points at, and the signer's
+# SHA is its whole identity (mise/pinact.yaml); its ref-version-mismatch
+# reports the signer's `# main` comment whenever the signer's main moves
+# past the pin, and `# main` says the commit is on main, not that it is
+# main's head (how far behind is Renovate's question). Both red the
+# audit for a true fact that is not a defect. zizmor-signer.py drops
+# exactly those: audit stale-action-refs or ref-version-mismatch AND
+# every reference in the signer's repository, read from
+# security/identity.toml, never written here. A second comment on the
+# `uses:` line was measured and hides the pin from Renovate; a
+# zizmor.yml ignore would hide a real third-party finding. The
 # green path is one JSON run; when anything remains, zizmor runs again
 # in its own format so the finding is shown as zizmor writes it.
 run = '''

@@ -1,0 +1,112 @@
+[
+  {
+    "ident": "ref-version-mismatch",
+    "desc": "action's hash pin has mismatched or missing version comment",
+    "url": "https://docs.zizmor.sh/audits/#ref-version-mismatch",
+    "determinations": {
+      "confidence": "High",
+      "severity": "Medium",
+      "persona": "Regular"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/continuous.yml"
+            }
+          },
+          "annotation": "this job",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 678,
+              "column": 2
+            },
+            "end_point": {
+              "row": 698,
+              "column": 18
+            },
+            "offset_span": {
+              "start": 32410,
+              "end": 33418
+            }
+          },
+          "feature": "  sign:\n    name: Sign image\n    needs: assemble\n    uses: monumental-archive/signer/.github/workflows/sign.yml@0d6c6e297684c8ba401fb9c212532628fe552148 # main\n    with:\n      image-name: ${{ needs.assemble.outputs.image }}\n      image-digest: ${{ needs.assemble.outputs.digest }}\n      bundle-artifact: attestation-bundle-image\n    permissions:\n      id-token: write # the signer mints the Sigstore identity\n      attestations: write # the signer persists the provenance\n      artifact-metadata: write # the signer creates the storage record\n\n  # The `latest` tag, last (#1280): a name for an index already pushed\n  # by digest, gated and signed, applied by the same manifest PUT the\n  # versioned path uses. A stream has no release to wait for, so the\n  # signature is the last thing before the name; a run that dies before\n  # it leaves `latest` on the previous stream image. The tag job for a\n  # failed sign does not run, and a failed tag job is a red run with an\n  # idempotent re-run.\n  # phase: publish",
+          "comments": [
+            "# main",
+            "# the signer mints the Sigstore identity",
+            "# the signer persists the provenance",
+            "# the signer creates the storage record",
+            "# The `latest` tag, last (#1280): a name for an index already pushed",
+            "# by digest, gated and signed, applied by the same manifest PUT the",
+            "# versioned path uses. A stream has no release to wait for, so the",
+            "# signature is the last thing before the name; a run that dies before",
+            "# it leaves `latest` on the previous stream image. The tag job for a",
+            "# failed sign does not run, and a failed tag job is a red run with an",
+            "# idempotent re-run.",
+            "# phase: publish"
+          ]
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": ".github/workflows/continuous.yml"
+            }
+          },
+          "annotation": "branch points to commit b7469566abb0",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "sign"
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 681,
+              "column": 106
+            },
+            "end_point": {
+              "row": 681,
+              "column": 110
+            },
+            "offset_span": {
+              "start": 32563,
+              "end": 32567
+            }
+          },
+          "feature": "main",
+          "comments": ["# main"]
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  }
+]
