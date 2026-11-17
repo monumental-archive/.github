@@ -8772,6 +8772,43 @@ echo "audit:lock-idempotent: ok — ${n} lock(s), working tree unchanged"
 org_done=1
 '''
 
+[tasks."audit:regression-tests"]
+description = "Share of fix commits that came with a test, and last week's that did not (a report — always exits 0)"
+dir = "{{cwd}}"
+# Best Practices' `regression_tests_added50` asks whether half the bugs
+# fixed in the last six months came with a regression test, and nothing
+# in the org could say (#1335). regression-count.py sorts each
+# fix-typed commit into test added / no test / not a code fix /
+# unclassifiable by what its diff touches, from a language table that
+# names no repository; this prints its four lists to the log and puts
+# the six-month ratio and the last seven days' "no test" fixes in the
+# job summary, so a fix that arrived without a test is seen within a
+# week.
+#
+# A REPORT, NOT A GATE, and it exits 0 whatever the ratio. A diff cannot
+# tell a bug fix from a `fix`-typed pin bump, so a lint refusing a fix
+# with no test would need an opt-out, and the belt has none; a red leg
+# below 50% would stay red for months while a backfill runs. Both were
+# rejected on #1335. What DOES fail is a history this cannot read: a
+# shallow clone cuts the window short and would print a smaller ratio
+# as if it were measured, so the leg checks out with full history and
+# the helper refuses a shallow one.
+#
+# audit:*, not lint:*, though it touches no network: it reads six months
+# of history the gate's checkout does not fetch, and its answer is a
+# property of the branch, not of the change under review.
+run = '''
+git rev-parse --git-dir > /dev/null 2>&1 || {
+  echo "audit:regression-tests: not a git repository, skipped"
+  exit 0
+}
+args=(--since "6 months ago" --recent "7 days ago")
+if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+  args+=(--summary "${GITHUB_STEP_SUMMARY}")
+fi
+python3 "${ORG_BELT_DIR}/regression-count.py" "${args[@]}"
+'''
+
 [tasks."lint:nested-permissions"]
 description = "Every nested `uses:` job states its permissions (startup_failure trap)"
 dir = "{{cwd}}"

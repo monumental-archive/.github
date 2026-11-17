@@ -62,10 +62,27 @@ re-score by hand whenever a change lands that a criterion would notice.
 
 Silver now stands on one remaining MUST:
 
-- `regression_tests_added50` — a measurement, not a tool. Every `fix:`
-  commit in the window must be classified as "shipped the check that
-  would have caught it" or not, and ≥ 50% must be yes. Free to close;
-  nobody has done the pass. It was never tool-blocked.
+- `regression_tests_added50` — **Unmet, measured 2026-11-17 (#1335)**.
+  `mise/regression-count.py` sorts every `fix`-typed commit into test
+  added, no test, not a code fix (docs, data, pins, Renovate's
+  `fix(deps)` and `fix(canon)`) and unclassifiable. Over the six months
+  to 2026-11-17: 58 test added, 176 no test, 261 not a code fix, 0
+  unclassifiable — a raw 24.8%. The hand-check corrects both halves:
+  of 30 "no test" fixes, 24 were bugs; of 30 "test added", 11 tests
+  fail on their own assertion with the fix's code reverted, 13 test
+  code the fix itself created (a revert removes what they call, so
+  they prove nothing about the bug), and 6 pass with the fix reverted.
+  That is about **11%** of bug fixes held by a test proven against
+  the bug, 23% at most if every test that arrived with its fix is
+  counted. The samples and the arithmetic are on #1335.
+
+  `audit:regression-tests`, a Monday leg of `audit.yml` and
+  `repo-audit.yml`, prints the four lists and puts the six-month ratio
+  and the last seven days' "no test" fixes in the job summary. It is a
+  report and exits 0 whatever the ratio: a diff cannot tell a bug fix
+  from a `fix`-typed pin bump, so a gate on it would need an opt-out.
+  The backfill that moves the figure is #1360, and each backfilled test
+  is proven against its reverted fix before it counts.
 
 `test_statement_coverage80` was the wall, and its history is kept in
 [tooling-verdicts.md](tooling-verdicts.md) (the kcov entry): the bash
