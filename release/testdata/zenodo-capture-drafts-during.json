@@ -1,0 +1,46 @@
+[
+  {
+    "created": "2026-11-17T16:04:05.704875+00:00",
+    "modified": "2026-11-17T16:04:05.895478+00:00",
+    "id": 24318079,
+    "conceptrecid": "21913604",
+    "conceptdoi": "10.5281/zenodo.21913604",
+    "metadata": {
+      "title": "monumental-archive/.github",
+      "publication_date": "2026-11-17",
+      "description": "Release v1.68.4 of monumental-archive/.github. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release.",
+      "access_right": "open",
+      "creators": [
+        {
+          "name": "Allen, Carl",
+          "affiliation": null
+        }
+      ],
+      "license": "0bsd",
+      "imprint_publisher": "Zenodo",
+      "upload_type": "software",
+      "prereserve_doi": {
+        "doi": "10.5281/zenodo.24318079",
+        "recid": 24318079
+      }
+    },
+    "title": "monumental-archive/.github",
+    "links": {
+      "self": "https://zenodo.org/api/deposit/depositions/24318079",
+      "html": "https://zenodo.org/deposit/24318079",
+      "badge": "https://zenodo.org/badge/doi/.svg",
+      "files": "https://zenodo.org/api/deposit/depositions/24318079/files",
+      "latest_draft": "https://zenodo.org/api/deposit/depositions/24318079",
+      "latest_draft_html": "https://zenodo.org/deposit/24318079",
+      "publish": "https://zenodo.org/api/deposit/depositions/24318079/actions/publish",
+      "edit": "https://zenodo.org/api/deposit/depositions/24318079/actions/edit",
+      "discard": "https://zenodo.org/api/deposit/depositions/24318079/actions/discard",
+      "newversion": "https://zenodo.org/api/deposit/depositions/24318079/actions/newversion"
+    },
+    "record_id": 24318079,
+    "owner": 1815987,
+    "files": [],
+    "state": "unsubmitted",
+    "submitted": false
+  }
+]

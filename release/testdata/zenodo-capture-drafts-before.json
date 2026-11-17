@@ -1,0 +1,68 @@
+[
+  {
+    "created": "2026-11-16T04:00:38.834452+00:00",
+    "modified": "2026-11-16T04:00:39.036020+00:00",
+    "id": 24269508,
+    "conceptrecid": "21913604",
+    "doi": "10.5281/zenodo.24269508",
+    "conceptdoi": "10.5281/zenodo.21913604",
+    "doi_url": "https://doi.org/10.5281/zenodo.24269508",
+    "metadata": {
+      "title": "monumental-archive/.github",
+      "doi": "10.5281/zenodo.24269508",
+      "publication_date": "2026-11-16",
+      "description": "Release v1.68.4 of monumental-archive/.github. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release.",
+      "access_right": "open",
+      "creators": [
+        {
+          "name": "Allen, Carl",
+          "affiliation": null
+        }
+      ],
+      "version": "1.68.4",
+      "license": "0bsd",
+      "imprint_publisher": "Zenodo",
+      "upload_type": "software",
+      "prereserve_doi": {
+        "doi": "10.5281/zenodo.24269508",
+        "recid": 24269508
+      }
+    },
+    "title": "monumental-archive/.github",
+    "links": {
+      "self": "https://zenodo.org/api/records/24269508",
+      "html": "https://zenodo.org/records/24269508",
+      "doi": "https://doi.org/10.5281/zenodo.24269508",
+      "parent_doi": "https://doi.org/10.5281/zenodo.21913604",
+      "badge": "https://zenodo.org/badge/doi/10.5281%2Fzenodo.24269508.svg",
+      "conceptbadge": "https://zenodo.org/badge/doi/10.5281%2Fzenodo.21913604.svg",
+      "files": "https://zenodo.org/api/records/24269508/files",
+      "latest_draft": "https://zenodo.org/api/deposit/depositions/24269508",
+      "latest_draft_html": "https://zenodo.org/deposit/24269508",
+      "publish": "https://zenodo.org/api/deposit/depositions/24269508/actions/publish",
+      "edit": "https://zenodo.org/api/deposit/depositions/24269508/actions/edit",
+      "discard": "https://zenodo.org/api/deposit/depositions/24269508/actions/discard",
+      "newversion": "https://zenodo.org/api/deposit/depositions/24269508/actions/newversion",
+      "record": "https://zenodo.org/api/records/24269508",
+      "record_html": "https://zenodo.org/record/24269508",
+      "latest": "https://zenodo.org/api/records/24269508/versions/latest",
+      "latest_html": "https://zenodo.org/records/24269508/latest"
+    },
+    "record_id": 24269508,
+    "owner": 1815987,
+    "files": [
+      {
+        "id": "4f7761b5-0cc0-4d68-98ad-f38fd53f0084",
+        "filename": ".github-1.68.4.tar.gz",
+        "filesize": 1234134,
+        "checksum": "2a11c3167d742e709c39c082e207b18b",
+        "links": {
+          "self": "https://zenodo.org/api/records/24269508/files/4f7761b5-0cc0-4d68-98ad-f38fd53f0084",
+          "download": "https://zenodo.org/api/records/24269508/draft/files/.github-1.68.4.tar.gz/content"
+        }
+      }
+    ],
+    "state": "done",
+    "submitted": true
+  }
+]

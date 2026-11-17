@@ -1,0 +1,108 @@
+{
+  "created": "2026-11-16T02:39:00.379749+00:00",
+  "modified": "2026-11-16T02:39:00.606860+00:00",
+  "id": 24268584,
+  "conceptrecid": "24268583",
+  "doi": "10.5281/zenodo.24268584",
+  "conceptdoi": "10.5281/zenodo.24268583",
+  "doi_url": "https://doi.org/10.5281/zenodo.24268584",
+  "metadata": {
+    "title": "monumental-archive/edtf",
+    "doi": "10.5281/zenodo.24268584",
+    "publication_date": "2026-11-16",
+    "description": "Release v1.3.5 of monumental-archive/edtf. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release. Licensed under the SPDX expression MIT OR Apache-2.0, as CITATION.cff states it.",
+    "access_right": "open",
+    "creators": [
+      {
+        "name": "Allen, Carl",
+        "affiliation": null
+      }
+    ],
+    "version": "1.3.5",
+    "resource_type": {
+      "title": "Software",
+      "type": "software"
+    },
+    "license": {
+      "id": "mit-license"
+    },
+    "relations": {
+      "version": [
+        {
+          "index": 0,
+          "is_last": true,
+          "parent": {
+            "pid_type": "recid",
+            "pid_value": "24268583"
+          }
+        }
+      ]
+    }
+  },
+  "title": "monumental-archive/edtf",
+  "links": {
+    "self": "https://zenodo.org/api/records/24268584",
+    "self_html": "https://zenodo.org/records/24268584",
+    "preview_html": "https://zenodo.org/records/24268584?preview=1",
+    "doi": "https://doi.org/10.5281/zenodo.24268584",
+    "self_doi": "https://doi.org/10.5281/zenodo.24268584",
+    "self_doi_html": "https://zenodo.org/doi/10.5281/zenodo.24268584",
+    "reserve_doi": "https://zenodo.org/api/records/24268584/draft/pids/doi",
+    "parent": "https://zenodo.org/api/records/24268583",
+    "parent_html": "https://zenodo.org/records/24268583",
+    "parent_doi": "https://doi.org/10.5281/zenodo.24268583",
+    "parent_doi_html": "https://zenodo.org/doi/10.5281/zenodo.24268583",
+    "self_iiif_manifest": "https://zenodo.org/api/iiif/record:24268584/manifest",
+    "self_iiif_sequence": "https://zenodo.org/api/iiif/record:24268584/sequence/default",
+    "files": "https://zenodo.org/api/records/24268584/files",
+    "media_files": "https://zenodo.org/api/records/24268584/media-files",
+    "latest": "https://zenodo.org/api/records/24268584/versions/latest",
+    "latest_html": "https://zenodo.org/records/24268584/latest",
+    "versions": "https://zenodo.org/api/records/24268584/versions",
+    "draft": "https://zenodo.org/api/records/24268584/draft",
+    "access_links": "https://zenodo.org/api/records/24268584/access/links",
+    "access_grants": "https://zenodo.org/api/records/24268584/access/grants",
+    "access_users": "https://zenodo.org/api/records/24268584/access/users",
+    "access_request": "https://zenodo.org/api/records/24268584/access/request",
+    "access": "https://zenodo.org/api/records/24268584/access",
+    "communities": "https://zenodo.org/api/records/24268584/communities",
+    "communities-suggestions": "https://zenodo.org/api/records/24268584/communities-suggestions",
+    "request_deletion": "https://zenodo.org/api/records/24268584/request-deletion",
+    "file_modification": "https://zenodo.org/api/records/24268584/file-modification",
+    "quota_increase": "https://zenodo.org/api/records/24268584/quota-increase",
+    "requests": "https://zenodo.org/api/records/24268584/requests"
+  },
+  "updated": "2026-11-16T02:39:00.606860+00:00",
+  "recid": "24268584",
+  "revision": 3,
+  "files": [
+    {
+      "id": "dfad0c0d-892e-4b58-bfc5-efc8abbaab01",
+      "key": "edtf-1.3.5.tar.gz",
+      "size": 239695,
+      "checksum": "md5:355a121de4a81163f791dcd7c7aedc6c",
+      "links": {
+        "self": "https://zenodo.org/api/records/24268584/files/edtf-1.3.5.tar.gz/content"
+      }
+    }
+  ],
+  "swh": {},
+  "owners": [
+    {
+      "id": "1815987"
+    }
+  ],
+  "status": "published",
+  "stats": {
+    "downloads": 1,
+    "unique_downloads": 1,
+    "views": 1,
+    "unique_views": 1,
+    "version_downloads": 1,
+    "version_unique_downloads": 1,
+    "version_unique_views": 1,
+    "version_views": 1
+  },
+  "state": "done",
+  "submitted": true
+}
