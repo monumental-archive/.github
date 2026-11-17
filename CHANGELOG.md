@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.69.1](https://github.com/monumental-archive/.github/compare/v1.69.0...v1.69.1) - 2026-11-17
+
+### Fixed
+
+- update rumdl to 0.3.3 ([#1442](https://github.com/monumental-archive/.github/pull/1442))
+- keep blank lines after a run: block out of shfmt ([#1443](https://github.com/monumental-archive/.github/pull/1443))
+- derive the build matrices in one tested helper (#1385) ([#1445](https://github.com/monumental-archive/.github/pull/1445))
+- stand up the go leg of mutation testing ([#1446](https://github.com/monumental-archive/.github/pull/1446))
+
+### Testing
+
+- hold the oldest canon fixes to their reverted bugs ([#1440](https://github.com/monumental-archive/.github/pull/1440))
+
 ## [1.69.0](https://github.com/monumental-archive/.github/compare/v1.68.12...v1.69.0) - 2026-11-17
 
 ### Added
