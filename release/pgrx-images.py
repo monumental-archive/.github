@@ -39,6 +39,15 @@ build (#1381: a base named by a build argument is decided where the
 build runs, out of lint:from-digests' sight, so the text is rendered
 here instead of tracked).
 
+EXTENSION-NAME. Prints the name of the one extension the artifact image
+ships, the stem of the one `*.control` file in the staged
+`share/extension/` tree it was built from. The consumer proof creates
+that name and no other (#1439): the stock image's own extension
+directory holds 45-47 contrib control files, and picking the first of
+them created adminpack or amcheck on every major. A tree with no
+control file, or more than one, is refused by name: the proof cannot
+tell what it is proving.
+
 BASE-IMAGE. Prints the `[build]` row for the major from
 docker/pgrx-base-images.toml: the digest-pinned image the extension was
 built against, so the proof installs it where it was built. A major
@@ -48,6 +57,7 @@ with no row is refused by name.
                          [--tarballs DIR] [--out DIR]
     pgrx-images.py consumer-dockerfile --recipe copy|path --image REF
                                        --base REF --pg MAJOR
+    pgrx-images.py extension-name --tree DIR
     pgrx-images.py base-image --pg MAJOR --table FILE
 """
 
@@ -156,6 +166,33 @@ def consumer_dockerfile(recipe: str, image: str, base: str, pg: str) -> str:
     return f"FROM {image} AS ext\nFROM {base}\n" + RECIPES[recipe].format(pg=pg)
 
 
+def extension_name(tree: Path) -> str:
+    """Name the one extension a staged `share/extension/` tree ships.
+
+    Returns:
+        The stem of its one `*.control` file.
+
+    Raises:
+        RefusalError: no control file, or more than one.
+
+    """
+    controls = sorted(p.stem for p in tree.glob("*.control"))
+    if not controls:
+        msg = (
+            f"{tree} holds no extension control file; the artifact image"
+            " ships no extension for the consumer proof to create"
+        )
+        raise RefusalError(msg)
+    if len(controls) > 1:
+        msg = (
+            f"{tree} holds {len(controls)} extension control files"
+            f" ({', '.join(controls)}); the consumer proof creates the one"
+            " extension the artifact image ships and cannot tell which"
+        )
+        raise RefusalError(msg)
+    return controls[0]
+
+
 def base_image(table: Path, pg: str) -> str:
     """Name the image the extension was built against, for one major.
 
@@ -193,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--image", required=True)
     render.add_argument("--base", required=True)
     render.add_argument("--pg", required=True)
+    named = verbs.add_parser("extension-name")
+    named.add_argument("--tree", type=Path, required=True)
     base = verbs.add_parser("base-image")
     base.add_argument("--pg", required=True)
     base.add_argument("--table", type=Path, required=True)
@@ -214,6 +253,8 @@ def run(args: argparse.Namespace) -> str:
     """
     if args.verb == "base-image":
         return base_image(args.table, args.pg) + "\n"
+    if args.verb == "extension-name":
+        return extension_name(args.tree) + "\n"
     if args.verb == "consumer-dockerfile":
         return consumer_dockerfile(args.recipe, args.image, args.base, args.pg)
     stage(
