@@ -88,9 +88,18 @@ def clean_env() -> dict[str, str]:
 
 
 def package(
-    name: str, root: str, *, publish: list[str] | None = None, pgrx: bool = False
+    name: str,
+    root: str,
+    *,
+    publish: list[str] | None = None,
+    pgrx: bool = False,
+    kinds: tuple[list[str], ...] = (["lib"],),
 ) -> dict:
     """Plant one workspace member as `cargo metadata` reports it.
+
+    `kinds` is one `kind` list per target, as cargo writes them: edtf's
+    measured shapes are `["lib"]`, `["cdylib", "rlib"]` (edtf-wasm),
+    `["cdylib", "lib"]` (edtf-postgres) and `["bin"]` (edtf-cli).
 
     Returns:
         The package record.
@@ -112,6 +121,7 @@ def package(
         "publish": publish,
         "dependencies": deps,
         "features": features,
+        "targets": [{"kind": kind, "crate_types": kind} for kind in kinds],
         "manifest_path": f"{root}/{name}/Cargo.toml",
     }
 
@@ -136,8 +146,8 @@ def at(crate: str, major: int) -> str:
     return judged(crate, "--only-explicit-features", "--features", f"pg{major}")
 
 
-class SemverAudit(unittest.TestCase):
-    """Each guard branch of the helper, with its exact calls and words."""
+class Planted(unittest.TestCase):
+    """A planted tree, stub PATH and belt; the rows are in the classes below."""
 
     def setUp(self) -> None:
         """Plant a tracked tree, a stub PATH and a belt with stub provisioning."""
@@ -236,6 +246,10 @@ class SemverAudit(unittest.TestCase):
             if not line.startswith(f"{LABEL}: judging ")
         ]
 
+
+class Judgment(Planted):
+    """Lookup, judgment and verdict: what happens to a crate that is asked."""
+
     def test_ordinary_published_crate(self) -> None:
         """One call, no feature flags, judged clean."""
         self.plant(package("alpha", str(self.tree)))
@@ -297,7 +311,14 @@ class SemverAudit(unittest.TestCase):
 
     def test_pgrx_crate_judged_per_major(self) -> None:
         """Five majors, five calls, each with only its own pgNN."""
-        self.plant(package("edtf-postgres", str(self.tree), pgrx=True))
+        self.plant(
+            package(
+                "edtf-postgres",
+                str(self.tree),
+                pgrx=True,
+                kinds=(["cdylib", "lib"],),
+            )
+        )
         done, log = self.run_helper()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
@@ -355,6 +376,10 @@ class SemverAudit(unittest.TestCase):
                 f"{LABEL}: zeta: judged clean",
             ],
         )
+
+
+class Population(Planted):
+    """Which crates are asked at all: publish setting, targets, no manifest."""
 
     def test_publish_false_and_empty_are_skipped(self) -> None:
         """Both spellings arrive as `[]`: no lookup, no judgment."""
@@ -417,6 +442,72 @@ class SemverAudit(unittest.TestCase):
             ],
         )
         self.assertIn(f"{LABEL}: red", done.stderr)
+
+    def test_bin_only_crate_is_named_not_judged(self) -> None:
+        """No library target: no lookup, no judgment, exit 0."""
+        self.plant(package("cli", str(self.tree), kinds=(["bin"], ["test"])))
+        done, log = self.run_helper()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(log, ["cargo metadata --no-deps --format-version 1 --locked"])
+        self.assertEqual(
+            self.verdicts(done),
+            [f"{LABEL}: cli: no library target, no API to judge, not judged"],
+        )
+
+    def test_proc_macro_crate_is_named_not_judged(self) -> None:
+        """The tool does not count proc-macro as a library target; nor does this."""
+        self.plant(package("derive", str(self.tree), kinds=(["proc-macro"],)))
+        done, log = self.run_helper()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(log, ["cargo metadata --no-deps --format-version 1 --locked"])
+        self.assertEqual(
+            self.verdicts(done),
+            [f"{LABEL}: derive: no library target, no API to judge, not judged"],
+        )
+
+    def test_lib_and_bin_crate_is_judged(self) -> None:
+        """A library beside a binary is judged, once."""
+        self.plant(package("both", str(self.tree), kinds=(["lib"], ["bin"])))
+        done, log = self.run_helper()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.semver_calls(log), [judged("both")])
+        self.assertEqual(self.verdicts(done), [f"{LABEL}: both: judged clean"])
+
+    def test_every_library_kind_is_judged(self) -> None:
+        """rlib, dylib, cdylib and staticlib count, as the tool counts them."""
+        root = str(self.tree)
+        self.plant(
+            package("wasm", root, kinds=(["cdylib", "rlib"],)),
+            package("dyn", root, kinds=(["dylib"],)),
+            package("static", root, kinds=(["staticlib"],)),
+        )
+        done, log = self.run_helper()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            self.semver_calls(log),
+            [judged("wasm"), judged("dyn"), judged("static")],
+        )
+
+    def test_bin_only_among_judged_crates(self) -> None:
+        """The crates around a bin-only one are still judged."""
+        root = str(self.tree)
+        self.plant(
+            package("core", root),
+            package("cli", root, kinds=(["bin"],)),
+            package("wasm", root, kinds=(["cdylib", "rlib"],)),
+        )
+        done, log = self.run_helper()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.semver_calls(log), [judged("core"), judged("wasm")])
+        self.assertNotIn(f"curl {INDEX}/3/c/cli", log)
+        self.assertEqual(
+            self.verdicts(done),
+            [
+                f"{LABEL}: core: judged clean",
+                f"{LABEL}: cli: no library target, no API to judge, not judged",
+                f"{LABEL}: wasm: judged clean",
+            ],
+        )
 
     def test_index_path_lowercases(self) -> None:
         """The sparse index is keyed on the lowercased name."""

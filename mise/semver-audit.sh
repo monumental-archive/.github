@@ -20,6 +20,13 @@
 #
 #   - `publish` false (cargo reports `[]`): not published, skipped;
 #   - `publish` naming registries but not crates.io: not judged, said so;
+#   - no library target: no API to judge, said so. "Library" is what
+#     cargo-semver-checks itself checks (v0.51.0,
+#     `is_lib_like_checkable_target`): a target of kind lib, rlib, dylib,
+#     cdylib or staticlib. A bin-only crate is not one, and neither is a
+#     proc-macro crate — the tool skips both. Asked of `-p` alone, the
+#     tool refuses such a crate with an error, which would make every
+#     workspace with a CLI red; the old whole-workspace run skipped it;
 #   - otherwise the crates.io sparse index is asked FIRST. A 200 is a
 #     baseline and the crate is judged; a 404 is a definite "never
 #     published" and the crate is named as not judged; ANYTHING ELSE — a
@@ -55,9 +62,10 @@ command -v cargo > /dev/null || {
 # would read as a workspace with nothing to judge.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
 surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}")
-# Where each member may be published, as cargo resolved it: `null` is
-# anywhere, `[]` is `publish = false`, a list names registries (crates.io
-# as `crates-io`). Never an empty field — see gate-surface.py on tabs.
+# Per member: where it may be published, as cargo resolved it (`null` is
+# anywhere, `[]` is `publish = false`, a list names registries, crates.io
+# as `crates-io`), and whether it has a target the tool can judge (the
+# kinds above). Never an empty field — see gate-surface.py on tabs.
 where=$(jq -r '
   .workspace_members as $ids
   | .packages[]
@@ -65,7 +73,9 @@ where=$(jq -r '
   | [.name, (if .publish == null then "any"
              elif (.publish | length) == 0 then "none"
              elif (.publish | index("crates-io")) then "any"
-             else (.publish | join(",")) end)]
+             else (.publish | join(",")) end),
+     (if any(.targets[].kind[]; IN("lib", "rlib", "dylib", "cdylib", "staticlib"))
+      then "lib" else "nolib" end)]
   | @tsv' <<< "${metadata}")
 
 # The sparse index's path rule: 1, 2, 3/<first>, then <1-2>/<3-4>.
@@ -87,8 +97,9 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
   [[ ${record} == crate ]] || continue
   crate="${spec%@*}"
   target=$(awk -F '\t' -v n="${crate}" '$1 == n { print $2 }' <<< "${where}")
-  if [[ -z ${target} ]]; then
-    verdicts+=("${label}: ${crate}: cargo reports no publish setting for it, red")
+  library=$(awk -F '\t' -v n="${crate}" '$1 == n { print $3 }' <<< "${where}")
+  if [[ -z ${target} || -z ${library} ]]; then
+    verdicts+=("${label}: ${crate}: cargo reports no publish setting or targets for it, red")
     red=1
     continue
   fi
@@ -98,6 +109,10 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
   fi
   if [[ ${target} != any ]]; then
     verdicts+=("${label}: ${crate}: published to ${target}, not crates.io, not judged")
+    continue
+  fi
+  if [[ ${library} != lib ]]; then
+    verdicts+=("${label}: ${crate}: no library target, no API to judge, not judged")
     continue
   fi
 

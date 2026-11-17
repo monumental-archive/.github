@@ -3305,8 +3305,8 @@ dir = "{{cwd}}"
 # said it ran in "ci.yml's postgres job"; there was none, and its task
 # sat outside the `lint:*` wildcard, so `ci` never collected it.
 #
-# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface, not a
-# Rust API, which is why cargo-semver-checks is off for one. Nothing
+# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface; its
+# Rust API is judged per major by audit:semver since #1341. Nothing
 # else makes a change to that surface visible: a signature change would
 # ship as an ordinary refactor and surface only when somebody's CREATE
 # EXTENSION or ALTER EXTENSION UPDATE failed. And a clean diff is the
