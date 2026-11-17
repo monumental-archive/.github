@@ -29,7 +29,7 @@ honestly blocked on.
 | rekor-monitor (org-owned workflow) | Fulcio certificate-log watch for forged signer identities (#1237), run by `stele assert signer-certificates` (#1339) — the reason the id-token rule was narrowed |
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
-| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate |
+| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
@@ -2727,6 +2727,31 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   belt beside the runner — two instrumentations of one suite, and a
   provider version the belt would own where the repository's lockfile
   should.
+- **Rust branch coverage in the gate** — skipped, for now
+  (#1359, 2026-11-17). `cargo llvm-cov --branch` needs a nightly
+  toolchain: measured 2026-11-17 on a one-function crate, the dated
+  nightly `nightly-2026-07-20` reported 4 branches, 1 covered (25%),
+  while stable 1.97.1 refused the flag and stable without it reported
+  a branch count of 0 and a percent of 0. A second instrumented test
+  run on a nightly would double a Rust repository's test time on every
+  pull request and put a nightly in the deterministic gate, so the
+  gate keeps its line leg and the branch figure is measured on the
+  Monday cron: `audit:coverage-branches` in `repo-audit.yml`, on the
+  nightly the repository already declares as `FUZZ_TOOLCHAIN` (no new
+  toolchain), over the workspace and exclusions the `rust` leg derives
+  (one function in `mise/coverage-measure.sh`). Its floor is a second
+  line of `.coverage-floor`, `rust-branches <percent>`, derived by
+  `coverage:adopt` from a measurement under the same law and band as
+  the main floor; the release path carries it unchanged, since it
+  measures on stable. A repository with no such line, or no
+  `Cargo.toml`, skips clean. A measurement with no branches at all is
+  refused rather than floored, because 0 of 0 is what an
+  uninstrumented run reports. Rejected, so it is not re-proposed:
+  waiting for branch coverage on stable, which has no date. *Reopen:*
+  `--branch` working on a stable toolchain — then the cron leg is
+  replaced by one flag on the gate's `rust` leg, and the
+  `rust-branches` line folds into the main floor the way
+  `python-branches` does.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because
