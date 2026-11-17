@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Table tests for mise/mutation-totals.sh, the one answer across shards.
 
-repo-audit.yml's `mutants` matrix uploads each shard's counts as its own
+repo-mutants.yml's `mutants` matrix uploads each shard's counts as its own
 artifact, so the totals job sees one subdirectory per shard holding one
 `<language>.tsv` per leg, in the shape mise/mutants-rust.sh writes. Each
 row plants that tree and asserts the exact lines and exit status.

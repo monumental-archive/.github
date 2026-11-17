@@ -541,7 +541,7 @@ class Pgrx(Planted):
 
 
 class Shards(Planted):
-    """One shard of repo-audit.yml's matrix: MUTANTS_SHARD=k/n."""
+    """One shard of repo-mutants.yml's matrix: MUTANTS_SHARD=k/n."""
 
     def summary(self) -> str:
         """Read the counts the leg wrote for the totals job.

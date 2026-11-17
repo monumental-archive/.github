@@ -49,7 +49,13 @@ _SPEC.loader.exec_module(caller_pins)
 # Item 4 of #1333: the scheduled audits and the level checks keep their
 # installs. Everything else uncached is on the release, publish or
 # continuous path and is held here.
-OUT_OF_SCOPE = {"audit.yml", "repo-audit.yml", "level.yml", "level-assert.yml"}
+OUT_OF_SCOPE = {
+    "audit.yml",
+    "repo-audit.yml",
+    "repo-mutants.yml",
+    "level.yml",
+    "level-assert.yml",
+}
 
 # The jobs #1333 names, as the tree holds them. A new uncached mise-action
 # job anywhere else fails the coverage row until it is listed here and

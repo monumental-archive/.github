@@ -116,7 +116,22 @@ class Gate(unittest.TestCase):
 
 
 class Mutants(unittest.TestCase):
-    """Every delivered leg is one line of `audit:mutants`."""
+    """Every delivered leg is one line of `audit:mutants`, run on its own."""
+
+    def test_mutants_run_in_their_own_workflow(self) -> None:
+        """repo-mutants.yml runs the task; repo-audit.yml never does.
+
+        A survivor reds the mutation run and never the weekly audit, so
+        the audit's result keeps meaning what it means (owner, #1355).
+        """
+        workflows = BELT.parent / ".github" / "workflows"
+        run = re.compile(r"mise run audit:mutants\b")
+        own = (workflows / "repo-mutants.yml").read_text(encoding="utf-8")
+        audit = (workflows / "repo-audit.yml").read_text(encoding="utf-8")
+        self.assertEqual(len(run.findall(own)), 1)
+        self.assertEqual(run.findall(audit), [])
+        stub = BELT.parent / "workflow-templates" / "mutants.yml"
+        self.assertIn("/.github/workflows/repo-mutants.yml@", stub.read_text())
 
     def test_every_leg_is_one_line_of_the_task(self) -> None:
         """A mise/mutants-<language>.sh nobody runs cannot exist."""

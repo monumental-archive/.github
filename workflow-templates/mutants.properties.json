@@ -1,0 +1,5 @@
+{
+  "name": "Org weekly mutation testing",
+  "description": "The monumental-archive repo-side mutation run: no unexplained surviving mutant, sharded, via the shared reusable workflow.",
+  "categories": ["ci"]
+}

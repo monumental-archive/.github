@@ -433,7 +433,7 @@ python = "3.15.2"
 # list runs — skips a lazy tool; `mise run` of any other task does not
 # install it; `mise install cargo:cargo-mutants` does, from this lock.
 # All three measured on mise 2026.11.6. So the one job that names it,
-# repo-audit.yml's `mutants`, is the only place it is ever built, and
+# repo-mutants.yml's `mutants`, is the only place it is ever built, and
 # only in a repository that adopts (.cargo/mutants.toml). Run
 # locally, `cargo mutants` is a bootstrap shim that installs it on
 # first use.
@@ -8095,9 +8095,9 @@ dir = "{{cwd}}"
 # (mise/mutants-<language>.sh), so a language is ONE added line below.
 #
 # NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
-# suite once per mutant. repo-audit.yml's `mutants` matrix runs it on
+# suite once per mutant. repo-mutants.yml's `mutants` matrix runs it on
 # the Monday cron, one shard per job (MUTANTS_SHARD=k/n), and
-# `mutants-total` states the one answer across shards
+# its `totals` job states the one answer across shards
 # (mise/mutation-totals.sh). mise/test_task_contract.py holds `ci` to
 # reaching no audit task at all.
 #

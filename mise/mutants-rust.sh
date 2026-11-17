@@ -31,7 +31,7 @@
 #
 # Prints each survivor (file:line:col: the mutation) and one summary
 # line: mutants, killed, survived, excluded. Run as one shard of
-# repo-audit.yml's matrix (MUTANTS_SHARD=k/n), it judges that shard
+# repo-mutants.yml's matrix (MUTANTS_SHARD=k/n), it judges that shard
 # alone and, given MUTANTS_SUMMARY_DIR, writes its counts to rust.tsv
 # there for the job that states the totals across shards.
 set -euo pipefail
@@ -40,7 +40,7 @@ label="audit:mutants: rust"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
 config=".cargo/mutants.toml"
 
-# One shard of the population, `k/n`, when repo-audit.yml's matrix runs
+# One shard of the population, `k/n`, when repo-mutants.yml's matrix runs
 # the leg; unset, the whole population (a local run). Anything else is
 # red rather than read as "whole": a typo would quietly run every mutant
 # n times over.

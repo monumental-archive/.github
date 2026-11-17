@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The one answer across audit:mutants' shards (#1355). Org canon — the
-# body of repo-audit.yml's `mutants-total` job.
+# body of repo-mutants.yml's `totals` job.
 #
-# repo-audit.yml runs the leg as a matrix of shards (`--shard k/n`), each
+# repo-mutants.yml runs the leg as a matrix of shards (`--shard k/n`), each
 # printing its own survivors and summary line. The measure is still one
 # answer — no unexplained survivor in the WHOLE population — so this
 # reads what every shard wrote and states the totals: mutants, killed,
