@@ -46,7 +46,7 @@ written for two moments: wiring a repository in, and a release going wrong.
    | Class | Extra inputs | Caller build inputs (mise.toml) |
    | --- | --- | --- |
    | `rust-crate` | `exclude` for container-built members | `rust` |
-   | `rust-binary` | `binary-targets`, `binary-smoke-test`, `exclude` | `rust` |
+   | `rust-binary` | `binary-targets`, `binary-smoke-test`, `exclude` | `rust`, `cargo-auditable` |
    | `go-binary` | `go-targets`, `go-smoke-test` | `go` |
    | `oci-image` | `dockerfile`, `context`, `smoke-test`, and `binary-crate` **or** `prepare` | `rust`, `cargo-auditable` when either is declared |
    | `wasm-npm` | `crate-dir`, `npm-scope` | `rust`, `aqua:rustwasm/wasm-pack`, `node` |
