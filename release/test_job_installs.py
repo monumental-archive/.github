@@ -606,6 +606,74 @@ class JobInstalls(unittest.TestCase):
         self.assertEqual([], uninstalled("attach-release.yml", "attach", job))
 
 
+# The line a named-list job carries at job level (#1412). mise's
+# task_run_auto_install is on by default, so without it `mise run`
+# installs every other tool in scope before the task starts, and the
+# list saves nothing in the jobs that run a task.
+NO_TASK_INSTALL = '      MISE_TASK_RUN_AUTO_INSTALL: "false"'
+
+
+def task_auto_install(workflow: str, job_id: str, job: list[str]) -> list[str]:
+    """Name a named-list job that leaves mise's task auto-install on.
+
+    Returns:
+        One line when the job's mise-action step names install_args and
+        the job's own env does not turn task auto-install off.
+
+    """
+    (step,) = mise_steps(job)
+    if not step.get("with.install_args") or NO_TASK_INSTALL in job:
+        return []
+    return [
+        (
+            f"{workflow} {job_id}: installs a named list but leaves mise's task"
+            ' auto-install on; set MISE_TASK_RUN_AUTO_INSTALL: "false" in the'
+            " job's env (#1412)"
+        )
+    ]
+
+
+class TaskAutoInstall(unittest.TestCase):
+    """A named list stays the whole install when a task runs (#1412)."""
+
+    def test_every_named_list_job_turns_task_auto_install_off(self) -> None:
+        """Every job in scope that installs a list, the exempt one aside."""
+        for workflow, job_id in IN_SCOPE:
+            with self.subTest(workflow=workflow, job=job_id):
+                job = load(workflow)[job_id]
+                self.assertEqual([], task_auto_install(workflow, job_id, job))
+
+    def test_a_job_without_the_setting_is_named(self) -> None:
+        """Planted: the SBOM job, which runs audit:deny, loses the line."""
+        job = [ln for ln in load("publish.yml")["sbom"] if ln != NO_TASK_INSTALL]
+        self.assertEqual(
+            [
+                (
+                    "publish.yml sbom: installs a named list but leaves mise's task"
+                    ' auto-install on; set MISE_TASK_RUN_AUTO_INSTALL: "false" in'
+                    " the job's env (#1412)"
+                )
+            ],
+            task_auto_install("publish.yml", "sbom", job),
+        )
+
+    def test_a_tool_only_a_task_calls_must_be_listed(self) -> None:
+        """Planted: cargo-deny is reached only through `mise run audit:deny`."""
+        job = [
+            ln.replace(" aqua:EmbarkStudios/cargo-deny", "")
+            for ln in load("publish.yml")["sbom"]
+        ]
+        self.assertEqual(
+            [
+                (
+                    "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does"
+                    " not install it"
+                )
+            ],
+            uninstalled("publish.yml", "sbom", job),
+        )
+
+
 class OneReader(unittest.TestCase):
     """release/caller-pins.py is the canon's one reader of a caller's pins."""
 

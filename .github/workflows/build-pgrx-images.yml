@@ -147,6 +147,9 @@ jobs:
       contents: read
       packages: write # push the per-major index by digest and tag
     env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
       PG: ${{ matrix.pg }}
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"

@@ -170,6 +170,9 @@ jobs:
     permissions:
       contents: read
     env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       # No MISE_GLOBAL_CONFIG_FILE and no toolbelt checkout, deliberately:
