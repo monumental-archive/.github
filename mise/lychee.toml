@@ -25,3 +25,17 @@
 # unknown or mistyped key (exit 3, "Failed to parse configuration file"),
 # so this config cannot silently become a no-op the way a permissive
 # schema would let it.
+
+# npm package pages are checked against the registry that publishes
+# them (#1343). `www.npmjs.com` refuses anonymous requests with 403, so
+# every repository linking its own package was red on a link that is
+# not broken. `registry.npmjs.org` answers for the same package with no
+# token — 200 for a published package or version, 404 for one that does
+# not exist — so the link is still checked: a missing package or
+# version still fails. No package or scope name is written here.
+# The version rule comes first: remaps apply in order, and the
+# package rule would otherwise swallow `/v/<version>` into the name.
+remap = [
+  '^https://www\.npmjs\.com/package/(.+)/v/([^/?#]+)$ https://registry.npmjs.org/$1/$2',
+  '^https://www\.npmjs\.com/package/([^?#]+)$ https://registry.npmjs.org/$1',
+]
