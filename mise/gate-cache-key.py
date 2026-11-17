@@ -51,6 +51,17 @@ The fallback prefix stops before the mise version: a mise bump restores
 the previous tools and the action installs the one binary that changed.
 `name` is the hand-moved part of the key (#1165) and stays the
 invalidation lever: a different name shares no prefix.
+
+A JOB THAT INSTALLS A LIST (#1408) passes it with `--install`, the words
+its install step gives mise-action as `install_args`, and the KEY carries
+their digest as `-i{digest}` before the belt suffix: the tools sorted and
+joined, flags dropped, as mise-action digests `install_args`. Only the
+key: the list carries versions (`rust@1.97.1 …`), and a digest in the
+prefix would leave a job no fallback the moment any pin moved — a Rust
+or cargo-pgrx bump would install every leg cold, the case the fallback
+exists for. What must never cross, one pgrx leg's Postgres into another
+major's leg, is kept apart by the NAME (`mise-pgrx-v1-pg18`), which is
+the prefix. Without `--install` the key is the one above, to the byte.
 """
 
 import argparse
@@ -146,7 +157,21 @@ class Facts(NamedTuple):
     belt: str
 
 
-def names(name: str, env: dict[str, str], facts: Facts) -> dict[str, str]:
+def install_digest(install: str) -> str:
+    """Digest a job's install list as mise-action digests `install_args`.
+
+    Returns:
+        The sha256 of the tools, sorted and space-joined with flags
+        dropped, or "" when the list names no tool.
+
+    """
+    tools = " ".join(sorted(w for w in install.split() if not w.startswith("-")))
+    return hashlib.sha256(tools.encode()).hexdigest() if tools else ""
+
+
+def names(
+    name: str, env: dict[str, str], facts: Facts, install: str = ""
+) -> dict[str, str]:
     """Compose the cache's key, fallback prefix and path.
 
     Returns:
@@ -159,7 +184,9 @@ def names(name: str, env: dict[str, str], facts: Facts) -> dict[str, str]:
     period = int(facts.now // PERIOD_SECONDS)
     file_hash = env.get("ORG_MISE_CONFIG_HASH") or "no-config"
     menv = f"-{mise_env}" if mise_env else ""
-    key = f"{prefix}{facts.version}{menv}-p{period}-{file_hash}-b{facts.belt}"
+    digest = install_digest(install)
+    listed = f"-i{digest}" if digest else ""
+    key = f"{prefix}{facts.version}{menv}-p{period}-{file_hash}{listed}-b{facts.belt}"
     return {"key": key, "prefix": prefix, "dir": data_dir(env)}
 
 
@@ -177,6 +204,11 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         type=Path,
         help="the canon tree: its ci.yml pins mise, its mise/mise.lock the belt",
     )
+    parser.add_argument(
+        "--install",
+        default="",
+        help="the job's install_args, for a job that installs a list (#1408)",
+    )
     args = parser.parse_args(argv)
     env = dict(os.environ)
     try:
@@ -188,7 +220,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         print(f"{NAME}: {err}", file=sys.stderr)
         return 1
     clock = time.time() if now is None else now
-    out = names(args.name, env, Facts(version, plat, clock, belt))
+    out = names(args.name, env, Facts(version, plat, clock, belt), args.install)
     lines = "".join(f"{k}={v}\n" for k, v in out.items())
     with Path(env["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
         fh.write(lines)

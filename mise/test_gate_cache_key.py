@@ -262,5 +262,91 @@ class Belt(unittest.TestCase):
         self.assertTrue(got["key"].endswith("-b" + hashlib.sha256(lock).hexdigest()))
 
 
+LEG = "jq rust@1.97.1 cargo:cargo-pgrx@0.19.3 aqua:theseus-rs/postgresql-binaries@"
+
+
+def leg(major: int, install: str) -> dict[str, str]:
+    """Name a pgrx leg's cache, at the logged run's inputs (#1408).
+
+    Returns:
+        The names the workflow reads.
+
+    """
+    facts = gate_cache_key.Facts("2026.11.6", "linux-x64", WHEN, BELT)
+    return gate_cache_key.names(f"mise-pgrx-v1-pg{major}", RUNNER, facts, install)
+
+
+class InstallList(unittest.TestCase):
+    """A job that installs a list keys its cache by the list (#1408)."""
+
+    def test_two_legs_have_two_prefixes(self) -> None:
+        """By name: a pg14 leg never falls back to a pg18 leg's cache."""
+        pg14, pg18 = leg(14, LEG + "14.24.1"), leg(18, LEG + "18.6.1")
+        self.assertEqual("mise-pgrx-v1-pg14-linux-x64-ubuntu26-", pg14["prefix"])
+        self.assertEqual("mise-pgrx-v1-pg18-linux-x64-ubuntu26-", pg18["prefix"])
+        self.assertFalse(pg18["key"].startswith(pg14["prefix"]))
+        self.assertFalse(pg14["key"].startswith(pg18["prefix"]))
+
+    def test_a_pin_bump_keeps_the_prefix_and_moves_the_key(self) -> None:
+        """One leg, two lists: same fallback, different caches."""
+        before = leg(18, LEG + "18.6.1")
+        after = leg(18, LEG.replace("1.97.1", "1.98.0") + "18.6.1")
+        self.assertEqual(before["prefix"], after["prefix"])
+        self.assertNotEqual(before["key"], after["key"])
+        self.assertTrue(after["key"].startswith(before["prefix"]))
+
+    def test_the_digest_sits_before_the_belt(self) -> None:
+        """The list's digest is in the key, after the config hash."""
+        digest = gate_cache_key.install_digest(LEG + "18.6.1")
+        self.assertTrue(
+            leg(18, LEG + "18.6.1")["key"].endswith(
+                f"-2026.11.6-p692-{HASH}-i{digest}-b{BELT}"
+            )
+        )
+
+    def test_the_digest_is_mise_actions(self) -> None:
+        """Order and flags do not change it: sorted tools, flags dropped."""
+        self.assertEqual(
+            gate_cache_key.install_digest("b a"),
+            gate_cache_key.install_digest("--locked a  b"),
+        )
+        self.assertEqual(
+            "c8687a08aa5d6ed2044328fa6a697ab8e96dc34291e8c2034ae8c38e6fcc6d65",
+            gate_cache_key.install_digest("a b"),
+        )
+
+    def test_no_list_is_todays_key(self) -> None:
+        """The gate passes no list, and its key does not move by a byte."""
+        facts = gate_cache_key.Facts("2026.11.6", "linux-x64", WHEN, BELT)
+        for install in ("", "  ", "--locked"):
+            with self.subTest(install=install):
+                out = gate_cache_key.names("mise-v2", RUNNER, facts, install)
+                self.assertEqual(f"{LOGGED}-b{BELT}", out["key"])
+                self.assertEqual("mise-v2-linux-x64-ubuntu26-", out["prefix"])
+
+    def test_main_reads_the_list(self) -> None:
+        """`--install` reaches the key the workflow reads."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = canon(Path(tmp))
+            out = Path(tmp) / "out"
+            env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(
+                    gate_cache_key.platform, "system", return_value="Linux"
+                ),
+                mock.patch.object(
+                    gate_cache_key.platform, "machine", return_value="x86_64"
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                argv = ["mise-pgrx-v1-pg18", str(tree), "--install", "jq rust@1"]
+                self.assertEqual(0, gate_cache_key.main(argv, now=WHEN))
+            written = out.read_text("utf-8")
+        digest = gate_cache_key.install_digest("jq rust@1")
+        self.assertIn(f"-i{digest}-b", written)
+        self.assertIn("prefix=mise-pgrx-v1-pg18-linux-x64-ubuntu26-\n", written)
+
+
 if __name__ == "__main__":
     unittest.main()
