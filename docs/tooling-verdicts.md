@@ -30,6 +30,7 @@ honestly blocked on.
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate |
+| coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
@@ -2507,6 +2508,36 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   while the derived upgrade script beside them stays in `lint:sql` —
   #792's ruling (a), that the org's derived files meet the org's own
   rules, held to rather than asserted.
+  **Amended 2026-11-17 (#1331): the Python half is measured, and the
+  canon takes a floor.** The 2026-08-19 sentence above — that the canon
+  "takes no `.coverage-floor` and no shield" because "a coverage number
+  over a workflow tree would measure nothing" — stopped describing the
+  tree: on 2026-11-16 it tracked 62 Python files (25,610 lines, 41 of
+  them `unittest` suites over three roots) against 32 shell files
+  (5,626 lines). The canon is a Python codebase with a real test corpus,
+  and the machinery could not measure it because every `coverage:*`
+  task skipped without `Cargo.toml` or `go.mod`. coverage.py joins the
+  belt (`pipx:coverage`, the fourth `pipx:` exception; a measurement
+  tool, not a test framework, so #364's refusal does not reach it — the
+  suites stay stdlib `unittest`), and `mise/coverage-measure.sh` gains
+  a `python` leg: the repository's own `test` task, run under coverage
+  with every child `python3` measured, printing `python <percent>`
+  (statements) and `python-branches <percent>`. The floor is a minimum
+  both hold. Applicability is "tracks `*.py` and defines `test`",
+  answered once by the script's `probe` for all three tasks and the
+  release path. Measured on the canon at this change: python 93.17,
+  python-branches 89.32 with child processes measured, against
+  92.45 and 88.66 with the unittest runners alone (3,021 statements,
+  1,200 branches; test files omitted, since a suite executes itself
+  completely by construction). The canon
+  adopts in the commit after the release that ships the leg, since the
+  floor derives from the released measurement. **The bash half is
+  unchanged and still blocked**: kcov is v43 with no binary assets and
+  not in aqua, the trigger above stands, and the shell stays
+  unmeasured — the floor covers the Python legs only. Rejected, so it
+  is not re-proposed: stdlib `trace` (no Codecov format, an order of
+  magnitude slower, no branch coverage), and waiting for a bash tool
+  before measuring anything.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because

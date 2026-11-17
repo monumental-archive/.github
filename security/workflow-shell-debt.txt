@@ -57,7 +57,6 @@
 .github/workflows/build-wasm-npm.yml	Pack and hash the exact bytes that will publish	36	# canon helper (packaging): #1384
 .github/workflows/ci.yml	The squash message is the PR title and body — hold it to the commit canon	23	# canon helper (the remaining small steps): #1386
 .github/workflows/ci.yml	Every part of the gate passed	25	# canon helper (the remaining small steps): #1386
-.github/workflows/ci.yml	Generate the report	17	# canon helper: #1352 unassigned
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Derive this publish's VEX and gate on undecided advisories	40	# stele: monumental-archive/stele#397, canon swap #1372
 .github/workflows/continuous.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374

@@ -774,7 +774,9 @@ jobs:
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-          ORG_TOOL_INSTALL: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
+          ORG_TOOL_INSTALL: >-
+            jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv pipx:coverage
+            ${{ steps.pins.outputs.install }}
         run: |
           python3 .org-canon/mise/gate-cache-key.py mise-coverage-v1 \
             .org-canon --install "${ORG_TOOL_INSTALL}"
@@ -831,7 +833,9 @@ jobs:
           version: 2026.11.6
           cache: false
           # belt tools by the belt's keys, then the caller's inputs
-          install_args: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
+          install_args: >-
+            jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv pipx:coverage
+            ${{ steps.pins.outputs.install }}
 
       # unattested-path: the write half of the tool cache restored
       # above, on the same standing. It runs on a push to the default
@@ -925,9 +929,7 @@ jobs:
           # reports, and the previous `hashFiles('go.mod')` selector
           # named coverage.txt for every such repo — including the ones
           # whose Rust-only leg had written lcov.info.
-          files=""
-          [[ -f lcov.info ]] && files="lcov.info"
-          [[ -f coverage.txt ]] && files="${files:+${files},}coverage.txt"
+          files=$(for f in lcov.info coverage.txt coverage.xml; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
           if [[ -z ${files} ]]; then
             echo "::error::coverage:report wrote no report — nothing to upload"
             exit 1
