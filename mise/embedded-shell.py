@@ -43,11 +43,18 @@ from typing import TYPE_CHECKING, NamedTuple
 # ceiling counts all of them (#1352) — a header it could not read would
 # be an opt-out by punctuation.
 RUN_RE = re.compile(r"^(\s*)(- )?run: ([|>](?:[+-]?[1-9]?|[1-9][+-]))(\s+#.*)?\s*$")
-# What shfmt and shellcheck read is unchanged by that: `|` and `|-` with
-# nothing after them, exactly as before. A folded block has its lines
-# joined before bash sees them, so linting its raw text would be
-# unfaithful; those gaps are their own issues, not the ceiling's.
-LINTED = frozenset({"|", "|-"})
+# How each header is linted (#1396). A literal block (`|`, any chomping
+# or indentation indicator) is the script bash runs, so shfmt and
+# shellcheck both read it. A folded block (`>`) has its lines joined
+# before bash sees it: shellcheck reads the FOLDED text, and shfmt does
+# not apply, because the file's lines are not the script's lines. A
+# comment after the indicator (`run: | # zizmor: ...`) changes nothing:
+# the block is read by its indicator like any other.
+LITERAL = "|"
+FOLDED = ">"
+FOLDED_NOTE = (
+    "folded block: shellcheck read the text bash receives; shfmt does not apply"
+)
 # A `shell:` key on the same step selects the interpreter. Only bash-family
 # blocks are shell at all — `shell: python` is a different language.
 SHELL_RE = re.compile(r"^\s*shell:\s*([a-z0-9 {}$.-]+)\s*$")
@@ -111,11 +118,14 @@ class Run(NamedTuple):
     """One `run:` block scalar, literal or folded, as the file holds it."""
 
     line: int  # 1-based number of the block's first body line
-    source: str  # the body, dedented, newline-terminated
+    source: str  # the body, dedented, newline-terminated, as the file holds it
     shell: str  # the step's `shell:`, or 'bash'
     header: str  # the block indicator: `|`, `|-`, `>-`, `|2`, ...
     commented: bool  # the indicator line carries a trailing comment
     name: str | None  # the step's `name:`, or None when it has none
+    start: int  # 0-based index of the header line
+    end: int  # 0-based index of the first line after the body
+    pad: int  # the body's content indentation in the file
 
 
 def depth(line: str) -> int | None:
@@ -185,17 +195,31 @@ def unquote(value: str) -> str:
     return value.split(" #", 1)[0].strip()
 
 
-def runs(path: Path) -> Iterator[Run]:
-    """Yield every `run:` block scalar in a workflow or composite action.
+def content_pad(body: list[str], header: str, key_indent: int) -> int:
+    """Return the column a block's content starts at.
 
-    This is the one reader of `run:` blocks: shfmt, shellcheck and the
-    line ceiling all see the blocks it finds, and no others.
+    An indentation indicator (`|2`) fixes it relative to the key, and
+    spaces beyond it are content; without one it is the least-indented
+    line, as YAML's auto-detection finds it.
+
+    Returns:
+        The number of leading spaces that belong to the YAML, not the text.
+
+    """
+    least = min(len(x) - len(x.lstrip()) for x in body if x.strip())
+    digits = "".join(c for c in header if c.isdigit())
+    if digits and key_indent + int(digits) <= least:
+        return key_indent + int(digits)
+    return least
+
+
+def runs_in(lines: list[str]) -> Iterator[Run]:
+    """Yield every `run:` block scalar in a file's lines.
 
     Yields:
         One Run per non-empty block, whatever its interpreter.
 
     """
-    lines = path.read_text(encoding="utf-8").splitlines()
     i = 0
     while i < len(lines):
         m = RUN_RE.match(lines[i])
@@ -214,7 +238,7 @@ def runs(path: Path) -> Iterator[Run]:
             i += 1
         if not any(x.strip() for x in body):
             continue
-        pad = min(len(x) - len(x.lstrip()) for x in body if x.strip())
+        pad = content_pad(body, m.group(3), key_indent)
         yield Run(
             line=start + 2,
             source="\n".join(x[pad:] if x.strip() else "" for x in body) + "\n",
@@ -222,25 +246,120 @@ def runs(path: Path) -> Iterator[Run]:
             header=m.group(3),
             commented=m.group(4) is not None,
             name=step_name(lines, start, key_indent),
+            start=start,
+            end=i,
+            pad=pad,
         )
 
 
-def blocks(path: Path) -> Iterator[tuple[int, str]]:
-    """Yield (first_body_line_number, dedented_source) per `run:` block.
+def runs(path: Path) -> Iterator[Run]:
+    """Yield every `run:` block scalar in a workflow or composite action.
+
+    This is the one reader of `run:` blocks: shfmt, shellcheck and the
+    line ceiling all see the blocks it finds, and no others.
 
     Yields:
-        One tuple per block whose interpreter is bash-family.
+        One Run per non-empty block, whatever its interpreter.
+
+    """
+    yield from runs_in(path.read_text(encoding="utf-8").splitlines())
+
+
+def fold(source: str) -> str:
+    """Fold a block's dedented text the way YAML hands it to bash.
+
+    A single line break between two text lines becomes a space; a run of
+    blank lines between them becomes that many line breaks; a break next
+    to a more-indented line is kept as written, blank lines included.
+
+    Returns:
+        The folded text, newline-terminated.
+
+    """
+    out: list[str] = []
+    prev: str | None = None
+    blanks = 0
+    for line in source.split("\n")[:-1]:
+        if not line:
+            if prev is None:
+                out.append("\n")
+            else:
+                blanks += 1
+            continue
+        if prev is None:
+            out.append(line)
+        elif line[0] in " \t" or prev[0] in " \t":
+            out.append("\n" * (blanks + 1) + line)
+        elif blanks:
+            out.append("\n" * blanks + line)
+        else:
+            out.append(" " + line)
+        prev, blanks = line, 0
+    return "".join(out) + "\n"
+
+
+def shell_family(run: Run) -> bool:
+    """Say whether a block runs under a bash-family interpreter.
+
+    Returns:
+        True for bash and sh blocks, the ones shfmt and shellcheck read.
+
+    """
+    return any(s in run.shell for s in ("bash", "sh"))
+
+
+def blocks(path: Path) -> Iterator[tuple[int, str, bool]]:
+    """Yield (first_body_line_number, script, folded) per linted block.
+
+    A literal block's script is its text; a folded block's is the text
+    after folding, which is what bash runs.
+
+    Yields:
+        One tuple per bash-family block shellcheck reads.
 
     """
     for run in runs(path):
-        if run.commented or run.header not in LINTED:
+        if not shell_family(run):
             continue
-        if any(s in run.shell for s in ("bash", "sh")):
-            yield run.line, run.source
+        if run.header.startswith(FOLDED):
+            yield run.line, fold(run.source), True
+        else:
+            yield run.line, run.source, False
+
+
+def shfmt_body(run: Run, lines: list[str]) -> list[str] | None:
+    """Return a literal block's body as shfmt formats it, at file indent.
+
+    Returns:
+        The new body lines, or None when shfmt fails or changes nothing.
+
+    """
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    r = subprocess.run(
+        [*SHFMT, "-"],
+        input="#!/usr/bin/env bash\n" + run.source,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0 or not r.stdout:
+        return None
+    body = lines[run.start + 1 : run.end]
+    formatted = r.stdout.splitlines()[1:]  # drop the shebang we added
+    if formatted == [x[run.pad :] if x.strip() else "" for x in body]:
+        return None
+    new = [(" " * run.pad + x) if x.strip() else "" for x in formatted]
+    if "+" in run.header:
+        # Keep chomping: trailing blank lines are part of the value.
+        trailing = 0
+        while trailing < len(body) and not body[-1 - trailing].strip():
+            trailing += 1
+        new += [""] * trailing
+    return new
 
 
 def rewrite(path: Path) -> int:
-    """Format every `run:` block in place, preserving YAML indentation.
+    """Format every literal `run:` block in place, preserving YAML indentation.
 
     Returns:
         The number of blocks rewritten.
@@ -248,51 +367,49 @@ def rewrite(path: Path) -> int:
     """
     lines = path.read_text(encoding="utf-8").splitlines()
     out: list[str] = []
-    i = 0
+    pos = 0
     changed = 0
-    while i < len(lines):
-        m = RUN_RE.match(lines[i])
-        if not m or m.group(3) not in LINTED or m.group(4) is not None:
-            out.append(lines[i])
-            i += 1
+    for run in runs_in(lines):
+        if not shell_family(run) or not run.header.startswith(LITERAL):
             continue
-        indent = len(m.group(1))
-        start = i
-        out.append(lines[i])
-        i += 1
-        body: list[str] = []
-        while i < len(lines) and (
-            not lines[i].strip() or (len(lines[i]) - len(lines[i].lstrip())) > indent
-        ):
-            body.append(lines[i])
-            i += 1
-        if not any(x.strip() for x in body) or not any(
-            s in step_shell(lines, start, indent) for s in ("bash", "sh")
-        ):
-            out.extend(body)
+        new = shfmt_body(run, lines)
+        if new is None:
             continue
-        pad = min(len(x) - len(x.lstrip()) for x in body if x.strip())
-        src = "\n".join(x[pad:] if x.strip() else "" for x in body) + "\n"
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        r = subprocess.run(
-            [*SHFMT, "-"],
-            input="#!/usr/bin/env bash\n" + src,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if r.returncode != 0 or not r.stdout:
-            out.extend(body)
-            continue
-        formatted = r.stdout.splitlines()[1:]  # drop the shebang we added
-        if formatted == [x[pad:] if x.strip() else "" for x in body]:
-            out.extend(body)
-            continue
-        out.extend((" " * pad + x) if x.strip() else "" for x in formatted)
+        out.extend(lines[pos : run.start + 1])
+        out.extend(new)
+        pos = run.end
         changed += 1
     if changed:
+        out.extend(lines[pos:])
         path.write_text("\n".join(out) + "\n", encoding="utf-8")
     return changed
+
+
+def findings(gcc: str, path: Path, lineno: int, *, folded: bool) -> list[str]:
+    """Map shellcheck's gcc-format output back onto the YAML file.
+
+    A literal block's findings land on their own lines. A folded block's
+    lines are not the script's lines, so its findings land on the block's
+    first line, and the first of them says why, once.
+
+    Returns:
+        One line per finding.
+
+    """
+    out: list[str] = []
+    for line in gcc.splitlines():
+        # gcc format is <file>:<line>:<col>: <level>: <msg>
+        parts = line.split(":", 3)
+        if len(parts) < GCC_FIELDS or not parts[1].isdigit():
+            continue
+        if folded:
+            note = "" if out else f" [{FOLDED_NOTE}]"
+            out.append(f"{path}:{lineno}:{parts[3].strip()}{note}")
+        else:
+            # -1 for the shebang this wrapper added.
+            real = lineno + int(parts[1]) - 2
+            out.append(f"{path}:{real}:{parts[3].strip()}")
+    return out
 
 
 def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
@@ -303,7 +420,7 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
 
     """
     out: list[str] = []
-    for lineno, src in blocks(path):
+    for lineno, src, folded in blocks(path):
         with tempfile.NamedTemporaryFile(
             "w",
             suffix=".sh",
@@ -315,7 +432,7 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
             tmp.write("#!/usr/bin/env bash\n" + src)
             name = tmp.name
         try:
-            if fmt:
+            if fmt and not folded:
                 # ruff: ignore[subprocess-without-shell-equals-true]
                 r = subprocess.run(
                     [*SHFMT, "-d", name],
@@ -340,14 +457,7 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
                     text=True,
                     check=False,
                 )
-                for line in r.stdout.splitlines():
-                    # gcc format is <file>:<line>:<col>: <level>: <msg>
-                    parts = line.split(":", 3)
-                    if len(parts) < GCC_FIELDS or not parts[1].isdigit():
-                        continue
-                    # -1 for the shebang this wrapper added.
-                    real = lineno + int(parts[1]) - 2
-                    out.append(f"{path}:{real}:{parts[3].strip()}")
+                out += findings(r.stdout, path, lineno, folded=folded)
         finally:
             Path(name).unlink(missing_ok=True)
     return out

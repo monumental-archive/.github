@@ -305,22 +305,29 @@ class Headers(unittest.TestCase):
                     self.assertEqual((run.header, es.weight(run.source)), (header, 16))
                     self.assertEqual(run.commented, bool(comment))
 
-    def test_shellcheck_reads_only_what_it_read_before(self) -> None:
-        """Folded, commented and indicator headers stay out of shellcheck's view."""
+    def test_what_shellcheck_reads_and_how(self) -> None:
+        """Every literal header is read as written, every folded one folded.
+
+        A comment after the indicator changes nothing about either.
+        """
         rows = [
-            ("|", True),
-            ("|-", True),
-            ("|+", False),
-            ("|2", False),
-            (">", False),
-            (">-", False),
-            ("| # zizmor: ignore[github-env]", False),
+            ("|", [False]),
+            ("|-", [False]),
+            ("|+", [False]),
+            ("|2", [False]),
+            ("|2-", [False]),
+            (">", [True]),
+            (">-", [True]),
+            (">+", [True]),
+            (">2", [True]),
+            ("| # zizmor: ignore[github-env]", [False]),
+            (">- # a note", [True]),
         ]
-        for header, linted in rows:
+        for header, folds in rows:
             with self.subTest(header=header), TemporaryDirectory() as tmp:
                 p = Path(tmp) / "w.yml"
                 p.write_text(workflow(folded("H", 3, header)), encoding="utf-8")
-                self.assertEqual(len(list(es.blocks(p))), int(linted))
+                self.assertEqual([f for _, _, f in es.blocks(p)], folds)
                 self.assertEqual(es.weight(next(es.runs(p)).source), 3)
 
     def test_mint_doi_folded_block_is_seen(self) -> None:
@@ -331,6 +338,154 @@ class Headers(unittest.TestCase):
             [(r.name, es.weight(r.source)) for r in found],
             [("Deposit, then publish — the DOI names the released bytes", 3)],
         )
+
+
+def action(header: str, body: str) -> str:
+    """Build a composite action with one bash step under `header`.
+
+    Returns:
+        The action's text; the step's body starts on line 8.
+
+    """
+    lines = "".join(f"        {x}\n" if x else "\n" for x in body.split("\n"))
+    return (
+        "name: a\nruns:\n  using: composite\n  steps:\n"
+        f"    - name: Act\n      shell: bash\n      run: {header}\n{lines}"
+    )
+
+
+class Folded(unittest.TestCase):
+    """#1396: shellcheck reads a folded block as bash receives it."""
+
+    def check(self, text: str, *, fmt: bool = True) -> tuple[Path, list[str]]:
+        """Run shfmt and shellcheck over one action text.
+
+        Returns:
+            The file's path and the findings.
+
+        """
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "action.yml"
+        path.write_text(text, encoding="utf-8")
+        return path, es.check(path, fmt=fmt, lint=True)
+
+    def test_planted_finding_in_a_folded_composite_block(self) -> None:
+        """A finding inside `run: >-` in an action is reported on the block's line.
+
+        The test that fails before #1396: the reader skipped folded blocks
+        and this returned no finding at all.
+        """
+        path, found = self.check(action(">-", "rm -rf\n${UNQUOTED}"))
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith(f"{path}:8:"), found[0])
+        self.assertIn("SC2086", found[0])
+        self.assertIn(f"[{es.FOLDED_NOTE}]", found[0])
+
+    def test_the_note_is_said_once_per_block(self) -> None:
+        """Two findings in one folded block: the note rides on the first."""
+        _, found = self.check(action(">", "echo ${A}\n\necho ${B}"))
+        self.assertEqual(len(found), 2, found)
+        self.assertEqual([es.FOLDED_NOTE in f for f in found], [True, False])
+        self.assertTrue(all(":8:" in f for f in found), found)
+
+    def test_folding_is_what_shellcheck_judges(self) -> None:
+        """A quoted string split across lines is one word once folded."""
+        _, found = self.check(action(">-", 'printf "%s\\n" "a\nb"'))
+        self.assertEqual(found, [])
+
+    def test_a_clean_folded_block_passes_and_shfmt_does_not_read_it(self) -> None:
+        """Text shfmt would reformat is not a finding in a folded block."""
+        _, found = self.check(action(">", "if true;then echo x;fi"))
+        self.assertEqual(found, [])
+        _, literal = self.check(action("|", "if true;then echo x;fi"))
+        self.assertTrue(any("not shfmt-formatted" in f for f in literal), literal)
+
+    def test_literal_headers_get_both_passes(self) -> None:
+        """`|+`, an indicator and a commented header get shfmt and shellcheck."""
+        for header in ["|+", "|2", "|2-", "| # zizmor: ignore[github-env]"]:
+            with self.subTest(header=header):
+                path, found = self.check(action(header, "if true;then echo ${X};fi"))
+                self.assertIn(f"{path}:8: run: block is not shfmt-formatted", found)
+                self.assertTrue(any("SC2086" in f for f in found), found)
+
+    def test_commented_header_finding_lands_on_its_line(self) -> None:
+        """A literal block under `run: | # ...` reports on the finding's own line."""
+        path, found = self.check(
+            action("| # zizmor: ignore[github-env]", "echo ok\nrm -rf ${GONE}"),
+        )
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith(f"{path}:9:"), found[0])
+        self.assertIn("SC2086", found[0])
+        self.assertNotIn(es.FOLDED_NOTE, found[0])
+
+    def test_rewrite_keeps_a_header_comment(self) -> None:
+        """The header line, comment included, survives the shfmt rewrite."""
+        n, out = rewrite_text(action("| # keep", "if true;then echo x;fi"))
+        self.assertEqual(n, 1)
+        self.assertEqual(out, action("| # keep", "if true; then echo x; fi"))
+
+    def test_fold(self) -> None:
+        """The fold, against YAML's rule, row by row."""
+        rows = [
+            ("a\nb\n", "a b\n"),
+            ("a\n\nb\n", "a\nb\n"),
+            ("a\n\n\nb\n", "a\n\nb\n"),
+            ("a\n  b\nc\n", "a\n  b\nc\n"),
+            ("a\n\n  b\n", "a\n\n  b\n"),
+            ("\na\nb\n", "\na b\n"),
+        ]
+        for source, folded_text in rows:
+            with self.subTest(source=source):
+                self.assertEqual(es.fold(source), folded_text)
+
+
+def rewrite_text(text: str) -> tuple[int, str]:
+    """Rewrite one action text in place.
+
+    Returns:
+        The number of blocks rewritten, and the file afterwards.
+
+    """
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "action.yml"
+        path.write_text(text, encoding="utf-8")
+        n = es.rewrite(path)
+        return n, path.read_text(encoding="utf-8")
+
+
+class Rewrite(unittest.TestCase):
+    """`--write` splices through the one reader and leaves folded text alone."""
+
+    def test_literal_block_is_formatted_at_its_indent(self) -> None:
+        """A `|` block comes back shfmt-formatted under the same key."""
+        n, out = rewrite_text(action("|", "if true;then echo x;fi"))
+        self.assertEqual(n, 1)
+        self.assertEqual(out, action("|", "if true; then echo x; fi"))
+
+    def test_folded_block_is_never_rewritten(self) -> None:
+        """A folded block is never handed to shfmt's rewrite."""
+        text = action(">", "if true;then echo x;fi")
+        self.assertEqual(rewrite_text(text), (0, text))
+
+    def test_indentation_indicator_keeps_its_content_column(self) -> None:
+        """`|2` content sits two past the key, and the rewrite writes it there.
+
+        The leading spaces beyond the indicator are script text, which
+        shfmt drops; reading the column from the deepest line instead
+        would have written the result back two columns too far right.
+        """
+        text = action("|2", "  if true;then echo x;fi")
+        n, out = rewrite_text(text)
+        self.assertEqual(n, 1)
+        self.assertEqual(out, action("|2", "if true; then echo x; fi"))
+
+    def test_keep_chomping_keeps_trailing_blank_lines(self) -> None:
+        """`|+` trailing blank lines are value, and survive the rewrite."""
+        text = action("|+", "if true;then echo x;fi\n\n")
+        n, out = rewrite_text(text)
+        self.assertEqual(n, 1)
+        self.assertEqual(out, action("|+", "if true; then echo x; fi\n\n"))
 
 
 class DebtFile(unittest.TestCase):
