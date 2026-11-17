@@ -6767,7 +6767,8 @@ dir = "{{cwd}}"
 # the #316 shape, where a second hardcoded --workspace drifted from the
 # first the instant a repo excluded a member. Each leg measures what its
 # language measures (statements for Go, lines for Rust, statements and
-# branches for Python, #1331); the floor is a minimum in all of them,
+# branches for Python, #1331, lines and branches for TypeScript, #1357);
+# the floor is a minimum in all of them,
 # and every leg must hold it. Which languages apply is the measurement
 # script's `probe`. The pathspec test before it is only the necessary
 # half, written where mise/gate-tools.py's derivation can read it
@@ -6776,17 +6777,17 @@ dir = "{{cwd}}"
 run = '''
 floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
 tracked_py=$(git ls-files -- '*.py') || tracked_py=""
-if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked_py} ]]; then
+if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked_py} && ! -f package.json ]]; then
   if [[ -z ${floor} ]]; then
     echo "coverage:check: no .coverage-floor, skipped"
   else
-    echo "coverage:check: no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), skipped"
+    echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), skipped"
   fi
   exit 0
 fi
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1
 if [[ -z ${applies} ]]; then
-  echo "coverage:check: no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), skipped"
+  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), skipped"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
@@ -6822,7 +6823,7 @@ dir = "{{cwd}}"
 run = '''
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
-  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), nothing to measure"
+  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), nothing to measure"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
@@ -6888,6 +6889,12 @@ fi
 if grep -qx python <<< "${applies}"; then
   "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report python > /dev/null
   echo "coverage:report: coverage.xml written"
+fi
+# TypeScript leg (#1357): the lcov vitest's own provider wrote in the
+# measured run, renamed off lcov.info, which the Rust leg below owns.
+if grep -qx typescript <<< "${applies}"; then
+  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report typescript > /dev/null
+  echo "coverage:report: lcov-typescript.info written"
 fi
 [[ -f Cargo.toml ]] || exit 0
 if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then

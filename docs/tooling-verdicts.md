@@ -31,6 +31,7 @@ honestly blocked on.
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
+| vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
@@ -2601,6 +2602,33 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   is not re-proposed: stdlib `trace` (no Codecov format, an order of
   magnitude slower, no branch coverage), and waiting for a bash tool
   before measuring anything.
+- **TypeScript coverage (#1357)** — measured with the runner the
+  repository already has, never a tool the belt pins. The `typescript`
+  leg of `mise/coverage-measure.sh` applies where a tracked root
+  `package.json`'s lockfile pins vitest, and runs that vitest from the
+  repository's `node_modules` under the coverage provider the same
+  lockfile pins (`@vitest/coverage-v8` or `-istanbul`), printing
+  `typescript <lines>` and `typescript-branches <branches>`; the floor
+  holds both. `mise/coverage-js-runner.py` reads the runner and the
+  provider from the lockfile (pnpm, npm, yarn or bun), so the version
+  is the repository's. A lockfile with vitest and no provider reds with
+  the remedy (add the provider at vitest's version), two providers red
+  rather than being chosen between, and any other runner (jest, mocha,
+  `node --test`, …) is named and skipped. The leg passes only the
+  provider, the `json-summary` and `lcov` reporters and a report
+  directory of its own; what the suite includes is the repository's
+  vitest config. One consequence, measured from vitest 4's own CLI:
+  without `coverage.include`, vitest counts only the files a test
+  loaded, so a file no test imports is invisible rather than uncovered
+  — a repository adopting the floor sets `coverage.include` over its
+  sources. The upload is the measured run's lcov, as
+  `lcov-typescript.info` (`lcov.info` is the Rust leg's). Proven on
+  monumental-archive, the org's only TypeScript, by that repository's
+  own adoption change after the release; its counts live there, not
+  here. **Rejected, so it is not re-proposed:** c8 or nyc pinned by the
+  belt beside the runner — two instrumentations of one suite, and a
+  provider version the belt would own where the repository's lockfile
+  should.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because

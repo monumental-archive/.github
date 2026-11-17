@@ -51,7 +51,8 @@ belt="$(cd "$(dirname "${BASH_SOURCE[0]}")/../mise" && pwd)"
 # same `probe` which languages apply (#1331), so the two cannot disagree.
 applies=$("${belt}/coverage-measure.sh" "release:coverage-floor" probe)
 if [[ -z ${applies} ]]; then
-  echo ".coverage-floor with no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), skipped"
+  echo ".coverage-floor with no measurable language (go.mod, Cargo.toml, tracked *.py"
+  echo "  with a test task, or package.json with vitest), skipped"
   emit "files="
   exit 0
 fi

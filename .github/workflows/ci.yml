@@ -766,6 +766,7 @@ jobs:
           .org-canon/release/caller-pins.py install \
             --input-of "the coverage badge feed" \
             --if-pinned rust --if-pinned go --if-pinned cargo-pgrx \
+            --if-pinned node --if-pinned pnpm \
             --major "postgresql-binaries=${ORG_PGRX_MAJORS}" >> "${GITHUB_OUTPUT}"
       # The tool cache's name (#1406, #1414), apart from the gate's and
       # the legs' (#1408): its own name, and the install list's digest in
@@ -907,29 +908,32 @@ jobs:
           key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-cargo-{0}-', runner.os) || '' }}
 
+      # The caller's own dependencies, from its own tracked lockfile, for the typescript leg (#1357): the report runs
+      # the repository's vitest and the provider that lockfile pins.
+      - name: Install the caller's JavaScript dependencies
+        if: ${{ hashFiles('pnpm-lock.yaml', 'package-lock.json') != '' }}
+        run: |
+          set -euo pipefail
+          if [[ -f pnpm-lock.yaml ]]; then pnpm install --frozen-lockfile; else npm ci; fi
+
       - name: Generate the report
         id: gen
         env:
           HAS_TOKEN: ${{ secrets.codecov-token != '' }}
         run: |
           set -euo pipefail
-          if [[ ! -f .coverage-floor || ${HAS_TOKEN} != "true" ]] \
-            || [[ ! -f Cargo.toml && ! -f go.mod ]]; then
+          # Which legs the tree measures is the measurement script's probe
+          # (#1331), never a manifest list copied here.
+          legs=$(.org-canon/mise/coverage-measure.sh coverage-upload probe)
+          if [[ ! -f .coverage-floor || ${HAS_TOKEN} != "true" || -z ${legs} ]]; then
             echo "skip=true" >> "${GITHUB_OUTPUT}"
-            echo "::notice::no floor or no token; badge upload skipped"
+            echo "::notice::no floor, no token or no measurable leg; badge upload skipped"
             exit 0
           fi
-          # The belt task, never a second inline invocation: it carries
-          # the repo's COVERAGE_EXCLUDE set and the llvm-tools assertion,
-          # so the badge feed and the gate ratchet cannot disagree about
-          # what is coverable (#316 — they did, and it reddened main).
+          # The belt task, never a second inline invocation (#316), and the
+          # upload list is what it WROTE, never a guess from repo shape.
           mise run coverage:report
-          # The upload list is what the task WROTE, never a guess from
-          # repo shape: a repo tracking both languages renders both
-          # reports, and the previous `hashFiles('go.mod')` selector
-          # named coverage.txt for every such repo — including the ones
-          # whose Rust-only leg had written lcov.info.
-          files=$(for f in lcov.info coverage.txt coverage.xml; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
+          files=$(for f in lcov{,-typescript}.info coverage.{txt,xml}; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
           if [[ -z ${files} ]]; then
             echo "::error::coverage:report wrote no report — nothing to upload"
             exit 1

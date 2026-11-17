@@ -21,7 +21,10 @@
 # `*.py` plus a `test` task (python, #1331). Python carries no manifest
 # that says "there is a suite", so the repository's own `test` task is
 # that statement — a tree that tracks a helper script and tests nothing
-# has no corpus to hold a floor over. The `probe` selector prints the
+# has no corpus to hold a floor over. A tracked root `package.json`
+# whose lockfile pins vitest measures the typescript leg (#1357); any
+# other runner is named and skipped, never guessed at. The `probe`
+# selector prints the
 # leg names that apply, one per line, without measuring anything: it is
 # how the `coverage:*` tasks and the release path decide applicability,
 # so "which languages does this tree measure" has one answer here rather
@@ -40,13 +43,13 @@ label="${1:-coverage:measure}"
 # renders its own Rust lcov — a format this script does not produce — so
 # it asks for `go` rather than paying for a second Rust test run (#707);
 # it asks for `python` to have the Cobertura report written beside the
-# number. Default `all`: every caller that reads the percentages wants
+# number, and `typescript` for the lcov beside its number. Default `all`: every caller that reads the percentages wants
 # them all, because the floor is a minimum every leg must hold.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | python | probe) ;;
+  all | go | rust | python | typescript | probe) ;;
   *)
-    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, python or probe" >&2
+    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, python, typescript or probe" >&2
     exit 1
     ;;
 esac
@@ -62,10 +65,27 @@ if [[ -n ${tracked_py} ]]; then
   python_test=$(mise tasks info test --json 2> /dev/null) || python_test=""
 fi
 
+# The JavaScript runner and its coverage provider, read from the root
+# package.json and its lockfile (#1357): `vitest <provider>`,
+# `unsupported <runner>`, or nothing.
+tracked_js=$(git ls-files -- package.json pnpm-lock.yaml package-lock.json yarn.lock bun.lock 2> /dev/null) || tracked_js=""
+ts_runner=""
+if [[ -n ${tracked_js} ]]; then
+  # shellcheck disable=SC2086  # one argument per tracked path; none has a space
+  ts_runner=$(python3 "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" ${tracked_js}) || exit 1
+fi
+
 if [[ ${legs} == probe ]]; then
   [[ -f go.mod ]] && echo go
   [[ -f Cargo.toml ]] && echo rust
   [[ -n ${python_test} ]] && echo python
+  case "${ts_runner}" in
+    vitest\ *) echo typescript ;;
+    unsupported\ *)
+      echo "${label}: typescript: ${ts_runner#unsupported } is not a runner the leg supports (vitest), skipped" >&2
+      ;;
+    *) ;;
+  esac
   exit 0
 fi
 
@@ -250,5 +270,67 @@ EOF
   fi
   echo "python ${py_pct}"
   echo "python-branches ${br_pct}"
+fi
+
+if [[ ${ts_runner} == vitest\ * && ${legs} =~ ^(all|typescript)$ ]]; then
+  # The repository's own runner under its own coverage provider (#1357):
+  # vitest from the repository's node_modules, the provider its lockfile
+  # pins. The belt pins neither, and adds no second instrumentation.
+  provider=${ts_runner#vitest }
+  case "${provider}" in
+    none)
+      echo "${label}: vitest runs the suite but the lockfile pins no coverage provider —" >&2
+      echo "  add @vitest/coverage-v8 to devDependencies at vitest's own version" >&2
+      echo "  (the belt pins no provider: the repository's lockfile owns it, #1357)" >&2
+      exit 1
+      ;;
+    both)
+      echo "${label}: the lockfile pins both @vitest/coverage-v8 and @vitest/coverage-istanbul —" >&2
+      echo "  the leg does not choose between them; keep the one the suite uses" >&2
+      exit 1
+      ;;
+    *) ;;
+  esac
+  vitest=node_modules/.bin/vitest
+  if [[ ! -x ${vitest} ]]; then
+    echo "${label}: vitest is in the lockfile but not installed — install from the" >&2
+    echo "  tracked lockfile before measuring" >&2
+    exit 1
+  fi
+  ts_work=$(mktemp -d)
+  rc=0
+  # Completion-guarded (#1233), and clearing the python leg's directory
+  # too, since this trap replaces that one.
+  trap 'rc=$?; rm -rf "${work:-}" "${ts_work}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
+  # The repository's own vitest config decides what is in the suite and
+  # in the report (`coverage.include`: vitest counts only files a test
+  # loaded unless it is set). The leg sets only what makes the number
+  # readable here: the provider, the two reporters, and a directory of
+  # its own, so nothing lands in the tree unasked.
+  if ! "${vitest}" run \
+    --coverage.enabled=true \
+    --coverage.provider="${provider}" \
+    --coverage.reporter=json-summary \
+    --coverage.reporter=lcov \
+    --coverage.reportsDirectory="${ts_work}" >&2; then
+    echo "${label}: the vitest suite failed under measurement — a suite that" >&2
+    echo "  does not pass cannot measure a floor" >&2
+    exit 1
+  fi
+  ts_pct=$(jq -r '.total.lines.pct // empty' "${ts_work}/coverage-summary.json" 2> /dev/null) || ts_pct=""
+  ts_br=$(jq -r '.total.branches.pct // empty' "${ts_work}/coverage-summary.json" 2> /dev/null) || ts_br=""
+  # A total over nothing reads "Unknown", not a number.
+  if [[ ! ${ts_pct} =~ ^[0-9.]+$ || ! ${ts_br} =~ ^[0-9.]+$ ]]; then
+    echo "${label}: could not read a total from the vitest report — a" >&2
+    echo "  measurement that reads nothing must not become a floor" >&2
+    exit 1
+  fi
+  # The upload is this run's own lcov (#707's law). A name of its own:
+  # lcov.info is the Rust leg's.
+  if [[ ${legs} == typescript ]]; then
+    cp "${ts_work}/lcov.info" lcov-typescript.info
+  fi
+  echo "typescript ${ts_pct}"
+  echo "typescript-branches ${ts_br}"
 fi
 org_done=1
