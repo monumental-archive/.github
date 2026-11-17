@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.7](https://github.com/monumental-archive/.github/compare/v1.68.6...v1.68.7) - 2026-11-17
+
+### Fixed
+
+- hold workflow run: blocks to a 15-line ceiling ([#1399](https://github.com/monumental-archive/.github/pull/1399))
+
 ## [1.68.6](https://github.com/monumental-archive/.github/compare/v1.68.5...v1.68.6) - 2026-11-17
 
 ### Fixed
