@@ -204,7 +204,8 @@ class Zenodo:
 
     vocab: frozenset[str] = VOCAB
     vocab_status: int | None = None
-    titles: list[dict] = field(default_factory=list)
+    titles: object = field(default_factory=list)
+    title_pages: list[object] | None = None
     drafts: list[dict] = field(default_factory=list)
     latest: dict[str, dict] = field(default_factory=dict)
     redirect: bool = False
@@ -241,6 +242,27 @@ class Zenodo:
             },
         }
 
+    def title_page(self, query: str) -> tuple[int, object, dict[str, str]]:
+        """Answer one page of the title listing.
+
+        Without `title_pages`, every page answers `titles`, as the stub
+        always did. With it, page N answers entry N-1 (a body, or an int
+        status), and pages past the list answer `[]`.
+
+        Returns:
+            (status, JSON body, headers).
+
+        """
+        if self.title_pages is None:
+            return 200, self.live(self.titles), {}
+        page = int(dict(kv.split("=", 1) for kv in query.split("&"))["page"])
+        if page > len(self.title_pages):
+            return 200, [], {}
+        got = self.title_pages[page - 1]
+        if isinstance(got, int):
+            return got, {"status": got}, {}
+        return 200, self.live(got), {}
+
     def live(self, body: object) -> object:
         """Point a recorded body's zenodo.org links at the fake.
 
@@ -269,7 +291,7 @@ class Zenodo:
             return (200, {"id": base.rsplit("/", 1)[1]}, {}) if ok else (404, {}, {})
         if method == "GET" and base == "/api/deposit/depositions":
             if "status=draft" not in query:
-                return 200, self.live(self.titles), {}
+                return self.title_page(query)
             return 200, self.live(self.drafts), {}
         if method == "POST" and path == "/api/deposit/depositions":
             if self.create_body is not None:
@@ -1202,7 +1224,7 @@ class FirstMintGuards(unittest.TestCase):
         (listing,) = run.made("GET", f"{DEP}?")
         self.assertEqual(
             run.requests[listing][1],
-            f"{ORIGIN}{DEP}?q=title:%22.github%22&size=10",
+            f"{ORIGIN}{DEP}?q=title:%22.github%22&size=10&page=1",
         )
 
     def test_the_captured_empty_title_answer_lets_the_mint_proceed(self) -> None:
@@ -1219,6 +1241,49 @@ class FirstMintGuards(unittest.TestCase):
                          version="1.68.5", repo=CANON_REPO)  # fmt: skip
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn("**First mint**", run.summary)
+
+    def test_a_title_on_a_later_page_refuses(self) -> None:
+        """Page 1 full of unsubmitted drafts, the minted title on page 2."""
+        (draft,) = captured("drafts-during")
+        z = first_mint_zenodo([])
+        z.title_pages = [[draft] * MINT.LISTING_PAGE, captured("drafts-before")]
+        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::a submitted deposition already bears this title", run.stdout
+        )
+        self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 2)
+        self.assertEqual(run.writes(), [])
+
+    def test_a_listing_page_that_cannot_be_read_refuses(self) -> None:
+        """Page 2 answers 503 on every try: refused, nothing created."""
+        (draft,) = captured("drafts-during")
+        z = first_mint_zenodo([])
+        z.title_pages = [[draft] * MINT.LISTING_PAGE, 503]
+        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::the deposition listing (q=title:%22.github%22) could not be"
+            f" read to its end ({MINT.LISTING_PAGE} entries read) — a first mint"
+            " is never checked against part of it",
+            run.stdout,
+        )
+        self.assertEqual(run.writes(), [])
+
+    def test_a_listing_still_full_at_the_page_bound_refuses(self) -> None:
+        """Full pages to the bound: the bound refuses, never passes."""
+        (draft,) = captured("drafts-during")
+        z = first_mint_zenodo([])
+        z.title_pages = [[draft] * MINT.LISTING_PAGE] * 3
+        with mock.patch.object(MINT, "LISTING_MAX_PAGES", 3):
+            run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            f"could not be read to its end ({3 * MINT.LISTING_PAGE} entries read)",
+            run.stdout,
+        )
+        self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 3)
+        self.assertEqual(run.writes(), [])
 
     def test_a_vocabulary_answering_500_refuses_as_unchecked(self) -> None:
         """A 500 is retried as transient, then refused; no deposit."""
