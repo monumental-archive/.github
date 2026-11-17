@@ -34,9 +34,33 @@ Zenodo, public reads with no token, captured 2026-11-17:
   in the InvenioRDM shape: published, rights `[mit, apache-2.0]`.
 
 The fake answers the concept's `versions/latest` with that measured
-301. The authenticated write side (the deposition listings, newversion,
-the draft deposition and the publish answer) is not recorded: those
-routes keep the shapes of #1246's stub, the same the first 23 rows use.
+301.
+
+THE WRITE SIDE is captured too, `testdata/zenodo-capture-*.json`: run
+44121466994 on this repository, 2026-11-17, a throwaway branch workflow
+holding the org's ZENODO_TOKEN that opened a new-version draft of the
+canon's concept and deleted it, never publishing. Bodies are as logged,
+re-indented by jq, otherwise unedited:
+
+- `titles` (C1): `GET /api/deposit/depositions?q=title:%22.github%22
+  &size=10`, answered `[]`.
+- `drafts-before` (C2, and C10 after the delete, byte-identical):
+  `GET ?q=conceptrecid:21913604&status=draft&size=50`, listing the
+  PUBLISHED v1.68.4 (`submitted: true`) despite `status=draft`.
+- `newversion` (C3, 201; C4, the `links.latest_draft` read, was
+  byte-identical): draft 24318079, unsubmitted, carrying v1.68.4's
+  tarball as its one file.
+- `drafts-during` (C5): the same listing with the draft open.
+- `draft-after-file-delete` (C7, after C6's `DELETE .../files/<id>`
+  answered 204): the draft with no files.
+- `draft-gone` (C9, after C8's `DELETE` of the draft answered 204): 404.
+
+The fake serves captured bodies with `https://zenodo.org` rewritten to
+its own origin, so the helper follows their links to it. ONE ANSWER IS
+NOT CAPTURED: the publish response, which cannot be taken without
+minting. It keeps the one shape the helper reads (`doi`, `conceptdoi`)
+and is proven only by the canon's next release. The first-mint create
+POST was not called either; it answers the captured draft deposition.
 
 `testdata/zenodo-rdm-draft.json` is the body production Zenodo answered
 to `GET /api/records/24249135/draft` with the InvenioRDM media type,
@@ -77,6 +101,7 @@ CANON_LATEST = TESTDATA / "zenodo-canon-latest.json"
 CANON_RDM = TESTDATA / "zenodo-canon-record-rdm.json"
 EDTF_LATEST = TESTDATA / "zenodo-edtf-latest.json"
 EDTF_RDM = TESTDATA / "zenodo-edtf-record-rdm.json"
+CAPTURE = TESTDATA / "zenodo-capture-{}.json"
 RDM = "application/vnd.inveniordm.v1+json"
 VOCAB = frozenset({"mit", "apache-2.0", "0bsd", "gpl-2.0-only"})
 ORIGIN = "https://zenodo.org"
@@ -189,6 +214,10 @@ class Zenodo:
     deposition: str = "101"
     published_record: dict | None = None
     appear_after: int = 0
+    create_body: object = None
+    newversion_body: object = None
+    draft_body: object = None
+    publish_body: dict | None = None
     stale: dict = field(default_factory=dict)
     log: list[tuple[str, str, str]] = field(default_factory=list)
     bodies: list[bytes] = field(default_factory=list)
@@ -212,6 +241,16 @@ class Zenodo:
             },
         }
 
+    def live(self, body: object) -> object:
+        """Point a recorded body's zenodo.org links at the fake.
+
+        Returns:
+            The body, every production origin replaced by the fake's.
+
+        """
+        text = json.dumps(body).replace("@BASE@", self.base)
+        return json.loads(text.replace(ORIGIN, self.base))
+
     def route(  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches] - one table of routes
         self, method: str, path: str, accept: str, body: bytes
     ) -> tuple[int, object, dict[str, str]] | None:
@@ -230,22 +269,24 @@ class Zenodo:
             return (200, {"id": base.rsplit("/", 1)[1]}, {}) if ok else (404, {}, {})
         if method == "GET" and base == "/api/deposit/depositions":
             if "status=draft" not in query:
-                return 200, self.titles, {}
-            return (
-                200,
-                json.loads(json.dumps(self.drafts).replace("@BASE@", self.base)),
-                {},
-            )
+                return 200, self.live(self.titles), {}
+            return 200, self.live(self.drafts), {}
         if method == "POST" and path == "/api/deposit/depositions":
+            if self.create_body is not None:
+                return 201, self.live(self.create_body), {}
             return 200, self.deposit(self.deposition), {}
         if method == "DELETE" and base.startswith("/api/deposit/depositions/"):
             return 204, None, {}
         if method == "POST" and base.endswith("/actions/newversion"):
+            if self.newversion_body is not None:
+                return 201, self.live(self.newversion_body), {}
             draft = f"{self.base}{dep}"
             return 200, {"links": {"latest_draft": draft}}, {}
         if method == "GET" and path == dep:
+            if self.draft_body is not None:
+                return 200, self.live(self.draft_body), {}
             return 200, self.deposit(self.deposition), {}
-        if method == "PUT" and (base.startswith("/api/files/b/") or path == dep):
+        if method == "PUT" and (base.startswith("/api/files/") or path == dep):
             return 200, {}, {}
         if path == f"/api/records/{self.deposition}/draft":
             if method == "GET" and accept == RDM:
@@ -261,6 +302,11 @@ class Zenodo:
             self.land()
             if self.publish == "drop":
                 return None
+            if self.publish_body is not None:
+                # NOT CAPTURED: a publish cannot be taken without minting.
+                # The one shape the helper reads; the canon's next release
+                # is its proof (#1365).
+                return 202, self.publish_body, {}
             return (
                 200,
                 {
@@ -763,55 +809,91 @@ class Refusals(unittest.TestCase):
 EDTF_CONCEPT = "24268583"
 EDTF_PREV = "24268584"
 CANON_CONCEPT = "21913604"
-NEW = "24300000"
+CANON_PREV = "24269508"
+CANON_DRAFT = "24318079"
+INHERITED = "4f7761b5-0cc0-4d68-98ad-f38fd53f0084"
+BUCKET = "/api/files/2df85c4a-73c4-4dd0-8201-406824a6284b"
+CANON_REPO = "monumental-archive/.github"
+DEP = "/api/deposit/depositions"
 
 
-def edtf_zenodo(**kw: object) -> Zenodo:
-    """Serve edtf's concept as production answered it, redirect and all.
+def captured(name: str) -> object:
+    """Read one body run 44121466994 captured.
 
-    Its latest published version is the recorded v1.3.5 record; the
-    next version's deposition is `NEW`. Once published, `NEW` reads as
-    the recorded record re-keyed to the new id and version - the only
-    field the oracle compares - with the recorded InvenioRDM read-back.
+    Returns:
+        The parsed body.
+
+    """
+    return recorded(Path(str(CAPTURE).format(name)))
+
+
+def canon_zenodo(**kw: object) -> Zenodo:
+    """Serve the canon's concept from the recorded and captured answers.
+
+    Every answer is production's except the publish response, which no
+    capture can take without minting: it keeps the one shape the helper
+    reads (`doi`, `conceptdoi`), and is proven only by the canon's next
+    release. Once published, the new record reads as the recorded
+    v1.68.4 record re-keyed to the draft's id and version - the only
+    fields the oracle compares.
 
     Returns:
         The fake's answers.
 
     """
-    prev = recorded(EDTF_LATEST)
+    prev = recorded(CANON_LATEST)
     nxt = copy.deepcopy(prev)
-    nxt.update(id=int(NEW), recid=NEW, doi=f"10.5281/zenodo.{NEW}")
-    nxt["metadata"]["version"] = "1.3.6"
-    rdm = recorded(EDTF_RDM)
+    nxt.update(id=int(CANON_DRAFT), recid=CANON_DRAFT)
+    nxt["doi"] = f"10.5281/zenodo.{CANON_DRAFT}"
+    nxt["metadata"]["version"] = "1.68.5"
     z = Zenodo(
-        latest={EDTF_CONCEPT: prev},
+        latest={CANON_CONCEPT: prev},
         redirect=True,
-        records={
-            EDTF_PREV: rdm,
-            NEW: rdm,
-            f"plain/{EDTF_PREV}": prev,
-            f"plain/{NEW}": nxt,
-        },
-        deposition=NEW,
+        records={f"plain/{CANON_PREV}": prev, f"plain/{CANON_DRAFT}": nxt},
+        drafts=captured("drafts-before"),
+        newversion_body=captured("newversion"),
+        draft_body=captured("newversion"),
+        deposition=CANON_DRAFT,
         published_record=nxt,
+        publish_body={
+            "doi": f"10.5281/zenodo.{CANON_DRAFT}",
+            "conceptdoi": f"10.5281/zenodo.{CANON_CONCEPT}",
+        },
     )
     for k, v in kw.items():
         setattr(z, k, v)
     return z
 
 
-def edtf_run(z: Zenodo, version: str = "1.3.6") -> Run:
-    """Run edtf's release of `version` against `z`.
+def canon_run(z: Zenodo, licence: str = "0BSD", version: str = "1.68.5") -> Run:
+    """Run the canon's release of `version` against `z`.
 
     Returns:
         The run.
 
     """
     return run_helper(
-        "MIT OR Apache-2.0",
-        concept=f"10.5281/zenodo.{EDTF_CONCEPT}",
+        licence,
+        concept=f"10.5281/zenodo.{CANON_CONCEPT}",
         zenodo=z,
         version=version,
+        repo=CANON_REPO,
+    )
+
+
+def edtf_zenodo() -> Zenodo:
+    """Serve edtf's concept as production answered it, redirect and all.
+
+    Returns:
+        The fake's answers: the recorded v1.3.5 record and its
+        InvenioRDM read-back.
+
+    """
+    prev = recorded(EDTF_LATEST)
+    return Zenodo(
+        latest={EDTF_CONCEPT: prev},
+        redirect=True,
+        records={EDTF_PREV: recorded(EDTF_RDM), f"plain/{EDTF_PREV}": prev},
     )
 
 
@@ -840,38 +922,65 @@ class TheRecordedResponses(unittest.TestCase):
             [r["id"] for r in rdm["metadata"]["rights"]], ["mit", "apache-2.0"]
         )
 
+    def test_newversion_answers_an_unsubmitted_draft_with_the_old_file(
+        self,
+    ) -> None:
+        """C3: a draft of the concept, carrying v1.68.4's tarball."""
+        draft = captured("newversion")
+        self.assertIsInstance(draft, dict)
+        assert isinstance(draft, dict)  # ruff: ignore[assert] - narrows the type
+        self.assertEqual(str(draft["id"]), CANON_DRAFT)
+        self.assertEqual(draft["conceptrecid"], CANON_CONCEPT)
+        self.assertFalse(draft["submitted"])
+        self.assertEqual(draft["links"]["latest_draft"], f"{ORIGIN}{DEP}/{CANON_DRAFT}")
+        self.assertEqual(
+            [(f["id"], f["filename"]) for f in draft["files"]],
+            [(INHERITED, ".github-1.68.4.tar.gz")],
+        )
+
+    def test_the_draft_listing_answers_the_published_record_too(self) -> None:
+        """C2: `status=draft` also lists the published v1.68.4."""
+        (rec,) = captured("drafts-before")
+        self.assertTrue(rec["submitted"])
+        self.assertEqual(str(rec["id"]), CANON_PREV)
+        (draft,) = captured("drafts-during")
+        self.assertFalse(draft["submitted"])
+        self.assertEqual(str(draft["id"]), CANON_DRAFT)
+
+    def test_the_deleted_draft_is_gone(self) -> None:
+        """C9: after the DELETE, the draft reads as a missing identifier."""
+        self.assertEqual(
+            captured("draft-gone"),
+            {"status": 404, "message": "The persistent identifier does not exist."},
+        )
+        self.assertEqual(captured("draft-after-file-delete")["files"], [])
+
 
 class AlreadyPublished(unittest.TestCase):
     """#484: a rerun over a published version converges, writing nothing."""
 
     def test_the_canon_converges_on_its_recorded_record(self) -> None:
         """The canon's own concept at v1.68.4: green, no write, no read-back."""
-        z = Zenodo(
-            latest={CANON_CONCEPT: recorded(CANON_LATEST)},
-            redirect=True,
-            records={"plain/24269508": recorded(CANON_LATEST)},
-        )
-        run = run_helper(
-            "0BSD",
-            concept=f"10.5281/zenodo.{CANON_CONCEPT}",
-            zenodo=z,
-            version="1.68.4",
-            repo="monumental-archive/.github",
-        )
+        run = canon_run(canon_zenodo(), version="1.68.4")
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn(
-            "::notice::DOI 10.5281/zenodo.24269508 (concept"
+            f"::notice::DOI 10.5281/zenodo.{CANON_PREV} (concept"
             f" 10.5281/zenodo.{CANON_CONCEPT})",
             run.stdout,
         )
         self.assertIn("**Already published**", run.summary)
         self.assertEqual(run.writes(), [])
-        self.assertEqual(run.published_reads("24269508"), [run.requests[-1]])
+        self.assertEqual(run.published_reads(CANON_PREV), [run.requests[-1]])
         self.assertEqual(run.requests[-1][2], "")
 
     def test_edtf_converges_after_verifying_both_licences(self) -> None:
         """Edtf at v1.3.5: green, its record's licences read, no write."""
-        run = edtf_run(edtf_zenodo(), version="1.3.5")
+        run = run_helper(
+            "MIT OR Apache-2.0",
+            concept=f"10.5281/zenodo.{EDTF_CONCEPT}",
+            zenodo=edtf_zenodo(),
+            version="1.3.5",
+        )
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn(f"::notice::DOI 10.5281/zenodo.{EDTF_PREV}", run.stdout)
         self.assertIn("this run converged on it (#484)", run.summary)
@@ -880,85 +989,146 @@ class AlreadyPublished(unittest.TestCase):
 
 
 class ALaterMint(unittest.TestCase):
-    """edtf v1.3.6 grows a new version from the recorded v1.3.5."""
+    """The canon's v1.68.5 grows from v1.68.4 on the captured answers."""
 
     run_: Run
 
     @classmethod
     def setUpClass(cls) -> None:
         """Run the helper once for every row of the class."""
-        cls.run_ = edtf_run(edtf_zenodo())
+        cls.run_ = canon_run(canon_zenodo())
 
     def test_it_publishes_the_new_version(self) -> None:
         """Green, with the new version's DOI and no first-mint instruction."""
         self.assertEqual(self.run_.returncode, 0, self.run_.stdout)
-        self.assertIn(f"::notice::DOI 10.5281/zenodo.{NEW}", self.run_.stdout)
+        self.assertIn(f"::notice::DOI 10.5281/zenodo.{CANON_DRAFT}", self.run_.stdout)
         self.assertNotIn("First mint", self.run_.summary)
 
     def test_the_concept_is_resolved_through_the_redirect_without_a_token(
         self,
     ) -> None:
         """The oracle follows the measured 301 as a public read."""
-        latest = f"{ORIGIN}/api/records/{EDTF_CONCEPT}/versions/latest"
+        latest = f"{ORIGIN}/api/records/{CANON_CONCEPT}/versions/latest"
         first = [r[1] for r in self.run_.requests].index(latest)
         self.assertEqual(
             self.run_.requests[first + 1],
-            ("GET", f"{ORIGIN}/api/records/{EDTF_PREV}", ""),
+            ("GET", f"{ORIGIN}/api/records/{CANON_PREV}", ""),
         )
 
     def test_newversion_grows_from_the_latest_and_no_title_search(self) -> None:
         """Newversion is asked of the resolved record; no title guard runs."""
-        path = f"/api/deposit/depositions/{EDTF_PREV}/actions/newversion"
+        path = f"{DEP}/{CANON_PREV}/actions/newversion"
         self.assertEqual(len(self.run_.made("POST", path)), 1)
-        self.assertEqual(self.run_.made("GET", "/api/deposit/depositions?q=title"), [])
-        create = ("POST", f"{ORIGIN}/api/deposit/depositions", "")
-        self.assertNotIn(create, self.run_.requests)
+        self.assertEqual(self.run_.made("GET", f"{DEP}?q=title"), [])
+        self.assertNotIn(("POST", f"{ORIGIN}{DEP}", ""), self.run_.requests)
+
+    def test_the_draft_is_read_from_latest_draft(self) -> None:
+        """The deposition read is the URL newversion answered."""
+        (newv,) = self.run_.made("POST", f"{DEP}/{CANON_PREV}/actions/newversion")
+        self.assertEqual(
+            self.run_.requests[newv + 1], ("GET", f"{ORIGIN}{DEP}/{CANON_DRAFT}", "")
+        )
+
+    def test_the_inherited_file_is_deleted_before_the_upload(self) -> None:
+        """v1.68.4's tarball goes, by its captured id, before the new one."""
+        (gone,) = self.run_.made("DELETE", f"{DEP}/{CANON_DRAFT}/files/{INHERITED}")
+        (put,) = self.run_.made("PUT", f"{BUCKET}/.github-1.68.5.tar.gz")
+        self.assertLess(gone, put)
+        self.assertEqual(
+            [r for r in self.run_.requests if r[0] == "DELETE"],
+            [self.run_.requests[gone]],
+        )
 
     def test_the_new_draft_carries_this_release(self) -> None:
-        """The tarball and metadata go to the new deposition, then publish."""
-        (put,) = self.run_.made("PUT", "/api/files/b/edtf-1.3.6.tar.gz")
+        """The tarball and metadata go to the captured draft, then publish."""
+        (put,) = self.run_.made("PUT", f"{BUCKET}/.github-1.68.5.tar.gz")
         self.assertEqual(self.run_.bodies[put], "tarball")
-        meta = self.run_.legacy_metadata(NEW)
-        self.assertEqual(meta["version"], "1.3.6")
-        self.assertEqual(meta["creators"], [{"name": "Allen, Carl"}])
+        meta = self.run_.legacy_metadata(CANON_DRAFT)
+        self.assertEqual(meta["version"], "1.68.5")
+        self.assertEqual(meta["license"], "0bsd")
         self.assertEqual(
-            meta["description"],
-            f"Release v1.3.6 of monumental-archive/edtf. {PIPELINE} {SENTENCE}",
+            meta["description"], f"Release v1.68.5 of {CANON_REPO}. {PIPELINE}"
         )
-        (publish,) = self.run_.made(
-            "POST", f"/api/deposit/depositions/{NEW}/actions/publish"
-        )
+        (publish,) = self.run_.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
         self.assertGreater(publish, put)
+
+    def test_the_creator_is_family_comma_given(self) -> None:
+        """The one deliberate difference from the bash (#1365).
+
+        The bash's sed kept the whitespace before `given-names`, sending
+        `Allen<TAB>    , Carl`; Zenodo normalised it to `Allen, Carl` on
+        the record. The helper sends what the record states.
+        """
+        meta = self.run_.legacy_metadata(CANON_DRAFT)
+        self.assertEqual(meta["creators"], [{"name": "Allen, Carl"}])
+
+    def test_two_licences_go_on_the_new_draft(self) -> None:
+        """A later mint with two ids sets the rights on the captured draft."""
+        z = canon_zenodo(
+            records={
+                f"plain/{CANON_PREV}": recorded(CANON_LATEST),
+                CANON_DRAFT: recorded(EDTF_RDM),
+            }
+        )
+        z.records[f"plain/{CANON_DRAFT}"] = z.published_record
+        run = canon_run(z, licence="MIT OR Apache-2.0")
+        self.assertEqual(run.returncode, 0, run.stdout)
+        (put,) = run.made("PUT", f"/api/records/{CANON_DRAFT}/draft")
+        (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
+        self.assertLess(put, publish)
+        sent = json.loads(run.bodies[put])
+        both = [{"id": "mit"}, {"id": "apache-2.0"}]
+        self.assertEqual(sent["metadata"]["rights"], both)
 
 
 class StaleDrafts(unittest.TestCase):
-    """An interrupted run's draft under the concept is deleted, nothing else."""
+    """Only an unsubmitted draft under the concept is deleted (C2, C5)."""
 
-    def test_only_unsubmitted_drafts_of_this_concept_are_deleted(self) -> None:
-        """One stale draft goes; a published one and another concept's stay."""
-        dep = "/api/deposit/depositions"
-        drafts = [
-            {"submitted": False, "conceptrecid": EDTF_CONCEPT,
-             "links": {"self": f"@BASE@{dep}/24299990"}},
-            {"submitted": True, "conceptrecid": EDTF_CONCEPT,
-             "links": {"self": f"@BASE@{dep}/{EDTF_PREV}"}},
-            {"submitted": False, "conceptrecid": "999",
-             "links": {"self": f"@BASE@{dep}/24299991"}},
-            {"conceptrecid": EDTF_CONCEPT,
-             "links": {"self": f"@BASE@{dep}/24299992"}},
-        ]  # fmt: skip
-        z = edtf_zenodo(drafts=drafts)
-        run = edtf_run(z)
+    def test_the_published_record_in_the_draft_listing_is_kept(self) -> None:
+        """C2 as captured lists v1.68.4 itself: nothing but the old file goes."""
+        run = canon_run(canon_zenodo())
         self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertNotIn("deleting stale", run.stdout)
         deleted = [r[1] for r in run.requests if r[0] == "DELETE"]
-        self.assertEqual(deleted, [f"{ORIGIN}{dep}/24299990"])
+        self.assertEqual(deleted, [f"{ORIGIN}{DEP}/{CANON_DRAFT}/files/{INHERITED}"])
+
+    def test_a_stale_draft_is_deleted_before_newversion(self) -> None:
+        """C5 as captured holds an interrupted run's draft: it goes first.
+
+        The captured newversion then answers the same id again; the fake
+        does not model Zenodo minting a fresh one.
+        """
+        z = canon_zenodo(drafts=captured("drafts-during"))
+        run = canon_run(z)
+        self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn(
-            f"::notice::deleting stale unpublished draft {z.base}{dep}/24299990"
+            f"::notice::deleting stale unpublished draft {z.base}{DEP}/{CANON_DRAFT}"
             " left by an interrupted run",
             run.stdout,
         )
-        (newv,) = run.made("POST", f"{dep}/{EDTF_PREV}/actions/newversion")
-        self.assertLess(run.made("DELETE", dep)[0], newv)
+        (stale,) = [
+            i for i, r in enumerate(run.requests)
+            if r[:2] == ("DELETE", f"{ORIGIN}{DEP}/{CANON_DRAFT}")
+        ]  # fmt: skip
+        (newv,) = run.made("POST", f"{DEP}/{CANON_PREV}/actions/newversion")
+        self.assertLess(stale, newv)
+
+    def test_both_together_delete_only_the_draft(self) -> None:
+        """C2 and C5 in one listing: the published record is never touched."""
+        z = canon_zenodo(
+            drafts=[*captured("drafts-before"), *captured("drafts-during")]
+        )
+        run = canon_run(z)
+        self.assertEqual(run.returncode, 0, run.stdout)
+        deleted = [r[1] for r in run.requests if r[0] == "DELETE"]
+        self.assertEqual(
+            deleted,
+            [
+                f"{ORIGIN}{DEP}/{CANON_DRAFT}",
+                f"{ORIGIN}{DEP}/{CANON_DRAFT}/files/{INHERITED}",
+            ],
+        )
+        self.assertFalse([u for u in deleted if CANON_PREV in u])
 
 
 class LostPublishResponse(unittest.TestCase):
@@ -966,45 +1136,61 @@ class LostPublishResponse(unittest.TestCase):
 
     def test_a_lost_response_over_a_landed_publish_is_recovered(self) -> None:
         """The connection drops, the record landed: green, 20 s spacing."""
-        z = edtf_zenodo(publish="drop", appear_after=1)
-        run = edtf_run(z)
+        run = canon_run(canon_zenodo(publish="drop", appear_after=1))
         self.assertEqual(run.returncode, 0, run.stdout)
-        self.assertIn(f"::notice::DOI 10.5281/zenodo.{NEW}", run.stdout)
+        self.assertIn(f"::notice::DOI 10.5281/zenodo.{CANON_DRAFT}", run.stdout)
         self.assertIn("**Published despite a lost response**", run.summary)
         self.assertEqual(run.pauses, [20])
-        (publish,) = run.made("POST", f"/api/deposit/depositions/{NEW}/actions/publish")
-        latest = run.made("GET", f"/api/records/{EDTF_CONCEPT}/versions/latest")
+        (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
+        latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
         self.assertEqual(len([i for i in latest if i > publish]), 2)
-        self.assertIn(("GET", f"{ORIGIN}/api/records/{NEW}", RDM), run.requests)
 
     def test_a_failed_publish_that_never_lands_is_red(self) -> None:
         """Nothing published: three reads, 20 s apart, then red by name."""
-        run = edtf_run(edtf_zenodo(publish="fail"))
+        run = canon_run(canon_zenodo(publish="fail"))
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
             "::error::publish failed and the concept's latest published version"
-            " is not 1.3.6",
+            " is not 1.68.5",
             run.stdout,
         )
         self.assertNotIn("::notice::DOI", run.stdout)
         self.assertEqual(run.pauses, [20, 20])
-        (publish,) = run.made("POST", f"/api/deposit/depositions/{NEW}/actions/publish")
-        latest = run.made("GET", f"/api/records/{EDTF_CONCEPT}/versions/latest")
+        (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
+        latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
         self.assertEqual(len([i for i in latest if i > publish]), 3)
+
+
+def first_mint_zenodo(titles: object) -> Zenodo:
+    """Serve a first mint of the canon, the title query answering `titles`.
+
+    The create POST was not part of the capture; it answers the captured
+    draft deposition (C3), a real unsubmitted deposition of this title.
+
+    Returns:
+        The fake's answers.
+
+    """
+    return canon_zenodo(
+        latest={},
+        titles=titles,
+        create_body=captured("newversion"),
+        publish_body={"doi": f"10.5281/zenodo.{CANON_DRAFT}"},
+    )
 
 
 class FirstMintGuards(unittest.TestCase):
     """The refusals before any deposit exists."""
 
     def test_a_submitted_deposition_bearing_the_title_refuses(self) -> None:
-        """First mint over an unrecorded concept: red, nothing created."""
-        z = stub_zenodo("both", None)
-        z.titles = [
-            {"title": "monumental-archive/edtf-extra", "submitted": True},
-            {"title": "monumental-archive/edtf", "submitted": False},
-            {"title": "monumental-archive/edtf", "submitted": True},
-        ]
-        run = run_helper("0BSD", zenodo=z)
+        """A real listing holding the published canon: red, nothing created.
+
+        The listing is C2, a captured deposition listing whose one entry is
+        the submitted `monumental-archive/.github`. Production answered the
+        title query itself with C1, `[]` (next row).
+        """
+        run = run_helper("0BSD", zenodo=first_mint_zenodo(captured("drafts-before")),
+                         version="1.68.5", repo=CANON_REPO)  # fmt: skip
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
             "::error::a submitted deposition already bears this title but"
@@ -1013,17 +1199,24 @@ class FirstMintGuards(unittest.TestCase):
             run.stdout,
         )
         self.assertEqual(run.writes(), [])
-        (listing,) = run.made("GET", "/api/deposit/depositions?")
+        (listing,) = run.made("GET", f"{DEP}?")
         self.assertEqual(
             run.requests[listing][1],
-            f"{ORIGIN}/api/deposit/depositions?q=title:%22edtf%22&size=10",
+            f"{ORIGIN}{DEP}?q=title:%22.github%22&size=10",
         )
 
+    def test_the_captured_empty_title_answer_lets_the_mint_proceed(self) -> None:
+        """C1, `[]` as production answered: no submitted title, a first mint."""
+        run = run_helper("0BSD", zenodo=first_mint_zenodo(captured("titles")),
+                         version="1.68.5", repo=CANON_REPO)  # fmt: skip
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("**First mint**", run.summary)
+        self.assertEqual(len(run.made("POST", DEP)), 2)
+
     def test_an_unsubmitted_title_alone_does_not_refuse(self) -> None:
-        """A draft with the title is not a minted concept: the mint goes on."""
-        z = stub_zenodo("both", None)
-        z.titles = [{"title": "monumental-archive/edtf", "submitted": False}]
-        run = run_helper("0BSD", zenodo=z)
+        """C5, the captured unsubmitted draft of the title: the mint goes on."""
+        run = run_helper("0BSD", zenodo=first_mint_zenodo(captured("drafts-during")),
+                         version="1.68.5", repo=CANON_REPO)  # fmt: skip
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn("**First mint**", run.summary)
 
