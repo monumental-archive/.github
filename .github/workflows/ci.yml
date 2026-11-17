@@ -207,11 +207,28 @@ jobs:
       - name: Keep the Rust toolchains inside the tool cache
         run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
 
+      # ONLY THE BELT TOOLS THIS TREE'S TASKS CALL (#1410). The gate
+      # installed all 34 belt tools in every repository, then 29 of 74
+      # lints skipped on stele. mise/gate-tools.toml says when each tool
+      # is needed — derived from the tasks and held to them by
+      # mise/test_gate_tools.py — and the helper disables the rest
+      # (MISE_DISABLE_TOOLS): not installed, not auto-installed by
+      # `mise run`, not on PATH, so a lint that needs one reds by name.
+      # The caller's own config installs exactly as it did, and no tool
+      # it pins is ever disabled. Local runs are unchanged: nothing sets
+      # it there.
+      - name: Leave out the belt tools this tree does not need
+        run: python3 .org-canon/mise/gate-tools.py disable
+
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
       # by mise/gate-cache-key.py and pinned by its test to a key the
       # action logged, then `-b` and the sha256 of the delivered belt's
       # mise.lock (#1414), so a belt tool bump names a new cache.
+      # A tree that leaves belt tools out (#1410) ends it in `-off` and
+      # their digest: what it installs changes with its files, which
+      # neither hash sees. The prefix is untouched, so a pull request
+      # still falls back to the default branch's entry.
       #
       # `mise-v2` is the cache's NAME, moved by hand when its CONTENTS
       # must change and its key would not (#1165). The key hashes the

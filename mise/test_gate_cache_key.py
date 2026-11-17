@@ -112,6 +112,23 @@ class Key(unittest.TestCase):
         )
         self.assertIn("-2026.11.6-ci-linux-p692-", out["key"])
 
+    def test_the_left_out_digest_goes_last(self) -> None:
+        """A narrowed belt (#1410) moves the key and keeps the prefix."""
+        env = {**RUNNER, "ORG_GATE_BELT_DIGEST": "0123456789ab"}
+        out = gate_cache_key.names(
+            "mise-v2", env, gate_cache_key.Facts("2026.11.6", "linux-x64", WHEN, BELT)
+        )
+        self.assertEqual(f"{LOGGED}-b{BELT}-off0123456789ab", out["key"])
+        self.assertTrue(out["key"].startswith(out["prefix"]))
+
+    def test_nothing_left_out_adds_nothing(self) -> None:
+        """An empty digest is the full belt: no suffix."""
+        env = {**RUNNER, "ORG_GATE_BELT_DIGEST": ""}
+        out = gate_cache_key.names(
+            "mise-v2", env, gate_cache_key.Facts("2026.11.6", "linux-x64", WHEN, BELT)
+        )
+        self.assertEqual(f"{LOGGED}-b{BELT}", out["key"])
+
 
 class Inputs(unittest.TestCase):
     """The version and target are read, never assumed."""
