@@ -48,7 +48,8 @@ RUN_RE = re.compile(r"^(\s*)(- )?run: ([|>](?:[+-]?[1-9]?|[1-9][+-]))(\s+#.*)?\s
 # shellcheck both read it. A folded block (`>`) has its lines joined
 # before bash sees it: shellcheck reads the FOLDED text, and shfmt does
 # not apply, because the file's lines are not the script's lines. A
-# header carrying a trailing comment is not linted (yet).
+# comment after the indicator (`run: | # zizmor: ...`) changes nothing:
+# the block is read by its indicator like any other.
 LITERAL = "|"
 FOLDED = ">"
 FOLDED_NOTE = (
@@ -304,7 +305,7 @@ def shell_family(run: Run) -> bool:
         True for bash and sh blocks, the ones shfmt and shellcheck read.
 
     """
-    return not run.commented and any(s in run.shell for s in ("bash", "sh"))
+    return any(s in run.shell for s in ("bash", "sh"))
 
 
 def blocks(path: Path) -> Iterator[tuple[int, str, bool]]:

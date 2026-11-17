@@ -308,7 +308,7 @@ class Headers(unittest.TestCase):
     def test_what_shellcheck_reads_and_how(self) -> None:
         """Every literal header is read as written, every folded one folded.
 
-        A trailing comment on the header is still not read (outside #1396).
+        A comment after the indicator changes nothing about either.
         """
         rows = [
             ("|", [False]),
@@ -320,7 +320,8 @@ class Headers(unittest.TestCase):
             (">-", [True]),
             (">+", [True]),
             (">2", [True]),
-            ("| # zizmor: ignore[github-env]", []),
+            ("| # zizmor: ignore[github-env]", [False]),
+            (">- # a note", [True]),
         ]
         for header, folds in rows:
             with self.subTest(header=header), TemporaryDirectory() as tmp:
@@ -401,12 +402,28 @@ class Folded(unittest.TestCase):
         self.assertTrue(any("not shfmt-formatted" in f for f in literal), literal)
 
     def test_literal_headers_get_both_passes(self) -> None:
-        """`|+` and an indentation indicator are shfmt'd and shellchecked."""
-        for header in ["|+", "|2", "|2-"]:
+        """`|+`, an indicator and a commented header get shfmt and shellcheck."""
+        for header in ["|+", "|2", "|2-", "| # zizmor: ignore[github-env]"]:
             with self.subTest(header=header):
                 path, found = self.check(action(header, "if true;then echo ${X};fi"))
                 self.assertIn(f"{path}:8: run: block is not shfmt-formatted", found)
                 self.assertTrue(any("SC2086" in f for f in found), found)
+
+    def test_commented_header_finding_lands_on_its_line(self) -> None:
+        """A literal block under `run: | # ...` reports on the finding's own line."""
+        path, found = self.check(
+            action("| # zizmor: ignore[github-env]", "echo ok\nrm -rf ${GONE}"),
+        )
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith(f"{path}:9:"), found[0])
+        self.assertIn("SC2086", found[0])
+        self.assertNotIn(es.FOLDED_NOTE, found[0])
+
+    def test_rewrite_keeps_a_header_comment(self) -> None:
+        """The header line, comment included, survives the shfmt rewrite."""
+        n, out = rewrite_text(action("| # keep", "if true;then echo x;fi"))
+        self.assertEqual(n, 1)
+        self.assertEqual(out, action("| # keep", "if true; then echo x; fi"))
 
     def test_fold(self) -> None:
         """The fold, against YAML's rule, row by row."""
