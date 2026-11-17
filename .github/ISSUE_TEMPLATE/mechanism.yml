@@ -44,7 +44,11 @@ body:
     id: done-when
     attributes:
       label: Done when
-      description: Observable states, on both sides, that mean closed.
+      description: >-
+        Observable states, on both sides, that mean closed. A defect's
+        Done-when includes "a test that fails before the fix and passes
+        after, named here", or names the file the logic lives in when
+        no test can reach it.
     validations:
       required: true
   - type: textarea
