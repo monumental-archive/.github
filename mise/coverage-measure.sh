@@ -93,7 +93,7 @@ if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
   echo "go ${go_pct}"
 fi
 
-if [[ -f Cargo.toml && ${legs} == all ]]; then
+if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   # No task-time rustup, by rule: a component installed mid-run races
   # every other task driving the toolchain (measured twice on the lab's
   # v0.18.0 release PR, #117). llvm-tools is a declared build input —
