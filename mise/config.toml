@@ -8966,6 +8966,10 @@ dir = "{{cwd}}"
 # were cited in prose as enforcing, and NO workflow ran either (#354,
 # fixed #356). This is the join: red on any audit:* task with no
 # `mise run audit:<name>` occurrence anywhere in .github/workflows/.
+# Anywhere, so the schedulers are whichever files run one: audit.yml,
+# publish.yml, repo-audit.yml, and repo-mutants.yml for audit:mutants,
+# which runs apart from the audit so a survivor never reds it (#1355).
+# mise/test_audit_scheduled.py holds the message to those names.
 # Deliberately no opt-out row — an unscheduled audit task IS the
 # defect; a task nobody should run should not exist. Linted, not
 # generated: generating audit.yml from the task list would mean
@@ -9010,9 +9014,9 @@ if [[ -f mise/config.toml ]]; then
     status=1
   elif [[ -n ${bad} ]]; then
     echo "lint:audit-scheduled: belt audit task(s) no workflow ever runs:${bad}" >&2
-    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml or" >&2
-    echo "  repo-audit.yml) or delete the task — a check nobody runs is a" >&2
-    echo "  claim, not a check (#358 seam 1)." >&2
+    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml," >&2
+    echo "  repo-audit.yml or repo-mutants.yml) or delete the task — a check" >&2
+    echo "  nobody runs is a claim, not a check (#358 seam 1)." >&2
     status=1
   else
     echo "lint:audit-scheduled: ${count} belt audit task(s), every one scheduled"

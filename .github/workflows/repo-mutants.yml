@@ -74,10 +74,14 @@ jobs:
       # source (no arm64 or checksummed asset upstream), from the lock,
       # with the repository's own rust pin installed above — a
       # repository with no Rust has no cargo to build it with, and its
-      # leg skips clean by name. One guarded step per language's tool.
+      # leg skips clean by name. ONE GUARDED STEP PER LANGUAGE'S TOOL,
+      # side by side here: each guarded on that language's adoption file,
+      # each installing its own tool by name.
       - name: Install cargo-mutants where .cargo/mutants.toml adopts it
         if: hashFiles('.cargo/mutants.toml') != ''
         run: mise install cargo:cargo-mutants
+
+      # The next language's guarded install step goes here.
 
       # Each leg writes its counts for the totals job into the summary
       # directory (it creates it), `<language>.tsv` per leg.
