@@ -277,5 +277,44 @@ class Refusals(unittest.TestCase):
         )
 
 
+class FirstMatch(unittest.TestCase):
+    """A first-line read survives a long input under pipefail (#747, #682)."""
+
+    def test_a_long_level_stub_still_renders_its_tracks(self) -> None:
+        """`| head -1` broke the pipe and killed the script without a word.
+
+        Under `set -o pipefail` the writer `head` hangs up on dies of
+        SIGPIPE once its output outruns the pipe buffer, and the whole
+        assignment fails. `sed -n 1p` reads to the end and cannot break
+        the pipe. 4,000 `tracks:` lines put the writer past 64 KiB.
+        """
+        stub = (
+            "jobs:\n  level:\n"
+            "    uses: monumental-archive/.github/.github/workflows/level.yml@v1\n"
+            "    with:\n" + "      tracks: build source dependency\n" * 4000
+        )
+        done, block = render({".github/workflows/levels.yml": stub})
+        self.assertEqual(done.returncode, 0, f"exit {done.returncode}: {done.stderr}")
+        self.assertIn("[![SLSA build]", block)
+
+
+class AbsentFieldIsNamed(unittest.TestCase):
+    """A read whose answer may be "none" reaches its guard (#905)."""
+
+    def test_no_download_location_says_so(self) -> None:
+        """`grep` finding nothing used to kill the script before its sentence.
+
+        Under `set -euo pipefail` grep's exit 1 left the pipeline and
+        errexit fired, so fix:badges exited 1 with nothing on stderr.
+        """
+        reuse = 'version = 1\n[[annotations]]\npath = "**"\n'
+        done, _ = render({"REUSE.toml": reuse})
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            "fix:badges: REUSE.toml carries no SPDX-PackageDownloadLocation\n",
+            done.stderr,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
