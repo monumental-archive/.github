@@ -9551,6 +9551,45 @@ fi
 echo "lint:canon-pins: ${found} canon references, all versioned"
 '''
 
+[tasks."lint:hook-jobs"]
+description = "No job in the canon's lefthook/org-hooks.yml runs a script file: lefthook would run it from the remote cache every worktree shares (canon only)"
+dir = "{{cwd}}"
+# lefthook runs a `script:` from its remote cache,
+# .git/info/lefthook-remotes/, which every worktree of a repository
+# shares and which holds one canon ref at a time: a hook in a worktree
+# pinned to another ref deletes the other ref's checkout. The pre-push
+# gate was a script, and pushes died with exit 127 after a green gate
+# (#1426). An inline `run:` is complete in the config lefthook read when
+# the hook started, so it touches nothing in that cache. This lint keeps
+# every job inline: no `script:` job and no `scripts:` map, in block or
+# flow style. Comment lines are skipped, as the header documents the
+# rule.
+#
+# Canon only: identity.toml tracked is the canon (#738); there the hook
+# file is a requirement, red by name when it is missing.
+run = '''
+if ! git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
+  echo "lint:hook-jobs: no tracked security/identity.toml, not the canon, skipped"
+  exit 0
+fi
+hooks=lefthook/org-hooks.yml
+if ! git ls-files --error-unmatch "${hooks}" > /dev/null 2>&1; then
+  echo "lint:hook-jobs: ${hooks} is not tracked; the canon delivers its hooks there" >&2
+  exit 1
+fi
+found=$(grep -nE '^[^#]*(^|[{,]|-[[:space:]])[[:space:]]*"?scripts?"?[[:space:]]*:' "${hooks}" || true)
+if [[ -n ${found} ]]; then
+  {
+    echo "lint:hook-jobs: ${hooks} runs a script file from lefthook's remote cache:"
+    while IFS= read -r hit; do echo "  line ${hit}"; done <<< "${found}"
+    echo "  every worktree shares that cache and a hook on another canon ref"
+    echo "  deletes it mid-gate (#1426); write the job as an inline run:"
+  } >&2
+  exit 1
+fi
+echo "lint:hook-jobs: every job in ${hooks} is an inline run:"
+'''
+
 [tasks."lint:bash-portability"]
 description = "No bash 4+ syntax: it runs on the runner and not on a Mac"
 dir = "{{cwd}}"
