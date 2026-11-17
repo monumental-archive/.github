@@ -112,50 +112,12 @@ jobs:
         id: plan
         env:
           UNTRUSTED_MAJORS: ${{ inputs.pg-majors }}
+        # One derivation and its tests (#1385), against the mapping that
+        # travels at this workflow's SHA.
         run: |
-          set -euo pipefail
-          mapping=$(python3 -c '
-          import json, sys, tomllib
-          with open(".org-canon/docker/pgrx-base-images.toml", "rb") as f:
-              t = tomllib.load(f)
-          print(json.dumps(t))
-          ')
-          IFS=',' read -ra majors <<< "${UNTRUSTED_MAJORS// /}"
-          if ((${#majors[@]} == 0)); then
-            echo "::error::no PG majors requested — a release that builds nothing is not a release"
-            exit 1
-          fi
-          include="[]"
-          for pg in "${majors[@]}"; do
-            build=$(jq -r --arg pg "${pg}" '.build[$pg] // empty' <<< "${mapping}")
-            smoke=$(jq -r --arg pg "${pg}" '.smoke[$pg] // empty' <<< "${mapping}")
-            if [[ -z ${build} || -z ${smoke} ]]; then
-              echo "::error::pg${pg} has no digest-pinned base image in docker/pgrx-base-images.toml"
-              exit 1
-            fi
-            for arch_runner in "amd64 ubuntu-24.04" "arm64 ubuntu-24.04-arm"; do
-              read -r arch runner <<< "${arch_runner}"
-              include=$(jq -c \
-                --arg pg "${pg}" --arg arch "${arch}" --arg runner "${runner}" \
-                --arg build "${build}" --arg smoke "${smoke}" \
-                '. + [{pg: $pg, arch: $arch, runner: $runner, build: $build, smoke: $smoke}]' \
-                <<< "${include}")
-            done
-          done
-          dupes=$(jq -r '[.[] | "\(.pg)-\(.arch)"] | length - (unique | length)' <<< "${include}")
-          if [[ ${dupes} != "0" ]]; then
-            echo "::error::duplicate PG major requested"
-            exit 1
-          fi
-          floor=$(jq -r '.floor.glibc' <<< "${mapping}")
-          matrix=$(jq -c '{include: .}' <<< "${include}")
-          expected=$(jq -c '[.[] | "\(.pg)-\(.arch)"]' <<< "${include}")
-          {
-            echo "matrix=${matrix}"
-            echo "expected=${expected}"
-            echo "floor=${floor}"
-          } >> "${GITHUB_OUTPUT}"
-          jq -r '.[] | "::notice::will build pg\(.pg) on \(.runner)"' <<< "${include}"
+          .org-canon/release/matrix.py pgrx-extension \
+            .org-canon/docker/pgrx-base-images.toml \
+            "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       expected: ${{ steps.plan.outputs.expected }}

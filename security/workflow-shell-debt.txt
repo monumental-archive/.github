@@ -27,15 +27,12 @@
 .github/workflows/attach-release.yml	Name each provenance after the class it describes	31	# stele: monumental-archive/stele#400, canon swap #1375
 .github/workflows/attach-release.yml	Write the evidence manifest	54	# stele: monumental-archive/stele#400, canon swap #1375
 .github/workflows/attach-release.yml	Attach and publish	49	# canon helper (the remaining small steps): #1386
-.github/workflows/base-attest.yml	Enumerate every pinned digest	28	# canon helper (matrices): #1385
 .github/workflows/base-attest.yml	Verify the upstream provenance names this source (#212)	29	# stele: monumental-archive/stele#402, canon swap #1377
-.github/workflows/build-go-binary.yml	Derive the matrix from the requested targets	31	# canon helper (matrices): #1385
 .github/workflows/build-go-binary.yml	Build every command	19	# canon helper: #1352 unassigned
 .github/workflows/build-go-binary.yml	Refuse a binary whose stamp is not the released commit	19	# stele: #1352 unassigned
 .github/workflows/build-go-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-oci-image.yml	Verify every first-party base carries its org attestation	65	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-oci-image.yml	Push by digest	22	# canon helper (registry operations): #1382
-.github/workflows/build-pgrx-extension.yml	Derive the matrix	43	# canon helper (matrices): #1385
 .github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# canon helper: #1352 unassigned
 .github/workflows/build-pgrx-extension.yml	Refuse a control file that strands existing installations	25	# canon helper (pgrx extension build): #1380
 .github/workflows/build-pgrx-extension.yml	Build, test and package inside the target Postgres	145	# canon helper (pgrx extension build): #1380
@@ -44,12 +41,10 @@
 .github/workflows/build-pgrx-extension.yml	Execute the upgrade from the previous release	48	# canon helper (pgrx extension build): #1380
 .github/workflows/build-pgrx-extension.yml	Emit the inventory plan (what this cell built, from its own inputs)	17	# stele: #1352 unassigned
 .github/workflows/build-pgrx-extension.yml	Compute the subject manifest	48	# stele: monumental-archive/stele#393, canon swap #1364
-.github/workflows/build-pgrx-images.yml	Derive the matrix	20	# canon helper (matrices): #1385
 .github/workflows/build-pgrx-images.yml	Stage the per-arch trees from the verified tarballs	22	# canon helper (pgrx images): #1381
 .github/workflows/build-pgrx-images.yml	Build both platforms and push by digest, untagged (#118)	37	# canon helper (registry operations): #1382
 .github/workflows/build-pgrx-images.yml	Prove the pushed image the way a consumer uses it	60	# canon helper (pgrx images): #1381
 .github/workflows/build-pgrx-images.yml	Assemble and refuse a partial set	16	# canon helper: #1352 unassigned
-.github/workflows/build-rust-binary.yml	Derive the matrix from the requested targets	31	# canon helper (matrices): #1385
 .github/workflows/build-rust-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-rust-crate.yml	Package	38	# canon helper (packaging): #1384
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
