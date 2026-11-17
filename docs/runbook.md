@@ -296,26 +296,29 @@ roll-forward.
   names a commit off its default branch, or one no branch holds).
   Reconciled certificates are in the run's log, one line each.
 - **rekor-monitor: the signer-identity watch is behind** (one standing
-  issue, its body replaced by every run that leaves the watch behind,
-  closed by a run that judges to the head): stele read Fulcio's
-  certificate log from its checkpoint and did not gain on it (#1353,
-  #1339). The body names the checkpoint's next index (everything
-  before it is judged), the tree head, the entries outstanding and why
-  this run stopped, verbatim from stele. A backlog alone is not this
-  issue: a run whose checkpoint advanced is green and starts the next
-  run, so a backlog is read off back to back. What opens it: a run
-  that judged nothing (the log or the forge throttled through the
-  whole budget, a read that did not complete), a run killed before its
-  checkpoint was saved (it persists nothing, and the next run judges
-  the range again), a checkpoint whose tree head is over a day old,
-  and stele refusing to start. A tree head that does not extend the
+  issue, its body replaced by every run that does not gain, closed by a
+  run that judges to the head): stele reads Fulcio's certificate log
+  from its checkpoint in up to fourteen sequential legs a run, and the
+  run did not gain on the log (#1353, #1339). Gaining is counted in
+  entries, from stele's own checkpoint: outstanding is its tree size
+  minus `next`, the first index not yet judged. The body names the
+  next index, the tree head, the outstanding count when the run
+  started and now, and the legs' result. A backlog alone is not this
+  issue: a run whose outstanding count fell is gaining. What opens it:
+  a run that did not advance the checkpoint (the log or the forge
+  throttled through every leg, reads that did not complete, every leg
+  killed before its save, stele refusing to start), and a run that
+  advanced but ended with no fewer entries outstanding than it started
+  with. A leg killed before its save persists nothing; the next leg
+  judges the range again. A tree head that does not extend the
   checkpoint's is refused by name and the checkpoint is left as it
   was: that is the log misbehaving, not the watch. A run with no
   checkpoint refuses to start, by name; dispatch the workflow with
   `start-at` set to the next index the last saved checkpoint recorded
-  (every run's judge step prints it), never the log's head, which
-  skips the unread range. `start-at` is refused while a checkpoint
-  exists.
+  (the alert job prints the newest checkpoint's next index every run),
+  never the log's head, which skips the unread range. `start-at` is
+  refused while a checkpoint exists, and only the first leg is given
+  it.
 - **Never watched (recorded 2026-11-15, #1237)**: issuance to the
   signer identity before the certificate-log checkpoint was founded.
   The Rekor scan this replaced completed no run after 2026-10-18, so

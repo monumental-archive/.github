@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
-"""Judge a run of the signer-identity watch, and keep its standing issue.
+"""Keep one standing issue while the signer-identity watch is not gaining.
 
-rekor-monitor.yml runs `stele assert signer-certificates` (#1339), which
-reads Fulcio's certificate log in chunks from a checkpoint and seals a
-report. This reads stele's exit status, its report and its checkpoint,
-says whether the run is green, and keeps one standing issue while the
-watch is behind (#1353). A certificate that does not reconcile files its
-own issue (findings.py); that is not this tool.
+rekor-monitor.yml reads Fulcio's certificate log in legs, each one run of
+`stele assert signer-certificates` from stele's checkpoint (#1339). Each
+leg is judged on its own (verdict.py), and a certificate that does not
+reconcile files its own issue (findings.py). This runs once, after the
+last leg, and asks one question of stele's own checkpoint files: did
+this run gain on the log? The outstanding count is the checkpoint's
+tree size minus its `next`, the first index not yet judged.
 
-  0, saved      judged to the head: green; close the standing issue.
-  1, saved      a certificate did not reconcile (each has its issue):
-                red.
-  4, saved      a range is outstanding. Green when the checkpoint
-                advanced, red when it did not or the report carries a
-                finding. Behind when it did not advance, or when the
-                checkpoint's signed tree head is more than 24 hours old.
-  anything else red, behind: stele did not finish, exited otherwise, or
-                its checkpoint was not saved (no report was written, or
-                a finding could not be filed).
-
-A run that advanced a saved checkpoint short of the head asks for the
-next run (`dispatch=true` in GITHUB_OUTPUT): a backlog is read off run
-after run, never left to the schedule.
+  newest checkpoint at its head   caught up: close the standing issue.
+  no checkpoint at the start      the run founded one: no earlier count,
+                                  said by name, not an alert.
+  did not advance                 red, behind.
+  advanced, outstanding not       behind (green: it advanced): a backlog
+  smaller than at the start       that is not shrinking.
+  advanced, outstanding smaller   gaining: nothing to say.
+  no newest checkpoint, or the    red, behind: whether the run gained
+  start's was not kept            cannot be told.
 
 Behind: no open issue with exactly the title, create it; one open,
 replace its body in place, keeping "behind since" and counting this run.
@@ -30,14 +26,9 @@ every open issue the forge lists; a search's ranking is never trusted to
 find it. A listing that fails exits 2 by name and files nothing: a
 failed read never opens a second issue.
 
-The checkpoint is stele's own file (`next`, the first index not yet
-judged, and `treeHead`, the last head it verified); the one named is the
-one that persists: this run's when it was saved, the restored one when
-it was not. A value that cannot be read is said by name in the body.
-
 Usage:
-  standing-issue.py --exit-code N --report FILE --checkpoint FILE
-                    --before FILE --saved true|false --run-url URL
+  standing-issue.py --start FILE --start-kept true|false|""
+                    --checkpoint FILE --legs RESULT --run-url URL
 
 The repository is GITHUB_REPOSITORY; no organisation, repository or log
 is named here. Stdlib only, and `gh` on PATH.
@@ -56,10 +47,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"
-TARGET = "assert signer-certificates"
 EXIT_RED = 1
 EXIT_ERROR = 2
-STALE = dt.timedelta(hours=24)
+FOUNDED = "none counted: this run founded the checkpoint"
 
 BEHIND_SINCE = re.compile(r"^- Behind since: (.+)$", re.MULTILINE)
 RUNS_BEHIND = re.compile(r"^- Runs behind since it opened: (\d+)$", re.MULTILINE)
@@ -78,34 +68,31 @@ class Checkpoint:
     when: dt.datetime | None
     missing: str | None
 
+    @property
+    def outstanding(self) -> int | None:
+        """Entries the checkpoint has not judged, up to its tree head."""
+        if self.next is None or self.size is None:
+            return None
+        return self.size - self.next
+
 
 @dataclass(frozen=True)
-class Report:
-    """What this tool reads of stele's report, or why it could not."""
+class Outcome:
+    """The run's verdict: colour, why, and the standing action."""
 
-    verdict: str | None
-    facts: dict[str, str]
-    findings: int
-    missing: str | None
+    red: bool
+    why: str
+    standing: str | None
 
 
 @dataclass(frozen=True)
 class Run:
     """The run being judged, as the standing issue names it."""
 
-    log_size: int | None
+    start: str
     why: str
+    legs: str
     url: str
-
-
-@dataclass(frozen=True)
-class Outcome:
-    """The run's verdict: colour, why, the standing action, dispatch."""
-
-    red: bool
-    why: str
-    standing: str | None
-    dispatch: bool
 
 
 def read_checkpoint(path: Path) -> Checkpoint:
@@ -127,91 +114,45 @@ def read_checkpoint(path: Path) -> Checkpoint:
     return Checkpoint(nxt, size, when, None)
 
 
-def read_report(path: Path) -> Report:
-    """Read stele's report.
+def judge(start: Checkpoint, kept: str, end: Checkpoint) -> Outcome:
+    """Decide whether the run gained on the log.
 
     Returns:
-        Its verdict, facts and finding count, or why it could not be read.
+        The outcome; `start` is the run's starting checkpoint, `end` the newest.
 
     """
-    if not path.is_file() or path.stat().st_size == 0:
-        return Report(None, {}, 0, "stele wrote no report")
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        if doc.get("target") != TARGET:
-            return Report(None, {}, 0, f"the report is not stele's {TARGET} report")
-        facts = {f["name"]: f["value"] for f in doc.get("facts") or []}
-        return Report(doc["verdict"], facts, len(doc.get("findings") or []), None)
-    except ValueError, TypeError, KeyError, AttributeError:
-        return Report(None, {}, 0, "the report could not be read")
-
-
-def head_size(report: Report) -> int | None:
-    """Read the tree size stele verified this run, from its `treeHead` fact.
-
-    Returns:
-        The size, or None when stele verified no tree head this run.
-
-    """
-    match = re.match(r"^(\d+) at ", report.facts.get("treeHead", ""))
-    return int(match.group(1)) if match else None
-
-
-KILLED = (
-    "stele did not finish: no exit status was recorded (a step before it"
-    " failed, or the job was cancelled or timed out)"
-)
-
-
-def judge(code: str, report: Report, cp: Checkpoint, *, saved: bool) -> Outcome:
-    """Decide the run from stele's exit status, its report and the checkpoint.
-
-    Returns:
-        The outcome; `cp` is the checkpoint that persists.
-
-    """
-    if not code.isdigit():
-        return Outcome(red=True, why=KILLED, standing="behind", dispatch=False)
-    if not saved:
-        lost = report.missing or "a finding could not be filed"
-        why = f"stele exited {code} and the checkpoint was not saved: {lost}"
-        return Outcome(red=True, why=why, standing="behind", dispatch=False)
-    if code == "0":
+    if end.next is None or end.outstanding is None:
+        why = f"the newest checkpoint: {end.missing}"
+        return Outcome(red=True, why=why, standing="behind")
+    if end.outstanding == 0:
         why = "judged to the head of the log"
-        return Outcome(red=False, why=why, standing="caught-up", dispatch=False)
-    if code == "1":
-        why = (
-            f"{report.findings} finding(s): a certificate did not reconcile;"
-            " each has its issue"
-        )
-        return Outcome(red=True, why=why, standing=None, dispatch=False)
-    if code != "4":
-        why = f"stele exited {code}"
-        return Outcome(red=True, why=why, standing="behind", dispatch=False)
-    return judge_outstanding(report, cp)
+        return Outcome(red=False, why=why, standing="caught-up")
+    if kept == "false":
+        why = f"advanced to {end.next}; no earlier count, this run founded it"
+        return Outcome(red=False, why=why, standing=None)
+    if kept != "true" or start.next is None or start.outstanding is None:
+        lost = start.missing if kept == "true" else "the start job did not finish"
+        why = f"the checkpoint the run started from was not kept ({lost})"
+        return Outcome(red=True, why=why, standing="behind")
+    return gained(start.next, start.outstanding, end.next, end.outstanding)
 
 
-def judge_outstanding(report: Report, cp: Checkpoint) -> Outcome:
-    """Decide a run that saved its checkpoint with a range outstanding (exit 4).
+def gained(start_next: int, start_left: int, end_next: int, end_left: int) -> Outcome:
+    """Decide a run with both checkpoints, short of the head.
 
     Returns:
-        Green when the checkpoint advanced and the report holds no finding;
-        the next run asked for whenever it advanced short of the head.
+        Red and behind when it did not advance; behind when the outstanding
+        count is not smaller than at the start; otherwise gaining.
 
     """
-    stopped = report.facts.get("stopped", "no reason given")
-    if report.facts.get("judged", "none") == "none":
-        why = f"the checkpoint did not advance: stele judged nothing ({stopped})"
-        return Outcome(red=True, why=why, standing="behind", dispatch=False)
-    short = cp.next is not None and cp.size is not None and cp.next < cp.size
-    stale = cp.when is None or dt.datetime.now(dt.UTC) - cp.when > STALE
-    standing = "behind" if stale else None
-    if report.findings:
-        why = f"{report.findings} finding(s) in the chunks judged; each has its issue"
-        return Outcome(red=True, why=why, standing=standing, dispatch=short)
-    left = report.facts.get("outstanding", "unknown")
-    why = f"advanced; outstanding {left} ({stopped})"
-    return Outcome(red=False, why=why, standing=standing, dispatch=short)
+    if end_next <= start_next:
+        why = f"the checkpoint did not advance in this run (next {end_next})"
+        return Outcome(red=True, why=why, standing="behind")
+    counts = f"outstanding {start_left:,} at the start, {end_left:,} now"
+    if end_left >= start_left:
+        why = f"advanced but not gaining: {counts}"
+        return Outcome(red=False, why=why, standing="behind")
+    return Outcome(red=False, why=f"gaining: {counts}", standing=None)
 
 
 def gh(*args: str) -> str:
@@ -260,48 +201,55 @@ def open_standing(repo: str) -> list[dict]:
     return [i for i in issues if i.get("title") == TITLE]
 
 
-def thousands(n: int) -> str:
-    """Format a count for a person.
+def count(n: int | None, missing: str | None) -> str:
+    """Format a count for a person, or name its absence.
 
     Returns:
-        n with thousands separators.
+        n with thousands separators, or why it is unknown.
 
     """
-    return f"{n:,}"
+    return f"{n:,}" if n is not None else f"unknown: {missing}"
 
 
-def body(cp: Checkpoint, run: Run, since: str, runs: int) -> str:
+def start_count(start: Checkpoint, kept: str) -> str:
+    """Say the outstanding count the run started from.
+
+    Returns:
+        The count, FOUNDED, or why it is unknown.
+
+    """
+    if kept == "false":
+        return FOUNDED
+    if kept != "true":
+        return "unknown: the start job did not finish"
+    return count(start.outstanding, start.missing)
+
+
+def body(end: Checkpoint, run: Run, since: str, runs: int) -> str:
     """Write the standing issue's body.
 
     Returns:
         The body, every value present or its absence named.
 
     """
-    nxt = thousands(cp.next) if cp.next is not None else f"unknown: {cp.missing}"
-    if cp.size is None or cp.when is None:
-        head = f"unknown: {cp.missing}"
+    if end.size is None or end.when is None:
+        head = f"unknown: {end.missing}"
     else:
-        head = f"{thousands(cp.size)} at {cp.when.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-    unverified = "unknown: stele verified no tree head this run"
-    log = thousands(run.log_size) if run.log_size is not None else unverified
-    if cp.next is None:
-        left = f"unknown: {cp.missing}"
-    elif run.log_size is None:
-        left = unverified
-    else:
-        left = thousands(run.log_size - cp.next)
+        head = f"{end.size:,} at {end.when.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+    nxt = count(end.next, end.missing)
     return "\n".join([
-        "The signer-identity watch is behind on Fulcio's certificate log:",
+        "The signer-identity watch is not gaining on Fulcio's certificate log:",
         "certificates logged at or after the checkpoint's next index have not",
-        "been reconciled. Every run that leaves it behind replaces this body; a",
+        "been reconciled. Every run that does not gain replaces this body; a",
         "run that judges to the head of the log closes this issue. A certificate",
         "that does not reconcile files its own issue, never this one.",
         "",
         f"- Checkpoint next index (everything before it is judged): {nxt}",
         f"- Checkpoint signed tree head: {head}",
-        f"- Log size this run: {log}",
-        f"- Entries outstanding: {left}",
+        f"- Entries outstanding when this run started: {run.start}",
+        f"- Entries outstanding now: {count(end.outstanding, end.missing)}",
         f"- This run: {run.why}",
+        f"- Legs: {run.legs or 'unknown: no result'}",
         f"- Behind since: {since}",
         f"- Latest run behind: {run.url}",
         f"- Runs behind since it opened: {runs}",
@@ -309,7 +257,7 @@ def body(cp: Checkpoint, run: Run, since: str, runs: int) -> str:
     ])
 
 
-def behind(repo: str, cp: Checkpoint, run: Run) -> str:
+def behind(repo: str, end: Checkpoint, run: Run) -> str:
     """Create the standing issue, or replace its body in place.
 
     Returns:
@@ -318,7 +266,7 @@ def behind(repo: str, cp: Checkpoint, run: Run) -> str:
     """
     found = open_standing(repo)
     if not found:
-        text = body(cp, run, run.url, 1)
+        text = body(end, run, run.url, 1)
         gh("issue", "create", "--repo", repo, "--title", TITLE, "--body", text)
         return "opened the standing issue"
     issue = found[0]
@@ -327,13 +275,13 @@ def behind(repo: str, cp: Checkpoint, run: Run) -> str:
     since = since_match.group(1) if since_match else "unknown: not in the previous body"
     count_match = RUNS_BEHIND.search(previous)
     runs = int(count_match.group(1)) + 1 if count_match else 1
-    text = body(cp, run, since, runs)
+    text = body(end, run, since, runs)
     number = str(issue["number"])
     gh("issue", "edit", number, "--repo", repo, "--body", text)
     return f"updated the standing issue #{number} ({runs} runs behind)"
 
 
-def caught_up(repo: str, cp: Checkpoint, run_url: str) -> str:
+def caught_up(repo: str, end: Checkpoint, run_url: str) -> str:
     """Close the standing issue, if one is open.
 
     Returns:
@@ -343,11 +291,25 @@ def caught_up(repo: str, cp: Checkpoint, run_url: str) -> str:
     found = open_standing(repo)
     if not found:
         return "no standing issue open"
-    size = thousands(cp.size) if cp.size is not None else f"unknown ({cp.missing})"
+    size = count(end.size, end.missing)
     comment = f"Caught up: {run_url} judged the log to its head, tree size {size}."
     for issue in found:
         gh("issue", "close", str(issue["number"]), "--repo", repo, "--comment", comment)
     return "closed " + ", ".join(f"#{i['number']}" for i in found)
+
+
+def keep(repo: str, standing: str | None, end: Checkpoint, run: Run) -> str:
+    """Take the standing action the outcome names.
+
+    Returns:
+        What was done, for the run's log.
+
+    """
+    if standing == "behind":
+        return behind(repo, end, run)
+    if standing == "caught-up":
+        return caught_up(repo, end, run.url)
+    return "nothing to keep"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -358,37 +320,28 @@ def main(argv: list[str] | None = None) -> int:
 
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--exit-code", default="")
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--start", type=Path, required=True)
+    parser.add_argument("--start-kept", default="")
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--before", type=Path, required=True)
-    parser.add_argument("--saved", choices=["true", "false"], required=True)
+    parser.add_argument("--legs", default="")
     parser.add_argument("--run-url", required=True)
     args = parser.parse_args(argv)
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
         print("standing-issue: GITHUB_REPOSITORY is not set", file=sys.stderr)
         return EXIT_ERROR
-    saved = args.saved == "true"
-    report = read_report(args.report)
-    cp = read_checkpoint(args.checkpoint if saved else args.before)
-    outcome = judge(args.exit_code, report, cp, saved=saved)
-    which = "saved by this run" if saved else "restored, not saved by this run"
-    where = cp.missing if cp.next is None else f"next index {cp.next}"
-    print(f"standing-issue: the checkpoint that persists ({which}): {where}")
-    output = os.environ.get("GITHUB_OUTPUT")
-    if output:
-        with Path(output).open("a", encoding="utf-8") as f:
-            f.write(f"dispatch={str(outcome.dispatch).lower()}\n")
+    start = read_checkpoint(args.start)
+    end = read_checkpoint(args.checkpoint)
+    outcome = judge(start, args.start_kept, end)
+    where = end.missing if end.next is None else f"next index {end.next}"
+    print(f"standing-issue: the newest checkpoint: {where}")
+    run = Run(start_count(start, args.start_kept), outcome.why, args.legs, args.run_url)
     try:
-        if outcome.standing == "behind":
-            run = Run(head_size(report), outcome.why, args.run_url)
-            print(f"standing-issue: {behind(repo, cp, run)}")
-        elif outcome.standing == "caught-up":
-            print(f"standing-issue: {caught_up(repo, cp, args.run_url)}")
+        done = keep(repo, outcome.standing, end, run)
     except StandingIssueError as err:
         print(f"standing-issue: {err}; nothing was filed", file=sys.stderr)
         return EXIT_ERROR
+    print(f"standing-issue: {done}")
     if outcome.red:
         print(f"::error::{outcome.why}")
         return EXIT_RED

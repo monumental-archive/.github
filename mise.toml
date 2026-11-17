@@ -41,8 +41,9 @@ dir = "{{cwd}}"
 # all (#772), and the first one written reproduces a burned release from
 # a real captured listing. .github/rekor-monitor/ joined with #1250; its
 # reconciler moved to stele with #1339, and what stays is the workflow's
-# two helpers (the issue filer and the standing issue), tested on stele's
-# own captured reports. Explicit roots rather than a walk from `.`
+# helpers (the issue filer, the leg's verdict, the standing issue) and
+# its shape, tested on stele's own captured reports and checkpoints.
+# Explicit roots rather than a walk from `.`
 # — a discovery root is a claim about what is tested, and a wildcard
 # makes that claim silently.
 run = """
