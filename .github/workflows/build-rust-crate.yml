@@ -87,6 +87,14 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      - name: Read the caller's pinned build inputs
+        # The caller's config decides the versions; the canon decides
+        # which tools (#1333). One reader, release/caller-pins.py.
+        id: pins
+        run: |
+          .org-canon/release/caller-pins.py install \
+            --input-of "the rust-crate class" \
+            rust >> "${GITHUB_OUTPUT}"
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
@@ -98,6 +106,10 @@ jobs:
           # No tool cache anywhere downstream of a signature: a poisoned
           # cache would be signed along with everything else.
           cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: jq ${{ steps.pins.outputs.install }}
 
       - name: Resolve the exclusion flags
         env:

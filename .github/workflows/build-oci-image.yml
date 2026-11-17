@@ -397,6 +397,15 @@ jobs:
             checked=$((checked + 1))
           done <<< "${refs}"
           echo "::notice::${checked} first-party base(s) verified"
+      - name: Read the caller's pinned build inputs
+        # The caller's config decides the versions; the canon decides
+        # which tools (#1333). One reader, release/caller-pins.py.
+        if: ${{ inputs.prepare != '' || inputs.binary-crate != '' }}
+        id: pins
+        run: |
+          .org-canon/release/caller-pins.py install \
+            --input-of "every class that ships a Rust binary" \
+            rust cargo-auditable >> "${GITHUB_OUTPUT}"
       - name: Install mise and the caller's pinned toolchain
         # Either path compiles in the CALLER's pinned toolchain, which
         # is the whole point of #295 — the declaration changes who
@@ -410,6 +419,10 @@ jobs:
           version: 2026.11.6
           # No tool cache anywhere downstream of a signature.
           cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: ${{ steps.pins.outputs.install }}
 
       - name: Materialise build artifacts into the context (prepare)
         if: inputs.prepare != ''

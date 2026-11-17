@@ -108,7 +108,7 @@ jobs:
           # refusable (see tag-release.sh). So only the belt tools
           # tag-release.sh itself runs are installed: `stele` derives the
           # plan, `gitsign` signs the tag, `jq` reads the plan. git and
-          # gh are the runner's. `release/test_release_guards.py` holds
+          # gh are the runner's. `release/test_job_installs.py` holds
           # this list to the script's calls.
           install_args: jq github:monumental-archive/stele aqua:sigstore/gitsign
 
@@ -185,6 +185,8 @@ jobs:
         uses: $/.github/actions/canon
 
       - name: Install mise and the pinned toolchain
+        # The whole config, the one exemption from #1333's named lists:
+        # the coverage floor below runs the caller's own test suite.
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6

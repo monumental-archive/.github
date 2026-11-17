@@ -39,10 +39,8 @@ Run through the gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import tomllib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1238,120 +1236,6 @@ class TagReleaseRefusals(unittest.TestCase):
             result = self._run(repo)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn(f"{tag} already exists; nothing to do", result.stdout)
-
-
-TAG_INSTALL_STEP = "- name: Install the tools the tag step runs, and nothing else"
-
-
-def tag_job_installs(workflow: str) -> list[str]:
-    """Read the tag job's `install_args` out of release.yml's text.
-
-    Returns:
-        The tool keys the job installs, in the order written.
-
-    Raises:
-        ValueError: the step or its install_args line is missing, so a
-            row would judge nothing.
-
-    """
-    lines = workflow.splitlines()
-    starts = [i for i, ln in enumerate(lines) if ln.strip() == TAG_INSTALL_STEP]
-    if len(starts) != 1:
-        msg = "release.yml no longer carries exactly one tag install step"
-        raise ValueError(msg)
-    for line in lines[starts[0] + 1 :]:
-        if line.strip().startswith("- name:"):
-            break
-        key, _, value = line.strip().partition(":")
-        if key == "install_args":
-            return value.split()
-    msg = "the tag install step names no install_args"
-    raise ValueError(msg)
-
-
-def belt_tools() -> dict[str, str]:
-    """Map each belt tool's command name to its `[tools]` key.
-
-    Returns:
-        Command name (the key's last `/`- or `:`-separated segment) to
-        the key as mise/config.toml writes it.
-
-    """
-    config = tomllib.loads((CANON / "mise" / "config.toml").read_text("utf-8"))
-    return {re.split(r"[/:]", key)[-1]: key for key in config["tools"]}
-
-
-def uninstalled_calls(script: str, installs: list[str]) -> list[str]:
-    """Name the belt tools a script calls that a job does not install.
-
-    A call is the tool's command name as a whole word on a line that is
-    not a comment — `gpg.x509.program=gitsign` counts, `# gitsign`
-    does not.
-
-    Returns:
-        The `[tools]` keys called and not installed, sorted.
-
-    """
-    code = "\n".join(
-        ln for ln in script.splitlines() if not ln.lstrip().startswith("#")
-    )
-    called = {
-        key
-        for name, key in belt_tools().items()
-        if re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", code)
-    }
-    return sorted(called - set(installs))
-
-
-class TagJobInstalls(unittest.TestCase):
-    """The tag job installs every belt tool tag-release.sh calls (#1322).
-
-    The job installs a named list rather than the whole belt, so that
-    the push is reached in seconds; the cost is that a tool the script
-    starts calling would be missing on the runner, and the release
-    would fail at the most expensive moment. These rows make that a
-    test failure instead.
-    """
-
-    WORKFLOW = (CANON / ".github/workflows/release.yml").read_text("utf-8")
-    SCRIPT = (RELEASE / "tag-release.sh").read_text("utf-8")
-
-    def test_every_install_is_a_belt_tool_key(self) -> None:
-        """A misspelt key would install nothing and say nothing."""
-        keys = set(belt_tools().values())
-        installs = tag_job_installs(self.WORKFLOW)
-        self.assertEqual([], [k for k in installs if k not in keys])
-
-    def test_the_job_installs_what_the_script_calls(self) -> None:
-        """The real job against the real script: nothing missing."""
-        installs = tag_job_installs(self.WORKFLOW)
-        self.assertEqual([], uninstalled_calls(self.SCRIPT, installs))
-        self.assertEqual(
-            ["aqua:sigstore/gitsign", "github:monumental-archive/stele", "jq"],
-            sorted(installs),
-        )
-
-    def test_a_dropped_install_is_named(self) -> None:
-        """Planted: the job without gitsign, which signs the tag."""
-        installs = [
-            k for k in tag_job_installs(self.WORKFLOW) if k != "aqua:sigstore/gitsign"
-        ]
-        self.assertEqual(
-            ["aqua:sigstore/gitsign"], uninstalled_calls(self.SCRIPT, installs)
-        )
-
-    def test_a_new_call_is_named(self) -> None:
-        """Planted: the script starts calling another belt tool."""
-        script = self.SCRIPT + '\ncosign verify-blob "${tag}"\n'
-        self.assertEqual(
-            ["aqua:sigstore/cosign"],
-            uninstalled_calls(script, tag_job_installs(self.WORKFLOW)),
-        )
-
-    def test_a_tool_named_only_in_a_comment_is_not_a_call(self) -> None:
-        """Prose about a tool installs nothing and needs nothing."""
-        script = self.SCRIPT + "\n# cosign could verify this one day\n"
-        self.assertEqual([], uninstalled_calls(script, tag_job_installs(self.WORKFLOW)))
 
 
 # A stand-in for gitsign: git's x509 signing contract is the signature on

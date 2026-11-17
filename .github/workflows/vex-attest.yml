@@ -81,6 +81,10 @@ jobs:
         with:
           version: 2026.11.6
           cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: jq github:monumental-archive/stele aqua:google/osv-scanner
 
       - name: Resolve subjects from the products the statements name
         id: collect

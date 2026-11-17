@@ -408,6 +408,25 @@ class SelectsThePredecessor(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
 
+class ReadsThePinsThroughTheOneReader(unittest.TestCase):
+    """The pins come from release/caller-pins.py, as the build leg's do (#1333)."""
+
+    def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(self) -> None:
+        """The reader names the tool, the script keeps its own FAIL line."""
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+            (repo.root / "mise.toml").write_text('[tools]\nrust = "1.97.1"\n')
+            result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+        self.assertEqual(1, result.returncode)
+        self.assertIn(
+            "::error::cargo-pgrx missing — pin cargo-pgrx in this repository's"
+            " mise config; it is a build input of the pgrx-extension class\n"
+            "FAIL: rust and cargo:cargo-pgrx must be pinned in this"
+            " repository's mise config\n",
+            result.stderr,
+        )
+
+
 # Set on the suite this row spawns, so the child declines to spawn one of
 # its own. A marker rather than running one class by name: the row is
 # about what a WHOLE suite run does to an index, and naming a class would

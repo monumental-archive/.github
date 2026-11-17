@@ -220,51 +220,22 @@ jobs:
               > /dev/null
             echo "::notice::approved base: ${ref}"
           done
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
       - name: Resolve the caller's build-input pins
-        env:
-          UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+        # rust, cargo-pgrx and cargo-auditable come from the caller's mise
+        # config, like every build input, read by the canon's one reader
+        # of a caller's pins (#1333) under whichever backend key pins
+        # them. The runner's python, because the build happens inside the
+        # container and the belt has no business on a build leg. A list
+        # of rust versions yields the first, the one mise puts on PATH
+        # (.github#445).
         run: |
-          set -euo pipefail
-          # rust and cargo-pgrx come from the caller's mise config, like
-          # every build input. Parsed with the runner's python (tomllib is
-          # stdlib) because the build happens inside the container and the
-          # belt has no business on a build leg.
-          pins=$(python3 -c '
-          import json, sys, tomllib
-          for candidate in ("mise.toml", ".mise.toml", "mise/config.toml"):
-              try:
-                  with open(candidate, "rb") as f:
-                      t = tomllib.load(f)
-                  break
-              except FileNotFoundError:
-                  continue
-          else:
-              sys.exit("no mise config found")
-          tools = t.get("tools", {})
-          rust = tools.get("rust", "")
-          pgrx = tools.get("cargo:cargo-pgrx", "")
-          auditable = tools.get("cargo:cargo-auditable", "")
-          # A list means a repo declared a second (nightly) toolchain for
-          # audit:fuzz; mise puts the first on PATH and that is the one
-          # this build uses (.github#445).
-          if isinstance(rust, list): rust = rust[0] if rust else ""
-          if isinstance(rust, dict): rust = rust.get("version", "")
-          print(json.dumps({"rust": rust, "pgrx": pgrx, "auditable": auditable}))
-          ')
-          rust=$(jq -r .rust <<< "${pins}")
-          pgrx=$(jq -r .pgrx <<< "${pins}")
-          auditable=$(jq -r .auditable <<< "${pins}")
-          if [[ -z ${rust} || -z ${pgrx} || -z ${auditable} ]]; then
-            emsg="rust, cargo:cargo-pgrx and cargo:cargo-auditable must be pinned in this repository's mise config; they"
-            emsg+=" are build inputs of the pgrx-extension class"
-            echo "::error::${emsg}"
-            exit 1
-          fi
-          {
-            echo "RUST_VERSION=${rust}"
-            echo "PGRX_VERSION=${pgrx}"
-            echo "AUDITABLE_VERSION=${auditable}"
-          } >> "${GITHUB_ENV}"
+          .org-canon/release/caller-pins.py env \
+            --input-of "the pgrx-extension class" \
+            RUST_VERSION=rust PGRX_VERSION=cargo-pgrx \
+            AUDITABLE_VERSION=cargo-auditable >> "${GITHUB_ENV}"
       - name: Refuse a tag whose version disagrees with the manifests
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
