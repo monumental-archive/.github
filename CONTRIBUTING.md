@@ -72,6 +72,71 @@ executable form:
    coverage figure and no mutation tool in the belt, so logic written
    in it can be tested but never measured.
 
+## Testing standard
+
+Coverage measures execution, not verification: a line counts as
+covered when a test runs it, whether or not any test would fail if
+the line were wrong. A repository can reach 100% and still ship bugs
+its suite cannot see. A good suite has six properties, and each is
+held by a mechanism with an issue of its own. The issue closes on its
+own work and adds the task that runs it to its row.
+
+| # | Property | What breaks without it | Mechanism | Issue |
+|---|---|---|---|---|
+| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python [#1354], Rust [#1355], Go [#1356], TypeScript [#1358] |
+| 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357]; Go has no branch figure, answered by [#1356] |
+| 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust and Go exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`); Python [#1332]; TypeScript exists in monumental-archive (fast-check) |
+| 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
+| 5 | Runs on real artifacts, on both platforms | the fixture's imagined world | a written rule: a recorded real artifact outranks a hand-written fixture; the gate already runs on Linux and the Mac | this section |
+| 6 | Reproduces each bug before the fix | the same bug, twice | the regression line in every defect's Done-when; a weekly report; a backfill per repository | [#1335], the canon [#1360], [signer#86], [iiif-server#212] |
+
+[#1331]: https://github.com/monumental-archive/.github/issues/1331
+[#1332]: https://github.com/monumental-archive/.github/issues/1332
+[#1335]: https://github.com/monumental-archive/.github/issues/1335
+[#1354]: https://github.com/monumental-archive/.github/issues/1354
+[#1355]: https://github.com/monumental-archive/.github/issues/1355
+[#1356]: https://github.com/monumental-archive/.github/issues/1356
+[#1357]: https://github.com/monumental-archive/.github/issues/1357
+[#1358]: https://github.com/monumental-archive/.github/issues/1358
+[#1359]: https://github.com/monumental-archive/.github/issues/1359
+[#1360]: https://github.com/monumental-archive/.github/issues/1360
+[signer#86]: https://github.com/monumental-archive/signer/issues/86
+[iiif-server#212]: https://github.com/monumental-archive/iiif-server/issues/212
+
+### No number can be bought
+
+- The mutation measure is "no unexplained surviving mutant", never a
+  score. Each survivor is killed by an assertion, or recorded as
+  equivalent, with a reason, in the tool's own per-site exclusion in
+  the repository. There are no org-level exclusions.
+- No `#[coverage(off)]`, `# pragma: no cover` or equivalent.
+- No deleting fail-closed guards to shrink the denominator.
+- No test that calls code without asserting on its result.
+- A regression test counts only if it fails with its fix reverted, and
+  that failure is shown.
+
+### What a pull request pays
+
+The gate stays fast and deterministic. A mechanism enters `ci` only
+with its measured cost written in its issue. Anything that repeats
+the suite (mutation testing), is random (the random half of property
+testing) or needs a second toolchain (Rust branch coverage) runs on
+the Monday audit, never on a pull request.
+
+### Every defect issue carries the regression line
+
+A defect's Done-when includes a test that fails before the fix and
+passes after, named in the issue — or, when no test can reach the
+logic, the file it lives in. The mechanism issue template says so in
+its "Done when" description, because work is done from sealed issues.
+
+### Run every test a repository already has
+
+A test the gate does not collect is not a test. A suite under a task
+name that `ci` never collects runs only when someone remembers it:
+monumental-archive's Atlas schema tests under `schema:*` are the case
+in hand, monumental-archive#337.
+
 ## Licensing
 
 By contributing, you agree that your contributions are licensed under the
