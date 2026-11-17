@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.6](https://github.com/monumental-archive/.github/compare/v1.68.5...v1.68.6) - 2026-11-17
+
+### Fixed
+
+- keep one standing issue while the watch is behind ([#1392](https://github.com/monumental-archive/.github/pull/1392))
+- ask the first-mint title guard the full title ([#1397](https://github.com/monumental-archive/.github/pull/1397))
+- give the prebuilt cargo-auditable key a short topic ([#1398](https://github.com/monumental-archive/.github/pull/1398))
+
 ## [1.68.5](https://github.com/monumental-archive/.github/compare/v1.68.4...v1.68.5) - 2026-11-17
 
 ### Fixed
