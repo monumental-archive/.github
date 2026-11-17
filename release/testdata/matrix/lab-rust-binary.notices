@@ -1,0 +1,4 @@
+::notice::will build x86_64-unknown-linux-musl on ubuntu-24.04
+::notice::will build aarch64-unknown-linux-musl on ubuntu-24.04-arm
+::notice::will build x86_64-apple-darwin on macos-15-intel
+::notice::will build aarch64-apple-darwin on macos-15

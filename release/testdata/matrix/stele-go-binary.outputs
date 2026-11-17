@@ -1,0 +1,2 @@
+matrix={"include":[{"target":"linux-amd64","runner":"ubuntu-24.04"},{"target":"linux-arm64","runner":"ubuntu-24.04-arm"},{"target":"darwin-amd64","runner":"macos-15-intel"},{"target":"darwin-arm64","runner":"macos-15"}]}
+expected=["linux-amd64","linux-arm64","darwin-amd64","darwin-arm64"]
