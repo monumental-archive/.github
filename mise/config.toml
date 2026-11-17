@@ -510,6 +510,20 @@ python = "3.15.2"
 # The tool venv is built on the `python` pin above, never one uv
 # fetched — the measurement runs the tests on that interpreter.
 "pipx:coverage" = "7.17.2"
+# Mutation testing for Python (#1354): `audit:mutants`' Python leg.
+# mutmut 3.8.1, PyPI-only (no aqua package), so the FIFTH pipx:
+# exception, on the same checksummed uv under the UV_* floor env and
+# the `python` pin above: measured 2026-11-18, its tool venv's
+# interpreter is this pin's 3.15.2 (pyvenv.cfg `home`), and libcst,
+# setproctitle and coverage arrive as cp315 wheels; pyyaml 6.0.3 (a
+# dependency) has no cp315 wheel and builds its pure-Python fallback
+# from the sdist, no compiler needed. pytest rides inside mutmut's own
+# venv as its runner and nothing in a repository imports it (#364).
+#
+# LAZY, the cargo-mutants precedent (#1355): a bare `mise install` —
+# the gate, every job without a named list — skips it, and only
+# repo-mutants.yml's `mutants-python` job installs it, by name.
+"pipx:mutmut" = { version = "3.8.1", lazy = true, lazy_bins = ["mutmut"] }
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -8140,6 +8154,7 @@ leg() {
   bash "${ORG_BELT_DIR}/mutants-$1.sh" || red+=" $1"
 }
 leg go
+leg python
 leg rust
 if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
   echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2

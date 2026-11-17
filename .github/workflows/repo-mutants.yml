@@ -57,11 +57,23 @@ jobs:
     outputs:
       rust: ${{ steps.rust.outputs.adopted }}
       go: ${{ steps.go.outputs.adopted }}
+      python: ${{ steps.python.outputs.adopted }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Python's adoption is a SECTION, not a file: pyproject.toml is in
+      # most Python repositories whether they adopt or not.
+      - name: Python adopts with [tool.mutmut] (or setup.cfg [mutmut])
+        id: python
+        run: |
+          adopted=false
+          if grep -qs '^\[tool\.mutmut\]' pyproject.toml || grep -qs '^\[mutmut\]' setup.cfg; then
+            adopted=true
+          fi
+          echo "adopted=${adopted}" >> "${GITHUB_OUTPUT}"
 
       - name: Rust adopts with a tracked .cargo/mutants.toml
         id: rust
@@ -253,4 +265,78 @@ jobs:
         env:
           SUMMARIES: ${{ runner.temp }}/mutants-summaries
         run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}" go
+
+  mutants-python:
+    name: mutants / python
+    needs: adoption
+    if: needs.adoption.outputs.python == 'true'
+    runs-on: ubuntu-26.04
+    # One job: mutmut 3.8.1 cannot shard. No timeout of its own yet: it
+    # is set from the canon's first run on a runner (#1354).
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+
+      # The belt pins mutmut `lazy`, so the bare install above — and
+      # every gate and release job — skips it. This job is the one
+      # place it is installed, on the belt's pinned Python (#1354).
+      - name: Install mutmut, by name
+        run: mise install pipx:mutmut
+
+      # The leg writes its counts for the totals job into the summary
+      # directory (it creates it) as python.tsv.
+      - name: Mutate, and name every unexplained survivor
+        env:
+          MUTANTS_LEG: python
+          MUTANTS_SHARD: 0/1
+          MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
+        run: mise run audit:mutants
+
+      - name: Keep the counts for the totals
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-python-summary-0
+          path: ${{ runner.temp }}/mutants-summary/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  mutants-python-totals:
+    name: mutants / python totals
+    # The same one answer every language states, from its own job. A
+    # run that judged nothing writes no counts and is named here.
+    needs:
+      - adoption
+      - mutants-python
+    if: always() && needs.adoption.outputs.python == 'true'
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Collect the counts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutants-python-summary-*
+          path: ${{ runner.temp }}/mutants-summaries
+
+      - name: State the totals
+        env:
+          SUMMARIES: ${{ runner.temp }}/mutants-summaries
+        run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}" python
 ...
