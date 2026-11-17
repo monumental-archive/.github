@@ -248,6 +248,7 @@ jobs:
           set -euo pipefail
           epoch=$(git log -1 --pretty=%ct)
           mkdir -p /tmp/out
+          pgrx=$(realpath .org-canon/release/pgrx)
           docker run --rm \
             --env PG --env RUST_VERSION --env PGRX_VERSION --env AUDITABLE_VERSION \
             --env BUILD_IMAGE \
@@ -255,7 +256,7 @@ jobs:
             --env CRATE_DIR="${UNTRUSTED_CRATE_DIR}" \
             --env SOURCE_DATE_EPOCH="${epoch}" \
             --volume "${PWD}:/src:ro" \
-            --volume "$(realpath .org-canon/release/pgrx):/pgrx:ro" \
+            --volume "${pgrx}:/pgrx:ro" \
             --volume /tmp/out:/out \
             "${BUILD_IMAGE}" \
             bash /pgrx/build-root.sh
@@ -271,13 +272,14 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
+          pgrx=$(realpath .org-canon/release/pgrx)
           for image in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
             docker run --rm \
               --env PG \
               --env UNTRUSTED_SMOKE \
               --volume /tmp/out/pkgroot:/pkgroot:ro \
               --volume "${PWD}:/src:ro" \
-              --volume "$(realpath .org-canon/release/pgrx):/pgrx:ro" \
+              --volume "${pgrx}:/pgrx:ro" \
               "${image}" \
               bash /pgrx/smoke.sh
           done
@@ -300,17 +302,17 @@ jobs:
           set -euo pipefail
           prev=$(.org-canon/release/pgrx/previous-release.py fetch \
             --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
-            --crate-dir "${UNTRUSTED_CRATE_DIR}" --pg "${PG}" --arch "${ARCH}" \
-            --tarball /tmp/prev.tar.gz --dest /tmp/prevroot)
+            --crate-dir "${UNTRUSTED_CRATE_DIR}" --pg "${PG}" --arch "${ARCH}" --tarball /tmp/prev.tar.gz --dest /tmp/prevroot)
           [[ -n ${prev} ]] || exit 0
+          name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
+          pgrx=$(realpath .org-canon/release/pgrx)
           docker run --rm \
-            --env PG --env NAME="$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')" \
+            --env PG --env NAME="${name}" \
             --env PREV="${prev}" --env NEW="${UNTRUSTED_VERSION}" \
             --volume /tmp/prevroot/pkgroot:/prev:ro \
             --volume /tmp/out/pkgroot:/new:ro \
-            --volume "$(realpath .org-canon/release/pgrx):/pgrx:ro" \
-            "${SMOKE_IMAGE}" \
-            bash /pgrx/upgrade.sh
+            --volume "${pgrx}:/pgrx:ro" \
+            "${SMOKE_IMAGE}" bash /pgrx/upgrade.sh
           echo "::notice::pg${PG}/${ARCH}: ${prev} -> ${UNTRUSTED_VERSION} upgrade executed"
       - name: Archive, normalised
         env:

@@ -31,7 +31,10 @@ for control in "${extdir}"/*.control; do
       echo "::error::${script##*/} already uses the pgrx_floor tag"
       exit 1
     fi
-    { printf "%s\n\n" "${block}"; cat "${script}"; } > "${script}.floor"
+    {
+      printf "%s\n\n" "${block}"
+      cat "${script}"
+    } > "${script}.floor"
     mv "${script}.floor" "${script}"
   done
   echo "::notice::${ext} ${version} was built against PostgreSQL ${xy}"

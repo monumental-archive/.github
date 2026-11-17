@@ -5,6 +5,10 @@
 #
 #   upgrade-cluster.sh create|update
 set -euo pipefail
+: "${PG:?}"
+: "${NAME:?}"
+: "${PREV:?}"
+: "${NEW:?}"
 case $1 in
   create)
     "/usr/lib/postgresql/${PG}/bin/initdb" -D /tmp/pgdata -A trust > /dev/null

@@ -29,9 +29,14 @@ in; nothing here names one.
 """
 
 import argparse
+import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
+
+# The runner's own, resolved on PATH once.
+GH = shutil.which("gh") or "gh"
+TAR = shutil.which("tar") or "tar"
 
 
 def latest_tag(repo: str) -> str:
@@ -45,7 +50,17 @@ def latest_tag(repo: str) -> str:
     """
     # ruff: ignore[subprocess-without-shell-equals-true]
     result = subprocess.run(
-        ["gh", "release", "view", "--repo", repo, "--json", "tagName", "--jq", ".tagName"],
+        [
+            GH,
+            "release",
+            "view",
+            "--repo",
+            repo,
+            "--json",
+            "tagName",
+            "--jq",
+            ".tagName",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -54,7 +69,7 @@ def latest_tag(repo: str) -> str:
 
 
 def extension_name(crate_dir: str) -> str:
-    """The extension's name: the crate directory's basename, `-` as `_`.
+    """Name the extension: the crate directory's basename, `-` as `_`.
 
     Returns:
         What `basename DIR | tr - _` printed.
@@ -87,7 +102,18 @@ def guard(repo: str, version: str, crate_dir: str) -> int:
     jq = f'[.assets[].name | select(startswith("{name}-{prev}-pg"))] | length'
     # ruff: ignore[subprocess-without-shell-equals-true]
     shipped = subprocess.run(
-        ["gh", "release", "view", f"v{prev}", "--repo", repo, "--json", "assets", "--jq", jq],
+        [
+            GH,
+            "release",
+            "view",
+            f"v{prev}",
+            "--repo",
+            repo,
+            "--json",
+            "assets",
+            "--jq",
+            jq,
+        ],
         stdout=subprocess.PIPE,
         text=True,
         check=False,
@@ -121,7 +147,9 @@ def fetch(args: argparse.Namespace) -> int:
     """
     prev = latest_tag(args.repo)
     if not prev.startswith("v") or prev.removeprefix("v") == args.version:
-        print("::notice::no previous release; upgrade execution skipped", file=sys.stderr)
+        print(
+            "::notice::no previous release; upgrade execution skipped", file=sys.stderr
+        )
         return 0
     prev = prev.removeprefix("v")
     name = extension_name(args.crate_dir)
@@ -129,7 +157,7 @@ def fetch(args: argparse.Namespace) -> int:
     # ruff: ignore[subprocess-without-shell-equals-true]
     download = subprocess.run(
         [
-            "gh",
+            GH,
             "release",
             "download",
             f"v{prev}",
@@ -151,7 +179,7 @@ def fetch(args: argparse.Namespace) -> int:
         return 0
     Path(args.dest).mkdir(parents=True, exist_ok=True)
     # ruff: ignore[subprocess-without-shell-equals-true]
-    extract = subprocess.run(["tar", "-xzf", args.tarball, "-C", args.dest], check=False)
+    extract = subprocess.run([TAR, "-xzf", args.tarball, "-C", args.dest], check=False)
     if extract.returncode != 0:
         return extract.returncode
     print(prev)

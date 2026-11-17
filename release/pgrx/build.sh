@@ -3,12 +3,23 @@
 # suite, package, then the debug split and the floor block. Run by
 # /pgrx/build-root.sh as the unprivileged postgres user.
 set -euo pipefail
+# The docker run line's environment, and the floor build-root.sh set.
+: "${PG:?}"
+: "${VERSION:?}"
+: "${CRATE_DIR:?}"
+: "${RUST_VERSION:?}"
+: "${PGRX_VERSION:?}"
+: "${AUDITABLE_VERSION:?}"
+: "${FLOOR_XY:?}"
+: "${FLOOR_NUM:?}"
 export HOME=/var/lib/postgresql
+# shellcheck disable=SC2312  # uname -m cannot meaningfully fail
 curl --proto "=https" --tlsv1.2 -sSf -o /tmp/rustup-init \
   "https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
 chmod +x /tmp/rustup-init
 /tmp/rustup-init -y --profile minimal \
   --default-toolchain "${RUST_VERSION}" --no-modify-path
+# shellcheck source=/dev/null  # written by rustup-init just above
 . "${HOME}/.cargo/env"
 cargo install cargo-pgrx --version "${PGRX_VERSION}" --locked
 cargo install cargo-auditable --version "${AUDITABLE_VERSION}" --locked

@@ -6,6 +6,9 @@
 # at /out. Root installs the headers, sets the floor, hands the tree to
 # the unprivileged postgres user and becomes it (/pgrx/build.sh).
 set -euo pipefail
+# The docker run line's environment.
+: "${PG:?}"
+: "${BUILD_IMAGE:?}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # Headers at exactly the server the pinned image already carries
@@ -45,6 +48,7 @@ export FLOOR_NUM=$((${FLOOR_XY%%.*} * 10000 + ${FLOOR_XY#*.}))
 # the out dir, and the extension install dirs pgrx test installs into.
 mkdir -p /build
 cp -a /src/. /build/
+# shellcheck disable=SC2312  # pg_config of the image's own server
 chown -R postgres:postgres /build /out \
   "$(/usr/bin/pg_config --pkglibdir)" \
   "$(/usr/bin/pg_config --sharedir)/extension"

@@ -5,6 +5,8 @@
 # (/pgrx/smoke-cluster.sh), then the caller's smoke-test script, if it
 # names one, runs against the extracted package root.
 set -euo pipefail
+: "${PG:?}"
+: "${UNTRUSTED_SMOKE?}"
 cp -a "/pkgroot/usr/lib/postgresql/${PG}/lib/." \
   "/usr/lib/postgresql/${PG}/lib/"
 cp -a "/pkgroot/usr/share/postgresql/${PG}/extension/." \

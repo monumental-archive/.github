@@ -51,7 +51,6 @@ Run through the gate as `mise run test`, which `ci` collects.
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -410,24 +409,21 @@ class TheStatementDecisions(unittest.TestCase):
         self.assertIn("unterminated statement", result.stdout + result.stderr)
 
 
-WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
+FLOOR_SQL = CANON / "release" / "pgrx" / "floor.sql.in"
 
 
 def floor_block(version: str = "0.27.0") -> str:
     """Return the floor block exactly as the build prepends it (#1274).
 
-    The template is read out of the build workflow's quoted heredoc and
-    filled the way the build fills it, followed by the blank line the
-    build leaves before the generated schema.
+    The template is the build's own release/pgrx/floor.sql.in (#1380),
+    read as floor.sh reads it and filled the way it fills it, followed
+    by the blank line the build leaves before the generated schema.
 
     Returns:
         The block that heads a published `lab_pg--<version>.sql`.
 
     """
-    lines = WORKFLOW.read_text().splitlines()
-    start = next(i for i, line in enumerate(lines) if line.endswith("<< 'FLOOR'"))
-    end = next(i for i in range(start, len(lines)) if lines[i].strip() == "FLOOR")
-    block = textwrap.dedent("\n".join(lines[start + 1 : end]))
+    block = FLOOR_SQL.read_text().rstrip("\n")
     for field, value in (
         ("@NUM@", "180007"),
         ("@XY@", "18.7"),

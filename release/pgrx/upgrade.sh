@@ -9,6 +9,7 @@
 # Environment: PG, NAME, PREV, NEW. The previous package root is
 # mounted at /prev, the new one at /new.
 set -euo pipefail
+: "${PG:?}"
 lib="/usr/lib/postgresql/${PG}/lib"
 ext="/usr/share/postgresql/${PG}/extension"
 cp -a "/prev${lib}/." "${lib}/"

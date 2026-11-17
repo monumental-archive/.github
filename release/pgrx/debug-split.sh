@@ -12,6 +12,8 @@ pkgroot=$1
 debugroot=$2
 mkdir -p "${debugroot}"
 libs=0
+# shellcheck disable=SC2312  # process substitution: a find that fails
+# finds nothing, and libs == 0 below refuses that
 while IFS= read -r -d "" so; do
   libs=$((libs + 1))
   rel="${so#"${pkgroot}"/}"
