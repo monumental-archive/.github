@@ -203,6 +203,21 @@ class Images(unittest.TestCase):
         })
         self.assertEqual(ghcr_lines(block), [shield(DB), shield("other-image")])
 
+    def test_an_extension_alone_renders_its_crate_image_not_the_repo(self) -> None:
+        """A pgrx extension's image is named for its crate dir (#1172).
+
+        edtf ships the extension alone and wore a ghcr shield for an
+        image `edtf` that has never existed: the repository name was
+        emitted for pgrx-extension as if it were oci-image.
+        """
+        stub = publish("pgrx-extension").replace(
+            "      classes: pgrx-extension\n",
+            "      classes: pgrx-extension\n"
+            "      extension-crate-dir: crates/edtf-postgres\n",
+        )
+        block = self.assert_block({".github/workflows/publish.yml": stub}, repo="edtf")
+        self.assertEqual([shield("edtf-postgres")], ghcr_lines(block))
+
     def test_no_stub_renders_no_image(self) -> None:
         """A tree with neither stub wears no ghcr shield and no registry dot."""
         block = self.assert_block({})
@@ -312,6 +327,52 @@ class AbsentFieldIsNamed(unittest.TestCase):
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             "fix:badges: REUSE.toml carries no SPDX-PackageDownloadLocation\n",
+            done.stderr,
+        )
+
+
+def reuse_with(*expressions: str) -> str:
+    """Return a REUSE.toml for the db repository with these annotations.
+
+    Returns:
+        The file's text, one annotation per expression.
+
+    """
+    head = (
+        "version = 1\n"
+        f'SPDX-PackageDownloadLocation = "https://github.com/monumental-archive/{DB}"\n'
+    )
+    return head + "".join(
+        f'\n[[annotations]]\npath = "p{i}/**"\nSPDX-License-Identifier = "{e}"\n'
+        for i, e in enumerate(expressions)
+    )
+
+
+class LicenceShield(unittest.TestCase):
+    """The licence shield is derived from REUSE.toml, never hand-written (#1174).
+
+    A shield written by hand below the block was read only by the
+    Monday audit, so it could state a licence the repository does not
+    carry for a week. The block now derives it.
+    """
+
+    def test_the_shield_states_the_expression_reuse_declares(self) -> None:
+        """One expression across the annotations is the shield's message."""
+        done, block = render({"REUSE.toml": reuse_with("Apache-2.0 OR MIT")})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(
+            "[![license](https://img.shields.io/badge/license-"
+            "Apache--2.0%20OR%20MIT-blue)](LICENSES/)",
+            block,
+        )
+
+    def test_two_expressions_are_refused_by_name(self) -> None:
+        """Annotations that disagree leave the shield nothing true to say."""
+        done, _ = render({"REUSE.toml": reuse_with("0BSD", "MIT")})
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn(
+            "fix:badges: REUSE.toml names several licence expressions:\n"
+            "  0BSD\n  MIT\n",
             done.stderr,
         )
 
