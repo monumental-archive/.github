@@ -12,8 +12,8 @@ authors:
     given-names: Carl
 repository-code: https://github.com/monumental-archive/.github
 license: 0BSD
-version: 1.68.4
-date-released: 2026-11-16
+version: 1.68.5
+date-released: 2026-11-17
 identifiers:
   - type: doi
     value: 10.5281/zenodo.21913604

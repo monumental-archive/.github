@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.5](https://github.com/monumental-archive/.github/compare/v1.68.4...v1.68.5) - 2026-11-17
+
+### Fixed
+
+- update aqua:google/osv-scanner to 2.7.1 ([#1337](https://github.com/monumental-archive/.github/pull/1337))
+- update monumental-archive/signer to b746956 ([#1345](https://github.com/monumental-archive/.github/pull/1345))
+- update typos to 1.52.1 ([#1347](https://github.com/monumental-archive/.github/pull/1347))
+- pass the job token to the links check ([#1366](https://github.com/monumental-archive/.github/pull/1366))
+- update jdx/mise to 2026.11.6 ([#1367](https://github.com/monumental-archive/.github/pull/1367))
+- declare release-lab's continuous stream on the roster ([#1368](https://github.com/monumental-archive/.github/pull/1368))
+- drop ref-version-mismatch on the signer's pins ([#1369](https://github.com/monumental-archive/.github/pull/1369))
+- install a named tool list in every release job ([#1370](https://github.com/monumental-archive/.github/pull/1370))
+- check npm package links against the registry ([#1390](https://github.com/monumental-archive/.github/pull/1390))
+- pin cargo-auditable in its prebuilt github: form ([#1387](https://github.com/monumental-archive/.github/pull/1387))
+- move the zenodo client into a tested mint-doi helper ([#1388](https://github.com/monumental-archive/.github/pull/1388))
+- judge each crate on its own in audit:semver ([#1391](https://github.com/monumental-archive/.github/pull/1391))
+
 ## [1.68.4](https://github.com/monumental-archive/.github/compare/v1.68.3...v1.68.4) - 2026-11-16
 
 ### Fixed
