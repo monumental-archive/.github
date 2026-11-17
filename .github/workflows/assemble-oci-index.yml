@@ -81,6 +81,9 @@ jobs:
       images: ${{ steps.assemble.outputs.images }}
       registry-subjects: ${{ steps.assemble.outputs.registry-subjects }}
     env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml

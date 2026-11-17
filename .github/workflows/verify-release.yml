@@ -209,6 +209,10 @@ jobs:
       artifact-metadata: write # the attestation storage record
     outputs:
       subjects: ${{ steps.prove.outputs.subjects }}
+    env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
     steps:
       - name: Prove each declared subject against the registry
         id: prove

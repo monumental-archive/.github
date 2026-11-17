@@ -97,6 +97,9 @@ jobs:
     permissions:
       contents: read
     env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       # No belt: a build-class job needs exactly the caller's pinned build

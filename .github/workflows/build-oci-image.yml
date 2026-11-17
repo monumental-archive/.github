@@ -224,6 +224,9 @@ jobs:
       contents: read
       packages: write # push the per-architecture image by digest
     env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
       # The prepare environment, mirrored from build-rust-binary (same
       # rationale, same flags — see its header): the caller's own pinned
       # toolchain, nothing global, and reproducibility by construction
