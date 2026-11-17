@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.8](https://github.com/monumental-archive/.github/compare/v1.68.7...v1.68.8) - 2026-11-17
+
+### Fixed
+
+- update monumental-archive/stele to v0.23.0 ([#1402](https://github.com/monumental-archive/.github/pull/1402))
+- update first-party canon ([#1404](https://github.com/monumental-archive/.github/pull/1404))
+- lint folded run: blocks as the text bash receives ([#1405](https://github.com/monumental-archive/.github/pull/1405))
+
 ## [1.68.7](https://github.com/monumental-archive/.github/compare/v1.68.6...v1.68.7) - 2026-11-17
 
 ### Fixed
