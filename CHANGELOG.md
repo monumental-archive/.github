@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.69.2](https://github.com/monumental-archive/.github/compare/v1.69.1...v1.69.2) - 2026-11-17
+
+### Fixed
+
+- pgrx images staging and proof as helpers (#1381) ([#1449](https://github.com/monumental-archive/.github/pull/1449))
+- measure typescript with vitest's own provider ([#1451](https://github.com/monumental-archive/.github/pull/1451))
+
 ## [1.69.1](https://github.com/monumental-archive/.github/compare/v1.69.0...v1.69.1) - 2026-11-17
 
 ### Fixed
