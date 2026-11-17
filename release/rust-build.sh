@@ -141,11 +141,11 @@ if [[ ${target} == *-linux-musl ]]; then
 fi
 
 # cargo-auditable is a build input like the toolchain itself, pinned in
-# the caller's own mise config (cargo:cargo-auditable) — asserted, never
+# the caller's own mise config (any backend key) — asserted, never
 # installed here; an unpinned install on a release leg is a runner
 # mutation.
 command -v cargo-auditable > /dev/null || {
-  emsg="cargo-auditable missing — pin cargo:cargo-auditable in this repository's mise config; it is a build"
+  emsg="cargo-auditable missing — pin cargo-auditable in this repository's mise config; it is a build"
   emsg+=" input of every class that ships a Rust binary"
   echo "::error::${emsg}"
   exit 1

@@ -23,8 +23,8 @@ shell = "bash -euo pipefail -c"
 
 [tools]
 # Rust repos: the toolchain and the release build inputs. rust and
-# cargo:cargo-auditable are required by the rust build classes (the
-# builds assert them and fail with this remedy); cargo:cargo-pgrx is the
+# cargo-auditable are required by the rust build classes (the builds
+# assert them and fail with this remedy); cargo:cargo-pgrx is the
 # pgrx-extension class only and must equal the pgrx crate dependency.
 # Components ride the toolchain pin so they install before any task runs
 # — task-time rustup races parallel tasks (the v0.18.0 lesson);
@@ -34,7 +34,11 @@ shell = "bash -euo pipefail -c"
 # already has, so on a minimal-profile runner clippy and rustfmt are
 # simply absent and their gates cannot run (#445).
 # rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }
-# "cargo:cargo-auditable" = "0.7.5"
+# cargo-auditable in its prebuilt form: upstream's checksummed release
+# binary, installed in seconds where the cargo: backend compiled it from
+# source on every uncached job (#1334). The canon reads it by tool, under
+# any key (release/caller-pins.py).
+# "github:rust-secure-code/cargo-auditable" = "0.7.7"
 # Repos that FUZZ (a tracked fuzz/ directory) declare a second, DATED
 # nightly beside the stable one — mise holds and locks both — because
 # AddressSanitizer is cargo-fuzz's default and needs -Zsanitizer, which

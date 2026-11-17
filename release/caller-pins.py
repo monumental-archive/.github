@@ -17,10 +17,11 @@ mise still applies the config entry's options to it (measured on
 config's `version_prefix`, and 404s without the config), so a pinned
 toolchain keeps its components.
 
-BY TOOL, UNDER ANY BACKEND KEY. `cargo:cargo-auditable` and
-`github:rust-secure-code/cargo-auditable` are the same tool, and the
-canon reads either without being told which; the key the caller wrote is
-the key emitted, so mise and the lockfile see exactly the caller's pin.
+BY TOOL, UNDER ANY BACKEND KEY. `cargo:cargo-pgrx` and
+`github:pgcentralfoundation/cargo-pgrx` are the same tool, as are both
+forms of cargo-auditable (#1334), and the canon reads either without
+being told which; the key the caller wrote is the key emitted, so mise
+and the lockfile see exactly the caller's pin.
 The same tool under two keys is refused: mise would install both and put
 one of them on PATH, and nothing here would say which.
 
@@ -68,9 +69,9 @@ def tool_name(key: str) -> str:
 
     Returns:
         The key's last `:`- or `/`-separated segment, any `[options]`
-        suffix dropped: `cargo:cargo-auditable` and
-        `github:rust-secure-code/cargo-auditable` both name
-        `cargo-auditable`; `rust` names `rust`.
+        suffix dropped: `cargo:cargo-pgrx` and
+        `github:pgcentralfoundation/cargo-pgrx` both name `cargo-pgrx`;
+        `rust` names `rust`.
 
     """
     return re.split(r"[/:]", key.split("[", 1)[0])[-1]

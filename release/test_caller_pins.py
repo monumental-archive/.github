@@ -90,11 +90,15 @@ class Versions(unittest.TestCase):
     def test_the_tools_come_out_in_the_order_named(self) -> None:
         """install_args reads in the job's order, not the config's."""
         config = (
-            '[tools]\n"cargo:cargo-auditable" = "0.7.7"\nnode = "26.13.0"\n'
-            'rust = "1.97.1"\n'
+            '[tools]\n"github:rust-secure-code/cargo-auditable" = "0.7.7"\n'
+            'node = "26.13.0"\nrust = "1.97.1"\n'
         )
         self.assertEqual(
-            (0, "install=rust@1.97.1 cargo:cargo-auditable@0.7.7\n", ""),
+            (
+                0,
+                "install=rust@1.97.1 github:rust-secure-code/cargo-auditable@0.7.7\n",
+                "",
+            ),
             install(config, "rust", "cargo-auditable"),
         )
 
@@ -104,10 +108,10 @@ class Keys(unittest.TestCase):
 
     def test_a_tool_under_the_cargo_key(self) -> None:
         """The compile-from-source form, emitted under its own key."""
-        config = '[tools]\nrust = "1.97.1"\n"cargo:cargo-auditable" = "0.7.7"\n'
+        config = '[tools]\nrust = "1.97.1"\n"cargo:cargo-pgrx" = "0.19.3"\n'
         self.assertEqual(
-            (0, "install=cargo:cargo-auditable@0.7.7\n", ""),
-            install(config, "cargo-auditable"),
+            (0, "install=cargo:cargo-pgrx@0.19.3\n", ""),
+            install(config, "cargo-pgrx"),
         )
 
     def test_the_same_tool_under_a_github_key(self) -> None:
@@ -129,21 +133,21 @@ class Keys(unittest.TestCase):
     def test_the_same_tool_under_two_keys_is_refused(self) -> None:
         """Both would install and one would win: refused, by name."""
         config = (
-            '[tools]\n"cargo:cargo-auditable" = "0.7.7"\n'
-            '"github:rust-secure-code/cargo-auditable" = "0.7.7"\n'
+            '[tools]\n"cargo:cargo-pgrx" = "0.19.3"\n'
+            '"github:pgcentralfoundation/cargo-pgrx" = "0.19.3"\n'
         )
         self.assertEqual(
             (
                 1,
                 "",
                 (
-                    "::error::cargo-auditable is pinned under 2 keys in mise.toml"
-                    " (cargo:cargo-auditable, github:rust-secure-code/cargo-auditable);"
+                    "::error::cargo-pgrx is pinned under 2 keys in mise.toml"
+                    " (cargo:cargo-pgrx, github:pgcentralfoundation/cargo-pgrx);"
                     " mise would install each and put one on PATH, so pin it under"
                     " one key\n"
                 ),
             ),
-            install(config, "cargo-auditable"),
+            install(config, "cargo-pgrx"),
         )
 
 
