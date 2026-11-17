@@ -162,7 +162,13 @@ when = []
 
 [tools."aqua:astral-sh/uv"]
 # No gate task runs it; mise installs every pipx: tool through it.
-for = ["pipx:coverage", "pipx:reuse", "pipx:sqlfluff", "pipx:yamllint"]
+for = [
+  "pipx:coverage",
+  "pipx:hypothesis",
+  "pipx:reuse",
+  "pipx:sqlfluff",
+  "pipx:yamllint",
+]
 run = ["uv", "uvx"]
 tasks = []
 when = []
@@ -194,6 +200,7 @@ tasks = [
   "lint:workflow-shell",
   "lint:workspace-inherit",
   "test:pgrx",
+  "test:python-properties",
 ]
 run = ["python3", "python"]
 
@@ -274,3 +281,9 @@ when = ["*.yaml", "*.yml", "scaffold/"]
 # cargo-llvm-cov's row, so the same wider half.
 tasks = ["coverage:check"]
 when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
+
+[tools."pipx:hypothesis"]
+# test:python-properties (#1332): its guard is a tracked prop_*.py, and
+# git's default pathspec lets `*` cross a slash.
+tasks = ["test:python-properties"]
+when = ["*prop_*.py"]

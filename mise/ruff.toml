@@ -82,8 +82,10 @@ ignore = [
 # port). Bare asserts would then trip S101 in turn, so this is the one
 # arrangement that lets `ALL` and `unittest` coexist. Nothing is
 # weakened for a repo that DOES use pytest: neither rule fires on a
-# pytest-style test in the first place.
+# pytest-style test in the first place. `prop_*.py` is the same idiom:
+# Hypothesis properties written as `unittest.TestCase` classes (#1332).
 "**/test_*.py" = ["PT009", "PT027"]
+"**/prop_*.py" = ["PT009", "PT027"]
 
 [format]
 docstring-code-format = true

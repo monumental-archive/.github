@@ -538,8 +538,11 @@ def scrub(source: str) -> str:
     inside one `'…'`. Scrubbing line by line would end each span at the
     newline and read the program text as shell.
 
-    The result is the same length as `source` with its newlines in place,
-    so an offset into it is an offset into the original.
+    The result is the same length as `source`, so an offset into it is
+    an offset into the original. Its newlines are in place except an
+    escaped one: a line continuation is blanked, because the two lines
+    it joins are one command. So a LINE number is counted in the
+    source, never here (#1332).
 
     Returns:
         The source with quoted and commented characters replaced by
@@ -602,7 +605,9 @@ def nested_runs(source: str) -> Iterator[int]:
             word in COMMAND_PREFIXES or ASSIGNMENT_RE.match(word)
             for word in head.split()
         ):
-            yield scrubbed.count("\n", 0, match.start())
+            # Counted in the source: scrub blanks a continued newline, so
+            # counting here put every run after one on the line above.
+            yield source.count("\n", 0, match.start())
 
 
 def excused(lines: Sequence[str], index: int) -> bool:
@@ -614,12 +619,22 @@ def excused(lines: Sequence[str], index: int) -> bool:
     must sit against the thing it excuses, or it becomes a comment about
     something else.
 
+    A run on a continued line is answered for at the line its command
+    starts on: the marker sits above the command, not inside it.
+
     Returns:
         True when a `# nested-mise: <reason>` marker covers the line.
 
     """
     if NESTED_MARKER_RE.search(lines[index]):
         return True
+    # A continued command starts on its first line, and that is the line
+    # a marker sits against: walk up through every line the backslash
+    # continues onto this one (#1332).
+    while index > 0 and lines[index - 1].rstrip().endswith("\\"):
+        index -= 1
+        if NESTED_MARKER_RE.search(lines[index]):
+            return True
     for above in range(index - 1, -1, -1):
         line = lines[above].strip()
         if not line.startswith("#"):

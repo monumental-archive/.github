@@ -639,6 +639,28 @@ class NestedMarker(unittest.TestCase):
         body = "# nested-mise: a reason\necho hi\nmise run fix:probe\n"
         self.assertEqual(len(nested(body)), 1)
 
+    def test_a_marker_above_a_continued_command_excuses_its_run(self) -> None:
+        """The run sits two continuations down; the marker is above line one.
+
+        lint:scaffold-assembly's shape. It passed before #1332 only
+        because the run's line was counted one up per continuation.
+        """
+        body = (
+            "# nested-mise: running the assembled gate is the job\n"
+            'if out=$(cd "${tmp}" \\\n'
+            '  X="${belt}" \\\n'
+            '  mise run "${task}" 2>&1); then\n'
+            "  true\n"
+            "fi\n"
+        )
+        self.assertEqual(nested(body), [])
+
+    def test_a_run_after_a_continuation_is_named_on_its_own_line(self) -> None:
+        """Counted in the source, so a continuation above moves nothing."""
+        found = nested("echo a \\\n  b\nmise run fix:probe\n")
+        self.assertEqual(len(found), 1)
+        self.assertIn(":8:", found[0])
+
 
 if __name__ == "__main__":
     unittest.main()
