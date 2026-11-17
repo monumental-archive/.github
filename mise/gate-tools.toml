@@ -1,0 +1,250 @@
+# When the gate needs each belt tool (#1410). One row per key in
+# config.toml's [tools]; mise/gate-tools.py reads it against
+# `git ls-files` and the gate job installs what it names.
+#
+#   tasks  the gate tasks that call the tool (`ci`'s lint:* wildcard,
+#          its depends, and the squash-message step's commits:check)
+#   when   the tracked-file pathspecs, git's default meaning, under which
+#          one of them does not skip; absent = every repository; [] = no
+#          gate task calls it
+#   for    install dependencies: needed whenever one of these is
+#   run    the commands the tool puts on PATH, where not its key's name
+#
+# The rows are derived, not remembered: mise/test_gate_tools.py reads
+# every gate task and the belt scripts it runs, and fails when a task
+# calls a tool missing here, or one whose `when` misses a pathspec the
+# task's guard tests. A call before a task's first "skipped" exit, or a
+# guard it cannot read, means no `when`.
+#
+# `scaffold/` is in every conditional row a lint or fixer reaches:
+# lint:scaffold-assembly (the canon's own tree) runs every fix:* and
+# lint:* task in a repository assembled from the stubs, so the canon
+# installs every tool a task calls.
+
+[tools.actionlint]
+# lint:actions tests for workflows in an if/else, after its call site.
+tasks = ["lint:actions", "lint:scaffold-assembly"]
+
+[tools.shellcheck]
+# lint:shell's guard is every tracked file through `shfmt --find`.
+tasks = [
+  "lint:belt-shell",
+  "lint:scaffold-assembly",
+  "lint:shell",
+  "lint:shell-embedded",
+  "lint:workflow-shell",
+]
+
+[tools.typos]
+tasks = ["lint:scaffold-assembly", "lint:typos"]
+
+[tools.lefthook]
+# hooks:install and the git hooks only; nothing in the gate.
+tasks = []
+when = []
+
+[tools.trivy]
+tasks = ["lint:scaffold-assembly", "lint:trivy"]
+
+[tools.zizmor]
+tasks = ["lint:scaffold-assembly", "lint:zizmor"]
+when = [".github/actions", ".github/workflows/*.y*ml", "scaffold/"]
+
+[tools.committed]
+# lint:commits and the squash-message step's commits:check.
+tasks = ["commits:check", "lint:commits", "lint:scaffold-assembly"]
+
+[tools.taplo]
+tasks = ["lint:scaffold-assembly", "lint:toml", "lint:tracks"]
+when = ["*.toml", "scaffold/", "security/identity.toml"]
+
+[tools.shfmt]
+# lint:shell finds its subject with `shfmt --find`, so it guards with it.
+tasks = [
+  "lint:bash-portability",
+  "lint:belt-shell",
+  "lint:scaffold-assembly",
+  "lint:shell",
+  "lint:shell-embedded",
+  "lint:workflow-shell",
+]
+
+[tools.rumdl]
+# lint:markdown tests for markdown in an if/else, after its call site.
+tasks = ["lint:markdown", "lint:scaffold-assembly"]
+
+[tools.lychee]
+# audit:links only; the gate is deterministic and checks no link.
+tasks = []
+when = []
+
+[tools.jq]
+# lint:audit-scheduled calls it with no guard.
+tasks = [
+  "coverage:check",
+  "lint:audit-scheduled",
+  "lint:badges",
+  "lint:biome",
+  "lint:biome-domains",
+  "lint:msrv",
+  "lint:pg-clippy",
+  "lint:pg-schema",
+  "lint:scaffold-assembly",
+  "lint:source-attest",
+  "lint:tracks",
+  "test:pgrx",
+]
+
+[tools."aqua:suzuki-shunsuke/pinact"]
+tasks = ["lint:action-pins", "lint:scaffold-assembly"]
+when = [
+  ".github/actions/*/action.y*ml",
+  ".github/workflows/*.y*ml",
+  "scaffold/",
+]
+
+[tools.ruff]
+tasks = ["lint:python", "lint:scaffold-assembly"]
+when = ["*.py", "*.pyi", "scaffold/"]
+
+[tools."aqua:biomejs/biome"]
+tasks = ["lint:biome", "lint:biome-domains", "lint:scaffold-assembly"]
+when = [
+  "*.cjs",
+  "*.cts",
+  "*.js",
+  "*.jsx",
+  "*.mjs",
+  "*.mts",
+  "*.ts",
+  "*.tsx",
+  "mise/biome-domains.tsv",
+  "scaffold/",
+]
+
+[tools."github:microsoft/typescript-go"]
+# lint:tsc-flags rules on the pinned compiler's options with no guard.
+tasks = [
+  "lint:scaffold-assembly",
+  "lint:tsc-flags",
+  "lint:tsconfig-dials",
+  "lint:types",
+]
+run = ["tsc"]
+
+[tools."aqua:taiki-e/cargo-llvm-cov"]
+# coverage:check's guard is a committed floor AND a root Cargo.toml or
+# go.mod; the row takes the wider half.
+tasks = ["coverage:check"]
+when = ["Cargo.toml", "go.mod"]
+
+[tools."aqua:EmbarkStudios/cargo-deny"]
+tasks = ["lint:deny", "lint:scaffold-assembly"]
+when = ["*/Cargo.lock", "Cargo.lock", "scaffold/"]
+
+[tools."aqua:google/osv-scanner"]
+# audit:* and the release path only.
+tasks = []
+when = []
+
+[tools."aqua:openvex/vexctl"]
+tasks = []
+when = []
+
+[tools."aqua:sigstore/gitsign"]
+tasks = []
+when = []
+
+[tools."aqua:astral-sh/uv"]
+# No gate task runs it; mise installs every pipx: tool through it.
+for = ["pipx:reuse", "pipx:sqlfluff", "pipx:yamllint"]
+run = ["uv", "uvx"]
+tasks = []
+when = []
+
+[tools.python]
+# Every belt helper; lint:subject-budget runs one with no guard.
+tasks = [
+  "coverage:check",
+  "lint:bash-portability",
+  "lint:belt-shell",
+  "lint:belt-tree",
+  "lint:biome",
+  "lint:deny",
+  "lint:fuzz-build",
+  "lint:gate-surface",
+  "lint:lock-platforms",
+  "lint:msrv",
+  "lint:pg-clippy",
+  "lint:pg-schema",
+  "lint:pg-upgrade-path",
+  "lint:plan-producers",
+  "lint:python-target",
+  "lint:rust",
+  "lint:scaffold-assembly",
+  "lint:shell-embedded",
+  "lint:sql",
+  "lint:subject-budget",
+  "lint:tsconfig-dials",
+  "lint:workflow-shell",
+  "lint:workspace-inherit",
+  "test:pgrx",
+]
+run = ["python3", "python"]
+
+[tools."pipx:reuse"]
+tasks = ["lint:reuse", "lint:scaffold-assembly"]
+when = ["REUSE.toml", "scaffold/"]
+
+[tools."aqua:sigstore/cosign"]
+tasks = []
+when = []
+
+[tools."github:monumental-archive/stele"]
+# lint:policy-load reads its guard from a loop the table cannot read.
+tasks = [
+  "lint:caller-permissions",
+  "lint:policy-load",
+  "lint:scaffold-assembly",
+  "lint:source-attest",
+  "lint:version-mirrors",
+]
+
+[tools."aqua:golangci/golangci-lint"]
+tasks = ["lint:go", "lint:scaffold-assembly"]
+when = ["*/*/go.mod", "*/go.mod", "go.mod", "scaffold/"]
+
+[tools."pipx:sqlfluff"]
+tasks = ["lint:scaffold-assembly", "lint:sql"]
+when = ["*.sql", "scaffold/"]
+
+[tools."github:obi1kenobi/cargo-semver-checks"]
+# audit:semver only.
+tasks = []
+when = []
+
+[tools."github:bnjbvr/cargo-machete"]
+tasks = ["lint:machete", "lint:scaffold-assembly"]
+when = ["*/Cargo.toml", "Cargo.toml", "scaffold/"]
+
+[tools."aqua:hadolint/hadolint"]
+tasks = ["lint:hadolint", "lint:scaffold-assembly"]
+when = [
+  "*.Dockerfile",
+  "*/Dockerfile",
+  "*/Dockerfile.*",
+  "Dockerfile",
+  "Dockerfile.*",
+  "scaffold/",
+]
+
+[tools."aqua:gitleaks/gitleaks"]
+tasks = ["lint:gitleaks", "lint:scaffold-assembly"]
+
+[tools."aqua:editorconfig-checker/editorconfig-checker"]
+# lint:editorconfig's guard is every tracked file.
+tasks = ["lint:editorconfig", "lint:scaffold-assembly"]
+
+[tools."pipx:yamllint"]
+tasks = ["lint:scaffold-assembly", "lint:yaml"]
+when = ["*.yaml", "*.yml", "scaffold/"]

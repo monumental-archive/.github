@@ -62,6 +62,17 @@ or cargo-pgrx bump would install every leg cold, the case the fallback
 exists for. What must never cross, one pgrx leg's Postgres into another
 major's leg, is kept apart by the NAME (`mise-pgrx-v1-pg18`), which is
 the prefix. Without `--install` the key is the one above, to the byte.
+
+THE BELT TOOLS LEFT OUT (#1410). The gate disables the belt tools a tree
+does not need (mise/gate-tools.py), and what it installs then changes
+with the tree's files, which neither hash sees: a first Dockerfile needs
+hadolint under the same key. An exact hit is never re-saved, so that
+restore would lack hadolint and fetch it on every run until the key
+moved. So a tree that leaves tools out ends the key in
+`-off{digest of the left-out set}` (ORG_GATE_BELT_DIGEST) — after the
+prefix, so a pull request whose set differs still falls back to the
+default branch's entry and installs only what it adds. A tree that
+leaves nothing out (the canon) sets no digest and no suffix.
 """
 
 import argparse
@@ -187,6 +198,9 @@ def names(
     digest = install_digest(install)
     listed = f"-i{digest}" if digest else ""
     key = f"{prefix}{facts.version}{menv}-p{period}-{file_hash}{listed}-b{facts.belt}"
+    left_out = env.get("ORG_GATE_BELT_DIGEST")
+    if left_out:
+        key += f"-off{left_out}"
     return {"key": key, "prefix": prefix, "dir": data_dir(env)}
 
 

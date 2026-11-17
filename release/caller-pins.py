@@ -178,6 +178,33 @@ def find_config(root: Path) -> Path | None:
     return None
 
 
+# Every config file mise reads [tools] from in a checkout, for a question
+# that must not miss one: which tools does this repository pin at all?
+EVERY_CONFIG = (*CANDIDATES, ".config/mise.toml", ".config/mise/config.toml")
+
+
+def pinned_names(root: Path) -> set[str]:
+    """Name every tool the repository pins, under any backend key.
+
+    The gate leaves belt tools out of a tree that does not need them
+    (#1410, mise/gate-tools.py), and must never leave out one the
+    repository pins itself: mise disables a tool by name, and the
+    repository's own pin would go with it.
+
+    Returns:
+        The tool name of every `[tools]` key in every config file in
+        EVERY_CONFIG that exists, by `tool_name`.
+
+    """
+    names: set[str] = set()
+    for name in EVERY_CONFIG:
+        path = root / name
+        if path.is_file():
+            tools = tomllib.loads(path.read_text("utf-8")).get("tools", {})
+            names.update(tool_name(key) for key in tools)
+    return names
+
+
 def read_pins(
     root: Path,
     needed: list[str],
