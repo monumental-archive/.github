@@ -236,6 +236,11 @@ when = []
 tasks = []
 when = []
 
+[tools."github:sivchari/gomu"]
+# audit:mutants only, and pinned lazy: no bare install fetches it (#1356).
+tasks = []
+when = []
+
 [tools."github:bnjbvr/cargo-machete"]
 tasks = ["lint:machete", "lint:scaffold-assembly"]
 when = ["*/Cargo.toml", "Cargo.toml", "scaffold/"]
