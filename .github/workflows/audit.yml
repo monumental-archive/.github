@@ -256,6 +256,38 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: mise run audit:lock-idempotent
 
+  regression-tests:
+    name: audit / fixes that came with a regression test
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+
+      # Tree-local, beside lock-idempotent and for its reason: this
+      # repository does not call repo-audit.yml, so this job is how its
+      # OWN history is read; the consumer side is the matching leg
+      # there. Local git only, no API reads, so either group would do
+      # and the first is the one with room. A report, never red on the
+      # ratio (#1335); full history because the helper refuses a
+      # shallow clone.
+      - name: Report fixes with and without a regression test
+        run: mise run audit:regression-tests
+
   template-pins:
     name: audit / template pin staleness
     needs: plan
