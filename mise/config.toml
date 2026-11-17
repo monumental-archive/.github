@@ -4171,6 +4171,18 @@ env = { CGO_ENABLED = "1" }
 # nothing, and the seeds are exactly the inputs already known to reach
 # interesting code. Determinism survives it: the detector reports races
 # it observes and invents none.
+#
+# ONLY THE PACKAGES THAT DECLARE A TARGET ARE RUN (#1413). Running
+# `./...` compiled every package's tests under -race to replay corpora
+# that live in a few: on stele, 6 of 46 packages, beside the repo's own
+# `go test -race ./...` and coverage:check in the same gate. The list
+# is the toolchain's, per package, never a grep of the source: `go test
+# -list` prints a package's matching names and then that package's `ok`
+# line (measured, go 1.27.4), so a target in an external `_test`
+# package is found the way `go test` finds it, and one behind a build
+# tag is found exactly when the run would build it. A listing that
+# fails is red, never a shorter list: a package whose tests do not
+# compile would otherwise drop out of the run instead of failing it.
 run = '''
 set -euo pipefail
 mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
@@ -4186,10 +4198,25 @@ total=0
 while IFS= read -r m; do
   [[ -n ${m} ]] || continue
   d=$(dirname "${m}")
-  n=$( (cd "${d}" && go test -list '^Fuzz' ./... 2> /dev/null) | grep -c '^Fuzz' || true)
+  listed=$(cd "${d}" && go test -list '^Fuzz' ./...) || {
+    printf '%s\n' "${listed}" >&2
+    echo "lint:go-fuzz-seeds: go test -list failed in ${d} — the fuzz targets cannot be enumerated" >&2
+    exit 1
+  }
+  n=$(grep -c '^Fuzz' <<< "${listed}" || true)
   [[ ${n} -gt 0 ]] || continue
   total=$((total + n))
-  (cd "${d}" && go test -race -run '^Fuzz' ./...)
+  owners=$(awk '/^Fuzz/ { n++ } /^ok[ \t]/ { if (n) printf "%s ", $2; n = 0 }' <<< "${listed}")
+  [[ -n ${owners} ]] || {
+    printf '%s\n' "${listed}" >&2
+    echo "lint:go-fuzz-seeds: ${n} target(s) listed in ${d} but no package line owns them" >&2
+    exit 1
+  }
+  read -ra pkgs <<< "${owners}"
+  (cd "${d}" && go test -race -run '^Fuzz' "${pkgs[@]}") || {
+    echo "lint:go-fuzz-seeds: a seed corpus failed in ${d} — packages run: ${pkgs[*]}" >&2
+    exit 1
+  }
 done <<< "${mods}"
 [[ ${total} -gt 0 ]] || {
   echo "lint:go-fuzz-seeds: no Go fuzz targets, skipped"
