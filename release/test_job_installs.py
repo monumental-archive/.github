@@ -715,6 +715,25 @@ class GateInstalls(unittest.TestCase):
             auto_installs("ci.yml", "pgrx", job),
         )
 
+    def test_a_task_named_in_a_followed_scripts_comment_is_not_reached(
+        self,
+    ) -> None:
+        """The reader follows a script's code, never its comments (#1408).
+
+        pgrx-env.sh's comments name `coverage:check` and its siblings.
+        `scripts()` once reassigned the text it searched for task names to
+        each followed file's whole source, comments included, so a step
+        sourcing it seemed to reach coverage-measure.sh and call Go.
+        """
+        job = [
+            "      - name: Planted",
+            '        run: . "${ORG_BELT_DIR}/pgrx-env.sh"',
+        ]
+        self.assertEqual(
+            ({"jq"}, {"rust", "cargo-pgrx", "postgresql-binaries"}),
+            calls(job, carries=True),
+        )
+
     def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres(self) -> None:
         """The leg's list as derived: no linter, node, fuzz or MSRV."""
         self.assertEqual(
