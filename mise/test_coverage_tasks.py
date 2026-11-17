@@ -401,6 +401,77 @@ class TypeScriptRows(CoverageTaskCase):
         self.assertFalse((tree / "lcov.info").exists())
 
 
+def upload_step() -> str:
+    """Read the upload job's "Generate the report" run block from ci.yml.
+
+    Returns:
+        The block, dedented, as the runner's bash receives it.
+
+    """
+    lines = (CANON / ".github/workflows/ci.yml").read_text("utf-8").splitlines()
+    at = lines.index("      - name: Generate the report")
+    at = lines.index("        run: |", at) + 1
+    body = []
+    for line in lines[at:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break
+        body.append(line[10:])
+    return "\n".join(body) + "\n"
+
+
+class UploadStep(unittest.TestCase):
+    """ci.yml's report step asks the probe which legs the tree measures."""
+
+    def test_a_python_only_tree_uploads(self) -> None:
+        """The step once skipped any tree without Cargo.toml or go.mod."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "tree"
+            stubs = Path(tmp) / "stubs"
+            tree.mkdir()
+            stubs.mkdir()
+            mise = MISE.replace(
+                "exit 1\n",
+                'if [[ "$1 $2" == "run coverage:report" ]]; then\n'
+                "  touch coverage.xml\n  exit 0\nfi\nexit 1\n",
+            )
+            (stubs / "mise").write_text(mise, encoding="utf-8")
+            (stubs / "mise").chmod(0o755)
+            task = Path(tmp) / "task.json"
+            task.write_text(json.dumps({"dir": str(tree), "run": ["true"]}), "utf-8")
+            (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
+            (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
+            (tree / ".org-canon").mkdir()
+            (tree / ".org-canon" / "mise").symlink_to(BELT)
+            out = Path(tmp) / "outputs"
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env |= {
+                "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+                "STUB_TASK": str(task),
+                "HAS_TOKEN": "true",
+                "GITHUB_OUTPUT": str(out),
+            }
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [GIT, "init", "-q"], cwd=tree, env=env, check=True
+            )
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [GIT, "add", "helper.py", ".coverage-floor"],
+                cwd=tree,
+                env=env,
+                check=True,
+            )
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [BASH, "-e", "-c", upload_step()],
+                cwd=tree,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            outputs = out.read_text("utf-8") if out.exists() else ""
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("files=coverage.xml\nskip=false\n", outputs)
+
+
 class AdoptAndReportRows(CoverageTaskCase):
     """The write-mode and upload halves read the same measurement."""
 

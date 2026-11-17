@@ -914,8 +914,11 @@ jobs:
         if: ${{ hashFiles('pnpm-lock.yaml', 'package-lock.json') != '' }}
         run: |
           set -euo pipefail
-          if [[ -f pnpm-lock.yaml ]]; then pnpm install --frozen-lockfile; else npm ci; fi
-
+          if [[ -f pnpm-lock.yaml ]]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
       - name: Generate the report
         id: gen
         env:

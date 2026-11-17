@@ -2624,8 +2624,9 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   sources. The upload is the measured run's lcov, as
   `lcov-typescript.info` (`lcov.info` is the Rust leg's). Proven on
   monumental-archive, the org's only TypeScript, by that repository's
-  own adoption change after the release; its counts live there, not
-  here. **Rejected, so it is not re-proposed:** c8 or nyc pinned by the
+  own adoption change on top of Renovate's pin bump
+  (monumental-archive/monumental-archive#365); its counts live there,
+  not here. **Rejected, so it is not re-proposed:** c8 or nyc pinned by the
   belt beside the runner — two instrumentations of one suite, and a
   provider version the belt would own where the repository's lockfile
   should.
