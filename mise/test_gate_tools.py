@@ -216,7 +216,11 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
 
     """
     found: set[str] = set()
-    for _, text in lines:
+    # A `\`-continued command is one command: lint:biome's selection runs
+    # onto a second line, and reading line by line lost `*.json` and the
+    # rest of it (#1410: biome disabled on stele, which tracks JSON only).
+    joined = re.sub(r"\\\n", " ", "\n".join(text for _, text in lines))
+    for text in joined.splitlines():
         for seg in re.findall(r"git ls-files([^|)>;&]*)", text):
             words = re.findall(r'"([^"]*)"|\'([^\']*)\'|(\S+)', seg)
             words = [a or b or c for a, b, c in words]
@@ -386,6 +390,17 @@ class Table(unittest.TestCase):
         )
         self.assertIsNone(first_call(lines, ["hadolint"]))
 
+    def test_a_continued_selection_is_read_whole(self) -> None:
+        """A backslash-continued `git ls-files` is one guard (#1410, lint:biome)."""
+        lines = expand(
+            'files=$(git ls-files ":!vendor/**" "*.js" \\\n  "*.json" "*.css")\n'
+            '[[ -n ${files} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n',
+            set(),
+        )
+        self.assertEqual(
+            {"*.js", "*.json", "*.css"}, guard_paths(lines[: first_skip(lines) + 1])
+        )
+
     def test_xargs_and_cargo_subcommands_are_calls(self) -> None:
         """`xargs -0 tool` and `cargo deny` are calls."""
         for text, cmd in (
@@ -496,6 +511,12 @@ class Helper(unittest.TestCase):
         self.assertIn("pipx:sqlfluff", got)
         self.assertIn("aqua:astral-sh/uv", got)
         self.assertIn("github:bnjbvr/cargo-machete", got)
+
+    def test_a_json_only_tree_needs_biome(self) -> None:
+        """lint:biome lints JSON: renovate.json alone brings biome (#1410)."""
+        self.assertIn(
+            "aqua:biomejs/biome", install(git_tree({"renovate.json": "{}\n"}))
+        )
 
     def test_a_dockerfile_tree(self) -> None:
         """Each Dockerfile form brings hadolint."""
