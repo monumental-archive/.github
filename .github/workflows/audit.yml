@@ -115,7 +115,12 @@ jobs:
           version: 2026.11.5
           cache: false
 
+      # The job's own token, as in repo-audit.yml (#1344): this
+      # repository is public, so it changes nothing here but keeps the
+      # two links legs alike.
       - name: Check links
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: mise run audit:links
 
   actions:

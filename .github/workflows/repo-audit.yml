@@ -208,8 +208,14 @@ jobs:
       # with the canon and is passed explicitly, so a repo-local
       # lychee.toml cannot quietly outrank it; `.lycheeignore` remains
       # the repo's own per-link escape (#681). A repo with no tracked
-      # markdown skips clean.
+      # markdown skips clean. The job's own token lets lychee ask the
+      # API whether a failed github.com link's repository exists, so a
+      # private repository's links to itself pass (#1344). It reads
+      # this repository and nothing else private; a dead path inside a
+      # private repository is taken on trust, the most lychee can do.
       - name: Check links
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: mise run audit:links
 
   actions:
