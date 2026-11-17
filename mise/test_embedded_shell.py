@@ -488,6 +488,87 @@ class Rewrite(unittest.TestCase):
         self.assertEqual(out, action("|+", "if true; then echo x; fi\n\n"))
 
 
+def blank_after(first: str) -> str:
+    """Build #1431's five-step workflow: blank lines after two blocks.
+
+    The first block's body is `first`, on line 6, with a blank line and
+    a comment after it; the third block's body is on line 14, with a
+    blank line before the next step. The other blocks have none.
+
+    Returns:
+        The workflow's text.
+
+    """
+    return (
+        "on: push\n"
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - run: |\n"
+        f"          {first}\n"
+        "\n"
+        "      # a comment\n"
+        "      - name: two\n"
+        "        run: |\n"
+        "          echo two\n"
+        "      - name: three\n"
+        "        run: |\n"
+        "          echo three\n"
+        "\n"
+        "      - run: |\n"
+        "          echo four\n"
+        "      - run: echo five\n"
+    )
+
+
+class TrailingBlank(unittest.TestCase):
+    """#1431: blank lines after a block are YAML layout, not shell."""
+
+    def write(self, text: str) -> Path:
+        """Write one workflow text to a scratch file.
+
+        Returns:
+            The file's path.
+
+        """
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "w.yml"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_blank_line_after_a_literal_block_is_not_a_finding(self) -> None:
+        """A formatted block followed by a blank line is clean.
+
+        The test that fails before #1431: the reader took the blank line
+        as body, shfmt reported it, and lines 6 and 14 were red.
+        """
+        path = self.write(blank_after("echo one"))
+        self.assertEqual(es.check(path, fmt=True, lint=True), [])
+
+    def test_rewrite_keeps_blank_lines_after_a_block(self) -> None:
+        """`--write` on clean blocks rewrites none and changes no byte.
+
+        The test that fails before #1431: the fixer reformatted two
+        blocks by deleting the blank line after each.
+        """
+        text = blank_after("echo one")
+        path = self.write(text)
+        self.assertEqual(es.rewrite(path), 0)
+        self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_unformatted_shell_before_a_blank_line_stays_red(self) -> None:
+        """The shell itself still reds, and the fix keeps the blank line."""
+        path = self.write(blank_after("if true;then echo x;fi"))
+        found = es.check(path, fmt=True, lint=True)
+        self.assertEqual(found, [f"{path}:6: run: block is not shfmt-formatted"])
+        self.assertEqual(es.rewrite(path), 1)
+        self.assertEqual(
+            path.read_text(encoding="utf-8"),
+            blank_after("if true; then echo x; fi"),
+        )
+
+
 class DebtFile(unittest.TestCase):
     """Lines of the debt file that are not entries are red, by line."""
 

@@ -213,6 +213,19 @@ def content_pad(body: list[str], header: str, key_indent: int) -> int:
     return least
 
 
+def trailing_blanks(body: list[str]) -> int:
+    """Count the blank lines that end a block's region.
+
+    Returns:
+        How many of the last lines hold nothing but whitespace.
+
+    """
+    n = 0
+    while n < len(body) and not body[-1 - n].strip():
+        n += 1
+    return n
+
+
 def runs_in(lines: list[str]) -> Iterator[Run]:
     """Yield every `run:` block scalar in a file's lines.
 
@@ -239,9 +252,13 @@ def runs_in(lines: list[str]) -> Iterator[Run]:
         if not any(x.strip() for x in body):
             continue
         pad = content_pad(body, m.group(3), key_indent)
+        # Blank lines after the text are YAML layout under every chomping
+        # indicator, never script to format (#1431): the source stops at
+        # the last text line, and `end` still marks the region's end.
+        text = body[: len(body) - trailing_blanks(body)]
         yield Run(
             line=start + 2,
-            source="\n".join(x[pad:] if x.strip() else "" for x in body) + "\n",
+            source="\n".join(x[pad:] if x.strip() else "" for x in text) + "\n",
             shell=step_shell(lines, start, indent),
             header=m.group(3),
             commented=m.group(4) is not None,
@@ -345,17 +362,13 @@ def shfmt_body(run: Run, lines: list[str]) -> list[str] | None:
     if r.returncode != 0 or not r.stdout:
         return None
     body = lines[run.start + 1 : run.end]
+    # The blank lines after the text are not the script's (#1431): only
+    # the text is compared and replaced, and they go back as they were.
+    cut = len(body) - trailing_blanks(body)
     formatted = r.stdout.splitlines()[1:]  # drop the shebang we added
-    if formatted == [x[run.pad :] if x.strip() else "" for x in body]:
+    if formatted == [x[run.pad :] if x.strip() else "" for x in body[:cut]]:
         return None
-    new = [(" " * run.pad + x) if x.strip() else "" for x in formatted]
-    if "+" in run.header:
-        # Keep chomping: trailing blank lines are part of the value.
-        trailing = 0
-        while trailing < len(body) and not body[-1 - trailing].strip():
-            trailing += 1
-        new += [""] * trailing
-    return new
+    return [(" " * run.pad + x) if x.strip() else "" for x in formatted] + body[cut:]
 
 
 def rewrite(path: Path) -> int:
