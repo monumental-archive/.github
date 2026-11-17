@@ -1,23 +1,32 @@
 #!/usr/bin/env python3
-"""Drop zizmor's stale-action-refs findings on the org signer (#1152).
+"""Drop zizmor's findings on the org signer's pins (#1152, #1340).
 
-`audit:actions` runs zizmor online, and since zizmor 1.32 its
-`stale-action-refs` audit reports every `uses:` pinned to a commit that
-no tag points at. The org signer is never tagged, by design: the SHA is
-its whole identity (`mise/pinact.yaml`). So the ten signer references
-red the audit for a fact that is true and is not a defect.
+`audit:actions` runs zizmor online, and two of its audits report the
+org signer's pins for facts that are true and are not defects:
+
+- `stale-action-refs` (since zizmor 1.32) reports every `uses:` pinned
+  to a commit that no tag points at. The signer is never tagged, by
+  design: the SHA is its whole identity (`mise/pinact.yaml`).
+- `ref-version-mismatch` reports a `# main` comment whenever the
+  signer's `main` has moved past the pinned commit. `# main` says the
+  commit is on `main`, not that it is `main`'s head; how far behind a
+  pin may fall is Renovate's and the pin audit's question, not this one.
 
 The exemption lives here, keyed on the signer's identity, because every
 other place was measured or ruled out on #1152: a second comment on the
 `uses:` line hides the reference from Renovate, a `zizmor.yml` ignore
-for the rule hides a stale third-party pin, and `file:line` rots.
+for either rule hides a real third-party finding, and `file:line` rots.
 
-A finding is dropped only when BOTH hold: its audit is
-`stale-action-refs`, and every reference it names belongs to the
-signer's repository. The reference is read from the finding's Primary
-location (`concrete.feature`, `owner/repo[/path]@ref`), the shape
-zizmor 1.32.0 emitted on the canon. A finding whose reference cannot be
-read is kept, so a change in zizmor's output reds rather than hides.
+A finding is dropped only when BOTH hold: its audit is one of those
+two, and every reference it names belongs to the signer's repository.
+Each audit carries its reference in a different location, as zizmor
+1.32.0 emitted them on the canon: `stale-action-refs` in its Primary
+location (`concrete.feature` is `owner/repo[/path]@ref`), and
+`ref-version-mismatch` in its Hidden location, whose feature is the
+whole job or step and whose `uses:` lines carry the reference (its
+Primary feature is the comment, `main`). A finding whose reference
+cannot be read is kept, so a change in zizmor's output reds rather than
+hides.
 
 Reads zizmor's `--format=json` array on stdin. Exits 0 when nothing is
 left to report, 1 when findings remain, 2 when the input is not that
@@ -28,30 +37,64 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
-AUDIT = "stale-action-refs"
+# Each exempt audit, the location kind that carries its reference, and
+# why the finding is true but not a defect on the signer.
+AUDITS = {
+    "stale-action-refs": (
+        "Primary",
+        "is never tagged by design, mise/pinact.yaml",
+    ),
+    "ref-version-mismatch": (
+        "Hidden",
+        "is pinned on `# main`, which names the branch, not its head",
+    ),
+}
+# A `uses:` key at the start of a line, optionally a sequence item; a
+# `uses:` inside a comment or prose is not a reference.
+USES = re.compile(r"""^\s*(?:-\s+)?uses:\s*["']?([^\s"'#]+)""", re.MULTILINE)
 # `owner/repo` is the shortest reference that names a repository.
 OWNER_AND_REPO = 2
 
 
-def references(finding: dict) -> list[str]:
-    """Return the references a finding's Primary locations name.
+def location_references(feature: str) -> list[str]:
+    """Return the references one location's feature carries.
 
     Returns:
-        Each Primary location's `owner/repo[/path]@ref` text; empty when
-        the finding carries none in that shape.
+        The feature itself when it is a bare `owner/repo[/path]@ref`;
+        otherwise the value of each `uses:` line in it that has an `@`.
 
     """
+    text = feature.strip()
+    if "@" in text and not any(c.isspace() for c in text):
+        return [text]
+    return [ref for ref in USES.findall(feature) if "@" in ref]
+
+
+def references(finding: dict) -> list[str]:
+    """Return the references a finding names, read where its audit puts them.
+
+    Returns:
+        The references in every location of the kind the finding's
+        audit carries them in; empty for an audit not exempt here, or
+        when the finding carries none in that shape.
+
+    """
+    audit = AUDITS.get(finding.get("ident"))
+    if audit is None:
+        return []
+    kind = audit[0]
     refs = []
     for location in finding.get("locations") or []:
         if not isinstance(location, dict):
             continue
-        if (location.get("symbolic") or {}).get("kind") != "Primary":
+        if (location.get("symbolic") or {}).get("kind") != kind:
             continue
         feature = (location.get("concrete") or {}).get("feature")
-        if isinstance(feature, str) and "@" in feature:
-            refs.append(feature.strip())
+        if isinstance(feature, str):
+            refs.extend(location_references(feature))
     return refs
 
 
@@ -73,14 +116,14 @@ def repository(reference: str) -> str | None:
 
 
 def on_signer(finding: dict, signer: str) -> bool:
-    """Report whether a finding is a stale-action-refs on the signer.
+    """Report whether a finding is an exempt audit on the signer.
 
     Returns:
-        True only when the audit matches and every reference the
-        finding names is in the signer's repository.
+        True only when the audit is exempt here and every reference
+        the finding names is in the signer's repository.
 
     """
-    if finding.get("ident") != AUDIT:
+    if finding.get("ident") not in AUDITS:
         return False
     refs = references(finding)
     if not refs:
@@ -133,10 +176,12 @@ def main(argv: list[str] | None = None) -> int:
     live = [f for f in findings if f.get("ignored") is not True]
     dropped = [f for f in live if on_signer(f, signer)]
     kept = [f for f in live if not on_signer(f, signer)]
-    print(
-        f"audit:actions: {len(dropped)} {AUDIT} finding(s) on the signer dropped"
-        f" ({signer} is never tagged by design, mise/pinact.yaml)",
-    )
+    for audit, (_, why) in AUDITS.items():
+        count = sum(1 for f in dropped if f.get("ident") == audit)
+        print(
+            f"audit:actions: {count} {audit} finding(s) on the signer dropped"
+            f" ({signer} {why})",
+        )
     if kept:
         idents = sorted({str(f.get("ident")) for f in kept})
         print(

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Table tests for audit:actions' signer filter (#1152).
+"""Table tests for audit:actions' signer filter (#1152, #1340).
 
-The fixture is zizmor 1.32.0's own `--format=json --persona=auditor`
-output, run online on the canon's `.github/workflows/` on 2026-11-15:
-the ten `stale-action-refs` findings on the signer, unedited. Every
-other row is derived from one of those real findings by changing one
-field, so each kept or dropped case is planted alone, not invented.
+Two fixtures, both zizmor 1.32.0's own `--format=json
+--persona=auditor` output, run online on the canon's
+`.github/workflows/`, unedited:
+
+- `zizmor-1.32.0-canon.json`, 2026-11-15: the ten `stale-action-refs`
+  findings on the signer.
+- `zizmor-1.32.0-ref-version-mismatch.json`, 2026-11-17: the first of
+  the ten `ref-version-mismatch` findings on the canon at `af30901`
+  (`4564ce7^`, before #1345 moved the signer pin), which pins the
+  signer at `0d6c6e2` while the signer's `main` was `b746956`.
+
+Every other row is derived from one of those real findings by changing
+one field, so each kept or dropped case is planted alone, not invented.
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -28,8 +36,12 @@ signer = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(signer)
 
 REAL = json.loads((HERE / "testdata" / "zizmor-1.32.0-canon.json").read_text())
+MISMATCH = json.loads(
+    (HERE / "testdata" / "zizmor-1.32.0-ref-version-mismatch.json").read_text(),
+)
 SIGNER_WORKFLOW = "monumental-archive/signer/.github/workflows/sign.yml"
 SIGNER_REF = SIGNER_WORKFLOW + "@cffec9441210d46f237099d8785098aacf5b8273"
+MISMATCH_REF = SIGNER_WORKFLOW + "@0d6c6e297684c8ba401fb9c212532628fe552148"
 
 
 def run(findings: object, workflow: str = SIGNER_WORKFLOW) -> tuple[int, str, str]:
@@ -64,6 +76,22 @@ def repointed(finding: dict, reference: str) -> dict:
     return changed
 
 
+def rewritten(finding: dict, kind: str, old: str, new: str) -> dict:
+    """Return a copy of a real finding with text replaced in one location kind.
+
+    Returns:
+        The finding with `old` replaced by `new` in the feature of every
+        location of that kind.
+
+    """
+    changed = copy.deepcopy(finding)
+    for location in changed["locations"]:
+        if location["symbolic"]["kind"] == kind:
+            feature = location["concrete"]["feature"]
+            location["concrete"]["feature"] = feature.replace(old, new)
+    return changed
+
+
 class RealCanonOutput(unittest.TestCase):
     """The canon's own zizmor run, as it came."""
 
@@ -80,6 +108,102 @@ class RealCanonOutput(unittest.TestCase):
         self.assertEqual(0, status, err)
         self.assertIn("10 stale-action-refs finding(s) on the signer dropped", out)
         self.assertEqual("", err)
+
+
+class RefVersionMismatch(unittest.TestCase):
+    """The signer's `# main` pin behind `main` (#1340), as zizmor wrote it."""
+
+    def test_the_fixture_is_one_signer_mismatch(self) -> None:
+        """The fixture is the measured shape: the reference rides the Hidden job."""
+        self.assertEqual(1, len(MISMATCH))
+        self.assertEqual("ref-version-mismatch", MISMATCH[0]["ident"])
+        primary = [
+            loc["concrete"]["feature"]
+            for loc in MISMATCH[0]["locations"]
+            if loc["symbolic"]["kind"] == "Primary"
+        ]
+        self.assertEqual(["main"], primary)
+        self.assertEqual([MISMATCH_REF], signer.references(MISMATCH[0]))
+
+    def test_the_signer_mismatch_is_dropped_and_counted(self) -> None:
+        """The signer's `# main` behind its branch head goes green, said aloud."""
+        status, out, err = run(MISMATCH)
+        self.assertEqual(0, status, err)
+        self.assertIn(
+            "1 ref-version-mismatch finding(s) on the signer dropped"
+            " (monumental-archive/signer is pinned on `# main`",
+            out,
+        )
+        self.assertEqual("", err)
+
+    def test_both_audits_together_are_dropped(self) -> None:
+        """The scheduled run carries both; each is counted on its own line."""
+        status, out, err = run([*REAL, *MISMATCH])
+        self.assertEqual(0, status, err)
+        self.assertIn("10 stale-action-refs finding(s) on the signer dropped", out)
+        self.assertIn("1 ref-version-mismatch finding(s) on the signer dropped", out)
+
+    def test_another_owner_mismatch_is_kept(self) -> None:
+        """The same finding on another owner's repository still reds."""
+        other = rewritten(
+            MISMATCH[0],
+            "Hidden",
+            "monumental-archive/signer/",
+            "someone-else/signer/",
+        )
+        status, out, err = run([other])
+        self.assertEqual(1, status)
+        self.assertIn("0 ref-version-mismatch finding(s) on the signer dropped", out)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+
+    def test_a_mismatch_with_no_readable_reference_is_kept(self) -> None:
+        """A Hidden location with no `uses:` line names nothing; it is kept."""
+        blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
+        self.assertEqual([], signer.references(blind))
+        status, _, err = run([blind])
+        self.assertEqual(1, status)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+
+    def test_the_comment_alone_is_not_read_as_a_reference(self) -> None:
+        """Primary carries only `main`; dropping the Hidden location blinds it."""
+        blind = copy.deepcopy(MISMATCH[0])
+        blind["locations"] = [
+            loc for loc in blind["locations"] if loc["symbolic"]["kind"] == "Primary"
+        ]
+        status, _, err = run([blind])
+        self.assertEqual(1, status)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+
+    def test_a_uses_in_prose_is_not_a_reference(self) -> None:
+        """A commented `uses:` beside the signer's is not read as a second ref."""
+        prose = rewritten(
+            MISMATCH[0],
+            "Hidden",
+            "    with:\n",
+            "    # relative `uses: actions/checkout@v4` in prose\n    with:\n",
+        )
+        self.assertEqual([MISMATCH_REF], signer.references(prose))
+        self.assertEqual(0, run([prose])[0])
+
+    def test_a_second_reference_elsewhere_keeps_it(self) -> None:
+        """Every named reference must be the signer's, not just one of them."""
+        two = rewritten(
+            MISMATCH[0],
+            "Hidden",
+            "    with:\n",
+            "    with:\n      - uses: actions/checkout@v4\n",
+        )
+        status, _, err = run([two])
+        self.assertEqual(1, status)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+
+    def test_another_audit_on_the_signer_is_kept(self) -> None:
+        """An unrelated audit carrying the same locations still reds."""
+        other_rule = copy.deepcopy(MISMATCH[0])
+        other_rule["ident"] = "unpinned-uses"
+        status, _, err = run([other_rule])
+        self.assertEqual(1, status)
+        self.assertIn("1 finding(s) remain: unpinned-uses", err)
 
 
 class Kept(unittest.TestCase):
