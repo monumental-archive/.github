@@ -87,7 +87,7 @@ jobs:
       # lint:caller-permissions checks it against what the callee
       # asks).
       contents: write # this repository's contents, read and write
-    uses: monumental-archive/.github/.github/workflows/level.yml@9c589515fd330342c66f5d29f5ddff3a1ac1b210 # v1.68.10
+    uses: monumental-archive/.github/.github/workflows/level.yml@dabadd776e67f73910cb09634a2eea5e5509a51f # v1.68.11
     with:
       tracks: build source dependency
 ...
