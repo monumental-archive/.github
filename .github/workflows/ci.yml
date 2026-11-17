@@ -420,52 +420,9 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          # The title is this composition's INPUT, so it must not already
-          # contain its OUTPUT: GitHub appends " (#N)" unconditionally,
-          # and a title ending in this PR's own number mints the
-          # reference twice in the permanent subject. It happened on both
-          # PRs where an author wrote the number in (#783 and #788), and
-          # the 72-column ceiling structurally cannot catch it — an
-          # appended "(#N)" is an unwrappable tail, and committed is
-          # wrap-aware by ruling (mise/committed.toml), so the 78-column
-          # duplicate passed legitimately. This is that mechanism one
-          # composition step short, asked here where the author is
-          # present and the fix is a title edit (#800, #576's test).
-          #
-          # This PR's OWN number only. A title ending in the ISSUE's
-          # reference is the convention — 39 subjects on main carry the
-          # issue ref then the PR's — so a check refusing any trailing
-          # reference would refuse the convention it exists to protect.
-          if [[ ${PR_TITLE} == *"(#${PR_NUMBER})" ]]; then
-            emsg="the PR title already ends in this pull request's own reference (#${PR_NUMBER}),"
-            emsg+=" and the merge appends it again — the permanent subject would carry it twice"
-            emsg+=" — fix the TITLE: it carries the ISSUE reference only, the squash appends the PR's"
-            echo "::error::${emsg}"
-            exit 1
-          fi
-          msg="${RUNNER_TEMP}/squash-message"
-          printf '%s (#%s)\n' "${PR_TITLE}" "${PR_NUMBER}" > "${msg}"
-          # The BODY is the other permanent half (#880). The API serves
-          # it CRLF-terminated, so strip the CR before measuring: a
-          # Windows author must not fail on characters they cannot see.
-          body=${PR_BODY:-}
-          body=${body//$'\r'/}
-          # A body that is empty or only whitespace composes to the
-          # subject alone — exactly the behaviour before this, so the
-          # change is strictly additive and adds no trailing blank.
-          if [[ -n ${body//[[:space:]]/} ]]; then
-            printf '\n%s\n' "${body}" >> "${msg}"
-          fi
-          export ORG_COMMIT_MSG_FILE="${msg}"
-          if ! mise run commits:check; then
-            emsg="the PR title and body become the permanent squash subject (plus ' (#${PR_NUMBER})') and body,"
-            emsg+=" and they fail the commit canon — fix the TITLE or the BODY, not a commit"
-            echo "::error::${emsg}"
-            exit 1
-          fi
-          echo "squash-message: title and body mint a conforming commit"
+        # The composition, the title's own-reference refusal (#800) and
+        # the CRLF body (#880): mise/squash-message.py (#1386).
+        run: python3 .org-canon/mise/squash-message.py
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       - name: Run the gate
@@ -681,30 +638,23 @@ jobs:
           GATE: ${{ needs.gate.result }}
           PGRX: ${{ needs.pgrx.result }}
           MAJORS: ${{ needs.plan.outputs.majors }}
+        # Prints what the jobs above computed, one name/result pair at a
+        # time; the pgrx legs may be skipped only when none were planned.
+        # Every branch is a row in mise/test_gate_verdict.py (#1386).
         run: |
           set -euo pipefail
           status=0
-          if [[ ${PLAN} != "success" ]]; then
-            echo "::error::plan: ${PLAN}"
+          for pair in "plan=${PLAN}" "gate=${GATE}" "pgrx legs=${PGRX}"; do
+            name=${pair%%=*} result=${pair#*=}
+            [[ ${result} != success ]] || continue
+            if [[ ${name} == "pgrx legs" && ${result} == skipped ]]; then
+              [[ ${MAJORS} != "[]" ]] || continue
+              echo "::error::pgrx legs were skipped although ${MAJORS} were planned"
+            else
+              echo "::error::${name}: ${result}"
+            fi
             status=1
-          fi
-          if [[ ${GATE} != "success" ]]; then
-            echo "::error::gate: ${GATE}"
-            status=1
-          fi
-          case "${PGRX}" in
-            success) ;;
-            skipped)
-              if [[ ${MAJORS} != "[]" ]]; then
-                echo "::error::pgrx legs were skipped although ${MAJORS} were planned"
-                status=1
-              fi
-              ;;
-            *)
-              echo "::error::pgrx legs: ${PGRX}"
-              status=1
-              ;;
-          esac
+          done
           [[ ${status} -eq 0 ]] || exit 1
           echo "ci: plan, gate and every pgrx leg (${MAJORS}) passed"
   # The badge feed, never the gate: uploads the coverage report to
@@ -923,26 +873,28 @@ jobs:
         id: gen
         env:
           HAS_TOKEN: ${{ secrets.codecov-token != '' }}
+        # Which reports to upload is coverage:report's answer (#1386): it
+        # knows which legs ran, prints the list it wrote, and refuses a
+        # leg that wrote nothing. The belt task, never a second inline
+        # invocation: it carries the repo's COVERAGE_EXCLUDE set and the
+        # llvm-tools assertion, so the badge feed and the gate ratchet
+        # cannot disagree about what is coverable (#316).
         run: |
           set -euo pipefail
-          # Which legs the tree measures is the measurement script's probe
-          # (#1331), never a manifest list copied here.
-          legs=$(.org-canon/mise/coverage-measure.sh coverage-upload probe)
-          if [[ ! -f .coverage-floor || ${HAS_TOKEN} != "true" || -z ${legs} ]]; then
-            echo "skip=true" >> "${GITHUB_OUTPUT}"
-            echo "::notice::no floor, no token or no measurable leg; badge upload skipped"
-            exit 0
+          report=""
+          if [[ ${HAS_TOKEN} != "true" ]]; then
+            echo "::notice::no token; badge upload skipped"
+          else
+            report=$(mise run coverage:report)
+            printf '%s\n' "${report}"
           fi
-          # The belt task, never a second inline invocation (#316), and the
-          # upload list is what it WROTE, never a guess from repo shape.
-          mise run coverage:report
-          files=$(for f in lcov{,-typescript}.info coverage.{txt,xml}; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
-          if [[ -z ${files} ]]; then
-            echo "::error::coverage:report wrote no report — nothing to upload"
-            exit 1
-          fi
+          files=$(sed -n 's/.*coverage:report: upload //p' <<< "${report}")
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
-          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          if [[ -n ${files} ]]; then
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          fi
       # unattested-path: the write half of the Go caches restored
       # above, on their standing: a push to the default branch that
       # missed them saves them, and every other ref writes nothing

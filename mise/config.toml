@@ -6877,8 +6877,7 @@ applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:report probe) || exit 1
 }
 # Go leg (#392): the profile go test writes IS the upload format —
 # Codecov parses Go coverprofiles natively, so the report is the
-# measurement, with no converter to drift. ci.yml selects the filename
-# by repo shape (coverage.txt for Go, lcov.info for Rust).
+# measurement, with no converter to drift.
 # Every tracked language renders its own report, for the same reason
 # coverage:check runs every leg: a mixed repo used to render lcov.info
 # alone while ci.yml, guessing the filename from `hashFiles('go.mod')`,
@@ -6910,23 +6909,37 @@ if grep -qx typescript <<< "${applies}"; then
   "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report typescript > /dev/null
   echo "coverage:report: lcov-typescript.info written"
 fi
-[[ -f Cargo.toml ]] || exit 0
-if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
-  echo "coverage:report: llvm-tools component missing — declare it with the" >&2
-  echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+if [[ -f Cargo.toml ]]; then
+  if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
+    echo "coverage:report: llvm-tools component missing — declare it with the" >&2
+    echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+    exit 1
+  fi
+  # The same provisioning the measurement gets, from the same function,
+  # so the report and the number it accompanies are built against one
+  # Postgres (#917).
+  . "${ORG_BELT_DIR}/pgrx-env.sh"
+  org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
+  excludes=""
+  for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
+  # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
+  # which cargo must receive as separate arguments
+  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
+  echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
+fi
+# What to upload is this task's answer, because it knows which legs ran
+# (#1386): the list is what the task WROTE, never a guess from repo
+# shape. A mixed repo renders every report and uploads every one; the
+# workflow's old `hashFiles('go.mod')` selector once named coverage.txt
+# for repos whose Rust-only leg had written lcov.info. The badge job
+# reads this line and nothing else; a leg that ran and wrote nothing is
+# refused here, where it happened.
+files=$(for f in lcov{,-typescript}.info coverage.{txt,xml}; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
+if [[ -z ${files} ]]; then
+  echo "coverage:report: wrote no report — nothing to upload" >&2
   exit 1
 fi
-# The same provisioning the measurement gets, from the same function, so
-# the report and the number it accompanies are built against one
-# Postgres (#917).
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
-excludes=""
-for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-# shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
-# which cargo must receive as separate arguments
-cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
-echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
+echo "coverage:report: upload ${files}"
 '''
 
 [tasks."lint:fuzz-build"]

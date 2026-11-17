@@ -18,7 +18,6 @@
 #
 # Generated from the tree by the lint's own counter
 # (mise/embedded-shell.py), never typed.
-.github/actions/canon/action.yml	Link the resolved canon tree	23	# canon helper (the remaining small steps): #1386
 .github/actions/source-attest/action.yml	Guard the identity and resolve the canon tree	35	# leaving (the source-attest action is deleted): #1362
 .github/actions/source-attest/action.yml	Emit the chain links and push the ledger	19	# leaving (the source-attest action is deleted): #1362
 .github/actions/verify-signed/action.yml	Derive the signer digest from the calling workflow's own pin	23	# stele: #1352 unassigned
@@ -47,8 +46,6 @@
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/build-source-archive.yml	Build the archive twice and prove determinism	22	# canon helper (packaging): #1384
 .github/workflows/build-wasm-npm.yml	Pack and hash the exact bytes that will publish	36	# canon helper (packaging): #1384
-.github/workflows/ci.yml	The squash message is the PR title and body — hold it to the commit canon	23	# canon helper (the remaining small steps): #1386
-.github/workflows/ci.yml	Every part of the gate passed	25	# canon helper (the remaining small steps): #1386
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Derive this publish's VEX and gate on undecided advisories	40	# stele: monumental-archive/stele#397, canon swap #1372
 .github/workflows/continuous.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374

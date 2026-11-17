@@ -497,11 +497,49 @@ class AdoptAndReportRows(CoverageTaskCase):
         )
 
     def test_report_writes_the_cobertura_report(self) -> None:
-        """The upload is rendered from the leg's own run."""
+        """The upload is rendered from the leg's own run, and listed."""
         done, tree = self.run_task("coverage:report")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("coverage:report: coverage.xml written\n", done.stdout)
+        self.assertEqual(
+            "coverage:report: coverage.xml written\n"
+            "coverage:report: upload coverage.xml\n",
+            done.stdout,
+        )
         self.assertTrue((tree / "coverage.xml").is_file())
+
+    def test_report_without_a_floor_lists_nothing(self) -> None:
+        """No floor: skipped, and no upload line for the badge job to read."""
+        done, _ = self.run_task("coverage:report", floor=False)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("coverage:report: no .coverage-floor, skipped\n", done.stdout)
+
+    def test_report_without_a_measurable_language_lists_nothing(self) -> None:
+        """Nothing measurable: skipped, and no upload line."""
+        done, _ = self.run_task("coverage:report", test_task=False)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "coverage:report: no measurable language, skipped\n", done.stdout
+        )
+
+    def test_report_mixed_tree_lists_every_report_it_wrote(self) -> None:
+        """#1386: the upload list is what exists, in one order."""
+        done, _ = self.run_task("coverage:report", go="90.0")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertTrue(
+            done.stdout.endswith("coverage:report: upload coverage.xml\n"),
+            done.stdout,
+        )
+
+    def test_report_that_wrote_nothing_is_refused(self) -> None:
+        """A leg that ran and left no report is refused by the task."""
+        # The Go stub measures but writes no profile, so the Go leg ran
+        # and nothing exists to upload.
+        done, _ = self.run_task("coverage:report", go="90.0", python=False)
+        self.assertEqual(1, done.returncode, done.stdout)
+        self.assertIn(
+            "coverage:report: wrote no report — nothing to upload", done.stderr
+        )
+        self.assertNotIn("upload ", done.stdout)
 
 
 # The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
