@@ -59,6 +59,13 @@ jobs:
   semver:
     name: audit / semver against the published baseline
     runs-on: ubuntu-26.04
+    # Measured (#1341): edtf's whole judgment, five pgrx majors built twice
+    # each (the crate and its baseline) plus its plain crates, took 706s on
+    # an M1 Pro (8 cores) with a cold target directory; the toolchain install
+    # took 4 minutes on the runner (edtf run 43884069155). The runner
+    # builds slower than the Mac, so the ceiling is about three times the
+    # sum: a hung build stops here, a slow one does not.
+    timeout-minutes: 50
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
