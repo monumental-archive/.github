@@ -251,38 +251,17 @@ if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${graph_head}" ]]; then
 fi
 
 # rust and cargo-pgrx are caller build inputs, pinned in the caller's own
-# mise config — same read as build-pgrx-extension.yml.
-pins=$(python3 -c '
-import json, sys, tomllib
-for candidate in ("mise.toml", ".mise.toml", "mise/config.toml"):
-    try:
-        with open(candidate, "rb") as f:
-            t = tomllib.load(f)
-        break
-    except FileNotFoundError:
-        continue
-else:
-    sys.exit("no mise config found")
-tools = t.get("tools", {})
-rust = tools.get("rust", "")
-pgrx = tools.get("cargo:cargo-pgrx", "")
-# A tool may be pinned as a LIST of versions — a repo that fuzzes declares
-# a second, nightly toolchain beside the stable one so audit:fuzz can run
-# AddressSanitizer (.github#445). mise puts the FIRST entry on PATH, and
-# that is the toolchain this build must use; reading the list whole sent
-# the entire JSON array to rustup as a version and reddened the lab
-# Release PR on the first run after it declared one. No apostrophes in
-# here: this block is a single-quoted python -c argument.
-if isinstance(rust, list): rust = rust[0] if rust else ""
-if isinstance(rust, dict): rust = rust.get("version", "")
-print(json.dumps({"rust": rust, "pgrx": pgrx}))
-')
-RUST_VERSION=$(jq -r .rust <<< "${pins}")
-PGRX_VERSION=$(jq -r .pgrx <<< "${pins}")
-if [[ -z ${RUST_VERSION} || -z ${PGRX_VERSION} ]]; then
+# mise config, read by the canon's one reader of a caller's pins (#1333):
+# under whichever backend key pins them, and for a LIST of rust versions
+# (a repo that fuzzes declares a nightly beside the stable one, .github#445)
+# the first entry, the one mise puts on PATH and this build must use.
+pins=$("${canon}/release/caller-pins.py" env --input-of "the pgrx-extension class" \
+  RUST_VERSION=rust PGRX_VERSION=cargo-pgrx) || {
   echo "FAIL: rust and cargo:cargo-pgrx must be pinned in this repository's mise config" >&2
   exit 1
-fi
+}
+RUST_VERSION=$(sed -n 's/^RUST_VERSION=//p' <<< "${pins}")
+PGRX_VERSION=$(sed -n 's/^PGRX_VERSION=//p' <<< "${pins}")
 export RUST_VERSION PGRX_VERSION
 
 # One canonical cell derives the script: the newest PG major that both the

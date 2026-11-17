@@ -454,23 +454,20 @@ jobs:
       # stele is a belt tool now (pinned, locked, provenance verified at
       # lock time) — the `go run <module>@<commit>` bootstrap this job
       # used to carry is retired, so the verdict needs the belt rather
-      # than the runner's preinstalled Go. install: false plus one
-      # explicit install keeps the job cold: only the tool it runs.
-      - name: Install mise
+      # than the runner's preinstalled Go. A named list keeps the job
+      # cold: only the tools the verdict runs (#1333), held to its calls
+      # by release/test_job_installs.py.
+      - name: Install the belt's stele and jq
         if: inputs.mode == 'verdict'
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
-        with:
-          version: 2026.11.6
-          cache: false
-          install: false
-
-      - name: Install the belt's stele
-        if: inputs.mode == 'verdict'
         env:
           MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
           MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
           MISE_LOCKED: "1"
-        run: mise install "github:monumental-archive/stele"
+        with:
+          version: 2026.11.6
+          cache: false
+          install_args: jq github:monumental-archive/stele
 
       - name: Verify the release and render the verdict (stele emit vsa)
         id: verdict
