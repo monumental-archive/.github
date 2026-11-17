@@ -1,0 +1,226 @@
+{
+  "id": "24269508",
+  "created": "2026-11-16T04:00:38.834452+00:00",
+  "updated": "2026-11-16T04:00:39.036020+00:00",
+  "links": {
+    "self": "https://zenodo.org/api/records/24269508",
+    "self_html": "https://zenodo.org/records/24269508",
+    "preview_html": "https://zenodo.org/records/24269508?preview=1",
+    "doi": "https://doi.org/10.5281/zenodo.24269508",
+    "self_doi": "https://doi.org/10.5281/zenodo.24269508",
+    "self_doi_html": "https://zenodo.org/doi/10.5281/zenodo.24269508",
+    "reserve_doi": "https://zenodo.org/api/records/24269508/draft/pids/doi",
+    "parent": "https://zenodo.org/api/records/21913604",
+    "parent_html": "https://zenodo.org/records/21913604",
+    "parent_doi": "https://doi.org/10.5281/zenodo.21913604",
+    "parent_doi_html": "https://zenodo.org/doi/10.5281/zenodo.21913604",
+    "self_iiif_manifest": "https://zenodo.org/api/iiif/record:24269508/manifest",
+    "self_iiif_sequence": "https://zenodo.org/api/iiif/record:24269508/sequence/default",
+    "files": "https://zenodo.org/api/records/24269508/files",
+    "media_files": "https://zenodo.org/api/records/24269508/media-files",
+    "latest": "https://zenodo.org/api/records/24269508/versions/latest",
+    "latest_html": "https://zenodo.org/records/24269508/latest",
+    "versions": "https://zenodo.org/api/records/24269508/versions",
+    "draft": "https://zenodo.org/api/records/24269508/draft",
+    "access_links": "https://zenodo.org/api/records/24269508/access/links",
+    "access_grants": "https://zenodo.org/api/records/24269508/access/grants",
+    "access_users": "https://zenodo.org/api/records/24269508/access/users",
+    "access_request": "https://zenodo.org/api/records/24269508/access/request",
+    "access": "https://zenodo.org/api/records/24269508/access",
+    "communities": "https://zenodo.org/api/records/24269508/communities",
+    "communities-suggestions": "https://zenodo.org/api/records/24269508/communities-suggestions",
+    "request_deletion": "https://zenodo.org/api/records/24269508/request-deletion",
+    "file_modification": "https://zenodo.org/api/records/24269508/file-modification",
+    "quota_increase": "https://zenodo.org/api/records/24269508/quota-increase",
+    "requests": "https://zenodo.org/api/records/24269508/requests"
+  },
+  "revision_id": 3,
+  "parent": {
+    "id": "21913604",
+    "access": {
+      "owned_by": {
+        "user": "1815987"
+      },
+      "settings": {
+        "allow_user_requests": false,
+        "allow_guest_requests": false,
+        "accept_conditions_text": null,
+        "secret_link_expiration": 0
+      }
+    },
+    "communities": {},
+    "pids": {
+      "doi": {
+        "identifier": "10.5281/zenodo.21913604",
+        "provider": "datacite",
+        "client": "datacite"
+      }
+    }
+  },
+  "versions": {
+    "is_latest": true,
+    "index": 95
+  },
+  "is_published": true,
+  "is_draft": false,
+  "pids": {
+    "doi": {
+      "identifier": "10.5281/zenodo.24269508",
+      "provider": "datacite",
+      "client": "datacite"
+    },
+    "oai": {
+      "identifier": "oai:zenodo.org:24269508",
+      "provider": "oai"
+    }
+  },
+  "metadata": {
+    "resource_type": {
+      "id": "software",
+      "title": {
+        "de": "Software",
+        "en": "Software"
+      }
+    },
+    "creators": [
+      {
+        "person_or_org": {
+          "type": "personal",
+          "name": "Allen, Carl",
+          "given_name": "Carl",
+          "family_name": "Allen"
+        }
+      }
+    ],
+    "title": "monumental-archive/.github",
+    "publisher": "Zenodo",
+    "publication_date": "2026-11-16",
+    "version": "1.68.4",
+    "rights": [
+      {
+        "id": "0bsd",
+        "title": {
+          "en": "BSD Zero Clause License"
+        },
+        "description": {
+          "en": ""
+        },
+        "props": {
+          "url": "http://landley.net/toybox/license.html",
+          "scheme": "spdx"
+        }
+      }
+    ],
+    "description": "Release v1.68.4 of monumental-archive/.github. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release."
+  },
+  "custom_fields": {},
+  "access": {
+    "record": "public",
+    "files": "public",
+    "embargo": {
+      "active": false,
+      "reason": null
+    },
+    "status": "open"
+  },
+  "files": {
+    "enabled": true,
+    "order": [],
+    "count": 1,
+    "total_bytes": 1234134,
+    "entries": {
+      ".github-1.68.4.tar.gz": {
+        "id": "4f7761b5-0cc0-4d68-98ad-f38fd53f0084",
+        "checksum": "md5:2a11c3167d742e709c39c082e207b18b",
+        "ext": "gz",
+        "size": 1234134,
+        "mimetype": "application/gzip",
+        "storage_class": "L",
+        "key": ".github-1.68.4.tar.gz",
+        "metadata": {},
+        "access": {
+          "hidden": false
+        },
+        "links": {
+          "self": "https://zenodo.org/api/records/24269508/files/.github-1.68.4.tar.gz",
+          "content": "https://zenodo.org/api/records/24269508/files/.github-1.68.4.tar.gz/content"
+        }
+      }
+    }
+  },
+  "media_files": {
+    "enabled": false,
+    "order": [],
+    "count": 0,
+    "total_bytes": 0,
+    "entries": {}
+  },
+  "status": "published",
+  "deletion_status": {
+    "is_deleted": false,
+    "status": "P"
+  },
+  "stats": {
+    "this_version": {
+      "views": 3,
+      "unique_views": 3,
+      "downloads": 1,
+      "unique_downloads": 1,
+      "data_volume": 1234134.0
+    },
+    "all_versions": {
+      "views": 437,
+      "unique_views": 434,
+      "downloads": 21,
+      "unique_downloads": 21,
+      "data_volume": 21028130.0
+    }
+  },
+  "swh": {},
+  "ui": {
+    "publication_date_l10n_medium": "Nov 16, 2026",
+    "publication_date_l10n_long": "November 16, 2026",
+    "created_date_l10n_long": "November 16, 2026",
+    "updated_date_l10n_long": "November 16, 2026",
+    "resource_type": {
+      "id": "software",
+      "title_l10n": "Software"
+    },
+    "custom_fields": {},
+    "access_status": {
+      "id": "open",
+      "title_l10n": "Open",
+      "description_l10n": "The record and files are publicly accessible.",
+      "icon": "unlock",
+      "embargo_date_l10n": null,
+      "message_class": ""
+    },
+    "creators": {
+      "creators": [
+        {
+          "person_or_org": {
+            "type": "personal",
+            "name": "Allen, Carl",
+            "given_name": "Carl",
+            "family_name": "Allen"
+          }
+        }
+      ],
+      "affiliations": []
+    },
+    "description_stripped": "Release v1.68.4 of monumental-archive/.github. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release.",
+    "version": "1.68.4",
+    "rights": [
+      {
+        "id": "0bsd",
+        "title_l10n": "BSD Zero Clause License",
+        "description_l10n": "",
+        "props": {
+          "url": "http://landley.net/toybox/license.html",
+          "scheme": "spdx"
+        }
+      }
+    ],
+    "is_draft": false
+  }
+}
