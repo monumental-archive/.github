@@ -6749,11 +6749,19 @@ dir = "{{cwd}}"
 # language measures (statements for Go, lines for Rust, statements and
 # branches for Python, #1331); the floor is a minimum in all of them,
 # and every leg must hold it. Which languages apply is the measurement
-# script's `probe`, so this guard names no manifest of its own.
+# script's `probe`. The pathspec test before it is only the necessary
+# half, written where mise/gate-tools.py's derivation can read it
+# (#1410): a tree with none of these can measure nothing, so the gate
+# need not install a coverage tool for it.
 run = '''
 floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
-if [[ -z ${floor} ]]; then
-  echo "coverage:check: no .coverage-floor, skipped"
+tracked_py=$(git ls-files -- '*.py') || tracked_py=""
+if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked_py} ]]; then
+  if [[ -z ${floor} ]]; then
+    echo "coverage:check: no .coverage-floor, skipped"
+  else
+    echo "coverage:check: no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), skipped"
+  fi
   exit 0
 fi
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1

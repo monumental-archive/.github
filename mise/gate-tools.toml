@@ -140,10 +140,11 @@ tasks = [
 run = ["tsc"]
 
 [tools."aqua:taiki-e/cargo-llvm-cov"]
-# coverage:check's guard is a committed floor AND a root Cargo.toml or
-# go.mod; the row takes the wider half.
+# coverage:check's guard is a committed floor AND a root Cargo.toml,
+# go.mod or tracked *.py (#1331); the row takes the wider half, and
+# the guard cannot say which leg a tree's language needs.
 tasks = ["coverage:check"]
-when = ["Cargo.toml", "go.mod"]
+when = ["*.py", "Cargo.toml", "go.mod"]
 
 [tools."aqua:EmbarkStudios/cargo-deny"]
 tasks = ["lint:deny", "lint:scaffold-assembly"]
@@ -164,7 +165,7 @@ when = []
 
 [tools."aqua:astral-sh/uv"]
 # No gate task runs it; mise installs every pipx: tool through it.
-for = ["pipx:reuse", "pipx:sqlfluff", "pipx:yamllint"]
+for = ["pipx:coverage", "pipx:reuse", "pipx:sqlfluff", "pipx:yamllint"]
 run = ["uv", "uvx"]
 tasks = []
 when = []
@@ -255,3 +256,9 @@ tasks = ["lint:editorconfig", "lint:scaffold-assembly"]
 [tools."pipx:yamllint"]
 tasks = ["lint:scaffold-assembly", "lint:yaml"]
 when = ["*.yaml", "*.yml", "scaffold/"]
+
+[tools."pipx:coverage"]
+# coverage:check's python leg (#1331): the same guard as
+# cargo-llvm-cov's row, so the same wider half.
+tasks = ["coverage:check"]
+when = ["*.py", "Cargo.toml", "go.mod"]
