@@ -87,37 +87,12 @@ jobs:
 
       - name: Enumerate every pinned digest
         id: plan
+        # The runner's python: tomllib is stdlib, and the belt has no
+        # business here — this job reads one file and emits a matrix.
+        # One derivation and its tests: release/matrix.py (#1385).
         run: |
-          set -euo pipefail
-          # The runner's python: tomllib is stdlib, and the belt has no
-          # business here — this job reads one file and emits a matrix.
-          include=$(
-            python3 - << 'EOF'
-          import json, tomllib
-          with open("docker/pgrx-base-images.toml", "rb") as f:
-              t = tomllib.load(f)
-          cells = []
-          for role in ("build", "smoke"):
-              for pg, ref in sorted(t.get(role, {}).items()):
-                  name, _, digest = ref.partition("@")
-                  if not digest.startswith("sha256:"):
-                      raise SystemExit(f"{role}.{pg}: no digest in {ref!r}")
-                  repo = name.split(":", 1)[0]
-                  if "/" not in repo:
-                      repo = f"docker.io/library/{repo}"
-                  cells.append({"role": role, "pg": pg, "ref": ref,
-                                "name": repo, "digest": digest})
-          print(json.dumps(cells))
-          EOF
-          )
-          count=$(jq "length" <<< "${include}" || true)
-          if [[ ${count} == "0" ]]; then
-            echo "::error::no pinned base images found — an empty approval set approves nothing"
-            exit 1
-          fi
-          matrix=$(jq -c '{include: .}' <<< "${include}")
-          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
-          jq -r '.[] | "::notice::will attest \(.role) pg\(.pg): \(.ref)"' <<< "${include}"
+          release/matrix.py base-images docker/pgrx-base-images.toml \
+            >> "${GITHUB_OUTPUT}"
   attest:
     name: Attest ${{ matrix.role }} base pg${{ matrix.pg }}
     needs: plan

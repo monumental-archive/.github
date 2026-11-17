@@ -1,0 +1,4 @@
+::notice::will build linux-amd64 on ubuntu-24.04
+::notice::will build linux-arm64 on ubuntu-24.04-arm
+::notice::will build darwin-amd64 on macos-15-intel
+::notice::will build darwin-arm64 on macos-15

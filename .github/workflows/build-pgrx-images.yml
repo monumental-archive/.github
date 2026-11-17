@@ -110,31 +110,16 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       expected: ${{ steps.plan.outputs.expected }}
     steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
       - name: Derive the matrix
         id: plan
         env:
           UNTRUSTED_MAJORS: ${{ inputs.pg-majors }}
+        # One derivation and its tests (#1385).
         run: |
-          set -euo pipefail
-          IFS=',' read -ra majors <<< "${UNTRUSTED_MAJORS// /}"
-          if ((${#majors[@]} == 0)); then
-            echo "::error::no PG majors requested"
-            exit 1
-          fi
-          include="[]"
-          for pg in "${majors[@]}"; do
-            if [[ ! ${pg} =~ ^[0-9]+$ ]]; then
-              echo "::error::${pg} is not a PG major"
-              exit 1
-            fi
-            include=$(jq -c --arg pg "${pg}" '. + [{pg: $pg}]' <<< "${include}")
-          done
-          matrix=$(jq -c '{include: .}' <<< "${include}")
-          expected=$(jq -c '[.[].pg]' <<< "${include}")
-          {
-            echo "matrix=${matrix}"
-            echo "expected=${expected}"
-          } >> "${GITHUB_OUTPUT}"
+          .org-canon/release/matrix.py pgrx-images "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
   image:
     name: Assemble and prove the pg${{ matrix.pg }} artifact image
     needs: plan

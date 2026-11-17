@@ -126,42 +126,17 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       expected: ${{ steps.plan.outputs.expected }}
     steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
       - name: Derive the matrix from the requested targets
         id: plan
         env:
           UNTRUSTED_TARGETS: ${{ inputs.targets }}
+        # One derivation, its runner table and its tests (#1385).
         run: |
-          set -euo pipefail
-          IFS=',' read -ra requested <<< "${UNTRUSTED_TARGETS// /}"
-          if ((${#requested[@]} == 0)); then
-            echo "::error::no targets requested — a release that builds nothing is not a release"
-            exit 1
-          fi
-          include="[]"
-          for t in "${requested[@]}"; do
-            case "${t}" in
-              linux-amd64) runner=ubuntu-24.04 ;;
-              linux-arm64) runner=ubuntu-24.04-arm ;;
-              darwin-amd64) runner=macos-15-intel ;;
-              darwin-arm64) runner=macos-15 ;;
-              *)
-                echo "::error::unknown target ${t}; canon targets only (<goos>-<goarch>)"
-                exit 1
-                ;;
-            esac
-            include=$(jq -c --arg t "${t}" --arg r "${runner}" \
-              '. + [{target: $t, runner: $r}]' <<< "${include}")
-          done
-          dupes=$(jq -r '[.[].target] | length - (unique | length)' <<< "${include}")
-          if [[ ${dupes} != "0" ]]; then
-            echo "::error::duplicate target requested"
-            exit 1
-          fi
-          matrix=$(jq -c '{include: .}' <<< "${include}")
-          expected=$(jq -c '[.[].target]' <<< "${include}")
-          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
-          echo "expected=${expected}" >> "${GITHUB_OUTPUT}"
-          jq -r '.[] | "::notice::will build \(.target) on \(.runner)"' <<< "${include}"
+          .org-canon/release/matrix.py targets go-binary \
+            "${UNTRUSTED_TARGETS}" >> "${GITHUB_OUTPUT}"
   build:
     name: Build and smoke ${{ matrix.target }}
     needs: plan
