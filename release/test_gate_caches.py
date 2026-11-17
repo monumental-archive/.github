@@ -376,5 +376,73 @@ class Planted(unittest.TestCase):
         )
 
 
+def install_key_findings(text: str) -> list[str]:
+    """Name a listed job whose cache key digests a list it does not install.
+
+    A job that installs a list (#1408) passes the list to the cache-name
+    step as ORG_TOOL_INSTALL, and the key carries its digest. The two
+    copies must be the same words, or the key names a cache of tools the
+    job does not install.
+
+    Returns:
+        One line per job whose two copies differ.
+
+    """
+    out = []
+    for job_id, job in job_installs.jobs(text).items():
+        steps = job_installs.steps(job)
+        named = [s for s in steps if s.get("id") == "tool-key"]
+        installs = job_installs.mise_steps(job)
+        if not named or not installs:
+            continue
+        listed = flat(installs[0].get("with.install_args", ""))
+        keyed = flat(named[0].get("env.ORG_TOOL_INSTALL", ""))
+        if listed != keyed:
+            out.append(
+                f"{job_id}: the cache key digests '{keyed}' and the job"
+                f" installs '{listed}'"
+            )
+    return out
+
+
+class InstallKeys(unittest.TestCase):
+    """A listed job's cache key digests what it installs (#1408)."""
+
+    def test_the_real_jobs_agree(self) -> None:
+        """The legs and the upload key by their own install lists."""
+        self.assertEqual([], install_key_findings(real()))
+
+    def test_the_listed_jobs_pass_their_list(self) -> None:
+        """Both listed jobs name a list; the gate names none."""
+        jobs = job_installs.jobs(real())
+        for job_id, wanted in (("pgrx", True), ("coverage-upload", True)):
+            (named,) = [
+                s for s in job_installs.steps(jobs[job_id]) if s.get("id") == "tool-key"
+            ]
+            self.assertEqual(wanted, bool(named.get("env.ORG_TOOL_INSTALL")))
+            self.assertIn("--install", named["run"])
+        (gate,) = [
+            s for s in job_installs.steps(jobs["gate"]) if s.get("id") == "tool-key"
+        ]
+        self.assertNotIn("--install", gate["run"])
+
+    def test_a_list_the_key_does_not_carry_is_named(self) -> None:
+        """Planted: the leg installs a tool its key's list leaves out."""
+        text = plant(
+            "          install_args: jq ${{ steps.pins.outputs.install }}",
+            "          install_args: jq typos ${{ steps.pins.outputs.install }}",
+        )
+        self.assertEqual(
+            [
+                (
+                    "pgrx: the cache key digests 'jq ${{ steps.pins.outputs.install }}'"
+                    " and the job installs"
+                    " 'jq typos ${{ steps.pins.outputs.install }}'"
+                )
+            ],
+            install_key_findings(text),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

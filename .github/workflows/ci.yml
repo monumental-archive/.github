@@ -220,8 +220,9 @@ jobs:
       # copy: the Rust toolchains moved inside the cached directory in
       # v1.64.2, the key stayed the same through v1.64.4, and every job
       # went on restoring a cache without them and fetching them again
-      # at about ten seconds a toolchain. v2 is that change. Bump it in
-      # all three jobs together; each repository pays one cold install.
+      # at about ten seconds a toolchain. v2 is that change. Only this
+      # job uses it: the pgrx legs and the coverage upload name their
+      # own caches (#1408). A bump costs each repository one cold install.
       - name: Name the tool cache
         id: tool-key
         env:
@@ -513,6 +514,11 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      # The list holds only if `mise run` keeps to it (#1408). Measured
+      # on mise 2026.11.6: by default `mise run` installs every tool the
+      # config pins and the data directory lacks, before the task, so
+      # the whole toolset would install in the next step instead.
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -526,18 +532,42 @@ jobs:
       - name: Keep the Rust toolchains inside the tool cache
         run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
 
-      # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
-      # rendered when it restored and saved this cache itself, reproduced
-      # by mise/gate-cache-key.py and pinned by its test to a key the
-      # action logged, then `-b` and the sha256 of the delivered belt's
-      # mise.lock (#1414), so a belt tool bump names a new cache.
-      # `mise-v2` moves with the `gate` job's, for the reason given there.
+      # WHAT A LEG INSTALLS (#1408): what `test:pgrx` calls, and nothing
+      # else. It installed the caller's whole config — measured on edtf,
+      # 222 to 278 s per leg to run an 8 to 9 s suite, or a 1.7 GB cache
+      # restore on a hit — for linters, node, cargo-fuzz, the MSRV
+      # toolchains and four Postgres majors it never ran. The caller's
+      # config decides the versions, the canon decides which tools
+      # (#1333): the first Rust, cargo-pgrx, and the one Postgres entry
+      # at this leg's major. release/test_job_installs.py holds the list
+      # to the calls of pgrx-test.sh and pgrx-env.sh.
+      - name: Read the caller's pinned build inputs
+        id: pins
+        env:
+          ORG_PGRX_MAJOR: ${{ matrix.major }}
+        run: |
+          .org-canon/release/caller-pins.py install \
+            --input-of "every pgrx leg of the gate" \
+            --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \
+            rust cargo-pgrx >> "${GITHUB_OUTPUT}"
+      # The tool cache's name (#1406, #1414), apart from the gate's
+      # (#1408). The NAME carries the leg's major, so it is the fallback
+      # prefix: a pg14 leg never restores a pg18 leg's cache. The KEY
+      # also carries a digest of the install list (`--install`), so a
+      # pin bump names a new cache while the prefix still finds the last
+      # one and installs only what moved. ORG_TOOL_INSTALL is the
+      # install step's install_args, word for word
+      # (release/test_gate_caches.py). Move `v1` when the cache's
+      # CONTENTS must change and its key would not (#1165).
       - name: Name the tool cache
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon
-
+          ORG_PGRX_MAJOR: ${{ matrix.major }}
+          ORG_TOOL_INSTALL: jq ${{ steps.pins.outputs.install }}
+        run: |
+          python3 .org-canon/mise/gate-cache-key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
+            .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
       # exactly here, on the same reasoning and with the same accepted
@@ -554,11 +584,13 @@ jobs:
       # `cache: false` (#1406): the action restores by exact key only —
       # its restoreMiseCache passes no restore keys — and saves from
       # every ref, so the steps either side of it do both instead.
-      - name: Install mise and the pinned toolchain
+      - name: Install mise and the leg's tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6
           cache: false
+          # belt tools by the belt's keys, then the caller's inputs
+          install_args: jq ${{ steps.pins.outputs.install }}
 
       # unattested-path: the write half of the tool cache restored
       # above, on the same standing. It runs on a push to the default
@@ -662,7 +694,10 @@ jobs:
   # Codecov on pushes to main. Separate job so the required check  stays deterministic; skips clean without a floor or a token.
   coverage-upload:
     name: coverage upload (badge only)
-    needs: ci
+    # `plan` for its majors, which this job's Postgres install names.
+    needs:
+      - plan
+      - ci
     # `!cancelled()` and the explicit result are load-bearing (#1161).
     # An `if:` with no status function gets an implicit `success()`,
     # and that is false when ANY ancestor was skipped — which the pgrx
@@ -682,6 +717,11 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      # The list holds only if `mise run` keeps to it (#1408). Measured
+      # on mise 2026.11.6: by default `mise run` installs every tool the
+      # config pins and the data directory lacks, before the task, so
+      # the whole toolset would install in the next step instead.
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -695,18 +735,32 @@ jobs:
       - name: Keep the Rust toolchains inside the tool cache
         run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
 
-      # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
-      # rendered when it restored and saved this cache itself, reproduced
-      # by mise/gate-cache-key.py and pinned by its test to a key the
-      # action logged, then `-b` and the sha256 of the delivered belt's
-      # mise.lock (#1414), so a belt tool bump names a new cache.
-      # `mise-v2` moves with the `gate` job's, for the reason given there.
+      # WHAT THE UPLOAD INSTALLS (#1408): what `coverage:report` calls.
+      # Rust, Go and cargo-pgrx where the repository pins them, since a
+      # Go repository has no Rust and most have no extension; and every
+      # Postgres major the plan found, because the report compiles the
+      # whole workspace and org_pgrx_provision registers each major the
+      # crate declares. release/test_job_installs.py holds the list.
+      - name: Read the caller's pinned build inputs
+        id: pins
+        env:
+          ORG_PGRX_MAJORS: ${{ needs.plan.outputs.majors }}
+        run: |
+          .org-canon/release/caller-pins.py install \
+            --input-of "the coverage badge feed" \
+            --if-pinned rust --if-pinned go --if-pinned cargo-pgrx \
+            --major "postgresql-binaries=${ORG_PGRX_MAJORS}" >> "${GITHUB_OUTPUT}"
+      # The tool cache's name (#1406, #1414), apart from the gate's and
+      # the legs' (#1408): its own name, and the install list's digest in
+      # the key, for the reason the `pgrx` job gives.
       - name: Name the tool cache
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon
-
+          ORG_TOOL_INSTALL: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
+        run: |
+          python3 .org-canon/mise/gate-cache-key.py mise-coverage-v1 \
+            .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
       # here — a human is waiting on a pull request. The rule covers
@@ -754,11 +808,13 @@ jobs:
       # `cache: false` (#1406): the action restores by exact key only —
       # its restoreMiseCache passes no restore keys — and saves from
       # every ref, so the steps either side of it do both instead.
-      - name: Install mise and the pinned toolchain
+      - name: Install mise and the report's tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6
           cache: false
+          # belt tools by the belt's keys, then the caller's inputs
+          install_args: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
 
       # unattested-path: the write half of the tool cache restored
       # above, on the same standing. It runs on a push to the default

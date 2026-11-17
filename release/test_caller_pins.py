@@ -358,5 +358,150 @@ class Usage(unittest.TestCase):
         self.assertEqual(2, raised.exception.code)
 
 
+PG = '"aqua:theseus-rs/postgresql-binaries"'
+PG_LIST = (
+    "[tools]\n"
+    'rust = "1.97.1"\n'
+    f'{PG} = ["18.6.1", "17.11.1", "16.15.1", "15.19.1", "14.24.1"]\n'
+)
+PG_INPUT_OF = "the gate's pgrx legs"
+
+
+def by_major(config: str | None, spec: str, *tools: str) -> tuple[int, str, str]:
+    """Run the install mode with one `--major postgresql-binaries=SPEC`.
+
+    Returns:
+        The exit status, stdout and stderr.
+
+    """
+    return run(
+        config,
+        "install",
+        "--input-of",
+        PG_INPUT_OF,
+        "--major",
+        f"postgresql-binaries={spec}",
+        *tools,
+    )
+
+
+class Majors(unittest.TestCase):
+    """A tool pinned at several majors yields the majors a job runs (#1408)."""
+
+    def test_the_legs_major_among_a_list(self) -> None:
+        """One leg, one Postgres: the entry that begins with its major."""
+        self.assertEqual(
+            (
+                0,
+                "install=rust@1.97.1 aqua:theseus-rs/postgresql-binaries@16.15.1\n",
+                "",
+            ),
+            by_major(PG_LIST, "16", "rust"),
+        )
+
+    def test_a_list_of_majors_yields_each_in_the_order_named(self) -> None:
+        """The plan's whole list, as the coverage upload asks for it."""
+        self.assertEqual(
+            (
+                0,
+                (
+                    "install=aqua:theseus-rs/postgresql-binaries@14.24.1"
+                    " aqua:theseus-rs/postgresql-binaries@18.6.1\n"
+                ),
+                "",
+            ),
+            by_major(PG_LIST, "[14,18]"),
+        )
+
+    def test_the_legs_major_absent_is_refused_by_name(self) -> None:
+        """A planned major the pin has no entry for: refused, never newest."""
+        self.assertEqual(
+            (
+                1,
+                "",
+                (
+                    "::error::postgresql-binaries pins no 13.x in mise.toml (pinned:"
+                    " 18.6.1, 17.11.1, 16.15.1, 15.19.1, 14.24.1); this job runs"
+                    " major 13 — pin it beside the others; it is a build input of"
+                    " the gate's pgrx legs\n"
+                ),
+            ),
+            by_major(PG_LIST, "13", "rust"),
+        )
+
+    def test_a_single_valued_pin_at_the_major(self) -> None:
+        """One Postgres pinned as a plain string serves its own major."""
+        config = f'[tools]\n{PG} = "17.11.1"\n'
+        self.assertEqual(
+            (0, "install=aqua:theseus-rs/postgresql-binaries@17.11.1\n", ""),
+            by_major(config, "17"),
+        )
+
+    def test_a_single_valued_pin_at_another_major_is_refused(self) -> None:
+        """...and only its own: the first-entry rule must not stand in."""
+        config = f'[tools]\n{PG} = {{ version = "17.11.1" }}\n'
+        self.assertEqual(
+            (
+                1,
+                "",
+                (
+                    "::error::postgresql-binaries pins no 18.x in mise.toml (pinned:"
+                    " 17.11.1); this job runs major 18 — pin it beside the others;"
+                    " it is a build input of the gate's pgrx legs\n"
+                ),
+            ),
+            by_major(config, "18"),
+        )
+
+    def test_a_major_pinned_twice_is_refused(self) -> None:
+        """Two entries at one major: mise installs both, the job takes either."""
+        config = f'[tools]\n{PG} = ["18.6.1", "18.5.0", "17.11.1"]\n'
+        self.assertEqual(
+            (
+                1,
+                "",
+                (
+                    "::error::postgresql-binaries pins major 18 2 times in mise.toml"
+                    " (18.6.1, 18.5.0); mise would install each and the job could"
+                    " take either, so pin one\n"
+                ),
+            ),
+            by_major(config, "18"),
+        )
+
+    def test_a_major_of_an_unpinned_tool_is_missing(self) -> None:
+        """A major asked of a tool the config does not pin at all."""
+        self.assertEqual(
+            (
+                1,
+                "",
+                (
+                    "::error::postgresql-binaries missing — pin postgresql-binaries"
+                    " in this repository's mise config; it is a build input of the"
+                    " gate's pgrx legs\n"
+                ),
+            ),
+            by_major('[tools]\nrust = "1.97.1"\n', "18", "rust"),
+        )
+
+    def test_no_major_planned_asks_for_nothing(self) -> None:
+        """The plan's `[]`: no extension, so no Postgres pin is needed."""
+        self.assertEqual(
+            (0, "install=rust@1.97.1\n", ""),
+            by_major('[tools]\nrust = "1.97.1"\n', "[]", "rust"),
+        )
+
+    def test_a_malformed_major_is_a_usage_error(self) -> None:
+        """Not a whole number or a list of them: refused before reading."""
+        for spec in ("pg18", '[18, "17"]', "true", ""):
+            with (
+                self.subTest(spec=spec),
+                self.assertRaises(SystemExit) as exit_,
+                redirect_stderr(io.StringIO()),
+            ):
+                by_major(PG_LIST, spec)
+            self.assertEqual(2, exit_.exception.code)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,16 @@ mise puts the first on PATH, and the first is the one a build uses
 (.github#445), so a list yields its first entry. An inline table yields
 its `version`.
 
+A MAJOR, WHERE THE JOB RUNS ONE (#1408). A list can also be one tool at
+several majors — a pgrx crate pins one Postgres per major it declares —
+and a job that runs some of them names them with `--major TOOL=SPEC`:
+SPEC is the JSON the gate's plan emits, one major (`18`) or a list
+(`[14,15]`). Each major yields the one entry whose version begins with
+it, so a leg installs its own Postgres and not the other four. A major
+the pin has no entry for is refused by name, and so is a major with two
+entries, which mise would install side by side for a job to take
+either. An empty list asks for nothing: no major planned, no Postgres.
+
 A NEEDED INPUT THE CONFIG DOES NOT PIN IS REFUSED BY NAME and never falls
 back: no default, no newest, no belt copy. An input named with
 `--if-pinned` is one a job needs only where the repository has it (a
@@ -39,7 +49,8 @@ not; the task that uses it keeps its own guard and remedy.
 
 Two outputs, one reader:
 
-    caller-pins.py install --input-of TEXT [--if-pinned TOOL]... TOOL...
+    caller-pins.py install --input-of TEXT [--if-pinned TOOL]...
+            [--major TOOL=SPEC]... TOOL...
         prints `install=<key@version ...>` for $GITHUB_OUTPUT, the job's
         `install_args`.
     caller-pins.py env --input-of TEXT VAR=TOOL...
@@ -52,6 +63,7 @@ applied before this reader replaced its own.
 """
 
 import argparse
+import json
 import re
 import sys
 import tomllib
@@ -91,6 +103,67 @@ def first_version(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
+def entries(value: object) -> list[str]:
+    """Read every version a `[tools]` value pins.
+
+    Returns:
+        One version per entry, in the config's order; "" for an entry
+        that pins none.
+
+    """
+    return [first_version(v) for v in (value if isinstance(value, list) else [value])]
+
+
+def parse_majors(spec: str) -> list[int] | None:
+    """Read a `--major` SPEC: the plan's JSON, one major or a list of them.
+
+    Returns:
+        The majors, or None for anything that is not a whole number or a
+        list of them.
+
+    """
+    try:
+        value = json.loads(spec)
+    except json.JSONDecodeError:
+        return None
+    value = value if isinstance(value, list) else [value]
+    if not all(isinstance(m, int) and not isinstance(m, bool) for m in value):
+        return None
+    return value
+
+
+def select_majors(
+    name: str, config: str, versions: list[str], majors: list[int], input_of: str
+) -> tuple[list[str], list[str]]:
+    """Select the entry pinned at each major.
+
+    Returns:
+        The selected versions in the order the majors were named, and
+        one refusal per major with no entry or with two.
+
+    """
+    chosen: list[str] = []
+    errors: list[str] = []
+    pinned = ", ".join(v for v in versions if v) or "none"
+    for major in majors:
+        hits = [v for v in versions if v.split(".", 1)[0] == str(major)]
+        if not hits:
+            errors.append(
+                f"{name} pins no {major}.x in {config} (pinned: {pinned}); this"
+                f" job runs major {major} — pin it beside the others; it is a"
+                f" build input of {input_of}"
+            )
+        elif len(hits) > 1:
+            errors.append(
+                f"{name} pins major {major} {len(hits)} times in {config}"
+                f" ({', '.join(hits)}); mise would install each and the job"
+                " could take either, so pin one"
+            )
+        else:
+            chosen.append(hits[0])
+    return chosen, errors
+
+
 def find_config(root: Path) -> Path | None:
     """Find the caller's mise config.
 
@@ -106,22 +179,30 @@ def find_config(root: Path) -> Path | None:
 
 
 def read_pins(
-    root: Path, needed: list[str], optional: list[str], input_of: str
-) -> dict[str, tuple[str, str]]:
-    """Resolve each named tool to the caller's own key and version.
+    root: Path,
+    needed: list[str],
+    optional: list[str],
+    input_of: str,
+    majors: dict[str, list[int]] | None = None,
+) -> dict[str, tuple[str, list[str]]]:
+    """Resolve each named tool to the caller's own key and versions.
 
     Returns:
-        Tool name to (key, version) for every needed tool and every
-        optional one that is pinned, in the order named.
+        Tool name to (key, versions) for every needed tool and every
+        optional one that is pinned, in the order named, then each tool
+        named by major. A tool has one version; a tool named by major
+        has one per major, in the order the majors were named.
 
     Raises:
-        RefusalError: no config, a needed tool unpinned, or a tool pinned
-            under two keys; every such tool is named.
+        RefusalError: no config, a needed tool unpinned, a tool pinned
+            under two keys, or a major with no entry or two; every such
+            tool is named.
 
     """
+    majors = {name: wanted for name, wanted in (majors or {}).items() if wanted}
     config = find_config(root)
     if config is None:
-        names = ", ".join(needed)
+        names = ", ".join([*needed, *majors])
         msg = (
             f"no mise config in this repository ({', '.join(CANDIDATES)}),"
             f" so {names} cannot be read; pin them in this repository's mise"
@@ -133,8 +214,8 @@ def read_pins(
     for key in tools:
         keys.setdefault(tool_name(key), []).append(key)
     errors = []
-    pins: dict[str, tuple[str, str]] = {}
-    for name in [*needed, *optional]:
+    pins: dict[str, tuple[str, list[str]]] = {}
+    for name in [*needed, *optional, *majors]:
         found = keys.get(name, [])
         if len(found) > 1:
             errors.append(
@@ -143,10 +224,17 @@ def read_pins(
                 " on PATH, so pin it under one key"
             )
             continue
+        if found and name in majors:
+            chosen, refused = select_majors(
+                name, config.name, entries(tools[found[0]]), majors[name], input_of
+            )
+            errors += refused
+            pins[name] = (found[0], chosen)
+            continue
         version = first_version(tools[found[0]]) if found else ""
         if version:
-            pins[name] = (found[0], version)
-        elif name in needed:
+            pins[name] = (found[0], [version])
+        elif name in needed or name in majors:
             errors.append(
                 f"{name} missing — pin {name} in this repository's mise"
                 f" config; it is a build input of {input_of}"
@@ -168,6 +256,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     install = sub.add_parser("install")
     install.add_argument("--input-of", required=True)
     install.add_argument("--if-pinned", action="append", default=[])
+    install.add_argument("--major", action="append", default=[])
     install.add_argument("tools", nargs="*")
     env = sub.add_parser("env")
     env.add_argument("--input-of", required=True)
@@ -178,22 +267,28 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         pairs = [p.partition("=") for p in args.pairs]
         if any(not var or not sep or not name for var, sep, name in pairs):
             parser.error("env takes VAR=TOOL pairs")
-        needed, optional = [name for _, _, name in pairs], []
+        needed, optional, majors = [name for _, _, name in pairs], [], {}
     else:
-        needed, optional = args.tools, args.if_pinned
-        if not needed and not optional:
+        needed, optional, majors = args.tools, args.if_pinned, {}
+        for pair in args.major:
+            name, sep, spec = pair.partition("=")
+            wanted = parse_majors(spec)
+            if not name or not sep or wanted is None:
+                parser.error(f"--major takes TOOL=SPEC, one major or a list: {pair}")
+            majors[name] = wanted
+        if not needed and not optional and not majors:
             parser.error("install names at least one tool")
     try:
-        pins = read_pins(root, needed, optional, args.input_of)
+        pins = read_pins(root, needed, optional, args.input_of, majors)
     except RefusalError as refusal:
         for line in str(refusal).splitlines():
             print(f"::error::{line}", file=sys.stderr)
         return 1
     if args.mode == "env":
         for var, _, name in pairs:
-            print(f"{var}={pins[name][1]}")
+            print(f"{var}={pins[name][1][0]}")
     else:
-        print("install=" + " ".join(f"{k}@{v}" for k, v in pins.values()))
+        print("install=" + " ".join(f"{k}@{v}" for k, vs in pins.values() for v in vs))
     return 0
 
 

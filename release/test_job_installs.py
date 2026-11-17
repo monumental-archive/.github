@@ -22,6 +22,12 @@ A call is a tool's command name as a whole word on a line that is not a
 comment. Where a job carries no belt (`MISE_GLOBAL_CONFIG_FILE` unset, the
 binary build legs), a belt tool's name is the runner's copy and is not
 counted; a caller build input always is.
+
+The gate's own jobs are held the same way where they run one thing
+(#1408): the `pgrx` legs run one major's suite and the coverage upload
+renders one report, and each installed the caller's whole config to do
+it. They are cached, so the uncached scope above never reached them;
+GATE_LISTS names them, and GATE_WHOLE the job that keeps everything.
 """
 
 import importlib.util
@@ -85,6 +91,17 @@ WHOLE_CONFIG = {
     ("release.yml", "release-pr"): "it runs the caller's own test suite",
 }
 
+# The gate's jobs (ci.yml) that install a named list (#1408), and the one
+# that installs the whole config, with why. Every mise-action job in
+# ci.yml is one or the other.
+GATE_LISTS = [("ci.yml", "pgrx"), ("ci.yml", "coverage-upload")]
+GATE_WHOLE = {
+    ("ci.yml", "gate"): (
+        "it runs every lint, so it needs the whole belt and every tool the"
+        " caller's config pins"
+    ),
+}
+
 # The caller's build inputs, by the commands that run them: the tool name
 # is what `release/caller-pins.py` is asked for.
 CALLER_COMMANDS = {
@@ -100,6 +117,14 @@ CALLER_COMMANDS = {
     "cargo-pgrx": "cargo-pgrx",
     "cargo-fuzz": "cargo-fuzz",
     "govulncheck": "govulncheck",
+    "postgresql-binaries": "postgresql-binaries",
+}
+
+# Calls a tool's name never appears in: the Postgres a pgrx task runs is
+# located by pgrx-postgres.py from `mise ls` and registered with
+# `cargo pgrx init`, both by path.
+PROVISIONS = {
+    r"pgrx-postgres\.py": ["postgresql-binaries"],
 }
 
 # What stele execs, read from its source (internal/cargo, internal/osv,
@@ -267,6 +292,8 @@ def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
                 next(it)
             elif word == "--if-pinned":
                 optional.append(next(it))
+            elif word == "--major":
+                needed.append(next(it).partition("=")[0])
             else:
                 needed.append(word)
     return keys, needed, optional
@@ -322,8 +349,8 @@ def scripts(text: str, seen: set[str]) -> str:
             path = CANON / home / name
             if path.is_file():
                 seen.add(name)
-                text = path.read_text("utf-8")
-                body = python_code(text) if name.endswith(".py") else code(text)
+                source = path.read_text("utf-8")
+                body = python_code(source) if name.endswith(".py") else code(source)
                 out += [body, scripts(body, seen)]
     # A task is reached by name, however it is run: `mise run audit:deny`
     # and `for task in audit:deny audit:go-vulns; do mise run "${task}"`.
@@ -378,7 +405,7 @@ def calls(job: list[str], *, carries: bool) -> tuple[set[str], set[str]]:
     body += "\n" + scripts(body, set())
     commands = {m.group(1) for m in CARGO_SUB.finditer(body)}
     commands = {f"cargo-{c}" for c in commands}
-    for pattern, execs in STELE_EXECS.items():
+    for pattern, execs in [*STELE_EXECS.items(), *PROVISIONS.items()]:
         if re.search(pattern, body):
             commands.update(execs)
     names = set(belt_tools()) | set(CALLER_COMMANDS)
@@ -402,6 +429,31 @@ def uninstalled(workflow: str, job_id: str, job: list[str]) -> list[str]:
         called_caller - set(needed) - set(optional)
     )
     return [f"{workflow} {job_id}: calls {t} and does not install it" for t in missing]
+
+
+def auto_installs(workflow: str, job_id: str, job: list[str]) -> list[str]:
+    """Name a listed job whose `mise run` would install the rest anyway.
+
+    Measured on mise 2026.11.6 (#1408): `mise run` installs every tool
+    the config pins and the data directory lacks before it runs the
+    task, so a list is only a list where the job turns that off.
+
+    Returns:
+        One line when the job runs `mise run` and does not set
+        MISE_TASK_RUN_AUTO_INSTALL to "false"; none otherwise.
+
+    """
+    text = "\n".join(job)
+    if not re.search(r"(?<![\w-])mise\s+run\b", code(text)):
+        return []
+    if re.search(r'^\s+MISE_TASK_RUN_AUTO_INSTALL: "false"$', text, re.MULTILINE):
+        return []
+    return [
+        (
+            f"{workflow} {job_id}: runs `mise run`, which installs every tool"
+            ' the config pins unless MISE_TASK_RUN_AUTO_INSTALL is "false"'
+        )
+    ]
 
 
 def load(workflow: str) -> dict[str, list[str]]:
@@ -502,10 +554,31 @@ class Coverage(unittest.TestCase):
             whole_config("attach-release.yml", "attach", job),
         )
 
+    def test_every_gate_install_is_held(self) -> None:
+        """Every mise-action job in ci.yml names a list or is the exemption."""
+        found = sorted(
+            ("ci.yml", job_id)
+            for job_id, job in load("ci.yml").items()
+            if mise_steps(job)
+        )
+        self.assertEqual(sorted([*GATE_LISTS, *GATE_WHOLE]), found)
+
+    def test_the_gate_lists_are_lists(self) -> None:
+        """The legs and the upload name their tools; the gate does not."""
+        for workflow, job_id in GATE_LISTS:
+            job = load(workflow)[job_id]
+            with self.subTest(job=job_id):
+                keys, needed, optional = installs(job)
+                self.assertTrue(keys and (needed or optional))
+        for workflow, job_id in GATE_WHOLE:
+            (step,) = mise_steps(load(workflow)[job_id])
+            self.assertNotIn("with.install_args", step)
+
     def test_every_belt_key_is_a_belt_key(self) -> None:
         """A misspelt key would install nothing and say nothing."""
         known = set(belt()["tools"])
-        for workflow, job_id in [j for j in IN_SCOPE if j not in WHOLE_CONFIG]:
+        listed = [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
+        for workflow, job_id in [*listed, *GATE_LISTS]:
             with self.subTest(workflow=workflow, job=job_id):
                 keys, _, _ = installs(load(workflow)[job_id])
                 self.assertEqual([], [k for k in keys if k not in known])
@@ -604,6 +677,127 @@ class JobInstalls(unittest.TestCase):
             "          true",
         ]
         self.assertEqual([], uninstalled("attach-release.yml", "attach", job))
+
+
+class GateInstalls(unittest.TestCase):
+    """The gate's pgrx legs and coverage upload install what they call (#1408)."""
+
+    def test_every_gate_list_installs_what_it_calls(self) -> None:
+        """The real jobs against pgrx-test.sh, pgrx-env.sh, coverage:report."""
+        for workflow, job_id in GATE_LISTS:
+            with self.subTest(job=job_id):
+                self.assertEqual(
+                    [], uninstalled(workflow, job_id, load(workflow)[job_id])
+                )
+
+    def test_no_gate_list_is_undone_by_mise_run(self) -> None:
+        """Each listed job that runs a task keeps `mise run` to the list."""
+        for workflow, job_id in GATE_LISTS:
+            with self.subTest(job=job_id):
+                self.assertEqual(
+                    [], auto_installs(workflow, job_id, load(workflow)[job_id])
+                )
+
+    def test_a_leg_that_lets_mise_run_install_is_named(self) -> None:
+        """Planted: the setting gone, `mise run test:pgrx` installs it all."""
+        job = [
+            ln
+            for ln in load("ci.yml")["pgrx"]
+            if "MISE_TASK_RUN_AUTO_INSTALL" not in ln
+        ]
+        self.assertEqual(
+            [
+                (
+                    "ci.yml pgrx: runs `mise run`, which installs every tool the"
+                    ' config pins unless MISE_TASK_RUN_AUTO_INSTALL is "false"'
+                )
+            ],
+            auto_installs("ci.yml", "pgrx", job),
+        )
+
+    def test_a_task_named_in_a_followed_scripts_comment_is_not_reached(
+        self,
+    ) -> None:
+        """The reader follows a script's code, never its comments (#1408).
+
+        pgrx-env.sh's comments name `coverage:check` and its siblings.
+        `scripts()` once reassigned the text it searched for task names to
+        each followed file's whole source, comments included, so a step
+        sourcing it seemed to reach coverage-measure.sh and call Go.
+        """
+        job = [
+            "      - name: Planted",
+            '        run: . "${ORG_BELT_DIR}/pgrx-env.sh"',
+        ]
+        self.assertEqual(
+            ({"jq"}, {"rust", "cargo-pgrx", "postgresql-binaries"}),
+            calls(job, carries=True),
+        )
+
+    def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres(self) -> None:
+        """The leg's list as derived: no linter, node, fuzz or MSRV."""
+        self.assertEqual(
+            (["jq"], ["postgresql-binaries", "rust", "cargo-pgrx"], []),
+            installs(load("ci.yml")["pgrx"]),
+        )
+
+    def test_a_leg_that_drops_cargo_pgrx_is_named(self) -> None:
+        """Planted: cargo-pgrx gone from the leg, which runs `cargo pgrx`."""
+        job = [
+            ln.replace("rust cargo-pgrx >>", "rust >>") for ln in load("ci.yml")["pgrx"]
+        ]
+        self.assertEqual(
+            ["ci.yml pgrx: calls cargo-pgrx and does not install it"],
+            uninstalled("ci.yml", "pgrx", job),
+        )
+
+    def test_a_leg_that_drops_its_postgres_is_named(self) -> None:
+        """Planted: no `--major`, so no Postgres for pgrx-postgres.py."""
+        job = [ln for ln in load("ci.yml")["pgrx"] if "--major" not in ln]
+        self.assertEqual(
+            ["ci.yml pgrx: calls postgresql-binaries and does not install it"],
+            uninstalled("ci.yml", "pgrx", job),
+        )
+
+    def test_an_upload_that_drops_cargo_llvm_cov_is_named(self) -> None:
+        """Planted: the report's `cargo llvm-cov` with nothing to run it."""
+        job = [
+            ln.replace("jq aqua:taiki-e/cargo-llvm-cov ", "jq ")
+            for ln in load("ci.yml")["coverage-upload"]
+        ]
+        self.assertEqual(
+            [
+                (
+                    "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov and"
+                    " does not install it"
+                )
+            ],
+            uninstalled("ci.yml", "coverage-upload", job),
+        )
+
+    def test_a_new_call_in_a_leg_is_named(self) -> None:
+        """Planted: a leg starts building the fuzz targets."""
+        job = [
+            *load("ci.yml")["pgrx"],
+            "      - name: Planted",
+            "        run: cargo fuzz build --sanitizer none",
+        ]
+        self.assertEqual(
+            ["ci.yml pgrx: calls cargo-fuzz and does not install it"],
+            uninstalled("ci.yml", "pgrx", job),
+        )
+
+    def test_a_new_belt_call_in_a_leg_is_named(self) -> None:
+        """Planted: a leg starts running a belt linter."""
+        job = [
+            *load("ci.yml")["pgrx"],
+            "      - name: Planted",
+            "        run: typos --format brief",
+        ]
+        self.assertEqual(
+            ["ci.yml pgrx: calls typos and does not install it"],
+            uninstalled("ci.yml", "pgrx", job),
+        )
 
 
 # The line a named-list job carries at job level (#1412). mise's
