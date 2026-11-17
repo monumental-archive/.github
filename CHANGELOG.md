@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.10](https://github.com/monumental-archive/.github/compare/v1.68.9...v1.68.10) - 2026-11-17
+
+### Fixed
+
+- update first-party canon ([#1420](https://github.com/monumental-archive/.github/pull/1420))
+- give the pgrx legs and coverage upload a named install list ([#1415](https://github.com/monumental-archive/.github/pull/1415))
+
+### Documentation
+
+- write the org testing standard ([#1419](https://github.com/monumental-archive/.github/pull/1419))
+
 ## [1.68.9](https://github.com/monumental-archive/.github/compare/v1.68.8...v1.68.9) - 2026-11-17
 
 ### Fixed
