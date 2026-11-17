@@ -35,13 +35,24 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
-# `run: |` and `run: |-`, at any indent, list item or not.
-RUN_RE = re.compile(r"^(\s*)(- )?run: \|-?\s*$")
+# Every block-scalar header of `run:`, at any indent, list item or not:
+# literal (`|`) or folded (`>`), any chomping or indentation indicator,
+# and an optional trailing comment (`run: | # zizmor: ...`). The line
+# ceiling counts all of them (#1352) — a header it could not read would
+# be an opt-out by punctuation.
+RUN_RE = re.compile(r"^(\s*)(- )?run: ([|>](?:[+-]?[1-9]?|[1-9][+-]))(\s+#.*)?\s*$")
+# What shfmt and shellcheck read is unchanged by that: `|` and `|-` with
+# nothing after them, exactly as before. A folded block has its lines
+# joined before bash sees them, so linting its raw text would be
+# unfaithful; those gaps are their own issues, not the ceiling's.
+LINTED = frozenset({"|", "|-"})
 # A `shell:` key on the same step selects the interpreter. Only bash-family
 # blocks are shell at all — `shell: python` is a different language.
 SHELL_RE = re.compile(r"^\s*shell:\s*([a-z0-9 {}$.-]+)\s*$")
+# A step's `name:`, on its own line or as the list item's first key.
+NAME_RE = re.compile(r"^(\s*)(- )?name:\s*(.*?)\s*$")
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -96,11 +107,92 @@ def step_shell(lines: list[str], run_idx: int, indent: int) -> str:
     return "bash"
 
 
-def blocks(path: Path) -> Iterator[tuple[int, str]]:
-    """Yield (first_body_line_number, dedented_source) per `run:` block.
+class Run(NamedTuple):
+    """One `run:` block scalar, literal or folded, as the file holds it."""
+
+    line: int  # 1-based number of the block's first body line
+    source: str  # the body, dedented, newline-terminated
+    shell: str  # the step's `shell:`, or 'bash'
+    header: str  # the block indicator: `|`, `|-`, `>-`, `|2`, ...
+    commented: bool  # the indicator line carries a trailing comment
+    name: str | None  # the step's `name:`, or None when it has none
+
+
+def depth(line: str) -> int | None:
+    """Return a YAML line's indent, or None for a blank or comment line.
+
+    Returns:
+        The number of leading spaces on a line that carries content.
+
+    """
+    if not line.strip() or line.lstrip().startswith("#"):
+        return None
+    return len(line) - len(line.lstrip())
+
+
+def step_start(lines: list[str], run_idx: int, key_indent: int) -> int | None:
+    """Return the index of the `- ` line opening the step that holds run_idx.
+
+    Returns:
+        The line index, or None when the key sits in no list item.
+
+    """
+    for j in range(run_idx, -1, -1):
+        cur = depth(lines[j])
+        if cur is None:
+            continue
+        if cur == key_indent - 2 and lines[j].lstrip().startswith("- "):
+            return j
+        if cur < key_indent:
+            return None
+    return None
+
+
+def step_name(lines: list[str], run_idx: int, key_indent: int) -> str | None:
+    """Return the `name:` of the step whose `run:` key sits at run_idx.
+
+    The step is the list item that holds the key: its `- ` sits two
+    columns left of its keys, and it ends at the first line indented less
+    than them. A `name:` inside the body or a `with:` map is deeper and is
+    never read.
+
+    Returns:
+        The name with YAML quoting removed, or None for an unnamed step.
+
+    """
+    start = step_start(lines, run_idx, key_indent)
+    if start is None:
+        return None
+    for j in range(start, len(lines)):
+        cur = depth(lines[j])
+        if j > start and cur is not None and cur < key_indent:
+            break
+        m = NAME_RE.match(lines[j])
+        if m and len(m.group(1)) + (2 if m.group(2) else 0) == key_indent:
+            return unquote(m.group(3)) or None
+    return None
+
+
+def unquote(value: str) -> str:
+    """Strip one layer of YAML quoting, or a trailing comment if unquoted.
+
+    Returns:
+        The scalar as YAML reads it, for the names steps actually carry.
+
+    """
+    if value[:1] in {"'", '"'} and value.endswith(value[0]) and len(value) > 1:
+        return value[1:-1]
+    return value.split(" #", 1)[0].strip()
+
+
+def runs(path: Path) -> Iterator[Run]:
+    """Yield every `run:` block scalar in a workflow or composite action.
+
+    This is the one reader of `run:` blocks: shfmt, shellcheck and the
+    line ceiling all see the blocks it finds, and no others.
 
     Yields:
-        One tuple per block whose interpreter is bash-family.
+        One Run per non-empty block, whatever its interpreter.
 
     """
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -111,6 +203,7 @@ def blocks(path: Path) -> Iterator[tuple[int, str]]:
             i += 1
             continue
         indent = len(m.group(1))
+        key_indent = indent + (2 if m.group(2) else 0)
         start = i
         i += 1
         body: list[str] = []
@@ -121,11 +214,29 @@ def blocks(path: Path) -> Iterator[tuple[int, str]]:
             i += 1
         if not any(x.strip() for x in body):
             continue
-        shell = step_shell(lines, start, indent)
-        if not any(s in shell for s in ("bash", "sh")):
-            continue
         pad = min(len(x) - len(x.lstrip()) for x in body if x.strip())
-        yield start + 2, "\n".join(x[pad:] if x.strip() else "" for x in body) + "\n"
+        yield Run(
+            line=start + 2,
+            source="\n".join(x[pad:] if x.strip() else "" for x in body) + "\n",
+            shell=step_shell(lines, start, indent),
+            header=m.group(3),
+            commented=m.group(4) is not None,
+            name=step_name(lines, start, key_indent),
+        )
+
+
+def blocks(path: Path) -> Iterator[tuple[int, str]]:
+    """Yield (first_body_line_number, dedented_source) per `run:` block.
+
+    Yields:
+        One tuple per block whose interpreter is bash-family.
+
+    """
+    for run in runs(path):
+        if run.commented or run.header not in LINTED:
+            continue
+        if any(s in run.shell for s in ("bash", "sh")):
+            yield run.line, run.source
 
 
 def rewrite(path: Path) -> int:
@@ -141,7 +252,7 @@ def rewrite(path: Path) -> int:
     changed = 0
     while i < len(lines):
         m = RUN_RE.match(lines[i])
-        if not m:
+        if not m or m.group(3) not in LINTED or m.group(4) is not None:
             out.append(lines[i])
             i += 1
             continue
@@ -242,6 +353,244 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
     return out
 
 
+# The ceiling (#1352). A `run:` block holds at most this many lines that
+# are neither blank nor a comment. Heredoc bodies count: a config file
+# written inline is a file that should be tracked.
+CEILING = 15
+# One entry per block over the ceiling: file, step name, lines, and a
+# `#` note naming the issue that will remove it — tab-separated, read
+# with str.split so an empty field is an error rather than a shift.
+DEBT_FIELDS = 4
+ISSUE_RE = re.compile(r"#\d+")
+# The ceiling's own issue. An entry no capability issue names carries it
+# with the word `unassigned`; without that word a note naming the
+# umbrella would look assigned while nothing is due to remove the block.
+UMBRELLA_RE = re.compile(r"(?<!\d)#1352(?!\d)")
+SETTLE = "mise run fix:workflow-shell"
+
+
+def weight(source: str) -> int:
+    """Count a block's lines that are neither blank nor a comment.
+
+    Returns:
+        The number the ceiling is held against.
+
+    """
+    return sum(1 for x in source.splitlines() if depth(x) is not None)
+
+
+class Entry(NamedTuple):
+    """One debt-file line naming a block allowed over the ceiling."""
+
+    file: str
+    step: str
+    lines: int
+    lineno: int
+
+
+def parse_entry(raw: str) -> Entry | str:
+    """Read one debt line.
+
+    Returns:
+        The entry (line number 0, filled by the caller), or what is wrong.
+
+    """
+    fields = raw.split("\t")
+    if len(fields) != DEBT_FIELDS or not all(fields):
+        return (
+            "an entry is <file>, <step name>, <lines>, `# <issue>`, tab-separated "
+            f"— this line has {len(fields)} field(s)"
+        )
+    file, step, count, note = fields
+    if not count.isdigit() or int(count) <= CEILING:
+        return f"'{count}' is not a line count over the {CEILING}-line ceiling"
+    if not note.startswith("#") or not ISSUE_RE.search(note):
+        return "the note is a `#` comment naming the issue that will remove the block"
+    if UMBRELLA_RE.search(note) and "unassigned" not in note:
+        return (
+            "a note naming #1352 says `unassigned`: name the issue that removes "
+            "the block, or mark it unassigned"
+        )
+    return Entry(file, step, int(count), 0)
+
+
+def read_debt(path: Path) -> tuple[list[Entry], list[str]]:
+    """Parse the debt file; a missing file is an empty debt.
+
+    Returns:
+        The entries, and one finding per line that is not a valid entry.
+
+    """
+    if not path.is_file():
+        return [], []
+    entries: list[Entry] = []
+    errors: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip() or raw.startswith("#"):
+            continue
+        entry = parse_entry(raw)
+        if isinstance(entry, str):
+            errors.append(f"{path}:{n}: {entry}")
+        elif (entry.file, entry.step) in seen:
+            errors.append(
+                f"{path}:{n}: step '{entry.step}' in {entry.file} is listed twice"
+            )
+        else:
+            seen.add((entry.file, entry.step))
+            entries.append(entry._replace(lineno=n))
+    return entries, errors
+
+
+class Verdict(NamedTuple):
+    """What the ceiling found, and what fix:workflow-shell may change."""
+
+    findings: list[str]  # red
+    lowered: dict[int, int]  # debt line number -> the block's new count
+    stale: set[int]  # debt line numbers naming no block over the ceiling
+
+
+def measure(files: list[str]) -> list[tuple[str, Run, int]]:
+    """Weigh every `run:` block in files.
+
+    Returns:
+        (file, block, weight) for every block, in file order.
+
+    """
+    return [(f, run, weight(run.source)) for f in files for run in runs(Path(f))]
+
+
+def over_block(
+    block: tuple[str, Run, int],
+    sharing: int,
+    entry: Entry | None,
+    debt: Path,
+) -> str | None:
+    """Judge one block over the ceiling against its debt entry.
+
+    Returns:
+        The finding, or None when the entry covers the block.
+
+    """
+    f, run, n = block
+    at = f"{f}:{run.line}"
+    over = f"a run: block of {n} lines, over the {CEILING}-line ceiling"
+    keyed = "— the debt file keys on the step name"
+    if run.name is None:
+        return f"{at}: {over}, in a step with no name {keyed}"
+    step = f"{at}: step '{run.name}'"
+    if sharing > 1:
+        return (
+            f"{step} holds {over}, and {sharing} run: blocks here share that name "
+            f"{keyed}"
+        )
+    if entry is None:
+        return (
+            f"{step} holds {over}, and {debt} does not list it "
+            "— move the logic out (CONTRIBUTING.md)"
+        )
+    if n > entry.lines:
+        return (
+            f"{step} holds {n} lines, more than its debt entry's {entry.lines} "
+            f"({debt}:{entry.lineno}) — the debt only shrinks"
+        )
+    return None
+
+
+def judge(files: list[str], debt: Path) -> Verdict:
+    """Hold every `run:` block in files to the ceiling, net of the debt.
+
+    Returns:
+        The findings, plus the entries that shrank or went stale.
+
+    """
+    entries, findings = read_debt(debt)
+    listed = {(e.file, e.step): e for e in entries}
+    weighed = measure(files)
+    named: dict[tuple[str, str], list[int]] = {}
+    for f, run, n in weighed:
+        if run.name is not None:
+            named.setdefault((f, run.name), []).append(n)
+    for block in weighed:
+        f, run, n = block
+        if n <= CEILING:
+            continue
+        key = (f, run.name or "")
+        finding = over_block(block, len(named.get(key, [])), listed.get(key), debt)
+        if finding:
+            findings.append(finding)
+    lowered: dict[int, int] = {}
+    stale: set[int] = set()
+    for e in entries:
+        at = f"{debt}:{e.lineno}: step '{e.step}' in {e.file}"
+        top = max(named.get((e.file, e.step), [0]))
+        if top > CEILING:
+            if top < e.lines:
+                lowered[e.lineno] = top
+            continue
+        stale.add(e.lineno)
+        if (e.file, e.step) in named:
+            findings.append(
+                f"{at} now fits the ceiling ({top} lines) — remove the entry ({SETTLE})"
+            )
+        else:
+            findings.append(f"{at} names no run: block — remove the entry ({SETTLE})")
+    return Verdict(findings, lowered, stale)
+
+
+def settled(text: str, verdict: Verdict) -> str:
+    """Lower shrunk entries and drop stale ones. Never adds an entry.
+
+    Returns:
+        The debt file's new text.
+
+    """
+    out: list[str] = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        if n in verdict.stale:
+            continue
+        fields = raw.split("\t")
+        if n in verdict.lowered:
+            fields[2] = str(verdict.lowered[n])
+        out.append("\t".join(fields))
+    return "\n".join(out) + "\n"
+
+
+def ceiling(files: list[str], debt: Path, *, write: bool) -> int:
+    """Run the ceiling in lint or fix mode.
+
+    Returns:
+        The process exit status.
+
+    """
+    verdict = judge(files, debt)
+    if write:
+        if verdict.lowered or verdict.stale:
+            debt.write_text(
+                settled(debt.read_text(encoding="utf-8"), verdict), encoding="utf-8"
+            )
+        print(
+            f"fix:workflow-shell: {len(verdict.lowered)} entry(ies) lowered, "
+            f"{len(verdict.stale)} removed; it never adds one",
+        )
+        return 0
+    for n, count in sorted(verdict.lowered.items()):
+        print(
+            f"{debt}:{n}: the block now holds {count} lines — {SETTLE} lowers the entry"
+        )
+    for line in verdict.findings:
+        print(line, file=sys.stderr)
+    if verdict.findings:
+        print(
+            f"workflow-shell: {len(verdict.findings)} finding(s) — a run: block holds "
+            f"at most {CEILING} lines, and the debt file only shrinks",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"workflow-shell: every run: block fits {CEILING} lines or its debt entry")
+    return 0
+
+
 def main() -> None:
     """Entry point: check every file named on the command line."""
     ap = argparse.ArgumentParser(description=__doc__)
@@ -249,7 +598,15 @@ def main() -> None:
     ap.add_argument("--no-format", action="store_true")
     ap.add_argument("--no-lint", action="store_true")
     ap.add_argument("--write", action="store_true", help="format blocks in place")
+    ap.add_argument(
+        "--ceiling",
+        metavar="DEBT",
+        help="hold blocks to the line ceiling, net of this debt file (#1352)",
+    )
     args = ap.parse_args()
+
+    if args.ceiling:
+        sys.exit(ceiling(args.files, Path(args.ceiling), write=args.write))
 
     # shellcheck only WARNS on an unreadable --rcfile and then lints at its
     # own defaults, exit 0 — so a belt that did not arrive would read as a

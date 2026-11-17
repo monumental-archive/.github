@@ -49,6 +49,28 @@ executable form:
    org's record and needs no anchor — which is exactly why the anchor is
    required of the claims that are. Prefer the `repo@version` form: the
    walk is line-based and a line wrap cannot split it.
+7. **Workflow shell**: `lint:workflow-shell` holds every `run:` block
+   in a workflow, a composite action or a workflow template to **15**
+   non-blank, non-comment lines, heredoc bodies included. A step is the
+   least reusable and least testable place logic can live. The blocks
+   already over the ceiling are listed by file and step name in
+   `security/workflow-shell-debt.txt`, which only shrinks:
+   `fix:workflow-shell` lowers a number or removes an entry, and nothing
+   adds one. There is no per-block ignore. Where the logic goes:
+   - a block that **judges or emits SLSA evidence** moves to stele,
+     one stele issue per capability;
+   - **anything else** moves to a helper under the repository's own
+     tests (the canon's, for the canon's workflows);
+   - the block that replaces it is one call, and the old block and its
+     debt entry are deleted in the change that replaces them.
+
+   **A helper's language**: logic (parsing, deciding, comparing,
+   talking to an API) is Python, stdlib only, so it comes under the
+   coverage and mutation legs. Shell is for a sequence of commands, and
+   for code that must run where Python is not guaranteed (inside a
+   build container, or before any tool is installed). Shell has no
+   coverage figure and no mutation tool in the belt, so logic written
+   in it can be tested but never measured.
 
 ## Licensing
 

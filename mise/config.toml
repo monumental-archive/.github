@@ -1974,6 +1974,65 @@ helper="${ORG_BELT_DIR}/embedded-shell.py"
 python3 "${helper}" ${files}
 '''
 
+[tasks."lint:workflow-shell"]
+description = "A `run:` block holds at most 15 lines; the blocks over it are a debt file that only shrinks"
+dir = "{{cwd}}"
+# A workflow step is the least reusable place logic can be and the
+# hardest to test: the canon's tests for it cut the shell out of the YAML
+# and run it, and most blocks had none. Measured 2026-11-17: 3,251 lines
+# in 142 blocks, 69 of them over 15 lines (#1352). Nothing stopped more
+# arriving, so this is the ceiling: at most 15 non-blank, non-comment
+# lines per block, heredoc bodies included (a config file written inline
+# is a file that should be tracked).
+#
+# The blocks over it today are listed in security/workflow-shell-debt.txt
+# by file and step name, each with the issue that moves it. The list only
+# shrinks: red on a block over the ceiling and not listed, on a listed
+# block that grew, on an entry whose block is gone or now fits, and on an
+# oversized block whose step has no name or shares it (the name is the
+# key; line numbers rot). There is no per-block ignore: the debt file is
+# the one exception. Where the logic goes is CONTRIBUTING.md's rule.
+#
+# The counter is mise/embedded-shell.py's reader, the one that hands
+# blocks to shfmt and shellcheck in lint:shell-embedded, so there is one
+# definition of where a block starts and ends. The ceiling sees every
+# block-scalar header (`|`, `>`, chomping and indentation indicators, a
+# trailing comment): a header it could not read would be an opt-out by
+# punctuation. Universal: a repository
+# with a block over the ceiling carries its own debt file, and one that
+# tracks no workflow skips clean.
+run = '''
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" \
+  ".github/actions/*/action.y*ml" "workflow-templates/*.y*ml")
+[[ -n ${files} ]] || {
+  echo "lint:workflow-shell: no workflows, actions or templates, skipped"
+  exit 0
+}
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
+python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+  --ceiling security/workflow-shell-debt.txt ${files}
+'''
+
+[tasks."fix:workflow-shell"]
+description = "Lower shrunk entries in the workflow-shell debt file and remove stale ones"
+dir = "{{cwd}}"
+# The write-mode sibling of lint:workflow-shell (#1352). It settles the
+# debt down — a listed block that shrank but is still over the ceiling
+# gets its new number, an entry whose block is gone or now fits is
+# removed — and never adds an entry: a block over the ceiling that is not
+# listed stays red until its logic moves out.
+run = '''
+files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" \
+  ".github/actions/*/action.y*ml" "workflow-templates/*.y*ml")
+[[ -n ${files} ]] || {
+  echo "fix:workflow-shell: no workflows, actions or templates, nothing to fix"
+  exit 0
+}
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
+python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+  --ceiling security/workflow-shell-debt.txt --write ${files}
+'''
+
 [tasks."lint:belt-current"]
 description = "This machine's mise and belt are as current as CI's"
 dir = "{{cwd}}"
