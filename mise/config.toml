@@ -420,6 +420,26 @@ python = "3.15.2"
 # run time (repo-side toolchain, the lint:deny shape). Like the other
 # Rust tools, unprovable in the canon — no Rust tracked.
 "github:obi1kenobi/cargo-semver-checks" = "v0.51.0"
+# Mutation testing for Rust (#1355): `audit:mutants`' Rust leg, which
+# asks whether the suite would fail if the code were wrong. The `cargo:`
+# backend, compiled from source with `--locked` (mise's default for the
+# backend), because upstream's v27.1.0 release carries x86_64 assets
+# only — no macOS arm64 and no Linux arm64 — and no checksum file, so
+# the `github:` backend cannot cover the platforms this lock carries
+# (re-measured 2026-11-17, docs/tooling-verdicts.md).
+#
+# LAZY, AND THAT IS WHAT KEEPS A COMPILE OUT OF EVERY OTHER JOB. A bare
+# `mise install` — what the gate and every job without a named install
+# list runs — skips a lazy tool; `mise run` of any other task does not
+# install it; `mise install cargo:cargo-mutants` does, from this lock.
+# All three measured on mise 2026.11.6. So the one job that names it,
+# repo-audit.yml's `mutants`, is the only place it is ever built, and
+# only in a repository that adopts (.cargo/mutants.toml). Run
+# locally, `cargo mutants` is a bootstrap shim that installs it on
+# first use.
+"cargo:cargo-mutants" = { version = "27.1.0", lazy = true, lazy_bins = [
+  "cargo-mutants",
+] }
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must
 # be imported somewhere, or carry a written ignored entry under
 # [package.metadata.cargo-machete] with a reason. Static analysis, no
@@ -8063,6 +8083,37 @@ if [[ -n ${failed} ]]; then
   exit 1
 fi
 echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
+'''
+
+[tasks."audit:mutants"]
+description = "Mutation testing: no unexplained surviving mutant (weekly cron, never the gate)"
+dir = "{{cwd}}"
+# Would the suite fail if the code were wrong? (#1336, property 1.)
+# Coverage counts a line as covered when a test runs it, whether or not
+# any test would notice a change to it; a mutation run changes it and
+# asks. One task, one leg per language, each leg its own delivered file
+# (mise/mutants-<language>.sh), so a language is ONE added line below.
+#
+# NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
+# suite once per mutant. repo-audit.yml's `mutants` matrix runs it on
+# the Monday cron, one shard per job (MUTANTS_SHARD=k/n), and
+# `mutants-total` states the one answer across shards
+# (mise/mutation-totals.sh). mise/test_task_contract.py holds `ci` to
+# reaching no audit task at all.
+#
+# The measure is "no unexplained survivor", never a score; adoption is
+# the tool's own config file in the repository, and a leg skips clean by
+# name where it is absent. Each leg's header carries the rest.
+#
+# EVERY LEG RUNS, THEN THE RED ONES ARE NAMED: one language's survivors
+# must not hide another's.
+run = '''
+red=""
+bash "${ORG_BELT_DIR}/mutants-rust.sh" || red+=" rust"
+if [[ -n ${red} ]]; then
+  echo "audit:mutants: red leg(s):${red}" >&2
+  exit 1
+fi
 '''
 
 [tasks."lint:licence"]

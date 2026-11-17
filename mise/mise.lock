@@ -644,6 +644,10 @@ url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-
 url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/547404213"
 provenance = "github-attestations"
 
+[[tools."cargo:cargo-mutants"]]
+version = "27.1.0"
+backend = "cargo:cargo-mutants"
+
 [[tools.committed]]
 version = "1.1.12"
 backend = "aqua:crate-ci/committed"

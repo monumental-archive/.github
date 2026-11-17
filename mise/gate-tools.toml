@@ -231,6 +231,11 @@ when = ["*.sql", "scaffold/"]
 tasks = []
 when = []
 
+[tools."cargo:cargo-mutants"]
+# audit:mutants only, and pinned lazy: no bare install builds it (#1355).
+tasks = []
+when = []
+
 [tools."github:bnjbvr/cargo-machete"]
 tasks = ["lint:machete", "lint:scaffold-assembly"]
 when = ["*/Cargo.toml", "Cargo.toml", "scaffold/"]
