@@ -83,7 +83,7 @@ own work and adds the task that runs it to its row.
 
 | # | Property | What breaks without it | Mechanism | Issue |
 |---|---|---|---|---|
-| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python [#1354], Rust [#1355], Go [#1356], TypeScript [#1358] |
+| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go [#1356], TypeScript [#1358] |
 | 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357]; Go has no branch figure, answered by [#1356] |
 | 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust and Go exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`); Python [#1332]; TypeScript exists in monumental-archive (fast-check) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
@@ -118,10 +118,12 @@ own work and adds the task that runs it to its row.
 ### What a pull request pays
 
 The gate stays fast and deterministic. A mechanism enters `ci` only
-with its measured cost written in its issue. Anything that repeats
-the suite (mutation testing), is random (the random half of property
-testing) or needs a second toolchain (Rust branch coverage) runs on
-the Monday audit, never on a pull request.
+with its measured cost written in its issue. Mutation testing, which
+repeats the suite once per mutant, runs on its own weekly mutation
+workflow, apart from the audit, never on a pull request. Anything
+that is random (the random half of property testing) or needs a
+second toolchain (Rust branch coverage) runs on the Monday audit,
+never on a pull request.
 
 ### Every defect issue carries the regression line
 

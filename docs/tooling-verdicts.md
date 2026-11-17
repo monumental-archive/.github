@@ -47,6 +47,7 @@ honestly blocked on.
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
+| cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`, each exclusion an `exclude_re` entry under a `#` reason (#1355) — proven first on release-lab |
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
@@ -2189,6 +2190,68 @@ shape). Unprovable in the canon — no Rust. *Reopen:* an aqua package
 or upstream sha256 assets appearing; or the release path growing a
 pre-tag semver leg so the break is caught at the version decision
 rather than the Monday after.
+
+**cargo-mutants as `audit:mutants`' Rust leg, compiled and kept out
+of every other job** (#1355, under #1336's testing standard). Coverage
+says a test ran a line; a mutation run changes the line and asks
+whether any test noticed. The measure is **no unexplained surviving
+mutant**, never a score: a percentage can be bought by deleting hard
+code and lets the survivor that matters hide in the average. A
+survivor is killed by an assertion or recorded in the repository's own
+`.cargo/mutants.toml` as an `exclude_re` entry under a `#` line that
+says why; an entry with no reason, an entry on the `exclude_re = [`
+line itself, and `#[mutants::skip]` (a dependency in shipped code) are
+each red by name. `exclude_globs` is held to the same reason rule — a
+whole-file exclusion is an exclusion. Adoption is that file, tracked;
+the belt keeps no list of adopters and delivers no exclusions. Every
+workspace member is mutated, named one by one: measured on
+release-lab, a bare `cargo mutants` follows `default-members` and left
+the pgrx crate out. A pgrx extension is mutated in its own run under
+its default major with `pg_test`, provisioned as every pgrx task is.
+
+Measured 2026-11-17. **Backend:** v27.1.0 (2026-06-02) still ships
+three assets — `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`,
+`x86_64-unknown-linux-gnu` — with no macOS arm64, no Linux arm64 and no
+checksum file, the same as v27.0.0 and v26.2.0; not in mise's baked
+aqua registry. The `github:` backend cannot cover the lock's
+platforms, so the pin is `cargo:cargo-mutants`, exact, built with
+`--locked` (mise's cargo default): 172 s to compile on an M1 Pro.
+**Kept out of every default install:** mise's `lazy = true` (with
+`lazy_bins`, which a non-registry backend needs) does it, measured on
+mise 2026.11.6 with a probe config — the locked lazy tool is in the
+lock, a bare `mise install` skips it, `mise run` of another task does
+not install it, and `mise install <tool>` installs it. So no second
+config file was needed (#1355's named fallback). repo-mutants.yml's
+`mutants-rust` jobs are the one place it is built, and they run only
+where `.cargo/mutants.toml` is tracked, since a repository with no Rust
+has no cargo to build it with. **Its own workflow, not an audit leg** (owner's
+ruling): `repo-mutants.yml`, called from each repository's
+`workflow-templates/mutants.yml` stub on its own Monday slot (07:00,
+the audit's is 06:00). Folded into `repo-audit.yml`, one survivor
+turned the whole weekly audit red and nobody could tell what else had
+passed; apart, each run's result means one thing. **Each language has
+its own jobs** in that file — `mutants-rust` and `mutants-rust-totals`
+— selecting its one leg with `MUTANTS_LEG`, so two adopted languages
+are two ticks, two shard counts and two timeouts, and a red names its
+language. They run only where an `adoption` job finds the config in the
+checkout; that guard is a job because `hashFiles` is step-only
+(measured: actionlint refuses it in a job's `if:`). **Sharded from the
+start** (owner's ruling): a
+matrix of four, `--shard k/4`, fail-fast off, each shard printing its
+own survivors and summary, and a totals job stating the one
+answer across them (`mise/mutation-totals.sh`). Measured on a nine-mutant
+crate: `--list` honours `--shard`, and the default slice sharding cut
+it 3/3/3/0 — an empty shard exits 0 and writes no `outcomes.json`, so
+the leg says "no mutants in this shard" and stays green. Excluded is a
+whole-population figure (a shard is cut after exclusion), reported the
+same by every shard and taken once. The count is adjusted from
+release-lab's first dispatched audit on a runner and recorded on the
+issue; the timeout too. Locally the leg was proven only against real
+output on a small crate — five survivors red by name, then green with
+five counted excluded under a reasoned `exclude_re` entry, then the
+same crate across four shards and their totals. *Reopen:* upstream
+publishing arm64 assets with checksums (move to `github:`), or an aqua
+package appearing.
 
 **sqlfluff, the third `pipx:` exception, provable only in
 monumental-archive-db** (#403). PyPI-only — no aqua package — so it

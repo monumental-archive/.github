@@ -420,6 +420,26 @@ python = "3.15.2"
 # run time (repo-side toolchain, the lint:deny shape). Like the other
 # Rust tools, unprovable in the canon — no Rust tracked.
 "github:obi1kenobi/cargo-semver-checks" = "v0.51.0"
+# Mutation testing for Rust (#1355): `audit:mutants`' Rust leg, which
+# asks whether the suite would fail if the code were wrong. The `cargo:`
+# backend, compiled from source with `--locked` (mise's default for the
+# backend), because upstream's v27.1.0 release carries x86_64 assets
+# only — no macOS arm64 and no Linux arm64 — and no checksum file, so
+# the `github:` backend cannot cover the platforms this lock carries
+# (re-measured 2026-11-17, docs/tooling-verdicts.md).
+#
+# LAZY, AND THAT IS WHAT KEEPS A COMPILE OUT OF EVERY OTHER JOB. A bare
+# `mise install` — what the gate and every job without a named install
+# list runs — skips a lazy tool; `mise run` of any other task does not
+# install it; `mise install cargo:cargo-mutants` does, from this lock.
+# All three measured on mise 2026.11.6. So the one job that names it,
+# repo-mutants.yml's `mutants-rust`, is the only place it is ever built, and
+# only in a repository that adopts (.cargo/mutants.toml). Run
+# locally, `cargo mutants` is a bootstrap shim that installs it on
+# first use.
+"cargo:cargo-mutants" = { version = "27.1.0", lazy = true, lazy_bins = [
+  "cargo-mutants",
+] }
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must
 # be imported somewhere, or carry a written ignored entry under
 # [package.metadata.cargo-machete] with a reason. Static analysis, no
@@ -8065,6 +8085,50 @@ fi
 echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
 '''
 
+[tasks."audit:mutants"]
+description = "Mutation testing: no unexplained surviving mutant (weekly cron, never the gate)"
+dir = "{{cwd}}"
+# Would the suite fail if the code were wrong? (#1336, property 1.)
+# Coverage counts a line as covered when a test runs it, whether or not
+# any test would notice a change to it; a mutation run changes it and
+# asks. One task, one leg per language, each leg its own delivered file
+# (mise/mutants-<language>.sh), so a language is ONE added line below.
+#
+# NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
+# suite once per mutant. repo-mutants.yml runs it weekly: per language a
+# shard matrix (`mutants-<language>`, MUTANTS_SHARD=k/n) and a totals job
+# stating the one answer across shards (mise/mutation-totals.sh). mise/test_task_contract.py holds `ci` to
+# reaching no audit task at all.
+#
+# The measure is "no unexplained survivor", never a score; adoption is
+# the tool's own config file in the repository, and a leg skips clean by
+# name where it is absent. Each leg's header carries the rest.
+#
+# EVERY LEG RUNS, THEN THE RED ONES ARE NAMED: one language's survivors
+# must not hide another's. Locally (`mise run audit:mutants`) that is
+# every leg. In repo-mutants.yml each language has its OWN jobs — its own
+# shard count, timeout and tick, so a red names its language at the job
+# level — and each job selects its one leg with MUTANTS_LEG=<language>.
+# A MUTANTS_LEG naming no leg is red, never a run of nothing.
+run = '''
+red=""
+ran=""
+leg() {
+  [[ -z ${MUTANTS_LEG:-} || ${MUTANTS_LEG} == "$1" ]] || return 0
+  ran+=" $1"
+  bash "${ORG_BELT_DIR}/mutants-$1.sh" || red+=" $1"
+}
+leg rust
+if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
+  echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2
+  exit 1
+fi
+if [[ -n ${red} ]]; then
+  echo "audit:mutants: red leg(s):${red}" >&2
+  exit 1
+fi
+'''
+
 [tasks."lint:licence"]
 description = "The repo carries its licence: tracked LICENSE or LICENSES/, and REUSE.toml's expression filled"
 dir = "{{cwd}}"
@@ -8915,6 +8979,10 @@ dir = "{{cwd}}"
 # were cited in prose as enforcing, and NO workflow ran either (#354,
 # fixed #356). This is the join: red on any audit:* task with no
 # `mise run audit:<name>` occurrence anywhere in .github/workflows/.
+# Anywhere, so the schedulers are whichever files run one: audit.yml,
+# publish.yml, repo-audit.yml, and repo-mutants.yml for audit:mutants,
+# which runs apart from the audit so a survivor never reds it (#1355).
+# mise/test_audit_scheduled.py holds the message to those names.
 # Deliberately no opt-out row — an unscheduled audit task IS the
 # defect; a task nobody should run should not exist. Linted, not
 # generated: generating audit.yml from the task list would mean
@@ -8959,9 +9027,9 @@ if [[ -f mise/config.toml ]]; then
     status=1
   elif [[ -n ${bad} ]]; then
     echo "lint:audit-scheduled: belt audit task(s) no workflow ever runs:${bad}" >&2
-    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml or" >&2
-    echo "  repo-audit.yml) or delete the task — a check nobody runs is a" >&2
-    echo "  claim, not a check (#358 seam 1)." >&2
+    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml," >&2
+    echo "  repo-audit.yml or repo-mutants.yml) or delete the task — a check" >&2
+    echo "  nobody runs is a claim, not a check (#358 seam 1)." >&2
     status=1
   else
     echo "lint:audit-scheduled: ${count} belt audit task(s), every one scheduled"
