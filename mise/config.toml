@@ -465,6 +465,17 @@ python = "3.15.2"
 # with zero platforms, which works locally and fails CI with "No lockfile
 # URL found".
 "pipx:yamllint" = "1.38.0"
+# Python statement and branch coverage (#1331): the measurement the
+# `python` and `python-branches` legs of coverage-measure.sh read. A
+# measurement tool, not a test framework, so #364's refusal does not
+# reach it: every suite stays stdlib `unittest`, run under coverage.
+# PyPI-only, no aqua package, so the FOURTH pipx: exception after
+# reuse, yamllint and sqlfluff, riding checksummed uv under the same
+# UV_* floor env; cp315 wheels exist for macOS arm64/x86_64 and
+# manylinux x86_64/aarch64, so the Mac and the runner run one build.
+# The tool venv is built on the `python` pin above, never one uv
+# fetched — the measurement runs the tests on that interpreter.
+"pipx:coverage" = "7.17.2"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -6735,12 +6746,19 @@ dir = "{{cwd}}"
 # the badge uploads cannot come from different flags (#707) —
 # the #316 shape, where a second hardcoded --workspace drifted from the
 # first the instant a repo excluded a member. Each leg measures what its
-# language measures (statements for Go, lines for Rust); the floor is a
-# minimum in both, and every leg must hold it.
+# language measures (statements for Go, lines for Rust, statements and
+# branches for Python, #1331); the floor is a minimum in all of them,
+# and every leg must hold it. Which languages apply is the measurement
+# script's `probe`, so this guard names no manifest of its own.
 run = '''
 floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
-if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod ]]; then
+if [[ -z ${floor} ]]; then
   echo "coverage:check: no .coverage-floor, skipped"
+  exit 0
+fi
+applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1
+if [[ -z ${applies} ]]; then
+  echo "coverage:check: no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), skipped"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
@@ -6774,8 +6792,9 @@ dir = "{{cwd}}"
 # wildcard, and a fixer that runs the whole test suite does not belong
 # in a sweep nobody asked for.
 run = '''
-if [[ ! -f Cargo.toml && ! -f go.mod ]]; then
-  echo "coverage:adopt: no Cargo.toml or go.mod, nothing to measure"
+applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
+if [[ -z ${applies} ]]; then
+  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), nothing to measure"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
@@ -6784,7 +6803,7 @@ python3 "${ORG_BELT_DIR}/coverage-floor.py" write \
 '''
 
 [tasks."coverage:report"]
-description = "Render the lcov report the Codecov badge feed uploads (never the gate)"
+description = "Render the reports the Codecov badge feed uploads (never the gate)"
 dir = "{{cwd}}"
 # The upload half of the ratchet, as a TASK rather than an inline
 # command in ci.yml — because "which members are coverable" is a
@@ -6804,8 +6823,13 @@ dir = "{{cwd}}"
 # copy survives, and it is asserted by the identical COVERAGE_EXCLUDE
 # loop rather than a hardcoded --workspace.
 run = '''
-[[ -f .coverage-floor ]] && [[ -f Cargo.toml || -f go.mod ]] || {
+[[ -f .coverage-floor ]] || {
   echo "coverage:report: no .coverage-floor, skipped"
+  exit 0
+}
+applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:report probe) || exit 1
+[[ -n ${applies} ]] || {
+  echo "coverage:report: no measurable language, skipped"
   exit 0
 }
 # Go leg (#392): the profile go test writes IS the upload format —
@@ -6827,6 +6851,15 @@ if [[ -f go.mod ]]; then
   # below, which renders lcov this script does not produce.
   "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report go > /dev/null
   echo "coverage:report: coverage.txt written"
+fi
+# Python leg (#1331): Cobertura XML, which Codecov parses natively, so
+# like Go's profile the upload needs no converter. Rendered by the
+# measurement script from the run it measures, never by a second
+# invocation with its own flags. coverage.xml, not lcov: lcov.info is
+# the Rust leg's name, and a mixed tree renders both.
+if grep -qx python <<< "${applies}"; then
+  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report python > /dev/null
+  echo "coverage:report: coverage.xml written"
 fi
 [[ -f Cargo.toml ]] || exit 0
 if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then

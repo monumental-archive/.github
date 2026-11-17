@@ -581,7 +581,7 @@ class CoverageFloorApplicability(unittest.TestCase):
             )
             files = emitted(out)
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("no Cargo.toml or go.mod, skipped", result.stdout)
+        self.assertIn(".coverage-floor with no measurable language", result.stdout)
         self.assertEqual("", files["files"])
 
 

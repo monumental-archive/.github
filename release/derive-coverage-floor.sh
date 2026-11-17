@@ -40,19 +40,21 @@ if [[ ! -f .coverage-floor ]]; then
   exit 0
 fi
 
-# A floor with no measurable language is a repository mid-migration, not
-# a release to fail: `coverage:check` skips the same shape.
-if [[ ! -f Cargo.toml && ! -f go.mod ]]; then
-  echo ".coverage-floor with no Cargo.toml or go.mod, skipped"
-  emit "files="
-  exit 0
-fi
-
 # The canon tree this script was fetched with, so the measurement and the
 # derivation are the ones the caller pinned — the same resolution that
 # delivered this file (#165). Not ORG_BELT_DIR: that is computed in the
 # belt's own [env] and this runs as a plain step, not inside a mise task.
 belt="$(cd "$(dirname "${BASH_SOURCE[0]}")/../mise" && pwd)"
+
+# A floor with no measurable language is a repository mid-migration, not
+# a release to fail: `coverage:check` skips the same shape, and asks the
+# same `probe` which languages apply (#1331), so the two cannot disagree.
+applies=$("${belt}/coverage-measure.sh" "release:coverage-floor" probe)
+if [[ -z ${applies} ]]; then
+  echo ".coverage-floor with no measurable language (go.mod, Cargo.toml, or tracked *.py with a test task), skipped"
+  emit "files="
+  exit 0
+fi
 
 # One measurement, shared with the gate: `coverage:check` enforces the
 # number this prints and this derives the floor from it, so the flags
