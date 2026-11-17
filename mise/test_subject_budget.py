@@ -19,6 +19,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 import importlib.util
 import io
 import json
+import re
 import sys
 import tomllib
 import unittest
@@ -1419,6 +1420,93 @@ class TestMainGuards(unittest.TestCase):
                 },
             )
         self.assertIn("commitMessageAction", str(caught.exception))
+
+
+CANON = Path(__file__).resolve().parent.parent
+
+# A `[tools]` entry in the scaffold, live or commented out as an example:
+# the key, then `=` (#1393).
+SCAFFOLD_PIN = re.compile(r'^(?:#\s*)?("[^"]+"|[A-Za-z][\w:/.-]*)\s*=\s*(.*)$')
+
+
+def scaffold_pins(text: str) -> dict[str, object]:
+    """Read every tool pin the scaffold's `[tools]` names.
+
+    The scaffold recommends most of its pins as comments, which Renovate
+    and `lint:subject-budget` never see, so a key the canon tells every
+    repository to adopt would reach them unbudgeted (#1393). Each live or
+    commented `key = value` line in the `[tools]` section is decoded as
+    TOML, a commented multi-line array included; prose lines are not
+    pins and are skipped.
+
+    Returns:
+        Each key to its decoded value, in file order.
+
+    """
+    pins: dict[str, object] = {}
+    lines = text.splitlines()
+    start = lines.index("[tools]") + 1
+    i = start
+    while i < len(lines):
+        line = lines[i]
+        if re.match(r"^#?\s*\[", line):
+            break
+        match = SCAFFOLD_PIN.match(line)
+        i += 1
+        if not match:
+            continue
+        body = [line.lstrip("# ")]
+        if match.group(2).strip() == "[":
+            while i < len(lines) and lines[i].lstrip("# ").strip() != "]":
+                body.append(lines[i].lstrip("#").strip())
+                i += 1
+            body.append("]")
+            i += 1
+        pins.update(tomllib.loads("\n".join(body)))
+    return pins
+
+
+class TestScaffoldKeysFitTheBudget(unittest.TestCase):
+    """Every key the scaffold recommends mints a subject that fits (#1393).
+
+    The canon pins none of these itself, so its own gate never budgeted
+    them: #1334 changed the recommended cargo-auditable key and the first
+    repository to adopt it went red on an 82-column subject.
+    """
+
+    PINS = scaffold_pins(
+        (CANON / "scaffold" / "mise.toml").read_text(encoding="utf-8"),
+    )
+
+    def test_the_reader_finds_the_recommended_keys(self) -> None:
+        """No pins read would pass the budget row below vacuously."""
+        self.assertEqual(
+            [
+                "rust",
+                "github:rust-secure-code/cargo-auditable",
+                "cargo:cargo-fuzz",
+                "go",
+                "go:golang.org/x/vuln/cmd/govulncheck",
+            ],
+            list(self.PINS),
+        )
+
+    def test_every_key_fits_under_the_delivered_preset(self) -> None:
+        """The real default.json and the real ceiling, advisory included."""
+        preset = json.loads((CANON / "default.json").read_text(encoding="utf-8"))
+        limit = tomllib.loads(
+            (CANON / "mise" / "committed.toml").read_text(encoding="utf-8"),
+        )["subject_length"]
+        deps = [
+            sb.Dep(key, sb.widest_version(spec), "mise", "scaffold/mise.toml")
+            for key, spec in self.PINS.items()
+        ]
+        template = sb.Template(preset, {}, sb.advisory_suffix(preset, {}))
+        findings = sb.judge(deps, template, limit, [])
+        self.assertEqual(
+            [],
+            [f"{f.dep.name}: {f.width} cols, {f.subject}" for f in findings],
+        )
 
 
 if __name__ == "__main__":
