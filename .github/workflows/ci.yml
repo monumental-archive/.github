@@ -83,7 +83,8 @@ env:
   # (src/config-hash.ts MISE_CONFIG_FILE_PATTERNS, in its order, at the
   # workspace root where the action runs). The workflow's hashFiles walks
   # and digests them exactly as the action's own glob.hashFiles does, so
-  # mise/gate-cache-key.py renders the key the action rendered.
+  # mise/gate-cache-key.py renders the key the action rendered, and then
+  # adds the belt's lockfile, which these globs never reach (#1414).
   ORG_MISE_CONFIG_GLOBS: |-
     .config/mise/conf.d/*.toml
     .config/mise/conf.d/*/mise*.toml
@@ -209,8 +210,8 @@ jobs:
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
       # by mise/gate-cache-key.py and pinned by its test to a key the
-      # action logged — so every default branch's existing entry is the
-      # one restored here, and the first run after the change is not cold.
+      # action logged, then `-b` and the sha256 of the delivered belt's
+      # mise.lock (#1414), so a belt tool bump names a new cache.
       #
       # `mise-v2` is the cache's NAME, moved by hand when its CONTENTS
       # must change and its key would not (#1165). The key hashes the
@@ -225,7 +226,7 @@ jobs:
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon/.github/workflows/ci.yml
+        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
@@ -251,15 +252,18 @@ jobs:
       # Staleness is not the exposure: mise installs what mise.lock
       # pins, and a restored directory only spares it the download, so
       # an older cache is a slower run, never a different one. The key
-      # is the one mise-action rendered when it cached this itself
-      # (#1406, mise/gate-cache-key.py): the hash of the mise configs
-      # its globs find at the workspace root — on the canon's own gate,
-      # mise/config.toml then mise.toml. #660 measured an earlier pin's
-      # glob following the delivered .org-canon tree through its
-      # symlink; v5.2.7's globs stop at the workspace root, so in a
-      # calling repository a canon pin bump keeps the key. Off the
-      # default branch a missed key restores the nearest earlier entry
-      # by prefix and installs only what changed (#1406).
+      # names what is installed (mise/gate-cache-key.py): the mise
+      # configs mise-action's globs find at the workspace root — on the
+      # canon's own gate, mise/config.toml then mise.toml — and the
+      # delivered belt's .org-canon/mise/mise.lock (#1414). #660
+      # measured an earlier pin's glob following the .org-canon tree
+      # through its symlink; v5.2.7's globs stop at the workspace root,
+      # so the belt was out of the key and a belt tool bump was
+      # installed on every run and never saved. The lockfile, not the
+      # belt's config.toml: it changes exactly when a belt tool does,
+      # where config.toml changes with every task body. Off the default
+      # branch a missed key restores the nearest earlier entry by
+      # prefix and installs only what changed (#1406).
       - name: Restore the tool cache (unsigned gate only)
         id: tool-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -525,14 +529,14 @@ jobs:
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
       # by mise/gate-cache-key.py and pinned by its test to a key the
-      # action logged — so every default branch's existing entry is the
-      # one restored here, and the first run after the change is not cold.
+      # action logged, then `-b` and the sha256 of the delivered belt's
+      # mise.lock (#1414), so a belt tool bump names a new cache.
       # `mise-v2` moves with the `gate` job's, for the reason given there.
       - name: Name the tool cache
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon/.github/workflows/ci.yml
+        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
@@ -694,14 +698,14 @@ jobs:
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
       # by mise/gate-cache-key.py and pinned by its test to a key the
-      # action logged — so every default branch's existing entry is the
-      # one restored here, and the first run after the change is not cold.
+      # action logged, then `-b` and the sha256 of the delivered belt's
+      # mise.lock (#1414), so a belt tool bump names a new cache.
       # `mise-v2` moves with the `gate` job's, for the reason given there.
       - name: Name the tool cache
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon/.github/workflows/ci.yml
+        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
@@ -727,15 +731,18 @@ jobs:
       # Staleness is not the exposure: mise installs what mise.lock
       # pins, and a restored directory only spares it the download, so
       # an older cache is a slower run, never a different one. The key
-      # is the one mise-action rendered when it cached this itself
-      # (#1406, mise/gate-cache-key.py): the hash of the mise configs
-      # its globs find at the workspace root — on the canon's own gate,
-      # mise/config.toml then mise.toml. #660 measured an earlier pin's
-      # glob following the delivered .org-canon tree through its
-      # symlink; v5.2.7's globs stop at the workspace root, so in a
-      # calling repository a canon pin bump keeps the key. Off the
-      # default branch a missed key restores the nearest earlier entry
-      # by prefix and installs only what changed (#1406).
+      # names what is installed (mise/gate-cache-key.py): the mise
+      # configs mise-action's globs find at the workspace root — on the
+      # canon's own gate, mise/config.toml then mise.toml — and the
+      # delivered belt's .org-canon/mise/mise.lock (#1414). #660
+      # measured an earlier pin's glob following the .org-canon tree
+      # through its symlink; v5.2.7's globs stop at the workspace root,
+      # so the belt was out of the key and a belt tool bump was
+      # installed on every run and never saved. The lockfile, not the
+      # belt's config.toml: it changes exactly when a belt tool does,
+      # where config.toml changes with every task body. Off the default
+      # branch a missed key restores the nearest earlier entry by
+      # prefix and installs only what changed (#1406).
       - name: Restore the tool cache (unsigned gate only)
         id: tool-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

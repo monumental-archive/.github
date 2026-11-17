@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Name the gate's tool cache the way jdx/mise-action v5.2.7 names it (#1406).
+"""Name the gate's tool cache: mise-action's key, plus the belt it installs.
 
 The gate's tool cache used to be restored and saved by mise-action itself
 (`cache: true`). That action restores by EXACT key only — its
@@ -32,6 +32,21 @@ The path is the action's too: GitHub includes the path list in a cache's
 version, so a restore naming `~/.local/share/mise` would never meet an
 entry saved under the absolute path the action resolved.
 
+THE BELT'S LOCKFILE IS THE ONE PART ADDED (#1414). The action's globs stop
+at the working directory and its parents, so in a calling repository the
+belt, delivered under `.org-canon/`, was never in the key: a belt tool
+bump kept the key, the default branch hit a cache without the new tool,
+installed it on every run and never saved it, because it hit. So the key
+ends in `-b{sha256 of .org-canon/mise/mise.lock}`: the one file that
+changes exactly when a belt tool, its version, its checksums or its
+install options do. Not the belt's `config.toml`, which carries every
+task body and changes with almost every canon release — that would make
+every canon bump a cold install of an unchanged toolset. The one belt
+tool option the lockfile does not record, `bin_path`, is resolved by mise
+at run time and changes nothing installed. The first run after #1414 on
+each default branch fills the new key once; every other ref falls back
+by prefix in the meantime.
+
 The fallback prefix stops before the mise version: a mise bump restores
 the previous tools and the action installs the one binary that changed.
 `name` is the hand-moved part of the key (#1165) and stays the
@@ -39,12 +54,14 @@ invalidation lever: a different name shares no prefix.
 """
 
 import argparse
+import hashlib
 import os
 import platform
 import re
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 NAME = "gate-cache-key"
 
@@ -110,9 +127,26 @@ def data_dir(env: dict[str, str]) -> str:
     return str(Path(env["HOME"]) / ".local" / "share" / "mise")
 
 
-def names(
-    name: str, version: str, plat: str, env: dict[str, str], now: float
-) -> dict[str, str]:
+def belt_hash(lock: bytes) -> str:
+    """Digest the belt's lockfile.
+
+    Returns:
+        Its sha256, in hex.
+
+    """
+    return hashlib.sha256(lock).hexdigest()
+
+
+class Facts(NamedTuple):
+    """What the key is built from, besides the runner's environment."""
+
+    version: str
+    plat: str
+    now: float
+    belt: str
+
+
+def names(name: str, env: dict[str, str], facts: Facts) -> dict[str, str]:
     """Compose the cache's key, fallback prefix and path.
 
     Returns:
@@ -120,11 +154,12 @@ def names(
 
     """
     image = env.get("ImageOS") or "self-hosted"
-    prefix = f"{name}-{plat}-{image}-"
+    prefix = f"{name}-{facts.plat}-{image}-"
     mise_env = env.get("MISE_ENV", "").replace(",", "-")
-    period = int(now // PERIOD_SECONDS)
+    period = int(facts.now // PERIOD_SECONDS)
     file_hash = env.get("ORG_MISE_CONFIG_HASH") or "no-config"
-    key = f"{prefix}{version}{'-' + mise_env if mise_env else ''}-p{period}-{file_hash}"
+    menv = f"-{mise_env}" if mise_env else ""
+    key = f"{prefix}{facts.version}{menv}-p{period}-{file_hash}-b{facts.belt}"
     return {"key": key, "prefix": prefix, "dir": data_dir(env)}
 
 
@@ -138,17 +173,22 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
     parser = argparse.ArgumentParser(prog=NAME, description=__doc__.splitlines()[0])
     parser.add_argument("name", help="the cache's hand-moved name (#1165)")
     parser.add_argument(
-        "workflow", type=Path, help="the workflow whose install pins mise"
+        "canon",
+        type=Path,
+        help="the canon tree: its ci.yml pins mise, its mise/mise.lock the belt",
     )
     args = parser.parse_args(argv)
     env = dict(os.environ)
     try:
-        version = mise_version(args.workflow.read_text("utf-8"))
+        workflow = args.canon / ".github" / "workflows" / "ci.yml"
+        version = mise_version(workflow.read_text("utf-8"))
+        belt = belt_hash((args.canon / "mise" / "mise.lock").read_bytes())
         plat = target(platform.system(), platform.machine())
     except (OSError, ValueError) as err:
         print(f"{NAME}: {err}", file=sys.stderr)
         return 1
-    out = names(args.name, version, plat, env, time.time() if now is None else now)
+    clock = time.time() if now is None else now
+    out = names(args.name, env, Facts(version, plat, clock, belt))
     lines = "".join(f"{k}={v}\n" for k, v in out.items())
     with Path(env["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
         fh.write(lines)
