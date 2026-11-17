@@ -48,7 +48,7 @@ written for two moments: wiring a repository in, and a release going wrong.
    | `rust-crate` | `exclude` for container-built members | `rust` |
    | `rust-binary` | `binary-targets`, `binary-smoke-test`, `exclude` | `rust` |
    | `go-binary` | `go-targets`, `go-smoke-test` | `go` |
-   | `oci-image` | `dockerfile`, `context`, `smoke-test`, and `binary-crate` **or** `prepare` | `rust`, `cargo:cargo-auditable` when either is declared |
+   | `oci-image` | `dockerfile`, `context`, `smoke-test`, and `binary-crate` **or** `prepare` | `rust`, `cargo-auditable` when either is declared |
    | `wasm-npm` | `crate-dir`, `npm-scope` | `rust`, `aqua:rustwasm/wasm-pack`, `node` |
    | `pgrx-extension` | `extension-crate-dir`, `pg-majors`, `extension-smoke-test` | `rust`, `cargo:cargo-pgrx` (must equal the pgrx crate dep) |
    | `source-archive` | none — the artifact is the tagged tree itself | — |

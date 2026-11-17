@@ -145,8 +145,8 @@ name: publish
           same reproducibility flags, same inventory plan — and installs
           the binaries at `<context>/dist/`, so a Rust-backed image needs
           no prepare script at all. Requires `rust` and
-          `cargo:cargo-auditable` in the caller's mise config, like every
-          other class that compiles Rust.
+          `cargo-auditable` (under any backend key) in the caller's mise
+          config, like every other class that compiles Rust.
         required: false
         type: string
         default: ""
