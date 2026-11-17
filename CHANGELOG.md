@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.12](https://github.com/monumental-archive/.github/compare/v1.68.11...v1.68.12) - 2026-11-17
+
+### Fixed
+
+- install biome wherever lint:biome runs (#1410) ([#1428](https://github.com/monumental-archive/.github/pull/1428))
+
 ## [1.68.11](https://github.com/monumental-archive/.github/compare/v1.68.10...v1.68.11) - 2026-11-17
 
 ### Fixed
