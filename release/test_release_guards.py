@@ -38,6 +38,7 @@ framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
+import json
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -621,6 +622,48 @@ class RustBuildInputs(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("PLAN_CLASS is set but PLAN_DOC_PREFIX is not", result.stdout)
 
+    @unittest.skipUnless(JQ, "jq reads cargo's metadata")
+    def test_the_build_is_handed_fat_lto(self) -> None:
+        """Release builds link with fat LTO, the fourth determinism input (#778).
+
+        Cargo's `lto = false` default still runs thin LOCAL LTO, whose
+        `.llvm.<hash>` symbols differed between two clean builds of the
+        same tree, so the repro gate failed on iiif-server. A stand-in
+        cargo records what the build step was handed and stops there.
+        """
+        with TemporaryDirectory() as d:
+            root = Path(d)
+            stubs = root / "stubs"
+            stubs.mkdir()
+            seen = root / "build-env"
+            stub = (
+                "#!/usr/bin/env bash\n"
+                "if [[ $1 == metadata ]]; then\n"
+                '  echo \'{"packages": [{"name": "demo", "targets": []}]}\'\n'
+                "  exit 0\n"
+                "fi\n"
+                f'printf "%s" "${{CARGO_PROFILE_RELEASE_LTO-unset}}" > "{seen}"\n'
+                "exit 1\n"
+            )
+            for name, body in (
+                ("cargo", stub),
+                ("rustup", "#!/usr/bin/env bash\nexit 0\n"),
+                ("cargo-auditable", "#!/usr/bin/env bash\nexit 0\n"),
+            ):
+                (stubs / name).write_text(body)
+                (stubs / name).chmod(0o755)
+            result = run_script(
+                "rust-build.sh",
+                root,
+                TARGET="x86_64-unknown-linux-gnu",
+                STAGE_DIR="stage",
+                SOURCE_DATE_EPOCH="1700000000",
+                PACKAGE="demo",
+                PATH=f"{stubs}:{os.environ['PATH']}",
+            )
+            self.assertTrue(seen.exists(), result.stdout + result.stderr)
+            self.assertEqual("fat", seen.read_text())
+
 
 @unittest.skipUnless(JQ, "jq reads the plan document")
 class OpenReleasePrInputs(unittest.TestCase):
@@ -706,8 +749,10 @@ if [[ ${1:-} == api && ${2:-} == graphql ]]; then
     cat "${STATE}/head"
     exit 0
   fi
-  if grep -q createCommitOnBranch; then
+  request=$(cat)
+  if grep -q createCommitOnBranch <<< "${request}"; then
     log graphql createCommitOnBranch
+    printf '%s' "${request}" > "${STATE}/commit-request"
     refused "graphql createCommitOnBranch" "$@"
     headers "$@"
     echo "${OID}"
@@ -724,6 +769,12 @@ if [[ ${1:-} == api ]]; then
   done
   log "${method} ${path}"
   refused "${method} ${path}" "${args[@]}"
+  # An App installation token has no user context: the forge answers
+  # `user` with this 403 (#58, measured in the release lab).
+  if [[ ${path} == user ]]; then
+    echo "gh: Resource not accessible by integration (HTTP 403)" >&2
+    exit 1
+  fi
   [[ ${method} == GET && ${path} == */git/ref/heads/* ]] || headers "${args[@]}"
   case "${method} ${path}" in
     "GET users/"*) echo 4242 ;;
@@ -931,6 +982,57 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
                 )
                 self.assertEqual("", result.stdout)
                 self.assertEqual(calls, self.calls())
+
+    def test_the_sign_off_names_the_app_bot_without_the_user_endpoint(
+        self,
+    ) -> None:
+        """The release commit signs off as the App's bot user (#58).
+
+        An installation token has no user context, so `gh api user`
+        answers 403 and the Release PR was never opened. The identity
+        comes from APP_SLUG and the public users endpoint instead, and
+        `lint:dco` matches it against the commit author verbatim.
+        """
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        request = self.state / "commit-request"
+        self.assertTrue(
+            request.exists(), "no release commit was requested:\n" + result.stderr
+        )
+        message = json.loads(request.read_text())["variables"]["input"]["message"]
+        self.assertEqual(
+            "Signed-off-by: org-tag-mint[bot]"
+            " <4242+org-tag-mint[bot]@users.noreply.github.com>",
+            message["body"],
+        )
+        self.assertNotIn("GET user", self.calls())
+
+    def test_the_old_half_of_a_rename_rides_the_commit_as_a_deletion(
+        self,
+    ) -> None:
+        """A planned path absent from disk is deleted, not read (#101).
+
+        The bump renames an upgrade script, and the plan names both
+        halves. The release lab's first run of the rename (run
+        31408916140) died with FileNotFoundError reading the old path
+        as an addition.
+        """
+        old = "sql/demo--1.0.0--next.sql"
+        new = "sql/demo--1.0.0--1.1.0.sql"
+        plan = json.loads(self.plan.read_text())
+        plan["commit"]["additions"] = [old, new]
+        self.plan.write_text(json.dumps(plan))
+        (self.root / "sql").mkdir()
+        (self.root / new).write_text("-- upgrade\n")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        request = self.state / "commit-request"
+        self.assertTrue(
+            request.exists(), "no release commit was requested:\n" + result.stderr
+        )
+        changes = json.loads(request.read_text())["variables"]["input"]["fileChanges"]
+        self.assertEqual([new], [a["path"] for a in changes["additions"]])
+        self.assertEqual([{"path": old}], changes["deletions"])
 
     def test_head_moved_writes_nothing_and_says_why(self) -> None:
         """The measured race: the branch moved while the run was planning."""
@@ -1338,6 +1440,7 @@ class TagReleasePush(unittest.TestCase):
         )
         local = git(repo, "tag", "--list", "v1.1.0")
         pushed = git(remote, "tag", "--list", "v1.1.0")
+        self.pushed_tag = git(remote, "cat-file", "tag", "v1.1.0") if pushed else ""
         return result, local, pushed
 
     def test_the_workflow_refusal_is_named_and_mints_nothing(self) -> None:
@@ -1372,6 +1475,19 @@ class TagReleasePush(unittest.TestCase):
         result, _, pushed = self._run("")
         self.assertIn("pushed v1.1.0 (signed)", result.stdout)
         self.assertEqual("v1.1.0\n", pushed)
+
+    def test_the_pushed_tag_carries_the_signers_signature(self) -> None:
+        """The tag is signed through gitsign, not merely annotated (#349 S4).
+
+        An unsigned annotated tag minted by the App and one minted by
+        hand at break-glass were indistinguishable by inspection; the
+        x509 signature in the tag object is what tells them apart.
+        """
+        result, _, pushed = self._run("")
+        self.assertEqual("v1.1.0\n", pushed, result.stderr)
+        self.assertIn(
+            "-----BEGIN SIGNED MESSAGE-----", self.pushed_tag, self.pushed_tag
+        )
 
 
 class InventoryClassRefusal(unittest.TestCase):

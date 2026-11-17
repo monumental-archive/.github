@@ -24,6 +24,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tomllib
 import unittest
+import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -438,6 +439,35 @@ class Folded(unittest.TestCase):
         for source, folded_text in rows:
             with self.subTest(source=source):
                 self.assertEqual(es.fold(source), folded_text)
+
+
+class OrgConfig(unittest.TestCase):
+    """The org's shellcheck settings are the ones applied (#696, #733)."""
+
+    def test_a_home_shellcheckrc_cannot_lower_the_org_checks(self) -> None:
+        """A machine's own rc file does not switch a belt check off.
+
+        Without `--rcfile`, shellcheck reads `~/.shellcheckrc`, so a
+        `disable=` there silently dropped a check the belt enables; the
+        delivered `mise/shellcheckrc` is passed instead and nothing else
+        is read.
+        """
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name) / "home"
+        home.mkdir()
+        (home / ".shellcheckrc").write_text("disable=SC2250\n", encoding="utf-8")
+        path = Path(tmp.name) / "wf.yml"
+        path.write_text(
+            workflow('- name: s\n  run: |\n    x=1\n    echo "$x"'),
+            encoding="utf-8",
+        )
+        env = {k: v for k, v in os.environ.items() if k != "XDG_CONFIG_HOME"}
+        with unittest.mock.patch.dict(
+            os.environ, {**env, "HOME": str(home)}, clear=True
+        ):
+            found = es.check(path, fmt=False, lint=True)
+        self.assertTrue(any("[SC2250]" in f for f in found), found)
 
 
 def rewrite_text(text: str) -> tuple[int, str]:
