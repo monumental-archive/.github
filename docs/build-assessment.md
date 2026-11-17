@@ -118,8 +118,10 @@ rotated, backed up or stealable, so the questions about secret storage,
 memory protection and rotation cadence have no subject. Remediation for a
 compromised identity is detection rather than rotation: `rekor-monitor`
 watches Fulcio's certificate transparency log for certificates issued to
-the signer identity that the org did not ask for (#1237), and an
-unexpected issuance is a stop-everything event
+the signer identity that the org did not ask for (#1237), each
+reconciled against a signing the org performed by
+`stele assert signer-certificates` (#1339), and an unexpected issuance
+is a stop-everything event
 ([`runbook.md`](runbook.md)).
 
 **Known limit.** Anything that can push a branch in `signer` mints a

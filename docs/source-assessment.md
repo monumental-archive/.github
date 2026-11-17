@@ -67,7 +67,10 @@ steal, or back up. The compromise-remediation story is the identity's:
 certificates are minutes-lived, every certificate Fulcio issues lands
 in its certificate transparency log, and the org's rekor-monitor
 workflow watches that log for certificates issued to the signer
-identity that the org did not ask for (#1237).
+identity that the org did not ask for (#1237): it runs
+`stele assert signer-certificates`, which reads the log in chunks from
+a checkpoint and reconciles every certificate against a signing the
+org performed (#1339).
 
 **Control effectiveness.** The claims in every VSA are read from
 GitHub's rules API at emission time, not asserted from configuration

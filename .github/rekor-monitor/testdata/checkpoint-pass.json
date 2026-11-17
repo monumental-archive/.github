@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "log": "https://ctfe.sigstore.dev/2022",
+  "treeHead": {
+    "treeSize": 448221522,
+    "timestamp": 1794940295196,
+    "rootHash": "6sSn+k8NAi3gw/i6DLPrs46vhPRNuBnUNtUAW/eHito=",
+    "signature": "BAMARzBFAiAVMZwunWvrPKV7HLKDvk1azAMFeJmgB6MISvhhjKkVPwIhAN6/yAHItixfg6ySKP9LPVz5qtxrKLD+w1f7RM/kVZmr"
+  },
+  "next": 448221522
+}

@@ -75,10 +75,6 @@
 .github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/publish.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374
 .github/workflows/publish.yml	Stage the decision subjects (the inventory the decision covered)	29	# stele: monumental-archive/stele#399, canon swap #1374
-.github/workflows/rekor-monitor.yml	Record the checkpoint before the run	16	# leaving (rekor-monitor cut-over to stele): #1339
-.github/workflows/rekor-monitor.yml	Run the monitor once	21	# leaving (rekor-monitor cut-over to stele): #1339
-.github/workflows/rekor-monitor.yml	Record the checkpoint after the run	48	# leaving (rekor-monitor cut-over to stele): #1339
-.github/workflows/rekor-monitor.yml	File an issue for each certificate that did not reconcile	16	# leaving (rekor-monitor cut-over to stele): #1339
 .github/workflows/repro-check.yml	Read the latest release	35	# canon helper (the remaining small steps): #1386
 .github/workflows/repro-check.yml	Compare rebuilt digests with the published ones	17	# stele: #1352 unassigned
 .github/workflows/repro-check.yml	File an issue on failure	28	# canon helper (the remaining small steps): #1386

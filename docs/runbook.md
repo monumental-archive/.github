@@ -279,37 +279,43 @@ roll-forward.
   ruleset, mints by hand, re-enables, records the event.
 - **rekor-monitor: a certificate did not reconcile** (an issue titled
   `certificate at CT index N did not reconcile (<conditions>)`, one per
-  certificate): the monitor found a certificate for the signer identity
-  that the reconciler could not tie to a signing the org performed
-  (#1250). This is a stop-everything event: rotate nothing until you
-  know how the identity was minted. The issue names the failed
-  conditions and quotes every claim read from the CT entry, including
-  the run that asked for it (`run_invocation_uri`). Open that run. If it
-  is a real org signing, the failed condition is the defect: a canon
-  workflow at an unmerged commit (`canon-branch`), a signer pinned
-  outside the canon (`direct`), or a reusable workflow outside the canon
-  in a signing run (`foreign`). Fix that and record it on the issue. If
-  the run does not exist, or is not the org's (`run`), or never called
-  the signer at that digest (`signer-in-run`, `chain`), treat the
-  identity as compromised: find the push to the signer repository that
-  minted it (`signer-branch` names a commit off its default branch).
-  Reconciled certificates are listed in the run summary, one line each,
-  with the run and the canon file that asked for the signer.
-- **rekor-monitor filed an issue** (`rekor-monitor: failure (run N)`):
-  the watch on Fulcio's certificate transparency log failed, or a
-  certificate it found could not be reconciled because a forge read did
-  not complete (403, throttling). A failed run saves no checkpoint, so
-  the next run reads the same range again. Three monitoring failures
-  name themselves: a monitor stopped at 10 minutes ends its log with
-  every goroutine's stack; a run whose checkpoint did not advance
-  while the log's signed tree head moved says so beside the
-  checkpoint's hash before and after; and a short read, where the
-  monitor read fewer entries than the checkpoint advanced over, quotes
-  both ranges. A run with no
-  checkpoint to restore refuses to start; dispatch with `found=true` to
-  found one at the log's head, knowingly. A backlog of several hours
-  (missed runs) can exceed the runner's memory, since the monitor holds
-  the whole range at once: found again and record the gap here.
+  certificate): `stele assert signer-certificates` found a certificate
+  for the signer identity that it could not tie to a signing the org
+  performed (#1250, #1339). This is a stop-everything event: rotate
+  nothing until you know how the identity was minted. The issue names
+  each failed condition with stele's reason and every claim it read
+  from the CT entry, including the run that asked for it. Open that
+  run. If it is a real org signing, the failed condition is the defect:
+  a caller workflow at an unmerged commit (`caller-branch`), a signer
+  called outside the policy's callers (`direct`), or a reusable
+  workflow outside them in a signing run (`foreign`). Fix that and
+  record it on the issue. If the run does not exist, or is not the
+  org's (`run`), or never called the signer at that digest
+  (`signer-in-run`, `chain`), treat the identity as compromised: find
+  the push to the signer repository that minted it (`signer-branch`
+  names a commit off its default branch, or one no branch holds).
+  Reconciled certificates are in the run's log, one line each.
+- **rekor-monitor: the signer-identity watch is behind** (one standing
+  issue, its body replaced by every run that leaves the watch behind,
+  closed by a run that judges to the head): stele read Fulcio's
+  certificate log from its checkpoint and did not gain on it (#1353,
+  #1339). The body names the checkpoint's next index (everything
+  before it is judged), the tree head, the entries outstanding and why
+  this run stopped, verbatim from stele. A backlog alone is not this
+  issue: a run whose checkpoint advanced is green and starts the next
+  run, so a backlog is read off back to back. What opens it: a run
+  that judged nothing (the log or the forge throttled through the
+  whole budget, a read that did not complete), a run killed before its
+  checkpoint was saved (it persists nothing, and the next run judges
+  the range again), a checkpoint whose tree head is over a day old,
+  and stele refusing to start. A tree head that does not extend the
+  checkpoint's is refused by name and the checkpoint is left as it
+  was: that is the log misbehaving, not the watch. A run with no
+  checkpoint refuses to start, by name; dispatch the workflow with
+  `start-at` set to the next index the last saved checkpoint recorded
+  (every run's judge step prints it), never the log's head, which
+  skips the unread range. `start-at` is refused while a checkpoint
+  exists.
 - **Never watched (recorded 2026-11-15, #1237)**: issuance to the
   signer identity before the certificate-log checkpoint was founded.
   The Rekor scan this replaced completed no run after 2026-10-18, so

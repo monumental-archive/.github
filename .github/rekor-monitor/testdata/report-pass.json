@@ -1,0 +1,129 @@
+{
+  "schema": 8,
+  "target": "assert signer-certificates",
+  "subject": "https://ctfe.sigstore.dev/2022",
+  "verdict": "PASS",
+  "population": {
+    "size": 361,
+    "expected": 361,
+    "source": "declared",
+    "detail": "log entries judged, of the range between the checkpoint and the verified tree head"
+  },
+  "facts": [
+    { "name": "log", "value": "https://ctfe.sigstore.dev/2022" },
+    { "name": "treeHead", "value": "448221522 at 2026-11-17T18:31:35Z" },
+    { "name": "judged", "value": "448221161..448221521" },
+    { "name": "outstanding", "value": "none" },
+    { "name": "checkpointNext", "value": "448221522" },
+    { "name": "entriesRead", "value": "361" },
+    { "name": "requests", "value": "2" },
+    { "name": "throttled", "value": "0" },
+    { "name": "unavailable", "value": "0" },
+    { "name": "matches", "value": "0" },
+    { "name": "reconciled", "value": "0" }
+  ],
+  "unexercisedExceptions": [
+    {
+      "kind": "declared",
+      "subject": "release-lab@v0.16.1",
+      "assertion": "attestations-vsa-npm.intoto.jsonl",
+      "origin": "security/attestation-debt.txt:18"
+    },
+    {
+      "kind": "declared",
+      "subject": "release-lab@v0.15.4",
+      "assertion": "attestations-vsa-npm.intoto.jsonl",
+      "origin": "security/attestation-debt.txt:19"
+    },
+    {
+      "kind": "declared",
+      "subject": "release-lab@v0.15.2",
+      "assertion": "attestations-vsa-npm.intoto.jsonl",
+      "origin": "security/attestation-debt.txt:20"
+    },
+    {
+      "kind": "declared",
+      "subject": "release-lab@v0.14.2",
+      "assertion": "attestations-vsa-npm.intoto.jsonl",
+      "origin": "security/attestation-debt.txt:21"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.4.1",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:26"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.4.0",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:27"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.3.2",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:28"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.3.1",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:29"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.3.0",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:30"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.2.2",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:31"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.2.1",
+      "assertion": "sbom",
+      "origin": "security/attestation-debt.txt:32"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.41.0",
+      "assertion": "vsa:deep",
+      "origin": "security/attestation-debt.txt:39"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.42.0",
+      "assertion": "vsa:deep",
+      "origin": "security/attestation-debt.txt:40"
+    },
+    {
+      "kind": "declared",
+      "subject": ".github@v1.43.0",
+      "assertion": "vsa:deep",
+      "origin": "security/attestation-debt.txt:41"
+    },
+    {
+      "kind": "declared",
+      "subject": "stele@v0.14.0",
+      "assertion": "vsa:deep",
+      "origin": "security/attestation-debt.txt:42"
+    },
+    {
+      "kind": "declared",
+      "subject": "stele@v0.15.0",
+      "assertion": "vsa:deep",
+      "origin": "security/attestation-debt.txt:43"
+    },
+    {
+      "kind": "declared",
+      "subject": "release-lab@v0.25.3",
+      "assertion": "deep",
+      "origin": "security/attestation-debt.txt:56"
+    }
+  ]
+}

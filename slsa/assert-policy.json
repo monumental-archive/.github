@@ -1,7 +1,16 @@
 {
-  "schema": 7,
+  "schema": 8,
   "issuer": "https://token.actions.githubusercontent.com",
   "debtFile": "security/attestation-debt.txt",
+  "signerCertificates": {
+    "log": "https://ctfe.sigstore.dev/2022",
+    "signers": [
+      {
+        "workflow": "monumental-archive/signer/.github/workflows/sign.yml",
+        "callers": ["monumental-archive/.github"]
+      }
+    ]
+  },
   "population": {
     "repositories": [
       { "repo": ".github" },
