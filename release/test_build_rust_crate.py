@@ -18,14 +18,17 @@ now keeps exactly the crates release/crates-io-members.sh names (the
 helper the publisher reads too) and fails by name on one it names that
 cargo did not write.
 
-WHAT RUNS. The `run:` bodies of `Package`, `Compute the subject
-manifest` and `Emit the inventory plan`, cut out of
-`.github/workflows/build-rust-crate.yml` as shipped, in order, under
-`bash -c`, with a stub `cargo` first on PATH. `sha256sum`, `sed` and
-`jq` are the real ones, and so is the canon helper, reached through a
-`.org-canon` link to this tree exactly as the canon action lays it
-out; GITHUB_OUTPUT is a real file the hash step writes and the test
-reads back.
+WHAT RUNS. The Package step's helper, release/package-crates.py
+(#1384), then the `run:` bodies of `Compute the subject manifest` and
+`Emit the inventory plan`, cut out of
+`.github/workflows/build-rust-crate.yml` as shipped, in order, the two
+bodies under `bash -c`, with a stub `cargo` first on PATH. The helper
+runs through a `.org-canon` link to this tree exactly as the canon
+action lays it out, and so does crates-io-members.sh, which it calls;
+`sha256sum`, `sed` and `jq` are the real ones; GITHUB_OUTPUT is a real
+file the hash step writes and the test reads back. One row holds the
+shipped Package step to the helper call, so what runs here is what the
+job runs.
 
 THE STUB IS CARGO'S MEASURED SHAPE. Measured 2026-11-16 on a fixture
 workspace with real cargo 1.97.1 (three members: one plain, one whose
@@ -65,8 +68,8 @@ BASH = shutil.which("bash")
 VERSION = "1.3.4"
 MEMBERS = ("edtf-core", "edtf-cli", "edtf-postgres")
 UNCOMPILABLE = "edtf-postgres"
+HELPER = ".org-canon/release/package-crates.py"
 STEPS = (
-    "Package",
     "Compute the subject manifest",
     "Emit the inventory plan (which packages these crates ship)",
 )
@@ -112,12 +115,17 @@ def step_body(name: str) -> str:
     """Cut one step's `run:` block out of the shipped workflow.
 
     Returns:
-        The block, dedented, exactly as the runner would hand it to bash.
+        The block, dedented, exactly as the runner would hand it to bash;
+        a one-line `run:` as its line.
 
     """
     lines = WORKFLOW.read_text().splitlines()
     step = lines.index(f"      - name: {name}")
-    run = next(i for i in range(step, len(lines)) if lines[i].strip() == "run: |")
+    run = next(
+        i for i in range(step, len(lines)) if lines[i].strip().startswith("run:")
+    )
+    if lines[run].strip() != "run: |":
+        return lines[run].strip().removeprefix("run:").strip() + "\n"
     indent = len(lines[run]) - len(lines[run].lstrip()) + 2
     body = []
     for line in lines[run + 1 :]:
@@ -243,9 +251,9 @@ def run_steps(
             "STUB_UNWRITTEN": " ".join(unwritten),
         }
         out, err, rc = "", "", 0
-        for name in STEPS:
+        for argv in [[HELPER], *([BASH, "-c", step_body(n)] for n in STEPS)]:
             result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [BASH, "-c", step_body(name)],
+                argv,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -270,6 +278,14 @@ def run_steps(
 
 ALL = sorted(f"{m}-{VERSION}.crate" for m in MEMBERS)
 EXCLUDE = f" --exclude {UNCOMPILABLE}"
+
+
+class PackageStepIsTheHelper(unittest.TestCase):
+    """The job runs the helper these rows run (#1384)."""
+
+    def test_the_shipped_step_calls_the_helper(self) -> None:
+        """Nothing but the call is left in the workflow."""
+        self.assertEqual(f"{HELPER}\n", step_body("Package"))
 
 
 class PackageAnExcludedMember(unittest.TestCase):
@@ -320,6 +336,25 @@ class PackageAnExcludedMember(unittest.TestCase):
         run = run_steps(EXCLUDE, second={UNCOMPILABLE: b"first written here\n"})
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
         self.assertNotIn("::error::", run.stdout)
+
+    def test_a_verified_run_that_wrote_nothing_is_refused(self) -> None:
+        """Every member excluded leaves nothing to compare (#1384)."""
+        flags = "".join(f" --exclude {m}" for m in MEMBERS)
+        run = run_steps(flags)
+        self.assertEqual(1, run.returncode)
+        self.assertEqual(
+            "::error::cargo package wrote no crate to verify\n", run.stdout
+        )
+        self.assertEqual([f"package --workspace --locked{flags}"], run.cargo)
+        self.assertEqual("", run.outputs)
+
+    def test_a_failing_cargo_fails_the_step_with_its_status(self) -> None:
+        """The uncompilable member, not excluded: cargo's 101 is the step's."""
+        run = run_steps("")
+        self.assertEqual(101, run.returncode)
+        self.assertIn("failed to compile pgrx-pg-sys", run.stderr)
+        self.assertEqual(["package --workspace --locked"], run.cargo)
+        self.assertEqual("", run.outputs)
 
 
 class PackageWithoutExclusion(unittest.TestCase):
