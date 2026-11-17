@@ -214,6 +214,24 @@ def uncached(step: dict[str, str]) -> bool:
     return step.get("with.cache", "true") != "true"
 
 
+def tool_cache_restored(job: list[str]) -> bool:
+    """Say whether a job restores its tool cache around the install (#1406).
+
+    The gate's jobs install with `cache: false` because `actions/cache`
+    steps either side restore and save the tool cache instead: cached, so
+    not a release install, and held by release/test_gate_caches.py.
+
+    Returns:
+        True when an `actions/cache/restore` step restores the mise dir.
+
+    """
+    return any(
+        "actions/cache/restore@" in s.get("uses", "")
+        and "tool-key.outputs.dir" in s.get("with.path", "")
+        for s in steps(job)
+    )
+
+
 def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Read what a job installs.
 
@@ -441,6 +459,7 @@ class Coverage(unittest.TestCase):
             if path.name not in OUT_OF_SCOPE
             for job_id, job in jobs(path.read_text("utf-8")).items()
             if any(uncached(s) for s in mise_steps(job))
+            and not tool_cache_restored(job)
         )
         self.assertEqual(sorted(IN_SCOPE), found)
 
