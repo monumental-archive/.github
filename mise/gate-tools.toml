@@ -108,11 +108,18 @@ tasks = ["lint:python", "lint:scaffold-assembly"]
 when = ["*.py", "*.pyi", "scaffold/"]
 
 [tools."aqua:biomejs/biome"]
+# Everything lint:biome selects, JSON and CSS included: every repository
+# tracks renovate.json, so in practice every repository needs it.
 tasks = ["lint:biome", "lint:biome-domains", "lint:scaffold-assembly"]
 when = [
   "*.cjs",
+  "*.css",
   "*.cts",
+  "*.gql",
+  "*.graphql",
   "*.js",
+  "*.json",
+  "*.jsonc",
   "*.jsx",
   "*.mjs",
   "*.mts",
