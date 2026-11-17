@@ -806,32 +806,13 @@ dir = "{{cwd}}"
 # change, a property of the registry, not the diff. The release path is
 # where this bites hardest (a major-worthy API break shipping as a
 # minor), so a red here means: fix the API or bump the major in the
-# next release — never both silently. Guarded on a publishable crate:
-# publish = false workspaces have no registry baseline to diverge from.
-run = '''
-set -euo pipefail
-manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
-[[ -n ${manifests} ]] || {
-  echo "audit:semver: no Cargo.toml tracked, skipped"
-  exit 0
-}
-command -v cargo > /dev/null || {
-  echo "audit:semver: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
-  exit 1
-}
-publishable=0
-while IFS= read -r m; do
-  [[ -n ${m} ]] || continue
-  grep -q '^\[package\]' "${m}" || continue
-  grep -q '^publish[[:space:]]*=[[:space:]]*false' "${m}" && continue
-  publishable=1
-done <<< "${manifests}"
-[[ ${publishable} -eq 1 ]] || {
-  echo "audit:semver: no publishable crate, skipped"
-  exit 0
-}
-cargo-semver-checks check-release
-'''
+# next release — never both silently.
+#
+# Crate by crate, in a delivered helper (#1341): a pgrx extension is
+# judged once per declared major, a crate crates.io has never seen is
+# named as not judged, and a failed index lookup is red, never a skip.
+# The helper's header says why each.
+run = 'bash "${ORG_BELT_DIR}/semver-audit.sh"'
 
 [tasks."lint:pg-upgrade-path"]
 description = "Every published pgrx extension version reaches the current one"
@@ -3324,8 +3305,8 @@ dir = "{{cwd}}"
 # said it ran in "ci.yml's postgres job"; there was none, and its task
 # sat outside the `lint:*` wildcard, so `ci` never collected it.
 #
-# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface, not a
-# Rust API, which is why cargo-semver-checks is off for one. Nothing
+# WHAT IT GUARDS. A pgrx extension's contract is its SQL surface; its
+# Rust API is judged per major by audit:semver since #1341. Nothing
 # else makes a change to that surface visible: a signature change would
 # ship as an ordinary refactor and surface only when somebody's CREATE
 # EXTENSION or ALTER EXTENSION UPDATE failed. And a clean diff is the
