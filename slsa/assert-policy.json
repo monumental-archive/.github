@@ -5,7 +5,19 @@
   "population": {
     "repositories": [
       { "repo": ".github" },
-      { "repo": "release-lab" },
+      {
+        "repo": "release-lab",
+        "reason": "publishes on both archetypes: its tagged releases, and a continuous digest stream of its CLI image on every push to main through the canon's continuous.yml, so the level walk measures both publish paths and neither stands in for the other (#1329, stele#355). The stream surface's identity is the db's: the org signer's sign.yml signs the index provenance and continuous.yml's commit point attests each per-architecture digest's inventory and decisions",
+        "surfaces": [
+          { "kind": "release" },
+          {
+            "kind": "continuous-digest",
+            "registry": "ghcr.io/monumental-archive/release-lab",
+            "tag": "latest",
+            "identity": "^https://github\\.com/monumental-archive/(signer/\\.github/workflows/sign\\.yml|\\.github/\\.github/workflows/continuous\\.yml)@"
+          }
+        ]
+      },
       { "repo": "stele" },
       { "repo": "iiif-server" },
       { "repo": "edtf" },
