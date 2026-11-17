@@ -37,6 +37,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -53,6 +54,13 @@ TIMEOUT = 300
 # Three oracle reads after a lost publish response, 20 s apart (#484).
 RECOVERY_READS = 3
 RECOVERY_SPACING = 20
+# The first-mint title guard's listing (#1389): page size, and a bound
+# on pages that REFUSES when reached - a page cap never decides a pass
+# (#316 addendum A). Measured in run 44129109573: `size=100` answers,
+# `size=1000` is a 400, and no Link or total header comes back, so a
+# short page is the only end there is.
+LISTING_PAGE = 100
+LISTING_MAX_PAGES = 1000
 SPDX_ID = re.compile(r"[A-Za-z0-9.+-]+")
 FAMILY = re.compile(r'^\s*- family-names:\s*"?([^"]*?)"?\s*$')
 GIVEN = re.compile(r'^\s*given-names:\s*"?([^"]*?)"?\s*$')
@@ -552,6 +560,45 @@ class Mint:
                 )
                 raise RefusedError(msg)
 
+    def read_listing(self, query: str) -> list[dict]:
+        """Read a deposition listing to its end, page by page (#1389).
+
+        The end is a page shorter than the page size. A page that cannot
+        be read, is not a list, or a listing still full at the page
+        bound refuses: a guard that saw part of the listing has not
+        checked it.
+
+        Returns:
+            Every entry, in the order the pages answered.
+
+        Raises:
+            RefusedError: the listing could not be read to its end.
+
+        """
+        z = self.zenodo
+        entries: list[dict] = []
+        for page in range(1, LISTING_MAX_PAGES + 1):
+            url = (
+                f"{z.base}/api/deposit/depositions?{query}"
+                f"&size={LISTING_PAGE}&page={page}"
+            )
+            try:
+                got = json.loads(z.idem("GET", url))
+            except (HttpError, ValueError) as e:
+                print(e, file=sys.stderr)
+                got = None
+            if not isinstance(got, list):
+                break
+            entries += got
+            if len(got) < LISTING_PAGE:
+                return entries
+        msg = (
+            f"the deposition listing ({query}) could not be read to its end"
+            f" ({len(entries)} entries read) — a first mint is never checked"
+            " against part of it"
+        )
+        raise RefusedError(msg)
+
     def first_deposit(self) -> dict:
         """Create a deposition for a first mint, behind the title guard.
 
@@ -566,13 +613,12 @@ class Mint:
             RefusedError: a submitted deposition bears the title.
 
         """
-        base = self.zenodo.base
-        name = self.repo.rsplit("/", 1)[-1]
-        listing = json.loads(
-            self.zenodo.idem(
-                "GET", f"{base}/api/deposit/depositions?q=title:%22{name}%22&size=10"
-            )
-        )
+        # The FULL title, quoted, slash encoded (#1389). Measured in run
+        # 44129109573 on production: `title:"<repo name>"` answered []
+        # for both `.github` and `edtf`, so the guard had never matched
+        # anything; `title:"<owner>/<repo>"` answered exactly the record
+        # for both, the slash encoded or literal.
+        listing = self.read_listing(f"q=title:%22{quote(self.repo, safe='')}%22")
         if any(
             d.get("title") == self.repo and d.get("submitted") is True for d in listing
         ):
@@ -585,7 +631,7 @@ class Mint:
         return json.loads(
             self.zenodo.call(
                 "POST",
-                f"{base}/api/deposit/depositions",
+                f"{self.zenodo.base}/api/deposit/depositions",
                 body=b"{}",
                 headers={"Content-Type": "application/json"},
             )

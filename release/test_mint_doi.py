@@ -62,6 +62,25 @@ minting. It keeps the one shape the helper reads (`doi`, `conceptdoi`)
 and is proven only by the canon's next release. The first-mint create
 POST was not called either; it answers the captured draft deposition.
 
+THE TITLE GUARD'S QUESTION is measured too (#1389), in
+`testdata/zenodo-measure-*.json`: run 44129109573 on this repository,
+2026-11-17, GET only, nothing created. These are authenticated
+`GET /api/deposit/depositions` answers:
+
+- `present-github` (M1), `?q=title:%22.github%22&size=10`, and
+  `present-edtf` (M2), `?q=title:%22edtf%22&size=10`: both answered
+  `[]`. The guard's question before #1389 found nothing, dotted name
+  or not.
+- `full-github` (M3), `?q=title:%22monumental-archive%2F.github%22`,
+  and `full-edtf` (M4), `?q=title:%22monumental-archive%2Fedtf%22`:
+  each answered exactly its submitted record. With the slash literal
+  (M5, M6) the answers were byte-identical.
+- `listing-summary.txt` (M7, the default unfiltered listing): the
+  summary lines as the run printed them, not a body. Six depositions:
+  five submitted org records, and one unsubmitted draft whose title the
+  run did not print. `size=100` answered the same six (M9);
+  `size=1000` answered 400 (M8). No Link or total header was returned.
+
 `testdata/zenodo-rdm-draft.json` is the body production Zenodo answered
 to `GET /api/records/24249135/draft` with the InvenioRDM media type,
 captured 2026-11-15 in run 43729983384 (#1246: a draft, read back and
@@ -204,7 +223,9 @@ class Zenodo:
 
     vocab: frozenset[str] = VOCAB
     vocab_status: int | None = None
-    titles: list[dict] = field(default_factory=list)
+    titles: object = field(default_factory=list)
+    title_pages: list[object] | None = None
+    titles_by_query: dict[str, object] | None = None
     drafts: list[dict] = field(default_factory=list)
     latest: dict[str, dict] = field(default_factory=dict)
     redirect: bool = False
@@ -241,6 +262,33 @@ class Zenodo:
             },
         }
 
+    def title_page(self, query: str) -> tuple[int, object, dict[str, str]]:
+        """Answer one page of the title listing.
+
+        Without `title_pages`, every page answers `titles`, as the stub
+        always did. With it, page N answers entry N-1 (a body, or an int
+        status), and pages past the list answer `[]`.
+
+        Returns:
+            (status, JSON body, headers).
+
+        """
+        params = dict(kv.split("=", 1) for kv in query.split("&"))
+        if self.titles_by_query is not None:
+            got = self.titles_by_query.get(params["q"])
+            if got is None:
+                return 418, {"refused": params["q"]}, {}
+            return 200, self.live(got), {}
+        if self.title_pages is None:
+            return 200, self.live(self.titles), {}
+        page = int(params["page"])
+        if page > len(self.title_pages):
+            return 200, [], {}
+        got = self.title_pages[page - 1]
+        if isinstance(got, int):
+            return got, {"status": got}, {}
+        return 200, self.live(got), {}
+
     def live(self, body: object) -> object:
         """Point a recorded body's zenodo.org links at the fake.
 
@@ -269,7 +317,7 @@ class Zenodo:
             return (200, {"id": base.rsplit("/", 1)[1]}, {}) if ok else (404, {}, {})
         if method == "GET" and base == "/api/deposit/depositions":
             if "status=draft" not in query:
-                return 200, self.live(self.titles), {}
+                return self.title_page(query)
             return 200, self.live(self.drafts), {}
         if method == "POST" and path == "/api/deposit/depositions":
             if self.create_body is not None:
@@ -955,6 +1003,23 @@ class TheRecordedResponses(unittest.TestCase):
         )
         self.assertEqual(captured("draft-after-file-delete")["files"], [])
 
+    def test_only_the_full_title_finds_the_record(self) -> None:
+        """M1-M4 (#1389): the repo name finds nothing, the full title finds it.
+
+        C1, the same repo-name query in the capture run, answered `[]` too.
+        """
+        self.assertEqual(captured("titles"), [])
+        self.assertEqual(measured("present-github"), [])
+        self.assertEqual(measured("present-edtf"), [])
+        for name, rid, title in (
+            ("full-github", CANON_PREV, CANON_REPO),
+            ("full-edtf", EDTF_PREV, "monumental-archive/edtf"),
+        ):
+            with self.subTest(name):
+                (rec,) = measured(name)
+                self.assertEqual((str(rec["id"]), rec["title"]), (rid, title))
+                self.assertTrue(rec["submitted"])
+
 
 class AlreadyPublished(unittest.TestCase):
     """#484: a rerun over a published version converges, writing nothing."""
@@ -1161,6 +1226,36 @@ class LostPublishResponse(unittest.TestCase):
         self.assertEqual(len([i for i in latest if i > publish]), 3)
 
 
+def measured(name: str) -> object:
+    """Read one answer run 44129109573 measured (#1389).
+
+    Returns:
+        The parsed body.
+
+    """
+    return recorded(TESTDATA / f"zenodo-measure-{name}.json")
+
+
+def measured_titles() -> dict[str, object]:
+    """Map each measured title query to production's answer (#1389).
+
+    Run 44129109573, 2026-11-17, GET only. The repo-name query (the
+    guard before #1389) found nothing for either title; the full title
+    quoted found exactly the record, for the dotted name and the plain
+    one. The literal-slash forms answered byte-identically to these.
+
+    Returns:
+        The `q` value, as sent, to its answer.
+
+    """
+    return {
+        "title:%22.github%22": measured("present-github"),
+        "title:%22edtf%22": measured("present-edtf"),
+        "title:%22monumental-archive%2F.github%22": measured("full-github"),
+        "title:%22monumental-archive%2Fedtf%22": measured("full-edtf"),
+    }
+
+
 def first_mint_zenodo(titles: object) -> Zenodo:
     """Serve a first mint of the canon, the title query answering `titles`.
 
@@ -1182,15 +1277,19 @@ def first_mint_zenodo(titles: object) -> Zenodo:
 class FirstMintGuards(unittest.TestCase):
     """The refusals before any deposit exists."""
 
-    def test_a_submitted_deposition_bearing_the_title_refuses(self) -> None:
-        """A real listing holding the published canon: red, nothing created.
+    def test_the_canons_first_mint_is_refused_on_the_measured_answers(
+        self,
+    ) -> None:
+        """#1389's fail-before test: the canon's title, as production answers.
 
-        The listing is C2, a captured deposition listing whose one entry is
-        the submitted `monumental-archive/.github`. Production answered the
-        title query itself with C1, `[]` (next row).
+        The fake answers each title query as run 44129109573 measured. The
+        guard before #1389 asked `title:".github"`, got M1 (`[]`) and let a
+        second first mint through; the full title gets M3, the submitted
+        `monumental-archive/.github`, and refuses.
         """
-        run = run_helper("0BSD", zenodo=first_mint_zenodo(captured("drafts-before")),
-                         version="1.68.5", repo=CANON_REPO)  # fmt: skip
+        z = first_mint_zenodo([])
+        z.titles_by_query = measured_titles()
+        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
             "::error::a submitted deposition already bears this title but"
@@ -1202,12 +1301,25 @@ class FirstMintGuards(unittest.TestCase):
         (listing,) = run.made("GET", f"{DEP}?")
         self.assertEqual(
             run.requests[listing][1],
-            f"{ORIGIN}{DEP}?q=title:%22.github%22&size=10",
+            f"{ORIGIN}{DEP}?q=title:%22monumental-archive%2F.github%22&size=100&page=1",
         )
 
-    def test_the_captured_empty_title_answer_lets_the_mint_proceed(self) -> None:
-        """C1, `[]` as production answered: no submitted title, a first mint."""
-        run = run_helper("0BSD", zenodo=first_mint_zenodo(captured("titles")),
+    def test_a_title_with_no_dot_is_refused_on_the_measured_answers(self) -> None:
+        """Edtf's title: M4 holds its submitted record, so a first mint refuses."""
+        z = first_mint_zenodo([])
+        z.titles_by_query = measured_titles()
+        run = run_helper(
+            "0BSD", zenodo=z, version="1.3.6", repo="monumental-archive/edtf"
+        )
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::a submitted deposition already bears this title", run.stdout
+        )
+        self.assertEqual(run.writes(), [])
+
+    def test_the_old_query_answer_could_never_refuse(self) -> None:
+        """M1, what `title:".github"` answered: nothing, so a mint went on."""
+        run = run_helper("0BSD", zenodo=first_mint_zenodo(measured("present-github")),
                          version="1.68.5", repo=CANON_REPO)  # fmt: skip
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn("**First mint**", run.summary)
@@ -1219,6 +1331,50 @@ class FirstMintGuards(unittest.TestCase):
                          version="1.68.5", repo=CANON_REPO)  # fmt: skip
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn("**First mint**", run.summary)
+
+    def test_a_title_on_a_later_page_refuses(self) -> None:
+        """Page 1 full of unsubmitted drafts, the minted title on page 2."""
+        (draft,) = captured("drafts-during")
+        z = first_mint_zenodo([])
+        z.title_pages = [[draft] * MINT.LISTING_PAGE, captured("drafts-before")]
+        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::a submitted deposition already bears this title", run.stdout
+        )
+        self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 2)
+        self.assertEqual(run.writes(), [])
+
+    def test_a_listing_page_that_cannot_be_read_refuses(self) -> None:
+        """Page 2 answers 503 on every try: refused, nothing created."""
+        (draft,) = captured("drafts-during")
+        z = first_mint_zenodo([])
+        z.title_pages = [[draft] * MINT.LISTING_PAGE, 503]
+        run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::the deposition listing"
+            " (q=title:%22monumental-archive%2F.github%22) could not be"
+            f" read to its end ({MINT.LISTING_PAGE} entries read) — a first mint"
+            " is never checked against part of it",
+            run.stdout,
+        )
+        self.assertEqual(run.writes(), [])
+
+    def test_a_listing_still_full_at_the_page_bound_refuses(self) -> None:
+        """Full pages to the bound: the bound refuses, never passes."""
+        (draft,) = captured("drafts-during")
+        z = first_mint_zenodo([])
+        z.title_pages = [[draft] * MINT.LISTING_PAGE] * 3
+        with mock.patch.object(MINT, "LISTING_MAX_PAGES", 3):
+            run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            f"could not be read to its end ({3 * MINT.LISTING_PAGE} entries read)",
+            run.stdout,
+        )
+        self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 3)
+        self.assertEqual(run.writes(), [])
 
     def test_a_vocabulary_answering_500_refuses_as_unchecked(self) -> None:
         """A 500 is retried as transient, then refused; no deposit."""
