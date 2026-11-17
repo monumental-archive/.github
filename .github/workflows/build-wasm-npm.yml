@@ -194,58 +194,16 @@ jobs:
           fi
           wasm-pack build --release "${scope_flag[@]}" "${UNTRUSTED_CRATE_DIR}"
       - name: Pack and hash the exact bytes that will publish
+        # npm pack here, npm publish <tarball> there: the bytes that are
+        # hashed, signed and verified are the bytes that ship. The
+        # repository and the version are refused before packing (npm
+        # provenance E422, found by the v0.14.1 run).
+        # release/pack-wasm.py, which says why.
         id: pack
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: |
-          set -euo pipefail
-          # npm pack here, npm publish <tarball> there: the bytes that are
-          # hashed, signed and verified are the bytes that ship, with no
-          # re-pack in between to drift.
-          mkdir -p dist
-          pkg="${UNTRUSTED_CRATE_DIR}/pkg"
-          name=$(jq -r '.name' "${pkg}/package.json")
-          version=$(jq -r '.version' "${pkg}/package.json")
-          # npm's provenance validation (E422) requires package.json's
-          # repository to match the caller repository. wasm-pack copies it
-          # from Cargo.toml's `repository` field — so its absence must
-          # fail HERE, with the remedy, not at the registry after
-          # everything else succeeded. Found by the v0.14.1 run.
-          repo_url=$(jq -r '.repository.url // .repository // ""' "${pkg}/package.json")
-          want="https://github.com/${GITHUB_REPOSITORY}"
-          norm="${repo_url#git+}"
-          norm="${norm%.git}"
-          if [[ ${norm} != "${want}" ]]; then
-            emsg="package.json repository is '${repo_url}', npm provenance requires '${want}' — set repository ="
-            emsg+=" \"${want}\" in the crate's Cargo.toml (canon: [workspace.package] repository with repository.workspace ="
-            emsg+=" true)"
-            echo "::error::${emsg}"
-            exit 1
-          fi
-          if [[ ${version} != "${UNTRUSTED_VERSION}" ]]; then
-            echo "::error::package.json says ${version}, tag says ${UNTRUSTED_VERSION}"
-            exit 1
-          fi
-          pkg_abs=$(realpath "${pkg}")
-          cd dist
-          tarball=$(npm pack "${pkg_abs}" --silent)
-          if [[ ! -s ${tarball} ]]; then
-            echo "::error::npm pack produced nothing"
-            exit 1
-          fi
-          manifest=$(sha256sum "${tarball}")
-          # registry-subjects — one tarball, one leg: the same digest
-          # the signer is handed, carrying the publisher's name for a
-          # class that varies nothing.
-          {
-            echo "subjects<<SUBJECTS_EOF"
-            printf '%s\n' "${manifest}"
-            echo "SUBJECTS_EOF"
-            echo "package=${name}@${version}"
-            echo "registry-subjects=package ${manifest}"
-          } >> "${GITHUB_OUTPUT}"
-          printf '%s\n' "${manifest}"
+        run: .org-canon/release/pack-wasm.py
       - name: Emit the inventory plan (which package this artifact ships)
         # The artifact-to-package mapping exists with certainty exactly
         # once — here, where the tarball was just packed from the crate
