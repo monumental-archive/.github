@@ -15,8 +15,9 @@ from pathlib import Path
 _SPEC = importlib.util.spec_from_file_location(
     "crates_index", Path(__file__).resolve().parent / "crates-index.py"
 )
-assert _SPEC is not None
-assert _SPEC.loader is not None
+if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
+    msg = "test_crates_index: crates-index.py did not arrive beside this file"
+    raise SystemExit(msg)
 crates_index = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(crates_index)
 
@@ -44,7 +45,9 @@ class IndexPath(unittest.TestCase):
 
     def test_an_empty_name_has_no_record(self) -> None:
         """An empty name is refused, never placed at `0/`."""
-        with self.assertRaisesRegex(ValueError, "a crate with no name has no index record"):
+        with self.assertRaisesRegex(
+            ValueError, "a crate with no name has no index record"
+        ):
             crates_index.index_path("")
 
     def test_the_url_is_the_host_and_the_path(self) -> None:
@@ -58,7 +61,8 @@ class IndexPath(unittest.TestCase):
 class Command(unittest.TestCase):
     """`crates-index.py url <crate>`, for the shell reader."""
 
-    def run_main(self, *argv: str) -> tuple[int, str, str]:
+    @staticmethod
+    def run_main(*argv: str) -> tuple[int, str, str]:
         """Run main and capture its streams.
 
         Returns:
@@ -82,7 +86,8 @@ class Command(unittest.TestCase):
         for argv in ((), ("url",), ("path", "alpha"), ("url", "a", "b")):
             with self.subTest(argv=argv):
                 self.assertEqual(
-                    (2, "", "usage: crates-index.py url <crate>\n"), self.run_main(*argv)
+                    (2, "", "usage: crates-index.py url <crate>\n"),
+                    self.run_main(*argv),
                 )
 
     def test_an_empty_name(self) -> None:

@@ -39,15 +39,20 @@ def index_path(name: str) -> str:
     if not lower:
         msg = "a crate with no name has no index record"
         raise ValueError(msg)
-    if len(lower) <= 2:  # noqa: PLR2004 - cargo's own buckets
+    if len(lower) <= 2:  # ruff: ignore[magic-value-comparison] - cargo's own buckets
         return f"{len(lower)}/{lower}"
-    if len(lower) == 3:  # noqa: PLR2004 - cargo's own buckets
+    if len(lower) == 3:  # ruff: ignore[magic-value-comparison] - cargo's own buckets
         return f"3/{lower[0]}/{lower}"
     return f"{lower[0:2]}/{lower[2:4]}/{lower}"
 
 
 def index_url(name: str) -> str:
-    """Return the full URL of a crate's record."""
+    """Name the full URL of a crate's record.
+
+    Returns:
+        The index host's URL for the record.
+
+    """
     return f"{INDEX}/{index_path(name)}"
 
 
@@ -58,7 +63,7 @@ def main(argv: list[str]) -> int:
         0 on success, 2 on a usage error.
 
     """
-    if len(argv) != 2 or argv[0] != "url":  # noqa: PLR2004 - `url <crate>`
+    if len(argv) != 2 or argv[0] != "url":  # ruff: ignore[magic-value-comparison] - `url <crate>`
         print("usage: crates-index.py url <crate>", file=sys.stderr)
         return 2
     try:
