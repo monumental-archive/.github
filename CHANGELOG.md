@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.69.0](https://github.com/monumental-archive/.github/compare/v1.68.12...v1.69.0) - 2026-11-17
+
+### Added
+
+- measure python with a statement and branch leg ([#1434](https://github.com/monumental-archive/.github/pull/1434))
+
+### Fixed
+
+- count the fixes that arrived with a regression test ([#1437](https://github.com/monumental-archive/.github/pull/1437))
+- let the rust selector measure the rust leg ([#1438](https://github.com/monumental-archive/.github/pull/1438))
+- stand up the rust leg of mutation testing ([#1429](https://github.com/monumental-archive/.github/pull/1429))
+
 ## [1.68.12](https://github.com/monumental-archive/.github/compare/v1.68.11...v1.68.12) - 2026-11-17
 
 ### Fixed
