@@ -168,6 +168,8 @@ class Planted(unittest.TestCase):
         belt = self.tmp / "belt"
         belt.mkdir()
         (belt / "gate-surface.py").symlink_to(BELT / "gate-surface.py")
+        # The one index rule, shared with the crates publisher (#1383).
+        (belt / "crates-index.py").symlink_to(BELT / "crates-index.py")
         (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
         self.index = self.tmp / "index"
         self.index.mkdir()
