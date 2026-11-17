@@ -59,6 +59,14 @@
       "commitMessageTopic": "postgresql-binaries"
     },
     {
+      "description": "39 as minted, 10 past: #1334's prebuilt key, which every Rust repository adopts from the scaffold (#1393).",
+      "matchPackageNames": [
+        "github:rust-secure-code/cargo-auditable",
+        "rust-secure-code/cargo-auditable"
+      ],
+      "commitMessageTopic": "cargo-auditable"
+    },
+    {
       "description": "ICU's headers are pinned to the major the pinned Postgres was built against (pgrx-env.sh derives it from pg_config and reds on any other), so a major is never an update here — it arrives with a Postgres build that moved, by hand.",
       "matchPackageNames": ["github:unicode-org/icu", "unicode-org/icu"],
       "matchUpdateTypes": ["major"],
