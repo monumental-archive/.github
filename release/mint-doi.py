@@ -37,6 +37,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -55,8 +56,10 @@ RECOVERY_READS = 3
 RECOVERY_SPACING = 20
 # The first-mint title guard's listing (#1389): page size, and a bound
 # on pages that REFUSES when reached - a page cap never decides a pass
-# (#316 addendum A).
-LISTING_PAGE = 10
+# (#316 addendum A). Measured in run 44129109573: `size=100` answers,
+# `size=1000` is a 400, and no Link or total header comes back, so a
+# short page is the only end there is.
+LISTING_PAGE = 100
 LISTING_MAX_PAGES = 1000
 SPDX_ID = re.compile(r"[A-Za-z0-9.+-]+")
 FAMILY = re.compile(r'^\s*- family-names:\s*"?([^"]*?)"?\s*$')
@@ -610,9 +613,12 @@ class Mint:
             RefusedError: a submitted deposition bears the title.
 
         """
-        base = self.zenodo.base
-        name = self.repo.rsplit("/", 1)[-1]
-        listing = self.read_listing(f"q=title:%22{name}%22")
+        # The FULL title, quoted, slash encoded (#1389). Measured in run
+        # 44129109573 on production: `title:"<repo name>"` answered []
+        # for both `.github` and `edtf`, so the guard had never matched
+        # anything; `title:"<owner>/<repo>"` answered exactly the record
+        # for both, the slash encoded or literal.
+        listing = self.read_listing(f"q=title:%22{quote(self.repo, safe='')}%22")
         if any(
             d.get("title") == self.repo and d.get("submitted") is True for d in listing
         ):
@@ -625,7 +631,7 @@ class Mint:
         return json.loads(
             self.zenodo.call(
                 "POST",
-                f"{base}/api/deposit/depositions",
+                f"{self.zenodo.base}/api/deposit/depositions",
                 body=b"{}",
                 headers={"Content-Type": "application/json"},
             )

@@ -1,0 +1,68 @@
+[
+  {
+    "created": "2026-11-16T02:39:00.379749+00:00",
+    "modified": "2026-11-16T02:39:00.606860+00:00",
+    "id": 24268584,
+    "conceptrecid": "24268583",
+    "doi": "10.5281/zenodo.24268584",
+    "conceptdoi": "10.5281/zenodo.24268583",
+    "doi_url": "https://doi.org/10.5281/zenodo.24268584",
+    "metadata": {
+      "title": "monumental-archive/edtf",
+      "doi": "10.5281/zenodo.24268584",
+      "publication_date": "2026-11-16",
+      "description": "Release v1.3.5 of monumental-archive/edtf. Built, proven and signed by the monumental-archive release pipeline; verification instructions ship with the GitHub release. Licensed under the SPDX expression MIT OR Apache-2.0, as CITATION.cff states it.",
+      "access_right": "open",
+      "creators": [
+        {
+          "name": "Allen, Carl",
+          "affiliation": null
+        }
+      ],
+      "version": "1.3.5",
+      "license": "mit-license",
+      "imprint_publisher": "Zenodo",
+      "upload_type": "software",
+      "prereserve_doi": {
+        "doi": "10.5281/zenodo.24268584",
+        "recid": 24268584
+      }
+    },
+    "title": "monumental-archive/edtf",
+    "links": {
+      "self": "https://zenodo.org/api/records/24268584",
+      "html": "https://zenodo.org/records/24268584",
+      "doi": "https://doi.org/10.5281/zenodo.24268584",
+      "parent_doi": "https://doi.org/10.5281/zenodo.24268583",
+      "badge": "https://zenodo.org/badge/doi/10.5281%2Fzenodo.24268584.svg",
+      "conceptbadge": "https://zenodo.org/badge/doi/10.5281%2Fzenodo.24268583.svg",
+      "files": "https://zenodo.org/api/records/24268584/files",
+      "latest_draft": "https://zenodo.org/api/deposit/depositions/24268584",
+      "latest_draft_html": "https://zenodo.org/deposit/24268584",
+      "publish": "https://zenodo.org/api/deposit/depositions/24268584/actions/publish",
+      "edit": "https://zenodo.org/api/deposit/depositions/24268584/actions/edit",
+      "discard": "https://zenodo.org/api/deposit/depositions/24268584/actions/discard",
+      "newversion": "https://zenodo.org/api/deposit/depositions/24268584/actions/newversion",
+      "record": "https://zenodo.org/api/records/24268584",
+      "record_html": "https://zenodo.org/record/24268584",
+      "latest": "https://zenodo.org/api/records/24268584/versions/latest",
+      "latest_html": "https://zenodo.org/records/24268584/latest"
+    },
+    "record_id": 24268584,
+    "owner": 1815987,
+    "files": [
+      {
+        "id": "dfad0c0d-892e-4b58-bfc5-efc8abbaab01",
+        "filename": "edtf-1.3.5.tar.gz",
+        "filesize": 239695,
+        "checksum": "355a121de4a81163f791dcd7c7aedc6c",
+        "links": {
+          "self": "https://zenodo.org/api/records/24268584/files/dfad0c0d-892e-4b58-bfc5-efc8abbaab01",
+          "download": "https://zenodo.org/api/records/24268584/draft/files/edtf-1.3.5.tar.gz/content"
+        }
+      }
+    ],
+    "state": "done",
+    "submitted": true
+  }
+]
