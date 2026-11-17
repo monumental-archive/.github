@@ -193,68 +193,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.name.outputs.image }}
           UNTRUSTED_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          # --annotation was silently ignored before buildx 0.12
-          # (docker/buildx#1965) — assert the floor rather than trust the
-          # runner image.
-          buildx_version=$(docker buildx version)
-          v=$(sed -nE '1s/^.*v?([0-9]+)\.([0-9]+)\.[0-9]+.*$/\1.\2/p' <<< "${buildx_version}")
-          pair=$(printf '%s\n%s' "0.12" "${v}")
-          ordered=$(sort -V <<< "${pair}")
-          floor=$(head -1 <<< "${ordered}")
-          if [[ -z ${v} ]] || [[ ${floor} != "0.12" ]]; then
-            echo "::error::buildx ${v:-unknown} < 0.12: index annotations would be dropped silently"
-            exit 1
-          fi
-          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          # Labels for both per-arch configs, annotations for the index —
-          # one map, generated the same way at every surface. This path
-          # produces its index in the single build below, so the index:
-          # annotations enter here rather than at an imagetools create.
-          pairs=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${FACTS}")
-          LABELS=()
-          while IFS= read -r kv; do LABELS+=(--label "${kv}"); done <<< "${pairs}"
-          ANNOS=()
-          while IFS= read -r kv; do ANNOS+=(--annotation "index:${kv}"); done <<< "${pairs}"
-          # One build, both platforms: FROM scratch runs nothing, so no
-          # emulation is involved and the native-hardware rule is not in
-          # play — there is no hardware behaviour to prove.
-          #
-          # oci-mediatypes=true: the exporter default is false and a
-          # Docker manifest list has no annotations field to carry the
-          # map (docker/buildx#1965) — the assert step downstream proves
-          # the published index is OCI.
-          # --provenance=false / --sbom=false / rewrite-timestamp=true:
-          # the determinism set, measured in the lab's first gate run —
-          # see build-oci-image.yml's push step for the full argument.
-          outspec="type=image,name=${IMAGE},push-by-digest=true"
-          outspec+=",name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true"
-          docker buildx build \
-            --file .org-canon/docker/pgrx-artifact.Dockerfile \
-            --platform linux/amd64,linux/arm64 \
-            "${LABELS[@]}" \
-            "${ANNOS[@]}" \
-            --provenance=false --sbom=false \
-            --output "${outspec}" \
-            --metadata-file /tmp/meta.json \
-            .
-          digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
-          if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::no index digest from the push"
-            exit 1
-          fi
-          mkdir -p /tmp/digests
-          # The tag NAME rides along — applied only post-gate, by
-          # tag-images.yml putting the very same manifest bytes under the
-          # tag — so downstream consumers (the VSA's tag→digest binding
-          # proof) never re-derive the scheme: the step that names the
-          # tag is the step that records it, and nothing referenceable
-          # exists until the repro gate has passed.
-          jq -n --arg pg "${PG}" --arg image "${IMAGE}" --arg digest "${digest}" \
-            --arg tag "${UNTRUSTED_VERSION}-pg${PG}-artifact" \
-            '{pg: $pg, image: $image, tag: $tag, digest: $digest}' > "/tmp/digests/pg${PG}.json"
-          echo "::notice::pg${PG} index ${digest}"
+        # One build, both platforms: FROM scratch runs nothing, so no
+        # emulation is involved and the native-hardware rule is not in
+        # play. The buildx floor, labels and index annotations from the
+        # facts, the push and its digest check are release/registry.py
+        # (#1382), tested by release/test_registry.py. The tag NAME rides
+        # along in the record, applied only post-gate by tag-images.yml,
+        # so the step that names the tag is the step that records it.
+        run: >-
+          python3 .org-canon/release/registry.py push --image "${IMAGE}"
+          --file .org-canon/docker/pgrx-artifact.Dockerfile --context .
+          --digests /tmp/digests --pg "${PG}"
+          --platform linux/amd64,linux/arm64
+          --tag "${UNTRUSTED_VERSION}-pg${PG}-artifact"
       # By digest, never by tag, and exactly the documented recipes
       # (docs/release.md): COPY --from into a stock postgres on every
       # major, and on 18 and above the image mounted whole and loaded
