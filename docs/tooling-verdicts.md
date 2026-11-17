@@ -2222,17 +2222,23 @@ mise 2026.11.6 with a probe config — the locked lazy tool is in the
 lock, a bare `mise install` skips it, `mise run` of another task does
 not install it, and `mise install <tool>` installs it. So no second
 config file was needed (#1355's named fallback). repo-mutants.yml's
-`mutants` job is the one place it is built, in a step guarded on
-`.cargo/mutants.toml`, since a repository with no Rust has no cargo
-to build it with. **Its own workflow, not an audit leg** (owner's
+`mutants-rust` jobs are the one place it is built, and they run only
+where `.cargo/mutants.toml` is tracked, since a repository with no Rust
+has no cargo to build it with. **Its own workflow, not an audit leg** (owner's
 ruling): `repo-mutants.yml`, called from each repository's
 `workflow-templates/mutants.yml` stub on its own Monday slot (07:00,
 the audit's is 06:00). Folded into `repo-audit.yml`, one survivor
 turned the whole weekly audit red and nobody could tell what else had
-passed; apart, each run's result means one thing. **Sharded from the
+passed; apart, each run's result means one thing. **Each language has
+its own jobs** in that file — `mutants-rust` and `mutants-rust-totals`
+— selecting its one leg with `MUTANTS_LEG`, so two adopted languages
+are two ticks, two shard counts and two timeouts, and a red names its
+language. They run only where an `adoption` job finds the config in the
+checkout; that guard is a job because `hashFiles` is step-only
+(measured: actionlint refuses it in a job's `if:`). **Sharded from the
 start** (owner's ruling): a
 matrix of four, `--shard k/4`, fail-fast off, each shard printing its
-own survivors and summary, and a `totals` job stating the one
+own survivors and summary, and a totals job stating the one
 answer across them (`mise/mutation-totals.sh`). Measured on a nine-mutant
 crate: `--list` honours `--shard`, and the default slice sharding cut
 it 3/3/3/0 — an empty shard exits 0 and writes no `outcomes.json`, so

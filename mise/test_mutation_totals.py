@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Table tests for mise/mutation-totals.sh, the one answer across shards.
 
-repo-mutants.yml's `mutants` matrix uploads each shard's counts as its own
-artifact, so the totals job sees one subdirectory per shard holding one
-`<language>.tsv` per leg, in the shape mise/mutants-rust.sh writes. Each
-row plants that tree and asserts the exact lines and exit status.
+Each language's shard matrix in repo-mutants.yml uploads each shard's
+counts as its own artifact, so that language's totals job sees one
+subdirectory per shard holding `<language>.tsv`, in the shape
+mise/mutants-rust.sh writes, and calls the helper with its language.
+Each row plants that tree and asserts the exact lines and exit status.
 
 stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
@@ -36,7 +37,7 @@ class Totals(unittest.TestCase):
         sub.mkdir(exist_ok=True)
         (sub / f"{lang}.tsv").write_text(row + "\n", encoding="utf-8")
 
-    def run_totals(self) -> subprocess.CompletedProcess:
+    def run_totals(self, lang: str = "rust") -> subprocess.CompletedProcess:
         """Run the helper over the planted directory.
 
         Returns:
@@ -44,7 +45,7 @@ class Totals(unittest.TestCase):
 
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [BASH, str(SCRIPT), str(self.dir)],
+            [BASH, str(SCRIPT), str(self.dir), lang],
             capture_output=True,
             text=True,
             check=False,
@@ -124,29 +125,50 @@ class Totals(unittest.TestCase):
             done.stderr.splitlines(),
             [
                 (
-                    "audit:mutants: no shard reported a summary"
+                    f"{LABEL}: no shard reported a summary"
                     " — every shard died before its last line"
                 )
             ],
         )
 
-    def test_each_language_is_totalled_on_its_own(self) -> None:
-        """A second leg's file is totalled beside the first, by name."""
+    def test_only_the_named_language_is_totalled(self) -> None:
+        """One language per call: another leg's files are not read."""
         for k in range(2):
             self.shard(k, f"{k}/2\t2\t2\t0\t0")
-            self.shard(k, f"{k}/2\tskipped", lang="go")
+            self.shard(k, f"{k}/2\t5\t1\t4\t0", lang="go")
         done = self.run_totals()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
             done.stdout.splitlines(),
             [
-                "audit:mutants: go: not adopted, skipped in all 2 shards",
                 (
                     f"{LABEL}: across 2 shards:"
                     " 4 mutants, 4 killed, 0 survived, 0 excluded"
                 ),
             ],
         )
+        other = self.run_totals("go")
+        self.assertEqual(other.returncode, 1)
+        self.assertEqual(
+            other.stdout.splitlines(),
+            [
+                (
+                    "audit:mutants: go: across 2 shards:"
+                    " 10 mutants, 2 killed, 8 survived, 0 excluded"
+                ),
+            ],
+        )
+
+    def test_language_is_required(self) -> None:
+        """No language named: refused, never a total of everything."""
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, str(SCRIPT), str(self.dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("<language>", done.stderr)
 
 
 if __name__ == "__main__":

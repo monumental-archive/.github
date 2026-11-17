@@ -20,10 +20,21 @@
 # adopts nothing has every leg skip clean by name. The belt's
 # `audit:mutants` task runs one leg per language (mise/mutants-*.sh).
 #
-# SHARDED FROM THE START (owner's ruling): four shards, each judging its
-# slice and naming its own survivors, then one job stating the answer
-# across them. The count is adjusted from the first run measured on a
-# runner — release-lab's dispatched run — and recorded on the issue.
+# EACH LANGUAGE HAS ITS OWN JOBS (owner's ruling): a shard matrix and a
+# totals job per language, each running only its language's leg
+# (MUTANTS_LEG). Two adopted languages are two ticks, two shard counts
+# and two timeouts, and a red names its language at the job level. A
+# language's jobs run only where `adoption` finds its config tracked: a
+# repository without it shows them skipped, not run-and-skipped. The
+# guard is a job of its own because `hashFiles` is step-only — measured,
+# actionlint refuses it in `jobs.<id>.if` ("only available in
+# jobs.<job_id>.steps.*").
+#
+# Rust is SHARDED FROM THE START (owner's ruling): four shards, each
+# judging its slice and naming its own survivors, then one job stating
+# the answer across them. The count and the timeout are adjusted from
+# the first run measured on a runner — release-lab's dispatched run —
+# and recorded on the issue.
 # No inputs, by design — zero caller-controlled expansion.
 ---
 name: repo-mutants
@@ -34,11 +45,36 @@ permissions:
   contents: read
 
 jobs:
-  mutants:
-    name: mutants / shard ${{ matrix.shard }}
+  adoption:
+    name: mutants / which languages adopt
+    runs-on: ubuntu-26.04
+    # One output per language: "true" when that tool's own config is in
+    # the checkout — a fresh checkout holds tracked files only, so this
+    # is the leg's own test (git ls-files). `hashFiles` is allowed in a
+    # step's env, never a job's `if`. A language adds one step and one
+    # output line.
+    outputs:
+      rust: ${{ steps.rust.outputs.adopted }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust adopts with a tracked .cargo/mutants.toml
+        id: rust
+        env:
+          ADOPTED: ${{ hashFiles('.cargo/mutants.toml') != '' }}
+        run: echo "adopted=${ADOPTED}" >> "${GITHUB_OUTPUT}"
+
+  mutants-rust:
+    name: mutants / rust shard ${{ matrix.shard }}
+    needs: adoption
+    if: needs.adoption.outputs.rust == 'true'
     runs-on: ubuntu-26.04
     # The count is written twice, here and in MUTANTS_SHARDS below; move
     # both together. No fail-fast: every shard reports its own survivors.
+    # No timeout of its own yet: it is set from the first runner run.
     strategy:
       fail-fast: false
       matrix:
@@ -67,26 +103,19 @@ jobs:
           version: 2026.11.6
           cache: false
 
-      # The belt pins each language's mutation tool `lazy`, so the
-      # bare install above — and every gate and release job — skips it
-      # (measured, #1355). This job is the one place it is built, and
-      # only where the repository adopts: cargo-mutants compiles from
-      # source (no arm64 or checksummed asset upstream), from the lock,
-      # with the repository's own rust pin installed above — a
-      # repository with no Rust has no cargo to build it with, and its
-      # leg skips clean by name. ONE GUARDED STEP PER LANGUAGE'S TOOL,
-      # side by side here: each guarded on that language's adoption file,
-      # each installing its own tool by name.
-      - name: Install cargo-mutants where .cargo/mutants.toml adopts it
-        if: hashFiles('.cargo/mutants.toml') != ''
+      # The belt pins cargo-mutants `lazy`, so the bare install above —
+      # and every gate and release job — skips it (measured, #1355).
+      # This job is the one place it is built: from source (no arm64 or
+      # checksummed asset upstream), from the lock, with the
+      # repository's own rust pin installed above.
+      - name: Install cargo-mutants, by name
         run: mise install cargo:cargo-mutants
 
-      # The next language's guarded install step goes here.
-
-      # Each leg writes its counts for the totals job into the summary
-      # directory (it creates it), `<language>.tsv` per leg.
+      # The leg writes its counts for the totals job into the summary
+      # directory (it creates it) as rust.tsv.
       - name: Mutate this shard, and name every unexplained survivor
         env:
+          MUTANTS_LEG: rust
           MUTANTS_SHARD: ${{ matrix.shard }}/${{ env.MUTANTS_SHARDS }}
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
         run: mise run audit:mutants
@@ -97,18 +126,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutants-summary-${{ matrix.shard }}
+          name: mutants-rust-summary-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants-summary/
           if-no-files-found: ignore
           retention-days: 7
 
-  totals:
-    name: mutants / totals
-    runs-on: ubuntu-26.04
+  mutants-rust-totals:
+    name: mutants / rust totals
     # The measure is one answer across the shards: no unexplained
-    # survivor in the whole population. Runs whatever the shards did.
-    needs: mutants
-    if: always()
+    # survivor in the whole population. Runs whatever the shards did,
+    # wherever Rust adopts.
+    needs:
+      - adoption
+      - mutants-rust
+    if: always() && needs.adoption.outputs.rust == 'true'
+    runs-on: ubuntu-26.04
     steps:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
@@ -116,11 +148,11 @@ jobs:
       - name: Collect every shard's counts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: mutants-summary-*
+          pattern: mutants-rust-summary-*
           path: ${{ runner.temp }}/mutants-summaries
 
       - name: State the totals across shards
         env:
           SUMMARIES: ${{ runner.temp }}/mutants-summaries
-        run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}"
+        run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}" rust
 ...

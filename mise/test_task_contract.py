@@ -10,20 +10,27 @@ group — over the tasks the belt defines, and no task it reaches may be
 an `audit:*` task or run a mutation leg.
 
 The `audit:mutants` half: every delivered leg, `mise/mutants-*.sh`, is
-named by exactly one line of the task's body, so a leg file nobody runs
-cannot exist and a language is one added line (#1336's shared shape).
+named by exactly one `leg <language>` line of the task's body, so a leg
+file nobody runs cannot exist and a language is one added line (#1336's
+shared shape); MUTANTS_LEG selects one leg for that language's own jobs
+in repo-mutants.yml, and unset runs them all.
 
 stdlib `unittest` and `tomllib`, the belt's one test idiom. Run through
 the gate as `mise run test`, which `ci` collects.
 """
 
+import os
 import re
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import tempfile
 import tomllib
 import unittest
 from fnmatch import fnmatchcase
 from pathlib import Path
 
 BELT = Path(__file__).resolve().parent
+BASH = shutil.which("bash") or "bash"
 CONFIG = BELT / "config.toml"
 
 
@@ -115,6 +122,21 @@ class Gate(unittest.TestCase):
         self.assertIn("audit:mutants", closure("ci", defined))
 
 
+LEG_LINE = re.compile(r"^leg ([a-z]+)$", re.MULTILINE)
+
+
+def leg_files() -> list[str]:
+    """Name the delivered legs, mise/mutants-<language>.sh.
+
+    Returns:
+        The languages, sorted.
+
+    """
+    return sorted(
+        path.stem.removeprefix("mutants-") for path in BELT.glob("mutants-*.sh")
+    )
+
+
 class Mutants(unittest.TestCase):
     """Every delivered leg is one line of `audit:mutants`, run on its own."""
 
@@ -128,25 +150,100 @@ class Mutants(unittest.TestCase):
         run = re.compile(r"mise run audit:mutants\b")
         own = (workflows / "repo-mutants.yml").read_text(encoding="utf-8")
         audit = (workflows / "repo-audit.yml").read_text(encoding="utf-8")
-        self.assertEqual(len(run.findall(own)), 1)
+        self.assertNotEqual(run.findall(own), [])
         self.assertEqual(run.findall(audit), [])
         stub = BELT.parent / "workflow-templates" / "mutants.yml"
-        self.assertIn("/.github/workflows/repo-mutants.yml@", stub.read_text())
+        self.assertIn(
+            "/.github/workflows/repo-mutants.yml@", stub.read_text(encoding="utf-8")
+        )
+
+    def test_each_language_has_its_own_jobs(self) -> None:
+        """One `mutants-<language>` job per leg, selecting only that leg.
+
+        Each language's jobs are its own tick, shard count and timeout,
+        so a red names its language at the job level (owner, #1355).
+        """
+        own = (BELT.parent / ".github" / "workflows" / "repo-mutants.yml").read_text(
+            encoding="utf-8"
+        )
+        for lang in leg_files():
+            with self.subTest(lang=lang):
+                self.assertIn(f"\n  mutants-{lang}:\n", own)
+                self.assertIn(f"\n  mutants-{lang}-totals:\n", own)
+                self.assertIn(f"MUTANTS_LEG: {lang}\n", own)
+                self.assertIn(f'mutation-totals.sh "${{SUMMARIES}}" {lang}\n', own)
 
     def test_every_leg_is_one_line_of_the_task(self) -> None:
-        """A mise/mutants-<language>.sh nobody runs cannot exist."""
-        body = tasks()["audit:mutants"]["run"]
-        legs = sorted(path.name for path in BELT.glob("mutants-*.sh"))
-        self.assertNotEqual(legs, [])
-        for leg in legs:
-            lines = [line for line in body.splitlines() if leg in line]
-            self.assertEqual(len(lines), 1, f"{leg} is named {len(lines)} times")
+        """Each mise/mutants-<language>.sh is exactly one `leg` line.
 
-    def test_task_names_no_leg_that_does_not_exist(self) -> None:
-        """A line naming a missing leg would red every adopter for nothing."""
+        A leg file nobody runs cannot exist, nor a line naming a missing leg.
+        """
         body = tasks()["audit:mutants"]["run"]
-        for leg in re.findall(r"mutants-[a-z]+\.sh", body):
-            self.assertTrue((BELT / leg).is_file(), leg)
+        named = LEG_LINE.findall(body)
+        self.assertNotEqual(named, [])
+        self.assertEqual(sorted(named), leg_files())
+        self.assertEqual(len(named), len(set(named)))
+
+
+class Selection(unittest.TestCase):
+    """MUTANTS_LEG selects one leg; unset, every leg runs."""
+
+    def setUp(self) -> None:
+        """Plant a belt directory of stub legs that only say they ran."""
+        self.belt = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.belt)
+        for lang in leg_files():
+            (self.belt / f"mutants-{lang}.sh").write_text(
+                f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n', encoding="utf-8"
+            )
+
+    def run_task(self, **env: str) -> subprocess.CompletedProcess:
+        """Run audit:mutants' body against the stub legs.
+
+        Returns:
+            The finished process.
+
+        """
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, "-euo", "pipefail", "-c", tasks()["audit:mutants"]["run"]],
+            env={**os.environ, "ORG_BELT_DIR": str(self.belt), **env},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_unset_runs_every_leg(self) -> None:
+        """Locally, `mise run audit:mutants` runs every adopted leg."""
+        done = self.run_task()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.splitlines(), [f"ran {g}" for g in leg_files()])
+
+    def test_named_leg_runs_alone(self) -> None:
+        """A language's job runs only its own leg."""
+        done = self.run_task(MUTANTS_LEG="rust")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.splitlines(), ["ran rust"])
+
+    def test_red_leg_is_named(self) -> None:
+        """A red leg reds the task, by language."""
+        done = self.run_task(MUTANTS_LEG="rust", PLANT_RED="1")
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stderr.splitlines(), ["audit:mutants: red leg(s): rust"])
+
+    def test_unknown_leg_is_red_by_name(self) -> None:
+        """A typo never runs nothing and passes."""
+        done = self.run_task(MUTANTS_LEG="cobol")
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stdout, "")
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [
+                (
+                    "audit:mutants: MUTANTS_LEG='cobol' names no leg"
+                    " (mise/mutants-<language>.sh)"
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":
