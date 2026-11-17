@@ -180,7 +180,10 @@ if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
   fi
 
   work=$(mktemp -d)
-  trap 'rm -rf "${work}"' EXIT
+  # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
+  # that dies on an unset variable would otherwise exit 0.
+  rc=0
+  trap 'rc=$?; rm -rf "${work}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   mkdir "${work}/hook" "${work}/data"
   # Child processes are measured, not only the runner (#1331): suites
   # exec their helper as `python3 helper.py`, and a leg that measured
@@ -248,3 +251,4 @@ EOF
   echo "python ${py_pct}"
   echo "python-branches ${br_pct}"
 fi
+org_done=1
