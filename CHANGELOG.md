@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.11](https://github.com/monumental-archive/.github/compare/v1.68.10...v1.68.11) - 2026-11-17
+
+### Fixed
+
+- run go fuzz seeds only where a target is declared ([#1423](https://github.com/monumental-archive/.github/pull/1423))
+- install only the belt tools a tree's gate tasks call ([#1424](https://github.com/monumental-archive/.github/pull/1424))
+
 ## [1.68.10](https://github.com/monumental-archive/.github/compare/v1.68.9...v1.68.10) - 2026-11-17
 
 ### Fixed
