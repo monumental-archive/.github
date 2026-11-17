@@ -43,6 +43,8 @@ dir = "{{cwd}}"
 # reconciler moved to stele with #1339, and what stays is the workflow's
 # helpers (the issue filer, the leg's verdict, the standing issue) and
 # its shape, tested on stele's own captured reports and checkpoints.
+# settings/ joined with #1360: repo-baseline.sh's drift check, run
+# against a stubbed forge that makes no live settings read or write.
 # Explicit roots rather than a walk from `.`
 # — a discovery root is a claim about what is tested, and a wildcard
 # makes that claim silently.
@@ -61,5 +63,6 @@ python3 mise/git-decoy.py plant "${decoy}"
 python3 mise/git-decoy.py run "${decoy}" -- python3 -m unittest discover --start-directory mise --pattern "test_*.py"
 python3 mise/git-decoy.py run "${decoy}" -- python3 -m unittest discover --start-directory release --pattern "test_*.py"
 python3 mise/git-decoy.py run "${decoy}" -- python3 -m unittest discover --start-directory .github/rekor-monitor --pattern "test_*.py"
+python3 mise/git-decoy.py run "${decoy}" -- python3 -m unittest discover --start-directory settings --pattern "test_*.py"
 org_done=1
 """
