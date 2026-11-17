@@ -83,7 +83,7 @@ own work and adds the task that runs it to its row.
 
 | # | Property | What breaks without it | Mechanism | Issue |
 |---|---|---|---|---|
-| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go [#1356], TypeScript [#1358] |
+| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
 | 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357]; Go has no branch figure, answered by [#1356] |
 | 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust and Go exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`); Python [#1332]; TypeScript exists in monumental-archive (fast-check) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
@@ -107,8 +107,11 @@ own work and adds the task that runs it to its row.
 
 - The mutation measure is "no unexplained surviving mutant", never a
   score. Each survivor is killed by an assertion, or recorded as
-  equivalent, with a reason, in the tool's own per-site exclusion in
-  the repository. There are no org-level exclusions.
+  equivalent, with a reason, at one site in the repository: in the
+  tool's own per-site exclusion where it has one (Rust: an `exclude_re`
+  entry in `.cargo/mutants.toml`), otherwise in a comment at the site
+  (Go: `//mutants:equivalent <type> <reason>`). There are no
+  org-level exclusions.
 - No `#[coverage(off)]`, `# pragma: no cover` or equivalent.
 - No deleting fail-closed guards to shrink the denominator.
 - No test that calls code without asserting on its result.

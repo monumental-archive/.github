@@ -440,6 +440,20 @@ python = "3.15.2"
 "cargo:cargo-mutants" = { version = "27.1.0", lazy = true, lazy_bins = [
   "cargo-mutants",
 ] }
+# Mutation testing for Go (#1356): `audit:mutants`' Go leg,
+# mise/mutants-go.sh. Chosen over gremlins and go-mutesting on a
+# measured comparison (docs/tooling-verdicts.md): eleven kinds of mutant
+# gremlins cannot produce, and a compile check that keeps a mutant that
+# does not build out of the killed count. Not in mise's baked aqua
+# registry; the `github:` backend takes the prebuilt binary, and the
+# lock's checksums equal upstream's gomu_0.3.0_checksums.txt.
+#
+# LAZY, so a bare `mise install` — the gate, and every job without a
+# named install list — skips it: only repo-mutants.yml's `mutants-go` job
+# installs it, by name (`mise install github:sivchari/gomu`).
+"github:sivchari/gomu" = { version = "v0.3.0", lazy = true, lazy_bins = [
+  "gomu",
+] }
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must
 # be imported somewhere, or carry a written ignored entry under
 # [package.metadata.cargo-machete] with a reason. Static analysis, no
@@ -8118,6 +8132,7 @@ leg() {
   ran+=" $1"
   bash "${ORG_BELT_DIR}/mutants-$1.sh" || red+=" $1"
 }
+leg go
 leg rust
 if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
   echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2

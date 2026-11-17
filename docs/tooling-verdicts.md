@@ -41,6 +41,7 @@ honestly blocked on.
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
+| gomu (`github:` backend, lazy, upstream checksums) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
 | editorconfig-checker (`aqua:`, binary `editorconfig-checker`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
@@ -1943,6 +1944,102 @@ fuzzing pair was proven end to end on a throwaway module — clean seeds,
 a crash found and written, the gate then red on the committed input.
 *Reopen:* the first Go repo with fuzz targets, to measure `FUZZ_SECONDS`
 against something real rather than the 60s default.
+
+**gomu, the Go leg of `audit:mutants`, chosen against two others**
+(#1356, under #1336's property 1, "fails when any behaviour changes").
+Coverage counts a line as covered when a test runs it, whether or not
+any test would notice a change to it, and Go's coverage has no branch
+figure either: for Go a mutation run is the only answer to both. The leg
+(`mise/mutants-go.sh`, its verdict in `mise/mutants-go.py`) runs on the
+Monday cron, never in `ci` and never on a pull request, because the run
+repeats the suite once per mutant; `mise/test_task_contract.py` holds
+`ci` to reaching no audit task.
+
+*Three candidates, measured on stele* (`9a4923d`, Go 1.27.4, the real
+toolchain first on PATH; wall-clock taken at load averages of 186–226 on
+a shared Mac, so not comparable between tools):
+
+| | gremlins 0.6.0 | go-mutesting v2.3.1 | gomu v0.3.0 |
+| --- | --- | --- | --- |
+| Four-package sample | 226 mutants: 172 killed, 16 lived, 38 not covered; 150 s | not run on stele | convcommit 230 mutants (gremlins: 37), 175 killed, 29 survived, 26 not viable; workflow 452, 323 killed |
+| A mutant that does not compile | killed (`go test` exits 1 on a build failure too) | killed (same reading) | NOT_VIABLE, from its own `go build` before the test |
+| Lines no test executes | NOT COVERED, from its coverage step | run, reported escaped | run, reported SURVIVED |
+| Per-site exclusion with a reason | none: file regexps | a next-line comment, but a reason after the mutator list silently breaks it, and an excluded mutant is never generated, so a stale one cannot be seen | none: `.gomuignore`, file patterns |
+| How it mutates | a copy of the module per worker | the working tree, in place | `go build -overlay` / `go test -overlay` |
+| Pin | `github:`, upstream checksums | `go:` at a pseudo-version only: v2.3.1 has no `/v2` module path, so the tag cannot be installed | `github:`, upstream checksums |
+
+*Why gomu.* It produces eleven kinds of mutant gremlins cannot produce
+even with every gremlins mutator enabled — a returned `err` replaced
+with `nil`, return values flipped or zeroed, `if` and loop conditions
+forced, statements, assignments and expressions removed, blocks
+emptied, switch cases emptied, string and integer literals shifted, and
+`!` removed — and those are the mutants that ask whether the error paths
+and early returns of an evidence engine are tested at all. Its compile
+check keeps a mutant that does not build out of the killed count; the
+other two count it killed. Chosen by the owner, 2026-11-17.
+
+*Why not gremlins.* Eleven months without a release, five default
+mutators, and a run that killed everything and was wrong: the first full
+run on stele read 4042 killed, 0 lived, in twenty seconds, because
+gremlins runs `go test` in a temporary copy of the module, mise's `go`
+shim refused the copy's untrusted `mise.toml` with exit 1, and gremlins
+reads exit 1 as KILLED (`internal/engine/executor.go`).
+
+*Why not go-mutesting.* Pinnable only at a pseudo-version, and it
+rewrites the working tree in place, one mutant at a time — a job killed
+mid-run leaves a mutated file behind.
+
+*What the leg does for gomu, each measured from its v0.3.0 source and
+held by a stub row* (`mise/test_mutants_go.py`; no row runs gomu):
+
+- **Adoption is a tracked root `.gomuignore` with no pattern.** gomu
+  has no config file; `.gomuignore` is the one file it reads. A pattern
+  in any tracked one — gomu walks up from each file to the nearest — is
+  red by name: it drops whole files from the run and the count, a
+  denominator bought.
+- **An equivalent mutant is recorded at its site**:
+  `//mutants:equivalent <type> <reason>`, trailing the line or alone on
+  the line above. Red by name with no reason, with a type that is not
+  the survivor's, on a mutant no test runs, or matching nothing (stale).
+  "Excluded" is the number of sound records in the tree, the same in
+  every shard, because the totals across shards take it once.
+- **NOT COVERED is the leg's own verdict.** gomu takes no coverage, so
+  the leg takes each package's own coverage profile first and reports a
+  survivor on a line no test executes as NOT COVERED, never as a
+  survivor a record could explain. NOT_VIABLE is its own count, never
+  killed; TIMED_OUT is killed, with the timeout ten times the package's
+  own measured test time and never under 30 s.
+- **gomu exits 0 whatever happened**, outside `--ci-mode`, and skips a
+  file silently when generating or executing its mutants fails ("(error:
+  …)", "(execution error: …)"). The verdict is read from the JSON, and
+  either message, a count that disagrees with the results, or an ERROR
+  result is red as not judged.
+- **Nothing lands in the tree.** gomu writes `.gomu_history.json` and
+  `mutation-report.json` to its working directory, so it runs from a
+  scratch directory with the file's absolute path, `--incremental=false`
+  always.
+- **The real toolchain first on PATH**, and the leg refuses to run if
+  `go` resolves elsewhere: a `go test` that fails for an environment
+  reason is killed to gomu as well (probed on a module of one function).
+- **One worker per shard.** A Mac ran out of memory (93 GB) while four
+  parallel `-overlay` workers ran on stele beside other lanes' gates;
+  the runner's memory is measured by the first audit runs before this is
+  raised.
+
+*Pin and checksums.* `github:sivchari/gomu` at v0.3.0, released
+2026-10-17, pinned lazy so only the audit job that names it installs it.
+Not in mise's baked aqua registry. `mise lock` (2026.11.6) recorded, for
+all seven lock platforms, checksums equal to upstream's
+`gomu_0.3.0_checksums.txt` — five distinct assets, compared by hand on
+2026-11-17; the musl platforms take the glibc-named Linux archive. One
+maintainer, recorded as the risk it is.
+
+*Not proven on a Mac, by ruling.* No full mutation run is made locally:
+the first real run is stele's dispatched audit, which gives the survivor
+list, the count and the job's timeout where they matter. **Reopen** when
+a Go release ships that gomu cannot type-check or build against, or when
+a gomu release adds coverage or a per-site exclusion of its own (the leg
+would then defer to it).
 
 **eslint, typescript-eslint and knip stay repo-side** — not a rejection,
 a placement. A flat eslint config is a JS module that imports its plugins
