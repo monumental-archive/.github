@@ -1,32 +1,34 @@
 #!/usr/bin/env python3
-"""Keep one standing issue while the signer-identity watch is behind.
+"""Keep one standing issue while the signer-identity watch is not gaining.
 
-rekor-monitor.yml has two kinds of issue (#1353). A certificate that
-does not reconcile files its own, one per CT index; that is not this
-tool. A run that could not read the log is this one: at most one issue
-open, under one fixed title, saying how far behind the watch is.
+rekor-monitor.yml reads Fulcio's certificate log in legs, each one run of
+`stele assert signer-certificates` from stele's checkpoint (#1339). Each
+leg is judged on its own (verdict.py), and a certificate that does not
+reconcile files its own issue (findings.py). This runs once, after the
+last leg, and asks one question of stele's own checkpoint files: did
+this run gain on the log? The outstanding count is the checkpoint's
+tree size minus its `next`, the first index not yet judged.
 
-  behind     a run failed or was cancelled. No open issue with exactly
-             the title: create it. One open: replace its body in place,
-             keeping "behind since" and counting this run. No comment,
-             no second issue.
-  caught-up  a run saved an advanced checkpoint. One open: close it
-             with one comment naming the run and the size it reached.
-             None open: nothing to do.
+  newest checkpoint at its head   caught up: close the standing issue.
+  no checkpoint at the start      the run founded one: no earlier count,
+                                  said by name, not an alert.
+  did not advance                 red, behind.
+  advanced, outstanding not       behind (green: it advanced): a backlog
+  smaller than at the start       that is not shrinking.
+  advanced, outstanding smaller   gaining: nothing to say.
+  no newest checkpoint, or the    red, behind: whether the run gained
+  start's was not kept            cannot be told.
 
-The title is matched exactly, here, on every open issue the forge
-lists; a search's ranking is never trusted to find it. If the listing
-fails, this exits non-zero by name and files nothing: a failed read
-never opens a second issue.
-
-The checkpoint is the monitor's file: one line per signed tree head,
-the last one current, as JSON with `tree_size` and `timestamp`
-(milliseconds since the epoch, RFC 6962). A value that cannot be read
-(no checkpoint, the log unreachable) is said by name in the body.
+Behind: no open issue with exactly the title, create it; one open,
+replace its body in place, keeping "behind since" and counting this run.
+Caught up: close it with one comment. The title is matched exactly, on
+every open issue the forge lists; a search's ranking is never trusted to
+find it. A listing that fails exits 2 by name and files nothing: a
+failed read never opens a second issue.
 
 Usage:
-  standing-issue.py behind --checkpoint FILE --log-size N --run-url URL
-  standing-issue.py caught-up --checkpoint FILE --run-url URL
+  standing-issue.py --start FILE --start-kept true|false|""
+                    --checkpoint FILE --legs RESULT --run-url URL
 
 The repository is GITHUB_REPOSITORY; no organisation, repository or log
 is named here. Stdlib only, and `gh` on PATH.
@@ -45,10 +47,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"
+EXIT_RED = 1
 EXIT_ERROR = 2
+FOUNDED = "none counted: this run founded the checkpoint"
 
 BEHIND_SINCE = re.compile(r"^- Behind since: (.+)$", re.MULTILINE)
-FAILED_RUNS = re.compile(r"^- Failed runs since it opened: (\d+)$", re.MULTILINE)
+RUNS_BEHIND = re.compile(r"^- Runs behind since it opened: (\d+)$", re.MULTILINE)
 
 
 class StandingIssueError(Exception):
@@ -57,41 +61,98 @@ class StandingIssueError(Exception):
 
 @dataclass(frozen=True)
 class Checkpoint:
-    """The checkpoint's tree size and signed tree head time, or why not."""
+    """stele's checkpoint: next index, verified tree head, or why not."""
 
+    next: int | None
     size: int | None
-    timestamp: str | None
+    when: dt.datetime | None
     missing: str | None
+
+    @property
+    def outstanding(self) -> int | None:
+        """Entries the checkpoint has not judged, up to its tree head."""
+        if self.next is None or self.size is None:
+            return None
+        return self.size - self.next
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """The run's verdict: colour, why, and the standing action."""
+
+    red: bool
+    why: str
+    standing: str | None
+
+
+@dataclass(frozen=True)
+class Run:
+    """The run being judged, as the standing issue names it."""
+
+    start: str
+    why: str
+    legs: str
+    url: str
 
 
 def read_checkpoint(path: Path) -> Checkpoint:
-    """Read the last signed tree head of the monitor's checkpoint file.
+    """Read stele's checkpoint file.
 
     Returns:
-        The size and UTC time, or the reason they could not be read.
+        Its next index, tree size and head time, or why they could not be read.
 
     """
     if not path.is_file() or path.stat().st_size == 0:
-        return Checkpoint(None, None, "no checkpoint file")
-    lines = path.read_text(encoding="utf-8").splitlines()
+        return Checkpoint(None, None, None, "no checkpoint file")
     try:
-        sth = json.loads(lines[-1])
-        size = int(sth["tree_size"])
-        millis = int(sth["timestamp"])
-    except IndexError, ValueError, TypeError, KeyError:
-        return Checkpoint(None, None, "the checkpoint file could not be read")
-    when = dt.datetime.fromtimestamp(millis / 1000, dt.UTC)
-    return Checkpoint(size, when.strftime("%Y-%m-%dT%H:%M:%SZ"), None)
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        head = doc["treeHead"]
+        nxt, size = int(doc["next"]), int(head["treeSize"])
+        when = dt.datetime.fromtimestamp(int(head["timestamp"]) / 1000, dt.UTC)
+    except ValueError, TypeError, KeyError:
+        return Checkpoint(None, None, None, "the checkpoint file could not be read")
+    return Checkpoint(nxt, size, when, None)
 
 
-def parse_log_size(text: str) -> int | None:
-    """Read the log's size as the workflow passed it.
+def judge(start: Checkpoint, kept: str, end: Checkpoint) -> Outcome:
+    """Decide whether the run gained on the log.
 
     Returns:
-        The size, or None when the log could not be read.
+        The outcome; `start` is the run's starting checkpoint, `end` the newest.
 
     """
-    return int(text) if text.isdigit() else None
+    if end.next is None or end.outstanding is None:
+        why = f"the newest checkpoint: {end.missing}"
+        return Outcome(red=True, why=why, standing="behind")
+    if end.outstanding == 0:
+        why = "judged to the head of the log"
+        return Outcome(red=False, why=why, standing="caught-up")
+    if kept == "false":
+        why = f"advanced to {end.next}; no earlier count, this run founded it"
+        return Outcome(red=False, why=why, standing=None)
+    if kept != "true" or start.next is None or start.outstanding is None:
+        lost = start.missing if kept == "true" else "the start job did not finish"
+        why = f"the checkpoint the run started from was not kept ({lost})"
+        return Outcome(red=True, why=why, standing="behind")
+    return gained(start.next, start.outstanding, end.next, end.outstanding)
+
+
+def gained(start_next: int, start_left: int, end_next: int, end_left: int) -> Outcome:
+    """Decide a run with both checkpoints, short of the head.
+
+    Returns:
+        Red and behind when it did not advance; behind when the outstanding
+        count is not smaller than at the start; otherwise gaining.
+
+    """
+    if end_next <= start_next:
+        why = f"the checkpoint did not advance in this run (next {end_next})"
+        return Outcome(red=True, why=why, standing="behind")
+    counts = f"outstanding {start_left:,} at the start, {end_left:,} now"
+    if end_left >= start_left:
+        why = f"advanced but not gaining: {counts}"
+        return Outcome(red=False, why=why, standing="behind")
+    return Outcome(red=False, why=f"gaining: {counts}", standing=None)
 
 
 def gh(*args: str) -> str:
@@ -140,58 +201,63 @@ def open_standing(repo: str) -> list[dict]:
     return [i for i in issues if i.get("title") == TITLE]
 
 
-def thousands(n: int) -> str:
-    """Format a count for a person.
+def count(n: int | None, missing: str | None) -> str:
+    """Format a count for a person, or name its absence.
 
     Returns:
-        n with thousands separators.
+        n with thousands separators, or why it is unknown.
 
     """
-    return f"{n:,}"
+    return f"{n:,}" if n is not None else f"unknown: {missing}"
 
 
-def body(
-    cp: Checkpoint,
-    log_size: int | None,
-    since: str,
-    run_url: str,
-    failed: int,
-) -> str:
+def start_count(start: Checkpoint, kept: str) -> str:
+    """Say the outstanding count the run started from.
+
+    Returns:
+        The count, FOUNDED, or why it is unknown.
+
+    """
+    if kept == "false":
+        return FOUNDED
+    if kept != "true":
+        return "unknown: the start job did not finish"
+    return count(start.outstanding, start.missing)
+
+
+def body(end: Checkpoint, run: Run, since: str, runs: int) -> str:
     """Write the standing issue's body.
 
     Returns:
         The body, every value present or its absence named.
 
     """
-    size = thousands(cp.size) if cp.size is not None else f"unknown: {cp.missing}"
-    head = cp.timestamp or f"unknown: {cp.missing}"
-    unreachable = "unknown: the log was unreachable"
-    log = thousands(log_size) if log_size is not None else unreachable
-    if cp.size is None:
-        outstanding = f"unknown: {cp.missing}"
-    elif log_size is None:
-        outstanding = unreachable
+    if end.size is None or end.when is None:
+        head = f"unknown: {end.missing}"
     else:
-        outstanding = thousands(log_size - cp.size)
+        head = f"{end.size:,} at {end.when.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+    nxt = count(end.next, end.missing)
     return "\n".join([
-        "The signer-identity watch could not read Fulcio's certificate log on",
-        "its latest run, so certificates logged after the checkpoint have not",
-        "been reconciled. Every failed run replaces this body; a run that saves",
-        "an advanced checkpoint closes this issue. A certificate that does not",
-        "reconcile files its own issue, never this one.",
+        "The signer-identity watch is not gaining on Fulcio's certificate log:",
+        "certificates logged at or after the checkpoint's next index have not",
+        "been reconciled. Every run that does not gain replaces this body; a",
+        "run that judges to the head of the log closes this issue. A certificate",
+        "that does not reconcile files its own issue, never this one.",
         "",
-        f"- Checkpoint tree size: {size}",
+        f"- Checkpoint next index (everything before it is judged): {nxt}",
         f"- Checkpoint signed tree head: {head}",
-        f"- Log size now: {log}",
-        f"- Entries outstanding: {outstanding}",
+        f"- Entries outstanding when this run started: {run.start}",
+        f"- Entries outstanding now: {count(end.outstanding, end.missing)}",
+        f"- This run: {run.why}",
+        f"- Legs: {run.legs or 'unknown: no result'}",
         f"- Behind since: {since}",
-        f"- Latest failed run: {run_url}",
-        f"- Failed runs since it opened: {failed}",
+        f"- Latest run behind: {run.url}",
+        f"- Runs behind since it opened: {runs}",
         "",
     ])
 
 
-def behind(repo: str, cp: Checkpoint, log_size: int | None, run_url: str) -> str:
+def behind(repo: str, end: Checkpoint, run: Run) -> str:
     """Create the standing issue, or replace its body in place.
 
     Returns:
@@ -200,22 +266,22 @@ def behind(repo: str, cp: Checkpoint, log_size: int | None, run_url: str) -> str
     """
     found = open_standing(repo)
     if not found:
-        text = body(cp, log_size, run_url, run_url, 1)
+        text = body(end, run, run.url, 1)
         gh("issue", "create", "--repo", repo, "--title", TITLE, "--body", text)
         return "opened the standing issue"
     issue = found[0]
     previous = issue.get("body") or ""
     since_match = BEHIND_SINCE.search(previous)
     since = since_match.group(1) if since_match else "unknown: not in the previous body"
-    count_match = FAILED_RUNS.search(previous)
-    failed = int(count_match.group(1)) + 1 if count_match else 1
-    text = body(cp, log_size, since, run_url, failed)
+    count_match = RUNS_BEHIND.search(previous)
+    runs = int(count_match.group(1)) + 1 if count_match else 1
+    text = body(end, run, since, runs)
     number = str(issue["number"])
     gh("issue", "edit", number, "--repo", repo, "--body", text)
-    return f"updated the standing issue #{number} ({failed} failed runs)"
+    return f"updated the standing issue #{number} ({runs} runs behind)"
 
 
-def caught_up(repo: str, cp: Checkpoint, run_url: str) -> str:
+def caught_up(repo: str, end: Checkpoint, run_url: str) -> str:
     """Close the standing issue, if one is open.
 
     Returns:
@@ -225,40 +291,61 @@ def caught_up(repo: str, cp: Checkpoint, run_url: str) -> str:
     found = open_standing(repo)
     if not found:
         return "no standing issue open"
-    size = thousands(cp.size) if cp.size is not None else f"unknown ({cp.missing})"
-    comment = f"Caught up: {run_url} saved a checkpoint at tree size {size}."
+    size = count(end.size, end.missing)
+    comment = f"Caught up: {run_url} judged the log to its head, tree size {size}."
     for issue in found:
         gh("issue", "close", str(issue["number"]), "--repo", repo, "--comment", comment)
     return "closed " + ", ".join(f"#{i['number']}" for i in found)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run one mode.
+def keep(repo: str, standing: str | None, end: Checkpoint, run: Run) -> str:
+    """Take the standing action the outcome names.
 
     Returns:
-        0 on success, EXIT_ERROR when a read or write could not complete.
+        What was done, for the run's log.
+
+    """
+    if standing == "behind":
+        return behind(repo, end, run)
+    if standing == "caught-up":
+        return caught_up(repo, end, run.url)
+    return "nothing to keep"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Judge one run and keep the standing issue.
+
+    Returns:
+        0 green, EXIT_RED red, EXIT_ERROR when a read or write failed.
 
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=["behind", "caught-up"])
+    parser.add_argument("--start", type=Path, required=True)
+    parser.add_argument("--start-kept", default="")
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--log-size", default="")
+    parser.add_argument("--legs", default="")
     parser.add_argument("--run-url", required=True)
     args = parser.parse_args(argv)
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
         print("standing-issue: GITHUB_REPOSITORY is not set", file=sys.stderr)
         return EXIT_ERROR
-    cp = read_checkpoint(args.checkpoint)
+    start = read_checkpoint(args.start)
+    end = read_checkpoint(args.checkpoint)
+    outcome = judge(start, args.start_kept, end)
+    where = end.missing if end.next is None else f"next index {end.next}"
+    print(f"standing-issue: the newest checkpoint: {where}")
+    run = Run(start_count(start, args.start_kept), outcome.why, args.legs, args.run_url)
     try:
-        if args.mode == "behind":
-            done = behind(repo, cp, parse_log_size(args.log_size), args.run_url)
-        else:
-            done = caught_up(repo, cp, args.run_url)
+        done = keep(repo, outcome.standing, end, run)
     except StandingIssueError as err:
         print(f"standing-issue: {err}; nothing was filed", file=sys.stderr)
         return EXIT_ERROR
     print(f"standing-issue: {done}")
+    if outcome.red:
+        print(f"::error::{outcome.why}")
+        return EXIT_RED
+    print(f"standing-issue: green: {outcome.why}")
     return 0
 
 

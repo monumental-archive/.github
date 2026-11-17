@@ -63,6 +63,10 @@ IN_SCOPE = [
     ("publish-wasm-npm.yml", "publish"),
     ("publish.yml", "facts"),
     ("publish.yml", "sbom"),
+    # Not on the release path: the signer-identity watch, scheduled and
+    # in sequential legs while a backlog lasts (#1339). It installs stele
+    # alone, and this row holds the list to its calls.
+    ("rekor-monitor.yml", "watch"),
     ("release.yml", "release-pr"),
     ("release.yml", "tag"),
     ("repro-check.yml", "compare"),

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""standing-issue.py against a stub `gh` on PATH (#1353).
+"""standing-issue.py against a stub `gh` on PATH (#1353, #1339).
 
 The stub records every argv it is called with and answers `issue list`
 from the row's canned listing (or fails, for the read-failure row).
-Each row runs the helper as the workflow does, as a process, and
-asserts the exact arguments gh received.
+Each row runs the helper as the workflow's alert job does, as a process,
+and asserts the exact arguments gh received, the colour and the message.
 
-The checkpoint line is the CT log's real signed tree head, captured
-from ctfe.sigstore.dev/2022 `get-sth` on 2026-11-17: the monitor writes
-the same JSON (ct-go's SignedTreeHead, one line) as its checkpoint.
+The checkpoints are stele v0.24.0's own files, captured from
+ctfe.sigstore.dev/2022 on 2026-11-17 (testdata/SOURCE.md): one at the
+head it verified, one 25,905 entries behind it. A row that needs another
+position edits `next` or `treeHead.treeSize` of a copy in code.
 """
 
 from __future__ import annotations
@@ -23,17 +24,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HELPER = HERE / "standing-issue.py"
+DATA = HERE / "testdata"
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"
 REPO = "example-owner/example-repo"
 RUN = "https://github.com/example-owner/example-repo/actions/runs/200"
 FIRST_RUN = "https://github.com/example-owner/example-repo/actions/runs/100"
-STH = (
-    '{"tree_size":447930488,"timestamp":1794929933483,'
-    '"sha256_root_hash":"IZRcFmBfOJW4uX1zk+EgOCXyf+HoyZo6qYTdV4JtU/4=",'
-    '"tree_head_signature":"BAMARzBFAiBgaysRVYSF9q7VMI1vP4VwXoFbV6ZVwcFSM/'
-    'PhKGGj4AIhANT4N8bb1o+Cwn8C4YHelGmYLMCkc4b5HGT1qC7BoZZh"}'
-)
 
 STUB = """\
 import json, os, sys
@@ -51,9 +47,31 @@ LIST = [
     "issue", "list", "--repo", REPO, "--state", "open",
     "--limit", "1000", "--json", "number,title,body",
 ]  # fmt: skip
+NEXT = "- Checkpoint next index (everything before it is judged): "
+STARTED = "- Entries outstanding when this run started: "
+NOW = "- Entries outstanding now: "
+
+# checkpoint-budget.json: next 448,196,522 of a verified 448,222,427.
+BEHIND_NEXT = 448196522
+BEHIND_SIZE = 448222427
 
 
-def previous_body(since: str, failed: int) -> str:
+def checkpoint(name: str = "checkpoint-budget.json", **edits: int) -> dict:
+    """Read a captured checkpoint, `next` or `size` edited.
+
+    Returns:
+        The checkpoint document.
+
+    """
+    doc = json.loads((DATA / name).read_text(encoding="utf-8"))
+    if "next" in edits:
+        doc["next"] = edits["next"]
+    if "size" in edits:
+        doc["treeHead"]["treeSize"] = edits["size"]
+    return doc
+
+
+def previous_body(since: str, runs: int) -> str:
     """Build an earlier body the helper wrote.
 
     Returns:
@@ -61,19 +79,19 @@ def previous_body(since: str, failed: int) -> str:
 
     """
     return (
-        "The signer-identity watch could not read ...\n\n"
-        "- Checkpoint tree size: 445,241,315\n"
+        "The signer-identity watch is not gaining ...\n\n"
+        f"{NEXT}445,241,315\n"
         f"- Behind since: {since}\n"
-        "- Latest failed run: https://example.invalid/old\n"
-        f"- Failed runs since it opened: {failed}\n"
+        "- Latest run behind: https://example.invalid/old\n"
+        f"- Runs behind since it opened: {runs}\n"
     )
 
 
-class StandingIssue(unittest.TestCase):
-    """One row per guard branch of standing-issue.py."""
+class Rows(unittest.TestCase):
+    """A stub gh, the run's two checkpoints, and the helper run."""
 
     def setUp(self) -> None:
-        """Lay out a stub gh, its call log, and a checkpoint."""
+        """Lay out a stub gh and a run that did not advance."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.dir = Path(tmp.name)
@@ -83,8 +101,10 @@ class StandingIssue(unittest.TestCase):
         stub.write_text(f"#!{sys.executable}\n{STUB}", encoding="utf-8")
         stub.chmod(0o755)
         self.calls = self.dir / "calls.jsonl"
-        self.checkpoint = self.dir / "checkpoint_log.txt"
-        self.checkpoint.write_text(STH + "\n", encoding="utf-8")
+        self.start = self.dir / "run-start.json"
+        self.end = self.dir / "checkpoint.json"
+        self.write(self.start, checkpoint())
+        self.write(self.end, checkpoint())
         self.env = {
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "GITHUB_REPOSITORY": REPO,
@@ -92,14 +112,18 @@ class StandingIssue(unittest.TestCase):
             "STUB_LIST": "[]",
         }
 
+    @staticmethod
+    def write(path: Path, doc: dict) -> None:
+        """Write a checkpoint where the helper reads it."""
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
     def run_helper(
         self,
-        mode: str,
         listing: list[dict] | None = None,
-        log_size: str = "447930999",
+        kept: str = "true",
         **env: str,
     ) -> subprocess.CompletedProcess[str]:
-        """Run the helper as the workflow does.
+        """Run the helper as the alert job does.
 
         Returns:
             The finished process.
@@ -109,11 +133,10 @@ class StandingIssue(unittest.TestCase):
         if listing is not None:
             full["STUB_LIST"] = json.dumps(listing)
         argv = [
-            sys.executable, str(HELPER), mode,
-            "--checkpoint", str(self.checkpoint), "--run-url", RUN,
+            sys.executable, str(HELPER), "--start", str(self.start),
+            "--start-kept", kept, "--checkpoint", str(self.end),
+            "--legs", "success", "--run-url", RUN,
         ]  # fmt: skip
-        if mode == "behind":
-            argv += ["--log-size", log_size]
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
             argv, env=full, capture_output=True, text=True, check=False
         )
@@ -130,23 +153,33 @@ class StandingIssue(unittest.TestCase):
         lines = self.calls.read_text(encoding="utf-8").splitlines()
         return [json.loads(line) for line in lines]
 
+
+class StandingIssue(Rows):
+    """The standing issue (#1353), row for row."""
+
     def test_no_open_issue_creates_it(self) -> None:
-        """No open issue: one create, under the exact title."""
-        proc = self.run_helper("behind", [])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        """Not advanced, no open issue: red, one create, under the exact title."""
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 1, proc.stderr)
         calls = self.gh_calls()
         self.assertEqual(calls[0], LIST)
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][:6], CREATE)
         self.assertEqual(calls[1][6], "--body")
         text = calls[1][7]
-        self.assertIn("- Checkpoint tree size: 447,930,488\n", text)
-        self.assertIn("- Checkpoint signed tree head: 2026-11-17T15:38:53Z\n", text)
-        self.assertIn("- Log size now: 447,930,999\n", text)
-        self.assertIn("- Entries outstanding: 511\n", text)
+        self.assertIn(f"{NEXT}448,196,522\n", text)
+        head = "- Checkpoint signed tree head: 448,222,427 at 2026-11-17T18:32:08Z\n"
+        self.assertIn(head, text)
+        self.assertIn(f"{STARTED}25,905\n", text)
+        self.assertIn(f"{NOW}25,905\n", text)
+        why = "the checkpoint did not advance in this run (next 448196522)"
+        self.assertIn(f"- This run: {why}\n", text)
+        self.assertIn("- Legs: success\n", text)
         self.assertIn(f"- Behind since: {RUN}\n", text)
-        self.assertIn(f"- Latest failed run: {RUN}\n", text)
-        self.assertIn("- Failed runs since it opened: 1\n", text)
+        self.assertIn(f"- Latest run behind: {RUN}\n", text)
+        self.assertIn("- Runs behind since it opened: 1\n", text)
+        self.assertIn("standing-issue: opened the standing issue", proc.stdout)
+        self.assertIn(f"::error::{why}", proc.stdout)
 
     def test_one_open_edits_it(self) -> None:
         """One open: edit that number, keep "behind since", count the run."""
@@ -154,18 +187,18 @@ class StandingIssue(unittest.TestCase):
             {"number": 7, "title": "unrelated", "body": ""},
             {"number": 42, "title": TITLE, "body": previous_body(FIRST_RUN, 3)},
         ]
-        proc = self.run_helper("behind", listing)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = self.run_helper(listing)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
         calls = self.gh_calls()
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][:5], ["issue", "edit", "42", "--repo", REPO])
         self.assertEqual(calls[1][5], "--body")
         text = calls[1][6]
         self.assertIn(f"- Behind since: {FIRST_RUN}\n", text)
-        self.assertIn(f"- Latest failed run: {RUN}\n", text)
-        self.assertIn("- Failed runs since it opened: 4\n", text)
+        self.assertIn(f"- Latest run behind: {RUN}\n", text)
+        self.assertIn("- Runs behind since it opened: 4\n", text)
         self.assertNotIn("create", [c[1] for c in calls])
-        self.assertIn("updated the standing issue #42 (4 failed runs)", proc.stdout)
+        self.assertIn("updated the standing issue #42 (4 runs behind)", proc.stdout)
 
     def test_resembling_title_is_ignored(self) -> None:
         """A title that only resembles the fixed one is not the issue."""
@@ -174,16 +207,16 @@ class StandingIssue(unittest.TestCase):
             {"number": 10, "title": "rekor-monitor: failure (run 1)", "body": ""},
             {"number": 11, "title": TITLE.upper(), "body": ""},
         ]
-        proc = self.run_helper("behind", listing)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = self.run_helper(listing)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
         calls = self.gh_calls()
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][:6], CREATE)
         self.assertIn(f"- Behind since: {RUN}\n", calls[1][7])
 
     def test_list_failure_files_nothing(self) -> None:
-        """Gh issue list failing: non-zero by name, nothing created."""
-        proc = self.run_helper("behind", STUB_LIST_FAIL="1")
+        """Gh issue list failing: exit 2 by name, nothing created."""
+        proc = self.run_helper(STUB_LIST_FAIL="1")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), [LIST])
         self.assertEqual(
@@ -193,9 +226,10 @@ class StandingIssue(unittest.TestCase):
         )
 
     def test_caught_up_closes_open_issue(self) -> None:
-        """caught-up with one open: close it with one comment."""
+        """Newest checkpoint at its head, one open: green, close it."""
+        self.write(self.end, checkpoint("checkpoint-pass.json"))
         listing = [{"number": 42, "title": TITLE, "body": previous_body(FIRST_RUN, 3)}]
-        proc = self.run_helper("caught-up", listing)
+        proc = self.run_helper(listing)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(
             self.gh_calls(),
@@ -203,66 +237,145 @@ class StandingIssue(unittest.TestCase):
                 LIST,
                 [
                     "issue", "close", "42", "--repo", REPO, "--comment",
-                    f"Caught up: {RUN} saved a checkpoint at tree size 447,930,488.",
+                    (
+                        f"Caught up: {RUN} judged the log to its head,"
+                        " tree size 448,221,522."
+                    ),
                 ],
             ],
         )  # fmt: skip
+        self.assertIn("standing-issue: closed #42", proc.stdout)
+        newest = "standing-issue: the newest checkpoint: next index 448221522"
+        self.assertIn(newest, proc.stdout)
+        green = "standing-issue: green: judged to the head of the log"
+        self.assertIn(green, proc.stdout)
 
     def test_caught_up_with_none_open_does_nothing(self) -> None:
-        """caught-up with none open: list only, exit 0."""
-        proc = self.run_helper("caught-up", [{"number": 7, "title": "x", "body": ""}])
+        """At the head with none open: list only, green."""
+        self.write(self.end, checkpoint("checkpoint-pass.json"))
+        proc = self.run_helper([{"number": 7, "title": "x", "body": ""}])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.gh_calls(), [LIST])
         self.assertIn("no standing issue open", proc.stdout)
 
     def test_no_checkpoint_is_named(self) -> None:
-        """No checkpoint file: the body says so, never a blank."""
-        self.checkpoint.unlink()
-        proc = self.run_helper("behind", [])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        """No checkpoint at all (before the founding run): red, named."""
+        self.start.unlink()
+        self.end.unlink()
+        proc = self.run_helper([], kept="false")
+        self.assertEqual(proc.returncode, 1, proc.stderr)
         text = self.gh_calls()[1][7]
         missing = "unknown: no checkpoint file\n"
-        self.assertIn(f"- Checkpoint tree size: {missing}", text)
+        self.assertIn(f"{NEXT}{missing}", text)
         self.assertIn(f"- Checkpoint signed tree head: {missing}", text)
-        self.assertIn(f"- Entries outstanding: {missing}", text)
+        founded = "none counted: this run founded the checkpoint"
+        self.assertIn(f"{STARTED}{founded}\n", text)
+        self.assertIn(f"{NOW}{missing}", text)
+        self.assertIn("::error::the newest checkpoint: no checkpoint file", proc.stdout)
 
     def test_unreadable_checkpoint_is_named(self) -> None:
-        """A checkpoint that is not a signed tree head: named as unreadable."""
-        self.checkpoint.write_text("not json\n", encoding="utf-8")
-        proc = self.run_helper("behind", [])
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        """A newest checkpoint that is not stele's: red, named as unreadable."""
+        self.end.write_text("not json\n", encoding="utf-8")
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 1, proc.stderr)
         text = self.gh_calls()[1][7]
         unreadable = "unknown: the checkpoint file could not be read\n"
-        self.assertIn(f"- Checkpoint tree size: {unreadable}", text)
+        self.assertIn(f"{NEXT}{unreadable}", text)
+        self.assertIn(f"- Checkpoint signed tree head: {unreadable}", text)
 
-    def test_log_unreachable_is_named(self) -> None:
-        """The log unreachable (empty or null size): named, never a blank."""
-        for given in ("", "null"):
-            with self.subTest(log_size=given):
-                self.calls.unlink(missing_ok=True)
-                proc = self.run_helper("behind", [], log_size=given)
-                self.assertEqual(proc.returncode, 0, proc.stderr)
-                text = self.gh_calls()[1][7]
-                gone = "unknown: the log was unreachable\n"
-                self.assertIn(f"- Log size now: {gone}", text)
-                self.assertIn(f"- Entries outstanding: {gone}", text)
+    def test_start_not_kept_is_named(self) -> None:
+        """The start job did not finish: red, behind, the count named unknown."""
+        proc = self.run_helper([], kept="")
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        text = self.gh_calls()[1][7]
+        self.assertIn(f"{STARTED}unknown: the start job did not finish\n", text)
+        self.assertIn(
+            "::error::the checkpoint the run started from was not kept"
+            " (the start job did not finish)",
+            proc.stdout,
+        )
 
     def test_previous_body_unreadable(self) -> None:
         """An edited-by-hand body: "behind since" named as lost, count restarts."""
         listing = [{"number": 42, "title": TITLE, "body": "hand-written"}]
-        proc = self.run_helper("behind", listing)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = self.run_helper(listing)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
         text = self.gh_calls()[1][6]
         self.assertIn("- Behind since: unknown: not in the previous body\n", text)
-        self.assertIn("- Failed runs since it opened: 1\n", text)
+        self.assertIn("- Runs behind since it opened: 1\n", text)
 
     def test_no_repository(self) -> None:
-        """GITHUB_REPOSITORY unset: non-zero by name, gh never called."""
-        proc = self.run_helper("behind", [], GITHUB_REPOSITORY="")
+        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called."""
+        proc = self.run_helper([], GITHUB_REPOSITORY="")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), [])
         self.assertEqual(
             proc.stderr.strip(), "standing-issue: GITHUB_REPOSITORY is not set"
+        )
+
+
+class Gaining(Rows):
+    """Did the run gain on the log (#1339)? One row per branch of judge()."""
+
+    def test_gaining_files_nothing(self) -> None:
+        """Advanced, outstanding smaller than at the start: green, no issue."""
+        self.write(self.end, checkpoint(next=BEHIND_NEXT + 10000))
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.gh_calls(), [])
+        self.assertIn(
+            "standing-issue: green: gaining: outstanding 25,905 at the start,"
+            " 15,905 now",
+            proc.stdout,
+        )
+
+    def test_advanced_but_outstanding_grew(self) -> None:
+        """Advanced, but the log grew faster: behind, both counts, still green."""
+        grown = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 5000)
+        self.write(self.end, grown)
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        calls = self.gh_calls()
+        self.assertEqual(calls[1][:6], CREATE)
+        text = calls[1][7]
+        self.assertIn(f"{STARTED}25,905\n", text)
+        self.assertIn(f"{NOW}29,905\n", text)
+        self.assertIn(
+            "- This run: advanced but not gaining: outstanding 25,905 at the start,"
+            " 29,905 now\n",
+            text,
+        )
+
+    def test_advanced_but_outstanding_equal(self) -> None:
+        """Advanced, outstanding exactly as at the start: not smaller, behind."""
+        level = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 1000)
+        self.write(self.end, level)
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.gh_calls()[1][:6], CREATE)
+
+    def test_first_run_after_founding(self) -> None:
+        """No checkpoint at the start: no earlier count, by name, not an alert."""
+        self.start.unlink()
+        proc = self.run_helper([], kept="false")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(self.gh_calls(), [])
+        self.assertIn(
+            "standing-issue: green: advanced to 448196522; no earlier count,"
+            " this run founded it",
+            proc.stdout,
+        )
+
+    def test_kept_but_not_restored(self) -> None:
+        """The start was kept but its copy is gone: red, behind, named."""
+        self.start.unlink()
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(self.gh_calls()[1][:6], CREATE)
+        self.assertIn(
+            "::error::the checkpoint the run started from was not kept"
+            " (no checkpoint file)",
+            proc.stdout,
         )
 
 

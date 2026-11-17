@@ -9,288 +9,181 @@
 # alone tells nobody anything. The log also shows a certificate issued
 # and never used to sign, which a watch on the signature log could not.
 #
-# The certificate log, not Rekor (#1237). rekor-monitor's Rekor scan
-# reads ten entries per request, one request at a time, against a log
-# growing by about a million entries an hour: no run completed after
-# 2026-10-18. The CT log is read in bulk (`get-entries`, hundreds of
-# certificates per request). The file keeps its name so the workflow
-# stays dispatchable and its history in one place; the monitor it
-# runs is still sigstore/rekor-monitor, now its ./cmd/ct_monitor.
+# What runs: `stele assert signer-certificates` (#1339, stele#387), the
+# belt's pinned stele, one verb. It reads the log in chunks from its
+# checkpoint, verifies the tree head and its consistency with the last
+# one, reconciles every match against the forge, rewrites the checkpoint
+# after each done chunk, and seals a report. The log, the signer and its
+# callers are policy (slsa/assert-policy.json, `signerCertificates`).
+# This workflow keeps the checkpoint between legs and runs, and says who
+# is told. It used to build a patched sigstore/rekor-monitor and judge in
+# Python; that reader held the whole range in memory and kept nothing
+# unless all of it was read, so a backlog fed itself (#1339). The file
+# keeps its name so the workflow stays dispatchable and its history in
+# one place (#1237). github-owned actions only.
 #
-# SELF-CONTAINED, deliberately. sigstore/rekor-monitor ships a reusable
-# workflow, and this org briefly allowlisted it — but its base workflow
-# runs `dawidd6/action-download-artifact` (third-party, single-maintainer)
-# and a slsa-github-generator action, so admitting it meant admitting
-# those: the first dispatch died as startup_failure on the org's own
-# Actions policy. What the reusable actually does is run the monitor
-# --once around a checkpoint file, so this workflow does exactly that
-# with github-owned actions only — the same trade as hand-rolled
-# `docker buildx` over the docker/* actions, and the allowlist stays at
-# four patterns.
-#
-# The checkpoint rides the Actions cache. That is safe HERE and would not
-# be in a build workflow: nothing downstream is signed, main's cache is
-# not writable from pull requests, and the worst a stale or lost
-# checkpoint causes is re-scanning a log range — the monitor's consistency
-# proof runs from whatever checkpoint it is given.
+# The checkpoint rides the Actions cache, the one hand-off between legs
+# and between runs. That is safe HERE and would not be in a build
+# workflow: nothing downstream is signed, main's cache is not writable
+# from pull requests, and stele proves the log consistent with the
+# checkpoint's tree head before it reads an entry. Keys:
+#   ct-watch-<run>-<attempt>-<leg>  each leg's save; every leg restores
+#                                   the newest by the `ct-watch-` prefix
+#   ct-start-<run>-<attempt>        the checkpoint the run started from,
+#                                   kept aside for the alert job
 ---
 name: rekor-monitor
 
 "on":
   schedule:
-    # Hourly, sized by measurement (#1237). The CT log grew 6,519
-    # entries in 338 s on 2026-11-15 (19.3/s, about 69,000 an hour; 16.6/s
-    # averaged over the 12 hours before). The patched monitor read
-    # 70,001 entries in 104 s at a peak of 2.97 GB resident. So an
-    # hour's growth takes about two minutes, and the 10-minute QUIT
-    # below is five times that. Memory, not time, bounds catch-up: the
-    # monitor holds every entry of the range at once, so a backlog of
-    # several hours (missed runs) fails loudly rather than slowly.
+    # Hourly; GitHub created this schedule's runs every 4 to 10 hours
+    # (2026-11-15 to 11-17). The legs below, not the cron, size the
+    # reading (#1339).
     - cron: 17 * * * *
   workflow_dispatch:
     inputs:
-      found:
-        description: Start a new checkpoint (the log before now goes unmonitored)
+      start-at:
+        # stele refuses this when a checkpoint exists, and refuses to
+        # start with no checkpoint and none given: where the watch starts
+        # is a decision a person makes, never a missing cache (#1145).
+        # The first run of this reader is 445241315, the old monitor's
+        # last checkpoint; never the log's head, which skips the range.
+        # Only leg 1 is given it; later legs resume from leg 1's save.
+        description: Found a new checkpoint at this tree size (refused when one exists)
         required: false
-        default: "false"
+        default: ""
         type: string
 permissions: {}
 
+# A delivered run queues behind a running one and never overlaps it:
+# two runs reading from one checkpoint would race their saves.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
-  monitor:
-    name: Watch the log for the signer identity
+  # The checkpoint the run starts from, restored and kept aside under its
+  # own key so the alert job can say whether this run gained on the log.
+  start:
+    name: Keep the checkpoint the run starts from
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    # The audit App's credentials live in this environment, as they do
-    # for audit.yml's legs; the reconciler reads the forge with that
-    # App's token (#1250). The environment carries no protection rules
-    # and no branch policy, so it gates nothing here.
-    environment: audit
-    env:
-      # Fulcio's certificate transparency log: every certificate Fulcio
-      # issues is logged here (RFC 6962 API, `get-sth`/`get-entries`).
-      CT_LOG: https://ctfe.sigstore.dev/2022
-    permissions:
-      contents: read # checkout of the pinned monitor source
-      issues: write # a certificate that does not reconcile must page, not just log
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      kept: ${{ steps.kept.outputs.kept }}
     steps:
-      - name: Check out rekor-monitor (pinned)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: sigstore/rekor-monitor
-          ref: 2cbcfa260c42a9b2f060c7769adb5d1c31a3b7c7 # main 2026-08-10
-          persist-credentials: false
-
-      # The canon's own files, from this same commit: the monitor patch
-      # and the reconciler beside it, and the roster the reconciler reads.
-      # Checked out after the monitor, which owns the workspace root.
-      - name: Check out the monitor patch and the reconciler
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: canon
-          sparse-checkout: |
-            .github/rekor-monitor
-            slsa
-          persist-credentials: false
-
-      # Upstream's CT monitor reads one server-capped page per run and
-      # writes its checkpoint at the log head; the patch's header has the
-      # measurement. `--check` first, so a pin whose code moved fails
-      # here by name rather than building something unpatched (#1237).
-      - name: Patch the monitor to read the whole range
-        run: |
-          set -euo pipefail
-          patch=canon/.github/rekor-monitor/ct-paging.patch
-          if ! git apply --check "${patch}"; then
-            echo "::error::ct-paging.patch does not apply to the pinned rekor-monitor; re-derive it or drop it if upstream pages"
-            exit 1
-          fi
-          git apply "${patch}"
-          git diff --stat
-      # unattested-path: setup-go's `cache:` defaults to true, so this
-      # step warms a Go module cache — same verdict as the checkpoint
-      # cache below, and for the same reason: this workflow builds and
-      # signs nothing, so a poisoned module cache degrades the monitor
-      # and can reach no artifact. Marked rather than disabled because
-      # the monitor is built from source and the cache is the only
-      # thing keeping that off a cold module download twice a day.
-      - name: Set up Go from the monitor's own go.mod
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: ./go.mod
-
-      # unattested-path: this workflow builds and signs nothing — the
-      # cache holds the monitor's own CT-log checkpoint, which is exactly
-      # the state it exists to carry between runs (consistency proofs
-      # need the previous checkpoint). Poisoning it degrades the monitor,
-      # never an artifact; the cold-build rule (lint:cold-attested)
-      # governs attested paths only.
-      - name: Restore the previous checkpoint
+      # unattested-path: the newest checkpoint, read and copied aside.
+      - name: Restore the newest checkpoint
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: checkpoint_log.txt
-          key: ct-checkpoint-${{ github.run_id }}
-          restore-keys: ct-checkpoint-
+          path: checkpoint.json
+          key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-0
+          restore-keys: ct-watch-
 
-      # A run with no checkpoint starts from the head of the log and
-      # finishes in seconds, having monitored nothing before now — and it
-      # is GREEN. Measured 2026-11-13: the first run on ubuntu-26.04 found
-      # no cache ("Cache not found for input keys"), passed in under a
-      # minute, and so silently skipped every entry since the last run
-      # that had completed, on 2026-10-18. Starting from nothing is a
-      # decision a person makes, by dispatch, never something a missing
-      # cache decides (#1145).
-      - name: Refuse to start from no checkpoint
-        if: ${{ hashFiles('checkpoint_log.txt') == '' && github.event.inputs.found != 'true' }}
+      - name: Copy it aside
+        id: kept
         run: |
           set -euo pipefail
-          echo "::error::no checkpoint was restored — the log since the last completed run is unmonitored"
-          echo "::error::dispatch this workflow with found=true to start a new checkpoint knowingly"
-          exit 1
-      # Built once and run as a binary, not `go run`: the signal below
-      # must reach the monitor itself, and `go run` would take it in the
-      # go command's place (#1145).
-      - name: Build the monitor
-        run: |
-          set -euo pipefail
-          go build -o "${RUNNER_TEMP}/ct_monitor" ./cmd/ct_monitor
-      # The checkpoint's hash and its tree size and root hash, before the
-      # run and after it. The file is one line, the CT log's signed tree
-      # head as JSON. A run that succeeded without moving the checkpoint
-      # is then visible in one place (#1145).
-      - name: Record the checkpoint before the run
-        id: before
-        run: |
-          set -euo pipefail
-          if [[ ! -s checkpoint_log.txt ]]; then
-            echo "checkpoint before: none"
-            echo "sha256=" >> "${GITHUB_OUTPUT}"
-            exit 0
+          if [[ -f checkpoint.json ]]; then
+            cp checkpoint.json run-start.json
+            echo "kept=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "no checkpoint: this run founds one, or refuses to start"
+            echo "kept=false" >> "${GITHUB_OUTPUT}"
           fi
-          cp checkpoint_log.txt checkpoint_before.txt
-          size=$(tail -n 1 checkpoint_log.txt | jq -r .tree_size)
-          root=$(tail -n 1 checkpoint_log.txt | jq -r .sha256_root_hash)
-          sha=$(sha256sum checkpoint_log.txt | cut -d' ' -f1)
-          echo "checkpoint before: sha256 ${sha}"
-          echo "checkpoint before: size ${size} / root ${root}"
-          {
-            echo "sha256=${sha}"
-            echo "size=${size}"
-          } >> "${GITHUB_OUTPUT}"
-      # SIGQUIT at 10 minutes, five before the job's own timeout: a Go
-      # program that receives it prints every goroutine's stack and
-      # exits, so a hung run ends with the frame it was stuck in, in its
-      # own log. GOTRACEBACK=all makes "every goroutine" explicit. No
-      # --kill-after: the runner's timeout is uutils coreutils 0.10.0,
-      # which sends the KILL straight behind the QUIT rather than after
-      # the grace period, so the monitor died with exit 137 at 25:00 and
-      # wrote no stack (measured 2026-11-14). The run printed "Root hash
-      # consistency verified" and then nothing for 29 minutes on 12 of
-      # 13 runs on 2026-11-14 (#1145). The output is kept for the read
-      # check below.
-      - name: Run the monitor once
-        id: monitor
-        env:
-          GOTRACEBACK: all
-        run: |
-          set -euo pipefail
-          cat > /tmp/monitor-config.yaml << 'CONFIG'
-          monitoredValues:
-            certIdentities:
-              - certSubject: https://github\.com/monumental-archive/signer/\.github/workflows/sign\.yml@.*
-                issuers:
-                  - https://token\.actions\.githubusercontent\.com
-          CONFIG
-          config=$(cat /tmp/monitor-config.yaml)
-          rc=0
-          timeout --signal=QUIT 10m \
-            "${RUNNER_TEMP}/ct_monitor" \
-            --url "${CT_LOG}" \
-            --file checkpoint_log.txt \
-            --once=true \
-            --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
-            --config "${config}" 2>&1 | tee "${RUNNER_TEMP}/monitor.log" || rc=$?
-          if ((rc == 124)); then
-            echo "::error::the monitor hung and was stopped at 10 minutes; its goroutine stacks are above"
-          fi
-          exit "${rc}"
-      # A checkpoint that did not move while the log did is a failure,
-      # whatever the monitor exited with: on 2026-10-15 and 2026-10-18
-      # two runs three days apart, with a success between them, both
-      # started from size 2,457,808,563. The log's head is the CT log's
-      # signed tree head, read from the log directly, not from the
-      # monitor's output, so a monitor that said nothing cannot vouch for
-      # itself (#1145). The monitor returns exit 0 without writing the
-      # checkpoint when its identity search fails; this is what catches it.
-      - name: Record the checkpoint after the run
-        id: after
-        if: ${{ always() && steps.before.outcome == 'success' }}
-        env:
-          BEFORE_SHA256: ${{ steps.before.outputs.sha256 }}
-          BEFORE_SIZE: ${{ steps.before.outputs.size }}
-        run: |
-          set -euo pipefail
-          if [[ ! -s checkpoint_log.txt ]]; then
-            echo "::error::no checkpoint after the run"
-            exit 1
-          fi
-          size=$(tail -n 1 checkpoint_log.txt | jq -r .tree_size)
-          root=$(tail -n 1 checkpoint_log.txt | jq -r .sha256_root_hash)
-          sha=$(sha256sum checkpoint_log.txt | cut -d' ' -f1)
-          echo "checkpoint after: sha256 ${sha}"
-          echo "checkpoint after: size ${size} / root ${root}"
-          if [[ -z ${BEFORE_SHA256} ]]; then
-            echo "no checkpoint before the run (found=true): nothing to compare"
-            exit 0
-          fi
-          if [[ ${sha} != "${BEFORE_SHA256}" ]]; then
-            echo "checkpoint advanced: size ${BEFORE_SIZE} -> ${size}"
-            # The checkpoint moved over entries BEFORE_SIZE..size-1. The
-            # patched monitor says what it read; it must have read every
-            # one of them, or it advanced over certificates it never saw.
-            read_line=$(grep '^ct-monitor-read: ' "${RUNNER_TEMP}/monitor.log" || true)
-            if [[ -z ${read_line} ]]; then
-              echo "::error::the checkpoint advanced but the monitor reported no read"
-              exit 1
-            fi
-            echo "${read_line}"
-            if [[ ! ${read_line} =~ count=([0-9]+)\ start=([0-9]+)\ end=([0-9]+) ]]; then
-              echo "::error::unreadable read line from the monitor"
-              exit 1
-            fi
-            count=${BASH_REMATCH[1]}
-            start=${BASH_REMATCH[2]}
-            end=${BASH_REMATCH[3]}
-            if ((start > BEFORE_SIZE || end != size - 1 || count != end - start + 1)); then
-              echo "::error::short read: the monitor read ${count} entries of ${start}..${end}," \
-                "but the checkpoint advanced over ${BEFORE_SIZE}..$((size - 1))"
-              exit 1
-            fi
-            echo "read covers the advance: ${count} entries, ${start}..${end}"
-            exit 0
-          fi
-          log_size=$(curl --fail --silent --show-error --retry 3 \
-            --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
-            "${CT_LOG}/ct/v1/get-sth" | jq -r .tree_size)
-          echo "log now: size ${log_size}"
-          if [[ ${log_size} == "${BEFORE_SIZE}" ]]; then
-            echo "checkpoint unchanged and the log has not moved"
-            exit 0
-          fi
-          echo "::error::the checkpoint did not advance although the log grew" \
-            "(checkpoint size ${BEFORE_SIZE}, log size ${log_size})"
-          exit 1
-      # Read-only, and only what the reconciler reads: workflow runs, and
-      # the workflow files and commits they name. Named here so the
-      # token cannot widen when the App's own grants do. The job itself
-      # still declares no id-token and runs no caller-supplied code.
+      # unattested-path: the save half of the copy above — same cache,
+      # same reasoning. Marked per declaration (#676).
+      - name: Save the run's starting checkpoint
+        if: ${{ steps.kept.outputs.kept == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: run-start.json
+          key: ct-start-${{ github.run_id }}-${{ github.run_attempt }}
+
+  watch:
+    name: Watch the log for the signer identity (leg ${{ matrix.leg }})
+    needs: start
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-26.04
+    # Sized by measurement (#1339). stele judged 50,000 entries in a
+    # 20-minute run (about 42/s, five bare 429s), so a 40-minute leg
+    # judges about 100,000; the log grows 19.3/s, about 69,000 an hour.
+    # The App token lives an hour, so a leg cannot read longer: each leg
+    # mints its own. A leg with set-up and filing takes about 45 minutes
+    # when it has a backlog, so 14 legs run about 10.5 hours — longer
+    # than the worst gap GitHub left between this schedule's runs (10
+    # hours, about 695,000 entries). The next delivered run is therefore
+    # already queued when one ends: the reader never idles while a
+    # backlog lasts, and judges about 133,000 an hour against 69,000
+    # arriving. A leg that starts at the head reads the tree head and
+    # what arrived since, and ends in minutes.
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        leg:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
+          - 10
+          - 11
+          - 12
+          - 13
+          - 14
+    # The budget is 40 minutes and stele stops at its last done chunk
+    # when it ends; ten more cover set-up, filing and the save.
+    timeout-minutes: 50
+    # The audit App's credentials live in this environment, as they do
+    # for audit.yml's legs; stele reads the forge with that App's token
+    # (#1250). The environment carries no protection rules and no branch
+    # policy, so it gates nothing here.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    permissions:
+      contents: read # the canon's policy, belt and helpers
+      issues: write # a certificate that does not reconcile must page, not just log
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # unattested-path: this workflow builds and signs nothing — the
+      # cache holds stele's CT-log checkpoint, which is exactly the state
+      # it exists to carry between legs and runs (the consistency proof
+      # runs from the checkpoint's tree head). Poisoning it degrades the
+      # watch, never an artifact; the cold-build rule (lint:cold-attested)
+      # governs attested paths only. The prefix is new with stele's
+      # reader (#1339): the old monitor's file is never restored into it.
+      # This leg's own key never exists yet, so the prefix restores the
+      # newest save: the previous leg's, or the previous run's last.
+      - name: Restore the newest checkpoint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: checkpoint.json
+          key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.leg }}
+          restore-keys: ct-watch-
+
+      # Read-only, and only what the reconciliation reads: workflow runs,
+      # the workflow files and commits they name, and the population.
+      # The existing audit App, with read permissions only; every
+      # repository in its installation, on purpose: the population has a
+      # private member, and stele refuses to start from a listing without
+      # it. Named here so the token cannot widen when the App's own
+      # grants do. The job still declares no id-token and runs no
+      # caller-supplied code.
       - name: Mint the audit App's read token
         id: token
-        if: ${{ always() && steps.monitor.outcome == 'success' }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
@@ -298,105 +191,122 @@ jobs:
           permission-actions: read
           permission-contents: read
           permission-metadata: read
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
 
-      # Every certificate the monitor found is reconciled against a
-      # signing the org performed (#1250): the run it names exists in a
-      # roster repository, called only the canon's workflows and the
-      # signer at the certificate's digest, a canon file at a
-      # default-branch commit asked for that digest, and the signer
-      # commit is on the signer's default branch. reconcile.py's header
-      # has the conditions. A read that cannot complete exits 2 and
-      # fails the job; nothing is counted as reconciled.
-      - name: Reconcile each certificate the monitor found
-        id: reconcile
-        if: ${{ always() && steps.token.outcome == 'success' }}
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333).
+          install_args: github:monumental-archive/stele
+
+      # Exit 0 judged to the head, 1 a certificate did not reconcile, 4 a
+      # range is outstanding; the leg's last step judges each, so this
+      # one records the status and stays green. stdout is the report.
+      - name: Judge the log from the checkpoint
+        id: stele
         env:
-          FORGE_TOKEN: ${{ steps.token.outputs.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          START_AT: ${{ matrix.leg == 1 && inputs.start-at || '' }}
         run: |
           set -euo pipefail
-          python3 canon/.github/rekor-monitor/reconcile.py \
-            "${RUNNER_TEMP}/monitor.log" \
-            --root canon \
-            --findings "${RUNNER_TEMP}/findings.json" \
-            --summary "${GITHUB_STEP_SUMMARY}"
+          args=(--policy slsa/assert-policy.json --checkpoint checkpoint.json
+            --org "${GITHUB_REPOSITORY_OWNER}" --budget 40m --json)
+          if [[ -n ${START_AT} ]]; then
+            args+=(--start-at "${START_AT}")
+          fi
+          rc=0
+          stele assert signer-certificates "${args[@]}" > "${RUNNER_TEMP}/report.json" || rc=$?
+          echo "code=${rc}" >> "${GITHUB_OUTPUT}"
+          echo "stele exited ${rc}"
       # One issue per certificate that did not reconcile, deduplicated by
-      # its CT index: a rerun over the same range files nothing twice.
+      # its CT index, from the report's findings whatever its verdict: a
+      # leg that stopped partway carries the findings of every chunk it
+      # finished, and the next leg starts past them.
       - name: File an issue for each certificate that did not reconcile
-        if: ${{ always() && steps.reconcile.outcome == 'success' }}
+        id: findings
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          count=$(jq length "${RUNNER_TEMP}/findings.json")
-          for ((i = 0; i < count; i++)); do
-            key=$(jq -r ".[${i}].key" "${RUNNER_TEMP}/findings.json")
-            title=$(jq -r ".[${i}].title" "${RUNNER_TEMP}/findings.json")
-            jq -r ".[${i}].body" "${RUNNER_TEMP}/findings.json" > "${RUNNER_TEMP}/finding.md"
-            existing=$(gh issue list --repo "${GITHUB_REPOSITORY}" --state all \
-              --search "\"${key}\" in:title" --json number --jq '.[0].number // empty')
-            if [[ -n ${existing} ]]; then
-              echo "${key}: already filed as #${existing}"
-              continue
-            fi
-            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${title}" \
-              --body-file "${RUNNER_TEMP}/finding.md"
-          done
-          echo "${count} certificate(s) did not reconcile"
+        run: python3 .github/rekor-monitor/findings.py --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"
+
       # unattested-path: the save half of the checkpoint restore
       # marked above — same cache, same reasoning: this workflow
-      # builds and signs nothing, and the entry holds only the
-      # monitor's own CT-log checkpoint. Marked per declaration
-      # (#676); the restore step's marker does not carry the file.
-      # Saved only when the check above passed: a checkpoint that
-      # advanced over entries the monitor did not read must not become
-      # the next run's starting point, or those entries are never read
-      # (#1237). A failed run leaves the previous checkpoint in place.
-      # Nor past certificates the reconciler could not finish reading
-      # (#1250): the next run reads the range, and them, again.
-      - name: Save the advanced checkpoint
-        if: ${{ always() && steps.after.outcome == 'success' && steps.reconcile.outcome == 'success' }}
+      # builds and signs nothing, and the entry holds only stele's
+      # CT-log checkpoint. Marked per declaration (#676); the restore
+      # step's marker does not carry the file.
+      # Saved only once stele has exited, its report is written and every
+      # finding in it has its issue — never on stele's exit status, since
+      # 1 and 4 both advance the file. A leg killed before this persists
+      # nothing and its range is judged again (#1339).
+      - name: Save the checkpoint
+        id: save
+        if: ${{ steps.findings.outcome == 'success' && hashFiles('checkpoint.json') != '' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: checkpoint_log.txt
-          key: ct-checkpoint-${{ github.run_id }}
+          path: checkpoint.json
+          key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.leg }}
 
-      # The watch caught up: close the standing issue that said it was
-      # behind (#1353). `success()` means every step above passed, the
-      # checkpoint save included, so the checkpoint here is the one the
-      # next run starts from.
-      - name: Close the standing issue once the watch has caught up
-        if: ${{ success() }}
+      # The leg's colour, from stele's exit status and its report. A
+      # finding is red whatever the exit code, 4 included: a certificate
+      # that does not reconcile is the one thing this watch exists to
+      # raise. `always()`: a leg ended by its own timeout is CANCELLED.
+      # verdict.py's header has the outcomes.
+      - name: Judge the leg
+        if: ${{ always() }}
+        env:
+          CODE: ${{ steps.stele.outputs.code }}
+          SAVED: ${{ steps.save.outcome == 'success' }}
+        run: |
+          python3 .github/rekor-monitor/verdict.py --exit-code "${CODE}" \
+            --report "${RUNNER_TEMP}/report.json" --saved "${SAVED}"
+  # Once, after the last leg: did this run gain on the log? Read from
+  # stele's own checkpoints, the one the run started from and the newest
+  # saved. The standing issue (#1353) is for a watch that is not
+  # gaining; a backlog being worked off is normal.
+  alert:
+    name: Keep the standing issue
+    needs:
+      - start
+      - watch
+    if: ${{ always() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    permissions:
+      contents: read # the helper
+      issues: write # the standing issue
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # unattested-path: the run's starting checkpoint, kept aside by the
+      # start job. Read only; this job saves nothing.
+      - name: Restore the checkpoint the run started from
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: run-start.json
+          key: ct-start-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # unattested-path: the newest checkpoint, the last leg's save. Read
+      # only; this job saves nothing.
+      - name: Restore the newest checkpoint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: checkpoint.json
+          key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-end
+          restore-keys: ct-watch-
+
+      - name: Judge the run and keep the standing issue
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          KEPT: ${{ needs.start.outputs.kept }}
+          LEGS: ${{ needs.watch.result }}
         run: |
-          python3 canon/.github/rekor-monitor/standing-issue.py caught-up \
-            --checkpoint checkpoint_log.txt --run-url "${RUN_URL}"
-      # `cancelled()` beside `failure()`: the job's own 15-minute timeout
-      # ends it as CANCELLED, which `failure()` does not match. For seven
-      # weeks from 2026-09-24 the monitor timed out twice a day and this
-      # step was skipped every time, so a dead monitor filed nothing.
-      # One standing issue, edited in place, not one per run (#1353): 14
-      # in three days buried the alert this workflow exists to raise. A
-      # certificate that did not reconcile files its own issue above. An
-      # empty log size is the log unreachable, and the body says so.
-      # The checkpoint named is the SAVED one: the monitor may have
-      # advanced checkpoint_log.txt on a run whose save was skipped, so
-      # the copy taken before the run is read. With no copy, the before
-      # step never ran, so neither did the monitor, and the workspace
-      # file is still the one restored from the cache.
-      - name: Keep the standing issue that the watch is behind
-        if: ${{ failure() || cancelled() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          log_size=$(curl --fail --silent --show-error --retry 3 \
-            --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
-            "${CT_LOG}/ct/v1/get-sth" | jq -r .tree_size) || log_size=
-          checkpoint=checkpoint_log.txt
-          [[ -s checkpoint_before.txt ]] && checkpoint=checkpoint_before.txt
-          python3 canon/.github/rekor-monitor/standing-issue.py behind \
-            --checkpoint "${checkpoint}" --log-size "${log_size}" --run-url "${RUN_URL}"
+          python3 .github/rekor-monitor/standing-issue.py --start run-start.json \
+            --start-kept "${KEPT}" --checkpoint checkpoint.json --legs "${LEGS}" \
+            --run-url "${RUN_URL}"
 ...

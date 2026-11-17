@@ -381,9 +381,13 @@ not tamper-proof") and identity monitoring, configurable by certificate SAN
 regex, workflow identity, or **Fulcio OID extension** — so it can watch
 OIDs .9/.10 directly. It requires `id-token: write`, and its identity
 matching currently supports **hashedrekord entries only**, while
-attestations are DSSE. The org's watch runs its CT monitor instead
-(`cmd/ct_monitor`, #1237): Fulcio's certificate log holds every
-certificate issued, whatever entry type it later signed.
+attestations are DSSE. The org's watch reads Fulcio's certificate log
+instead (#1237), which holds every certificate issued, whatever entry
+type it later signed. Its reader was rekor-monitor's `cmd/ct_monitor`,
+patched to page; it held the whole range in memory and kept nothing
+unless all of it was read, and is now stele's own
+(`stele assert signer-certificates`, #1339): chunked, checkpointed after
+each chunk, and reconciling every certificate it finds.
 
 ## `actions/attest`
 

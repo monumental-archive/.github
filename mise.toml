@@ -39,9 +39,11 @@ dir = "{{cwd}}"
 #
 # release/ joined mise/ with #816: the release scripts had no tests at
 # all (#772), and the first one written reproduces a burned release from
-# a real captured listing. .github/rekor-monitor/ joined with #1250: the
-# signer-certificate reconciler, tested on two real captured
-# certificates. Explicit roots rather than a walk from `.`
+# a real captured listing. .github/rekor-monitor/ joined with #1250; its
+# reconciler moved to stele with #1339, and what stays is the workflow's
+# helpers (the issue filer, the leg's verdict, the standing issue) and
+# its shape, tested on stele's own captured reports and checkpoints.
+# Explicit roots rather than a walk from `.`
 # — a discovery root is a claim about what is tested, and a wildcard
 # makes that claim silently.
 run = """

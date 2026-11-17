@@ -62,14 +62,6 @@ max_line_length = 130
 [*.sh]
 max_line_length = 130
 
-# A patch to another project carries that project's bytes verbatim:
-# Go context lines are tab-indented behind the diff's own one-column
-# prefix, and `git apply` refuses a hunk whose context was reindented.
-# The rekor-monitor CT paging patch is the first (#1237). ec keeps
-# charset, EOL, final-newline and trailing-whitespace for it.
-[*.patch]
-indent_style = unset
-
 # A fuzzing corpus is machine-generated binary input, not source: the
 # files have no encoding, no line endings and no final newline by
 # construction, and libFuzzer rewrites them on every run. Checking them
