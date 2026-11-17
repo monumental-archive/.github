@@ -46,6 +46,7 @@ class Totals(unittest.TestCase):
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(SCRIPT), str(self.dir), lang],
+            cwd=self.dir,
             capture_output=True,
             text=True,
             check=False,
@@ -163,6 +164,7 @@ class Totals(unittest.TestCase):
         """No language named: refused, never a total of everything."""
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(SCRIPT), str(self.dir)],
+            cwd=self.dir,
             capture_output=True,
             text=True,
             check=False,

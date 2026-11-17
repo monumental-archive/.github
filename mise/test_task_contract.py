@@ -206,6 +206,7 @@ class Selection(unittest.TestCase):
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", tasks()["audit:mutants"]["run"]],
+            cwd=self.belt,
             env={**os.environ, "ORG_BELT_DIR": str(self.belt), **env},
             capture_output=True,
             text=True,
