@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
 import json
 import os
 import re
@@ -513,9 +512,10 @@ class Mint:
         )
         text = None
         if cff.returncode == 0:
+            # binascii.Error and UnicodeDecodeError both subclass ValueError.
             try:
                 text = base64.b64decode(cff.stdout).decode()
-            except ValueError, binascii.Error:
+            except ValueError:
                 text = None
         if text is None:
             msg = (
