@@ -43,6 +43,84 @@ name: ci
 permissions:
   contents: read # checkout of the caller and of the toolbelt
 
+# WHICH RUNS WRITE A CACHE, AND WHICH FALL BACK (#1406). GitHub scopes a
+# cache to the ref that saved it, and only the default branch's entries
+# are readable from any other ref — so every pull request and queue entry
+# that saved its own copy wrote an entry nobody else could read, and
+# those copies held every repository at the 10 GB limit, evicting the
+# one copy every ref could use (stele held the same 793 MB Go cache five
+# times). So the gate's caches are written on a push to the default
+# branch and nowhere else, and every other ref restores and never saves.
+#
+# These are the CALLER's run: a reusable workflow sees the caller's
+# `github` context. `push` to the default branch: ref
+# `refs/heads/<default>`, both true of SAVE, FALLBACK false. `pull_request`:
+# ref `refs/pull/<n>/merge`, never the default branch, so SAVE false and
+# FALLBACK true. `merge_group`: ref `refs/heads/gh-readonly-queue/...`,
+# a branch that is not the default one, so the same. `event_name` is in
+# SAVE as well as the ref, so a run on the default branch's ref that is
+# not a push (`pull_request_target` runs there with a pull request's
+# inputs) writes nothing. An event whose payload carries no repository
+# reads as not the default branch: it restores with the fallback and
+# saves nothing, which is never a write.
+#
+# The fallback is the other half. Off the default branch a restore may
+# take the nearest earlier entry by prefix — the default branch's last
+# — so a pin or lockfile change compiles or installs the difference
+# instead of everything. ON the default branch it may not: a fallback
+# there, saved back under the new key, carried every version ever used
+# forward (#1285, #1330), so the default branch takes an exact hit or
+# builds clean. Off it, nothing restored is ever saved, so nothing
+# carried over is written back. release/test_gate_caches.py holds each
+# cache step in ci.yml to this.
+env:
+  ORG_GATE_CACHE_SAVE: >-
+    ${{ github.event_name == 'push'
+    && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+  ORG_GATE_CACHE_FALLBACK: >-
+    ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+  # The config globs jdx/mise-action v5.2.7 hashes into its cache key
+  # (src/config-hash.ts MISE_CONFIG_FILE_PATTERNS, in its order, at the
+  # workspace root where the action runs). The workflow's hashFiles walks
+  # and digests them exactly as the action's own glob.hashFiles does, so
+  # mise/gate-cache-key.py renders the key the action rendered.
+  ORG_MISE_CONFIG_GLOBS: |-
+    .config/mise/conf.d/*.toml
+    .config/mise/conf.d/*/mise*.toml
+    .config/mise/config.toml
+    .config/mise/config.lock
+    .config/mise/config.*.toml
+    .config/mise/config.*.lock
+    .config/mise/mise.toml
+    .config/mise/mise.*.toml
+    .config/mise/mise.lock
+    .config/mise/mise.*.lock
+    .config/mise.toml
+    .config/mise.lock
+    .config/mise.*.toml
+    .config/mise.*.lock
+    .mise/conf.d/*.toml
+    .mise/conf.d/*/mise*.toml
+    .mise/config.toml
+    .mise/config.lock
+    .mise/config.*.toml
+    .mise/config.*.lock
+    mise/conf.d/*.toml
+    mise/conf.d/*/mise*.toml
+    mise/config.toml
+    mise/config.lock
+    mise/config.*.toml
+    mise/config.*.lock
+    .mise.toml
+    .mise.lock
+    .mise.*.toml
+    .mise.*.lock
+    mise.toml
+    mise.lock
+    mise.*.toml
+    mise.*.lock
+    .tool-versions
+
 jobs:
   # WHICH POSTGRES MAJORS GET A LEG (#1148). A matrix has to exist before
   # its jobs do, so the list is made first, alone, and cheaply — the
@@ -128,6 +206,27 @@ jobs:
       - name: Keep the Rust toolchains inside the tool cache
         run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
 
+      # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
+      # rendered when it restored and saved this cache itself, reproduced
+      # by mise/gate-cache-key.py and pinned by its test to a key the
+      # action logged — so every default branch's existing entry is the
+      # one restored here, and the first run after the change is not cold.
+      #
+      # `mise-v2` is the cache's NAME, moved by hand when its CONTENTS
+      # must change and its key would not (#1165). The key hashes the
+      # mise configs and an exact hit is never re-saved, so a change to
+      # WHAT is cached that touches no config keeps restoring the old
+      # copy: the Rust toolchains moved inside the cached directory in
+      # v1.64.2, the key stayed the same through v1.64.4, and every job
+      # went on restoring a cache without them and fetching them again
+      # at about ten seconds a toolchain. v2 is that change. Bump it in
+      # all three jobs together; each repository pays one cold install.
+      - name: Name the tool cache
+        id: tool-key
+        env:
+          ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
+        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon/.github/workflows/ci.yml
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
       # here — a human is waiting on a pull request. The rule covers
@@ -149,30 +248,45 @@ jobs:
       # already inside CI write scope. Same trust class, applied
       # consistently.
       #
-      # Staleness is not the exposure: mise-action keys its cache on
-      # the hash of every mise config the workspace exposes — the
-      # delivered .org-canon tree included, which its glob follows
-      # through the symlink — so a canon pin bump asks for a key that
-      # does not exist yet and installs cold. Measured against the
-      # pinned action's own glob (#660): changing the delivered
-      # config.toml changes the key, changing mise.lock alone changes
-      # the key, an unrelated workspace file leaves it identical.
+      # Staleness is not the exposure: mise installs what mise.lock
+      # pins, and a restored directory only spares it the download, so
+      # an older cache is a slower run, never a different one. The key
+      # is the one mise-action rendered when it cached this itself
+      # (#1406, mise/gate-cache-key.py): the hash of the mise configs
+      # its globs find at the workspace root — on the canon's own gate,
+      # mise/config.toml then mise.toml. #660 measured an earlier pin's
+      # glob following the delivered .org-canon tree through its
+      # symlink; v5.2.7's globs stop at the workspace root, so in a
+      # calling repository a canon pin bump keeps the key. Off the
+      # default branch a missed key restores the nearest earlier entry
+      # by prefix and installs only what changed (#1406).
+      - name: Restore the tool cache (unsigned gate only)
+        id: tool-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-key.outputs.key }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && steps.tool-key.outputs.prefix || '' }}
+
+      # `cache: false` (#1406): the action restores by exact key only —
+      # its restoreMiseCache passes no restore keys — and saves from
+      # every ref, so the steps either side of it do both instead.
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6
-          cache: true
-          # The cache's NAME, moved by hand when its CONTENTS must change
-          # and its key would not (#1165). mise-action keys on the mise
-          # configs and never re-saves on a hit, so a change to WHAT is
-          # cached that touches no config keeps restoring the old copy:
-          # the Rust toolchains moved inside the cached directory in
-          # v1.64.2, the key stayed the same through v1.64.4, and every
-          # job went on restoring a cache without them and fetching them
-          # again at about ten seconds a toolchain. v2 is that change.
-          # Bump it in all three jobs together; each repository pays one
-          # cold install.
-          cache_key_prefix: mise-v2
+          cache: false
+
+      # unattested-path: the write half of the tool cache restored
+      # above, on the same standing. It runs on a push to the default
+      # branch only, and only when the restore missed: an exact hit is
+      # already saved, and every other ref writes nothing (#1406).
+      - name: Save the tool cache (default branch only)
+        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.tool-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
       # unattested-path: this gate signs and publishes nothing, so
       # the cold-build rule (#117, docs/release.md) permits the Go
@@ -185,32 +299,42 @@ jobs:
       # registry sources against Cargo.lock, so a poisoned entry
       # cannot change what compiles — and GitHub scopes cache writes
       # per branch, so a pull request cannot write the default
-      # branch's entries. A stale cache is a slower run, never a
-      # wrong one.
+      # branch's entries, and since #1406 it writes none at all. A
+      # stale cache is a slower run, never a wrong one.
       #
-      # The Go cache takes an exact hit or nothing (#1285): no
-      # restore-keys. With them, a go.sum change restored the last
-      # cache, the run added to it and saved the whole under the new
-      # key, so every module version ever used rode along (stele:
-      # 1.87 GB restored in 3m58s, where one run's fill is 775 MB in
-      # 17s). The cost taken instead: a go.sum change is one cold run
-      # per ref (pull request, queue, main), 247s on stele, about
-      # what every run paid to unpack the carried-over cache. Both
-      # paths stay cached: modules alone measured 241s against 62s
-      # (#1181). v2 leaves the oversized v1 entries behind.
+      # On the default branch the Go cache takes an exact hit or
+      # nothing (#1285). With restore-keys there, a go.sum change
+      # restored the last cache, the run added to it and saved the
+      # whole under the new key, so every module version ever used
+      # rode along (stele: 1.87 GB restored in 3m58s, where one run's
+      # fill is 775 MB in 17s); so a go.sum change is one cold run on
+      # the default branch, 247s on stele. Every other ref takes the
+      # fallback and saves nothing (#1406): a pull request or queue
+      # entry that changes go.sum starts from the default branch's last
+      # cache and compiles the difference, and what it carried over is
+      # never written back — the growth #1285 measured has no way in.
+      # Before #1406 those refs paid the cold run too, each saving a
+      # copy no other ref could read. Both paths stay cached: modules
+      # alone measured 241s against 62s (#1181). v2 leaves the
+      # oversized v1 entries behind.
       - name: Restore the Go caches (unsigned gate only)
+        id: go-cache
         if: ${{ hashFiles('go.sum') != '' }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
           key: gate-go-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-go-v2-{0}-', runner.os) || '' }}
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
       # source against Cargo.lock, and GitHub scopes cache writes per
-      # branch. Marked per declaration (#676).
+      # branch; since #1406 only the default branch writes at all.
+      # Marked per declaration (#676). The fallback is off the default
+      # branch only, for the Go cache's reason: a fallback restored and
+      # saved back under a new key is the growth #1330 measured.
       #
       # ~/.pgrx/config.toml rides with `target` because the two are one
       # unit (#1165): pgrx-pg-sys's build script declares
@@ -223,15 +347,16 @@ jobs:
       # A path that does not exist — every repository without an
       # extension — is skipped by the action.
       - name: Restore the cargo caches (unsigned gate only)
+        id: cargo-cache
         if: ${{ hashFiles('Cargo.lock') != '' }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.pgrx/config.toml
             target
           key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: gate-cargo-${{ runner.os }}-
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-cargo-{0}-', runner.os) || '' }}
 
       # PRs squash-merge, and the PERMANENT commit message is the PR
       # title with GitHub's " (#N)" appended, then the PR body — neither
@@ -330,6 +455,37 @@ jobs:
           ORG_PGRX_FANNED: ${{ needs.plan.outputs.majors }}
         run: mise run ci
 
+      # unattested-path: the write half of the Go caches restored
+      # above, on their standing: a push to the default branch that
+      # missed them saves them, and every other ref writes nothing
+      # (#1406).
+      - name: Save the Go caches (default branch only)
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true'
+          && hashFiles('go.sum') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      # unattested-path: the write half of the cargo caches restored
+      # above, on their standing: a push to the default branch that
+      # missed them saves them, and every other ref writes nothing
+      # (#1406).
+      - name: Save the cargo caches (default branch only)
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.cargo-cache.outputs.cache-hit != 'true'
+          && hashFiles('Cargo.lock') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.pgrx/config.toml
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
   # ONE POSTGRES MAJOR PER RUNNER. Serially, inside the gate job, the
   # five took the gate from about a minute to 8m14s (release-lab) and
   # 8m48s (edtf) — paid twice per merge, since the merge queue runs it
@@ -366,17 +522,50 @@ jobs:
       - name: Keep the Rust toolchains inside the tool cache
         run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
 
+      # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
+      # rendered when it restored and saved this cache itself, reproduced
+      # by mise/gate-cache-key.py and pinned by its test to a key the
+      # action logged — so every default branch's existing entry is the
+      # one restored here, and the first run after the change is not cold.
+      # `mise-v2` moves with the `gate` job's, for the reason given there.
+      - name: Name the tool cache
+        id: tool-key
+        env:
+          ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
+        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon/.github/workflows/ci.yml
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
       # exactly here, on the same reasoning and with the same accepted
-      # property as the `gate` job's own install step above.
+      # property as the `gate` job's own tool cache above, and is
+      # restored and saved as it is there (#1406).
+      - name: Restore the tool cache (unsigned gate only)
+        id: tool-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-key.outputs.key }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && steps.tool-key.outputs.prefix || '' }}
+
+      # `cache: false` (#1406): the action restores by exact key only —
+      # its restoreMiseCache passes no restore keys — and saves from
+      # every ref, so the steps either side of it do both instead.
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6
-          cache: true
-          # Moved with the `gate` job's, for the reason given there.
-          cache_key_prefix: mise-v2
+          cache: false
+
+      # unattested-path: the write half of the tool cache restored
+      # above, on the same standing. It runs on a push to the default
+      # branch only, and only when the restore missed: an exact hit is
+      # already saved, and every other ref writes nothing (#1406).
+      - name: Save the tool cache (default branch only)
+        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.tool-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the cargo cache
@@ -386,19 +575,37 @@ jobs:
       # compiles. ~/.pgrx/config.toml rides with `target`, as in the
       # `gate` job and for the reason given there (#1165).
       - name: Restore the cargo caches (unsigned gate only)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.pgrx/config.toml
             target
           key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-
+          restore-keys: >-
+            ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
+            && format('gate-pgrx-{0}-{1}-', matrix.major, runner.os) || '' }}
 
       - name: Run the extension's suite at this major
         env:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
         run: mise run test:pgrx
+
+      # unattested-path: the write half of the cargo caches restored
+      # above, on their standing: a push to the default branch that
+      # missed them saves them, and every other ref writes nothing
+      # (#1406).
+      - name: Save the cargo caches (default branch only)
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.pgrx/config.toml
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # THE REQUIRED CHECK. `ci / ci` is the one context the org ruleset
   # names, so it must be red unless every part of the gate was green.
@@ -484,6 +691,18 @@ jobs:
       - name: Keep the Rust toolchains inside the tool cache
         run: echo "MISE_RUSTUP_HOME=${HOME}/.local/share/mise/rustup" >> "${GITHUB_ENV}"
 
+      # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
+      # rendered when it restored and saved this cache itself, reproduced
+      # by mise/gate-cache-key.py and pinned by its test to a key the
+      # action logged — so every default branch's existing entry is the
+      # one restored here, and the first run after the change is not cold.
+      # `mise-v2` moves with the `gate` job's, for the reason given there.
+      - name: Name the tool cache
+        id: tool-key
+        env:
+          ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
+        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon/.github/workflows/ci.yml
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
       # here — a human is waiting on a pull request. The rule covers
@@ -505,21 +724,45 @@ jobs:
       # already inside CI write scope. Same trust class, applied
       # consistently.
       #
-      # Staleness is not the exposure: mise-action keys its cache on
-      # the hash of every mise config the workspace exposes — the
-      # delivered .org-canon tree included, which its glob follows
-      # through the symlink — so a canon pin bump asks for a key that
-      # does not exist yet and installs cold. Measured against the
-      # pinned action's own glob (#660): changing the delivered
-      # config.toml changes the key, changing mise.lock alone changes
-      # the key, an unrelated workspace file leaves it identical.
+      # Staleness is not the exposure: mise installs what mise.lock
+      # pins, and a restored directory only spares it the download, so
+      # an older cache is a slower run, never a different one. The key
+      # is the one mise-action rendered when it cached this itself
+      # (#1406, mise/gate-cache-key.py): the hash of the mise configs
+      # its globs find at the workspace root — on the canon's own gate,
+      # mise/config.toml then mise.toml. #660 measured an earlier pin's
+      # glob following the delivered .org-canon tree through its
+      # symlink; v5.2.7's globs stop at the workspace root, so in a
+      # calling repository a canon pin bump keeps the key. Off the
+      # default branch a missed key restores the nearest earlier entry
+      # by prefix and installs only what changed (#1406).
+      - name: Restore the tool cache (unsigned gate only)
+        id: tool-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-key.outputs.key }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && steps.tool-key.outputs.prefix || '' }}
+
+      # `cache: false` (#1406): the action restores by exact key only —
+      # its restoreMiseCache passes no restore keys — and saves from
+      # every ref, so the steps either side of it do both instead.
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.6
-          cache: true
-          # Moved with the `gate` job's, for the reason given there.
-          cache_key_prefix: mise-v2
+          cache: false
+
+      # unattested-path: the write half of the tool cache restored
+      # above, on the same standing. It runs on a push to the default
+      # branch only, and only when the restore missed: an exact hit is
+      # already saved, and every other ref writes nothing (#1406).
+      - name: Save the tool cache (default branch only)
+        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.tool-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
       # unattested-path: this gate signs and publishes nothing, so
       # the cold-build rule (#117, docs/release.md) permits the Go
@@ -532,42 +775,53 @@ jobs:
       # registry sources against Cargo.lock, so a poisoned entry
       # cannot change what compiles — and GitHub scopes cache writes
       # per branch, so a pull request cannot write the default
-      # branch's entries. A stale cache is a slower run, never a
-      # wrong one.
+      # branch's entries, and since #1406 it writes none at all. A
+      # stale cache is a slower run, never a wrong one.
       #
-      # The Go cache takes an exact hit or nothing (#1285): no
-      # restore-keys. With them, a go.sum change restored the last
-      # cache, the run added to it and saved the whole under the new
-      # key, so every module version ever used rode along (stele:
-      # 1.87 GB restored in 3m58s, where one run's fill is 775 MB in
-      # 17s). The cost taken instead: a go.sum change is one cold run
-      # per ref (pull request, queue, main), 247s on stele, about
-      # what every run paid to unpack the carried-over cache. Both
-      # paths stay cached: modules alone measured 241s against 62s
-      # (#1181). v2 leaves the oversized v1 entries behind.
+      # On the default branch the Go cache takes an exact hit or
+      # nothing (#1285). With restore-keys there, a go.sum change
+      # restored the last cache, the run added to it and saved the
+      # whole under the new key, so every module version ever used
+      # rode along (stele: 1.87 GB restored in 3m58s, where one run's
+      # fill is 775 MB in 17s); so a go.sum change is one cold run on
+      # the default branch, 247s on stele. Every other ref takes the
+      # fallback and saves nothing (#1406): a pull request or queue
+      # entry that changes go.sum starts from the default branch's last
+      # cache and compiles the difference, and what it carried over is
+      # never written back — the growth #1285 measured has no way in.
+      # Before #1406 those refs paid the cold run too, each saving a
+      # copy no other ref could read. Both paths stay cached: modules
+      # alone measured 241s against 62s (#1181). v2 leaves the
+      # oversized v1 entries behind.
       - name: Restore the Go caches (unsigned gate only)
+        id: go-cache
         if: ${{ hashFiles('go.sum') != '' }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
           key: gate-go-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-go-v2-{0}-', runner.os) || '' }}
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
       # source against Cargo.lock, and GitHub scopes cache writes per
-      # branch. Marked per declaration (#676).
+      # branch; since #1406 only the default branch writes at all.
+      # Marked per declaration (#676). The fallback is off the default
+      # branch only, for the Go cache's reason: a fallback restored and
+      # saved back under a new key is the growth #1330 measured.
       - name: Restore the cargo caches (unsigned gate only)
+        id: cargo-cache
         if: ${{ hashFiles('Cargo.lock') != '' }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.pgrx/config.toml
             target
           key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: gate-cargo-${{ runner.os }}-
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-cargo-{0}-', runner.os) || '' }}
 
       - name: Generate the report
         id: gen
@@ -600,6 +854,36 @@ jobs:
           fi
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
           echo "skip=false" >> "${GITHUB_OUTPUT}"
+      # unattested-path: the write half of the Go caches restored
+      # above, on their standing: a push to the default branch that
+      # missed them saves them, and every other ref writes nothing
+      # (#1406).
+      - name: Save the Go caches (default branch only)
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true'
+          && hashFiles('go.sum') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      # unattested-path: the write half of the cargo caches restored
+      # above, on their standing: a push to the default branch that
+      # missed them saves them, and every other ref writes nothing
+      # (#1406).
+      - name: Save the cargo caches (default branch only)
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.cargo-cache.outputs.cache-hit != 'true'
+          && hashFiles('Cargo.lock') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.pgrx/config.toml
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
       # fail_ci_if_error: TRUE, deliberately. The job is
       # continue-on-error, so a broken feed never blocks a merge — but it
       # must not report clean either. With it false, release-lab's first
