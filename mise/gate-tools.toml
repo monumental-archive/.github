@@ -141,10 +141,11 @@ run = ["tsc"]
 
 [tools."aqua:taiki-e/cargo-llvm-cov"]
 # coverage:check's guard is a committed floor AND a root Cargo.toml,
-# go.mod or tracked *.py (#1331); the row takes the wider half, and
-# the guard cannot say which leg a tree's language needs.
+# go.mod, tracked *.py (#1331) or a root package.json (#1357); the row
+# takes the wider half, and the guard cannot say which leg a tree's
+# language needs.
 tasks = ["coverage:check"]
-when = ["*.py", "Cargo.toml", "go.mod"]
+when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
 
 [tools."aqua:EmbarkStudios/cargo-deny"]
 tasks = ["lint:deny", "lint:scaffold-assembly"]
@@ -271,4 +272,4 @@ when = ["*.yaml", "*.yml", "scaffold/"]
 # coverage:check's python leg (#1331): the same guard as
 # cargo-llvm-cov's row, so the same wider half.
 tasks = ["coverage:check"]
-when = ["*.py", "Cargo.toml", "go.mod"]
+when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
