@@ -281,5 +281,56 @@ class AdoptAndReportRows(CoverageTaskCase):
         self.assertTrue((tree / "coverage.xml").is_file())
 
 
+# The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
+# the workspace read (no pgrx crate) and the measurement.
+RUSTUP = """\
+#!/usr/bin/env bash
+echo "llvm-tools-stub"
+"""
+
+CARGO = """\
+#!/usr/bin/env bash
+case "$1" in
+  metadata) echo '{"packages": [], "workspace_members": []}' ;;
+  llvm-cov)
+    printf '{"data": [{"totals": {"lines": {"percent": %s}}}]}\\n' "${STUB_RUST}"
+    ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+class MeasureSelectors(unittest.TestCase):
+    """Every selector the script accepts measures its leg."""
+
+    def test_the_rust_selector_measures_the_rust_leg(self) -> None:
+        """`rust` is accepted, so it must not measure nothing and pass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "tree"
+            stubs = Path(tmp) / "stubs"
+            tree.mkdir()
+            stubs.mkdir()
+            for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
+                (stubs / name).write_text(text, encoding="utf-8")
+                (stubs / name).chmod(0o755)
+            (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env |= {
+                "ORG_BELT_DIR": str(BELT),
+                "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+                "STUB_RUST": "61.5",
+            }
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
+                cwd=tree,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("rust 61.5\n", done.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
