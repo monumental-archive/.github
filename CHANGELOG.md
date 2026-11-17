@@ -10,6 +10,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.68.9](https://github.com/monumental-archive/.github/compare/v1.68.8...v1.68.9) - 2026-11-17
+
+### Fixed
+
+- save gate caches from the default branch only ([#1411](https://github.com/monumental-archive/.github/pull/1411))
+- cut the signer watch over to stele's reader ([#1407](https://github.com/monumental-archive/.github/pull/1407))
+- key the gate's tool cache on the belt's lockfile ([#1418](https://github.com/monumental-archive/.github/pull/1418))
+- keep mise run from installing past the named list ([#1416](https://github.com/monumental-archive/.github/pull/1416))
+
 ## [1.68.8](https://github.com/monumental-archive/.github/compare/v1.68.7...v1.68.8) - 2026-11-17
 
 ### Fixed
