@@ -359,22 +359,36 @@ jobs:
           path: checkpoint_log.txt
           key: ct-checkpoint-${{ github.run_id }}
 
+      # The watch caught up: close the standing issue that said it was
+      # behind (#1353). `success()` means every step above passed, the
+      # checkpoint save included, so the checkpoint here is the one the
+      # next run starts from.
+      - name: Close the standing issue once the watch has caught up
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 canon/.github/rekor-monitor/standing-issue.py caught-up \
+            --checkpoint checkpoint_log.txt --run-url "${RUN_URL}"
       # `cancelled()` beside `failure()`: the job's own 15-minute timeout
       # ends it as CANCELLED, which `failure()` does not match. For seven
       # weeks from 2026-09-24 the monitor timed out twice a day and this
       # step was skipped every time, so a dead monitor filed nothing.
-      - name: File an issue on failure
+      # One standing issue, edited in place, not one per run (#1353): 14
+      # in three days buried the alert this workflow exists to raise. A
+      # certificate that did not reconcile files its own issue above. An
+      # empty log size is the log unreachable, and the body says so.
+      - name: Keep the standing issue that the watch is behind
         if: ${{ failure() || cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          # A certificate that did not reconcile files its own issue
-          # above; this one is the monitor or the reconciler failing.
-          body="The signer-identity monitor (Fulcio CT log) failed: the log was not read,"
-          body+=" or a certificate it found could not be reconciled. Read the run:"
-          body+=" ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          gh issue create --repo "${GITHUB_REPOSITORY}" \
-            --title "rekor-monitor: failure (run ${GITHUB_RUN_ID})" \
-            --body "${body}"
+          log_size=$(curl --fail --silent --show-error --retry 3 \
+            --user-agent "monumental-archive/.github/rekor-monitor/${GITHUB_RUN_ID}" \
+            "${CT_LOG}/ct/v1/get-sth" | jq -r .tree_size) || log_size=
+          python3 canon/.github/rekor-monitor/standing-issue.py behind \
+            --checkpoint checkpoint_log.txt --log-size "${log_size}" --run-url "${RUN_URL}"
 ...
