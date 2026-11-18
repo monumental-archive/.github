@@ -57,12 +57,19 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import json
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "prepare-release.sh"
@@ -127,57 +134,32 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # supplies several of them ambiently — `GITHUB_REPOSITORY`, `GITHUB_SHA`,
 # `RUNNER_TEMP` — as the release job supplies its step inputs
 # (`VERSION`, `PLAN`, `APP_SLUG`). So nothing reaches a fixture by
-# inheritance except what INHERITED names; every input a row wants is
+# inheritance except what mise/hermetic.py names; every input a row wants is
 # supplied explicitly through `overrides`.
-
-# What a fixture's process inherits from the suite's, by name, and why
-# (#1508). Everything else a row needs it states itself, through
-# `overrides`. The list is an ALLOW-list on purpose: the deny-list it
-# replaced dropped git's, the forge's and the runner's variables and
-# kept the rest, so the release job's own step inputs reached fixtures
-# — `VERSION: 1.69.4` turned "VERSION must be set" into a row that
-# could not refuse, and the canon could not tag. A deny-list misses the
-# next exported input the same way; an allow-list cannot.
-INHERITED = {
-    # Finding bash, git, jq and the belt's tools at all.
-    "PATH": "the commands a script runs",
-    # mktemp and every tool that writes scratch.
-    "TMPDIR": "where scratch files go",
-    # The scripts print and match UTF-8 (em-dashes in their messages);
-    # under the C locale bash and grep treat them byte-wise.
-    "LANG": "the character set messages are read in",
-    "LC_ALL": "the character set messages are read in",
-    "LC_CTYPE": "the character set messages are read in",
-    # The Rust toolchain's own homes: cargo and rustup find their
-    # installed toolchains here, and a fixture HOME would hide them.
-    "CARGO_HOME": "where cargo's toolchain lives",
-    "RUSTUP_HOME": "where rustup's toolchains live",
-    "RUSTUP_TOOLCHAIN": "the toolchain mise selected for this run",
-}
 
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build an environment the suite's own environment cannot reach into.
+    """Build a fixture's environment through mise/hermetic.py (#1508, #1514).
 
     Returns:
-        The variables INHERITED names, HOME and a git identity set, cargo's
-        own homes preserved, and any overrides applied last.
+        hermetic.env for `home`, with this harness's git identity, and
+        any overrides applied last.
 
     """
-    env = {name: os.environ[name] for name in INHERITED if name in os.environ}
+    stated = {
+        "GIT_AUTHOR_NAME": IDENTITY_NAME,
+        "GIT_AUTHOR_EMAIL": IDENTITY_EMAIL,
+        "GIT_COMMITTER_NAME": IDENTITY_NAME,
+        "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
+    }
+    # cargo and rustup keep their installs under the real home; a fixture
+    # HOME would hide them, so their homes are stated unless the suite set them.
     real_home = Path(os.environ.get("HOME", "~")).expanduser()
-    env.update(
-        HOME=str(home),
-        CARGO_HOME=os.environ.get("CARGO_HOME", str(real_home / ".cargo")),
-        RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(real_home / ".rustup")),
-        GIT_EDITOR="true",
-        GIT_AUTHOR_NAME=IDENTITY_NAME,
-        GIT_AUTHOR_EMAIL=IDENTITY_EMAIL,
-        GIT_COMMITTER_NAME=IDENTITY_NAME,
-        GIT_COMMITTER_EMAIL=IDENTITY_EMAIL,
-    )
-    env.update(overrides)
-    return env
+    stated |= {
+        "CARGO_HOME": os.environ.get("CARGO_HOME", str(real_home / ".cargo")),
+        "RUSTUP_HOME": os.environ.get("RUSTUP_HOME", str(real_home / ".rustup")),
+    }
+    return hermetic.env(home, **(stated | overrides))
 
 
 class Tree:

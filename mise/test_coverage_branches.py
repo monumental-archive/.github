@@ -22,6 +22,7 @@ gate as `mise run test`, which `ci` collects.
 
 import importlib.util
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -29,6 +30,12 @@ import tomllib
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -140,11 +147,9 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
         tracked.append(".coverage-floor")
 
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(("GIT_", "RUSTUP_", "FUZZ_", "COVERAGE_"))
-    }
+    # The stubs stand in for the Rust toolchain, so rustup's own selection
+    # is left out of the fixture as well (#1514: the rest is hermetic).
+    env = {k: v for k, v in hermetic.env().items() if not k.startswith("RUSTUP_")}
     env |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",

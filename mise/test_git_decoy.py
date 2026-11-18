@@ -20,12 +20,19 @@ import importlib.util
 import os
 import pathlib
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import tomllib
 import unittest
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location("git_decoy", _HERE / "git-decoy.py")
@@ -35,7 +42,7 @@ _SPEC.loader.exec_module(gd)
 
 GIT = shutil.which("git") or "git"
 BASH = shutil.which("bash") or "bash"
-CLEAN = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+CLEAN = hermetic.env()
 IDENTITY = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -81,7 +88,9 @@ class T(unittest.TestCase):
             subprocess.run(["git", "add", "leak.txt"], cwd=d, env=ENV, check=True)
 """
 
-SCRUB = '{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}'
+# The careful harness's environment, planted as code into a module that
+# cannot import hermetic.py: what git needs and nothing of git's own.
+SCRUB = '{"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}'
 
 
 def body() -> str:

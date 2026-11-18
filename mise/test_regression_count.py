@@ -12,13 +12,20 @@ import importlib.util
 import io
 import os
 import pathlib
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from typing import ClassVar
 from unittest import mock
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 _SPEC = importlib.util.spec_from_file_location(
     "regression_count", pathlib.Path(__file__).with_name("regression-count.py")
@@ -123,7 +130,7 @@ class RepoCase(unittest.TestCase):
 
     def setUp(self) -> None:
         """Isolate git's config, then build the repository."""
-        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        clean = hermetic.env()
         patcher = mock.patch.dict(os.environ, {**clean, **_GIT_ENV}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)

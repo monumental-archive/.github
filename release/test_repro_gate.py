@@ -21,6 +21,7 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
+import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
@@ -29,6 +30,12 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "publish.yml"
@@ -112,11 +119,7 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
         (stubs / "stele").write_text(STELE_STUB)
         (stubs / "stele").chmod(0o755)
         argv, files = tmp / "argv", tmp / "files"
-        inherited = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(("FIRST_", "REBUILD_", "STUB_"))
-        }
+        inherited = hermetic.env()
         env = {
             **inherited,
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",

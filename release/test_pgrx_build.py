@@ -18,12 +18,19 @@ stdlib `unittest`, matching the other tests here.
 """
 
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tarfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 PGRX = CANON / "release" / "pgrx"
@@ -44,7 +51,7 @@ def run(
     # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         argv,
-        env={**os.environ, **env},
+        env=hermetic.env(**env),
         cwd=cwd,
         capture_output=True,
         text=True,

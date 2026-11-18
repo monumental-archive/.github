@@ -14,12 +14,18 @@ directory. stdlib `unittest`, matching the other mise/test_*.py; run
 through the gate as `mise run test`.
 """
 
-import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 SCRIPT = Path(__file__).resolve().with_name("citation.sh")
 BASH = shutil.which("bash") or "bash"
@@ -41,7 +47,7 @@ def run(reuse: str) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "REUSE.toml").write_text("version = 1\n" + reuse, encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = hermetic.env()
         env["CITATION_OUT"] = str(root / "out.cff")
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(

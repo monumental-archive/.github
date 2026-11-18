@@ -19,12 +19,19 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import importlib.util
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-python.sh"
@@ -145,7 +152,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every GIT_* key.
 
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return hermetic.env()
 
 
 class Planted(unittest.TestCase):

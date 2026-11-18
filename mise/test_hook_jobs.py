@@ -19,13 +19,19 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -70,7 +76,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         for rel, text in files.items():
             path = root / rel

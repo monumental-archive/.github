@@ -17,12 +17,19 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -61,9 +68,7 @@ class History:
     def __init__(self, root: Path) -> None:
         """Initialise an empty repository at `root`."""
         self.root = root
-        self.env = {
-            k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "MISE_"))
-        }
+        self.env = hermetic.env()
         self.env |= {
             "HOME": str(root),
             "GIT_CONFIG_GLOBAL": os.devnull,

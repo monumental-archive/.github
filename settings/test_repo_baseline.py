@@ -25,11 +25,18 @@ import base64
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
@@ -179,7 +186,7 @@ class Forge:
             The completed process; drift is the thing under test.
 
         """
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = hermetic.env()
         env |= {
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "STUB": str(self.root),

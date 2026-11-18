@@ -19,8 +19,8 @@ stdlib `unittest` and `tomllib`, the belt's one test idiom. Run through
 the gate as `mise run test`, which `ci` collects.
 """
 
-import os
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -28,6 +28,12 @@ import tomllib
 import unittest
 from fnmatch import fnmatchcase
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
@@ -207,7 +213,7 @@ class Selection(unittest.TestCase):
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", tasks()["audit:mutants"]["run"]],
             cwd=self.belt,
-            env={**os.environ, "ORG_BELT_DIR": str(self.belt), **env},
+            env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env),
             capture_output=True,
             text=True,
             check=False,

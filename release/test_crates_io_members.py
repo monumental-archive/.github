@@ -19,11 +19,18 @@ as `mise run test`, which `ci` collects.
 
 import json
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 HELPER = CANON / "release" / "crates-io-members.sh"
@@ -133,7 +140,7 @@ class TheWholeWorkspace(unittest.TestCase):
             stub.chmod(0o755)
             result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [BASH, str(HELPER)],
-                env={**os.environ, "PATH": f"{d}{os.pathsep}{os.environ['PATH']}"},
+                env=hermetic.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
                 capture_output=True,
                 text=True,
                 check=False,

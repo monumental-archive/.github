@@ -29,12 +29,19 @@ run through the gate as `mise run test`, which `ci` collects.
 import importlib.util
 import json
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 BELT = Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate-tools.py")
@@ -136,7 +143,7 @@ class Planted(unittest.TestCase):
         self.tree.mkdir()
         self.bin = tmp / "bin"
         self.bin.mkdir()
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | {
+        self.env = hermetic.env() | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_CANON_DIR": str(BELT.parent),
         }

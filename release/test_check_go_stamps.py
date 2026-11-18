@@ -17,6 +17,7 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
+import runpy
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
@@ -24,6 +25,12 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -71,7 +78,7 @@ def clean_env() -> dict[str, str]:
         config read.
 
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = hermetic.env()
     return {**env, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
 

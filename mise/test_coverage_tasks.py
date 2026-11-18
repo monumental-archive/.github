@@ -23,6 +23,7 @@ gate as `mise run test`, which `ci` collects.
 
 import json
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -30,6 +31,12 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -214,7 +221,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
         tracked.append(".coverage-floor")
 
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = hermetic.env()
     env |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
@@ -644,7 +651,7 @@ class UploadStep(unittest.TestCase):
             (tree / ".org-canon").mkdir()
             (tree / ".org-canon" / "mise").symlink_to(BELT)
             out = Path(tmp) / "outputs"
-            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env = hermetic.env()
             env |= {
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
                 "STUB_TASK": str(task),
@@ -776,7 +783,7 @@ class MeasureSelectors(unittest.TestCase):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env = hermetic.env()
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",

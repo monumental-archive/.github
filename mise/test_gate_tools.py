@@ -36,8 +36,8 @@ stdlib `unittest`, matching the other mise/test_*.py.
 
 import functools
 import importlib.util
-import os
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -45,6 +45,12 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -420,7 +426,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every `GIT_*` name (#857).
 
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return hermetic.env()
 
 
 def git_tree(files: dict[str, str]) -> Path:

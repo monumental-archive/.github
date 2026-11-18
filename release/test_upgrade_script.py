@@ -48,12 +48,18 @@ framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
@@ -142,8 +148,7 @@ class Derivation:
             (self.root / "next-data.sql").write_text(data)
             args.append(str(self.root / "next-data.sql"))
         prev_v, new_v = versions
-        env = dict(os.environ)
-        env.update(EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v)
+        env = hermetic.env(EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v)
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [PYTHON, str(self.source), *args],

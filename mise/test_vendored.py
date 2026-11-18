@@ -17,12 +17,18 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import hashlib
-import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "vendored.sh"
@@ -42,7 +48,7 @@ def clean_env() -> dict[str, str]:
         A copy of os.environ carrying no GIT_* variable (#857).
 
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return hermetic.env()
 
 
 def sha(data: bytes) -> str:

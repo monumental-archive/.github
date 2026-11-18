@@ -23,12 +23,19 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -97,7 +104,7 @@ echo "3.0.0 (stub interpreter)"
 # REAL repository's index instead of the planted one. Measured here:
 # the first push of this file staged the deletion of every tracked file.
 _GIT_ENV = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+    **hermetic.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }

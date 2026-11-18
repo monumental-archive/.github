@@ -17,13 +17,19 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
 run through the gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
@@ -56,9 +62,7 @@ class Scheduled(unittest.TestCase):
         belt = self.tmp / "belt"
         belt.mkdir()
         (belt / "own-audits.sh").write_text(OWN_AUDITS_STUB, encoding="utf-8")
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | {
-            "ORG_BELT_DIR": str(belt)
-        }
+        self.env = hermetic.env() | {"ORG_BELT_DIR": str(belt)}
 
     def workflow(self, name: str, task: str) -> None:
         """Plant a workflow whose one step runs one audit task."""

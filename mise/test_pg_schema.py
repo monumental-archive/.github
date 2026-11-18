@@ -44,6 +44,7 @@ import io
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -51,7 +52,13 @@ import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 _SPEC = importlib.util.spec_from_file_location(
     "pg_schema",
@@ -255,7 +262,7 @@ def scrubbed() -> dict[str, str]:
         A copy of the environment safe to run git in a fixture with.
 
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return hermetic.env()
 
 
 def git(root: Path, *args: str) -> None:

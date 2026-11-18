@@ -49,13 +49,19 @@ test framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "pg-upgrade-path.sh"
@@ -81,7 +87,7 @@ def clean_env() -> dict[str, str]:
         below cannot be redirected at the caller's repository (#857).
 
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return hermetic.env()
 
 
 def record_file(
