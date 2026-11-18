@@ -643,16 +643,22 @@ the gate. The marker is a comment line whose first token is the marker,
 first in its block, sitting directly above the step it authorises — and
 it authorises that step alone (#676), so prose about the convention
 cannot read as an exemption and one marker cannot carry a file. Base
-images are digest-pinned (`lint:from-digests`) and org-approved before
-use, by the mechanism that fits whose bytes they are (tabulated in
-[`build-track.md`](build-track.md)): `base-attest.yml` for the canon's
-own pgrx build environment, which the pgrx build legs verify
-fail-closed, and — for a caller's `FROM` inside the org's own ghcr
-namespace — the oci-image class build's own step, which verifies the
-org signer's attestation over the pinned digest at the ref its tag
-implies, before anything is built (#715). And `audit:attestations`
-proves weekly that nothing published lacks its evidence set — the
-difference between "we attest" and "nothing ships unattested".
+images are digest-pinned (`lint:from-digests`) and approved before use,
+by the mechanism that fits whose bytes they are (tabulated in
+[`build-track.md`](build-track.md)), and the verifier is stele
+throughout (#1377): `stele verify base`, judging under
+`slsa/assert-policy.json`'s `evidence.baseImages`. `base-attest.yml`
+runs it over the canon's own pgrx build environment, each pinned
+postgres base's upstream provenance, and signs that verification, which
+the pgrx build legs verify fail-closed. For a caller's `FROM`, the
+oci-image class's `bases` job runs it over every reference the
+Dockerfile pins, once and before any leg builds (#715): a base under
+the org's ghcr prefix must carry the org signer's provenance at the ref
+its tag implies, and an official image the policy's `upstream` list
+declares must carry upstream provenance naming its source. And
+`audit:attestations` proves weekly that nothing published lacks its
+evidence set — the difference between "we attest" and "nothing ships
+unattested".
 
 ### The repro gate
 

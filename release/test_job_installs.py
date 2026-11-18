@@ -69,13 +69,16 @@ IN_SCOPE = [
     ("assemble-oci-index.yml", "manifest"),
     # Not on the release path: the scheduled base approvals, which judge
     # each pinned base with `stele verify base` (#1377). It installs
-    # stele alone, and this row holds the list to its calls.
+    # stele and the jq its predicate step calls, and this row holds the
+    # list to its calls.
     ("base-attest.yml", "attest"),
     ("attach-release.yml", "attach"),
     ("build-go-binary.yml", "build"),
     # The collect jobs call `stele derive subjects` (#1364): stele alone,
     # and jq beside it where the images job still writes `images`.
     ("build-go-binary.yml", "collect"),
+    # The base check ahead of the build legs (#1377): stele alone.
+    ("build-oci-image.yml", "bases"),
     ("build-oci-image.yml", "build"),
     ("build-pgrx-extension.yml", "collect"),
     ("build-pgrx-images.yml", "collect"),
