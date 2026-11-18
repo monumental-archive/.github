@@ -34,8 +34,6 @@
 .github/workflows/level-assert.yml	Report	20	# canon helper (the remaining small steps): #1386
 .github/workflows/level.yml	Check this repository against the canon roster	26	# stele: monumental-archive/stele#388, canon swap #1379
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
-.github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/verify-release.yml	Prove each declared subject against the registry	163	# stele: monumental-archive/stele#392, canon swap #1363
 .github/workflows/verify-release.yml	Verify the release and render the verdict (stele emit vsa)	85	# stele: monumental-archive/stele#392, canon swap #1363
 .github/workflows/verify-release.yml	Compute the enrichment facts (control plane only)	89	# stele: monumental-archive/stele#392, canon swap #1363
