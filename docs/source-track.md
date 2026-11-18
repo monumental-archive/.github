@@ -47,7 +47,7 @@ A VSA naming any other resource, ref or verifier is not this chain's.
 **A release tag has a source verdict of its own** (#1350). A consumer
 pinning `vX.Y.Z` does not have to resolve the tag, fetch that
 commit's note and trust the claimed tag controls. Every release from
-`.github@v1.70.1` on publishes `source-verdict.json`: one statement
+`.github@v1.70.2` on publishes `source-verdict.json`: one statement
 whose subject is the tag's commit, with `sourceRefs` naming
 `refs/tags/vX.Y.Z` and `verifiedLevels` copied from that commit's
 link. It is signed by the release verifier
