@@ -7809,15 +7809,20 @@ dir = "{{cwd}}"
 # exception, the one thing the vocabulary forbids. An exclusion
 # produces NOTHING; an exception is dated and loud.
 #
-# The listing is still read, for exactly one thing: reconciliation by
-# NAME in both directions, so a repository in the org and absent from
-# the roster SCREAMS rather than being quietly walked, and one declared
-# but not listed screams too. A count cannot say which went missing.
+# The population is stele's (#1379, stele#388): `stele derive
+# population` reads the roster, reconciles it against the org listing
+# by NAME in both directions — so a repository in the org and absent
+# from the roster SCREAMS rather than being quietly walked, and one
+# declared but not listed screams too; a count cannot say which went
+# missing — and prints each member with its resolved tracks, the
+# forge's word for its visibility and whether it carries a release
+# tag. The canon keeps no second reading of the roster.
 #
 # The obligation set is derived per repository from what its declared
 # membership makes applicable — mise/adoption-population.py holds that
-# derivation and the table tests for it. "Does not apply" and "has not
-# got" are different sentences, and only the second is debt.
+# table, read off stele's document, and the table tests for it. "Does
+# not apply" and "has not got" are different sentences, and only the
+# second is debt.
 # The canon's self-* variants and gate.yml satisfy the same
 # obligations under their canonical alternate names.
 run = '''
@@ -7836,6 +7841,10 @@ command -v gh > /dev/null || {
   echo "audit:adoption: gh missing" >&2
   exit 1
 }
+command -v stele > /dev/null || {
+  echo "audit:adoption: stele missing from the belt — it holds the population" >&2
+  exit 1
+}
 [[ -n ${GH_TOKEN:-} ]] || {
   echo "audit:adoption: GH_TOKEN is unset — CANNOT_JUDGE. The population" >&2
   echo "  contains a private member, and a credential that cannot see it" >&2
@@ -7844,28 +7853,27 @@ command -v gh > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:adoption walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-# One object per line, re-slurped into an array: `gh --paginate` emits
-# one JSON array PER PAGE, and concatenated arrays are not JSON. A
-# single-page org hides that; the org that outgrows a page would not.
-if ! listing=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos?per_page=100" --paginate \
-  --jq '.[] | {name, private, archived, fork}' 2> /dev/null | jq -s '.'); then
-  echo "audit:adoption: could not enumerate the org's repositories — CANNOT_JUDGE" >&2
-  echo "  (no listing, no reconciliation: the roster would go unchecked)" >&2
+# Exit 1 is the roster and the listing disagreeing: the document is
+# still printed, with no members and both directions named, and the
+# reconciliation below reds on it. Exit 4 is a population nobody could
+# read — the listing, or a member's tags — and anything else is the
+# tool failing; neither is a population.
+rc=0
+population=$(stele derive population --policy "${roster}" \
+  --org "${GITHUB_REPOSITORY_OWNER}") || rc=$?
+if [[ ${rc} -ne 0 && ${rc} -ne 1 ]]; then
+  echo "audit:adoption: stele derive population exited ${rc} — CANNOT_JUDGE" >&2
+  echo "  (no population, no reconciliation: the roster would go unchecked)" >&2
   exit 1
 fi
+unlisted=$(jq -r '.reconciliation.undeclared[]' <<< "${population}")
+absent=$(jq -r '.reconciliation.unlisted[]' <<< "${population}")
+repos=$(jq -r '.members[].repo' <<< "${population}")
 derive="${ORG_BELT_DIR}/adoption-population.py"
-if ! population=$(python3 "${derive}" population --roster "${roster}" <<< "${listing}"); then
-  echo "audit:adoption: the roster was refused, so no population was derived" >&2
-  exit 1
-fi
-unlisted=$(sed -n 's/^UNLISTED\t//p' <<< "${population}")
-absent=$(sed -n 's/^ABSENT\t//p' <<< "${population}")
-repos=$(sed -n 's/^POP\t//p' <<< "${population}")
 optout="security/adoption-optout.txt"
 fail=""
 blind=""
 checked=0
-tagged=""
 seen=$(mktemp -d)
 for repo in ${repos}; do
   # Unreadable is CANNOT_JUDGE, never a gap. The old branch here read
@@ -7878,30 +7886,18 @@ for repo in ${repos}; do
     rm -f "${seen}/${repo}"
     continue
   fi
-  # The versioned archetype is proven by CONSEQUENCE, not by config: a
-  # repository carrying v* tags has released, so it owes the release
-  # machinery. cliff.toml was the old marker and retired with git-cliff
-  # (#505) — which silently switched this obligation OFF for the canon
-  # the moment that file went, the exact "a check nobody runs" shape
-  # #354 exists to prevent. Tags cannot be deleted to escape the check
-  # (org-default-tag protects them), and a versioned repo that loses
-  # release.yml entirely is now caught, which the file marker never did.
-  # A tag is an ACT, not a claim, so this stays a consequence and is not
-  # narrowed by a repository's declared tracks: it can only make the
-  # audit louder (#693).
-  # Read whole, never piped into grep -q: gh --paginate dies on SIGPIPE
-  # when the reader closes early (the audit:source-vsa lesson).
-  tags=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/tags" --paginate --jq '.[].name' 2> /dev/null || true)
-  if grep -qE '^v[0-9]' <<< "${tags}"; then
-    tagged="${tagged} ${repo}"
-  fi
 done
 # The obligations are DERIVED from declared membership, never listed
 # here: "does not apply" leaves no row behind, which is what keeps an
-# exclusion from decaying into a standing exception (#693).
-if ! owed=$(python3 "${derive}" obligations --roster "${roster}" \
-  --tagged "${tagged}" <<< "${listing}"); then
-  echo "audit:adoption: the roster was refused, so no obligations were derived" >&2
+# exclusion from decaying into a standing exception (#693). The
+# versioned archetype is proven by CONSEQUENCE, not by config: a member
+# carrying a release tag (the policy's tagPattern, `^v[0-9]`, read by
+# stele) has released, so it owes the release machinery whatever its
+# tracks (#505, #354, #693). A disagreeing roster prints no members, so
+# it derives nothing and the reconciliation below says why.
+owed=""
+if [[ -n ${repos} ]] && ! owed=$(python3 "${derive}" <<< "${population}"); then
+  echo "audit:adoption: the population document was refused, so no obligations were derived" >&2
   exit 1
 fi
 while IFS=$'\t' read -r _ repo artifact names; do

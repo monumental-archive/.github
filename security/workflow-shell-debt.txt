@@ -29,10 +29,6 @@
 .github/workflows/build-pgrx-extension.yml	Emit the inventory plan (what this cell built, from its own inputs)	17	# stele: #1352 unassigned
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/level-assert.yml	Fetch what every population repository published	17	# canon helper: #1352 unassigned
-.github/workflows/level-assert.yml	Assert the published board is the measured one	18	# stele: #1352 unassigned
-.github/workflows/level-assert.yml	Report	20	# canon helper (the remaining small steps): #1386
-.github/workflows/level.yml	Check this repository against the canon roster	26	# stele: monumental-archive/stele#388, canon swap #1379
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
