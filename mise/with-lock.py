@@ -20,7 +20,9 @@ the lock's descriptor, and exits with the command's own status.
 import argparse
 import fcntl
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+
+# ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING
