@@ -105,11 +105,25 @@ jobs:
       contents: read
       id-token: write # mints the Sigstore identity for the approval
       attestations: write # persists it in this repo's attestation store
+    env:
+      # The list is the whole install (#1412), from this tree's belt.
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
     steps:
       - name: Check out the canon
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333).
+          install_args: jq github:monumental-archive/stele
 
       - name: Confirm the digest resolves upstream
         # The approval asserts bytes that exist. A digest is content-
@@ -137,51 +151,20 @@ jobs:
         # (slsa.dev/provenance/v0.2) as attestation manifests — unsigned,
         # which is why it is Build L1 and why the org's SIGNED statement
         # about having verified it is the strongest claim available
-        # without owning the build. Asserted per platform, fail-closed:
-        # every platform in the pinned index must carry provenance whose
-        # configSource names the docker-library/postgres repository and
-        # the <major>/<suite> directory the pinned tag implies. A
-        # platform with no provenance, or provenance naming any other
-        # source, fails the run — an unverifiable base is a red run.
+        # without owning the build. The judgment is `stele verify base`
+        # (stele#402) under the policy's `upstream` entry for postgres:
+        # every platform of the pinned index must carry provenance whose
+        # config source names docker-library/postgres at the
+        # <major>/<suite> the pinned tag implies, fail-closed. `--bind`
+        # holds the tag's major to the pin file's row; `--facts-out`
+        # writes, on PASS only, the facts the predicate below signs.
         id: upstream
         env:
           REF: ${{ matrix.ref }}
           PG: ${{ matrix.pg }}
-        run: |
-          set -euo pipefail
-          docker buildx imagetools inspect "docker.io/library/${REF}" \
-            --format '{{json .Provenance}}' > provenance-map.json
-          count=$(jq 'length' provenance-map.json)
-          if [[ ${count} == "0" || ${count} == "null" ]]; then
-            echo "::error::${REF}: upstream publishes no provenance — refusing to verify nothing"
-            exit 1
-          fi
-          # The suite is the tag's suffix (postgres:14-bookworm ->
-          # bookworm); upstream's configSource ends ":<major>/<suite>".
-          tag="${REF#postgres:}"
-          tag="${tag%%@*}"
-          suite="${tag#"${PG}"-}"
-          expect_prefix="https://github.com/docker-library/postgres.git#"
-          expect_suffix=":${PG}/${suite}"
-          jq -e --arg pre "${expect_prefix}" --arg suf "${expect_suffix}" '
-            to_entries | length > 0 and all(.[];
-              (.value.SLSA.invocation.configSource.uri // "")
-              | startswith($pre) and endswith($suf))' provenance-map.json > /dev/null || {
-            emsg="${REF}: a platform's provenance does not name docker-library/postgres at ${PG}/${suite} — refusing to"
-            emsg+=" attest a verification that failed"
-            echo "::error::${emsg}"
-            exit 1
-          }
-          # The facts the predicate carries: the upstream source revision
-          # (one per platform, deduplicated — a healthy index builds all
-          # platforms from one commit) and the platform list verified.
-          jq -c '{
-            sources: ([.[] | .SLSA.invocation.configSource.uri] | unique),
-            platforms: (keys | sort),
-            provenanceType: "https://slsa.dev/provenance/v0.2"
-          }' provenance-map.json > upstream.json
-          platforms=$(jq -r '.platforms | length' upstream.json)
-          echo "::notice::${REF}: upstream provenance verified across ${platforms} platform(s)"
+        run: >-
+          stele verify base --assert-policy slsa/assert-policy.json
+          --ref "${REF}" --bind "major=${PG}" --facts-out upstream.json
       - name: Write the verification predicate
         env:
           ROLE: ${{ matrix.role }}

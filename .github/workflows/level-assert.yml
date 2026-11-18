@@ -43,8 +43,9 @@
 # apart differ in bytes. The shield is the sealed judgment with no
 # clock in it, and it is what a badge renders.
 #
-# Every judgment here is the engine's. This workflow enumerates,
-# compares bytes and reads dates.
+# Every judgment here is the engine's — the population, the seeding
+# and the comparison included (#1379). This workflow fetches the
+# published branches and reads their dates.
 ---
 name: level-assert
 
@@ -127,19 +128,22 @@ jobs:
 
       - name: Fetch what every population repository published
         # The roster is the canon's declared population and nothing
-        # else — this file is where the org states who is on the board,
-        # and a second list here could disagree with it. A member
-        # declared with an empty track list bears no cell and so has no
-        # branch to fetch; asking for one would red over a repository
-        # behaving exactly as declared.
+        # else, and stele reads it (#1379, stele#388): `derive
+        # population` reconciles the roster against the org listing and
+        # names each member, so the canon keeps no reading of `tracks`
+        # here. A member that is an exclusion bears no cell and so has
+        # no branch to fetch; asking for one would red over a
+        # repository behaving exactly as declared. A roster the listing
+        # contradicts (exit 1) or a population nobody could read
+        # (exit 4) is no population to fetch, and reds here.
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
           mkdir -p published
-          : > missing.txt
-          : > ages.txt
-          jq -r '.population.repositories[]
-                 | select((.tracks // ["*"]) | length > 0)
-                 | .repo' slsa/assert-policy.json > roster.txt
+          touch missing.txt ages.txt
+          stele derive population --org "${GITHUB_REPOSITORY_OWNER}" --policy slsa/assert-policy.json \
+            | jq -r '.members[] | select(.exclusion | not) | .repo' > roster.txt
           while read -r repo; do
             if git clone --quiet --depth 1 --single-branch --branch levels \
               "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}.git" "fetched/${repo}"; then
@@ -150,55 +154,36 @@ jobs:
               echo "${repo}" >> missing.txt
             fi
           done < roster.txt
-      - name: Measure the org over the published board
-        # Seeded with what the repositories published, so the engine
-        # decides what may replace what. Exit 4 is the regression case
-        # and nothing else — a cell judged before that cannot be judged
-        # now — and it is reported at the end with everything else this
-        # job found, rather than ending the run before the comparison
-        # that names which cells moved.
+      - name: Measure the org and compare it with the published board
+        # One call (#1379, stele#418). stele seeds the empty --out-dir
+        # from the published board, so the engine decides what may
+        # replace what (stele#135): a cell it cannot judge today keeps
+        # the level somebody proved yesterday instead of publishing grey
+        # over it. It then compares shields, never reports, and names
+        # every difference as `level: drift:` — measured, never
+        # published; published and different, with both messages;
+        # published, outside the declared population. Exit 4 is a cell
+        # judged before that cannot be judged now, 1 is drift; both are
+        # recorded and reported at the end with everything else this
+        # job found, rather than ending the run before the staleness
+        # walk.
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
           mkdir -p measured
-          cp -R published/. measured/
           rc=0
           stele level \
             --org "${GITHUB_REPOSITORY_OWNER}" \
             --out-dir measured \
+            --published published \
             --policy slsa/assert-policy.json || rc=$?
-          if [[ ${rc} -ne 0 && ${rc} -ne 4 ]]; then
+          if [[ ${rc} -ne 0 && ${rc} -ne 1 && ${rc} -ne 4 ]]; then
             echo "::error::stele level failed (exit ${rc}) — the board was not measured, so nothing here is asserted"
             exit "${rc}"
           fi
-          echo "blind=${rc}" >> "${GITHUB_ENV}"
-      - name: Assert the published board is the measured one
-        # Both directions are findings. A measured cell nobody
-        # published is a stub that never ran or never declared the
-        # track; a published cell the measurement does not hold is a
-        # repository publishing a level for something the declared
-        # population says it does not bear — the drift the sweep exists
-        # to reconcile, in the two ways it can happen.
-        run: |
-          set -euo pipefail
-          cells() { (cd "$1" && find . -name '*.shield.json' | sed 's|^\./||' | sort); }
-          cells measured > measured-cells.txt
-          cells published > published-cells.txt
-          drift=""
-          while read -r cell; do
-            if [[ ! -f "published/${cell}" ]]; then
-              drift="${drift} ${cell}(measured, never published)"
-            elif ! cmp -s "measured/${cell}" "published/${cell}"; then
-              was=$(jq -r '.message' "published/${cell}")
-              now=$(jq -r '.message' "measured/${cell}")
-              drift="${drift} ${cell}(published ${was}, measured ${now})"
-            fi
-          done < measured-cells.txt
-          while read -r cell; do
-            [[ -f "measured/${cell}" ]] || drift="${drift} ${cell}(published, outside the declared population)"
-          done < published-cells.txt
-          echo "drift=${drift}" >> "${GITHUB_ENV}"
+          [[ ${rc} -eq 0 ]] || echo "::error::the board comparison is red (stele level exit ${rc}) — its findings are named above"
+          echo "board=${rc}" >> "${GITHUB_ENV}"
       - name: Assert every levels branch still moves
         # A branch can agree with the measurement and still be dead:
         # nothing changed, so a stub that stopped running last month
@@ -217,6 +202,10 @@ jobs:
           done < ages.txt
           echo "stale=${stale}" >> "${GITHUB_ENV}"
       - name: Report
+        # The board's own findings are named above by stele (the
+        # `level: drift:` lines and the exit-4 line) and flagged by the
+        # measure step; this step makes them a red, with the two
+        # findings that stay the canon's.
         run: |
           set -euo pipefail
           bad=0
@@ -225,17 +214,10 @@ jobs:
             echo "::error::no levels branch in: ${absent}— the stub has never run there"
             bad=1
           fi
-          if [[ -n ${drift} ]]; then
-            echo "::error::the published board disagrees with the org measurement:${drift}"
-            bad=1
-          fi
           if [[ -n ${stale} ]]; then
             echo "::error::a levels branch has not moved in over ${STALE_AFTER_DAYS} days:${stale} — the stub stopped running"
             bad=1
           fi
-          if [[ ${blind} -ne 0 ]]; then
-            echo "::error::a cell that was judged before cannot be judged now — investigate; no published judgment was touched"
-            bad=1
-          fi
+          [[ ${board} -eq 0 ]] || bad=1
           exit "${bad}"
 ...
