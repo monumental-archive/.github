@@ -48,7 +48,7 @@ re-score by hand whenever a change lands that a criterion would notice.
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
 | `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
-| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`measured - 2`, rising only, #652), so it holds without anyone maintaining it. For the canon, answered by relocation — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust and Go legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
+| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`measured - 2`, rising only, #652), so it holds without anyone maintaining it. For the canon, **Met since 2026-11-18 (#1331)**: 94.9% of its Python statements under a floor of 89.1 — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust, Go, Python and TypeScript legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | `stele derive version` + App-minted `v*` tags |
 | `version_tags_signed` | Met | the tag objects **are** signed — Sigstore keyless, by the release workflow. See the `no_user` trap below |
@@ -98,12 +98,20 @@ that no belt-legal tool could measure moved to stele (#392), where
 ratchets it, and the codecov shield renders it. The floor is derived
 state since #652 — the release machinery writes it as `measured - 2`
 and it only rises — so the criterion is met by a number nothing hand
-maintains rather than by one nobody was watching. What remains
-in the canon is orchestration — workflow YAML, one-line task bodies,
-one Python join — not a statement-coverage corpus. The honest
-per-repo answers: stele meets the 80 (and Gold's 90) with a measured
-number; the canon's criterion is answered by pointing at where its
-logic went, not by inventing a number over a workflow tree. A bash
+maintains rather than by one nobody was watching.
+
+**The canon measures itself since 2026-11-18 (#1331).** The sentence
+that stood here — that what remains in the canon is orchestration, not
+a statement-coverage corpus — stopped being true: the canon's Python
+(belt and release helpers, with stdlib `unittest` suites over three
+roots) outgrew its shell, and coverage.py now measures it in the gate,
+child processes included: 94.9% of statements and 91.1% of branches,
+held by a derived `.coverage-floor` of 89.1 (measured 91.1, the weaker
+leg, minus the band). So `test_statement_coverage80`, `90` and
+`test_branch_coverage80` are Met from that number. The scope is stated
+in every answer: the shell is not measured (kcov still fails the
+belt's priors, and the verdict says so), and the floor covers the
+Python legs only. A bash
 test framework was considered as the separable half and **refused**
 (#364): it would neither produce a number — the criterion needs
 coverage, not tests — nor survive the port.
@@ -310,13 +318,12 @@ copying the canon's is wrong:
   and this is the trap that caught the first pass of these answers. See
   below.
 - `test_statement_coverage80` / `90`, `test_branch_coverage80` — met
-  where the code is: stele's floor holds ≥ 90 and Rust repos measure
-  via cargo-llvm-cov. The canon's own answer changed with #392/#398
-  (see [`tooling-verdicts.md`](tooling-verdicts.md), the kcov entry):
-  its measurable logic moved to stele, and no number is invented over
-  the workflow tree that remains. **A consuming repo can legitimately
-  outscore the conformance root**, which should not read as a
-  regression.
+  where the code is measured: stele's floor holds ≥ 90, Rust repos
+  measure via cargo-llvm-cov, and the canon measures its own Python
+  since #1331 (94.9% statements, 91.1% branches; the shell is not
+  measured — see [`tooling-verdicts.md`](tooling-verdicts.md), the kcov
+  entry). **A consuming repo can legitimately outscore the
+  conformance root**, which should not read as a regression.
 - `dynamic_analysis` — Met only where fuzzing or property testing
   actually runs. The canon: Met, from `test:python-properties` (#1332).
 - Registry and DOI criteria follow the publish stub's `classes:`.
