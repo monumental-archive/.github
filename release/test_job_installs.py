@@ -30,14 +30,17 @@ it. They are cached, so the uncached scope above never reached them;
 GATE_LISTS names them, and GATE_WHOLE the job that keeps everything.
 """
 
+import ast
 import importlib.util
 import io
 import re
 import shlex
+import tempfile
 import tokenize
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
@@ -149,6 +152,26 @@ CARGO_SUB = re.compile(r"(?<![\w./-])cargo\s+([a-z][\w-]*)")
 
 # The indent of a step's own keys in every workflow here.
 STEP = 8
+
+# The subprocess calls whose first argument is the command (#1499).
+SUBPROCESS_CALLS = {"run", "check_output", "check_call", "Popen"}
+
+# Helpers that run a command this check cannot read (#1499): the argv is
+# a variable, a splat or a computed path. Each contributes nothing to its
+# job's calls, so each is named here with why; a new one is red by name.
+DYNAMIC = {
+    "release/attach-publish.py": "runs record-draft.sh by its path, which"
+    " scripts() follows by name",
+    "release/package-crates.py": "runs crates-io-members.sh by its path,"
+    " which scripts() follows by name",
+    "release/publish-crates.py": "runs crates-io-members.sh by its path, and"
+    " builds its cargo metadata, package and publish argvs in variables",
+    "mise/belt-shell.py": "splats its shfmt and shellcheck argvs from lists",
+    "mise/embedded-shell.py": "splats its shfmt argv from a list",
+    "mise/git-decoy.py": "runs its caller's command against a decoy repository",
+    "mise/with-lock.py": "runs its caller's command under the lock",
+    "mise/security-config.py": "builds its gh argv in a variable",
+}
 
 # Scripts that run before any tool is installed, so call nothing a list
 # could carry (the reader prints tool names in its own prose).
@@ -326,7 +349,113 @@ def code(text: str) -> str:
     return "\n".join(kept)
 
 
-def python_code(text: str, name: str = "a helper") -> str:
+def constants(tree: ast.Module) -> dict[str, str]:
+    """Read the module-level names an argv can start with.
+
+    Returns:
+        Each name bound to a string constant, or to
+        `shutil.which("x") or "x"`, with the command it stands for.
+
+    """
+    out = {}
+    for node in tree.body:
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            continue
+        value = node.value
+        if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or):
+            value = which_or(value.values)
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            out[node.targets[0].id] = value.value
+    return out
+
+
+def which_or(values: list[ast.expr]) -> ast.expr | None:
+    """Read `shutil.which("x") or "x"` as its fallback, "x".
+
+    Returns:
+        The fallback constant when the `or` is exactly that shape, else
+        None.
+
+    """
+    match values:
+        case [ast.Call() as call, ast.Constant() as name] if (
+            ast.unparse(call) == f"shutil.which({ast.unparse(name)})"
+        ):
+            return name
+    return None
+
+
+def first_word(arg: ast.expr | None, names: dict[str, str]) -> str | None:
+    """Read the command an argv names, where it names one literally.
+
+    Returns:
+        The first element of a list or tuple literal, or the first word
+        of a string literal, when it is a string constant or a module
+        name `constants()` resolved; None for anything else.
+
+    """
+    if isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
+        head = arg.elts[0]
+        if isinstance(head, ast.Constant) and isinstance(head.value, str):
+            return head.value
+        if isinstance(head, ast.Name):
+            return names.get(head.id)
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        words = arg.value.split()
+        return words[0] if words else None
+    return None
+
+
+def argv_commands(tree: ast.Module) -> tuple[set[str], list[str]]:
+    """Name the commands a helper's subprocess calls run (#1499).
+
+    A command in a Python argv is a quoted string, which `word()` never
+    reads as a call. Every call to subprocess.run, check_output,
+    check_call or Popen, however imported, is read here instead.
+
+    Returns:
+        The commands, and one line per call whose argv cannot be read.
+
+    """
+    modules, functions = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {
+                a.asname or a.name for a in node.names if a.name == "subprocess"
+            }
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            functions |= {
+                a.asname or a.name for a in node.names if a.name in SUBPROCESS_CALLS
+            }
+    names = constants(tree)
+    commands, dynamic = set(), []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr in SUBPROCESS_CALLS
+            and isinstance(func.value, ast.Name)
+            and func.value.id in modules
+        ) and not (isinstance(func, ast.Name) and func.id in functions):
+            continue
+        arg = node.args[0] if node.args else None
+        arg = arg or next((k.value for k in node.keywords if k.arg == "args"), None)
+        command = first_word(arg, names)
+        if command is None:
+            shown = ast.unparse(arg) if arg is not None else "no argv"
+            dynamic.append(f"line {node.lineno}: {shown}")
+        else:
+            commands.add(command)
+    return commands, dynamic
+
+
+def python_code(text: str, name: str = "a helper") -> tuple[str, set[str], list[str]]:
     """Reduce a Python helper to what can run a subprocess.
 
     Comments go by Python's own tokenizer (#1496): every COMMENT token,
@@ -335,12 +464,14 @@ def python_code(text: str, name: str = "a helper") -> str:
     code is kept as written; only each comment's own columns are cut.
 
     Returns:
-        "" for a helper that imports no subprocess (it calls nothing),
-        else its text without comments and docstrings.
+        The text without comments and docstrings ("" for a helper that
+        imports no subprocess: it calls nothing), the commands its
+        subprocess calls run, and a line per call whose argv cannot be
+        read (`argv_commands`).
 
     Raises:
-        ValueError: the tokenizer cannot read the helper. Read as
-            "calls nothing", an unreadable helper would hide a real call.
+        ValueError: the tokenizer or the parser cannot read the helper.
+            Read as "calls nothing", it would hide a real call.
 
     """
     lines = text.splitlines()
@@ -350,6 +481,7 @@ def python_code(text: str, name: str = "a helper") -> str:
             for token in tokenize.generate_tokens(io.StringIO(text).readline)
             if token.type == tokenize.COMMENT
         ]
+        tree = ast.parse(text)
     except (tokenize.TokenError, SyntaxError) as error:
         message = f"{name}: the tokenizer cannot read it ({error})"
         raise ValueError(message) from error
@@ -357,8 +489,42 @@ def python_code(text: str, name: str = "a helper") -> str:
         lines[row - 1] = lines[row - 1][:col].rstrip()
     text = "\n".join(lines)
     if not re.search(r"^import subprocess|^from subprocess", text, re.MULTILINE):
-        return ""
-    return re.sub(r'"""(?:.|\n)*?"""', "", text)
+        return "", set(), []
+    commands, dynamic = argv_commands(tree)
+    return re.sub(r'"""(?:.|\n)*?"""', "", text), commands, dynamic
+
+
+def unreadable(helpers: dict[str, str]) -> list[str]:
+    """Name each helper whose argv cannot be read and is not in DYNAMIC.
+
+    Returns:
+        One line per such helper, with the calls, sorted.
+
+    """
+    out = []
+    for name, text in sorted(helpers.items()):
+        _, _, dynamic = python_code(text, name)
+        if dynamic and name not in DYNAMIC:
+            out.append(
+                f"{name}: runs a command this check cannot read"
+                f" ({'; '.join(dynamic)}); name it in DYNAMIC with why"
+            )
+    return out
+
+
+def helpers() -> dict[str, str]:
+    """Read every Python helper `scripts()` can follow.
+
+    Returns:
+        Path relative to the canon -> text, tests excluded.
+
+    """
+    return {
+        f"{home}/{p.name}": p.read_text("utf-8")
+        for home in ("release", "mise")
+        for p in sorted((CANON / home).glob("*.py"))
+        if not p.name.startswith("test_")
+    }
 
 
 def scripts(text: str, seen: set[str]) -> str:
@@ -379,12 +545,16 @@ def scripts(text: str, seen: set[str]) -> str:
             if path.is_file():
                 seen.add(name)
                 source = path.read_text("utf-8")
-                body = (
-                    python_code(source, f"{home}/{name}")
-                    if name.endswith(".py")
-                    else code(source)
-                )
-                out += [body, scripts(body, seen)]
+                commands: set[str] = set()
+                if name.endswith(".py"):
+                    body, commands, _ = python_code(source, f"{home}/{name}")
+                else:
+                    body = code(source)
+                # A Python argv's command, as one bare word per line, so
+                # it is judged exactly as a word in a shell body is
+                # (#1499). The `;` keeps CARGO_SUB from pairing two.
+                out += [body, *(f"{c};" for c in sorted(commands))]
+                out.append(scripts(body, seen))
     # A task is reached by name, however it is run: `mise run audit:deny`
     # and `for task in audit:deny audit:go-vulns; do mise run "${task}"`.
     for task in [t for t in tasks if ":" in t and word(t, text)]:
@@ -910,7 +1080,7 @@ class PythonCode(unittest.TestCase):
             "import subprocess  # ruff: ignore[suspicious-subprocess-import]\n"
             'subprocess.run(["git", "status"], check=True)\n'
         )
-        reduced = python_code(helper)
+        reduced, _, _ = python_code(helper)
         self.assertEqual(
             'import subprocess\nsubprocess.run(["git", "status"], check=True)',
             reduced,
@@ -920,14 +1090,14 @@ class PythonCode(unittest.TestCase):
     def test_a_bare_name_in_code_is_still_a_call(self) -> None:
         """Code before an inline comment is kept and still read."""
         helper = "import subprocess\nTOOL = ruff  # the linter\n"
-        reduced = python_code(helper)
+        reduced, _, _ = python_code(helper)
         self.assertEqual("import subprocess\nTOOL = ruff", reduced)
         self.assertTrue(word("ruff", reduced))
 
     def test_a_hash_inside_a_string_is_code(self) -> None:
         """A `#` in a string literal is not a comment; the line stays whole."""
         line = 'subprocess.run(["sh", "-c", "echo # not a comment"])  # a comment'
-        reduced = python_code(f"import subprocess\n{line}\n")
+        reduced, _, _ = python_code(f"import subprocess\n{line}\n")
         self.assertEqual(
             'import subprocess\nsubprocess.run(["sh", "-c", "echo # not a comment"])',
             reduced,
@@ -939,6 +1109,109 @@ class PythonCode(unittest.TestCase):
             ValueError, r"^release/broken\.py: the tokenizer cannot read it \("
         ):
             python_code('import subprocess\nx = """unterminated\n', "release/broken.py")
+
+
+PLANTED_RED = ["attach-release.yml attach: calls ruff and does not install it"]
+
+
+def planted_uninstalled(helper: str) -> list[str]:
+    """Plant `helper` as release/planted-call.py and read the attach job (#1499).
+
+    Returns:
+        What `uninstalled` says about the attach job running it.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "mise").symlink_to(CANON / "mise")
+        (root / "release").mkdir()
+        for path in (CANON / "release").iterdir():
+            (root / "release" / path.name).symlink_to(path)
+        (root / "release" / "planted-call.py").write_text(helper, "utf-8")
+        job = [
+            *load("attach-release.yml")["attach"],
+            "      - name: Planted",
+            '        run: python3 "${GITHUB_WORKSPACE}/release/planted-call.py"',
+        ]
+        with mock.patch(f"{__name__}.CANON", root):
+            return uninstalled("attach-release.yml", "attach", job)
+
+
+class ArgvCalls(unittest.TestCase):
+    """A command a Python helper runs is a call (#1499).
+
+    Each planted helper sits beside the real release scripts in a scratch
+    canon root whose mise/ is the real belt, and the attach job gains a
+    step that runs it. The job installs no ruff.
+    """
+
+    def test_a_list_argv_is_a_call(self) -> None:
+        """`subprocess.run(["ruff", "check"])`: red on main, which saw nothing."""
+        helper = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
+        self.assertEqual(PLANTED_RED, planted_uninstalled(helper))
+
+    def test_a_string_command_is_a_call(self) -> None:
+        """The first word of a string argv is the command."""
+        helper = 'import subprocess\nsubprocess.run("ruff check .", shell=True)\n'
+        self.assertEqual(PLANTED_RED, planted_uninstalled(helper))
+
+    def test_a_module_constant_argv_is_a_call(self) -> None:
+        """A module name bound to the command, plain or through which()."""
+        for binding in ('"ruff"', 'shutil.which("ruff") or "ruff"'):
+            with self.subTest(binding=binding):
+                helper = (
+                    "import shutil\nimport subprocess\n"
+                    f"RUFF = {binding}\n"
+                    'subprocess.check_output([RUFF, "check"])\n'
+                )
+                self.assertEqual(PLANTED_RED, planted_uninstalled(helper))
+
+    def test_a_name_in_a_message_is_not_a_call(self) -> None:
+        """A tool named in a string or a list no subprocess call runs.
+
+        Only a subprocess call's argv is read as a command. A name inside
+        a message, after its first word, is still a bare word to `word()`
+        as it is in a shell body; this row keeps to what argv adds.
+        """
+        helper = (
+            "import subprocess\n"
+            'print("ruff: not run here")\n'
+            'print(["ruff", "check"])\n'
+            'subprocess.run(["git", "status"], check=True)\n'
+        )
+        self.assertEqual([], planted_uninstalled(helper))
+
+    def test_every_import_form_is_read(self) -> None:
+        """An aliased module and an imported function, all four calls."""
+        helper = (
+            "import subprocess as sp\n"
+            "from subprocess import Popen as Spawn, check_call\n"
+            'sp.run(["one"])\nsp.check_output(("two", "x"))\n'
+            'check_call(args=["three"])\nSpawn("four x")\n'
+        )
+        self.assertEqual(
+            ({"one", "two", "three", "four"}, []),
+            argv_commands(ast.parse(helper)),
+        )
+
+    def test_the_dynamic_helpers_are_the_named_ones(self) -> None:
+        """The real tree: every unreadable argv is named, and only those."""
+        found = {name for name, text in helpers().items() if python_code(text)[2]}
+        self.assertEqual(sorted(DYNAMIC), sorted(found))
+        self.assertEqual([], unreadable(helpers()))
+
+    def test_an_unnamed_dynamic_helper_is_red_by_name(self) -> None:
+        """A new helper that runs a variable is named, with its call."""
+        helper = "import subprocess\n\n\ndef go(args):\n    subprocess.run(args)\n"
+        self.assertEqual(
+            [
+                (
+                    "release/planted.py: runs a command this check cannot read"
+                    " (line 5: args); name it in DYNAMIC with why"
+                )
+            ],
+            unreadable({"release/planted.py": helper}),
+        )
 
 
 class OneReader(unittest.TestCase):
