@@ -21,9 +21,7 @@
 .github/actions/source-attest/action.yml	Guard the identity and resolve the canon tree	35	# leaving (the source-attest action is deleted): #1362
 .github/actions/source-attest/action.yml	Emit the chain links and push the ledger	19	# leaving (the source-attest action is deleted): #1362
 .github/workflows/assemble-oci-index.yml	Generate the image SBOM from the published bytes	20	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/base-attest.yml	Verify the upstream provenance names this source (#212)	29	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-go-binary.yml	Refuse a binary whose stamp is not the released commit	19	# stele: #1352 unassigned
-.github/workflows/build-oci-image.yml	Verify every first-party base carries its org attestation	65	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# stele (derive bump --check --expect): monumental-archive/stele#455
 .github/workflows/build-pgrx-extension.yml	Emit the inventory plan (what this cell built, from its own inputs)	17	# stele: #1352 unassigned
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
