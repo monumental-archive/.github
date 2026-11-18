@@ -6829,6 +6829,34 @@ END {
 ' .github/workflows/*.y*ml
 '''
 
+[tasks."lint:coverage-exclusions"]
+description = "No coverage-exclusion marker in tracked source (the testing standard's rule)"
+dir = "{{cwd}}"
+# The testing standard (CONTRIBUTING.md, "No number can be bought")
+# forbids excluding code from coverage, and until this lint nothing held
+# it: the canon itself carried seven such markers, and a pull request
+# added forty more before review caught them (#1522). Red on any marker
+# of the languages the belt measures, by file, line and rule: Python's
+# coverage.py pragmas, Rust's coverage(off) and cfg(coverage), the
+# istanbul, c8 and v8 ignore comments, and Go's coverage build
+# constraint and coverage:ignore. Where a marker counts, per language,
+# is the helper's docstring (mise/coverage-exclusions.py): a marker
+# quoted in a string is text, not an exclusion.
+#
+# No allow-list and no per-site escape: the standard has none, and an
+# excused line is a bought number. Vendored trees are outside it, as for
+# every belt lint; a repository tracking none of these languages skips
+# clean.
+run = '''
+files=$(git ls-files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
+  '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs')
+[[ -n ${files} ]] || {
+  echo "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or JavaScript tracked, skipped"
+  exit 0
+}
+python3 "${ORG_BELT_DIR}/coverage-exclusions.py" <<< "${files}"
+'''
+
 [tasks."coverage:check"]
 description = "Enforce the derived coverage floor (.coverage-floor); repos without one skip clean"
 dir = "{{cwd}}"

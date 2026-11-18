@@ -75,9 +75,6 @@ METADATA = TESTDATA / "edtf-cargo-metadata.json"
 _SPEC = importlib.util.spec_from_file_location(
     "publish_crates", CANON / "release" / "publish-crates.py"
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
-    msg = "test_publish_rust_crate: publish-crates.py did not arrive beside this file"
-    raise SystemExit(msg)
 publish_crates = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(publish_crates)
 

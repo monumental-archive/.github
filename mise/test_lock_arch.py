@@ -11,9 +11,6 @@ import unittest
 _SPEC = importlib.util.spec_from_file_location(
     "lock_arch", pathlib.Path(__file__).with_name("lock-arch.py")
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - import plumbing
-    msg = "cannot load lock-arch.py"
-    raise RuntimeError(msg)
 lock_arch = importlib.util.module_from_spec(_SPEC)
 sys.modules["lock_arch"] = lock_arch
 _SPEC.loader.exec_module(lock_arch)

@@ -29,9 +29,6 @@ from unittest import mock
 _SPEC = importlib.util.spec_from_file_location(
     "publish_npm", Path(__file__).with_name("publish-npm.py")
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
-    msg = "test_publish_npm: publish-npm.py did not arrive beside this file"
-    raise SystemExit(msg)
 publish_npm = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(publish_npm)
 

@@ -84,11 +84,14 @@ TIMEOUT = 60
 _SPEC = importlib.util.spec_from_file_location(
     "crates_index", HERE.parent / "mise" / "crates-index.py"
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
-    msg = "publish-crates: mise/crates-index.py did not arrive in the canon tree"
-    raise SystemExit(msg)
 crates_index = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(crates_index)
+# A missing sibling fails here, in exec_module, never as a None spec: a
+# `.py` path always gets a spec and a loader (#1522).
+try:
+    _SPEC.loader.exec_module(crates_index)
+except FileNotFoundError:
+    msg = "publish-crates: mise/crates-index.py did not arrive in the canon tree"
+    raise SystemExit(msg) from None
 
 
 @dataclass
