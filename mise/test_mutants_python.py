@@ -17,6 +17,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -29,6 +30,12 @@ SCRIPT = BELT / "mutants-python.sh"
 BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 LABEL = "audit:mutants: python"
+
+_SPEC = importlib.util.spec_from_file_location(
+    "mutants_python", BELT / "mutants-python.py"
+)
+helper = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(helper)
 
 MUTMUT_STUB = """#!/usr/bin/env bash
 printf 'mutmut %s\\n' "$*" >> "${PLANT_LOG}"
@@ -247,6 +254,31 @@ class Verdict(Planted):
             ["mutmut run", "mutmut results --all true", f"mutmut show {SURVIVOR}"],
         )
         self.assertEqual(self.counts(), "0/1\t4\t3\t1\t0\n")
+
+    def test_a_backslash_in_the_removed_line_is_found_at_its_true_line(self) -> None:
+        """A raw regex in the mutated line: line 12, not the def's line 10.
+
+        Fails against the shell leg before #1486: it passed the removed
+        line through `awk -v`, which turns backslash-d into `d`, so no line
+        matched and the survivor was reported at the `def` (measured: 10).
+        """
+        module = MODULE.replace(
+            "    return x + 1\n", '    return re.match(r"\\d+", x)\n', 1
+        )
+        self.plant(KILLED | {SURVIVOR: "survived"}, module=module)
+        (self.show / SURVIVOR).write_text(
+            DIFF.replace(
+                "-    return x + 1", '-    return re.match(r"\\d+", x)'
+            ).replace("+    return x - 1", '+    return re.match(r"\\D+", x)'),
+            encoding="utf-8",
+        )
+        done, _ = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stdout.splitlines()[0],
+            f"{LABEL}: survived: pkg/mod.py:12: {SURVIVOR}:"
+            ' return re.match(r"\\D+", x)',
+        )
 
     def test_no_tests_is_a_survivor(self) -> None:
         """A mutant no test reaches is the least explained of all."""
@@ -478,6 +510,143 @@ class Reasons(Planted):
                 REASON,
             ],
         )
+
+
+class ConfigReader(unittest.TestCase):
+    """mutants-python.py's reader of the adoption config, on planted text (#1486)."""
+
+    def test_a_toml_list_counts_reasoned_entries_and_names_the_rest(self) -> None:
+        """Reason above: counted. None: named with its line."""
+        text = (
+            "[tool.mutmut]\n"
+            "do_not_mutate = [\n"
+            "  # generated\n"
+            '  "pkg/gen.py",\n'
+            '  "pkg/other.py",\n'
+            "]\n"
+        )
+        found = helper.scan(text, "[tool.mutmut]")
+        self.assertEqual(found.listed, 1)
+        self.assertEqual(found.findings, [(5, "do_not_mutate", '"pkg/other.py"')])
+
+    def test_an_entry_on_the_opening_line_is_named(self) -> None:
+        """In a TOML list or a setup.cfg value alike."""
+        toml = helper.scan('[tool.mutmut]\nonly_mutate = ["a"]\n', "[tool.mutmut]")
+        cfg = helper.scan("[mutmut]\ndo_not_mutate = a.py\n", "[mutmut]")
+        self.assertEqual(
+            toml.findings, [(2, "only_mutate", "an entry on the opening line")]
+        )
+        self.assertEqual(
+            cfg.findings, [(2, "do_not_mutate", "an entry on the opening line")]
+        )
+
+    def test_setup_cfg_entries_take_a_hash_or_semicolon_reason(self) -> None:
+        """One indented entry per line; a dedent or blank ends the list."""
+        text = (
+            "[mutmut]\n"
+            "do_not_mutate_patterns =\n"
+            "  ; vendored\n"
+            "  vendor/*\n"
+            "  # tests\n"
+            "  tests/*\n"
+            "  bare/*\n"
+            "\n"
+            "  after/*\n"
+        )
+        found = helper.scan(text, "[mutmut]")
+        self.assertEqual(found.listed, 2)
+        self.assertEqual(found.findings, [(7, "do_not_mutate_patterns", "bare/*")])
+
+    def test_mutate_only_covered_lines_true_is_refused(self) -> None:
+        """Every spelling of true; false is fine."""
+        for value in ("true", "True", "1", "t"):
+            found = helper.scan(
+                f"[tool.mutmut]\nmutate_only_covered_lines = {value}\n", "[tool.mutmut]"
+            )
+            self.assertEqual(found.findings, [(2, "refused", helper.REFUSED)], value)
+        found = helper.scan(
+            "[tool.mutmut]\nmutate_only_covered_lines = false\n", "[tool.mutmut]"
+        )
+        self.assertEqual(found.findings, [])
+
+    def test_only_the_config_section_is_read(self) -> None:
+        """The same keys under another header are someone else's."""
+        text = (
+            '[tool.other]\ndo_not_mutate = ["x"]\n'
+            '[tool.mutmut]\nsource_paths = ["pkg"]\n'
+        )
+        found = helper.scan(text, "[tool.mutmut]")
+        self.assertEqual((found.findings, found.listed), ([], 0))
+
+
+class PragmaRule(unittest.TestCase):
+    """The reason rule for `# pragma: no mutate`, directly (#1486)."""
+
+    def test_a_reason_after_two_dashes_counts_the_site(self) -> None:
+        """Reasoned: counted. Bare: named. `end`: needs none."""
+        text = (
+            "a.py\t3\t# pragma: no mutate -- the fixture's width\n"
+            "a.py\t9\t# pragma: no mutate block\n"
+            "b.py\t4\t# pragma: no mutate: end\n"
+            "b.py\t5\t# pragma: no mutate --\n"
+        )
+        self.assertEqual(helper.pragmas(text), (1, ["a.py:9", "b.py:5"]))
+
+    def test_the_word_after_no_mutate(self) -> None:
+        """Colons and spaces before it are not the word."""
+        self.assertEqual(helper.pragma_word("# pragma: no mutate: end")[0], "end")
+        self.assertEqual(helper.pragma_word("# pragma: no mutate")[0], "")
+
+
+class ResultsAndLines(unittest.TestCase):
+    """The state mapping and the line locator, directly (#1486)."""
+
+    def test_every_state_lands_in_one_class(self) -> None:
+        """Killed four ways, survived two ways, the rest never judged."""
+        text = "\n".join(
+            f"    m.x_f__mutmut_{i}: {state}"
+            for i, state in enumerate([
+                "killed",
+                "timeout",
+                "caught by type check",
+                "segfault",
+                "survived",
+                "no tests",
+                "suspicious",
+                "skipped",
+                "not checked",
+            ])
+        )
+        results = helper.read_results(text + "\nnot a result line\n")
+        self.assertEqual((results.total, results.killed, results.unjudged), (9, 4, 3))
+        self.assertEqual(
+            results.survivors,
+            [("survived", "m.x_f__mutmut_4"), ("no tests", "m.x_f__mutmut_5")],
+        )
+
+    def test_the_function_is_read_from_the_mutant_name(self) -> None:
+        """A function's `x_` and a method's class are not its name."""
+        self.assertEqual(helper.function_of("pkg.mod.x_answer__mutmut_12"), "answer")
+        self.assertEqual(helper.function_of("pkg.mod.xǁShapeǁarea__mutmut_3"), "area")
+
+    def test_a_show_diff_names_the_file_and_both_lines(self) -> None:
+        """The `---` path, the first removed and added lines, marks dropped."""
+        shown = helper.read_show(DIFF)
+        self.assertEqual(
+            (shown.file, shown.removed, shown.added),
+            ("pkg/mod.py", "    return x + 1", "    return x - 1"),
+        )
+
+    def test_the_line_is_found_from_the_def_not_the_file_top(self) -> None:
+        """MODULE has the same line in `other` too; `answer`'s is 12."""
+        self.assertEqual(helper.locate(MODULE, "answer", "    return x + 1"), 12)
+        self.assertEqual(helper.locate(MODULE, "other", "return x + 1"), 16)
+
+    def test_no_matching_line_falls_back_to_the_def_then_zero(self) -> None:
+        """The `def` when the line is gone; 0 when the function is too."""
+        self.assertEqual(helper.locate(MODULE, "answer", "gone"), 10)
+        self.assertEqual(helper.locate(MODULE, "absent", "return x + 1"), 0)
+        self.assertEqual(helper.locate("async def go():\n    pass\n", "go", "pass"), 2)
 
 
 if __name__ == "__main__":

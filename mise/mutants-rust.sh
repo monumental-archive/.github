@@ -29,6 +29,12 @@
 # `pg_test` so its `#[pg_test]` suite runs; which members are pgrx comes
 # from gate-surface.py, as for every other pgrx task.
 #
+# THIS FILE IS THE SEQUENCE; mutants-rust.py READS AND JUDGES (#1486).
+# Every step that parses or decides — the reason rule, the default
+# major, the listings' counts, which exit statuses mean judged, the
+# tally — is a call to the helper, so it comes under the canon's
+# coverage figure and its own mutation run.
+#
 # Prints each survivor (file:line:col: the mutation) and one summary
 # line: mutants, killed, survived, excluded. Run as one shard of
 # repo-mutants.yml's matrix (MUTANTS_SHARD=k/n), it judges that shard
@@ -64,44 +70,8 @@ if ! git ls-files --error-unmatch "${config}" > /dev/null 2>&1; then
 fi
 
 # Reasons first: cheap, and a malformed exclusion is red whatever the run
-# would have found. Every entry of an exclusion list must sit on its own
-# line with a `#` line directly above it; an entry on the `key = [` line
-# itself has nowhere to put one.
-unexplained=$(awk '
-  /^[[:space:]]*(exclude_re|exclude_globs)[[:space:]]*=/ {
-    key = $0
-    sub(/^[[:space:]]*/, "", key)
-    sub(/[[:space:]]*=.*/, "", key)
-    rest = $0
-    sub(/^[^=]*=[[:space:]]*\[?/, "", rest)
-    if (rest ~ /^[[:space:]]*["\047]/) {
-      printf "%d\t%s\t%s\n", NR, key, "an entry on the opening line"
-    }
-    inside = ($0 !~ /\]/)
-    prev = ""
-    next
-  }
-  inside {
-    if ($0 ~ /^[[:space:]]*\]/) { inside = 0; next }
-    if ($0 ~ /^[[:space:]]*["\047]/) {
-      if (prev !~ /^[[:space:]]*#/) {
-        entry = $0
-        sub(/^[[:space:]]*/, "", entry)
-        sub(/,[[:space:]]*$/, "", entry)
-        printf "%d\t%s\t%s\n", NR, key, entry
-      }
-      if ($0 ~ /\][[:space:]]*$/) { inside = 0 }
-    }
-    if ($0 !~ /^[[:space:]]*$/) { prev = $0 }
-  }
-' "${config}")
-if [[ -n ${unexplained} ]]; then
-  while IFS=$'\t' read -r line key entry; do
-    echo "${label}: ${config}:${line}: ${key} entry ${entry} has no # reason line above it" >&2
-  done <<< "${unexplained}"
-  echo "  an exclusion records a mutant the suite cannot kill; say why, one # line above each entry" >&2
-  exit 1
-fi
+# would have found.
+python3 "${belt}/mutants-rust.py" reasons "${config}"
 
 skips=$(git grep -n -e 'mutants::skip' -- ':!vendor/**' '*.rs' || true)
 if [[ -n ${skips} ]]; then
@@ -139,10 +109,7 @@ done <<< "${surface}"
 
 # The crate's default major: the one `pgNN` its `default` feature names.
 default_major() {
-  jq -r --arg n "$1" '
-    .packages[] | select(.name == $n)
-    | [(.features.default // [])[] | select(test("^pg[0-9]+$"))]
-    | if length == 1 then .[0] else "" end' <<< "${metadata}"
+  python3 "${belt}/mutants-rust.py" default-major "$1" <<< "${metadata}"
 }
 
 # The status survives the cleanup, and a run that died before its last
@@ -152,70 +119,33 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-runs=()
-red=0
-total=0
-killed=0
-survived=0
-excluded=0
-survivors=()
+# The run log the verdict replays, one line per event, in order.
+runs="${scratch}/runs.tsv"
+: > "${runs}"
 
 # One cargo-mutants run: $1 names it, the rest are its selection flags.
-# The verdict is read from outcomes.json, never the exit status alone:
-# 2 (survivors) and 3 (timeouts) are results to report, anything else
-# but 0 means nothing was judged. A timeout counts as killed: the suite
-# noticed, by hanging, and cargo-mutants itself calls it no survivor.
-#
-# EXCLUDED IS THE WHOLE POPULATION'S, never a shard's: a shard is cut
-# from the list AFTER exclusion, so the configured and unconfigured
-# lists slice differently and a per-shard difference means nothing (it
-# can go negative). Every shard reports the same whole-population
-# figure and the totals take it once.
+# The listings go to the helper, which says what the run mutates and
+# whether the shard holds anything; the run's exit status is recorded
+# for the verdict, which decides what it means.
 mutate() {
-  local name="$1" out="${scratch}/$1" status=0 all listed here
+  local name="$1" out="${scratch}/$1" status=0
   shift
-  # Counted by awk, not `wc -l`: BSD wc pads its number with spaces.
-  all=$(cargo mutants --list --no-config "$@" | awk 'NF { n++ } END { print n + 0 }')
-  listed=$(cargo mutants --list "$@" | awk 'NF { n++ } END { print n + 0 }')
-  excluded=$((excluded + all - listed))
-  here="${listed}"
+  mkdir -p "${out}"
+  cargo mutants --list --no-config "$@" > "${out}/all.txt"
+  cargo mutants --list "$@" > "${out}/listed.txt"
+  local here=""
   if [[ -n ${shard} ]]; then
-    here=$(cargo mutants --list --shard "${shard}" "$@" | awk 'NF { n++ } END { print n + 0 }')
+    cargo mutants --list --shard "${shard}" "$@" > "${out}/here.txt"
+    here="${out}/here.txt"
   fi
-  echo "${label}: mutating ${name}${where} (${here} mutants, $((all - listed)) excluded)"
-  # Measured on cargo-mutants 27.1.0: a shard with nothing in it exits 0
-  # and writes no outcomes.json. Nothing to run is said by name, green.
-  if [[ ${here} -eq 0 ]]; then
-    echo "${label}: ${name}${where}: no mutants in this shard, nothing to run"
-    return 0
-  fi
+  python3 "${belt}/mutants-rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
+    --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
+  printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
+  [[ ! -e ${out}/empty ]] || return 0
   local sharding=()
   [[ -z ${shard} ]] || sharding=(--shard "${shard}")
   cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} "$@" || status=$?
-  if [[ ${status} -ne 0 && ${status} -ne 2 && ${status} -ne 3 ]]; then
-    runs+=("${name}: cargo mutants exited ${status} — nothing judged (a red baseline is exit 4)")
-    red=1
-    return 0
-  fi
-  local outcomes="${out}/mutants.out/outcomes.json" counts
-  [[ -r ${outcomes} ]] || {
-    runs+=("${name}: cargo mutants wrote no outcomes.json")
-    red=1
-    return 0
-  }
-  counts=$(jq -r '[.total_mutants, .caught + .timeout, .missed] | @tsv' "${outcomes}")
-  local t k m
-  IFS=$'\t' read -r t k m <<< "${counts}"
-  total=$((total + t))
-  killed=$((killed + k))
-  survived=$((survived + m))
-  if [[ ${m} -gt 0 ]]; then
-    red=1
-    while IFS= read -r s; do
-      [[ -n ${s} ]] && survivors+=("${s}")
-    done < "${out}/mutants.out/missed.txt"
-  fi
-  return 0
+  echo "${status}" > "${out}/status"
 }
 
 if [[ ${#plain[@]} -gt 0 ]]; then
@@ -228,8 +158,8 @@ provisioned=""
 for c in ${pgrx[@]+"${pgrx[@]}"}; do
   major=$(default_major "${c}")
   if [[ -z ${major} ]]; then
-    runs+=("${c}: a pgrx extension whose default features name no single pgNN — it is mutated under its default major")
-    red=1
+    printf 'red\t%s: %s\n' "${c}" \
+      "a pgrx extension whose default features name no single pgNN — it is mutated under its default major" >> "${runs}"
     continue
   fi
   if [[ -z ${provisioned} ]]; then
@@ -241,8 +171,7 @@ for c in ${pgrx[@]+"${pgrx[@]}"}; do
     org_pgrx_provision "${label}" "" || provisioned=failed
   fi
   if [[ ${provisioned} != ok ]]; then
-    runs+=("${c} at ${major}: no Postgres could be provisioned")
-    red=1
+    printf 'red\t%s\n' "${c} at ${major}: no Postgres could be provisioned" >> "${runs}"
     continue
   fi
   echo "${label}: ${c} is a pgrx extension, mutated under its default major, ${major}"
@@ -254,24 +183,5 @@ if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then
   exit 1
 fi
 
-for s in ${survivors[@]+"${survivors[@]}"}; do
-  echo "${label}: survived: ${s}"
-done
-for r in ${runs[@]+"${runs[@]}"}; do
-  echo "${label}: ${r}" >&2
-done
-echo "${label}:${where:+${where#,}:} ${total} mutants, ${killed} killed, ${survived} survived, ${excluded} excluded"
-# Only a shard that judged everything it was given reports: a red run
-# (as opposed to red survivors) writes nothing, and the totals step
-# names the shard that is missing.
-if [[ -n ${MUTANTS_SUMMARY_DIR:-} && ${#runs[@]} -eq 0 ]]; then
-  mkdir -p "${MUTANTS_SUMMARY_DIR}"
-  printf '%s\t%s\t%s\t%s\t%s\n' "${shard:-whole}" "${total}" "${killed}" "${survived}" "${excluded}" \
-    > "${MUTANTS_SUMMARY_DIR}/rust.tsv"
-fi
-if [[ ${red} -ne 0 ]]; then
-  echo "${label}: red — kill each survivor with an assertion, or record it in ${config}" >&2
-  echo "  as an exclude_re entry under a # line saying why the mutant is equivalent" >&2
-  exit 1
-fi
+python3 "${belt}/mutants-rust.py" verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
 org_done=1
