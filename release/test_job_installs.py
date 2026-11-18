@@ -67,6 +67,10 @@ OUT_OF_SCOPE = {
 # installs a list of its own.
 IN_SCOPE = [
     ("assemble-oci-index.yml", "manifest"),
+    # Not on the release path: the scheduled base approvals, which judge
+    # each pinned base with `stele verify base` (#1377). It installs
+    # stele alone, and this row holds the list to its calls.
+    ("base-attest.yml", "attest"),
     ("attach-release.yml", "attach"),
     ("build-go-binary.yml", "build"),
     # The collect jobs call `stele derive subjects` (#1364): stele alone,
