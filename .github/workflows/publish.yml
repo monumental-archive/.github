@@ -32,8 +32,8 @@
 # property is why there is no self-referential SHA to bootstrap.
 #
 # capability-boundary: several jobs here declare `id-token: write` — the
-# `sign*` jobs, the `verify*`/`vsa*` jobs, and `commit-point`. None of
-# them runs caller-supplied code. The sign and verdict jobs are `uses:`
+# `sign*` jobs, the `verify*`/`vsa*` jobs, `source-verdict`, and
+# `commit-point`. None of them runs caller-supplied code. The sign and verdict jobs are `uses:`
 # of canon workflows (the grant is passed down to `signer`, which is
 # where it is spent); `commit-point` is defined here with steps that
 # judge other jobs' results and carries its own marker at the job. The
@@ -1665,12 +1665,51 @@ jobs:
   # oci-image and wasm-npm forward nothing: they publish to a registry
   # and attach no release asset, so they own no build subject and
   # passing their build outputs REFUSES.
+  # The release tag's source verdict (#1350, stele#468): signed once per
+  # release by verify-release.yml's own identity in its `source` mode,
+  # after the signers and before attach, because attach publishes the
+  # release and a published release takes no further asset. It reads no
+  # release — only the tag and its commit's chain link — and hands the
+  # envelope to attach as a `release-*` artifact, which ships it under
+  # the name the assert policy declares. Never on a dry-run: a rehearsal
+  # has no sealed release to carry it, and the mode refuses one. Every
+  # verdict leg below reads the published envelope back.
+  # phase: attest
+  source-verdict:
+    name: Sign the tag's source verdict
+    needs:
+      - guard
+      - commit-point
+      - sign
+      - sign-image
+      - sign-binaries
+      - sign-go
+      - sign-source
+      - sign-wasm
+      - sign-extensions
+      - sign-extension-images
+    if: >-
+      ${{
+        !cancelled() && needs.guard.result == 'success' && needs.commit-point.result == 'success'
+        && !contains(join(needs.*.result, ','), 'failure') && !inputs.dry-run
+      }}
+    uses: ./.github/workflows/verify-release.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read # the tag, the history and the policy ref
+      id-token: write # the source verdict signs itself — verifier.id IS the certificate (#264)
+      attestations: write # declared by the callee's job; this mode writes no store record
+      artifact-metadata: write # declared by the callee's job
+    with:
+      mode: source
+      version: ${{ needs.guard.outputs.version }}
+
   # phase: attest
   attach:
     name: Attach evidence and publish
     needs:
       - guard
       - sbom
+      - source-verdict
       - sign
       - sign-image
       - sign-binaries
@@ -1699,6 +1738,7 @@ jobs:
       ${{
         !cancelled() && needs.guard.result == 'success'
         && needs.sbom.result == 'success'
+        && (needs.source-verdict.result == 'success' || inputs.dry-run)
         && !contains(join(needs.*.result, ','), 'failure')
         && (!contains(inputs.classes, 'rust-crate') || needs.sign.result == 'success')
         && (!contains(inputs.classes, 'oci-image') || needs.sign-image.result == 'success' || inputs.dry-run)

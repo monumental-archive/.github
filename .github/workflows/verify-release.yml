@@ -1,5 +1,5 @@
 # The release verifier: one identity for every check the org's verdict
-# rests on. Two modes, two invocations per release, same file:
+# rests on. Three modes, same file:
 #
 #   mode: bytes    — pull the published bytes back from the registry and
 #                    prove them against the built digests. Runs BEFORE the
@@ -19,7 +19,20 @@
 #                    comparisons, #210), and
 #                    only then assembles the VSA predicate
 #                    (slsa.dev/verification_summary/v1) and signs it
-#                    ITSELF (#264).
+#                    ITSELF (#264). Where the assert policy owes a
+#                    source verdict for the tag, it reads the one the
+#                    release published and refuses unless it binds the
+#                    commit the release's provenance names (#1350).
+#   mode: source   — once per release, AFTER the signers and BEFORE
+#                    attach: `stele emit source-vsa` proves the release
+#                    tag, finds the chain link at the tag's target in a
+#                    fetched history, and signs the tag's source verdict
+#                    under this same identity (stele#468). It reads no
+#                    release, so it can run while the release can still
+#                    take an asset; attach ships the envelope under the
+#                    name the assert policy declares
+#                    (evidence.sourceVerdictBundle). It refuses a
+#                    dry-run: a rehearsal has no release to carry it.
 #
 # Correct by construction (#208): every field of the predicate is an
 # output of a check performed in this job. `verificationResult: PASSED`
@@ -32,9 +45,13 @@
 #
 # capability-boundary: this workflow holds `id-token: write` and runs NO
 # caller-supplied code — no checkout, typed inputs validated against
-# whitelist shapes, a body of three stele calls (assert published, emit
-# vsa, emit enrichment) and the printf/cat/cp/tee/sed that pass their
-# files. It is
+# whitelist shapes, a body of four stele calls (assert published, emit
+# vsa, emit enrichment, emit source-vsa) and the printf/cat/cp/tee/sed
+# that pass their files. The source and verdict modes also FETCH the
+# caller's git history (`git fetch` of branches, tags and notes into a
+# bare repository: objects read, never a work tree checked out, never
+# a hook or script run), and read the release's own published asset
+# back with `gh release download`. It is
 # sign.yml's category, not a build job's. It signs the verdict ITSELF
 # (#264) because a verdict routed through the org signer makes
 # `verifier.id` a string in a caller-supplied predicate: any workflow
@@ -152,7 +169,7 @@ name: verify-release
         type: string
         default: ""
       mode:
-        description: bytes (default) or verdict — see the header.
+        description: bytes (default), verdict or source — see the header.
         required: false
         type: string
         default: bytes
@@ -228,9 +245,13 @@ jobs:
         uses: $/.github/actions/canon
 
       # stele is a belt tool (pinned, locked, provenance verified at lock
-      # time). A named list keeps the job cold: only the tool the job runs
-      # (#1333), held to its calls by release/test_job_installs.py.
-      - name: Install the belt's stele
+      # time). A named list keeps the job cold: only the tools the job
+      # runs (#1333), held to its calls by release/test_job_installs.py —
+      # stele in every mode, and for the source and verdict modes the jq
+      # that reads the source verdict's asset name and the cosign `stele
+      # emit source-vsa` signs through. One step per job, so bytes mode
+      # carries the two small binaries too.
+      - name: Install the belt's stele, jq and cosign
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         env:
           MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
@@ -239,7 +260,7 @@ jobs:
         with:
           version: 2026.11.6
           cache: false
-          install_args: github:monumental-archive/stele
+          install_args: github:monumental-archive/stele jq aqua:sigstore/cosign
 
       # Every declared subject is pulled back from the store that serves
       # it and compared to its built digest, and every image tag resolved
@@ -255,6 +276,7 @@ jobs:
       # what the verdict covers in verdict mode.
       - name: Prove each declared subject against the registry
         id: prove
+        if: inputs.mode != 'source'
         env:
           UNTRUSTED_SUBJECTS: ${{ inputs.subjects }}
           UNTRUSTED_IMAGES: ${{ inputs.images }}
@@ -280,6 +302,121 @@ jobs:
             "${args[@]}" --out "${RUNNER_TEMP}/verified.sha256"
           { echo "subjects<<SUBJECTS_EOF" && cat "${RUNNER_TEMP}/verified.sha256" && echo "SUBJECTS_EOF"; } >> "${GITHUB_OUTPUT}"
 
+      # A rehearsal has no release to carry a source verdict, so the
+      # source mode refuses one, as verdict mode does.
+      - name: Refuse a rehearsal
+        if: inputs.mode == 'source' && inputs.dry-run
+        run: |
+          echo "::error::a rehearsal has no release to carry a source verdict — refusing a dry-run"
+          exit 1
+
+      # The history a source verdict is proven and read against: every
+      # branch and tag commits-only, and the notes refs whole — a bare
+      # repository, objects only, nothing checked out and nothing run.
+      # The ledger's ref and the protected branches are the verify
+      # policy's, read by stele; fetching every head and every notes ref
+      # means this step restates neither. The credential rides in the
+      # environment, never on a command line a process listing shows.
+      - name: Fetch the history the source verdict reads
+        id: history
+        if: inputs.mode != 'bytes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git="${RUNNER_TEMP}/source-history"
+          git init -q --bare "${git}"
+          git -C "${git}" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader
+          GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          export GIT_CONFIG_VALUE_0
+          git -C "${git}" fetch -q --filter=tree:0 origin '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+          git -C "${git}" fetch -q --no-filter origin '+refs/notes/*:refs/notes/*'
+          echo "git-dir=${git}" >> "${GITHUB_OUTPUT}"
+
+      # The two facts the source verdict is judged by, from the pinned
+      # canon tree: the machinery version, read the way the plans
+      # judgment reads it, and the asset name the assert policy declares.
+      - name: Read the canon's version and the source verdict's asset name
+        id: facts
+        if: inputs.mode != 'bytes'
+        env:
+          CANON_PATH: ${{ steps.canon.outputs.path }}
+          MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
+          MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
+          MISE_LOCKED: "1"
+        run: |
+          set -euo pipefail
+          machinery=$(awk '/^version:/{print $2; exit}' "${CANON_PATH}/CITATION.cff")
+          [[ -n ${machinery} ]] || {
+            echo "::error::the pinned canon tree's CITATION.cff names no version — the owed epochs cannot be judged"
+            exit 1
+          }
+          asset=$(jq -r '.evidence.sourceVerdictBundle // empty' "${CANON_PATH}/slsa/assert-policy.json")
+          { echo "machinery=${machinery}" && echo "asset=${asset}"; } >> "${GITHUB_OUTPUT}"
+
+      # The tag's source verdict (stele#468): proven, signed under this
+      # workflow's identity and self-proved by `stele emit source-vsa`,
+      # before attach so the release can still take it as an asset.
+      # stele validates the tag and refuses a release that owes no
+      # verdict. stele resolves the pinned policy ref to the commit the
+      # verdict names as its policy digest (stele#472), as it does for
+      # the release verdict; GH_TOKEN is that read.
+      - name: Sign the tag's source verdict (stele emit source-vsa)
+        if: inputs.mode == 'source'
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          POLICY_REF: ${{ steps.canon.outputs.ref }}
+          CANON_PATH: ${{ steps.canon.outputs.path }}
+          GIT_DIR_SOURCE: ${{ steps.history.outputs.git-dir }}
+          MACHINERY: ${{ steps.facts.outputs.machinery }}
+          ASSET: ${{ steps.facts.outputs.asset }}
+          GH_TOKEN: ${{ github.token }}
+          MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
+          MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
+          MISE_LOCKED: "1"
+        run: |
+          set -euo pipefail
+          [[ -n ${ASSET} ]] || { echo "::error::the assert policy names no sourceVerdictBundle" && exit 1; }
+          mkdir -p "${RUNNER_TEMP}/source-verdict"
+          stele emit source-vsa --policy "${CANON_PATH}/slsa/verify-policy.json" \
+            --assert-policy "${CANON_PATH}/slsa/assert-policy.json" --repo "${GITHUB_REPOSITORY}" \
+            --tag "v${UNTRUSTED_VERSION}" --git-dir "${GIT_DIR_SOURCE}" --machinery-version "${MACHINERY}" \
+            --policy-ref "${POLICY_REF}" --policy-repo monumental-archive/.github --policy-tree "${CANON_PATH}" \
+            --out "${RUNNER_TEMP}/source-verdict/${ASSET}"
+      # Carried to attach as a `release-*` artifact: attach ships every
+      # one as a release asset, this one under the name the policy
+      # declares.
+      - name: Hand the source verdict to attach
+        if: inputs.mode == 'source'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-source-verdict
+          path: ${{ runner.temp }}/source-verdict/
+          if-no-files-found: error
+
+      # The source verdict the release published, read back for `emit
+      # vsa` to hold against the release's own commit. Absent when no
+      # source mode ran for this release; stele says by name whether one
+      # was owed.
+      - name: Read back the published source verdict
+        id: published-source
+        if: inputs.mode == 'verdict'
+        env:
+          UNTRUSTED_VERSION: ${{ inputs.version }}
+          ASSET: ${{ steps.facts.outputs.asset }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -z ${ASSET} ]]; then
+            exit 0
+          fi
+          mkdir -p "${RUNNER_TEMP}/published-source"
+          if gh release download "v${UNTRUSTED_VERSION}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "${ASSET}" --dir "${RUNNER_TEMP}/published-source"; then
+            echo "path=${RUNNER_TEMP}/published-source/${ASSET}" >> "${GITHUB_OUTPUT}"
+          fi
+
       # Everything verb-shaped is `stele emit vsa` (stele#21, stele#392):
       # the store fetch, the four verifying-artifacts comparisons, subject
       # coverage equality, the source-revision fold, the release decision
@@ -301,6 +438,9 @@ jobs:
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_INVENTORIES: ${{ inputs.inventories }}
+          GIT_DIR_SOURCE: ${{ steps.history.outputs.git-dir }}
+          MACHINERY: ${{ steps.facts.outputs.machinery }}
+          SOURCE_VERDICT: ${{ steps.published-source.outputs.path }}
           POLICY_REF: ${{ steps.canon.outputs.ref }}
           CANON_PATH: ${{ steps.canon.outputs.path }}
           GH_TOKEN: ${{ github.token }}
@@ -312,7 +452,14 @@ jobs:
           MISE_LOCKED: "1"
         run: |
           set -euo pipefail
+          # The published source verdict, when one was read back; stele
+          # decides whether one is owed and refuses either mismatch by
+          # name.
+          source_args=()
+          [[ -z ${SOURCE_VERDICT} ]] || source_args=(--source-verdict "${SOURCE_VERDICT}")
           stele emit vsa --policy "${CANON_PATH}/slsa/verify-policy.json" \
+            --assert-policy "${CANON_PATH}/slsa/assert-policy.json" --git-dir "${GIT_DIR_SOURCE}" \
+            --machinery-version "${MACHINERY}" "${source_args[@]}" \
             --repo "${GITHUB_REPOSITORY}" --tag "v${UNTRUSTED_VERSION}" \
             --subjects "${RUNNER_TEMP}/verified.sha256" --sbom-assets .spdx.json \
             --inventory-plan "${UNTRUSTED_INVENTORIES}" --signer-workflows "${CANON_PATH}/.github/workflows" \

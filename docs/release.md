@@ -773,6 +773,32 @@ re-derive from — which is why the VSA never replaces the per-class
 bundles. Dry-runs skip it, and verdict mode refuses a
 dry-run on its own: a rehearsal must never sign "PASSED".
 
+**A release tag carries a source verdict of its own** (#1350,
+stele#468). The release verdict speaks for the artifacts; nothing in
+it names a source level. So `verify-release.yml` has a third mode,
+**source**, which `publish.yml` calls once per release, after the
+signers and before `attach`, never on a dry-run. `stele emit
+source-vsa` runs there:
+
+- it proves the tag under the assert policy's `tags` section;
+- it finds the chain link at the tag's own commit in a fetched
+  history;
+- it copies that link's level into a VSA whose subject is the commit,
+  with the tag in `sourceRefs`;
+- it signs the VSA under this workflow's identity and proves it as a
+  stranger would.
+
+It reads no release, which is what lets it run while the release can
+still take an asset. `attach` ships the envelope as the asset the
+assert policy names (`evidence.sourceVerdictBundle`). Each verdict
+leg then reads that published asset back, and `stele emit vsa`
+refuses unless it binds the commit the release's own provenance
+names. The obligation starts at the canon version
+`evidence.sourceVerdictFromVersion` names. Releases cut on older
+pins owe none, and `audit:attestations` holds every later release to
+the asset. A stranger reads it with `stele verify source-vsa`
+([runbook](runbook.md), the verdict recipe).
+
 **Every class gets a verdict, and every verdict runs after publish**
 (#209). Three proof shapes feed one manifest: registry artifacts are
 pulled back by stable URL (crates.io, npm); release assets are pulled

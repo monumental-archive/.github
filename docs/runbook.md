@@ -419,6 +419,32 @@ literal):
   one replaced (the same shape as the `attestations-vsa-*` asset caveat
   below, which applies to releases cut before `.github@v1.13.0`).
 
+  **A release tag's source verdict** (#1350) is one signed statement
+  binding the tag to its commit and to the source level that commit's
+  chain link holds. It is published as the release asset
+  `source-verdict.json` from `.github@v1.70.1` on. One command reads
+  it, from a clone holding the branches, the ledger and the tag:
+
+  ```bash
+  git clone --bare https://github.com/<owner>/<repo>.git repo.git
+  git -C repo.git fetch origin 'refs/notes/*:refs/notes/*'
+  stele verify source-vsa --repo <owner>/<repo> --tag vX.Y.Z \
+    --git-dir repo.git --machinery-digest <canon commit> \
+    --policy verify-policy.json --assert-policy assert-policy.json
+  ```
+
+  It checks:
+
+  - the signature, under the same verifier identity as the release
+    verdict;
+  - that the subject is the tag's commit, and that `sourceRefs` names
+    exactly the tag;
+  - that the claimed level is no higher than the commit's link shows
+    today.
+
+  The two policies are the canon's own `slsa/` files at the pinned
+  commit.
+
   **Release tags are signed at the mint** (#349 S4): gitsign puts a
   keyless x509 signature in the tag object's PGP slot, under the same
   Sigstore root of trust as everything else. The limit, stated rather
