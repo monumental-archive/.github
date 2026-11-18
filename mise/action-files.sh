@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The one selection of the files the action lints read (#1448). Sourced
 # by lint:actions-allowed, lint:action-pins, its fix:actions and
-# audit:action-pins halves, and lint:zizmor
-# (`. "${ORG_BELT_DIR}/action-files.sh"`), never executed, so they
-# cannot disagree about what an action file is.
+# audit:action-pins halves, lint:zizmor, lint:shell-embedded, and
+# lint:workflow-shell with fix:workflow-shell (which add the workflow
+# templates) — `. "${ORG_BELT_DIR}/action-files.sh"`, never executed —
+# so they cannot disagree about what an action file is.
 #
 # The workflows, and every tracked action definition WHEREVER it lives:
 # an action is identified by its file name, which the platform fixes

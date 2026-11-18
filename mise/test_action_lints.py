@@ -89,6 +89,41 @@ def action(*uses: str) -> str:
     return f"name: x\ndescription: x\nruns:\n  using: composite\n  steps:\n{steps}"
 
 
+def run_step(name: str, lines: list[str]) -> str:
+    """Render a composite action with one named bash step and its block.
+
+    Returns:
+        The YAML text; the block's first line is the file's line 9.
+
+    """
+    block = "".join(f"        {line}\n" for line in lines)
+    return (
+        "name: x\ndescription: x\nruns:\n  using: composite\n  steps:\n"
+        f"    - name: {name}\n      shell: bash\n      run: |\n{block}"
+    )
+
+
+def template(name: str, lines: list[str]) -> str:
+    """Render a workflow template with one named step and its block.
+
+    Returns:
+        The YAML text; the block's first line is the file's line 8.
+
+    """
+    block = "".join(f"          {line}\n" for line in lines)
+    return (
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n"
+        f"      - name: {name}\n        run: |\n{block}"
+    )
+
+
+SIXTEEN = [f"echo {i}" for i in range(1, 17)]
+CEILING = (
+    "workflow-shell: 1 finding(s) — a run: block holds at most 15 lines,"
+    " and the debt file only shrinks"
+)
+
+
 class Planted(unittest.TestCase):
     """A planted, tracked tree; a lint's verdict on it."""
 
@@ -284,6 +319,76 @@ class Zizmor(Planted):
             (0, "lint:zizmor: no workflows or actions, skipped\n"),
         )
         self.assertFalse(self.args.exists())
+
+
+class ShellEmbedded(Planted):
+    """lint:shell-embedded reads a top-level action's run: blocks."""
+
+    def test_an_unquoted_expansion_in_a_top_level_action_is_red(self) -> None:
+        """Shellcheck refuses the block, at its line in actions/x/action.yml."""
+        self.plant({"actions/x/action.yml": run_step("Remove", ["rm $UNQUOTED"])})
+        done = self.run_task("lint:shell-embedded")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(
+            "actions/x/action.yml:9:note: Double quote to prevent globbing and"
+            " word splitting. [SC2086]",
+            done.stderr.splitlines(),
+        )
+
+    def test_a_clean_top_level_action_passes(self) -> None:
+        """The control row: the same file, quoted, is green."""
+        self.plant({"actions/x/action.yml": run_step("Remove", ['rm "${QUOTED}"'])})
+        done = self.run_task("lint:shell-embedded")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
+
+class WorkflowShell(Planted):
+    """lint:workflow-shell and fix:workflow-shell read a top-level action."""
+
+    DEBT = "security/workflow-shell-debt.txt"
+
+    def test_an_oversized_block_in_a_top_level_action_is_red(self) -> None:
+        """Sixteen lines in actions/x/action.yml, unlisted, are over the ceiling."""
+        self.plant({"actions/x/action.yml": run_step("Big", SIXTEEN)})
+        done = self.run_task("lint:workflow-shell")
+        self.assertEqual(done.returncode, 1)
+        finding = (
+            "actions/x/action.yml:9: step 'Big' holds a run: block of 16"
+            " lines, over the 15-line ceiling, and"
+            " security/workflow-shell-debt.txt does not list it — move the"
+            " logic out (CONTRIBUTING.md)"
+        )
+        self.assertEqual(done.stderr.splitlines(), [finding, CEILING])
+
+    def test_the_workflow_templates_are_still_read(self) -> None:
+        """The selection is added to, never narrowed: templates stay."""
+        self.plant({"workflow-templates/t.yml": template("Big", SIXTEEN)})
+        done = self.run_task("lint:workflow-shell")
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines()[0],
+            "workflow-templates/t.yml:8: step 'Big' holds a run: block of 16"
+            " lines, over the 15-line ceiling, and"
+            " security/workflow-shell-debt.txt does not list it — move the"
+            " logic out (CONTRIBUTING.md)",
+        )
+
+    def test_the_fixer_lowers_a_top_level_action_entry(self) -> None:
+        """Read, the entry is lowered; unread, it would be removed as gone."""
+        self.plant({
+            "actions/x/action.yml": run_step("Big", SIXTEEN),
+            self.DEBT: "actions/x/action.yml\tBig\t30\t# canon helper: #1\n",
+        })
+        done = self.run_task("fix:workflow-shell")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "fix:workflow-shell: 1 entry(ies) lowered, 0 removed; it never adds one\n",
+        )
+        self.assertEqual(
+            (self.tree / self.DEBT).read_text("utf-8"),
+            "actions/x/action.yml\tBig\t16\t# canon helper: #1\n",
+        )
 
 
 class Selection(Planted):
