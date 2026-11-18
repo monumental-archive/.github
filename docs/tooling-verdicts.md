@@ -2871,6 +2871,22 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   belt beside the runner — two instrumentations of one suite, and a
   provider version the belt would own where the repository's lockfile
   should.
+  **Amended 2026-11-18: the run measured is the `test` task's own.**
+  The first build ran vitest's whole configured suite, where the
+  Decided build says the repository's own test command (#707: the suite
+  measured is the suite the gate runs). The leg now reads the one vitest
+  invocation from the `test` task and the tasks it depends on (`mise
+  tasks info`), and runs the repository's vitest with exactly its
+  arguments, from its task's `dir`, plus the coverage flags. A task it
+  cannot read is refused by name: no vitest (`pnpm test` behind a
+  package.json script), two, a shell expansion, a compound line, an
+  unknown launcher, a subcommand other than `run`, or a coverage flag of
+  its own. A vitest tree with no `test` task skips clean, as a Python
+  one does. Running the task's scripts with a coverage-adding `vitest`
+  first on PATH was measured and refused: `pnpm exec` and `npx` put
+  `node_modules/.bin` at the head of PATH, so the repository's binary
+  runs and the shim never does, and vitest reads no environment variable
+  that enables coverage.
 - **Rust branch coverage in the gate** — skipped, for now
   (#1359, 2026-11-17). `cargo llvm-cov --branch` needs a nightly
   toolchain: measured 2026-11-17 on a one-function crate, the dated
