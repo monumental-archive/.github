@@ -58,8 +58,6 @@
 .github/workflows/level-assert.yml	Assert the published board is the measured one	18	# stele: #1352 unassigned
 .github/workflows/level-assert.yml	Report	20	# canon helper (the remaining small steps): #1386
 .github/workflows/level.yml	Check this repository against the canon roster	26	# stele: monumental-archive/stele#388, canon swap #1379
-.github/workflows/publish-rust-crate.yml	Publish	77	# canon helper (registry publishers): #1383
-.github/workflows/publish-wasm-npm.yml	Publish	49	# canon helper (registry publishers): #1383
 .github/workflows/publish.yml	Check the ref and the class	50	# stele: monumental-archive/stele#403, canon swap #1378
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/publish.yml	Derive this release's VEX and gate on undecided advisories	27	# stele: monumental-archive/stele#397, canon swap #1372
