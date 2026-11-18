@@ -44,6 +44,13 @@ INHERITED: dict[str, str] = {
     "CARGO_HOME": "where cargo's toolchain lives",
     "RUSTUP_HOME": "where rustup's toolchains live",
     "RUSTUP_TOOLCHAIN": "the toolchain mise selected for this run",
+    # The coverage measurement reaches the helpers a fixture runs as
+    # `python3 helper.py` through these two (#1331): a sitecustomize on
+    # PYTHONPATH starts coverage in every python3 that names its rc file.
+    # Without them every helper a suite execs runs unmeasured and the
+    # branch floor falls (measured: 86.75% against 89.1%).
+    "COVERAGE_PROCESS_START": "where coverage's child-process rc file is",
+    "PYTHONPATH": "the coverage start-up hook, when the suite is measured",
 }
 
 # What a tool needs beyond INHERITED, per tool, each with why. A row
