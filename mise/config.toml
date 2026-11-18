@@ -6855,6 +6855,13 @@ dir = "{{cwd}}"
 # coverage:report beside it: the `fix` aggregate collects `fix:*`
 # wildcard, and a fixer that runs the whole test suite does not belong
 # in a sweep nobody asked for.
+#
+# A Rust repository that declares its dated nightly (FUZZ_TOOLCHAIN) also
+# gets its `rust-branches` line (#1359): measured here with `--branch` on
+# that nightly and written beside the main floor under the same law, for
+# audit:coverage-branches to hold on the Monday cron. Without the nightly
+# the line is not written and the audit skips clean; a line already
+# committed is carried through, never dropped.
 run = '''
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
@@ -6862,6 +6869,12 @@ if [[ -z ${applies} ]]; then
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
+if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
+  branches=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt rust-branches) || exit 1
+  legs="${legs}"$'\n'"${branches}"
+elif [[ -f Cargo.toml ]]; then
+  echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
+fi
 python3 "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
 '''
@@ -8045,6 +8058,45 @@ if [[ -n ${failed} ]]; then
   exit 1
 fi
 echo "audit:fuzz: all targets ran ${secs}s clean under ASan"
+'''
+
+[tasks."audit:coverage-branches"]
+description = "Hold the Rust branch-coverage floor (.coverage-floor's rust-branches line) on the nightly (never the gate)"
+dir = "{{cwd}}"
+# The branch half of #1336's property 2 for Rust (#1359). `cargo llvm-cov
+# --branch` passes -Z flags that stable refuses, so the figure needs a
+# nightly, and a second instrumented test run would double a Rust
+# repository's test time on every pull request: the gate keeps its line
+# leg, and the branch floor is held here, on the Monday cron, on the
+# nightly the repository already declares for audit:fuzz. The
+# measurement is coverage-measure.sh's `rust-branches` leg, over the
+# workspace and exclusions the gate's `rust` leg uses (one function), and
+# the floor is the `rust-branches` line coverage:adopt derived — read
+# through coverage-floor.py, so a hand-typed line is refused as drift
+# here exactly as the main floor is in the gate. Reopen: `--branch` on
+# stable, when this becomes one flag on the gate's leg
+# (docs/tooling-verdicts.md).
+run = '''
+[[ -f Cargo.toml ]] || {
+  echo "audit:coverage-branches: no Cargo.toml, skipped"
+  exit 0
+}
+floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg rust-branches) || exit 1
+[[ -n ${floor} ]] || {
+  echo "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped"
+  exit 0
+}
+measured=$("${ORG_BELT_DIR}/coverage-measure.sh" audit:coverage-branches rust-branches) || exit 1
+read -r leg pct <<< "${measured}"
+if [[ ${leg:-} != rust-branches || -z ${pct:-} ]]; then
+  echo "audit:coverage-branches: the measurement printed no rust-branches figure — a check that reads nothing must not pass" >&2
+  exit 1
+fi
+if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
+  echo "audit:coverage-branches: rust-branches: ${pct}% is below the derived floor ${floor}%" >&2
+  exit 1
+fi
+echo "audit:coverage-branches: rust-branches holds the floor ${floor} (${pct}%)"
 '''
 
 [tasks."audit:go-fuzz"]

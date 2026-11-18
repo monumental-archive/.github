@@ -29,6 +29,17 @@ Two entry points, one definition:
          consumes. The ratchet is applied here, so both callers get the
          same law from the same code.
 
+One leg is held apart (#1359): `rust-branches`, Rust branch coverage,
+measured on a nightly and so never in the gate. It is a second line of
+the same file, `rust-branches <floor>`, with its own `rust-branches
+measured:` record under the same band and the same law — derived,
+never typed, refused as drift, and only ever raised. It is not folded
+into the minimum the main floor is cut from: `coverage:check` cannot
+measure it, so the gate would be holding a number it never reads. The
+Monday audit reads it (`read --leg rust-branches`); `coverage:adopt`
+writes it; the release path, which measures on stable, carries it
+through unchanged.
+
 Opt-in is unchanged: a repository with no `.coverage-floor` owes nothing
 and skips clean in both directions. The belt offers the mechanism; the
 committed file is the repository's adoption and its number is the
@@ -71,7 +82,12 @@ BAND_KEY = "band"
 MEASURED_KEY = "measured"
 DERIVED_KEY = "derived"
 RESET_KEY = "reset"
-KEYS = frozenset({BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY})
+# The legs held as floors of their own rather than in the minimum.
+SEPARATE = ("rust-branches",)
+KEYS = frozenset(
+    {BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY}
+    | {f"{leg} {MEASURED_KEY}" for leg in SEPARATE},
+)
 
 LEG_FIELDS = 2
 
@@ -92,6 +108,14 @@ TEMPLATE = """\
 {floor}
 """
 
+SEPARATE_TEMPLATE = """\
+#
+# {leg}: a floor of its own (#1359), measured off the gate and held by
+# the Monday audit, under the same band and the same law.
+# {leg} {measured_key}: {measured}
+{leg} {floor}
+"""
+
 
 class Record(NamedTuple):
     """A parsed `.coverage-floor`: the number, and how it was arrived at."""
@@ -101,6 +125,9 @@ class Record(NamedTuple):
     measured: Decimal | None
     derived: str | None
     reset: str | None
+    # Leg name to (floor, measured) for each SEPARATE leg the file holds;
+    # `parse` always sets it, so None is only the unparsed default.
+    separate: dict[str, tuple[Decimal, Decimal]] | None = None
 
 
 def quantise(value: Decimal) -> Decimal:
@@ -129,27 +156,83 @@ def number(text: str) -> Decimal | None:
     return value
 
 
-def fields(text: str) -> tuple[dict[str, str], list[str]]:
+def fields(text: str) -> tuple[dict[str, str], list[str], list[str]]:
     """Split a floor file into its comment record and its bare lines.
 
     Returns:
-        The `key: value` pairs stated in comments, and every non-comment,
-        non-blank line in the order they appear.
+        The `key: value` pairs stated in comments, every non-comment,
+        non-blank line in the order they appear, and of those apart the
+        lines that open with a SEPARATE leg's name.
 
     """
     record: dict[str, str] = {}
     bare: list[str] = []
+    apart: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
         if not line.startswith("#"):
-            bare.append(line)
+            (apart if line.split()[0] in SEPARATE else bare).append(line)
             continue
         key, sep, value = line.lstrip("#").strip().partition(":")
         if sep and key.strip() in KEYS:
             record[key.strip()] = value.strip()
-    return record, bare
+    return record, bare, apart
+
+
+def separate_of(
+    record: dict[str, str],
+    apart: list[str],
+    band: Decimal,
+) -> tuple[dict[str, tuple[Decimal, Decimal]] | None, list[str]]:
+    """Read the SEPARATE legs' lines and hold each to its own record.
+
+    Returns:
+        Leg name to (floor, measured), or None with every problem found.
+
+    """
+    lines: dict[str, list[str]] = {}
+    for line in apart:
+        lines.setdefault(line.split()[0], []).append(line)
+    held: dict[str, tuple[Decimal, Decimal]] = {}
+    problems: list[str] = []
+    for leg in SEPARATE:
+        key = f"{leg} {MEASURED_KEY}"
+        stated = lines.get(leg, [])
+        if not stated and key not in record:
+            continue
+        if len(stated) != 1 or key not in record:
+            problems.append(
+                f"states {len(stated)} `{leg}` line(s) and "
+                f"{'a' if key in record else 'no'} `{key}` record: the "
+                "leg is one line and one record, both written by "
+                "`mise run coverage:adopt`, or neither",
+            )
+            continue
+        parts = stated[0].split()
+        floor = number(parts[1]) if len(parts) == LEG_FIELDS else None
+        measured = number(record[key])
+        if floor is None or not FLOOR_MIN <= floor <= FLOOR_MAX:
+            problems.append(f"{leg} line {stated[0]!r} is not `{leg} <percent>`")
+            continue
+        if measured is None or not FLOOR_MIN <= measured <= FLOOR_MAX:
+            problems.append(f"{key} {record[key]!r} is not a percentage")
+            continue
+        expected = max(FLOOR_MIN, measured - band)
+        if floor != expected:
+            problems.append(
+                f"{leg} floor {floor} disagrees with its own record: "
+                f"measured {measured} minus band {band} is {expected}. "
+                "Refused as drift and never repaired — restore the "
+                "derivation, or delete both lines and re-derive with "
+                "`mise run coverage:adopt`",
+            )
+            continue
+        held[leg] = (floor, measured)
+    if problems:
+        return None, problems
+    return held, []
 
 
 def floor_of(bare: list[str]) -> tuple[Decimal | None, list[str]]:
@@ -253,24 +336,17 @@ def derived_form(
     return Record(floor, band, measured, record.get(DERIVED_KEY), None), []
 
 
-def parse(text: str) -> tuple[Record | None, list[str]]:
-    """Read a floor file and hold it to the derived-state law.
+def main_form(
+    record: dict[str, str],
+    floor: Decimal,
+    band: Decimal,
+) -> tuple[Record | None, list[str]]:
+    """Read the main floor's record in whichever form it is stated.
 
     Returns:
-        The record, or None with the problems that refused it. Every
-        problem is a complete sentence naming its own remedy: this output
-        is what a session sees when the gate goes red.
+        The record, or None with the problem that refused it.
 
     """
-    record, bare = fields(text)
-
-    floor, problems = floor_of(bare)
-    if floor is None:
-        return None, problems
-    band, problems = band_of(record)
-    if band is None:
-        return None, problems
-
     has_measured = MEASURED_KEY in record
     has_reset = RESET_KEY in record
     if has_measured and has_reset:
@@ -294,6 +370,32 @@ def parse(text: str) -> tuple[Record | None, list[str]]:
             "`reset: <why>`"
         ),
     ]
+
+
+def parse(text: str) -> tuple[Record | None, list[str]]:
+    """Read a floor file and hold it to the derived-state law.
+
+    Returns:
+        The record, or None with the problems that refused it. Every
+        problem is a complete sentence naming its own remedy: this output
+        is what a session sees when the gate goes red.
+
+    """
+    record, bare, apart = fields(text)
+
+    floor, problems = floor_of(bare)
+    if floor is None:
+        return None, problems
+    band, problems = band_of(record)
+    if band is None:
+        return None, problems
+    held, problems = separate_of(record, apart, band)
+    if held is None:
+        return None, problems
+    main, problems = main_form(record, floor, band)
+    if main is None:
+        return None, problems
+    return main._replace(separate=held), []
 
 
 def legs(text: str) -> tuple[list[tuple[str, Decimal]], list[str]]:
@@ -321,20 +423,36 @@ def legs(text: str) -> tuple[list[tuple[str, Decimal]], list[str]]:
     return measured, problems
 
 
-def render(measured: Decimal, provenance: str) -> str:
+def render(
+    measured: Decimal,
+    provenance: str,
+    separate: dict[str, Decimal] | None = None,
+) -> str:
     """Write the file the derivation describes.
 
     Returns:
-        The whole file, band comment and all.
+        The whole file, band comment and all, with a section for each
+        SEPARATE leg given (leg name to its measurement).
 
     """
     quantised = quantise(measured)
-    return TEMPLATE.format(
+    text = TEMPLATE.format(
         band=BAND,
         measured=quantised,
         provenance=provenance,
         floor=max(FLOOR_MIN, quantised - BAND),
     )
+    for leg in SEPARATE:
+        if separate is None or leg not in separate:
+            continue
+        leg_measured = quantise(separate[leg])
+        text += SEPARATE_TEMPLATE.format(
+            leg=leg,
+            measured_key=MEASURED_KEY,
+            measured=leg_measured,
+            floor=max(FLOOR_MIN, leg_measured - BAND),
+        )
+    return text
 
 
 def complain(problems: list[str], path: Path) -> None:
@@ -343,13 +461,14 @@ def complain(problems: list[str], path: Path) -> None:
         print(f"{NAME}: {path} {problem}", file=sys.stderr)
 
 
-def read(path: Path) -> int:
-    """Print the floor `coverage:check` must enforce.
+def read(path: Path, leg: str | None = None) -> int:
+    """Print the floor `coverage:check` (or, for a leg, the audit) enforces.
 
     Returns:
         0 with the floor on stdout, 0 with an empty stdout when the
-        repository has adopted no floor, and 1 when the committed file
-        does not hold to the derived-state law.
+        repository has adopted no floor (or no line for the leg asked
+        for), and 1 when the committed file does not hold to the
+        derived-state law — every line of it, whichever was asked for.
 
     """
     if not path.exists():
@@ -358,12 +477,52 @@ def read(path: Path) -> int:
     if record is None:
         complain(problems, path)
         return 1
-    print(record.floor)
+    if leg is None:
+        print(record.floor)
+    elif leg in (record.separate or {}):
+        print(record.separate[leg][0])
     return 0
 
 
-def write(path: Path, measured: Decimal, provenance: str, *, adopt: bool) -> int:
+def ratchet_separate(record: Record, separate: dict[str, Decimal]) -> bool:
+    """Hold each freshly measured SEPARATE leg to the floor it already has.
+
+    Returns:
+        True when every leg may be rewritten, False (with the reason
+        printed) when one would fall.
+
+    """
+    held = True
+    holds = record.separate or {}
+    for leg, measured in separate.items():
+        if leg not in holds:
+            continue
+        floor = holds[leg][0]
+        if quantise(measured) < floor + BAND:
+            print(
+                f"{NAME}: {leg} measured {quantise(measured)}% is below its "
+                f"floor {floor}% plus the {BAND}-point band. The floor only "
+                f"rises, so nothing is written: write the tests that put "
+                f"{leg} back to {floor + BAND}%",
+                file=sys.stderr,
+            )
+            held = False
+    return held
+
+
+def write(
+    path: Path,
+    measured: Decimal,
+    provenance: str,
+    *,
+    adopt: bool,
+    separate: dict[str, Decimal] | None = None,
+) -> int:
     """Re-derive the floor from a fresh measurement.
+
+    `separate` is the SEPARATE legs measured this time; a leg the file
+    already holds and this run did not measure is carried through as it
+    stands, so a release measuring on stable keeps the nightly's figure.
 
     Returns:
         0 when the file was written or the repository owes nothing, and 1
@@ -373,13 +532,18 @@ def write(path: Path, measured: Decimal, provenance: str, *, adopt: bool) -> int
     """
     quantised = quantise(measured)
     derived = max(FLOOR_MIN, quantised - BAND)
+    fresh = dict(separate or {})
+    noted = "".join(
+        f", {leg} {max(FLOOR_MIN, quantise(m) - BAND)} (measured {quantise(m)})"
+        for leg, m in fresh.items()
+    )
 
     if not path.exists():
         if not adopt:
             print(f"{NAME}: no {path}, skipped")
             return 0
-        path.write_text(render(measured, provenance), encoding="utf-8")
-        print(f"{NAME}: adopted {path} at {derived} (measured {quantised})")
+        path.write_text(render(measured, provenance, fresh), encoding="utf-8")
+        print(f"{NAME}: adopted {path} at {derived} (measured {quantised}){noted}")
         return 0
 
     record, problems = parse(path.read_text(encoding="utf-8"))
@@ -396,11 +560,12 @@ def write(path: Path, measured: Decimal, provenance: str, *, adopt: bool) -> int
         # conscious act, so a recordless or drifted floor is exactly what
         # it exists to migrate. It still cannot lower a floor whose record
         # parses: that path falls through to the ratchet below.
-        path.write_text(render(measured, provenance), encoding="utf-8")
-        print(f"{NAME}: rewrote {path} at {derived} (measured {quantised})")
+        path.write_text(render(measured, provenance, fresh), encoding="utf-8")
+        print(f"{NAME}: rewrote {path} at {derived} (measured {quantised}){noted}")
         return 0
 
-    if quantised < record.floor + BAND:
+    main_held = quantised >= record.floor + BAND
+    if not main_held:
         print(
             f"{NAME}: measured {quantised}% is below the floor "
             f"{record.floor}% plus the {BAND}-point band. The floor only "
@@ -410,14 +575,19 @@ def write(path: Path, measured: Decimal, provenance: str, *, adopt: bool) -> int
             f"and `derived` lines of {path} with `reset: <why>`",
             file=sys.stderr,
         )
+    # Every leg is judged before anything returns, so one run names every
+    # refusal rather than the first.
+    if not ratchet_separate(record, fresh) or not main_held:
         return 1
 
     # The ratchet passed, so `measured - band >= floor` holds by
     # arithmetic: the new floor cannot be below the old one. Asserting
     # that again here would be a second definition of the same law, with
-    # its own way of being wrong.
-    path.write_text(render(measured, provenance), encoding="utf-8")
-    print(f"{NAME}: floor {record.floor} -> {derived} (measured {quantised})")
+    # its own way of being wrong. A SEPARATE leg this run did not measure
+    # keeps the measurement its record states.
+    kept = {leg: m for leg, (_, m) in (record.separate or {}).items()} | fresh
+    path.write_text(render(measured, provenance, kept), encoding="utf-8")
+    print(f"{NAME}: floor {record.floor} -> {derived} (measured {quantised}){noted}")
     return 0
 
 
@@ -428,10 +598,12 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
         A process exit status.
 
     """
-    measured, problems = legs(source)
+    every, problems = legs(source)
     if problems:
         complain(problems, path)
         return 1
+    measured = [(leg, pct) for leg, pct in every if leg not in SEPARATE]
+    separate = {leg: pct for leg, pct in every if leg in SEPARATE}
     if not measured:
         print(
             f"{NAME}: no leg was measured — a derivation that reads "
@@ -443,7 +615,7 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
     # deriving from an average, or from the language that happens to be
     # measured last, writes a floor the gate will then refuse.
     weakest = min(percent for _, percent in measured)
-    return write(path, weakest, provenance, adopt=adopt)
+    return write(path, weakest, provenance, adopt=adopt, separate=separate)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -456,7 +628,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="the derived coverage floor")
     parser.add_argument("--path", type=Path, default=DEFAULT_PATH)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("read", help="print the floor to enforce, refusing drift")
+    reader = sub.add_parser("read", help="print the floor to enforce, refusing drift")
+    reader.add_argument(
+        "--leg",
+        choices=SEPARATE,
+        help="print the floor of a leg held apart (empty when the file has none)",
+    )
     writer = sub.add_parser(
         "write",
         help="re-derive the floor from `<leg> <percent>` lines on stdin",
@@ -470,7 +647,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "read":
-        return read(args.path)
+        return read(args.path, args.leg)
     return derive(args.path, sys.stdin.read(), args.provenance, adopt=args.adopt)
 
 
