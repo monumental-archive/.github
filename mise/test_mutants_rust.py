@@ -397,6 +397,23 @@ class Verdict(Planted):
             ],
         )
 
+    def test_a_count_outcomes_json_does_not_state_is_red_by_name(self) -> None:
+        """No `timeout` in outcomes.json: not judged, never read as zero."""
+        result = outcomes(3, 3, 0)
+        del result["timeout"]
+        self.plant(package("alpha", str(self.tree)), result=result)
+        done, _ = self.run_leg(MUTANTS_SUMMARY_DIR=str(self.tmp / "summary"))
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [f"{LABEL}: workspace: outcomes.json states no timeout", *RED],
+        )
+        self.assertIn(
+            f"{LABEL}: 0 mutants, 0 killed, 0 survived, 0 excluded",
+            done.stdout.splitlines(),
+        )
+        self.assertFalse((self.tmp / "summary" / "rust.tsv").exists())
+
 
 class Reasons(Planted):
     """Every exclusion carries its reason, in the repository's own file."""
@@ -733,11 +750,17 @@ class Readers(unittest.TestCase):
         """Never the shard's figure."""
         self.assertEqual(helper.Plan(every=7, listed=5, here=1).excluded, 2)
 
-    def test_a_timeout_is_killed_and_absent_counts_are_zero(self) -> None:
+    def test_a_timeout_is_killed(self) -> None:
         """Caught plus timeout is killed; missed is survived."""
         counts = {"total_mutants": 6, "caught": 3, "timeout": 2, "missed": 1}
         self.assertEqual(helper.tally(counts), (6, 5, 1))
-        self.assertEqual(helper.tally({}), (0, 0, 0))
+
+    def test_a_count_not_stated_is_named_never_zero(self) -> None:
+        """Absent, null, a string or a bool is not a stated count."""
+        counts = {"total_mutants": 6, "caught": None, "timeout": "2", "missed": True}
+        self.assertEqual(helper.missing_counts(counts), ["caught", "timeout", "missed"])
+        self.assertEqual(helper.missing_counts([]), list(helper.COUNTS))
+        self.assertEqual(helper.missing_counts(dict.fromkeys(helper.COUNTS, 0)), [])
 
     def test_red_is_a_survivor_or_a_run_that_judged_nothing(self) -> None:
         """Clean is neither."""

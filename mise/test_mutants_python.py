@@ -255,6 +255,31 @@ class Verdict(Planted):
         )
         self.assertEqual(self.counts(), "0/1\t4\t3\t1\t0\n")
 
+    def test_a_backslash_in_the_removed_line_is_found_at_its_true_line(self) -> None:
+        """A raw regex in the mutated line: line 12, not the def's line 10.
+
+        Fails against the shell leg before #1486: it passed the removed
+        line through `awk -v`, which turns backslash-d into `d`, so no line
+        matched and the survivor was reported at the `def` (measured: 10).
+        """
+        module = MODULE.replace(
+            "    return x + 1\n", '    return re.match(r"\\d+", x)\n', 1
+        )
+        self.plant(KILLED | {SURVIVOR: "survived"}, module=module)
+        (self.show / SURVIVOR).write_text(
+            DIFF.replace(
+                "-    return x + 1", '-    return re.match(r"\\d+", x)'
+            ).replace("+    return x - 1", '+    return re.match(r"\\D+", x)'),
+            encoding="utf-8",
+        )
+        done, _ = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stdout.splitlines()[0],
+            f"{LABEL}: survived: pkg/mod.py:12: {SURVIVOR}:"
+            ' return re.match(r"\\D+", x)',
+        )
+
     def test_no_tests_is_a_survivor(self) -> None:
         """A mutant no test reaches is the least explained of all."""
         self.plant({SURVIVOR: "no tests"})

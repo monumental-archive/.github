@@ -20,7 +20,8 @@ comes under the canon's coverage figure and its own mutation run
 - `verdict SCRATCH`: every run in the order the shell made them, from
   the scratch directory: which exit statuses of `cargo mutants` mean
   "judged" (0, 2 survivors, 3 timeouts), the tally from each
-  `outcomes.json`, the survivors from `missed.txt`. Prints them and the
+  `outcomes.json` (a count it does not state is red by name, never
+  read as zero), the survivors from `missed.txt`. Prints them and the
   summary line, writes `rust.tsv` for the totals, and returns the leg's
   exit status.
 
@@ -242,21 +243,44 @@ class Verdict:
     runs: list[str] = field(default_factory=list)
 
 
+COUNTS = ("total_mutants", "caught", "timeout", "missed")
+
+
+def missing_counts(outcomes: object) -> list[str]:
+    """Name the counts outcomes.json does not state.
+
+    A count that is absent, null or not a whole number is not stated:
+    reading one as zero would pass a check on nothing (#1486).
+
+    Returns:
+        The missing fields, in COUNTS order; all of them when the
+        document is not an object.
+
+    """
+    if not isinstance(outcomes, dict):
+        return list(COUNTS)
+    return [
+        key
+        for key in COUNTS
+        if not isinstance(outcomes.get(key), int) or isinstance(outcomes.get(key), bool)
+    ]
+
+
 def tally(outcomes: dict) -> tuple[int, int, int]:
-    """Read cargo-mutants' counts.
+    """Read cargo-mutants' counts, every one of which is stated.
 
     A timeout counts as killed: the suite noticed, by hanging, and
     cargo-mutants itself calls it no survivor.
 
     Returns:
-        Mutants, killed, survived; an absent count is 0.
+        Mutants, killed, survived.
 
     """
-
-    def count(key: str) -> int:
-        return int(outcomes.get(key) or 0)
-
-    return count("total_mutants"), count("caught") + count("timeout"), count("missed")
+    return (
+        outcomes["total_mutants"],
+        outcomes["caught"] + outcomes["timeout"],
+        outcomes["missed"],
+    )
 
 
 def judge_run(verdict: Verdict, name: str, run: Path) -> None:
@@ -276,7 +300,12 @@ def judge_run(verdict: Verdict, name: str, run: Path) -> None:
     if not outcomes.is_file():
         verdict.runs.append(f"{name}: cargo mutants wrote no outcomes.json")
         return
-    total, killed, missed = tally(json.loads(outcomes.read_text(encoding="utf-8")))
+    document = json.loads(outcomes.read_text(encoding="utf-8"))
+    missing = missing_counts(document)
+    if missing:
+        verdict.runs.extend(f"{name}: outcomes.json states no {key}" for key in missing)
+        return
+    total, killed, missed = tally(document)
     verdict.total += total
     verdict.killed += killed
     verdict.survived += missed
