@@ -199,9 +199,9 @@ class TestEachLanguage(RepoCase):
                 self.assertEqual(got[f"fix: {lang} lockfile"], rc.NOT_CODE)
 
     def test_test_directories(self) -> None:
-        """Any path under tests/, testdata/ or fixtures/ is a test."""
+        """Any path under tests/ or testdata/ is a test, fixtures included."""
         self.repo.commit("feat: tool", {"tool/run.sh": "echo 1\n"})
-        for directory in ("tests", "testdata", "fixtures"):
+        for directory in ("tests", "testdata", "tests/fixtures"):
             with self.subTest(directory=directory):
                 subject = f"fix: tool, with {directory}"
                 self.repo.commit(
@@ -212,6 +212,16 @@ class TestEachLanguage(RepoCase):
                     },
                 )
                 self.assert_class(subject, rc.TEST_ADDED)
+
+    def test_fixtures_alone_is_not_a_test(self) -> None:
+        """A `fixtures` directory outside tests/ holds no tests (#1447).
+
+        The row that fails before #1447: iiif-server's fixture-tool
+        configuration, `tools/fixtures/mise.toml`, counted as a test.
+        """
+        self.repo.commit("feat: tools", {"tools/fixtures/x.toml": "a = 1\n"})
+        self.repo.commit("fix: tool config", {"tools/fixtures/x.toml": "a = 2\n"})
+        self.assert_class("fix: tool config", rc.NO_TEST)
 
     def test_rust_test_attribute_in_source(self) -> None:
         """An added `#[test]`-family line makes a `.rs` file a test."""
