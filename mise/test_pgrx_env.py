@@ -34,6 +34,8 @@ BASH = shutil.which("bash") or "bash"
 CARGO_STUB = r"""#!/usr/bin/env bash
 [[ $1 == pgrx && $2 == init ]] || exit 1
 echo start >> "${PGRX_HOME}.log"
+holder=$(cat "${PGRX_HOME}.init.lock/pid" 2> /dev/null || echo none)
+echo "start pid=$$ ppid=${PPID} lock-holder=${holder}" >> "${PGRX_HOME}.diag"
 sleep 2
 mkdir -p "${PGRX_HOME}"
 if [[ -n ${NEW_CONFIG:-} ]]; then
@@ -110,7 +112,11 @@ class OneInitAtATime(InitCase):
             t.stdout.close()
             t.stderr.close()
         self.assertEqual([0, 0], [code for code, _ in results], results)
-        self.assertEqual(["start", "end", "start", "end"], self.log())
+        diag = Path(f"{self.home}.diag")
+        trail = diag.read_text(encoding="utf-8") if diag.exists() else ""
+        self.assertEqual(
+            ["start", "end", "start", "end"], self.log(), f"{trail}{results}"
+        )
 
 
 class UnchangedConfigKeepsItsTime(InitCase):
