@@ -65,15 +65,14 @@ Silver now stands on one remaining MUST:
 - `regression_tests_added50` — **Unmet, re-answered 2026-11-18
   (#1360)**. Window 2026-05-17 to `9f1b3ec`: 213 bugs fixed — the 58
   `fix` commits that arrived with a test, and 155 of the 176 that
-  arrived without one (the other 21 were not bugs). **49 (23.0%)** are
+  arrived without one (the other 21 were not bugs). **50 (23.5%)** are
   now held by a test shown failing on its own assertion with the fix
   reverted: 30 of the 58 tests that arrived with their fix, every one
   revert-checked (#1335 sampled 30, #1360 checked the other 28), and
-  19 tests backfilled under #1360. Counting every test, proven or
-  not: 77 (36.2%). Of the other 136, 119 live in workflow YAML or
-  task bodies (left for #1352), 12 fixed code since removed, 4 need a
-  live Postgres, a container or macOS, and 1 (#1140, the pgrx init
-  lock) waits on its own defect; #1360's checklist names each.
+  20 tests backfilled under #1360. Counting every test, proven or
+  not: 78 (36.6%). Of the other 135, 119 live in workflow YAML or
+  task bodies (left for #1352), 12 fixed code since removed, and 4 need
+  a live Postgres, a container or macOS; #1360's checklist names each.
 
   `mise/regression-count.py` sorts every `fix`-typed commit into test
   added, no test, not a code fix (docs, data, pins, Renovate's
