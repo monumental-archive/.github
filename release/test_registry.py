@@ -46,7 +46,6 @@ import importlib.util
 import io
 import json
 import os
-import re
 import sys
 import threading
 import unittest
@@ -158,8 +157,13 @@ class Fake(BaseHTTPRequestHandler):
             (name, reference), or None for any other path.
 
         """
-        m = re.fullmatch(r"/v2/(.+)/manifests/([^/]+)", self.path)
-        return (m[1], m[2]) if m else None
+        # Plain splitting, never a pattern: the path is the request's.
+        name, sep, reference = self.path.removeprefix("/v2/").rpartition("/manifests/")
+        if not self.path.startswith("/v2/") or not sep or not name:
+            return None
+        if not reference or "/" in reference:
+            return None
+        return name, reference
 
     def authorised(self) -> bool:
         """Say whether the request carries the issued bearer token.
