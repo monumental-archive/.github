@@ -252,10 +252,30 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions: {}
+    env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     outputs:
       images: ${{ steps.collect.outputs.images }}
       registry-subjects: ${{ steps.collect.outputs.registry-subjects }}
     steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: jq github:monumental-archive/stele
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ${{ inputs.repro && 'repro-pgrx-image-digest-pg*' || 'pgrx-image-digest-pg*' }}
@@ -264,27 +284,21 @@ jobs:
 
       - name: Assemble and refuse a partial set
         id: collect
+        # Every planned major left exactly one digest document and no
+        # other did, judged by stele against the class's declared
+        # subjects (stele#393, #1364); the registry lines are what the
+        # signer is given. The documents also leave whole, as `images`,
+        # for the signing matrix (kept beside the call, #1364).
         env:
           EXPECTED: ${{ needs.plan.outputs.expected }}
         run: |
           set -euo pipefail
-          expected_count=$(jq -r 'length' <<< "${EXPECTED}")
+          stele derive subjects --policy .org-canon/slsa/assert-policy.json \
+            --class pgrx-extension-image --expected /dev/stdin --dir digests \
+            --registry-subjects-out "${RUNNER_TEMP}/registry" <<< "${EXPECTED}"
           images=$(jq -sc '.' digests/*.json)
-          got=$(jq -r 'length' <<< "${images}")
-          if [[ ${got} != "${expected_count}" ]]; then
-            echo "::error::${got} image digests for ${expected_count} planned majors; refusing a partial set"
-            exit 1
-          fi
           echo "images=${images}" >> "${GITHUB_OUTPUT}"
-          # The set just proved complete, restated in the shape the
-          # manifest step reads: every major names one repository, so
-          # the digest is what tells the five apart and the major is
-          # which leg built it.
-          lines=$(jq -r '.[] | "\(.pg) \(.digest | sub("^sha256:"; ""))  \(.image)"' <<< "${images}")
           {
-            echo "registry-subjects<<REGISTRY_EOF"
-            printf '%s\n' "${lines}"
-            echo "REGISTRY_EOF"
+            echo "registry-subjects<<REGISTRY_EOF" && cat "${RUNNER_TEMP}/registry" && echo "REGISTRY_EOF"
           } >> "${GITHUB_OUTPUT}"
-          jq -r '.[] | "::notice::pg\(.pg) \(.digest)"' <<< "${images}"
 ...

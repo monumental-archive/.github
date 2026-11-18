@@ -379,11 +379,31 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions: {}
+    env:
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     outputs:
       subjects: ${{ steps.manifest.outputs.subjects }}
       leg-subjects: ${{ steps.manifest.outputs.leg-subjects }}
       artifact-name: release-extensions
     steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: github:monumental-archive/stele
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ${{ inputs.repro && 'repro-extension-pg*' || 'extension-pg*' }}
@@ -392,64 +412,22 @@ jobs:
 
       - name: Compute the subject manifest
         id: manifest
+        # Every planned leg produced exactly its assets and nothing else
+        # is present, judged by stele against the class's declared
+        # subjects (stele#393, #1364): the flat lines and the same lines
+        # by leg, in the bytes the signer and attach steps read.
         env:
           EXPECTED: ${{ needs.plan.outputs.expected }}
         run: |
           set -euo pipefail
-          cd dist
-          shopt -s nullglob
-          cell_list=$(jq -r '.[]' <<< "${EXPECTED}")
-          cells=()
-          while IFS= read -r c; do
-            if [[ -n ${c} ]]; then cells+=("${c}"); fi
-          done <<< "${cell_list}"
-          for c in "${cells[@]}"; do
-            pg="${c%-*}"
-            arch="${c#*-}"
-            matches=(./*-pg"${pg}"-linux-"${arch}".tar.gz)
-            if ((${#matches[@]} != 1)); then
-              echo "::error::expected exactly one tarball for pg${pg}/${arch}, found ${#matches[@]}"
-              exit 1
-            fi
-            matches=(./*-pg"${pg}"-linux-"${arch}"-debug.tar.gz)
-            if ((${#matches[@]} != 1)); then
-              echo "::error::expected exactly one debug tarball for pg${pg}/${arch}, found ${#matches[@]}"
-              exit 1
-            fi
-          done
-          # Two per cell: the installable tarball and its debug sibling.
-          archives=(./*.tar.gz)
-          if ((${#archives[@]} != 2 * ${#cells[@]})); then
-            echo "::error::${#archives[@]} tarballs for ${#cells[@]} planned cells (two each)"
-            exit 1
-          fi
-          manifest=$(sha256sum ./*.tar.gz | sed 's| \./| |')
-          # The same digests once more, each prefixed with the PG major
-          # whose leg produced it — this class's target grain. The
-          # prefix comes from the PLANNED cell list this step has just
-          # proved matches exactly one tarball each, so both arches of
-          # one major carry that major and nothing parses a target back
-          # out of a filename.
-          legs=()
-          for c in "${cells[@]}"; do
-            pg="${c%-*}"
-            arch="${c#*-}"
-            sums=$(sha256sum ./*-pg"${pg}"-linux-"${arch}".tar.gz \
-              ./*-pg"${pg}"-linux-"${arch}"-debug.tar.gz)
-            sums="${sums// .\// }"
-            while IFS= read -r line; do
-              legs+=("${pg} ${line}")
-            done <<< "${sums}"
-          done
+          stele derive subjects --policy .org-canon/slsa/assert-policy.json \
+            --class pgrx-extension --expected /dev/stdin --dir dist \
+            --subjects-out "${RUNNER_TEMP}/subjects" --leg-subjects-out "${RUNNER_TEMP}/legs" \
+            <<< "${EXPECTED}"
           {
-            echo "subjects<<SUBJECTS_EOF"
-            printf '%s\n' "${manifest}"
-            echo "SUBJECTS_EOF"
-            echo "leg-subjects<<LEGS_EOF"
-            printf '%s\n' "${legs[@]}"
-            echo "LEGS_EOF"
+            echo "subjects<<SUBJECTS_EOF" && cat "${RUNNER_TEMP}/subjects" && echo "SUBJECTS_EOF"
+            echo "leg-subjects<<LEGS_EOF" && cat "${RUNNER_TEMP}/legs" && echo "LEGS_EOF"
           } >> "${GITHUB_OUTPUT}"
-          printf '%s\n' "${manifest}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:

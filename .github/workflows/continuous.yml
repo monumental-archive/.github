@@ -474,38 +474,33 @@ jobs:
       attestations: write # store the decision in the caller's attestation store
     env:
       SBOM_RESULT: ${{ needs.sbom.result }}
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
-      - name: Refuse unless every required proof succeeded
-        run: |
-          set -euo pipefail
-          fail=0
-          proofs='[]'
-          # An array, not a bare word list: this archetype has exactly
-          # one proof today, and a single-element `for … in "x:y"` is a
-          # loop shellcheck reads as a mistake (SC2066). The array keeps
-          # the release path's shape — add a proof by adding an element,
-          # and lint:release-phases forces the `needs` edge beside it.
-          required=("inventory and advisory triage:${SBOM_RESULT}")
-          for p in "${required[@]}"; do
-            name="${p%:*}" result="${p##*:}"
-            proofs=$(jq -c --arg n "${name}" --arg r "${result}" \
-              '. + [{name: $n, result: $r}]' <<< "${proofs}")
-            if [[ ${result} != "success" ]]; then
-              echo "::error::${name} is '${result}' — absence of a proof is never a proof"
-              fail=1
-            fi
-          done
-          ((fail == 0)) || exit 1
-          decided_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          jq -n \
-            --arg classes "oci-image" \
-            --arg at "${decided_at}" \
-            --argjson proofs "${proofs}" \
-            '{classes: $classes, conclusion: "OPEN",
-              decidedAt: $at, proofs: $proofs}' \
-            > "${RUNNER_TEMP}/decision-predicate.json"
-          echo "::notice::commit point open: every required proof succeeded"
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        # stele, which judges the proof and writes the decision. No tool
+        # cache in a job that holds the decision's signing identity.
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: github:monumental-archive/stele
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        # A failed sbom job leaves no inventory to fetch; skipping the
+        # download lets the decision below refuse by the proof's name
+        # rather than by a missing download.
+        if: needs.sbom.result == 'success'
         with:
           name: continuous-inventory
           path: inventory
@@ -535,44 +530,33 @@ jobs:
             fi
             echo "${arch}=${digest}" >> "${GITHUB_OUTPUT}"
           done
-      - name: Stage the decision subjects (what the decision covered)
+      # The decision is the engine's (stele#399): the proof judged by
+      # name — absence of a proof is never a proof — and the record and
+      # its subjects written only once they read back through the
+      # verifier's own decision reader. A stream has no tag, so the
+      # record names none. Its subjects are every inventory file AND
+      # each per-arch image digest (#859): a checksums line is exactly
+      # an in-toto subject, so the images go in beside the file hashes
+      # rather than into a second attestation — one publish is one
+      # decision — and the store keys by digest, so THOSE lines are what
+      # makes the decision reachable from the registry.
+      - name: Decide over the proof, the inventory and the images
+        id: decision
         env:
           IMAGE: ${{ steps.pulled.outputs.image }}
           AMD64: ${{ steps.pulled.outputs.amd64 }}
           ARM64: ${{ steps.pulled.outputs.arm64 }}
         run: |
           set -euo pipefail
-          : > "${RUNNER_TEMP}/decision-subjects.sha256"
-          # Listed and named in their own statements, publish.yml's
-          # shape: a command substitution inside another command's
-          # arguments masks its exit status, and a `find` that failed
-          # would read here as an empty inventory.
-          listing=$(find inventory -type f | sort)
-          while IFS= read -r f; do
-            [[ -n ${f} ]] || continue
-            digest=$(sha256sum "${f}" | cut -d' ' -f1)
-            base=$(basename "${f}")
-            printf '%s  %s\n' "${digest}" "${base}" \
-              >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done <<< "${listing}"
-          [[ -s "${RUNNER_TEMP}/decision-subjects.sha256" ]] || {
-            echo "::error::the inventory artifact is empty — a decision over nothing decides nothing"
-            exit 1
-          }
-          # And the images themselves (#859). A checksums file is
-          # `<hex>  <name>`, which is exactly an in-toto subject, so the
-          # per-arch digests go in beside the file hashes rather than
-          # into a second attestation — one publish is one decision, and
-          # the subject list is the fan-out. The store keys by digest,
-          # so THESE lines are what makes the decision reachable from
-          # the registry; the name is for the reader.
-          for pair in "amd64=${AMD64}" "arm64=${ARM64}"; do
-            arch="${pair%%=*}" digest="${pair#*=}"
-            printf '%s  %s\n' "${digest#sha256:}" "${IMAGE}@${digest} (${arch})" \
-              >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done
-          covered=$(wc -l < "${RUNNER_TEMP}/decision-subjects.sha256")
-          echo "::notice::decision covers ${covered} subject(s)"
+          stele emit decision \
+            --policy .org-canon/slsa/verify-policy.json \
+            --stream --classes oci-image \
+            --proof "inventory and advisory triage=${SBOM_RESULT}" \
+            --covered inventory \
+            --also "${AMD64#sha256:}  ${IMAGE}@${AMD64} (amd64)" \
+            --also "${ARM64#sha256:}  ${IMAGE}@${ARM64} (arm64)" \
+            --predicate-out "${RUNNER_TEMP}/decision-predicate.json" \
+            --subjects-out "${RUNNER_TEMP}/decision-subjects.sha256" >> "${GITHUB_OUTPUT}"
       # The inventories, each keyed by the image it inventories (#859).
       # This is what makes the SBOM bytes durable: the run artifact
       # below expires in seven days and is unsigned, so it is a
@@ -646,7 +630,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ${{ runner.temp }}/decision-subjects.sha256
-          predicate-type: https://monumental-archive.github.io/attestations/release-decision/v1
+          predicate-type: ${{ steps.decision.outputs.predicate-type }}
           predicate-path: ${{ runner.temp }}/decision-predicate.json
 
   # The index assembly moved out of the build workflow when the

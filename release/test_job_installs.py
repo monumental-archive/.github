@@ -67,18 +67,35 @@ OUT_OF_SCOPE = {
 # installs a list of its own.
 IN_SCOPE = [
     ("assemble-oci-index.yml", "manifest"),
+    # Not on the release path: the scheduled base approvals, which judge
+    # each pinned base with `stele verify base` (#1377). It installs
+    # stele and the jq its predicate step calls, and this row holds the
+    # list to its calls.
+    ("base-attest.yml", "attest"),
     ("attach-release.yml", "attach"),
     ("build-go-binary.yml", "build"),
+    # The collect jobs call `stele derive subjects` (#1364): stele alone,
+    # and jq beside it where the images job still writes `images`.
+    ("build-go-binary.yml", "collect"),
+    # The base check ahead of the build legs (#1377): stele alone.
+    ("build-oci-image.yml", "bases"),
     ("build-oci-image.yml", "build"),
+    ("build-pgrx-extension.yml", "collect"),
+    ("build-pgrx-images.yml", "collect"),
     ("build-pgrx-images.yml", "image"),
     ("build-rust-binary.yml", "build"),
+    ("build-rust-binary.yml", "collect"),
     ("build-rust-crate.yml", "build"),
     ("build-wasm-npm.yml", "build"),
+    ("continuous.yml", "commit-point"),
     ("continuous.yml", "facts"),
     ("continuous.yml", "sbom"),
     ("publish-rust-crate.yml", "publish"),
     ("publish-wasm-npm.yml", "publish"),
+    ("publish.yml", "commit-point"),
     ("publish.yml", "facts"),
+    # The class derivation, `stele derive classes` (#1378).
+    ("publish.yml", "guard"),
     ("publish.yml", "sbom"),
     # Not on the release path: the signer-identity watch, scheduled and
     # in sequential legs while a backlog lasts (#1339). It installs stele
