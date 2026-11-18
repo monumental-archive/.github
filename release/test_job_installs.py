@@ -69,16 +69,26 @@ IN_SCOPE = [
     ("assemble-oci-index.yml", "manifest"),
     ("attach-release.yml", "attach"),
     ("build-go-binary.yml", "build"),
+    # The collect jobs call `stele derive subjects` (#1364): stele alone,
+    # and jq beside it where the images job still writes `images`.
+    ("build-go-binary.yml", "collect"),
     ("build-oci-image.yml", "build"),
+    ("build-pgrx-extension.yml", "collect"),
+    ("build-pgrx-images.yml", "collect"),
     ("build-pgrx-images.yml", "image"),
     ("build-rust-binary.yml", "build"),
+    ("build-rust-binary.yml", "collect"),
     ("build-rust-crate.yml", "build"),
     ("build-wasm-npm.yml", "build"),
+    ("continuous.yml", "commit-point"),
     ("continuous.yml", "facts"),
     ("continuous.yml", "sbom"),
     ("publish-rust-crate.yml", "publish"),
     ("publish-wasm-npm.yml", "publish"),
+    ("publish.yml", "commit-point"),
     ("publish.yml", "facts"),
+    # The class derivation, `stele derive classes` (#1378).
+    ("publish.yml", "guard"),
     ("publish.yml", "sbom"),
     # Not on the release path: the signer-identity watch, scheduled and
     # in sequential legs while a backlog lasts (#1339). It installs stele

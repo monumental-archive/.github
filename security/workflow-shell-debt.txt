@@ -24,23 +24,14 @@
 .github/workflows/assemble-oci-index.yml	Generate the image SBOM from the published bytes	20	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/base-attest.yml	Verify the upstream provenance names this source (#212)	29	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-go-binary.yml	Refuse a binary whose stamp is not the released commit	19	# stele: #1352 unassigned
-.github/workflows/build-go-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-oci-image.yml	Verify every first-party base carries its org attestation	65	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# stele (derive bump --check --expect): monumental-archive/stele#455
 .github/workflows/build-pgrx-extension.yml	Emit the inventory plan (what this cell built, from its own inputs)	17	# stele: #1352 unassigned
-.github/workflows/build-pgrx-extension.yml	Compute the subject manifest	48	# stele: monumental-archive/stele#393, canon swap #1364
-.github/workflows/build-pgrx-images.yml	Assemble and refuse a partial set	16	# canon helper: #1352 unassigned
-.github/workflows/build-rust-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/continuous.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374
-.github/workflows/continuous.yml	Stage the decision subjects (what the decision covered)	21	# stele: monumental-archive/stele#399, canon swap #1374
-.github/workflows/publish.yml	Check the ref and the class	50	# stele: monumental-archive/stele#403, canon swap #1378
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
-.github/workflows/publish.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374
-.github/workflows/publish.yml	Stage the decision subjects (the inventory the decision covered)	29	# stele: monumental-archive/stele#399, canon swap #1374
 .github/workflows/repro-check.yml	Compare rebuilt digests with the published ones	17	# stele: #1352 unassigned
 .github/workflows/verify-release.yml	Prove each declared subject against the registry	163	# stele: monumental-archive/stele#392, canon swap #1363
 .github/workflows/verify-release.yml	Verify the release and render the verdict (stele emit vsa)	85	# stele: monumental-archive/stele#392, canon swap #1363
