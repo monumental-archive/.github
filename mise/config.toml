@@ -1866,7 +1866,8 @@ dir = "{{cwd}}"
 # unchecked exactly as they did under zizmor's old scope.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "lint:action-pins: no workflows or actions, skipped"
   exit 0
@@ -1885,7 +1886,8 @@ dir = "{{cwd}}"
 # upgraded would fight it.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "fix:actions: no workflows or actions, skipped"
   exit 0
@@ -2461,15 +2463,15 @@ dir = "{{cwd}}"
 # support (rhysd/actionlint#711) — the same trigger as lint:actions'
 # two -ignore flags.
 run = '''
-paths=""
-compgen -G ".github/workflows/*.y*ml" > /dev/null && paths=".github/workflows/"
-[[ -d .github/actions ]] && paths="${paths} .github/actions/"
-[[ -n ${paths} ]] || {
+# The files the other action lints read, from the one selection (#1448):
+# every action definition wherever it lives, not only .github/actions/.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
+[[ -n ${files} ]] || {
   echo "lint:zizmor: no workflows or actions, skipped"
   exit 0
 }
-# shellcheck disable=SC2086  # the path list is newline-separated on purpose
-zizmor --offline --persona=pedantic ${paths}
+xargs zizmor --offline --persona=pedantic <<< "${files}"
 '''
 
 [tasks."lint:dco"]
@@ -6354,7 +6356,8 @@ dir = "{{cwd}}"
 # lint globs .github/workflows/ only, which is exactly the blind spot
 # that let the bad `uses:` through.
 run = '''
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "lint:actions-allowed: no workflows or actions, skipped"
   exit 0
@@ -6364,7 +6367,11 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*
 # publisher check, not a supply-chain one, and it is not ours to revoke.
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
-allowed="actions/* github/* ${canon_owner}/* jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
+# An array, quoted at every use: as one unquoted string, `actions/*`
+# expanded against the working directory, and in a repository tracking
+# `actions/<name>/` every GitHub-owned action was reported forbidden
+# (#1448). The patterns are matched against references, never paths.
+allowed=("actions/*" "github/*" "${canon_owner}/*" "jdx/mise-action@*" "codecov/codecov-action@*" "ossf/scorecard-action@*")
 bad=""
 checked=0
 while IFS= read -r f; do
@@ -6379,7 +6386,7 @@ while IFS= read -r f; do
     checked=$((checked + 1))
     owner_repo="${ref%%@*}"
     ok=""
-    for pat in ${allowed}; do
+    for pat in "${allowed[@]}"; do
       case "${pat}" in
         *@\*) [[ ${owner_repo} == "${pat%@\*}" ]] && ok=1 ;;
         */\*) [[ ${owner_repo} == "${pat%/\*}/"* ]] && ok=1 ;;
@@ -6393,7 +6400,7 @@ while IFS= read -r f; do
 done <<< "${files}"
 if [[ -n ${bad} ]]; then
   echo "lint:actions-allowed: uses: an action the org allowlist forbids:${bad}" >&2
-  echo "  allowed: GitHub-owned plus ${allowed}" >&2
+  echo "  allowed: GitHub-owned plus ${allowed[*]}" >&2
   echo "  GitHub refuses these at 'Set up job', so nothing goes red until a run dies" >&2
   echo "  widen the org setting deliberately, or use an allowed action" >&2
   exit 1
@@ -7034,7 +7041,8 @@ dir = "{{cwd}}"
 # consumer repos that carry no config and so the number has one home.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
