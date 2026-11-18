@@ -6,7 +6,8 @@
 assembly and upload, tagging a gated digest). None of the four blocks
 had a test. These rows run the helper in-process, as the steps call it,
 with a stub `docker` first on PATH and an `http.server` on 127.0.0.1
-standing in for ghcr.io (`REGISTRY_URL`). The fake refuses a route it
+standing in for ghcr.io (the `origin` the tests pass to `main`; the
+production path never reads one from the environment). The fake refuses a route it
 does not know (HTTP 418) and a manifest request without the bearer
 token its token endpoint issued. Every refusal row asserts the message.
 
@@ -49,10 +50,12 @@ import re
 import sys
 import threading
 import unittest
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, ClassVar
+from unittest import mock
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -97,7 +100,7 @@ elif args[:4] == ["buildx", "imagetools", "create", "--dry-run"]:
 elif args[:3] == ["buildx", "imagetools", "inspect"]:
     ref = args[3].removeprefix("ghcr.io/")
     name, sep, reference = ref.rpartition("@") if "@" in ref else ref.rpartition(":")
-    url = env["REGISTRY_URL"] + "/v2/" + name + "/manifests/" + reference
+    url = env["STUB_REGISTRY_URL"] + "/v2/" + name + "/manifests/" + reference
     req = urllib.request.Request(url, headers={{"X-Stub": "inspect"}})
     body = urllib.request.urlopen(req).read()
     shape = json.loads(open(env["STUB_INSPECT"]).read())
@@ -232,6 +235,7 @@ class Harness(unittest.TestCase):
         Fake.token_body = json.dumps({"token": TOKEN}).encode()
         Fake.rewrite = False
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+        self.origin = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(
             target=self.server.serve_forever,
             kwargs={"poll_interval": 0.01},
@@ -251,7 +255,8 @@ class Harness(unittest.TestCase):
         self.output.write_text("", "utf-8")
         self.env = {
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "REGISTRY_URL": f"http://127.0.0.1:{self.server.server_port}",
+            # The stub docker's own variable: the test writes the stub.
+            "STUB_REGISTRY_URL": self.origin,
             "GITHUB_ACTOR": ACTOR,
             "GITHUB_REPOSITORY": "Some-Owner/Some-Image",
             "GITHUB_OUTPUT": str(self.output),
@@ -272,7 +277,7 @@ class Harness(unittest.TestCase):
         """
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = registry.main(list(argv), self.env)
+            code = registry.main(list(argv), self.env, origin=self.origin)
         return code, out.getvalue()
 
     def docker_calls(self) -> list[dict]:
@@ -905,7 +910,38 @@ class Tag(Harness):
 
 
 class Environment(Harness):
-    """A step that forgot an input names it."""
+    """The step's environment supplies inputs, never the registry's origin."""
+
+    def test_registry_url_in_the_environment_changes_nothing(self) -> None:
+        """A GITHUB_ENV write cannot send the token elsewhere (#1382 review).
+
+        The production entry (no `origin`) is run with `REGISTRY_URL` set
+        to another host; `urlopen` is replaced, so nothing leaves the
+        machine, and the one request it is asked for goes to ghcr.io.
+        """
+        self.env["REGISTRY_URL"] = "https://attacker.example"
+        self.env["UNTRUSTED_IMAGES"] = json.dumps([
+            {"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}
+        ])
+        opened: list[str] = []
+
+        def refuse(req: object, **_: object) -> None:
+            opened.append(req.full_url)
+            reason = "no network in this row"
+            raise urllib.error.URLError(reason)
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(registry.urllib.request, "urlopen", refuse),
+            contextlib.redirect_stdout(out),
+        ):
+            code = registry.main(["tag"], self.env)
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            opened,
+            ["https://ghcr.io/token?scope=repository:a/b:pull,push&service=ghcr.io"],
+        )
+        self.assertNotIn("attacker", out.getvalue())
 
     def test_an_unset_input_is_named(self) -> None:
         """No UNTRUSTED_IMAGES: the variable is named, exit 1."""

@@ -19,10 +19,14 @@ INPUTS. From the environment, as the steps set them: `GH_TOKEN` (sent
 to `docker login` on stdin and to the token endpoint in a Basic
 Authorization header, never in a URL, never printed), `GITHUB_ACTOR`,
 `GITHUB_REPOSITORY`, `GITHUB_OUTPUT`, `FACTS` (the resolved facts map),
-`UNTRUSTED_IMAGES` (tag's input). `REGISTRY_URL` names the registry's
-HTTP origin and defaults to the registry itself; the tests point it at
-their fake. Image names come from the workflow: no organisation or
-repository is named here.
+`UNTRUSTED_IMAGES` (tag's input). Image names come from the workflow:
+no organisation or repository is named here.
+
+The registry's HTTP origin is never read from the environment: an
+earlier step that can write GITHUB_ENV would otherwise send the
+`packages: write` token to a host of its choosing. `main` takes it as
+a keyword argument, fixed to `ORIGIN` on the production path; only the
+tests pass their fake's.
 
 stdlib only (`urllib`, `json`, `hashlib`); `docker buildx` is called as
 a subprocess.
@@ -51,6 +55,7 @@ if TYPE_CHECKING:
 # The one registry the org publishes images to. A host, not an owner:
 # every name under it comes from the calling workflow.
 REGISTRY = "ghcr.io"
+ORIGIN = f"https://{REGISTRY}"
 
 # imagetools create silently ignored --annotation before buildx 0.12
 # (docker/buildx#1965), and so did a build's index: annotations.
@@ -97,10 +102,10 @@ class RefusedError(Exception):
 class Registry:
     """The registry's HTTP API and the `docker` that talks to it."""
 
-    def __init__(self, env: Mapping[str, str]) -> None:
-        """Read the credentials and the origin from the step's env."""
+    def __init__(self, env: Mapping[str, str], origin: str = ORIGIN) -> None:
+        """Take the step's env for credentials; the origin never comes from it."""
         self.env = env
-        self.origin = env.get("REGISTRY_URL") or f"https://{REGISTRY}"
+        self.origin = origin
 
     def docker(
         self, *args: str, stdin: bytes | None = None, capture: bool = True
@@ -628,8 +633,16 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    origin: str = ORIGIN,
+) -> int:
     """Run one operation from the step's environment.
+
+    `origin` is the registry's HTTP origin: fixed on the production path,
+    passed only by the tests.
 
     Returns:
         The exit status: 0 done, 1 refused.
@@ -639,7 +652,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     args = p.parse_args(argv)
     if args.command == "push" and args.pg is not None and not args.tag:
         p.error("push --pg needs --tag")
-    reg = Registry(os.environ if env is None else env)
+    reg = Registry(os.environ if env is None else env, origin)
     try:
         return args.run(reg, args)
     except RefusedError as e:
