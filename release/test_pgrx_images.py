@@ -380,6 +380,10 @@ class Proof(unittest.TestCase):
         docker.chmod(0o755)
         self.log = self.root / "docker.log"
         self.record = self.root / "pg.json"
+        self.staged = self.root / "staged" / "amd64" / "image" / "share" / "extension"
+        self.staged.mkdir(parents=True)
+        (self.staged / "edtf_postgres.control").write_text("control\n")
+        (self.staged / "edtf_postgres--1.2.3.sql").write_text("sql\n")
         self.env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -398,7 +402,15 @@ class Proof(unittest.TestCase):
         """
         self.record.write_text(f'{{"pg": "{pg}", "digest": "{digest}"}}\n')
         result = run(
-            [BASH, str(PROOF), IMAGE, str(self.record), pg, str(CANON)],
+            [
+                BASH,
+                str(PROOF),
+                IMAGE,
+                str(self.record),
+                pg,
+                str(CANON),
+                str(self.staged),
+            ],
             self.root,
             self.env,
         )
@@ -433,7 +445,7 @@ class Proof(unittest.TestCase):
         docker_dir = (CANON / "docker").resolve()
         self.assertEqual(
             f"run --rm -v {docker_dir}:/proof:ro consumer-proof:pg17"
-            " bash /proof/pgrx-copy-proof.sh",
+            " bash /proof/pgrx-copy-proof.sh edtf_postgres",
             calls[1],
         )
 
@@ -487,6 +499,141 @@ class Proof(unittest.TestCase):
         for name in ("pgrx-copy-proof.sh", "pgrx-path-proof.sh"):
             with self.subTest(name=name):
                 self.assertTrue(os.access(CANON / "docker" / name, os.X_OK))
+
+    def test_a_staged_tree_without_one_extension_builds_nothing(self) -> None:
+        """None or two control files in the artifact's tree: no docker call."""
+        (self.staged / "edtf_postgres.control").unlink()
+        result, lines = self.prove("17")
+        self.assertEqual(1, result.returncode)
+        self.assertIn("holds no extension control file", result.stderr)
+        self.assertEqual([], lines)
+        (self.staged / "a.control").write_text("")
+        (self.staged / "b.control").write_text("")
+        result, lines = self.prove("17")
+        self.assertEqual(1, result.returncode)
+        self.assertIn("holds 2 extension control files (a, b)", result.stderr)
+        self.assertEqual([], lines)
+
+
+def extension_name(tree: Path) -> subprocess.CompletedProcess:
+    """Run the extension-name verb on a tree.
+
+    Returns:
+        The finished process.
+
+    """
+    return run(
+        [sys.executable, str(STAGE), "extension-name", "--tree", str(tree)], CANON
+    )
+
+
+class ExtensionName(unittest.TestCase):
+    """`pgrx-images.py extension-name`: the one shipped extension (#1439)."""
+
+    def setUp(self) -> None:
+        """Make an empty staged share/extension tree, removed after."""
+        self.tree = Path(tempfile.mkdtemp(prefix="pgrx-ext-"))
+        self.addCleanup(shutil.rmtree, self.tree)
+
+    def test_one_control_file_names_the_extension(self) -> None:
+        """The stem of the one control file, SQL scripts beside it ignored."""
+        (self.tree / "edtf_postgres.control").write_text("")
+        (self.tree / "edtf_postgres--1.2.3.sql").write_text("")
+        result = extension_name(self.tree)
+        self.assertEqual((0, "edtf_postgres\n"), (result.returncode, result.stdout))
+
+    def test_no_control_file(self) -> None:
+        """An artifact that ships no extension is refused by name."""
+        (self.tree / "edtf_postgres--1.2.3.sql").write_text("")
+        result = extension_name(self.tree)
+        self.assertEqual((1, ""), (result.returncode, result.stdout))
+        self.assertEqual(
+            f"::error::{self.tree} holds no extension control file; the artifact"
+            " image ships no extension for the consumer proof to create\n",
+            result.stderr,
+        )
+
+    def test_two_control_files(self) -> None:
+        """Two control files: the proof cannot tell which it is proving."""
+        (self.tree / "edtf_postgres.control").write_text("")
+        (self.tree / "amcheck.control").write_text("")
+        result = extension_name(self.tree)
+        self.assertEqual((1, ""), (result.returncode, result.stdout))
+        self.assertEqual(
+            f"::error::{self.tree} holds 2 extension control files (amcheck,"
+            " edtf_postgres); the consumer proof creates the one extension the"
+            " artifact image ships and cannot tell which\n",
+            result.stderr,
+        )
+
+
+COPY_PROOF = CANON / "docker" / "pgrx-copy-proof.sh"
+SU = """#!/usr/bin/env bash
+# su postgres -c CMD
+exec bash -c "$3"
+"""
+PSQL = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${PSQL_LOG}"
+"""
+
+
+class CopyProof(unittest.TestCase):
+    """docker/pgrx-copy-proof.sh, run for real against a planted root."""
+
+    def setUp(self) -> None:
+        """Plant a stock postgres's directories and stub su and psql."""
+        self.root = Path(tempfile.mkdtemp(prefix="pgrx-copy-"))
+        self.addCleanup(shutil.rmtree, self.root)
+        share = self.root / "usr" / "share" / "postgresql" / "17" / "extension"
+        share.mkdir(parents=True)
+        # The stock image's contrib control file that sorts first on 17 and
+        # 18 (measured on #1439), beside the one the artifact shipped.
+        (share / "amcheck.control").write_text("")
+        (share / "edtf_postgres.control").write_text("")
+        self.share = share
+        bin_dir = self.root / "usr" / "lib" / "postgresql" / "17" / "bin"
+        bin_dir.mkdir(parents=True)
+        stubs = self.root / "stubs"
+        stubs.mkdir()
+        for path, text in (
+            (bin_dir / "initdb", "#!/usr/bin/env bash\n"),
+            (bin_dir / "pg_ctl", "#!/usr/bin/env bash\n"),
+            (stubs / "su", SU),
+            (stubs / "psql", PSQL),
+        ):
+            path.write_text(text)
+            path.chmod(0o755)
+        self.log = self.root / "psql.log"
+        self.env = {
+            **os.environ,
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "PGRX_PROOF_ROOT": str(self.root),
+            "PSQL_LOG": str(self.log),
+        }
+
+    def test_copy_proof_creates_the_shipped_extension(self) -> None:
+        """Create edtf_postgres, though amcheck sorts first in the destination."""
+        result = run([BASH, str(COPY_PROOF), "edtf_postgres"], self.root, self.env)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            ["-c CREATE EXTENSION edtf_postgres;"], self.log.read_text().splitlines()
+        )
+        self.assertEqual(
+            "created extension edtf_postgres from the COPY recipe\n", result.stdout
+        )
+
+    def test_a_copy_that_did_not_land(self) -> None:
+        """The shipped control file is absent from the destination: refused."""
+        (self.share / "edtf_postgres.control").unlink()
+        result = run([BASH, str(COPY_PROOF), "edtf_postgres"], self.root, self.env)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual(
+            "::error::edtf_postgres.control is not under"
+            " /usr/share/postgresql/*/extension; the COPY did not place the"
+            " shipped extension\n",
+            result.stdout,
+        )
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":

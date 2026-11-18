@@ -269,7 +269,8 @@ jobs:
           IMAGE: ${{ steps.name.outputs.image }}
         run: |
           .org-canon/release/pgrx-image-proof.sh "${IMAGE}" \
-            "/tmp/digests/pg${PG}.json" "${PG}" .org-canon
+            "/tmp/digests/pg${PG}.json" "${PG}" .org-canon \
+            staged/amd64/image/share/extension
       - name: Assert the published metadata equals the facts
         if: ${{ !inputs.dry-run && !inputs.repro }}
         env:

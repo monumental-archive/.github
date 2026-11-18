@@ -33,3 +33,4 @@ dynamic_library_path = '/extensions/ext/lib:$libdir'
 CONF
 "${bin}/pg_ctl" -D /tmp/pgdata -o "-c listen_addresses=" -w start > /dev/null
 psql -c "CREATE EXTENSION ${ext};"
+echo "created extension ${ext} through extension_control_path"
