@@ -96,6 +96,8 @@ IN_SCOPE = [
     ("publish.yml", "facts"),
     # The class derivation, `stele derive classes` (#1378).
     ("publish.yml", "guard"),
+    # The pre-release comparison, `stele verify repro` (#1376).
+    ("publish.yml", "repro-gate"),
     ("publish.yml", "sbom"),
     # Not on the release path: the signer-identity watch, scheduled and
     # in sequential legs while a backlog lasts (#1339). It installs stele

@@ -84,6 +84,19 @@
         "inventory": {
           "kind": "crates",
           "artifactSuffix": "-crate"
+        },
+        "subjects": {
+          "kind": "files",
+          "entry": "^(?P<crate>[A-Za-z0-9_-]+-[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$",
+          "unit": "crate",
+          "extension": ".crate",
+          "label": "crate",
+          "assets": [
+            {
+              "noun": "crate",
+              "suffix": "${crate}.crate"
+            }
+          ]
         }
       },
       "oci-image": {
@@ -98,7 +111,13 @@
             "class": "oci-image-crate",
             "output": "image-class"
           }
-        ]
+        ],
+        "subjects": {
+          "kind": "registry",
+          "form": "bare-digest",
+          "entry": "^[a-z0-9]+$",
+          "unit": "arch"
+        }
       },
       "oci-image-crate": {
         "bundles": ["attestations-image.intoto.jsonl"],
@@ -108,7 +127,13 @@
         "inventory": {
           "kind": "planned"
         },
-        "requestable": false
+        "requestable": false,
+        "subjects": {
+          "kind": "registry",
+          "form": "bare-digest",
+          "entry": "^[a-z0-9]+$",
+          "unit": "arch"
+        }
       },
       "rust-binary": {
         "bundles": ["attestations-binaries.intoto.jsonl"],
@@ -155,6 +180,19 @@
         "bundles": ["attestations-source.intoto.jsonl"],
         "inventory": {
           "kind": "planned"
+        },
+        "subjects": {
+          "kind": "files",
+          "entry": "^(?P<leg>source)$",
+          "unit": "archive",
+          "extension": ".tar.gz",
+          "label": "${leg}",
+          "assets": [
+            {
+              "noun": "archive",
+              "suffix": ".tar.gz"
+            }
+          ]
         }
       },
       "wasm-npm": {
@@ -165,6 +203,19 @@
         ],
         "inventory": {
           "kind": "planned"
+        },
+        "subjects": {
+          "kind": "files",
+          "entry": "^(?P<leg>package)$",
+          "unit": "package",
+          "extension": ".tgz",
+          "label": "${leg}",
+          "assets": [
+            {
+              "noun": "tarball",
+              "suffix": ".tgz"
+            }
+          ]
         }
       },
       "pgrx-extension": {

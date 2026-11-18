@@ -27,6 +27,3 @@
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
-.github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
-.github/workflows/repro-check.yml	Compare rebuilt digests with the published ones	17	# stele: #1352 unassigned

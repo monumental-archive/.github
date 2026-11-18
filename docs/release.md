@@ -666,9 +666,12 @@ Every irreversible step — the crates.io upload (yank-only), the npm
 upload (72-hour unpublish window), every ghcr tag, every append-only
 Sigstore entry, the release itself — sits downstream of a full-width
 bit-for-bit proof (#118): each class builds twice, independently, in
-the same run, and the `repro-gate` job compares sha256 subject
-manifests for the file classes and per-arch (oci) / per-major-index
-(pgrx) digests for the image classes. A mismatch fails the release
+the same run, and the `repro-gate` job compares them with one
+`stele verify repro` call in its pre-release form (#1376): sha256
+subject manifests for the file classes and per-arch (oci) /
+per-major-index (pgrx) digests for the image classes, each class's
+shape declared by its `subjects` in the assert policy. A mismatch is a
+typed finding per artifact and fails the release
 outright; there is no warn-and-ship path, because a warn path converts
 the control into a log line. Skew-proofing is free by construction:
 both builds resolve at the caller's pinned SHA in one orchestrator
