@@ -146,22 +146,12 @@ fi
 # with Go 1.24.13, panicked on every import against Go 1.27 (#1356). The
 # belt builds it with the repository's own go; a stale local binary or a
 # cache restored across a Go bump is refused here, by name, before it can
-# panic or quietly lose its type information.
+# panic or quietly lose its type information. The comparison and the
+# refusal are mutants-go.py's (`build-go`); the go calls stay here.
 built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2; exit }')
 running=$(go env GOVERSION)
-older=$(awk -v b="${built#go}" -v r="${running#go}" 'BEGIN {
-  nb = split(b, x, "."); nr = split(r, y, ".")
-  for (i = 1; i <= 3; i++) {
-    if ((x[i] + 0) < (y[i] + 0)) { print "yes"; exit }
-    if ((x[i] + 0) > (y[i] + 0)) { exit }
-  }
-}')
-if [[ -z ${built} || -n ${older} ]]; then
-  echo "${label}: ${gomu_bin} was built with ${built:-an unreadable Go}, older than the ${running} it runs under —" >&2
-  echo "  it cannot read this toolchain's export data; rebuild it with the repository's go:" >&2
-  echo "    mise install go:github.com/sivchari/gomu/cmd/gomu" >&2
-  exit 1
-fi
+python3 "${belt}/mutants-go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
+  --built "${built}" --running "${running}"
 
 root=$(pwd -P)
 rc=0

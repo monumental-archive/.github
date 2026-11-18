@@ -47,6 +47,14 @@ Each record is held to its site in the one shard that mutated its file.
 Prints each survivor and one summary line; writes `go.tsv` for the
 totals when a summary directory is given and the run judged everything
 it was given. Exit 1 on any red.
+
+`build-go` is the shell half's other question, asked before gomu runs:
+is the Go gomu was built with (`go version -m`) older than the `go` it
+runs under? gomu reads export data with the importer it was built with,
+so an older build cannot read the newer toolchain's (the v0.3.0 release
+binary, built with Go 1.24.13, panicked on every import against Go
+1.27). An unreadable build version is refused the same way. Prints the
+refusal and exits 1, or exits 0 silently.
 """
 
 import argparse
@@ -59,6 +67,8 @@ from pathlib import Path
 MARK = "//mutants:equivalent"
 KILLED = frozenset({"KILLED", "TIMED_OUT"})
 SKIPPED = ("(error:", "(execution error:")
+# A Go release as `go version` spells it: go1.27, go1.27.4, go1.28rc1.
+GO_RELEASE = re.compile(r"go(\d+)\.(\d+)(?:\.(\d+))?")
 # A compiler error names its place: `file.go:LINE:COL: message`.
 COMPILER = re.compile(r"\.go:\d+:\d+: ")
 
@@ -358,13 +368,66 @@ def report(args: argparse.Namespace, verdict: Verdict, excluded: int) -> None:
         )
 
 
+def release(spelled: str) -> tuple[int, int, int] | None:
+    """Read a Go release from `go version`'s spelling.
+
+    Returns:
+        (major, minor, patch), a missing patch as 0; None when unreadable.
+
+    """
+    found = GO_RELEASE.fullmatch(spelled) or GO_RELEASE.match(spelled)
+    if not found:
+        return None
+    major, minor, patch = found.groups()
+    return int(major), int(minor), int(patch or 0)
+
+
+def older(built: str, running: str) -> bool:
+    """Whether gomu's build Go cannot read the running Go's export data.
+
+    Returns:
+        True when `built` is unreadable or an earlier release than
+        `running`; False when equal or later.
+
+    """
+    have, need = release(built), release(running)
+    return have is None or (need is not None and have < need)
+
+
+def build_go(argv: list[str]) -> int:
+    """Refuse a gomu built with an older Go than the toolchain it runs under.
+
+    Returns:
+        0 when it may run, 1 after printing the refusal.
+
+    """
+    parser = argparse.ArgumentParser(prog="mutants-go.py build-go")
+    for name in ("label", "gomu", "built", "running"):
+        parser.add_argument(f"--{name}", required=True)
+    args = parser.parse_args(argv)
+    if not older(args.built, args.running):
+        return 0
+    spelled = args.built or "an unreadable Go"
+    print(
+        f"{args.label}: {args.gomu} was built with {spelled}, older than the"
+        f" {args.running} it runs under —\n"
+        "  it cannot read this toolchain's export data; rebuild it with the"
+        " repository's go:\n"
+        "    mise install go:github.com/sivchari/gomu/cmd/gomu",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main() -> int:
-    """Judge one shard.
+    """Judge one shard, or answer `build-go`.
 
     Returns:
         0 when nothing is unexplained, 1 otherwise.
 
     """
+    if sys.argv[1:2] == ["build-go"]:
+        return build_go(sys.argv[2:])
     args = parse_args()
     scratch = Path(args.scratch)
     shard = read_shard(args)

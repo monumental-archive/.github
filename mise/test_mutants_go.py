@@ -30,6 +30,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import json
 import os
 import runpy
@@ -48,6 +49,10 @@ hermetic = SimpleNamespace(
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-go.sh"
 BASH = shutil.which("bash") or "bash"
+
+_SPEC = importlib.util.spec_from_file_location("mutants_go", BELT / "mutants-go.py")
+mutants_go = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(mutants_go)
 GIT = shutil.which("git") or "git"
 LABEL = "audit:mutants: go"
 MODULE = "example.com/p"
@@ -758,6 +763,29 @@ class Shards(Planted):
         self.assertEqual(
             got.stderr, f"{LABEL}: MUTANTS_SHARD='2/2' is not k/n with k < n\n"
         )
+
+
+class BuildGo(unittest.TestCase):
+    """The comparison `build-go` makes: older or unreadable is refused."""
+
+    def test_an_older_build_is_refused(self) -> None:
+        """The v0.3.0 release binary under Go 1.27; a patch behind too."""
+        self.assertTrue(mutants_go.older("go1.24.13", "go1.27.4"))
+        self.assertTrue(mutants_go.older("go1.27.3", "go1.27.4"))
+
+    def test_an_equal_build_runs(self) -> None:
+        """The go: backend builds with the running go: equal."""
+        self.assertFalse(mutants_go.older("go1.27.4", "go1.27.4"))
+        self.assertFalse(mutants_go.older("go1.27", "go1.27.0"))
+
+    def test_a_newer_build_runs(self) -> None:
+        """A newer importer reads older export data."""
+        self.assertFalse(mutants_go.older("go1.28.0", "go1.27.4"))
+
+    def test_an_unreadable_build_is_refused(self) -> None:
+        """No version, or one `go version` would not print, is not trusted."""
+        self.assertTrue(mutants_go.older("", "go1.27.4"))
+        self.assertTrue(mutants_go.older("devel +abc123", "go1.27.4"))
 
 
 if __name__ == "__main__":
