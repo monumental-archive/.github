@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.2](https://github.com/monumental-archive/.github/compare/v1.70.1...v1.70.2) - 2026-11-18
+
+### Fixed
+
+- update first-party canon ([#1534](https://github.com/monumental-archive/.github/pull/1534))
+- sign a tag's source verdict before attach (#1350) ([#1535](https://github.com/monumental-archive/.github/pull/1535))
+- owe the source verdict from v1.70.2 ([#1538](https://github.com/monumental-archive/.github/pull/1538))
+
 ## [1.70.1](https://github.com/monumental-archive/.github/compare/v1.70.0...v1.70.1) - 2026-11-18
 
 ### Changed
