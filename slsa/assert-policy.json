@@ -320,7 +320,9 @@
       ]
     },
     "enrichmentFromVersion": "1.41.0",
-    "manifestSchemaFromVersion": "1.65.0"
+    "manifestSchemaFromVersion": "1.65.0",
+    "sourceVerdictFromVersion": "1.70.1",
+    "sourceVerdictBundle": "source-verdict.json"
   },
   "tags": {
     "tagPattern": "^v[0-9]",

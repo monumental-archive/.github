@@ -164,6 +164,8 @@ STELE_EXECS = {
     r"stele\s+derive\s+vex(?:-subjects)?": ["osv-scanner"],
     r"stele\s+assert\s+blast-radius": ["osv-scanner"],
     r"stele\s+emit\s+chain": ["cosign"],
+    # The source verdict signs through the same signer seam (stele#468).
+    r"stele\s+emit\s+source-vsa": ["cosign"],
 }
 
 # A cargo subcommand runs the `cargo-<sub>` binary.
