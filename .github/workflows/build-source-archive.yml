@@ -69,36 +69,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
       - name: Build the archive twice and prove determinism
+        # Refuses two builds that differ and an archive listing no more
+        # than half the tracked files. release/source-archive.py.
         env:
           VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          name="${GITHUB_REPOSITORY#*/}"
-          # The .github repo would produce a hidden-file basename; strip
-          # the dot so the asset is visible and predictable.
-          name="${name#.}"
-          base="${name}-${VERSION}"
-          mkdir -p dist
-          git archive --format=tar.gz --prefix="${base}/" \
-            -o "dist/${base}.tar.gz" "v${VERSION}"
-          git archive --format=tar.gz --prefix="${base}/" \
-            -o "/tmp/${base}.check.tar.gz" "v${VERSION}"
-          a=$(sha256sum "dist/${base}.tar.gz" | cut -d' ' -f1)
-          b=$(sha256sum "/tmp/${base}.check.tar.gz" | cut -d' ' -f1)
-          if [[ ${a} != "${b}" ]]; then
-            echo "::error::source archive is not deterministic (${a} vs ${b})"
-            exit 1
-          fi
-          # Smoke test: the archive must actually contain the tagged tree,
-          # not an empty or truncated stream.
-          count=$(tar -tzf "dist/${base}.tar.gz" | wc -l)
-          tracked=$(git ls-files | wc -l)
-          if ((count <= tracked / 2)); then
-            echo "::error::archive lists ${count} entries for ${tracked} tracked files"
-            exit 1
-          fi
-          echo "::notice::${base}.tar.gz: ${count} entries, digest ${a}"
+        run: .org-canon/release/source-archive.py
       - name: Compute the subject manifest
         id: manifest
         run: |

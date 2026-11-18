@@ -150,74 +150,11 @@ jobs:
         # Verification is ON here, deliberately: this is the job that is
         # allowed to build. `cargo package` extracts the tarball and
         # compiles it, which catches the crate that builds in-workspace and
-        # fails from its packaged form.
-        # No --allow-dirty: it is a flag, not a boolean option, and
-        # omitting it is what refuses a dirty tree. `--allow-dirty=false`
-        # is rejected outright by cargo.
-        #
-        # `exclude` means only "this job cannot compile it" (#1273), so an
-        # excluded member is still packaged: a second run, `--no-verify`
-        # over every member, writes its .crate without compiling it — its
-        # compile check is the class that owns it (pgrx-extension). That
-        # run rewrites the verified crates too, so each one must come out
-        # byte-identical, or the bytes hashed and published would not be
-        # the bytes that were verified. Measured on a fixture workspace,
-        # cargo 1.97.1: the second run reproduces the first byte for byte.
-        #
-        # Then the subject set is cut to what crates.io will receive
-        # (#1310). `cargo package` does not read the `publish` key, so it
-        # writes a crate for a `publish = false` member too, and every
-        # crate left in target/package is hashed, planned, uploaded as a
-        # release asset and fetched back from static.crates.io by the
-        # verifier — which fails on one the registry never got, after
-        # the release's other crates are public. So a crate the canon
-        # helper does not name is removed here, after it was packaged
-        # (and verified, unless excluded), before anything hashes it; and
-        # a crate the helper names that cargo did not write fails by
-        # name. The helper is the one the publisher reads, so the
-        # subjects and the uploads are one set by construction.
-        run: |
-          set -euo pipefail
-          # Bash 3.2-clean: release/test_build_rust_crate.py runs these
-          # exact bytes on a Mac, where /bin/bash is 3.2.
-          # shellcheck disable=SC2086  # the flags are flag-shaped on purpose
-          cargo package --workspace --locked ${EXCLUDE_FLAGS}
-          if [[ -n ${EXCLUDE_FLAGS// /} ]]; then
-            verified=$(sha256sum target/package/*.crate)
-            cargo package --workspace --locked --no-verify
-            changed=0
-            while read -r sum crate; do
-              [[ -n ${crate} ]] || continue
-              now=$(sha256sum "${crate}" | cut -d' ' -f1)
-              if [[ ${now} != "${sum}" ]]; then
-                echo "::error::${crate##*/} changed when packaged again" \
-                  "without verifying: ${sum} verified, ${now} now"
-                changed=1
-              fi
-            done <<< "${verified}"
-            if [[ ${changed} -ne 0 ]]; then exit 1; fi
-          fi
-          published=$(.org-canon/release/crates-io-members.sh)
-          ships=" "
-          missing=0
-          while IFS=$'\t' read -r name version; do
-            [[ -n ${name} ]] || continue
-            ships="${ships}${name}-${version}.crate "
-            if [[ ! -f target/package/${name}-${version}.crate ]]; then
-              echo "::error::${name} ${version} publishes to crates.io," \
-                "but cargo package wrote no ${name}-${version}.crate"
-              missing=1
-            fi
-          done <<< "${published}"
-          if [[ ${missing} -ne 0 ]]; then exit 1; fi
-          for c in target/package/*.crate; do
-            [[ -e ${c} ]] || break
-            if [[ ${ships} != *" ${c##*/} "* ]]; then
-              rm -- "${c}"
-              echo "${c##*/} is not published to crates.io (publish key);" \
-                "not a release subject"
-            fi
-          done
+        # fails from its packaged form. An excluded member is packaged by
+        # a second, unverified run that must rewrite every verified crate
+        # byte for byte (#1273), and the set is then cut to what crates.io
+        # receives (#1310). release/package-crates.py, which says why.
+        run: .org-canon/release/package-crates.py
       - name: Compute the subject manifest
         id: hash
         run: |

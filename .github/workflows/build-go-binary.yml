@@ -184,6 +184,9 @@ jobs:
             go >> "${GITHUB_OUTPUT}"
           # Unlinked before go runs: an untracked path in the tree stamps
           # every binary vcs.modified=true, which the stamp check refuses.
+          # The tree itself stays reachable for the build step's helper.
+          tree=$(realpath .org-canon)
+          echo "ORG_CANON_TREE=${tree}" >> "${GITHUB_ENV}"
           rm -- .org-canon
       - name: Install mise and the caller's pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
@@ -232,29 +235,11 @@ jobs:
           # artifact, not the diff.
           go test ./...
       - name: Build every command
+        # Every main package `go list` names, refusing none and a binary
+        # name two would share. Run from the tree the pins step recorded:
+        # the .org-canon link is gone by now. release/build-go-commands.py.
         run: |
-          set -euo pipefail
-          # The command list comes from the module's own package graph,
-          # never from a directory convention: a main package is what Go
-          # says is a main package, wherever it lives.
-          mkdir -p staged
-          mains=$(go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./...)
-          pkgs=()
-          while IFS= read -r p; do
-            if [[ -n ${p} ]]; then pkgs+=("${p}"); fi
-          done <<< "${mains}"
-          if ((${#pkgs[@]} == 0)); then
-            echo "::error::no main packages in this module — go-binary is the wrong class"
-            exit 1
-          fi
-          for p in "${pkgs[@]}"; do
-            b="${p##*/}"
-            if [[ -e staged/${b} ]]; then
-              echo "::error::two main packages both build a binary named ${b}"
-              exit 1
-            fi
-            go build -o "staged/${b}" "${p}"
-          done
+          "${ORG_CANON_TREE}/release/build-go-commands.py"
       - name: Refuse a binary whose stamp is not the released commit
         run: |
           set -euo pipefail

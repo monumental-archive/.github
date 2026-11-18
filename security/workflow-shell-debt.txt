@@ -28,7 +28,6 @@
 .github/workflows/attach-release.yml	Write the evidence manifest	54	# stele: monumental-archive/stele#400, canon swap #1375
 .github/workflows/attach-release.yml	Attach and publish	49	# canon helper (the remaining small steps): #1386
 .github/workflows/base-attest.yml	Verify the upstream provenance names this source (#212)	29	# stele: monumental-archive/stele#402, canon swap #1377
-.github/workflows/build-go-binary.yml	Build every command	19	# canon helper: #1352 unassigned
 .github/workflows/build-go-binary.yml	Refuse a binary whose stamp is not the released commit	19	# stele: #1352 unassigned
 .github/workflows/build-go-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-oci-image.yml	Verify every first-party base carries its org attestation	65	# stele: monumental-archive/stele#402, canon swap #1377
@@ -44,10 +43,7 @@
 .github/workflows/build-pgrx-images.yml	Build both platforms and push by digest, untagged (#118)	37	# canon helper (registry operations): #1382
 .github/workflows/build-pgrx-images.yml	Assemble and refuse a partial set	16	# canon helper: #1352 unassigned
 .github/workflows/build-rust-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
-.github/workflows/build-rust-crate.yml	Package	38	# canon helper (packaging): #1384
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/build-source-archive.yml	Build the archive twice and prove determinism	22	# canon helper (packaging): #1384
-.github/workflows/build-wasm-npm.yml	Pack and hash the exact bytes that will publish	36	# canon helper (packaging): #1384
 .github/workflows/ci.yml	The squash message is the PR title and body — hold it to the commit canon	23	# canon helper (the remaining small steps): #1386
 .github/workflows/ci.yml	Every part of the gate passed	25	# canon helper (the remaining small steps): #1386
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
