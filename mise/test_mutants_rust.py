@@ -22,6 +22,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -36,6 +37,10 @@ BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 LABEL = "audit:mutants: rust"
 CONFIG = ".cargo/mutants.toml"
+
+_SPEC = importlib.util.spec_from_file_location("mutants_rust", BELT / "mutants-rust.py")
+helper = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(helper)
 
 CARGO_STUB = """#!/usr/bin/env bash
 printf 'cargo %s\\n' "$*" >> "${PLANT_LOG}"
@@ -162,6 +167,7 @@ class Planted(unittest.TestCase):
         belt = self.tmp / "belt"
         belt.mkdir()
         (belt / "gate-surface.py").symlink_to(BELT / "gate-surface.py")
+        (belt / "mutants-rust.py").symlink_to(BELT / "mutants-rust.py")
         (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
         self.log = self.tmp / "log"
         self.log.touch()
@@ -657,6 +663,91 @@ class Shards(Planted):
                     [f"{LABEL}: MUTANTS_SHARD='{bad}' is not k/n with k < n"],
                 )
                 self.assertEqual(log, [])
+
+
+class ReasonRule(unittest.TestCase):
+    """mutants-rust.py's reader of `.cargo/mutants.toml`, on planted text (#1486)."""
+
+    def test_every_entry_under_its_reason_is_clean(self) -> None:
+        """A `#` line above each entry, blank lines between allowed."""
+        text = (
+            "exclude_re = [\n"
+            "  # the width is a constant\n"
+            '  "replace width",\n'
+            "  # a log line\n"
+            "\n"
+            '  "delete log",\n'
+            "]\n"
+        )
+        self.assertEqual(helper.unexplained(text), [])
+
+    def test_an_entry_with_no_reason_is_named_with_its_line(self) -> None:
+        """The second entry follows the first, not a comment."""
+        text = 'exclude_re = [\n  # why\n  "one",\n  "two",\n]\n'
+        self.assertEqual(helper.unexplained(text), [(4, "exclude_re", '"two"')])
+
+    def test_an_entry_on_the_opening_line_has_nowhere_for_a_reason(self) -> None:
+        """`key = ["x"]` is named as such, for either key."""
+        text = 'exclude_globs = ["src/gen.rs"]\n'
+        self.assertEqual(
+            helper.unexplained(text),
+            [(1, "exclude_globs", "an entry on the opening line")],
+        )
+
+    def test_a_closing_bracket_on_the_entry_ends_the_list(self) -> None:
+        """After `"x"]`, a quoted line is not an entry."""
+        text = 'exclude_re = [\n  # why\n  "x"]\n"not = an entry"\n'
+        self.assertEqual(helper.unexplained(text), [])
+
+    def test_other_keys_are_not_read(self) -> None:
+        """Only the two exclusion lists carry the rule."""
+        text = 'additional_cargo_args = [\n  "--all-features",\n]\n'
+        self.assertEqual(helper.unexplained(text), [])
+
+
+class Readers(unittest.TestCase):
+    """mutants-rust.py's other readers, directly (#1486)."""
+
+    def test_default_major_is_the_one_pg_feature(self) -> None:
+        """One pgNN in `default` is the major; none or two is no answer."""
+        meta = {
+            "packages": [
+                {"name": "one", "features": {"default": ["pg17", "serde"]}},
+                {"name": "two", "features": {"default": ["pg17", "pg18"]}},
+                {"name": "none", "features": {"default": []}},
+                {"name": "bare", "features": {}},
+            ]
+        }
+        self.assertEqual(helper.default_major(meta, "one"), "pg17")
+        self.assertEqual(helper.default_major(meta, "two"), "")
+        self.assertEqual(helper.default_major(meta, "none"), "")
+        self.assertEqual(helper.default_major(meta, "bare"), "")
+        self.assertEqual(helper.default_major(meta, "absent"), "")
+
+    def test_a_listing_counts_lines_with_anything_on_them(self) -> None:
+        """Blank and whitespace-only lines are not mutants."""
+        self.assertEqual(helper.count_listed("a\n\n  \t\nb\n"), 2)
+        self.assertEqual(helper.count_listed(""), 0)
+
+    def test_excluded_is_the_unconfigured_minus_the_configured(self) -> None:
+        """Never the shard's figure."""
+        self.assertEqual(helper.Plan(every=7, listed=5, here=1).excluded, 2)
+
+    def test_a_timeout_is_killed_and_absent_counts_are_zero(self) -> None:
+        """Caught plus timeout is killed; missed is survived."""
+        counts = {"total_mutants": 6, "caught": 3, "timeout": 2, "missed": 1}
+        self.assertEqual(helper.tally(counts), (6, 5, 1))
+        self.assertEqual(helper.tally({}), (0, 0, 0))
+
+    def test_red_is_a_survivor_or_a_run_that_judged_nothing(self) -> None:
+        """Clean is neither."""
+        self.assertFalse(helper.red(helper.Verdict(total=3, killed=3)))
+        self.assertTrue(helper.red(helper.Verdict(survived=1)))
+        self.assertTrue(helper.red(helper.Verdict(runs=["x: exited 1"])))
+
+    def test_only_0_2_and_3_are_judged(self) -> None:
+        """4 is a red baseline; 1 is a failure to run."""
+        self.assertEqual(helper.JUDGED, frozenset({0, 2, 3}))
 
 
 if __name__ == "__main__":
