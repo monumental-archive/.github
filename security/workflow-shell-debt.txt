@@ -26,7 +26,6 @@
 .github/workflows/attach-release.yml	Name each provenance after the class it describes	31	# stele: monumental-archive/stele#400, canon swap #1375
 .github/workflows/attach-release.yml	Write the evidence manifest	54	# stele: monumental-archive/stele#400, canon swap #1375
 .github/workflows/base-attest.yml	Verify the upstream provenance names this source (#212)	29	# stele: monumental-archive/stele#402, canon swap #1377
-.github/workflows/build-go-binary.yml	Build every command	19	# canon helper: #1352 unassigned
 .github/workflows/build-go-binary.yml	Refuse a binary whose stamp is not the released commit	19	# stele: #1352 unassigned
 .github/workflows/build-go-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-oci-image.yml	Verify every first-party base carries its org attestation	65	# stele: monumental-archive/stele#402, canon swap #1377
@@ -42,10 +41,7 @@
 .github/workflows/build-pgrx-images.yml	Build both platforms and push by digest, untagged (#118)	37	# canon helper (registry operations): #1382
 .github/workflows/build-pgrx-images.yml	Assemble and refuse a partial set	16	# canon helper: #1352 unassigned
 .github/workflows/build-rust-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
-.github/workflows/build-rust-crate.yml	Package	38	# canon helper (packaging): #1384
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/build-source-archive.yml	Build the archive twice and prove determinism	22	# canon helper (packaging): #1384
-.github/workflows/build-wasm-npm.yml	Pack and hash the exact bytes that will publish	36	# canon helper (packaging): #1384
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Derive this publish's VEX and gate on undecided advisories	40	# stele: monumental-archive/stele#397, canon swap #1372
 .github/workflows/continuous.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374
@@ -54,8 +50,6 @@
 .github/workflows/level-assert.yml	Assert the published board is the measured one	18	# stele: #1352 unassigned
 .github/workflows/level-assert.yml	Report	20	# canon helper (the remaining small steps): #1386
 .github/workflows/level.yml	Check this repository against the canon roster	26	# stele: monumental-archive/stele#388, canon swap #1379
-.github/workflows/publish-rust-crate.yml	Publish	77	# canon helper (registry publishers): #1383
-.github/workflows/publish-wasm-npm.yml	Publish	49	# canon helper (registry publishers): #1383
 .github/workflows/publish.yml	Check the ref and the class	50	# stele: monumental-archive/stele#403, canon swap #1378
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/publish.yml	Derive this release's VEX and gate on undecided advisories	27	# stele: monumental-archive/stele#397, canon swap #1372

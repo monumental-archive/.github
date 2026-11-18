@@ -1,0 +1,19 @@
+# The canon adopts audit:mutants' Python leg (#1354): this section is
+# the adoption, read by mutmut and by the belt's mise/mutants-python.sh.
+# Nothing else lives in this file: the belt delivers every other Python
+# tool's config, and passes it explicitly.
+#
+# The roots are the canon's three Python trees. Each exclusion carries
+# its reason on the line above it, the leg's rule; a survivor is killed
+# by an assertion or excluded at its site with
+# `# pragma: no mutate -- <why>`.
+[tool.mutmut]
+source_paths = ["mise", "release", ".github/rekor-monitor"]
+do_not_mutate = [
+  # The belt's tests are what judges a mutant, not what is judged.
+  "mise/test_*.py",
+  # The release scripts' tests, likewise.
+  "release/test_*.py",
+  # The signer watch's tests, likewise.
+  ".github/rekor-monitor/test_*.py",
+]

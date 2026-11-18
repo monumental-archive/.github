@@ -83,7 +83,7 @@ own work and adds the task that runs it to its row.
 
 | # | Property | What breaks without it | Mechanism | Issue |
 |---|---|---|---|---|
-| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
+| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (mutmut; adopt with `[tool.mutmut]` in `pyproject.toml`) [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
 | 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357]; Go has no branch figure, answered by [#1356] |
 | 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust and Go exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`); Python [#1332]; TypeScript exists in monumental-archive (fast-check) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
