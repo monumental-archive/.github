@@ -65,6 +65,15 @@ MARKER = re.compile(r"^\s*#\s*plan-producer:(?P<rest>.*)$")
 ENV_PREFIX = re.compile(r"^\s*PLAN_DOC_PREFIX:\s*(?P<prefix>\S+)\s*$")
 JQ_DOC = re.compile(r"""doc:\s*\(\s*(?P<quote>["'])(?P<prefix>[^"']*)(?P=quote)""")
 
+# The third: a leg that has stele write its plan (stele#396, #1371)
+# names its class on the command line, and stele names the documents
+# under that class's planned prefix in this same policy — so the prefix
+# is read from the policy, never restated in the leg, and producer and
+# obligation cannot drift apart by construction.
+STELE_PLAN = re.compile(
+    r"\bstele\s+derive\s+inventory-plan\b.*?--class\s+(?P<klass>[A-Za-z0-9_.-]+)"
+)
+
 # A leg that hands its plan to the sbom job. `pattern:` is the DOWNLOAD
 # side and deliberately not matched — publish.yml fetches `sbom-plan-*`
 # and emits nothing.
@@ -123,14 +132,17 @@ def markers(text: str) -> tuple[list[tuple[str, str]], list[str]]:
     return pairs, malformed
 
 
-def emitted(text: str) -> set[str]:
+def emitted(text: str, policy: dict | None = None) -> set[str]:
     """Read the document prefixes one file's legs actually emit under.
 
     Args:
         text: the file's contents.
+        policy: the decoded assert policy, which names the prefix a
+            stele-written plan is emitted under; without it a stele call
+            emits nothing this reader can name.
 
     Returns:
-        Every prefix named by the two emission idioms.
+        Every prefix named by the three emission idioms.
 
     """
     lines = text.splitlines()
@@ -140,7 +152,12 @@ def emitted(text: str) -> set[str]:
         if found
     }
     jq = {found.group("prefix") for line in lines for found in JQ_DOC.finditer(line)}
-    return env | jq
+    called = {
+        found.group("klass") for line in lines for found in STELE_PLAN.finditer(line)
+    }
+    planned = obligations(policy) if policy is not None else set()
+    stele = {prefix for klass, prefix in planned if klass in called}
+    return env | jq | stele
 
 
 def uploads_plan(text: str) -> bool:
@@ -242,10 +259,11 @@ def claims(policy: dict, files: dict[str, str]) -> tuple[Claims, list[str]]:
     return claimed, findings
 
 
-def production(files: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+def production(policy: dict, files: dict[str, str]) -> tuple[dict[str, str], list[str]]:
     """Read the prefixes the legs actually emit under.
 
     Args:
+        policy: the decoded assert policy, for stele-written plans.
         files: workflow path to contents.
 
     Returns:
@@ -258,14 +276,16 @@ def production(files: dict[str, str]) -> tuple[dict[str, str], list[str]]:
 
     for path in sorted(files):
         text = files[path]
-        prefixes = emitted(text)
+        prefixes = emitted(text, policy)
         for prefix in sorted(prefixes):
             produced.setdefault(prefix, path)
         if uploads_plan(text) and not prefixes:
             findings.append(
                 f"{path}: uploads an sbom-plan artifact and states no "
                 f"document prefix this check can read — state it as "
-                f"`PLAN_DOC_PREFIX:` or as the leading literal of `doc:`",
+                f"`PLAN_DOC_PREFIX:`, as the leading literal of `doc:`, or "
+                f"through `stele derive inventory-plan --class` for a class "
+                f"that declares a planned prefix",
             )
 
     return produced, findings
@@ -283,7 +303,7 @@ def judge(policy: dict, files: dict[str, str]) -> list[str]:
 
     """
     claimed, findings = claims(policy, files)
-    produced, upload_findings = production(files)
+    produced, upload_findings = production(policy, files)
 
     findings.extend(
         f"class {klass!r} declares the planned obligation {prefix!r} and no "

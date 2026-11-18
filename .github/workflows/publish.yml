@@ -631,182 +631,40 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
           CLASSES: ${{ inputs.classes }}
           # What the evidence declares, which the plans judgment reads
-          # and the branch below deliberately does not (#843): which
-          # legs RAN is the caller's list, and which classes OWE is the
+          # and the class rules deliberately do not (#843): which legs
+          # RAN is the caller's list, and which classes OWE is the
           # derived one. Two questions, two readings, neither guessing
           # at the other.
           EVIDENCE_CLASSES: ${{ needs.guard.outputs.classes }}
-          PG_MAJORS: ${{ inputs.pg-majors }}
+          # Every requested major must be covered — asked only of a
+          # release that built the extension, since pg-majors defaults
+          # for every caller.
+          VARIANTS: ${{ contains(inputs.classes, 'pgrx-extension') && inputs.pg-majors || '' }}
+        # One call (stele#396, #1371): the plans judged as `assert plans`
+        # judges them, one document per judged entry and the view folded
+        # from them; or the shipped binaries' own inventory; or, for a
+        # tree tracking no manifest, the forge's dependency graph. Which
+        # inventory each class owes is its `inventory` declaration in
+        # slsa/assert-policy.json, every document is held to the one
+        # PURL admissibility rule, and the decision population is
+        # printed. The released commit's own instant dates every
+        # document, never the run describing it.
         run: |
           set -euo pipefail
-          command -v stele > /dev/null || {
-            echo "::error::stele is not on the runner — it is a belt tool"
-            exit 1
-          }
-          base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
-          base="${base#.}"
-          mkdir -p dist
-          out="dist/${base}-${VERSION}.spdx.json"
-          # The released commit's own instant — every derived document
-          # is dated by the artifact, never by the run describing it.
           epoch=$(git log -1 --pretty=%ct)
           created=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)
-          echo "SBOM_CREATED=${created}" >> "${GITHUB_ENV}"
-          # A release with no inventory plan decides as one release; a
-          # planned one decides per planned document. Set before the
-          # branch so no path can leave it unstated.
-          inventories='[""]'
-          binaries_speak=1
-          go_binary=0
-          planned=()
-          for class in ${CLASSES//,/ }; do
-            case "${class}" in
-              go-binary) go_binary=1 ;;
-              oci-image) ;;
-              *)
-                binaries_speak=0
-                planned+=("${class}")
-                ;;
-            esac
-          done
-          # The reverse of #775's shape, refused the same way and before
-          # either branch is taken: go-binary beside a plan-emitting class
-          # would send the run down the plan branch, where the go-binary
-          # leg has no plan to offer, and the release would publish green
-          # with an inventory that omits the Go binaries (.github#784).
-          # Deleted in the change that gives the go-binary leg a plan.
-          if ((go_binary == 1 && binaries_speak == 0)); then
-            beside=$(
-              IFS=','
-              echo "${planned[*]}"
-            )
-            emsg="go-binary cannot yet ship beside ${beside}: the inventory would omit the Go binaries'"
-            emsg+=" packages (.github#784)"
-            echo "::error::${emsg}"
-            exit 1
-          fi
-          if [[ -n ${BINARIES_DIR:-} && ${binaries_speak} -eq 1 ]]; then
-            # The oci-image class is in the binaries-speak set because an
-            # image whose contents are the shipped Go binaries adds no
-            # inventory of its own. A DECLARED binary-crate does add one
-            # (#775), and this branch would derive from the binaries and
-            # drop it — an inventory silently narrower than the release.
-            # Refuse rather than choose: the two shapes disagree about
-            # what the release ships, and only the caller can say which
-            # it meant.
-            if compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
-              emsg="a build leg emitted an inventory plan while the shipped binaries would speak for the whole"
-              emsg+=" release — the two describe different artifact sets; declare the classes that own the plan,"
-              emsg+=" or drop binary-crate from the image"
-              echo "::error::${emsg}"
-              exit 1
-            fi
-            listing=$(find "${BINARIES_DIR}" -type f | sort)
-            bins=()
-            while IFS= read -r b; do
-              [[ -n ${b} ]] && bins+=("${b}")
-            done <<< "${listing}"
-            ((${#bins[@]} > 0)) || {
-              echo "::error::BINARIES_DIR holds no binaries — an inventory of nothing asserts nothing"
-              exit 1
-            }
-            stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
-          elif compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
-            # Pre-publish judgment of the plans (`stele assert plans`,
-            # stele#142) against the SAME policy the evidence walk
-            # reads — one obligation list, two moments of looking, so a
-            # release cannot publish green and red on the walk. The
-            # plans originate on build legs that execute caller code,
-            # so they are data: shape, charset, matrix collapse and
-            # divergent-claim refusal all live inside the engine, and
-            # nothing from a plan reaches a command line until it has
-            # judged. The spec is stele's docs/assert-policy-schema.md.
-            machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
-            [[ -n ${machinery} ]] || {
-              echo "::error::the pinned canon tree's CITATION.cff names no version — the owed epochs cannot be judged"
-              exit 1
-            }
-            stele assert plans \
-              --policy .org-canon/slsa/assert-policy.json \
-              --classes "${EVIDENCE_CLASSES}" \
-              --machinery-version "${machinery}" \
-              --out "${RUNNER_TEMP}/judged-plans.json" \
-              plans/sbom-plan-*/plan.json
-            # The derivation iterates the set the JUDGMENT emitted, not
-            # a second reading of the same bytes: `jq -s 'add | unique'`
-            # over the raw plans was the engine's canonical collapse
-            # derived twice, agreeing by luck (stele#151). --out writes
-            # only on PASS, so there is nothing to iterate unless the
-            # plans were judged.
-            plan=$(cat "${RUNNER_TEMP}/judged-plans.json")
-            docs=()
-            count=$(jq 'length' <<< "${plan}")
-            for ((i = 0; i < count; i++)); do
-              entry=$(jq -c ".[${i}]" <<< "${plan}")
-              doc_name=$(jq -r '.doc' <<< "${entry}")
-              doc="dist/${doc_name}-${VERSION}.spdx.json"
-              pkg=$(jq -r '.params.cargoPackage' <<< "${entry}")
-              flags=(--cargo-package "${pkg}" --tree .)
-              feats=$(jq -r '(.params.features // []) | join(",")' <<< "${entry}")
-              if [[ -n ${feats} ]]; then flags+=(--features "${feats}"); fi
-              ndf=$(jq -r '.params.noDefaultFeatures // false' <<< "${entry}")
-              if [[ ${ndf} == "true" ]]; then
-                flags+=(--no-default-features)
-              fi
-              artifact=$(jq -r '.artifact // ""' <<< "${entry}")
-              if [[ -n ${artifact} ]]; then flags+=(--artifact "${artifact}"); fi
-              stele derive sbom "${flags[@]}" --created "${created}" --out "${doc}"
-              docs+=("${doc}")
-            done
-            # One crate built once per major is several artifacts with
-            # several digests (#492), so each owes its own inventory —
-            # and the set is structural now: every requested major must
-            # appear in some pgrx document, or nothing publishes.
-            if [[ ${CLASSES} == *pgrx-extension* ]]; then
-              for major in ${PG_MAJORS//,/ }; do
-                found=0
-                for d in "${docs[@]}"; do
-                  if [[ ${d} == dist/sbom-pgrx-*-pg${major}-"${VERSION}".spdx.json ]]; then found=1; fi
-                done
-                ((found == 1)) || {
-                  echo "::error::pg-majors names ${major} but no pgrx inventory covers it"
-                  exit 1
-                }
-              done
-            fi
-            union=$(
-              IFS=','
-              echo "${docs[*]}"
-            )
-            stele derive sbom --union "${union}" --union-name "${base}@v${VERSION}" \
-              --created "${created}" --out "${out}"
-            # The union is a VIEW over the planned documents and bears
-            # no decision of its own (#492), so it is not in this list.
-            inventories=$(jq -c --arg v "${VERSION}" \
-              '[.[] | .doc + "-" + $v + ".spdx.json"] | unique' \
-              "${RUNNER_TEMP}/judged-plans.json")
-          elif tracked=$(git ls-files 'Cargo.lock' '*/Cargo.lock' 'go.mod' '*/go.mod') && [[ -n ${tracked} ]]; then
-            emsg="this release tracks a manifest but no build leg emitted an inventory plan — the per-release"
-            emsg+=" inventory is aggregated from per-artifact documents (#492), and the artifact-to-package"
-            emsg+=" mapping lives in the build leg that holds it (#537); release through a class whose build"
-            emsg+=" emits plans"
-            echo "::error::${emsg}"
-            exit 1
-          else
-            gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" --jq '.sbom' > "${out}"
-            purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
-            bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
-              | .referenceLocator | select(test("@") | not)] | length' "${out}")
-            echo "::notice::dependency-graph SBOM: ${bare} of ${purls} PURLs versionless"
-          fi
-          [[ -s ${out} ]] || {
-            echo "::error::SBOM derivation produced nothing"
-            exit 1
-          }
-          packages=$(jq '.packages | length' "${out}")
-          echo "::notice::release inventory: ${packages} packages (${out##*/})"
-          echo "list=${inventories}" >> "${GITHUB_OUTPUT}"
-          echo "::notice::decision population: ${inventories}"
+          mkdir -p dist && echo "SBOM_CREATED=${created}" >> "${GITHUB_ENV}"
+          machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
+          plans=(plans/sbom-plan-*/plan.json)
+          [[ -e ${plans[0]} ]] || plans=()
+          opts=()
+          [[ -z ${BINARIES_DIR:-} ]] || opts+=(--binaries-dir "${BINARIES_DIR}")
+          [[ -z ${VARIANTS} ]] || opts+=(--variants "${VARIANTS}")
+          list=$(stele derive inventories --policy .org-canon/slsa/assert-policy.json --classes "${CLASSES}" \
+            --evidence-classes "${EVIDENCE_CLASSES}" --machinery-version "${machinery}" \
+            --repo "${GITHUB_REPOSITORY}" --name "${SBOM_BASENAME}" --version "${VERSION}" --created "${created}" \
+            --tree . --out-dir dist "${opts[@]}" "${plans[@]}")
+          echo "list=${list}" >> "${GITHUB_OUTPUT}"
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
         # the SBOM just generated, so a release is born covered — and a
