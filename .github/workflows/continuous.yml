@@ -350,6 +350,7 @@ jobs:
           done
           echo "subjects=${subjects}" >> "${GITHUB_OUTPUT}"
       - name: Derive this publish's VEX and gate on undecided advisories
+        id: vex
         # The release path's leg, unchanged in policy and in tool
         # (publish.yml's sbom job): decisions are keyed by
         # package@version, coverage is derived from the inventory just
@@ -365,7 +366,6 @@ jobs:
         # (#1279) — the run artifact itself expires and is evidence of
         # nothing.
         env:
-          SUBJECTS: ${{ steps.inventory.outputs.subjects }}
           # The instant this publish describes, resolved once in the
           # facts job from the published commit's own committer time —
           # the same value SOURCE_DATE_EPOCH carries into the image. A
@@ -380,51 +380,45 @@ jobs:
             echo "::error::stele is not on the runner — it is a belt tool"
             exit 1
           }
-          # A stream's document is identified by the run that made it:
-          # there is no version to name it after, and two publishes of
-          # the same stream are two different documents.
-          id="https://openvex.dev/docs/public/vex-${GITHUB_REPOSITORY//\//-}-continuous-${GITHUB_RUN_ID}-derived"
+          # A stream's document is identified by the run that made it
+          # (the policy's blastRadius.vexId stream form): there is no
+          # version to name it after, and two publishes of the same
+          # stream are two different documents.
           released=$(date -u -d "@${SOURCE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)
-          # Captured, not streamed, so the verdict reaches the job
-          # summary either way. A refused SCHEDULED rebuild is the case
-          # that decides this: blocking a rebuild preserves MORE
-          # exposure than shipping it, so the refusal has to be
-          # readable by whoever can clear it — the issue's own
-          # reasoning. The red run is the notification; the summary is
-          # what makes it legible without opening a log.
-          code=0
+          # Captured as well as streamed, so the verdict reaches the job
+          # summary either way: the next step writes it.
           stele derive vex \
-            --subjects "${SUBJECTS}" \
-            --vex .org-canon/security/vex \
-            --base-ecosystems "debian,alpine,ubuntu,rocky,redhat,rpm" \
-            --author monumental-archive \
-            --id "${id}" \
+            --policy .org-canon/slsa/assert-policy.json \
+            --inventories dist --vex .org-canon/security/vex \
+            --repo "${GITHUB_REPOSITORY}" --run "${GITHUB_RUN_ID}" \
             --released "${released}" \
-            --out dist/continuous.vex.openvex.json > vex.log 2>&1 || code=$?
-          cat vex.log
+            --out dist/continuous.vex.openvex.json 2>&1 | tee vex.log
+      # A refused SCHEDULED rebuild is the case that decides this:
+      # blocking a rebuild preserves MORE exposure than shipping it, so
+      # the refusal has to be readable by whoever can clear it. The red
+      # run is the notification; the summary is what makes it legible
+      # without opening a log.
+      - name: Summarise the dependency decision
+        if: ${{ !cancelled() && steps.vex.outcome != 'skipped' && hashFiles('vex.log') != '' }}
+        env:
+          OUTCOME: ${{ steps.vex.outcome }}
+          REFUSAL: >-
+            An advisory in the inventory below has no recorded decision.
+            Record one in the canon under security/vex/, keyed by the
+            exact package@version; the next publish derives its coverage
+            from that decision, with no per-release list to extend.
+        run: |
+          set -euo pipefail
           {
-            if [[ ${code} -eq 0 ]]; then
+            if [[ ${OUTCOME} == success ]]; then
               echo "### Dependency decision: OPEN"
             else
-              echo "### Dependency decision: REFUSED — this publish is blocked"
-              echo
-              echo "An advisory in the inventory below has no recorded decision."
-              echo "Record one in the canon under security/vex/, keyed by the"
-              echo "exact package@version; the next publish derives its coverage"
-              echo "from that decision, with no per-release list to extend."
+              printf '%s\n\n%s\n' "### Dependency decision: REFUSED — this publish is blocked" "${REFUSAL}"
             fi
-            echo
-            echo '```'
+            printf '\n```\n'
             cat vex.log
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
-          if [[ ${code} -ne 0 ]]; then
-            exit "${code}"
-          fi
-          if [[ -f dist/continuous.vex.openvex.json ]]; then
-            statements=$(jq '.statements | length' dist/continuous.vex.openvex.json)
-            echo "::notice::derived VEX (${statements} statement(s))"
-          fi
       - name: Triage the tree's lock against the advisory feed
         # The release path's second and third legs, at the commit the
         # stream is publishing rather than at a tag. Both belt tasks

@@ -22,8 +22,6 @@
 .github/actions/source-attest/action.yml	Emit the chain links and push the ledger	19	# leaving (the source-attest action is deleted): #1362
 .github/actions/verify-signed/action.yml	Derive the signer digest from the calling workflow's own pin	23	# stele: #1352 unassigned
 .github/workflows/assemble-oci-index.yml	Generate the image SBOM from the published bytes	20	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/attach-release.yml	Name each provenance after the class it describes	31	# stele: monumental-archive/stele#400, canon swap #1375
-.github/workflows/attach-release.yml	Write the evidence manifest	54	# stele: monumental-archive/stele#400, canon swap #1375
 .github/workflows/base-attest.yml	Verify the upstream provenance names this source (#212)	29	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-go-binary.yml	Refuse a binary whose stamp is not the released commit	19	# stele: #1352 unassigned
 .github/workflows/build-go-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
@@ -35,7 +33,6 @@
 .github/workflows/build-rust-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-rust-crate.yml	Emit the inventory plan (which packages these crates ship)	25	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/continuous.yml	Inventory each pushed digest from the registry	32	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/continuous.yml	Derive this publish's VEX and gate on undecided advisories	40	# stele: monumental-archive/stele#397, canon swap #1372
 .github/workflows/continuous.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374
 .github/workflows/continuous.yml	Stage the decision subjects (what the decision covered)	21	# stele: monumental-archive/stele#399, canon swap #1374
 .github/workflows/level-assert.yml	Fetch what every population repository published	17	# canon helper: #1352 unassigned
@@ -44,7 +41,6 @@
 .github/workflows/level.yml	Check this repository against the canon roster	26	# stele: monumental-archive/stele#388, canon swap #1379
 .github/workflows/publish.yml	Check the ref and the class	50	# stele: monumental-archive/stele#403, canon swap #1378
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
-.github/workflows/publish.yml	Derive this release's VEX and gate on undecided advisories	27	# stele: monumental-archive/stele#397, canon swap #1372
 .github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/publish.yml	Refuse unless every required proof succeeded	23	# stele: monumental-archive/stele#399, canon swap #1374
@@ -53,4 +49,3 @@
 .github/workflows/verify-release.yml	Prove each declared subject against the registry	163	# stele: monumental-archive/stele#392, canon swap #1363
 .github/workflows/verify-release.yml	Verify the release and render the verdict (stele emit vsa)	85	# stele: monumental-archive/stele#392, canon swap #1363
 .github/workflows/verify-release.yml	Compute the enrichment facts (control plane only)	89	# stele: monumental-archive/stele#392, canon swap #1363
-.github/workflows/vex-attest.yml	Resolve subjects from the products the statements name	128	# stele: monumental-archive/stele#398, canon swap #1373

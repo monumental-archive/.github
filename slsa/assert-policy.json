@@ -1,5 +1,5 @@
 {
-  "schema": 8,
+  "schema": 9,
   "issuer": "https://token.actions.githubusercontent.com",
   "debtFile": "security/attestation-debt.txt",
   "signerCertificates": {
@@ -69,41 +69,103 @@
     "decisionFromVersion": "1.23.1",
     "evidenceSuffixes": [".openvex.json"],
     "publishWorkflows": ["publish", "self-publish"],
+    "publish": {
+      "stubPath": ".github/workflows/publish.yml",
+      "stubUses": "monumental-archive/.github/",
+      "selfStubPath": ".github/workflows/self-publish.yml"
+    },
     "classes": {
       "rust-crate": {
         "bundles": ["attestations-crates.intoto.jsonl"],
         "legacyVsaBundles": ["attestations-vsa-crates.intoto.jsonl"],
         "assetPrefixes": [
           { "prefix": "sbom-cargo-", "owedFrom": "1.42.0", "planned": true }
-        ]
+        ],
+        "inventory": {
+          "kind": "crates",
+          "artifactSuffix": "-crate"
+        }
       },
       "oci-image": {
-        "bundles": ["attestations-image.intoto.jsonl"]
+        "bundles": ["attestations-image.intoto.jsonl"],
+        "inventory": {
+          "kind": "none"
+        },
+        "declares": [
+          {
+            "kind": "instead",
+            "when": "binary-crate",
+            "class": "oci-image-crate",
+            "output": "image-class"
+          }
+        ]
       },
       "oci-image-crate": {
         "bundles": ["attestations-image.intoto.jsonl"],
         "assetPrefixes": [
           { "prefix": "sbom-image-", "owedFrom": "1.60.0", "planned": true }
-        ]
+        ],
+        "inventory": {
+          "kind": "planned"
+        },
+        "requestable": false
       },
       "rust-binary": {
         "bundles": ["attestations-binaries.intoto.jsonl"],
         "assetPrefixes": [
           { "prefix": "sbom-cargo-", "owedFrom": "1.43.0", "planned": true }
-        ]
+        ],
+        "inventory": {
+          "kind": "planned"
+        },
+        "subjects": {
+          "kind": "files",
+          "entry": "^(?P<target>[^/\\\\ \\t\\n*?\\[]+)$",
+          "unit": "target",
+          "extension": ".tar.gz",
+          "label": "${target}",
+          "assets": [
+            {
+              "noun": "archive",
+              "suffix": "-${target}.tar.gz"
+            }
+          ]
+        }
       },
       "go-binary": {
-        "bundles": ["attestations-go-binaries.intoto.jsonl"]
+        "bundles": ["attestations-go-binaries.intoto.jsonl"],
+        "inventory": {
+          "kind": "binaries"
+        },
+        "subjects": {
+          "kind": "files",
+          "entry": "^(?P<target>[^/\\\\ \\t\\n*?\\[]+)$",
+          "unit": "target",
+          "extension": ".tar.gz",
+          "label": "${target}",
+          "assets": [
+            {
+              "noun": "archive",
+              "suffix": "-${target}.tar.gz"
+            }
+          ]
+        }
       },
       "source-archive": {
-        "bundles": ["attestations-source.intoto.jsonl"]
+        "bundles": ["attestations-source.intoto.jsonl"],
+        "inventory": {
+          "kind": "planned"
+        }
       },
       "wasm-npm": {
         "bundles": ["attestations-npm.intoto.jsonl"],
         "legacyVsaBundles": ["attestations-vsa-npm.intoto.jsonl"],
         "assetPrefixes": [
           { "prefix": "sbom-npm-", "owedFrom": "1.42.0", "planned": true }
-        ]
+        ],
+        "inventory": {
+          "kind": "planned"
+        }
       },
       "pgrx-extension": {
         "bundles": ["attestations-extensions.intoto.jsonl"],
@@ -111,11 +173,55 @@
           { "prefix": "attestations-extimg-pg" },
           { "prefix": "sbom-pgrx-", "owedFrom": "1.42.0", "planned": true }
         ],
-        "enrichment": ["pgrx-base-images", "pgrx-base"]
+        "enrichment": ["pgrx-base-images", "pgrx-base"],
+        "inventory": {
+          "kind": "variants",
+          "artifact": "{package}-pg{variant}",
+          "features": ["pg{variant}"],
+          "noDefaultFeatures": true
+        },
+        "subjects": {
+          "kind": "files",
+          "entry": "^(?P<major>\\d+)-(?P<arch>[a-z0-9_]+)$",
+          "unit": "cell",
+          "extension": ".tar.gz",
+          "label": "${major}",
+          "assets": [
+            {
+              "noun": "tarball",
+              "of": "pg${major}/${arch}",
+              "suffix": "-pg${major}-linux-${arch}.tar.gz"
+            },
+            {
+              "noun": "debug tarball",
+              "of": "pg${major}/${arch}",
+              "suffix": "-pg${major}-linux-${arch}-debug.tar.gz"
+            }
+          ]
+        },
+        "declares": [
+          {
+            "kind": "after",
+            "class": "pgrx-extension-image",
+            "output": "extension-image-class"
+          }
+        ]
       },
       "pgrx-extension-image": {
         "bundles": [],
-        "assetPrefixes": [{ "prefix": "attestations-extimg-pg" }]
+        "assetPrefixes": [{ "prefix": "attestations-extimg-pg" }],
+        "inventory": {
+          "kind": "planned"
+        },
+        "subjects": {
+          "kind": "registry",
+          "form": "document",
+          "entry": "^\\d+$",
+          "unit": "major",
+          "extension": ".json",
+          "legField": "pg"
+        },
+        "requestable": false
       }
     },
     "continuous": {
@@ -179,6 +285,25 @@
       "repo": "release-lab",
       "tag": "v0.17.0",
       "advisory": "RUSTSEC-2021-0127"
+    },
+    "vexAuthor": "monumental-archive",
+    "vexId": {
+      "release": "https://openvex.dev/docs/public/vex-{owner}-{repo}-v{version}-derived",
+      "stream": "https://openvex.dev/docs/public/vex-{owner}-{repo}-continuous-{run}-derived"
     }
+  },
+  "published": {
+    "registries": [
+      {
+        "extension": ".crate",
+        "coordinate": "file",
+        "url": "https://static.crates.io/crates/{name}/{name}-{version}.crate"
+      },
+      {
+        "extension": ".tgz",
+        "coordinate": "declared",
+        "url": "https://registry.npmjs.org/{name}/-/{basename}-{version}.tgz"
+      }
+    ]
   }
 }
