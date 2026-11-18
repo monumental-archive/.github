@@ -53,13 +53,18 @@ RENOVATE_SCOPES = frozenset({"deps", "canon"})
 # TEST_DIRS. A `.rs` file is a test too where the diff ADDS a line
 # carrying one of RUST_TEST_ATTRS, because Rust keeps unit tests inside
 # the file they test.
+#
+# `fixtures` is not in TEST_DIRS (#1447). `testdata` is reserved by Go's
+# toolchain and `tests` is a convention about tests; `fixtures` alone
+# says only that files are stored there, and a fixtures directory under
+# either is a test by that directory.
 TEST_NAMES: tuple[re.Pattern[str], ...] = (
     re.compile(r"^test_.*\.py$"),  # Python, unittest/pytest
     re.compile(r"^.*_test\.go$"),  # Go
     re.compile(r"^[^.].*\.test\.[^.]+$"),  # JS/TS: `x.test.ts`
     re.compile(r"^[^.].*\.spec\.[^.]+$"),  # JS/TS: `x.spec.ts`
 )
-TEST_DIRS = frozenset({"tests", "testdata", "fixtures"})
+TEST_DIRS = frozenset({"tests", "testdata"})
 RUST_TEST_ATTRS = re.compile(r"^\+\s*#\[(?:test|pg_test|tokio::test)\b")
 
 # Code: a change here is a change in behaviour. TOML and YAML are code

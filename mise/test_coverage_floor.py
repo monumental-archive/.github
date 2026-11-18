@@ -565,6 +565,139 @@ class TestDerive(unittest.TestCase):
         self.assertIn("is not `<leg> <percent>`", err)
 
 
+BRANCH = "# rust-branches measured: 72.4\nrust-branches 70.4\n"
+
+
+class TestSeparateLeg(unittest.TestCase):
+    """The `rust-branches` line (#1359): its own record, law and ratchet."""
+
+    def test_render_round_trips_the_line(self) -> None:
+        """A rendered branch line parses back to the derivation it states."""
+        text = cf.render(
+            Decimal("95.44"), "coverage:adopt", {"rust-branches": Decimal("72.49")}
+        )
+        parsed, problems = cf.parse(text)
+        self.assertEqual(problems, [])
+        self.assertEqual(parsed.floor, Decimal("93.4"))
+        self.assertEqual(
+            parsed.separate, {"rust-branches": (Decimal("70.4"), Decimal("72.4"))}
+        )
+
+    def test_the_main_floor_ignores_the_line(self) -> None:
+        """coverage:check reads the main number, never the branch line."""
+        with Tree(record("93.4") + BRANCH) as tree:
+            status, out, err = run(cf.read, tree.path)
+        self.assertEqual((status, out, err), (0, "93.4\n", ""))
+
+    def test_read_leg_prints_the_line(self) -> None:
+        """The audit's read: the branch floor, from the record."""
+        with Tree(record("93.4") + BRANCH) as tree:
+            status, out, err = run(cf.read, tree.path, "rust-branches")
+        self.assertEqual((status, out, err), (0, "70.4\n", ""))
+
+    def test_read_leg_without_a_line_is_empty(self) -> None:
+        """No line: an empty answer, which the audit reads as a skip."""
+        with Tree(record("93.4")) as tree:
+            status, out, err = run(cf.read, tree.path, "rust-branches")
+        self.assertEqual((status, out, err), (0, "", ""))
+
+    def test_refusals(self) -> None:
+        """A line and its record come together, and agree, or are refused."""
+        rows = [
+            (
+                "line without record",
+                "rust-branches 70.4\n",
+                "states 1 `rust-branches` line(s) and no `rust-branches measured`",
+            ),
+            (
+                "record without line",
+                "# rust-branches measured: 72.4\n",
+                "states 0 `rust-branches` line(s) and a `rust-branches measured`",
+            ),
+            (
+                "two lines",
+                BRANCH + "rust-branches 70.4\n",
+                "states 2 `rust-branches` line(s)",
+            ),
+            (
+                "typed over the record",
+                "# rust-branches measured: 72.4\nrust-branches 60\n",
+                "rust-branches floor 60 disagrees with its own record",
+            ),
+            (
+                "not a number",
+                "# rust-branches measured: 72.4\nrust-branches high\n",
+                "is not `rust-branches <percent>`",
+            ),
+        ]
+        for name, extra, expected in rows:
+            with self.subTest(name):
+                parsed, problems = cf.parse(record("93.4") + extra)
+                self.assertIsNone(parsed)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(expected, problems[0])
+
+    def test_a_release_carries_the_line_through(self) -> None:
+        """Stable measures no branches, so the release keeps what it found."""
+        with Tree(record("93.4", measured="95.4") + BRANCH) as tree:
+            status, out, _ = run(
+                cf.derive, tree.path, "rust 96.0\n", "v1.2.0", adopt=False
+            )
+            parsed, problems = cf.parse(tree.text())
+        self.assertEqual(status, 0)
+        self.assertEqual(problems, [])
+        self.assertIn("93.4 -> 94.0", out)
+        self.assertEqual(
+            parsed.separate, {"rust-branches": (Decimal("70.4"), Decimal("72.4"))}
+        )
+
+    def test_the_line_is_not_in_the_minimum(self) -> None:
+        """A lower branch figure does not drag the main floor down."""
+        with Tree(record("93.4", measured="95.4")) as tree:
+            status, _, _ = run(
+                cf.derive,
+                tree.path,
+                "rust 96.0\nrust-branches 61.0\n",
+                "coverage:adopt",
+                adopt=True,
+            )
+            parsed, _ = cf.parse(tree.text())
+        self.assertEqual(status, 0)
+        self.assertEqual(parsed.floor, Decimal("94.0"))
+        self.assertEqual(parsed.separate["rust-branches"][0], Decimal("59.0"))
+
+    def test_the_line_only_rises(self) -> None:
+        """Below its floor plus the band, neither line is rewritten."""
+        before = record("93.4", measured="95.4") + BRANCH
+        with Tree(before) as tree:
+            status, _, err = run(
+                cf.derive,
+                tree.path,
+                "rust 96.0\nrust-branches 72.3\n",
+                "coverage:adopt",
+                adopt=True,
+            )
+            after = tree.text()
+        self.assertEqual(status, 1)
+        self.assertIn("rust-branches measured 72.3% is below its floor 70.4%", err)
+        self.assertEqual(after, before)
+
+    def test_the_line_rises(self) -> None:
+        """A higher branch figure raises the line."""
+        with Tree(record("93.4", measured="95.4") + BRANCH) as tree:
+            status, out, _ = run(
+                cf.derive,
+                tree.path,
+                "rust 96.0\nrust-branches 80.0\n",
+                "coverage:adopt",
+                adopt=True,
+            )
+            parsed, _ = cf.parse(tree.text())
+        self.assertEqual(status, 0)
+        self.assertIn("rust-branches 78.0 (measured 80.0)", out)
+        self.assertEqual(parsed.separate["rust-branches"][0], Decimal("78.0"))
+
+
 class TestMain(unittest.TestCase):
     """The command line both callers actually invoke."""
 

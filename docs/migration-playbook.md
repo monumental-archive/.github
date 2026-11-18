@@ -162,15 +162,15 @@ a fresh session **started in the target repo's checkout**.
       fuzzing runs, the repo decides what deserves a target.
 - [ ] `mise trust && mise install && mise run hooks:install`.
       What the `pre-push` hook gates is the working tree at `HEAD`,
-      on every push (#1281): `mise run ci`, run by the canon's
-      `.lefthook/pre-push/ci.sh`, which lefthook does not skip when the
-      push changes no file (a `run:` job was skipped for a delete-only
-      push). It gates `HEAD`, not the ref being pushed, so a branch
-      pushed from a checkout sitting on another commit is gated on the
-      wrong tree; push from the checkout (or worktree) whose `HEAD` is
-      the branch. Leave lefthook's `source_dir` at its default: the
-      script is found under it in the canon's checkout, and a repo
-      that moves it gets a failed push, never a skipped gate.
+      on every push (#1281): `mise run ci`, an inline job in the
+      canon's `lefthook/org-hooks.yml` that lefthook does not skip when
+      the push changes no file. It executes nothing from lefthook's
+      remote cache, which every worktree of the repository shares and
+      which holds one canon ref at a time (#1426), so worktrees pinned
+      to different canon refs can push side by side. It gates `HEAD`,
+      not the ref being pushed, so a branch pushed from a checkout
+      sitting on another commit is gated on the wrong tree; push from
+      the checkout (or worktree) whose `HEAD` is the branch.
 
 ## Phase 3 — make the gate green (session, in-repo)
 

@@ -20,15 +20,16 @@ here, as edtf's caller would have set it, so a row proves the step's
 bytes no longer read it; a member with `publish = false` (`"publish":
 []` in cargo metadata, measured on cargo 1.97.1) is the only way out.
 
-WHAT RUNS. The `run:` body of the `Publish` step, cut out of
-`.github/workflows/publish-rust-crate.yml` as shipped, under `bash -c`,
-with stub `curl` and `cargo` first on PATH. `jq` and `sha256sum` are the
-real ones, and so is release/crates-io-members.sh, the member set
-the step shares with the build (#1310), reached through a
-`.org-canon` link as the canon action lays it out. The stub `curl`
-answers the index from a directory laid out like the index host, so a
-wrong path layout reads as 404 and fails the "some published" row
-rather than passing quietly.
+WHAT RUNS. release/publish-crates.py, the step's body since #1383,
+in-process through its `run`, with a stub `cargo` first on PATH and the
+helper's one HTTP function replaced by a stub that answers the index
+from a directory laid out like the index host. `jq` and `sha256sum` are
+the real ones, and so is release/crates-io-members.sh, the member set
+the publisher shares with the build (#1310). The index path is the
+belt's one rule (mise/crates-index.py), so a wrong layout reads as 404
+and fails the "some published" row rather than passing quietly. Until
+#1383 these rows cut the step's `run:` block out of the workflow; they
+are the same rows, re-pointed.
 
 FIXTURES ARE REAL. Captured 2026-11-15:
 
@@ -53,22 +54,32 @@ as `mise run test`, which `ci` collects.
 """
 
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
-from dataclasses import dataclass
+from contextlib import redirect_stdout
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 CANON = Path(__file__).resolve().parent.parent
-WORKFLOW = CANON / ".github" / "workflows" / "publish-rust-crate.yml"
 TESTDATA = CANON / "release" / "testdata"
 INDEX = TESTDATA / "crates-index"
 CRATE = TESTDATA / "edtf-core-1.3.3.crate"
 METADATA = TESTDATA / "edtf-cargo-metadata.json"
-BASH = shutil.which("bash")
+
+_SPEC = importlib.util.spec_from_file_location(
+    "publish_crates", CANON / "release" / "publish-crates.py"
+)
+if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
+    msg = "test_publish_rust_crate: publish-crates.py did not arrive beside this file"
+    raise SystemExit(msg)
+publish_crates = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(publish_crates)
 
 CORE_CKSUM = "7001e4071709b45e67be9351b209b4465672b0ba633a143528b50f81805d428b"
 USER_AGENT = (
@@ -78,52 +89,12 @@ OIDC_URL = "https://oidc.invalid/token?api-version=2.0"
 OLD_CALLER_EXCLUDES = " --exclude edtf-postgres"
 PUBLISH = "publish --workspace --locked --no-verify"
 
-CURL_STUB = """#!/usr/bin/env bash
-# Stub `curl`: the OIDC request and the token exchange answer canned
-# JSON; index.crates.io answers from STUB_INDEX, laid out like the host.
-# <path>.status planted beside a path answers that status with no body.
-set -euo pipefail
-out=/dev/stdout
-fmt=""
-url=""
-ua=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -o) out="$2"; shift ;;
-    -w) fmt="$2"; shift ;;
-    -H) if [[ $2 == "User-Agent: "* ]]; then ua="${2#User-Agent: }"; fi; shift ;;
-    -X | --data) shift ;;
-    https://*) url="$1" ;;
-  esac
-  shift
-done
-printf '%s\\t%s\\n' "${url}" "${ua}" >> "${STUB_LOG}/curl"
-case ${url} in
-  "${ACTIONS_ID_TOKEN_REQUEST_URL}"*) echo '{"value":"stub-oidc"}' ;;
-  https://crates.io/api/v1/trusted_publishing/tokens) echo '{"token":"stub"}' ;;
-  https://index.crates.io/*)
-    rel="${url#https://index.crates.io/}"
-    if [[ -f ${STUB_INDEX}/${rel}.status ]]; then
-      : > "${out}"
-      code=$(cat "${STUB_INDEX}/${rel}.status")
-    elif [[ -f ${STUB_INDEX}/${rel} ]]; then
-      cp "${STUB_INDEX}/${rel}" "${out}"
-      code=200
-    else
-      : > "${out}"
-      code=404
-    fi
-    if [[ ${fmt} == '%{http_code}' ]]; then printf '%s' "${code}"; fi
-    ;;
-  *) echo "curl stub: refusing ${url}" >&2; exit 7 ;;
-esac
-"""
-
 CARGO_STUB = """#!/usr/bin/env bash
 # Stub `cargo`: logs every invocation; `metadata` answers the captured
 # edtf metadata with the target directory moved into the fixture;
 # `package -p <name>...` copies STUB_CRATES/<name>-*.crate where cargo
-# would write it; `publish` succeeds.
+# would write it; `publish` records the token it was handed and exits
+# STUB_PUBLISH_RC (0 when unset).
 set -euo pipefail
 printf '%s\\n' "$*" >> "${STUB_LOG}/cargo"
 case $1 in
@@ -137,29 +108,52 @@ case $1 in
       shift
     done
     ;;
-  publish) ;;
+  publish)
+    printf 'token=%s\\n' "${CARGO_REGISTRY_TOKEN:-}" >> "${STUB_LOG}/cargo-env"
+    exit "${STUB_PUBLISH_RC:-0}"
+    ;;
   *) echo "cargo stub: refusing $*" >&2; exit 101 ;;
 esac
 """
 
 
-def publish_body() -> str:
-    """Cut the `Publish` step's `run:` block out of the shipped workflow.
+@dataclass
+class Fetch:
+    """The helper's HTTP, stubbed.
 
-    Returns:
-        The block, dedented, exactly as the runner would hand it to bash.
-
+    The index answers from a served directory, and the OIDC endpoint and
+    the token exchange from canned answers. A served path's
+    `<path>.status` file answers that status with no body.
     """
-    lines = WORKFLOW.read_text().splitlines()
-    step = lines.index("      - name: Publish")
-    run = next(i for i in range(step, len(lines)) if lines[i].strip() == "run: |")
-    indent = len(lines[run]) - len(lines[run].lstrip()) + 2
-    body = []
-    for line in lines[run + 1 :]:
-        if line.strip() and len(line) - len(line.lstrip()) < indent:
-            break
-        body.append(line[indent:])
-    return "\n".join(body) + "\n"
+
+    served: Path
+    oidc: int = 200
+    exchange: int = 200
+    requests: list[tuple[str, str]] = field(default_factory=list)
+
+    def __call__(
+        self, method: str, url: str, headers: dict[str, str], data: bytes | None = None
+    ) -> publish_crates.Response:
+        """Answer one request and record it as the old curl stub logged it.
+
+        Returns:
+            The canned or served answer.
+
+        """
+        del method, data
+        self.requests.append((url, headers.get("User-Agent", "")))
+        if url.startswith(OIDC_URL):
+            return publish_crates.Response(self.oidc, b'{"value":"stub-oidc"}')
+        if url == publish_crates.EXCHANGE:
+            return publish_crates.Response(self.exchange, b'{"token":"stub"}')
+        rel = url.removeprefix("https://index.crates.io/")
+        status = self.served / f"{rel}.status"
+        if status.is_file():
+            code = status.read_text()
+            return publish_crates.Response(None if code == "000" else int(code), b"")
+        if (self.served / rel).is_file():
+            return publish_crates.Response(200, (self.served / rel).read_bytes())
+        return publish_crates.Response(404, b"")
 
 
 @dataclass
@@ -171,6 +165,7 @@ class Run:
     stderr: str
     cargo: list[str]
     curl: list[tuple[str, str]]
+    tokens: list[str]
 
     def publishes(self) -> list[str]:
         """Pick out the `cargo publish` invocations.
@@ -186,8 +181,9 @@ def run_publish(
     index: dict[str, str],
     crate: bytes | None = None,
     unpublished: tuple[str, ...] = (),
+    **answers: int,
 ) -> Run:
-    """Run the shipped body with the index serving `index`.
+    """Run the helper with the index serving `index`.
 
     Args:
         index: index paths to serve - a fixture file's name to serve it,
@@ -196,6 +192,8 @@ def run_publish(
             the real uploaded crate when None.
         unpublished: members whose manifest says `publish = false`,
             written into the captured metadata as cargo reports it.
+        answers: `oidc=` and `exchange=` statuses, and `publish_rc=`, the
+            stub cargo publish's exit.
 
     Returns:
         The run's status, output and the stubs' logs.
@@ -206,9 +204,8 @@ def run_publish(
         stubs, log, served, crates = (tmp / n for n in ("bin", "log", "index", "c"))
         for p in (stubs, log, served, crates):
             p.mkdir()
-        for name, body in (("curl", CURL_STUB), ("cargo", CARGO_STUB)):
-            (stubs / name).write_text(body)
-            (stubs / name).chmod(0o755)
+        (stubs / "cargo").write_text(CARGO_STUB)
+        (stubs / "cargo").chmod(0o755)
         for rel, answer in index.items():
             dest = served / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -216,9 +213,6 @@ def run_publish(
                 dest.with_name(dest.name + ".status").write_text(answer)
             else:
                 shutil.copy(INDEX / answer, dest)
-        # The canon action links the resolved canon tree here; the
-        # step reaches the shared member helper through it (#1310).
-        (tmp / ".org-canon").symlink_to(CANON)
         metadata = tmp / "metadata.json"
         captured = json.loads(METADATA.read_text())
         for package in captured["packages"]:
@@ -236,30 +230,28 @@ def run_publish(
             "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "stub-request-token",
             "ACTIONS_ID_TOKEN_REQUEST_URL": OIDC_URL,
             "STUB_LOG": str(log),
-            "STUB_INDEX": str(served),
             "STUB_CRATES": str(crates),
             "STUB_TARGET": str(tmp / "target"),
             "STUB_METADATA": str(metadata),
+            "STUB_PUBLISH_RC": str(answers.get("publish_rc", 0)),
         }
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [BASH, "-c", publish_body()],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=tmp,
+        fetch = Fetch(
+            served, oidc=answers.get("oidc", 200), exchange=answers.get("exchange", 200)
         )
+        out = io.StringIO()
+        with redirect_stdout(out):
+            try:
+                code = publish_crates.run(env, tmp, fetch)
+            except publish_crates.RefusalError as e:
+                print(e)
+                code = 1
 
         def read(name: str) -> list[str]:
             path = log / name
             return path.read_text().splitlines() if path.exists() else []
 
         return Run(
-            result.returncode,
-            result.stdout,
-            result.stderr,
-            read("cargo"),
-            [tuple(line.split("\t", 1)) for line in read("curl")],
+            code, out.getvalue(), "", read("cargo"), fetch.requests, read("cargo-env")
         )
 
 
@@ -394,6 +386,101 @@ class PublishFollowsCargo(unittest.TestCase):
             [u for u, _ in run.curl if u.startswith("https://index.")],
         )
         self.assertEqual([f"{PUBLISH} --exclude edtf-core"], run.publishes())
+
+
+class PublishMintsItsOwnToken(unittest.TestCase):
+    """Trusted publishing by hand: what the step's curl calls did (#907)."""
+
+    def test_the_token_is_masked_and_handed_to_cargo(self) -> None:
+        """OIDC, then the exchange with the org's UA, masked, into cargo's env."""
+        run = run_publish(WASM)
+        self.assertEqual(0, run.returncode, run.stdout)
+        self.assertIn("::add-mask::stub\n", run.stdout)
+        self.assertEqual(["token=stub"], run.tokens)
+        self.assertEqual(
+            [
+                (f"{OIDC_URL}&audience=crates.io", ""),
+                ("https://crates.io/api/v1/trusted_publishing/tokens", USER_AGENT),
+            ],
+            [r for r in run.curl if not r[0].startswith("https://index.")],
+        )
+
+    def test_a_refused_exchange_names_the_status_and_the_header(self) -> None:
+        """The 403 a missing UA draws is named, with where to look first."""
+        run = run_publish(WASM, exchange=403)
+        self.assertEqual(1, run.returncode)
+        self.assertEqual(
+            "::error::the crates.io token exchange answered 403 — if 403, check"
+            " the User-Agent before the publisher config (#907)\n",
+            run.stdout,
+        )
+        self.assertEqual([], run.publishes())
+
+    def test_a_refused_oidc_request_names_the_status(self) -> None:
+        """No OIDC token, no exchange, no publish."""
+        run = run_publish(WASM, oidc=500)
+        self.assertEqual(1, run.returncode)
+        self.assertEqual(
+            "::error::the runner's OIDC token endpoint answered 500\n", run.stdout
+        )
+        self.assertNotIn(publish_crates.EXCHANGE, [u for u, _ in run.curl])
+
+    def test_an_index_that_never_answered_is_named(self) -> None:
+        """No answer at all is "nothing", never "not published"."""
+        run = run_publish({"ed/tf/edtf-core": "000"} | WASM)
+        self.assertEqual(1, run.returncode)
+        self.assertIn(
+            "::error::the crates.io index answered nothing for edtf-core", run.stdout
+        )
+
+    def test_cargo_publish_s_own_exit_is_the_run_s(self) -> None:
+        """A failed upload fails the run with cargo's own status."""
+        run = run_publish(WASM, publish_rc=101)
+        self.assertEqual(101, run.returncode)
+
+
+class Main(unittest.TestCase):
+    """The command: refusals and failed commands as job-log lines."""
+
+    @staticmethod
+    def main(failure: BaseException) -> tuple[int, str]:
+        """Run main with `run` raising failure.
+
+        Returns:
+            The exit code and stdout.
+
+        """
+        out = io.StringIO()
+        with (
+            mock.patch.object(publish_crates, "run", side_effect=failure),
+            mock.patch.object(publish_crates.sys, "stdout", out),
+        ):
+            code = publish_crates.main()
+        return code, out.getvalue()
+
+    def test_a_refusal_is_printed_and_exits_1(self) -> None:
+        """The refusal's own line, exit 1."""
+        self.assertEqual(
+            (1, "::error::stop\n"),
+            self.main(publish_crates.RefusalError("::error::stop")),
+        )
+
+    def test_a_failed_command_names_itself_and_its_status(self) -> None:
+        """A failed cargo or member helper is named, with its exit."""
+        failed = publish_crates.subprocess.CalledProcessError(
+            101, ["cargo", "package", "-p", "x"]
+        )
+        self.assertEqual(
+            (101, "::error::cargo package -p x exited 101\n"), self.main(failed)
+        )
+
+    def test_success_is_run_s_exit(self) -> None:
+        """Without a failure, main returns what run returned."""
+        with (
+            mock.patch.object(publish_crates, "run", return_value=0),
+            mock.patch.object(publish_crates.sys, "stdout", io.StringIO()),
+        ):
+            self.assertEqual(0, publish_crates.main())
 
 
 if __name__ == "__main__":

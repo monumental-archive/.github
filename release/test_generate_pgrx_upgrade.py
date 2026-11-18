@@ -857,6 +857,10 @@ class ReadsThePreviousArchive(unittest.TestCase):
 
 
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
+# The build's root half and its floor template, out of the workflow
+# since #1380: the tracked scripts the container runs.
+BUILD_ROOT = CANON / "release" / "pgrx" / "build-root.sh"
+FLOOR_SQL = CANON / "release" / "pgrx" / "floor.sql.in"
 HEADER_PIN = '"postgresql-server-dev-${PG}=${server}"'
 SERVER_UNCHANGED = '[[ ${after} == "${server}" ]] || {'
 DPKG_STUB = """#!/usr/bin/env bash
@@ -949,20 +953,23 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
 
     def test_both_sites_pin_the_headers_and_check_the_server(self) -> None:
         """Each site names the pinned headers and the unchanged check."""
-        for site in (SCRIPT, WORKFLOW):
+        for site in (SCRIPT, BUILD_ROOT):
             text = site.read_text()
             with self.subTest(site=site.name):
                 block = "\n".join(header_install(text))
                 self.assertIn(HEADER_PIN, block)
                 self.assertIn(SERVER_UNCHANGED, block)
                 self.assertNotIn('"postgresql-server-dev-${PG}" ', text)
-                self.assertIn("--env BUILD_IMAGE", text)
+        # The image the remedy names reaches each container.
+        for site in (SCRIPT, WORKFLOW):
+            with self.subTest(env=site.name):
+                self.assertIn("--env BUILD_IMAGE", site.read_text())
 
     def test_the_two_sites_are_textually_identical(self) -> None:
         """They cannot share a script; they must not drift apart."""
         self.assertEqual(
             header_install(SCRIPT.read_text()),
-            header_install(WORKFLOW.read_text()),
+            header_install(BUILD_ROOT.read_text()),
         )
 
     def test_installs_the_headers_at_the_server_version(self) -> None:
@@ -1002,18 +1009,15 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
         )
 
 
-def floor_template(text: str) -> str:
-    """Cut the floor block's template out of the build workflow (#1274).
+def floor_template() -> str:
+    """Read the floor block's template the build fills (#1274, #1380).
 
     Returns:
-        The quoted heredoc's body, indentation off: the shipped bytes
-        the build fills and prepends, never a copy of them.
+        release/pgrx/floor.sql.in as floor.sh reads it, `$(cat ...)`,
+        trailing newline off: the shipped bytes, never a copy of them.
 
     """
-    lines = text.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.endswith("<< 'FLOOR'"))
-    end = next(i for i in range(start, len(lines)) if lines[i].strip() == "FLOOR")
-    return textwrap.dedent("\n".join(lines[start + 1 : end]))
+    return FLOOR_SQL.read_text().rstrip("\n")
 
 
 def fill(template: str, num: int, xy: str) -> str:
@@ -1067,7 +1071,7 @@ class FloorTemplateShape(unittest.TestCase):
 
     def test_every_field_and_the_tag(self) -> None:
         """Each placeholder is there, and none survives the fill."""
-        template = floor_template(WORKFLOW.read_text())
+        template = floor_template()
         for field in ("@NUM@", "@XY@", "@EXT@", "@VERSION@"):
             with self.subTest(field=field):
                 self.assertIn(field, template)
@@ -1186,7 +1190,7 @@ class WarnsBelowTheFloor(LiveServer):
 
         """
         xy = f"{num // 10000}.{num % 10000}"
-        return fill(floor_template(WORKFLOW.read_text()), num, xy)
+        return fill(floor_template(), num, xy)
 
     def test_below_the_floor_warns_with_the_sentence(self) -> None:
         """A server one minor older than the build's warns, exactly."""

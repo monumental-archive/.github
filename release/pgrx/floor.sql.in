@@ -1,0 +1,9 @@
+DO $pgrx_floor$
+BEGIN
+  IF current_setting('server_version_num')::int < @NUM@ THEN
+    RAISE WARNING '@EXT@ @VERSION@ was built against PostgreSQL @XY@; this server is %.'
+      ' If loading fails below, update PostgreSQL to @XY@ or newer.',
+      current_setting('server_version');
+  END IF;
+END
+$pgrx_floor$;

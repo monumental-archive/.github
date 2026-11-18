@@ -402,7 +402,7 @@ apt-get update -qq
 # Headers at exactly the server the pinned image already carries
 # (#1157): unversioned, apt serves the newest minor, and the library
 # links against symbols the image's server does not have. Textually
-# identical to the install in build-pgrx-extension.yml, asserted by
+# identical to the install in release/pgrx/build-root.sh, asserted by
 # release/test_generate_pgrx_upgrade.py: the two containers mount
 # different trees, so they cannot share one script.
 server=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")

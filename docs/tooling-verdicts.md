@@ -29,7 +29,7 @@ honestly blocked on.
 | rekor-monitor (org-owned workflow) | Fulcio certificate-log watch for forged signer identities (#1237), run by `stele assert signer-certificates` (#1339) — the reason the id-token rule was narrowed |
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
-| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate |
+| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
@@ -50,6 +50,7 @@ honestly blocked on.
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`, each exclusion an `exclude_re` entry under a `#` reason (#1355) — proven first on release-lab |
+| mutmut (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is `[tool.mutmut]` in a tracked `pyproject.toml` (or `setup.cfg`), each exclusion a `# pragma: no mutate -- <reason>` at its site or a reasoned list entry (#1354) — proven first on the canon |
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
@@ -2289,6 +2290,57 @@ or upstream sha256 assets appearing; or the release path growing a
 pre-tag semver leg so the break is caught at the version decision
 rather than the Monday after.
 
+**mutmut as `audit:mutants`' Python leg** (#1354, under #1336's
+testing standard; the shape is cargo-mutants', below). The measure is
+no unexplained surviving mutant, never a score. Measured 2026-11-18:
+mutmut 3.8.1 (PyPI, `py3-none-any`) installs on the `pipx:` route under
+the belt's `python` pin. Its tool venv's `pyvenv.cfg` names mise's
+3.15.2 as `home`, so the hidden-Python trap does not bite. libcst,
+setproctitle and coverage arrive as cp315 wheels; pyyaml 6.0.3 has no
+cp315 wheel and builds its pure-Python fallback from the sdist, with no
+compiler. Install took 123 s on an M1 Pro. Pinned `lazy`, like
+cargo-mutants, so only `repo-mutants.yml`'s `mutants-python` job
+installs it. cosmic-ray, the issue's fallback, was not needed.
+
+Read from mutmut's own source, since no mutation run happens on a
+laptop (owner's ruling; the first real run is the canon's, on a
+runner):
+
+- **Exclusion at the site.** `# pragma: no mutate` (line), `block`,
+  and `start`/`end` regions. mutmut reads only the first word after
+  `no mutate`, so the leg requires the reason after ` -- ` in the
+  same comment (`end` needs none). The config's `do_not_mutate`,
+  `do_not_mutate_patterns` and `only_mutate` entries each need a `#`
+  line above them, and `mutate_only_covered_lines = true` is refused:
+  it drops every untested line, with no reason anywhere.
+- **What counts.** `mutmut results --all true` gives one status per
+  mutant. killed, timeout, caught by type check and segfault count as
+  killed. survived and "no tests" are survivors. suspicious, skipped,
+  not checked and interrupted were never judged, and are red. The
+  excluded count is SITES (reasoned pragmas and list entries): mutmut
+  never generates an excluded mutant, so there is no mutant to count.
+- **Where a survivor is.** `mutmut show` diffs the mutated function
+  on its own, so its hunk counts lines from the function's `def`. The
+  leg finds the file line from the `def` and the removed line.
+- **No sharding.** 3.8.1 has no shard option, so the Python job is
+  one job; a shard other than 0/1 is red.
+- **Subprocess-run helpers (item 3).** mutmut copies every file under
+  its source paths into `mutants/`, exec bits kept, and selects a
+  mutant through an environment variable a child process inherits. A
+  helper a test runs as `python3 mise/x.py` from the copied tree
+  therefore runs its mutated copy. But mutmut maps tests to functions
+  by recording calls in the test process, so a function reached only
+  in a child is "no tests" and is never run. The leg counts that as a
+  survivor, by name. The measurement is owed from the canon's first
+  run on a runner: the "no tests" list is the subprocess-only set, and
+  issue #1354's permitted response (mutate only what the suite imports,
+  listing the rest as not measured) is applied in the canon's config
+  from it.
+
+*Reopen:* mutmut gaining sharding (shard the Python job like Rust's),
+or recording calls in child processes (the subprocess-only helpers
+become measurable).
+
 **cargo-mutants as `audit:mutants`' Rust leg, compiled and kept out
 of every other job** (#1355, under #1336's testing standard). Coverage
 says a test ran a line; a mutation run changes the line and asks
@@ -2727,6 +2779,31 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   belt beside the runner — two instrumentations of one suite, and a
   provider version the belt would own where the repository's lockfile
   should.
+- **Rust branch coverage in the gate** — skipped, for now
+  (#1359, 2026-11-17). `cargo llvm-cov --branch` needs a nightly
+  toolchain: measured 2026-11-17 on a one-function crate, the dated
+  nightly `nightly-2026-07-20` reported 4 branches, 1 covered (25%),
+  while stable 1.97.1 refused the flag and stable without it reported
+  a branch count of 0 and a percent of 0. A second instrumented test
+  run on a nightly would double a Rust repository's test time on every
+  pull request and put a nightly in the deterministic gate, so the
+  gate keeps its line leg and the branch figure is measured on the
+  Monday cron: `audit:coverage-branches` in `repo-audit.yml`, on the
+  nightly the repository already declares as `FUZZ_TOOLCHAIN` (no new
+  toolchain), over the workspace and exclusions the `rust` leg derives
+  (one function in `mise/coverage-measure.sh`). Its floor is a second
+  line of `.coverage-floor`, `rust-branches <percent>`, derived by
+  `coverage:adopt` from a measurement under the same law and band as
+  the main floor; the release path carries it unchanged, since it
+  measures on stable. A repository with no such line, or no
+  `Cargo.toml`, skips clean. A measurement with no branches at all is
+  refused rather than floored, because 0 of 0 is what an
+  uninstrumented run reports. Rejected, so it is not re-proposed:
+  waiting for branch coverage on stable, which has no date. *Reopen:*
+  `--branch` working on a stable toolchain — then the cron leg is
+  replaced by one flag on the gate's `rust` leg, and the
+  `rust-branches` line folds into the main floor the way
+  `python-branches` does.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because

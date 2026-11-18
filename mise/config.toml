@@ -510,6 +510,20 @@ python = "3.15.2"
 # The tool venv is built on the `python` pin above, never one uv
 # fetched — the measurement runs the tests on that interpreter.
 "pipx:coverage" = "7.17.2"
+# Mutation testing for Python (#1354): `audit:mutants`' Python leg.
+# mutmut 3.8.1, PyPI-only (no aqua package), so the FIFTH pipx:
+# exception, on the same checksummed uv under the UV_* floor env and
+# the `python` pin above: measured 2026-11-18, its tool venv's
+# interpreter is this pin's 3.15.2 (pyvenv.cfg `home`), and libcst,
+# setproctitle and coverage arrive as cp315 wheels; pyyaml 6.0.3 (a
+# dependency) has no cp315 wheel and builds its pure-Python fallback
+# from the sdist, no compiler needed. pytest rides inside mutmut's own
+# venv as its runner and nothing in a repository imports it (#364).
+#
+# LAZY, the cargo-mutants precedent (#1355): a bare `mise install` —
+# the gate, every job without a named list — skips it, and only
+# repo-mutants.yml's `mutants-python` job installs it, by name.
+"pipx:mutmut" = { version = "3.8.1", lazy = true, lazy_bins = ["mutmut"] }
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -1866,7 +1880,8 @@ dir = "{{cwd}}"
 # unchecked exactly as they did under zizmor's old scope.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "lint:action-pins: no workflows or actions, skipped"
   exit 0
@@ -1885,7 +1900,8 @@ dir = "{{cwd}}"
 # upgraded would fight it.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "fix:actions: no workflows or actions, skipped"
   exit 0
@@ -2005,7 +2021,10 @@ dir = "{{cwd}}"
 # audits read run: content and cannot follow a script call.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+# The action lints' one selection (#1448): an action's run: blocks are
+# read wherever its action.yml lives, not only under .github/actions/.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "lint:shell-embedded: no workflows or actions, skipped"
   exit 0
@@ -2047,8 +2066,11 @@ dir = "{{cwd}}"
 # with a block over the ceiling carries its own debt file, and one that
 # tracks no workflow skips clean.
 run = '''
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" \
-  ".github/actions/*/action.y*ml" "workflow-templates/*.y*ml")
+# The action lints' one selection (#1448), and the workflow templates.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
+templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
+[[ -z ${templates} ]] || files+=$'\n'"${templates}"
 [[ -n ${files} ]] || {
   echo "lint:workflow-shell: no workflows, actions or templates, skipped"
   exit 0
@@ -2067,8 +2089,11 @@ dir = "{{cwd}}"
 # removed — and never adds an entry: a block over the ceiling that is not
 # listed stays red until its logic moves out.
 run = '''
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" \
-  ".github/actions/*/action.y*ml" "workflow-templates/*.y*ml")
+# The action lints' one selection (#1448), and the workflow templates.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
+templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
+[[ -z ${templates} ]] || files+=$'\n'"${templates}"
 [[ -n ${files} ]] || {
   echo "fix:workflow-shell: no workflows, actions or templates, nothing to fix"
   exit 0
@@ -2461,15 +2486,15 @@ dir = "{{cwd}}"
 # support (rhysd/actionlint#711) — the same trigger as lint:actions'
 # two -ignore flags.
 run = '''
-paths=""
-compgen -G ".github/workflows/*.y*ml" > /dev/null && paths=".github/workflows/"
-[[ -d .github/actions ]] && paths="${paths} .github/actions/"
-[[ -n ${paths} ]] || {
+# The files the other action lints read, from the one selection (#1448):
+# every action definition wherever it lives, not only .github/actions/.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
+[[ -n ${files} ]] || {
   echo "lint:zizmor: no workflows or actions, skipped"
   exit 0
 }
-# shellcheck disable=SC2086  # the path list is newline-separated on purpose
-zizmor --offline --persona=pedantic ${paths}
+xargs zizmor --offline --persona=pedantic <<< "${files}"
 '''
 
 [tasks."lint:dco"]
@@ -6354,7 +6379,8 @@ dir = "{{cwd}}"
 # lint globs .github/workflows/ only, which is exactly the blind spot
 # that let the bad `uses:` through.
 run = '''
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "lint:actions-allowed: no workflows or actions, skipped"
   exit 0
@@ -6364,7 +6390,11 @@ files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*
 # publisher check, not a supply-chain one, and it is not ours to revoke.
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
-allowed="actions/* github/* ${canon_owner}/* jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
+# An array, quoted at every use: as one unquoted string, `actions/*`
+# expanded against the working directory, and in a repository tracking
+# `actions/<name>/` every GitHub-owned action was reported forbidden
+# (#1448). The patterns are matched against references, never paths.
+allowed=("actions/*" "github/*" "${canon_owner}/*" "jdx/mise-action@*" "codecov/codecov-action@*" "ossf/scorecard-action@*")
 bad=""
 checked=0
 while IFS= read -r f; do
@@ -6379,7 +6409,7 @@ while IFS= read -r f; do
     checked=$((checked + 1))
     owner_repo="${ref%%@*}"
     ok=""
-    for pat in ${allowed}; do
+    for pat in "${allowed[@]}"; do
       case "${pat}" in
         *@\*) [[ ${owner_repo} == "${pat%@\*}" ]] && ok=1 ;;
         */\*) [[ ${owner_repo} == "${pat%/\*}/"* ]] && ok=1 ;;
@@ -6393,7 +6423,7 @@ while IFS= read -r f; do
 done <<< "${files}"
 if [[ -n ${bad} ]]; then
   echo "lint:actions-allowed: uses: an action the org allowlist forbids:${bad}" >&2
-  echo "  allowed: GitHub-owned plus ${allowed}" >&2
+  echo "  allowed: GitHub-owned plus ${allowed[*]}" >&2
   echo "  GitHub refuses these at 'Set up job', so nothing goes red until a run dies" >&2
   echo "  widen the org setting deliberately, or use an allowed action" >&2
   exit 1
@@ -6834,6 +6864,13 @@ dir = "{{cwd}}"
 # coverage:report beside it: the `fix` aggregate collects `fix:*`
 # wildcard, and a fixer that runs the whole test suite does not belong
 # in a sweep nobody asked for.
+#
+# A Rust repository that declares its dated nightly (FUZZ_TOOLCHAIN) also
+# gets its `rust-branches` line (#1359): measured here with `--branch` on
+# that nightly and written beside the main floor under the same law, for
+# audit:coverage-branches to hold on the Monday cron. Without the nightly
+# the line is not written and the audit skips clean; a line already
+# committed is carried through, never dropped.
 run = '''
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
@@ -6841,6 +6878,12 @@ if [[ -z ${applies} ]]; then
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
+if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
+  branches=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt rust-branches) || exit 1
+  legs="${legs}"$'\n'"${branches}"
+elif [[ -f Cargo.toml ]]; then
+  echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
+fi
 python3 "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
 '''
@@ -6877,8 +6920,7 @@ applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:report probe) || exit 1
 }
 # Go leg (#392): the profile go test writes IS the upload format —
 # Codecov parses Go coverprofiles natively, so the report is the
-# measurement, with no converter to drift. ci.yml selects the filename
-# by repo shape (coverage.txt for Go, lcov.info for Rust).
+# measurement, with no converter to drift.
 # Every tracked language renders its own report, for the same reason
 # coverage:check runs every leg: a mixed repo used to render lcov.info
 # alone while ci.yml, guessing the filename from `hashFiles('go.mod')`,
@@ -6910,23 +6952,37 @@ if grep -qx typescript <<< "${applies}"; then
   "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report typescript > /dev/null
   echo "coverage:report: lcov-typescript.info written"
 fi
-[[ -f Cargo.toml ]] || exit 0
-if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
-  echo "coverage:report: llvm-tools component missing — declare it with the" >&2
-  echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+if [[ -f Cargo.toml ]]; then
+  if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
+    echo "coverage:report: llvm-tools component missing — declare it with the" >&2
+    echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+    exit 1
+  fi
+  # The same provisioning the measurement gets, from the same function,
+  # so the report and the number it accompanies are built against one
+  # Postgres (#917).
+  . "${ORG_BELT_DIR}/pgrx-env.sh"
+  org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
+  excludes=""
+  for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
+  # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
+  # which cargo must receive as separate arguments
+  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
+  echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
+fi
+# What to upload is this task's answer, because it knows which legs ran
+# (#1386): the list is what the task WROTE, never a guess from repo
+# shape. A mixed repo renders every report and uploads every one; the
+# workflow's old `hashFiles('go.mod')` selector once named coverage.txt
+# for repos whose Rust-only leg had written lcov.info. The badge job
+# reads this line and nothing else; a leg that ran and wrote nothing is
+# refused here, where it happened.
+files=$(for f in lcov{,-typescript}.info coverage.{txt,xml}; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
+if [[ -z ${files} ]]; then
+  echo "coverage:report: wrote no report — nothing to upload" >&2
   exit 1
 fi
-# The same provisioning the measurement gets, from the same function, so
-# the report and the number it accompanies are built against one
-# Postgres (#917).
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
-excludes=""
-for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-# shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
-# which cargo must receive as separate arguments
-cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
-echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
+echo "coverage:report: upload ${files}"
 '''
 
 [tasks."lint:fuzz-build"]
@@ -7034,7 +7090,8 @@ dir = "{{cwd}}"
 # consumer repos that carry no config and so the number has one home.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
@@ -8025,6 +8082,45 @@ fi
 echo "audit:fuzz: all targets ran ${secs}s clean under ASan"
 '''
 
+[tasks."audit:coverage-branches"]
+description = "Hold the Rust branch-coverage floor (.coverage-floor's rust-branches line) on the nightly (never the gate)"
+dir = "{{cwd}}"
+# The branch half of #1336's property 2 for Rust (#1359). `cargo llvm-cov
+# --branch` passes -Z flags that stable refuses, so the figure needs a
+# nightly, and a second instrumented test run would double a Rust
+# repository's test time on every pull request: the gate keeps its line
+# leg, and the branch floor is held here, on the Monday cron, on the
+# nightly the repository already declares for audit:fuzz. The
+# measurement is coverage-measure.sh's `rust-branches` leg, over the
+# workspace and exclusions the gate's `rust` leg uses (one function), and
+# the floor is the `rust-branches` line coverage:adopt derived — read
+# through coverage-floor.py, so a hand-typed line is refused as drift
+# here exactly as the main floor is in the gate. Reopen: `--branch` on
+# stable, when this becomes one flag on the gate's leg
+# (docs/tooling-verdicts.md).
+run = '''
+[[ -f Cargo.toml ]] || {
+  echo "audit:coverage-branches: no Cargo.toml, skipped"
+  exit 0
+}
+floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg rust-branches) || exit 1
+[[ -n ${floor} ]] || {
+  echo "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped"
+  exit 0
+}
+measured=$("${ORG_BELT_DIR}/coverage-measure.sh" audit:coverage-branches rust-branches) || exit 1
+read -r leg pct <<< "${measured}"
+if [[ ${leg:-} != rust-branches || -z ${pct:-} ]]; then
+  echo "audit:coverage-branches: the measurement printed no rust-branches figure — a check that reads nothing must not pass" >&2
+  exit 1
+fi
+if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
+  echo "audit:coverage-branches: rust-branches: ${pct}% is below the derived floor ${floor}%" >&2
+  exit 1
+fi
+echo "audit:coverage-branches: rust-branches holds the floor ${floor} (${pct}%)"
+'''
+
 [tasks."audit:go-fuzz"]
 description = "Run every Go fuzz target for a bounded interval (time-bound, never the gate)"
 dir = "{{cwd}}"
@@ -8140,6 +8236,7 @@ leg() {
   bash "${ORG_BELT_DIR}/mutants-$1.sh" || red+=" $1"
 }
 leg go
+leg python
 leg rust
 if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
   echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2
@@ -9541,6 +9638,45 @@ if [[ -n ${bad} ]]; then
   exit 1
 fi
 echo "lint:canon-pins: ${found} canon references, all versioned"
+'''
+
+[tasks."lint:hook-jobs"]
+description = "No job in the canon's lefthook/org-hooks.yml runs a script file: lefthook would run it from the remote cache every worktree shares (canon only)"
+dir = "{{cwd}}"
+# lefthook runs a `script:` from its remote cache,
+# .git/info/lefthook-remotes/, which every worktree of a repository
+# shares and which holds one canon ref at a time: a hook in a worktree
+# pinned to another ref deletes the other ref's checkout. The pre-push
+# gate was a script, and pushes died with exit 127 after a green gate
+# (#1426). An inline `run:` is complete in the config lefthook read when
+# the hook started, so it touches nothing in that cache. This lint keeps
+# every job inline: no `script:` job and no `scripts:` map, in block or
+# flow style. Comment lines are skipped, as the header documents the
+# rule.
+#
+# Canon only: identity.toml tracked is the canon (#738); there the hook
+# file is a requirement, red by name when it is missing.
+run = '''
+if ! git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
+  echo "lint:hook-jobs: no tracked security/identity.toml, not the canon, skipped"
+  exit 0
+fi
+hooks=lefthook/org-hooks.yml
+if ! git ls-files --error-unmatch "${hooks}" > /dev/null 2>&1; then
+  echo "lint:hook-jobs: ${hooks} is not tracked; the canon delivers its hooks there" >&2
+  exit 1
+fi
+found=$(grep -nE '^[^#]*(^|[{,]|-[[:space:]])[[:space:]]*"?scripts?"?[[:space:]]*:' "${hooks}" || true)
+if [[ -n ${found} ]]; then
+  {
+    echo "lint:hook-jobs: ${hooks} runs a script file from lefthook's remote cache:"
+    while IFS= read -r hit; do echo "  line ${hit}"; done <<< "${found}"
+    echo "  every worktree shares that cache and a hook on another canon ref"
+    echo "  deletes it mid-gate (#1426); write the job as an inline run:"
+  } >&2
+  exit 1
+fi
+echo "lint:hook-jobs: every job in ${hooks} is an inline run:"
 '''
 
 [tasks."lint:bash-portability"]

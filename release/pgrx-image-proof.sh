@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prove a pushed pgrx artifact image the way a consumer uses it (#1381).
 #
-#   pgrx-image-proof.sh <image> <digest-record.json> <pg-major> <canon-dir>
+#   pgrx-image-proof.sh <image> <digest-record.json> <pg-major> <canon-dir> \
+#                       <staged-extension-dir>
 #
 # Pulls the image back BY DIGEST, never by tag, and runs exactly the
 # documented recipes (docs/release.md) against the stock postgres the
@@ -16,7 +17,10 @@
 #                 docker/pgrx-path-proof.sh (as postgres) loads it
 #                 through extension_control_path and dynamic_library_path.
 #
-# Below 18 there is no extension_control_path, so there is nothing to
+# The COPY recipe creates the extension named by the one control file in
+# the staged tree the image was built from (#1439), never one picked from
+# the stock image's directory, which already holds its contrib control
+# files. Below 18 there is no extension_control_path, so there is nothing to
 # prove on the second recipe and it says so. The digest is the record
 # the push step wrote ({pg, image, tag, digest}).
 set -euo pipefail
@@ -24,8 +28,10 @@ image="${1:?image}"
 record="${2:?digest record}"
 pg="${3:?pg major}"
 canon="${4:?canon dir}"
+staged="${5:?staged extension dir}"
 docker_dir=$(cd "${canon}/docker" && pwd -P)
 digest=$(jq -r .digest "${record}")
+ext=$(python3 "${canon}/release/pgrx-images.py" extension-name --tree "${staged}")
 base=$(python3 "${canon}/release/pgrx-images.py" base-image --pg "${pg}" \
   --table "${canon}/docker/pgrx-base-images.toml")
 context=$(mktemp -d)
@@ -39,7 +45,7 @@ render() { # recipe -> <context>/<recipe>.Dockerfile
 render copy
 docker buildx build --file "${context}/copy.Dockerfile" --load --tag "consumer-proof:pg${pg}" "${context}"
 docker run --rm -v "${docker_dir}:/proof:ro" "consumer-proof:pg${pg}" \
-  bash /proof/pgrx-copy-proof.sh
+  bash /proof/pgrx-copy-proof.sh "${ext}"
 if ((pg < 18)); then
   echo "pg${pg}: below 18, no extension_control_path; path proof not applicable"
   org_done=1

@@ -3,9 +3,11 @@
 # is sharded, is repo-mutants.yml's business, so a leg the canon adds
 # later reaches this repository on its next pin bump with nothing to
 # edit here. A repository adopts a language by tracking that tool's own
-# config (`.cargo/mutants.toml` for Rust); without one every leg skips
-# clean by name. Its own workflow, apart from the audit, so a survivor
-# reds this run and never the audit's.
+# config: `.cargo/mutants.toml` for Rust, a `[tool.mutmut]` table in
+# `pyproject.toml` (or `[mutmut]` in `setup.cfg`) for Python, and a root
+# `.gomuignore` with no pattern for Go (#1356). Without one every leg
+# skips clean by name. Its own workflow, apart from the audit, so a
+# survivor reds this run and never the audit's.
 ---
 name: mutants
 
@@ -25,5 +27,5 @@ jobs:
   mutants:
     permissions:
       contents: read # this repository's contents, read-only
-    uses: monumental-archive/.github/.github/workflows/repo-mutants.yml@30ba101e4375cbf17c916407ea6d211c35044928 # v1.69.0
+    uses: monumental-archive/.github/.github/workflows/repo-mutants.yml@4951bb785778a76c049835188f6a3c00b3bf9077 # v1.69.1
 ...

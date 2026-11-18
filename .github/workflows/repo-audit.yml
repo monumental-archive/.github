@@ -1,8 +1,9 @@
 # The repo-side Monday audit: the scheduled, network-touching checks the
 # deterministic gate deliberately excludes — the dependency advisory
-# feed (audit:deny) and bounded fuzz runs (audit:fuzz, #316; skips clean
-# in repos with no fuzz/, so the stub stays universal). Callers pin by
-# full SHA, ci.yml-style:
+# feed (audit:deny), bounded fuzz runs (audit:fuzz, #316; skips clean
+# in repos with no fuzz/, so the stub stays universal) and the Rust
+# branch-coverage floor, which needs a nightly (audit:coverage-branches,
+# #1359). Callers pin by full SHA, ci.yml-style:
 #
 #   jobs:
 #     audit:
@@ -158,6 +159,37 @@ jobs:
           path: "**/testdata/fuzz/**"
           if-no-files-found: ignore
           retention-days: 30
+
+  coverage-branches:
+    name: audit / rust branch coverage floor
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+
+      # `cargo llvm-cov --branch` on the nightly the repo declares as
+      # FUZZ_TOOLCHAIN, held to the `rust-branches` line of
+      # .coverage-floor (#1359). Here and never in the gate: the flag
+      # needs a nightly, and a second instrumented test run on every
+      # pull request is the cost the gate declines. Local only, so no
+      # token. Skips clean with no Cargo.toml or no such line.
+      - name: Hold the Rust branch-coverage floor
+        run: mise run audit:coverage-branches
 
   go-vulns:
     name: audit / go vulnerabilities

@@ -60,16 +60,30 @@ commit-msg:
 
 pre-push:
   jobs:
-    # The gate over the working tree at HEAD, on every push (#1281). A
-    # `script:`, never a `run:`: lefthook skips a pre-push `run:` job
-    # when the push changes no file that exists — a delete-only push, or
-    # a ref pushed while HEAD sits elsewhere — and says so in one grey
-    # line. The script is .lefthook/pre-push/ci.sh in this repository,
-    # found under the consumer's `source_dir` (default `.lefthook/`); a
-    # repo that sets another one gets a failed job, never a skip. It
+    # The gate over the working tree at HEAD, on every push (#1281). It
     # gates HEAD's tree, not the ref being pushed: push from the
     # checkout whose HEAD is the branch.
+    #
+    # Inline, never a `script:` (#1426). lefthook runs a script from its
+    # remote cache, .git/info/lefthook-remotes/, which every worktree of
+    # a repository shares and which holds one canon ref at a time: a
+    # hook in a worktree pinned to another ref deleted the script while
+    # this gate ran, and the push died with exit 127 after a green gate.
+    # This command is in the config lefthook read when the hook started
+    # and touches nothing in that cache. lint:hook-jobs holds it.
+    #
+    # `files` and `{files}` keep the job from being skipped. lefthook
+    # 2.2.2 skips a pre-push `run:` job whose pushed files come out
+    # empty (a delete-only push, a ref pushed while HEAD sits elsewhere),
+    # unless a file template in the command resolves to at least one
+    # file (build_command.go:45-49 at v2.2.2). `files` names the first
+    # tracked file present on disk, and `:` discards it.
     - name: ci
-      script: ci.sh
-      runner: bash
+      files: >-
+        git ls-files | while IFS= read -r f; do
+        if [ -f "$f" ]; then printf '%s\n' "$f"; break; fi; done
+      run: >-
+        : {files};
+        MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
+        mise run ci
 ...

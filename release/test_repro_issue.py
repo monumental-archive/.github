@@ -9,10 +9,11 @@ matched. The step now reads the compare step's outcome: `failure` is a
 verdict and keeps its title and body exactly; anything else is no
 verdict, and says so without the words of one.
 
-The body under test is the step's own `run:` block, lifted out of
-`.github/workflows/repro-check.yml` by its step name and run by bash
-with a stub `gh` first on PATH that records its arguments. Reading it
-out of the YAML is what keeps the test on the code that ships.
+The code under test is `release/repro-issue.py`, which the step runs as
+its one command (#1386), with a stub `gh` first on PATH that records
+its arguments. The three rows below were written against the step's
+`run:` block cut out of the YAML; they are carried over row for row and
+now run the helper the step ships.
 
 stdlib `unittest`, matching the other tests here. Run through the gate
 as `mise run test`, which `ci` collects.
@@ -22,12 +23,11 @@ import os
 import pathlib
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-WORKFLOW = ROOT / ".github" / "workflows" / "repro-check.yml"
-STEP = "- name: File an issue on failure"
+HELPER = pathlib.Path(__file__).resolve().parent / "repro-issue.py"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
 NO_VERDICT_BODY = (
     "The reproducibility audit set out to rebuild v0.28.1 with the"
@@ -56,43 +56,6 @@ BANNED = ("differs", "did not rebuild", "pinning")
 STUB_GH = """#!/usr/bin/env bash
 for arg in "$@"; do printf '%s\\0' "${arg}"; done > "${GH_ARGS}"
 """
-
-
-def step_script() -> str:
-    """Lift the issue step's `run: |` block out of the workflow.
-
-    Returns:
-        The block as bash, dedented to column zero.
-
-    Raises:
-        AssertionError: No single step of that name, no `run: |` under
-            it, or an empty block. Loud, never a skip: a test that found
-            nothing to run reads as a passing one.
-
-    """
-    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
-    starts = [i for i, line in enumerate(lines) if line.strip() == STEP]
-    if len(starts) != 1:
-        msg = f"expected one {STEP!r} in {WORKFLOW}, found {len(starts)}"
-        raise AssertionError(msg)
-    runs = [i for i in range(starts[0] + 1, len(lines)) if lines[i].strip() == "run: |"]
-    if not runs:
-        msg = f"no 'run: |' under {STEP!r}"
-        raise AssertionError(msg)
-    key = lines[runs[0]]
-    key_indent = len(key) - len(key.lstrip())
-    block: list[str] = []
-    for line in lines[runs[0] + 1 :]:
-        if line.strip() and len(line) - len(line.lstrip()) <= key_indent:
-            break
-        block.append(line)
-    while block and not block[-1].strip():
-        block.pop()
-    if not block:
-        msg = f"empty run block under {STEP!r}"
-        raise AssertionError(msg)
-    indent = len(block[0]) - len(block[0].lstrip())
-    return "\n".join(line[indent:] for line in block) + "\n"
 
 
 class FileAnIssue(unittest.TestCase):
@@ -130,11 +93,8 @@ class FileAnIssue(unittest.TestCase):
             "GITHUB_REPOSITORY": "monumental-archive/lab",
             "GITHUB_RUN_ID": "42044978939",
         }
-        bash = shutil.which("bash")
-        if bash is None:
-            self.fail("bash is not on PATH")
         proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [bash, "-c", step_script()],
+            [sys.executable, str(HELPER)],
             env=env,
             capture_output=True,
             text=True,
@@ -170,6 +130,20 @@ class FileAnIssue(unittest.TestCase):
         self.assertEqual(title, NO_VERDICT_TITLE)
         self.assertEqual(body, NO_VERDICT_BODY.format(outcome="cancelled"))
         self.assert_no_verdict_words(title, body)
+
+    def test_untyped_release_names_the_unscoped_population(self) -> None:
+        """No typed manifest: the verdict says it judged the whole release."""
+        title, body = self.file("failure", manifest=" \n")
+        self.assertEqual(title, VERDICT_TITLE)
+        self.assertEqual(
+            body,
+            VERDICT_BODY.replace(
+                "the pgrx-extension artifacts v0.28.1 published",
+                "every build subject v0.28.1 published — it carries no per-class"
+                " typing, so this pgrx-extension rebuild could not be scoped to its"
+                " own class",
+            ),
+        )
 
     def assert_no_verdict_words(self, title: str, body: str) -> None:
         """No word of a verdict, in any case, in title or body."""

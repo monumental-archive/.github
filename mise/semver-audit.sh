@@ -46,7 +46,6 @@ set -euo pipefail
 
 label="audit:semver"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
-index="https://index.crates.io"
 
 manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 [[ -n ${manifests} ]] || {
@@ -78,18 +77,6 @@ where=$(jq -r '
       then "lib" else "nolib" end)]
   | @tsv' <<< "${metadata}")
 
-# The sparse index's path rule: 1, 2, 3/<first>, then <1-2>/<3-4>.
-index_path() {
-  local name
-  name=$(tr '[:upper:]' '[:lower:]' <<< "$1")
-  case ${#name} in
-    1) printf '1/%s' "${name}" ;;
-    2) printf '2/%s' "${name}" ;;
-    3) printf '3/%s/%s' "${name:0:1}" "${name}" ;;
-    *) printf '%s/%s/%s' "${name:0:2}" "${name:2:2}" "${name}" ;;
-  esac
-}
-
 verdicts=()
 red=0
 provisioned=""
@@ -116,11 +103,13 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     continue
   fi
 
-  path=$(index_path "${crate}")
+  # The record's URL is the belt's one index rule, shared with the
+  # crates publisher (#1383), so the two can never read different paths.
+  url=$(python3 "${belt}/crates-index.py" url "${crate}")
   # curl's own exit is not the verdict: the status is. No answer at all
   # writes 000, which is red like every status but 200 and 404.
   code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-    --retry 3 --max-time 30 "${index}/${path}") || true
+    --retry 3 --max-time 30 "${url}") || true
   if [[ ${code} == 404 ]]; then
     verdicts+=("${label}: ${crate}: no published baseline on crates.io, not judged")
     continue

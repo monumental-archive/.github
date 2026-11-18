@@ -30,6 +30,13 @@
 # so "which languages does this tree measure" has one answer here rather
 # than a manifest list copied into each guard.
 #
+# `rust-branches` (#1359) is a leg of its own and never part of `all`:
+# branch instrumentation needs a nightly, and the gate runs none. It
+# measures on the dated nightly the repository declares as
+# FUZZ_TOOLCHAIN, over the same workspace and exclusions as the `rust`
+# leg — one function below, not a copy — and prints
+# `rust-branches <percent>` for the Monday audit and `coverage:adopt`.
+#
 # Invoked directly, never through a nested `mise run`: a nested mise
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
@@ -47,9 +54,9 @@ label="${1:-coverage:measure}"
 # them all, because the floor is a minimum every leg must hold.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | python | typescript | probe) ;;
+  all | go | rust | rust-branches | python | typescript | probe) ;;
   *)
-    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, python, typescript or probe" >&2
+    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, rust-branches, python, typescript or probe" >&2
     exit 1
     ;;
 esac
@@ -113,19 +120,31 @@ if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
   echo "go ${go_pct}"
 fi
 
-if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
+# The Rust measurement surface, shared by the `rust` and `rust-branches`
+# legs (#1359) so the line figure and the branch figure are taken over
+# one workspace: the llvm-tools assertion for the toolchain the leg
+# runs on, the pgrx provisioning, and the COVERAGE_EXCLUDE list. Sets
+# `excludes`. The toolchain is empty for the repository's stable pin.
+rust_surface() {
+  local toolchain="$1" member
   # No task-time rustup, by rule: a component installed mid-run races
   # every other task driving the toolchain (measured twice on the lab's
   # v0.18.0 release PR, #117). llvm-tools is a declared build input —
   # pinned in the repository's mise.toml, installed before any task runs
   # — and this asserts it with a remedy, never installs it.
-  if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
-    echo "${label}: llvm-tools component missing — declare it with the" >&2
-    echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+  if ! rustup component list --installed ${toolchain:+--toolchain "${toolchain}"} 2> /dev/null | grep -q "^llvm-tools"; then
+    if [[ -z ${toolchain} ]]; then
+      echo "${label}: llvm-tools component missing — declare it with the" >&2
+      echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+    else
+      echo "${label}: llvm-tools component missing on ${toolchain} — declare it with" >&2
+      echo "  the nightly's pin in mise.toml:" >&2
+      echo "    { version = \"${toolchain}\", components = \"rust-src,llvm-tools\" }" >&2
+    fi
     echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
     exit 1
   fi
-  # A pgrx extension in the workspace is compiled by the line below like
+  # A pgrx extension in the workspace is compiled by the measurement like
   # any other member, so it is given its Postgres first (#917) — and a
   # COVERAGE_EXCLUDE that names one is refused there, not honoured.
   # shellcheck source=mise/pgrx-env.sh
@@ -137,6 +156,10 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   # now refused above.
   excludes=""
   for member in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${member}"; done
+}
+
+if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
+  rust_surface ""
   # `--json --summary-only` rather than `--fail-under-lines`: the release
   # path needs the NUMBER, and a leg that only ever answers pass/fail
   # cannot derive a floor. The comparison is unchanged — measured against
@@ -154,6 +177,46 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
     exit 1
   fi
   echo "rust ${rust_pct}"
+fi
+
+if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
+  # The nightly is DECLARED by the repository, never discovered — the
+  # audit:fuzz rule, and the same pin: no second nightly for the belt to
+  # keep in step. A leg that used whatever nightly a machine happened to
+  # have would vary its figure by machine.
+  if [[ -z ${FUZZ_TOOLCHAIN:-} ]]; then
+    echo "${label}: FUZZ_TOOLCHAIN is not declared — Rust branch coverage needs a nightly" >&2
+    echo "  (cargo llvm-cov --branch passes -Z flags stable refuses). Declare the dated" >&2
+    echo "  nightly in this repo's mise.toml, both toolchains under one rust pin:" >&2
+    echo '    rust = ["1.xx.x", { version = "nightly-YYYY-MM-DD", components = "rust-src,llvm-tools" }]' >&2
+    echo '    [env] FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"' >&2
+    exit 1
+  fi
+  if ! rustup toolchain list 2> /dev/null | grep -q "^${FUZZ_TOOLCHAIN}"; then
+    echo "${label}: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
+    echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
+    exit 1
+  fi
+  rust_surface "${FUZZ_TOOLCHAIN}"
+  # RUSTUP_TOOLCHAIN as a per-command prefix: mise exports the stable
+  # pin's value into the task env, and only a command-scoped assignment
+  # beats it (the lint:msrv shape).
+  #
+  # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
+  # which cargo must receive as separate arguments
+  report=$(RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo llvm-cov --workspace --locked ${excludes} --branch --json --summary-only)
+  # A count of 0 is refused, never floored: an uninstrumented run reports
+  # `branches` as count 0, percent 0 (measured on stable 1.97.1 without
+  # --branch), so a zero count is the shape of a run that measured no
+  # branches rather than one that covered none.
+  br_count=$(jq -r '.data[0].totals.branches.count // empty' <<< "${report}")
+  br_pct=$(jq -r '.data[0].totals.branches.percent // empty' <<< "${report}")
+  if [[ -z ${br_count} || -z ${br_pct} || ${br_count} == 0 ]]; then
+    echo "${label}: the Rust report counted no branches (count '${br_count:-absent}') — a" >&2
+    echo "  measurement that reads nothing must not become a floor" >&2
+    exit 1
+  fi
+  echo "rust-branches ${br_pct}"
 fi
 
 if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then

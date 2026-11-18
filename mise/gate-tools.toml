@@ -48,7 +48,7 @@ tasks = ["lint:scaffold-assembly", "lint:trivy"]
 
 [tools.zizmor]
 tasks = ["lint:scaffold-assembly", "lint:zizmor"]
-when = [".github/actions", ".github/workflows/*.y*ml", "scaffold/"]
+when = ["*action.y*ml", ".github/workflows/*.y*ml", "scaffold/"]
 
 [tools.committed]
 # lint:commits and the squash-message step's commits:check.
@@ -97,11 +97,7 @@ tasks = [
 
 [tools."aqua:suzuki-shunsuke/pinact"]
 tasks = ["lint:action-pins", "lint:scaffold-assembly"]
-when = [
-  ".github/actions/*/action.y*ml",
-  ".github/workflows/*.y*ml",
-  "scaffold/",
-]
+when = ["*action.y*ml", ".github/workflows/*.y*ml", "scaffold/"]
 
 [tools.ruff]
 tasks = ["lint:python", "lint:scaffold-assembly"]
@@ -229,6 +225,11 @@ when = ["*.sql", "scaffold/"]
 
 [tools."github:obi1kenobi/cargo-semver-checks"]
 # audit:semver only.
+tasks = []
+when = []
+
+[tools."pipx:mutmut"]
+# audit:mutants only, and pinned lazy: no bare install builds it (#1354).
 tasks = []
 when = []
 
