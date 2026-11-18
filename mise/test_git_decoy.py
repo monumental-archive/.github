@@ -20,22 +20,18 @@ import importlib.util
 import os
 import pathlib
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import tomllib
 import unittest
+from types import SimpleNamespace
 
-_HERMETIC = importlib.util.spec_from_file_location(
-    "hermetic", pathlib.Path(__file__).resolve().with_name("hermetic.py")
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
 )
-if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
-    msg = "cannot load mise/hermetic.py"
-    raise RuntimeError(msg)
-hermetic = importlib.util.module_from_spec(_HERMETIC)
-sys.modules.setdefault("hermetic", hermetic)
-_HERMETIC.loader.exec_module(hermetic)
 
 
 _HERE = pathlib.Path(__file__).resolve().parent

@@ -10,24 +10,18 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import importlib.util
 import os
 import re
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location("hermetic", HERE / "hermetic.py")
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - import plumbing
-    msg = "cannot load hermetic.py"
-    raise RuntimeError(msg)
-hermetic = importlib.util.module_from_spec(_SPEC)
-sys.modules["hermetic"] = hermetic
-_SPEC.loader.exec_module(hermetic)
+hermetic = SimpleNamespace(**runpy.run_path(str(HERE / "hermetic.py")))
 
 CANON = HERE.parent
 GIT = shutil.which("git") or "git"

@@ -17,25 +17,19 @@ that reads like a pass (#364).
 stdlib `unittest`, matching the other tests here.
 """
 
-import importlib.util
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import sys
 import tarfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
-_HERMETIC = importlib.util.spec_from_file_location(
-    "hermetic", Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
 )
-if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
-    msg = "cannot load mise/hermetic.py"
-    raise RuntimeError(msg)
-hermetic = importlib.util.module_from_spec(_HERMETIC)
-sys.modules.setdefault("hermetic", hermetic)
-_HERMETIC.loader.exec_module(hermetic)
 
 
 CANON = Path(__file__).resolve().parent.parent
