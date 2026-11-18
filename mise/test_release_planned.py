@@ -160,6 +160,17 @@ class ReleasePlanned(unittest.TestCase):
             "  the Release PR is regenerated on the next push (#1472)\n"
         )
 
+    def test_one_commit_past_its_plan_is_named_in_the_singular(self) -> None:
+        """One pull request ahead of it: "1 commit", seen live on #1476."""
+        parent = self.repo.commit("fix: queued ahead")
+        self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned}\n")
+        self.assert_red(
+            f"{NAME}: the release was planned at {self.planned}"
+            f" but lands on {parent}:\n"
+            "  1 commit would ship without release notes;\n"
+            "  the Release PR is regenerated on the next push (#1472)\n"
+        )
+
     def test_the_trailer_amid_other_trailers_is_read(self) -> None:
         """The squash appends its own trailers after the body's."""
         self.repo.commit(

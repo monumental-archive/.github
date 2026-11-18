@@ -31,8 +31,10 @@ GATE_LISTS names them, and GATE_WHOLE the job that keeps everything.
 """
 
 import importlib.util
+import io
 import re
 import shlex
+import tokenize
 import tomllib
 import unittest
 from pathlib import Path
@@ -324,18 +326,39 @@ def code(text: str) -> str:
     return "\n".join(kept)
 
 
-def python_code(text: str) -> str:
+def python_code(text: str, name: str = "a helper") -> str:
     """Reduce a Python helper to what can run a subprocess.
+
+    Comments go by Python's own tokenizer (#1496): every COMMENT token,
+    wherever it sits on its line, so `import subprocess  # ruff: ...`
+    is not read as a call to ruff, and a `#` inside a string stays. The
+    code is kept as written; only each comment's own columns are cut.
 
     Returns:
         "" for a helper that imports no subprocess (it calls nothing),
         else its text without comments and docstrings.
 
+    Raises:
+        ValueError: the tokenizer cannot read the helper. Read as
+            "calls nothing", an unreadable helper would hide a real call.
+
     """
+    lines = text.splitlines()
+    try:
+        comments = [
+            token.start
+            for token in tokenize.generate_tokens(io.StringIO(text).readline)
+            if token.type == tokenize.COMMENT
+        ]
+    except (tokenize.TokenError, SyntaxError) as error:
+        message = f"{name}: the tokenizer cannot read it ({error})"
+        raise ValueError(message) from error
+    for row, col in comments:
+        lines[row - 1] = lines[row - 1][:col].rstrip()
+    text = "\n".join(lines)
     if not re.search(r"^import subprocess|^from subprocess", text, re.MULTILINE):
         return ""
-    text = re.sub(r'"""(?:.|\n)*?"""', "", text)
-    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    return re.sub(r'"""(?:.|\n)*?"""', "", text)
 
 
 def scripts(text: str, seen: set[str]) -> str:
@@ -356,7 +379,11 @@ def scripts(text: str, seen: set[str]) -> str:
             if path.is_file():
                 seen.add(name)
                 source = path.read_text("utf-8")
-                body = python_code(source) if name.endswith(".py") else code(source)
+                body = (
+                    python_code(source, f"{home}/{name}")
+                    if name.endswith(".py")
+                    else code(source)
+                )
                 out += [body, scripts(body, seen)]
     # A task is reached by name, however it is run: `mise run audit:deny`
     # and `for task in audit:deny audit:go-vulns; do mise run "${task}"`.
@@ -872,6 +899,46 @@ class TaskAutoInstall(unittest.TestCase):
             ],
             uninstalled("publish.yml", "sbom", job),
         )
+
+
+class PythonCode(unittest.TestCase):
+    """A Python helper's comments are not code, wherever they sit (#1496)."""
+
+    def test_an_inline_suppression_is_not_a_call(self) -> None:
+        """Measured on #1490: `# ruff: ignore[...]` after an import."""
+        helper = (
+            "import subprocess  # ruff: ignore[suspicious-subprocess-import]\n"
+            'subprocess.run(["git", "status"], check=True)\n'
+        )
+        reduced = python_code(helper)
+        self.assertEqual(
+            'import subprocess\nsubprocess.run(["git", "status"], check=True)',
+            reduced,
+        )
+        self.assertFalse(word("ruff", reduced))
+
+    def test_a_bare_name_in_code_is_still_a_call(self) -> None:
+        """Code before an inline comment is kept and still read."""
+        helper = "import subprocess\nTOOL = ruff  # the linter\n"
+        reduced = python_code(helper)
+        self.assertEqual("import subprocess\nTOOL = ruff", reduced)
+        self.assertTrue(word("ruff", reduced))
+
+    def test_a_hash_inside_a_string_is_code(self) -> None:
+        """A `#` in a string literal is not a comment; the line stays whole."""
+        line = 'subprocess.run(["sh", "-c", "echo # not a comment"])  # a comment'
+        reduced = python_code(f"import subprocess\n{line}\n")
+        self.assertEqual(
+            'import subprocess\nsubprocess.run(["sh", "-c", "echo # not a comment"])',
+            reduced,
+        )
+
+    def test_an_unreadable_helper_fails_by_name(self) -> None:
+        """Never "" for a helper the tokenizer cannot read."""
+        with self.assertRaisesRegex(
+            ValueError, r"^release/broken\.py: the tokenizer cannot read it \("
+        ):
+            python_code('import subprocess\nx = """unterminated\n', "release/broken.py")
 
 
 class OneReader(unittest.TestCase):

@@ -9783,7 +9783,9 @@ if [[ ${parent} == "${planned}" ]]; then
   exit 0
 fi
 if git cat-file -e "${planned}^{commit}" 2> /dev/null; then
-  between="$(git rev-list --count "${planned}..${parent}") commits"
+  count=$(git rev-list --count "${planned}..${parent}")
+  between="${count} commits"
+  [[ ${count} -ne 1 ]] || between="1 commit"
 else
   between="commits (${planned} is not in this checkout)"
 fi
