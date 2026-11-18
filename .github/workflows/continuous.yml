@@ -309,45 +309,26 @@ jobs:
         id: inventory
         env:
           GH_TOKEN: ${{ github.token }}
+        # trivy exports each per-arch inventory; stele judges both by the
+        # one admissibility rule (stele#396, #1371): no PURL, or a
+        # versionless one, is a package every scanner is blind to (the
+        # measured 2-of-236, docs/dependency-track.md), and an export
+        # that will not parse cannot be judged. trivy stamps the
+        # document name with the reference it was given, so the product
+        # id IS the digest a consumer pulls — derived, never composed.
         run: |
           set -euo pipefail
           image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          mkdir -p dist
-          subjects=""
+          mkdir -p dist && subjects=""
           for arch in amd64 arm64; do
             digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
-            if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::no ${arch} digest to inventory; refusing to decide about a partial image"
-              exit 1
-            fi
-            out="dist/${arch}.spdx.json"
-            trivy image --config /dev/null --format spdx-json \
-              --output "${out}" "${image}@${digest}"
-            [[ -s ${out} ]] || {
-              echo "::error::image SBOM export produced nothing for ${arch}"
-              exit 1
-            }
-            # The same two assertions the assemble job makes of its own
-            # SBOM: a versionless PURL is invisible to every scanner, so
-            # an inventory carrying one would gate on a set it cannot
-            # see (docs/dependency-track.md, the measured 2-of-236).
-            purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
-            bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
-              | .referenceLocator | select(test("@") | not)] | length' "${out}")
-            if [[ ${purls} -eq 0 || ${bare} -ne 0 ]]; then
-              emsg="${arch} SBOM has ${purls} PURLs, ${bare} versionless — a versionless PURL is invisible to every"
-              emsg+=" scanner, so an inventory carrying one gates on a set it cannot see"
-              echo "::error::${emsg}"
-              exit 1
-            fi
-            # trivy stamps the document name with the reference it was
-            # given, so the product id IS the digest a consumer pulls —
-            # derived, never composed here.
-            name=$(jq -r '.name' "${out}")
-            subjects="${subjects}${subjects:+,}${name}=${out}"
-            echo "::notice::${arch} (${digest}): ${purls} versioned PURLs"
+            [[ ${digest} =~ ^sha256:[0-9a-f]{64}$ ]] \
+              || { echo "::error::no ${arch} digest to inventory; refusing to decide about a partial image" && exit 1; }
+            trivy image --config /dev/null --format spdx-json --output "dist/${arch}.spdx.json" "${image}@${digest}"
+            subjects="${subjects}${subjects:+,}$(jq -r '.name' "dist/${arch}.spdx.json")=dist/${arch}.spdx.json"
           done
+          stele assert inventory dist/amd64.spdx.json dist/arm64.spdx.json
           echo "subjects=${subjects}" >> "${GITHUB_OUTPUT}"
       - name: Derive this publish's VEX and gate on undecided advisories
         id: vex

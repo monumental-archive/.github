@@ -1608,25 +1608,20 @@ class TagReleasePush(unittest.TestCase):
         )
 
 
-class InventoryClassRefusal(unittest.TestCase):
-    """publish.yml's inventory step, run for real over stubbed tools (#784).
+class InventoryStepWiring(unittest.TestCase):
+    """publish.yml's inventory step: what it hands its one stele call.
 
-    The step chooses one way to build the inventory for the whole
-    release, and go-binary beside a plan-emitting class used to take the
-    plan branch and publish green without the Go binaries' packages. The
+    The class rules this step used to hold in shell (.github#784's
+    binaries-beside-a-plan refusal, the binaries and plans branches, the
+    per-major coverage) are stele's now, tabled there (stele#396,
+    TestDeriveInventoriesRefusals), so the rows that ran them here went
+    with them (#1371). What stays canon-side is the call's wiring: the
     rows run the step's own `run:` block, extracted from the workflow,
-    so the refusal under test is the one that ships. `stele`, `git` and
-    `date` are stubs: the passing rows need only reach the end of the
-    binaries branch, and GNU `date -d` is not the Mac's.
+    with `stele`, `git` and `date` stubbed — stele records its argv and
+    prints a list, and GNU `date -d` is not the Mac's.
     """
 
     STEP = "Derive the per-artifact inventories and the release view"
-    MESSAGE = (
-        "::error::go-binary cannot yet ship beside rust-binary: the inventory"
-        " would omit the Go binaries' packages (.github#784)"
-    )
-
-    DERIVED = "derive sbom --out dist/tool-1.0.0.spdx.json"
 
     @classmethod
     def _block(cls) -> str:
@@ -1649,17 +1644,17 @@ class InventoryClassRefusal(unittest.TestCase):
             body.append(line[indent:])
         return "\n".join(body) + "\n"
 
-    def _run(self, classes: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+    def _run(
+        self, *, binaries: bool, plans: int, variants: str, refuse: bool = False
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self.enterContext(TemporaryDirectory()))
         stubs = root / ".stubs"
         stubs.mkdir()
-        calls = root / ".stele-calls"
+        calls = root / ".stele-argv"
         (stubs / "stele").write_text(
             "#!/usr/bin/env bash\n"
-            f'echo "$*" >> {calls}\n'
-            "out=\n"
-            "while [[ $# -gt 0 ]]; do [[ $1 == --out ]] && out=$2; shift; done\n"
-            'echo \'{"packages":[{"name":"stub"}]}\' > "${out}"\n',
+            f"printf '%s\\n' \"$@\" > {calls}\n"
+            + ("echo refused >&2; exit 1\n" if refuse else "echo '[\"\"]'\n"),
             encoding="utf-8",
         )
         (stubs / "git").write_text(
@@ -1667,31 +1662,35 @@ class InventoryClassRefusal(unittest.TestCase):
             encoding="utf-8",
         )
         (stubs / "date").write_text(
-            "#!/usr/bin/env bash\necho 2023-11-14T22:13:20Z\n",
-            encoding="utf-8",
+            "#!/usr/bin/env bash\necho 2023-11-14T22:13:20Z\n", encoding="utf-8"
         )
         for stub in stubs.iterdir():
             stub.chmod(0o755)
+        (root / ".org-canon").mkdir()
+        (root / ".org-canon" / "CITATION.cff").write_text("version: 1.69.1\n")
+        for n in range(plans):
+            leg = root / "plans" / f"sbom-plan-{n}"
+            leg.mkdir(parents=True)
+            (leg / "plan.json").write_text("[]\n", encoding="utf-8")
         bins = root / ".bins"
         bins.mkdir()
-        (bins / "tool_linux_amd64").write_text("binary\n", encoding="utf-8")
         script = root / ".step.sh"
         script.write_text(self._block(), encoding="utf-8")
         home = root / ".home"
         home.mkdir()
+        extra = {"BINARIES_DIR": str(bins)} if binaries else {}
         env = hermetic_env(
             home,
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            CLASSES=classes,
-            EVIDENCE_CLASSES=classes,
+            CLASSES="go-binary",
+            EVIDENCE_CLASSES="go-binary",
             VERSION="1.0.0",
-            SBOM_BASENAME="tool",
-            PG_MAJORS="",
-            BINARIES_DIR=str(bins),
+            SBOM_BASENAME="",
+            VARIANTS=variants,
             GITHUB_REPOSITORY="monumental-archive/tool",
             GITHUB_ENV=str(root / ".env"),
             GITHUB_OUTPUT=str(root / ".output"),
-            RUNNER_TEMP=str(root / ".rt"),
+            **extra,
         )
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
@@ -1702,29 +1701,50 @@ class InventoryClassRefusal(unittest.TestCase):
             text=True,
             check=False,
         )
-        return result, calls
+        argv = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+        return result, argv, root
 
-    def test_go_binary_beside_a_plan_class_is_refused_by_name(self) -> None:
-        """go-binary,rust-binary stops by name before anything is derived."""
-        result, calls = self._run("go-binary,rust-binary")
-        self.assertNotEqual(0, result.returncode, result.stdout)
-        self.assertIn(self.MESSAGE, result.stdout.splitlines())
-        self.assertFalse(calls.exists(), "refused after an inventory was derived")
-
-    def test_go_binary_beside_an_image_still_derives_from_the_binaries(self) -> None:
-        """go-binary,oci-image takes the binaries branch as before."""
-        result, calls = self._run("go-binary,oci-image")
+    def test_a_binaries_release_hands_stele_the_binaries(self) -> None:
+        """The binaries directory goes in; the list comes out unchanged."""
+        result, argv, root = self._run(binaries=True, plans=0, variants="")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("release inventory: 1 packages", result.stdout)
-        self.assertIn(self.DERIVED, calls.read_text(encoding="utf-8"))
+        self.assertEqual(["derive", "inventories"], argv[:2])
+        self.assertEqual(str(root / ".bins"), argv[argv.index("--binaries-dir") + 1])
+        self.assertNotIn("--variants", argv)
+        self.assertEqual("1.69.1", argv[argv.index("--machinery-version") + 1])
+        self.assertEqual("2023-11-14T22:13:20Z", argv[argv.index("--created") + 1])
+        output = (root / ".output").read_text(encoding="utf-8")
+        self.assertEqual('list=[""]\n', output)
+        self.assertIn("SBOM_CREATED=2023-11-14T22:13:20Z", (root / ".env").read_text())
 
-    def test_go_binary_alone_still_derives_from_the_binaries(self) -> None:
-        """go-binary alone takes the binaries branch as before."""
-        result, calls = self._run("go-binary")
+    def test_plans_follow_every_flag(self) -> None:
+        """Go's flag parser stops at the first operand: plans go last."""
+        result, argv, _ = self._run(binaries=False, plans=2, variants="16,17")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("release inventory: 1 packages", result.stdout)
-        self.assertNotIn("go-binary cannot yet ship", result.stdout)
-        self.assertIn(self.DERIVED, calls.read_text(encoding="utf-8"))
+        self.assertEqual(
+            ["plans/sbom-plan-0/plan.json", "plans/sbom-plan-1/plan.json"], argv[-2:]
+        )
+        self.assertEqual("16,17", argv[argv.index("--variants") + 1])
+        self.assertNotIn("--binaries-dir", argv)
+        self.assertTrue(all(a.startswith("plans/") for a in argv[-2:]))
+        flags = [a for a in argv[:-2] if a.startswith("--")]
+        self.assertTrue(flags, argv)
+
+    def test_no_plans_hands_stele_no_operand(self) -> None:
+        """An unmatched glob is no plan, never a literal path."""
+        result, argv, _ = self._run(binaries=False, plans=0, variants="")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertFalse(any("sbom-plan-" in a for a in argv), argv)
+        self.assertEqual(".", argv[argv.index("--tree") + 1])
+        self.assertEqual("dist", argv[argv.index("--out-dir") + 1])
+
+    def test_a_stele_refusal_fails_the_step(self) -> None:
+        """Nothing is written for a refused derivation."""
+        result, _, root = self._run(binaries=True, plans=0, variants="", refuse=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("refused", result.stderr)
+        output = root / ".output"
+        self.assertFalse(output.exists() and output.read_text(), "a list was written")
 
 
 if __name__ == "__main__":

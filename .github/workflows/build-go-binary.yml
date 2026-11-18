@@ -241,33 +241,15 @@ jobs:
         run: |
           "${ORG_CANON_TREE}/release/build-go-commands.py"
       - name: Refuse a binary whose stamp is not the released commit
+        # Go embeds the module list and the VCS facts in every binary —
+        # the artifact-carries-its-inventory property this class rests on
+        # (stele#7) — so each staged binary's stamp must be the released
+        # commit, from a clean tree, carrying its modules. Run from the
+        # tree the pins step recorded: no belt on a build leg, and the
+        # .org-canon link is gone by now. release/check-go-stamps.py
+        # (#1371).
         run: |
-          set -euo pipefail
-          # Go embeds the module list and the VCS facts in every binary,
-          # and `go version -m` reads them back out of the built bytes —
-          # the artifact-carries-its-inventory property this class rests
-          # on (stele#7). Asserted, not hoped: the stamped revision must
-          # equal the commit being released and the tree must be clean,
-          # which binds the bytes to the commit more strongly than any
-          # manifest-version comparison could.
-          head=$(git rev-parse HEAD)
-          for b in staged/*; do
-            info=$(go version -m "${b}")
-            rev=$(sed -n 's/^.*vcs\.revision=//p' <<< "${info}")
-            modified=$(sed -n 's/^.*vcs\.modified=//p' <<< "${info}")
-            if [[ ${rev} != "${head}" ]]; then
-              echo "::error::${b##*/}: stamped revision ${rev:-<none>} is not the released commit ${head}"
-              exit 1
-            fi
-            if [[ ${modified} != "false" ]]; then
-              echo "::error::${b##*/}: vcs.modified=${modified:-<none>} — a release builds a clean tree"
-              exit 1
-            fi
-            if ! grep -qE '^[[:space:]]+mod[[:space:]]' <<< "${info}"; then
-              echo "::error::${b##*/}: no module stamp — the shipped bytes must carry their inventory"
-              exit 1
-            fi
-          done
+          "${ORG_CANON_TREE}/release/check-go-stamps.py"
       - name: Smoke the binaries
         if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:

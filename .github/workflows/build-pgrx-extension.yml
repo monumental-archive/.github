@@ -346,36 +346,23 @@ jobs:
         # `--features pg${PG}` into exactly this tarball, because those
         # are its own build inputs (#537). The plan is that mapping as
         # data; the sbom job derives the closure from it on the prove
-        # leg. --artifact names the DOCUMENT apart from the package —
-        # the purl keeps the crate's real identity, because advisory
-        # matching runs on what the artifact IS, not what the tarball is
-        # called (stele#126). Both arches of a major state the same
-        # plan; the sbom job collapses identical entries and refuses
+        # leg. The artifact name keeps the DOCUMENT apart from the
+        # package — the purl keeps the crate's real identity, because
+        # advisory matching runs on what the artifact IS, not what the
+        # tarball is called (stele#126). Both arches of a major state the
+        # same plan; the sbom job collapses identical entries and refuses
         # divergent ones. Not on the repro leg: the comparator proves
-        # bytes, not inventories.
+        # bytes, not inventories. No belt on a build leg, so the helper
+        # is stdlib Python from the canon tree:
+        # release/pgrx/inventory-plan.py (#1371).
         #
         # plan-producer: pgrx-extension sbom-pgrx-
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
+          PLAN_DOC_PREFIX: sbom-pgrx-
         run: |
-          set -euo pipefail
-          pkg=$(python3 -c '
-          import tomllib
-          with open("'"${UNTRUSTED_CRATE_DIR}"'/Cargo.toml", "rb") as f:
-              t = tomllib.load(f)
-          print(t["package"]["name"])
-          ')
-          mkdir -p plan
-          jq -n --arg pkg "${pkg}" --arg pg "${PG}" \
-            '[{class: "pgrx-extension",
-               doc: ("sbom-pgrx-" + $pkg + "-pg" + $pg),
-               artifact: ($pkg + "-pg" + $pg),
-               params: {cargoPackage: $pkg,
-                        features: [("pg" + $pg)],
-                        noDefaultFeatures: true}}]' \
-            > plan/plan.json
-          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
+          .org-canon/release/pgrx/inventory-plan.py "${UNTRUSTED_CRATE_DIR}" "${PG}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:
