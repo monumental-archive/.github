@@ -63,11 +63,14 @@ _SPEC = importlib.util.spec_from_file_location(
     "belt_shell",
     Path(__file__).resolve().with_name("belt-shell.py"),
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
-    msg = "exit-trap: belt-shell.py did not arrive beside this file"
-    raise SystemExit(msg)
 _BELT_SHELL = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_BELT_SHELL)
+# A missing sibling fails here, in exec_module, never as a None spec: a
+# `.py` path always gets a spec and a loader (#1522).
+try:
+    _SPEC.loader.exec_module(_BELT_SHELL)
+except FileNotFoundError:
+    msg = "exit-trap: belt-shell.py did not arrive beside this file"
+    raise SystemExit(msg) from None
 
 # Any trap that names EXIT among its signals. `trap - EXIT` resets the
 # handler rather than setting one, and owes nothing.

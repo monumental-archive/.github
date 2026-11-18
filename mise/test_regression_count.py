@@ -30,9 +30,6 @@ hermetic = SimpleNamespace(
 _SPEC = importlib.util.spec_from_file_location(
     "regression_count", pathlib.Path(__file__).with_name("regression-count.py")
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - import plumbing
-    msg = "cannot load regression-count.py"
-    raise RuntimeError(msg)
 rc = importlib.util.module_from_spec(_SPEC)
 sys.modules["regression_count"] = rc
 _SPEC.loader.exec_module(rc)

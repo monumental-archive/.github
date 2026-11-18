@@ -15,9 +15,6 @@ from pathlib import Path
 _SPEC = importlib.util.spec_from_file_location(
     "crates_index", Path(__file__).resolve().parent / "crates-index.py"
 )
-if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - delivered beside it
-    msg = "test_crates_index: crates-index.py did not arrive beside this file"
-    raise SystemExit(msg)
 crates_index = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(crates_index)
 
