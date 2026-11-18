@@ -1,5 +1,5 @@
 {
-  "schema": 8,
+  "schema": 9,
   "issuer": "https://token.actions.githubusercontent.com",
   "trust": {
     "provenance": {
@@ -35,7 +35,7 @@
     "resourceUri": "pkg:github/{owner}/{repo}@v{version}",
     "sourceRepository": "https://github.com/{owner}/{repo}",
     "targetLevel": "SLSA_BUILD_LEVEL_3",
-    "denySelfHostedRunners": true,
+    "runnerEnvironments": ["github-hosted"],
     "enrichment": {
       "predicateType": "https://monumental-archive.github.io/attestations/build-enrichment/v2",
       "required": ["toolbelt-lock"],

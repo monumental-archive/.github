@@ -54,6 +54,22 @@ inputs:
 runs:
   using: composite
   steps:
+    # The mise binary alone: the derivation below runs stele from the belt
+    # of the canon tree this action was fetched in.
+    - name: Install mise
+      uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      with:
+        version: 2026.11.6
+        cache: false
+        install: false
+    # The derivation is `stele derive signer-digest` (stele#392): the
+    # verify policy names the signer workflow, and the `uses:` lines of
+    # the calling workflow's text are read as the platform runs them —
+    # one pin derived, none or two refused by name, a ref that is not a
+    # full commit refused. The action tree IS a canon tree (`uses:`
+    # fetched the whole repository at the caller's pin), so its policy
+    # and its belt are the caller's pinned canon, the same single
+    # resolution the canon action relies on (#165).
     - name: Derive the signer digest from the calling workflow's own pin
       id: derive
       shell: bash
@@ -61,27 +77,16 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
       run: |
         set -euo pipefail
+        canon="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
         # octocat/repo/.github/workflows/x.yml@refs/heads/main → the path
         path="${GITHUB_WORKFLOW_REF#"${GITHUB_REPOSITORY}"/}"
         path="${path%@refs/*}"
-        digest=$(gh api \
-          "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_WORKFLOW_SHA}" \
-          --jq '.content' | base64 -d \
-          | grep -oE 'monumental-archive/signer/.github/workflows/sign\.yml@[0-9a-f]{40}' \
-          | cut -d@ -f2 | sort -u)
-        if [[ -z ${digest} ]]; then
-          emsg="${path} at ${GITHUB_WORKFLOW_SHA} pins no sign.yml uses: — nothing to derive --signer-digest from (call"
-          emsg+=" verify-signed from the workflow that calls the signer)"
-          echo "::error::${emsg}"
-          exit 1
-        fi
-        digest_lines=$(wc -l <<< "${digest}")
-        if [[ ${digest_lines// /} != "1" ]]; then
-          emsg="${path} pins sign.yml at more than one digest — a tree states the trusted signer once:"
-          emsg+=" ${digest//$'\n'/ }"
-          echo "::error::${emsg}"
-          exit 1
-        fi
+        caller="${RUNNER_TEMP}/${path##*/}"
+        gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_WORKFLOW_SHA}" --jq '.content' \
+          | base64 -d > "${caller}"
+        digest=$(MISE_GLOBAL_CONFIG_FILE="${canon}/mise/config.toml" MISE_TRUSTED_CONFIG_PATHS="${canon}" \
+          MISE_LOCKED=1 mise exec github:monumental-archive/stele -- stele derive signer-digest \
+          --policy "${canon}/slsa/verify-policy.json" --workflow "${caller}" --repo "${GITHUB_REPOSITORY}")
         echo "signer digest, derived from ${path}: ${digest}"
         echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
     - name: Verify each artifact under both identity flags

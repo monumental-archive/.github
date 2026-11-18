@@ -295,7 +295,41 @@ jobs:
       # The class the per-major extension images are attributed to
       # (#1168), empty when no extension is declared. Same reason.
       extension-image-class: ${{ steps.check.outputs.extension-image-class }}
+    # The class derivation runs stele from the belt (#1378), so the job
+    # carries the release jobs' install env.
+    env:
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333).
+          install_args: github:monumental-archive/stele
+
+      # The ref check and the version are facts about the event and stay
+      # here. Which classes the evidence declares is `stele derive
+      # classes` (stele#403, #1378): each requested class validated
+      # against the policy's evidence.classes and expanded by its
+      # `declares` there, one vocabulary and one rule. An oci-image built
+      # from a binary crate is declared as oci-image-crate in its place
+      # (#843), pgrx-extension adds pgrx-extension-image after it
+      # (#1168), and a crate without oci-image is refused (#775). Its
+      # stdout is this step's classes, image-class and
+      # extension-image-class outputs.
+      #
+      # The declaration/producer marker `lint:plan-producers` joins to
+      # the policy stays beside the derivation that names the class,
+      # never in the image leg that is given it (#833):
+      #
+      # plan-producer: oci-image-crate sbom-image-
       - name: Check the ref and the class
         id: check
         env:
@@ -308,95 +342,14 @@ jobs:
             echo "::error::dispatching from a branch would attest a moving pointer"
             exit 1
           fi
-          IFS=',' read -ra requested <<< "${UNTRUSTED_CLASSES// /}"
-          if ((${#requested[@]} == 0)); then
-            echo "::error::no classes requested — a release that builds nothing is not a release"
-            exit 1
-          fi
-          # The one spelling of the crate-built image class (#843). It is
-          # written here and nowhere else in the machinery — so the
-          # declaration/producer marker `lint:plan-producers` joins to
-          # the policy is written here too, beside the name, rather than
-          # in the image leg that is GIVEN the class and must not state
-          # it a second time (#833).
-          #
-          # plan-producer: oci-image-crate sbom-image-
-          #
-          # The job hands
-          # it to the image leg as the class its inventory plan names, and
-          # to the fan-in as the class the evidence manifest declares, so
-          # the plan and the manifest cannot disagree about which class
-          # built the image.
-          image_class="oci-image-crate"
-          # The class list the EVIDENCE declares, derived from the same
-          # `binary-crate` fact that decides whether the image leg emits
-          # an inventory plan at all (#843). The oci-image class carried
-          # two obligation shapes under one name — a Dockerfile-only
-          # image owes no inventory and a crate-built one owes an
-          # `sbom-image-*` document — and the class is the unit of
-          # obligation, so the two shapes are two classes. The caller
-          # still declares `oci-image` and declares its crate; which
-          # class that IS is machinery's answer, never a second caller
-          # declaration to drift against the first.
-          #
-          # The extension images are the same ruling one class over
-          # (#1168). A pgrx release ships tarballs AND per-major images,
-          # built by different legs, signed separately, judged by
-          # separate verdicts — and owing different things: the tarball
-          # leg consumes the pinned base images and claims them, while
-          # the image leg is FROM scratch plus a COPY and claims none.
-          # Under one class name the evidence manifest could only
-          # attribute an image to the class that owes the base claims,
-          # and the audit would then demand them of an artifact whose
-          # verdict correctly makes none. Two shapes, two classes; the
-          # caller still declares `pgrx-extension` alone.
-          extension_image_class=""
-          declared=()
-          for c in "${requested[@]}"; do
-            case "${c}" in
-              rust-crate | oci-image | rust-binary | go-binary | wasm-npm | pgrx-extension | source-archive) ;;
-              *)
-                echo "::error::unknown class requested"
-                exit 1
-                ;;
-            esac
-            if [[ ${c} == oci-image && -n ${UNTRUSTED_BINARY_CRATE} ]]; then
-              declared+=("${image_class}")
-            else
-              declared+=("${c}")
-            fi
-            if [[ ${c} == pgrx-extension ]]; then
-              extension_image_class="pgrx-extension-image"
-              declared+=("${extension_image_class}")
-            fi
-          done
-          # A class input naming no requested class is a declaration
-          # that does nothing — which is how a caller comes to believe a
-          # binary is being built for an image nobody declared (#775).
-          # Judged here, in the five-second job, rather than as a puzzle
-          # in a green release that shipped a Dockerfile's stale COPY.
-          if [[ -n ${UNTRUSTED_BINARY_CRATE} ]] && [[ ,${UNTRUSTED_CLASSES// /}, != *,oci-image,* ]]; then
-            echo "::error::binary-crate is declared but oci-image is not among the classes — it would build nothing"
-            exit 1
-          fi
-          # Past that refusal, a declared crate means oci-image was
-          # requested, so the image leg has a class to plan under. Stated
-          # as its own output rather than re-derived at the call site:
-          # the leg writes the name it is given.
-          if [[ -z ${UNTRUSTED_BINARY_CRATE} ]]; then
-            image_class=""
-          fi
+          out=$(stele derive classes --policy .org-canon/slsa/assert-policy.json \
+            --classes "${UNTRUSTED_CLASSES}" --given "binary-crate=${UNTRUSTED_BINARY_CRATE}")
           version="${GITHUB_REF#refs/tags/v}"
-          classes_out=$(printf '%s,' "${declared[@]}")
-          classes_out="${classes_out%,}"
-          {
-            echo "version=${version}"
-            echo "classes=${classes_out}"
-            echo "image-class=${image_class}"
-            echo "extension-image-class=${extension_image_class}"
-          } >> "${GITHUB_OUTPUT}"
-          echo "::notice::publishing ${#requested[@]} class(es) at version ${version}"
-          echo "::notice::the evidence declares ${classes_out}"
+          printf 'version=%s\n%s\n' "${version}" "${out}" >> "${GITHUB_OUTPUT}"
+          commas="${UNTRUSTED_CLASSES//[^,]/}"
+          echo "::notice::publishing $((${#commas} + 1)) class(es) at version ${version}"
+          declared=$(sed -n 's/^classes=//p' <<< "${out}")
+          echo "::notice::the evidence declares ${declared}"
   # Every fact the image classes will assert — OCI annotations and config
   # labels — is resolved HERE, once, before anything is built, and the
   # builds consume the map without deriving anything. One resolution per
@@ -631,182 +584,40 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
           CLASSES: ${{ inputs.classes }}
           # What the evidence declares, which the plans judgment reads
-          # and the branch below deliberately does not (#843): which
-          # legs RAN is the caller's list, and which classes OWE is the
+          # and the class rules deliberately do not (#843): which legs
+          # RAN is the caller's list, and which classes OWE is the
           # derived one. Two questions, two readings, neither guessing
           # at the other.
           EVIDENCE_CLASSES: ${{ needs.guard.outputs.classes }}
-          PG_MAJORS: ${{ inputs.pg-majors }}
+          # Every requested major must be covered — asked only of a
+          # release that built the extension, since pg-majors defaults
+          # for every caller.
+          VARIANTS: ${{ contains(inputs.classes, 'pgrx-extension') && inputs.pg-majors || '' }}
+        # One call (stele#396, #1371): the plans judged as `assert plans`
+        # judges them, one document per judged entry and the view folded
+        # from them; or the shipped binaries' own inventory; or, for a
+        # tree tracking no manifest, the forge's dependency graph. Which
+        # inventory each class owes is its `inventory` declaration in
+        # slsa/assert-policy.json, every document is held to the one
+        # PURL admissibility rule, and the decision population is
+        # printed. The released commit's own instant dates every
+        # document, never the run describing it.
         run: |
           set -euo pipefail
-          command -v stele > /dev/null || {
-            echo "::error::stele is not on the runner — it is a belt tool"
-            exit 1
-          }
-          base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
-          base="${base#.}"
-          mkdir -p dist
-          out="dist/${base}-${VERSION}.spdx.json"
-          # The released commit's own instant — every derived document
-          # is dated by the artifact, never by the run describing it.
           epoch=$(git log -1 --pretty=%ct)
           created=$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)
-          echo "SBOM_CREATED=${created}" >> "${GITHUB_ENV}"
-          # A release with no inventory plan decides as one release; a
-          # planned one decides per planned document. Set before the
-          # branch so no path can leave it unstated.
-          inventories='[""]'
-          binaries_speak=1
-          go_binary=0
-          planned=()
-          for class in ${CLASSES//,/ }; do
-            case "${class}" in
-              go-binary) go_binary=1 ;;
-              oci-image) ;;
-              *)
-                binaries_speak=0
-                planned+=("${class}")
-                ;;
-            esac
-          done
-          # The reverse of #775's shape, refused the same way and before
-          # either branch is taken: go-binary beside a plan-emitting class
-          # would send the run down the plan branch, where the go-binary
-          # leg has no plan to offer, and the release would publish green
-          # with an inventory that omits the Go binaries (.github#784).
-          # Deleted in the change that gives the go-binary leg a plan.
-          if ((go_binary == 1 && binaries_speak == 0)); then
-            beside=$(
-              IFS=','
-              echo "${planned[*]}"
-            )
-            emsg="go-binary cannot yet ship beside ${beside}: the inventory would omit the Go binaries'"
-            emsg+=" packages (.github#784)"
-            echo "::error::${emsg}"
-            exit 1
-          fi
-          if [[ -n ${BINARIES_DIR:-} && ${binaries_speak} -eq 1 ]]; then
-            # The oci-image class is in the binaries-speak set because an
-            # image whose contents are the shipped Go binaries adds no
-            # inventory of its own. A DECLARED binary-crate does add one
-            # (#775), and this branch would derive from the binaries and
-            # drop it — an inventory silently narrower than the release.
-            # Refuse rather than choose: the two shapes disagree about
-            # what the release ships, and only the caller can say which
-            # it meant.
-            if compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
-              emsg="a build leg emitted an inventory plan while the shipped binaries would speak for the whole"
-              emsg+=" release — the two describe different artifact sets; declare the classes that own the plan,"
-              emsg+=" or drop binary-crate from the image"
-              echo "::error::${emsg}"
-              exit 1
-            fi
-            listing=$(find "${BINARIES_DIR}" -type f | sort)
-            bins=()
-            while IFS= read -r b; do
-              [[ -n ${b} ]] && bins+=("${b}")
-            done <<< "${listing}"
-            ((${#bins[@]} > 0)) || {
-              echo "::error::BINARIES_DIR holds no binaries — an inventory of nothing asserts nothing"
-              exit 1
-            }
-            stele derive sbom --out "${out}" --expect-version "${VERSION}" "${bins[@]}"
-          elif compgen -G "plans/sbom-plan-*/plan.json" > /dev/null; then
-            # Pre-publish judgment of the plans (`stele assert plans`,
-            # stele#142) against the SAME policy the evidence walk
-            # reads — one obligation list, two moments of looking, so a
-            # release cannot publish green and red on the walk. The
-            # plans originate on build legs that execute caller code,
-            # so they are data: shape, charset, matrix collapse and
-            # divergent-claim refusal all live inside the engine, and
-            # nothing from a plan reaches a command line until it has
-            # judged. The spec is stele's docs/assert-policy-schema.md.
-            machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
-            [[ -n ${machinery} ]] || {
-              echo "::error::the pinned canon tree's CITATION.cff names no version — the owed epochs cannot be judged"
-              exit 1
-            }
-            stele assert plans \
-              --policy .org-canon/slsa/assert-policy.json \
-              --classes "${EVIDENCE_CLASSES}" \
-              --machinery-version "${machinery}" \
-              --out "${RUNNER_TEMP}/judged-plans.json" \
-              plans/sbom-plan-*/plan.json
-            # The derivation iterates the set the JUDGMENT emitted, not
-            # a second reading of the same bytes: `jq -s 'add | unique'`
-            # over the raw plans was the engine's canonical collapse
-            # derived twice, agreeing by luck (stele#151). --out writes
-            # only on PASS, so there is nothing to iterate unless the
-            # plans were judged.
-            plan=$(cat "${RUNNER_TEMP}/judged-plans.json")
-            docs=()
-            count=$(jq 'length' <<< "${plan}")
-            for ((i = 0; i < count; i++)); do
-              entry=$(jq -c ".[${i}]" <<< "${plan}")
-              doc_name=$(jq -r '.doc' <<< "${entry}")
-              doc="dist/${doc_name}-${VERSION}.spdx.json"
-              pkg=$(jq -r '.params.cargoPackage' <<< "${entry}")
-              flags=(--cargo-package "${pkg}" --tree .)
-              feats=$(jq -r '(.params.features // []) | join(",")' <<< "${entry}")
-              if [[ -n ${feats} ]]; then flags+=(--features "${feats}"); fi
-              ndf=$(jq -r '.params.noDefaultFeatures // false' <<< "${entry}")
-              if [[ ${ndf} == "true" ]]; then
-                flags+=(--no-default-features)
-              fi
-              artifact=$(jq -r '.artifact // ""' <<< "${entry}")
-              if [[ -n ${artifact} ]]; then flags+=(--artifact "${artifact}"); fi
-              stele derive sbom "${flags[@]}" --created "${created}" --out "${doc}"
-              docs+=("${doc}")
-            done
-            # One crate built once per major is several artifacts with
-            # several digests (#492), so each owes its own inventory —
-            # and the set is structural now: every requested major must
-            # appear in some pgrx document, or nothing publishes.
-            if [[ ${CLASSES} == *pgrx-extension* ]]; then
-              for major in ${PG_MAJORS//,/ }; do
-                found=0
-                for d in "${docs[@]}"; do
-                  if [[ ${d} == dist/sbom-pgrx-*-pg${major}-"${VERSION}".spdx.json ]]; then found=1; fi
-                done
-                ((found == 1)) || {
-                  echo "::error::pg-majors names ${major} but no pgrx inventory covers it"
-                  exit 1
-                }
-              done
-            fi
-            union=$(
-              IFS=','
-              echo "${docs[*]}"
-            )
-            stele derive sbom --union "${union}" --union-name "${base}@v${VERSION}" \
-              --created "${created}" --out "${out}"
-            # The union is a VIEW over the planned documents and bears
-            # no decision of its own (#492), so it is not in this list.
-            inventories=$(jq -c --arg v "${VERSION}" \
-              '[.[] | .doc + "-" + $v + ".spdx.json"] | unique' \
-              "${RUNNER_TEMP}/judged-plans.json")
-          elif tracked=$(git ls-files 'Cargo.lock' '*/Cargo.lock' 'go.mod' '*/go.mod') && [[ -n ${tracked} ]]; then
-            emsg="this release tracks a manifest but no build leg emitted an inventory plan — the per-release"
-            emsg+=" inventory is aggregated from per-artifact documents (#492), and the artifact-to-package"
-            emsg+=" mapping lives in the build leg that holds it (#537); release through a class whose build"
-            emsg+=" emits plans"
-            echo "::error::${emsg}"
-            exit 1
-          else
-            gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/sbom" --jq '.sbom' > "${out}"
-            purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
-            bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
-              | .referenceLocator | select(test("@") | not)] | length' "${out}")
-            echo "::notice::dependency-graph SBOM: ${bare} of ${purls} PURLs versionless"
-          fi
-          [[ -s ${out} ]] || {
-            echo "::error::SBOM derivation produced nothing"
-            exit 1
-          }
-          packages=$(jq '.packages | length' "${out}")
-          echo "::notice::release inventory: ${packages} packages (${out##*/})"
-          echo "list=${inventories}" >> "${GITHUB_OUTPUT}"
-          echo "::notice::decision population: ${inventories}"
+          mkdir -p dist && echo "SBOM_CREATED=${created}" >> "${GITHUB_ENV}"
+          machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
+          plans=(plans/sbom-plan-*/plan.json)
+          [[ -e ${plans[0]} ]] || plans=()
+          opts=()
+          [[ -z ${BINARIES_DIR:-} ]] || opts+=(--binaries-dir "${BINARIES_DIR}")
+          [[ -z ${VARIANTS} ]] || opts+=(--variants "${VARIANTS}")
+          list=$(stele derive inventories --policy .org-canon/slsa/assert-policy.json --classes "${CLASSES}" \
+            --evidence-classes "${EVIDENCE_CLASSES}" --machinery-version "${machinery}" \
+            --repo "${GITHUB_REPOSITORY}" --name "${SBOM_BASENAME}" --version "${VERSION}" --created "${created}" \
+            --tree . --out-dir dist ${opts[@]+"${opts[@]}"} ${plans[@]+"${plans[@]}"})
+          echo "list=${list}" >> "${GITHUB_OUTPUT}"
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
         # the SBOM just generated, so a release is born covered — and a
@@ -829,30 +640,19 @@ jobs:
           }
           base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
           base="${base#.}"
-          release_purl="pkg:github/${GITHUB_REPOSITORY}@v${VERSION}"
-          # Subjects: the release view under the release's own purl,
-          # plus every per-artifact inventory under its artifact's name
-          # — a statement then names the artifact a consumer actually
-          # holds, not just the release that contained it (#492).
-          subjects="${release_purl}=dist/${base}-${VERSION}.spdx.json"
-          for doc in dist/sbom-*-"${VERSION}".spdx.json; do
-            [[ -e ${doc} ]] || continue
-            artifact=$(jq -r '.name' "${doc}")
-            subjects="${subjects},${artifact}=${doc}"
-          done
-          out="dist/${base}-${VERSION}.vex.openvex.json"
+          # The ecosystems and the author are the assert policy's
+          # (blastRadius), the document id its vexId template, and the
+          # release view's product the verify policy's resourceUri
+          # (stele#397, #1372). Every other inventory in dist/ is
+          # covered under its own document name.
           stele derive vex \
-            --subjects "${subjects}" \
+            --policy .org-canon/slsa/assert-policy.json \
+            --verify-policy .org-canon/slsa/verify-policy.json \
+            --inventories dist --release-view "dist/${base}-${VERSION}.spdx.json" \
             --vex .org-canon/security/vex \
-            --base-ecosystems "debian,alpine,ubuntu,rocky,redhat,rpm" \
-            --author monumental-archive \
-            --id "https://openvex.dev/docs/public/vex-${GITHUB_REPOSITORY//\//-}-v${VERSION}-derived" \
+            --repo "${GITHUB_REPOSITORY}" --version "${VERSION}" \
             --released "${SBOM_CREATED}" \
-            --out "${out}"
-          if [[ -f ${out} ]]; then
-            statements=$(jq '.statements | length' "${out}")
-            echo "::notice::derived VEX shipped (${statements} statement(s))"
-          fi
+            --out "dist/${base}-${VERSION}.vex.openvex.json"
       - name: Triage the tagged lock against the advisory feed
         # Dependency L2's own wording — triage all known vulnerabilities
         # BEFORE release — enforced against the release rather than the
@@ -1021,11 +821,11 @@ jobs:
     name: Sign image
     needs: assemble-oci
     if: ${{ !cancelled() && needs.assemble-oci.result == 'success' && contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       image-name: ${{ needs.assemble-oci.outputs.image }}
       image-digest: ${{ needs.assemble-oci.outputs.digest }}
-      bundle-artifact: attestation-bundle-image
+      bundle-artifact: attestations-image.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1092,10 +892,10 @@ jobs:
     name: Sign
     needs: verify
     if: ${{ !cancelled() && needs.verify.result == 'success' && contains(inputs.classes, 'rust-crate') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       subjects: ${{ needs.verify.outputs.subjects }}
-      bundle-artifact: attestation-bundle-crates
+      bundle-artifact: attestations-crates.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1187,10 +987,10 @@ jobs:
     # The Sigstore entry is append-only — an irreversible step, so it
     # sits downstream of the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'rust-binary') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       subjects: ${{ needs.build-binary.outputs.subjects }}
-      bundle-artifact: attestation-bundle-binaries
+      bundle-artifact: attestations-binaries.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1240,10 +1040,10 @@ jobs:
     # The Sigstore entry is append-only — an irreversible step, so it
     # sits downstream of the bit-for-bit proof (#118).
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'go-binary') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       subjects: ${{ needs.build-go.outputs.subjects }}
-      bundle-artifact: attestation-bundle-go-binaries
+      bundle-artifact: attestations-go-binaries.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1286,10 +1086,10 @@ jobs:
       - build-source
       - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'source-archive') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       subjects: ${{ needs.build-source.outputs.subjects }}
-      bundle-artifact: attestation-bundle-source
+      bundle-artifact: attestations-source.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1369,10 +1169,10 @@ jobs:
     name: Sign wasm package
     needs: verify-wasm
     if: ${{ !cancelled() && needs.verify-wasm.result == 'success' && contains(inputs.classes, 'wasm-npm') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
-      bundle-artifact: attestation-bundle-npm
+      bundle-artifact: attestations-npm.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1441,10 +1241,10 @@ jobs:
       - build-extension
       - commit-point
     if: ${{ !cancelled() && needs.commit-point.result == 'success' && contains(inputs.classes, 'pgrx-extension') }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       subjects: ${{ needs.build-extension.outputs.subjects }}
-      bundle-artifact: attestation-bundle-extensions
+      bundle-artifact: attestations-extensions.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1544,11 +1344,11 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.build-extension-images.outputs.images) }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       image-name: ${{ matrix.image }}
       image-digest: ${{ matrix.digest }}
-      bundle-artifact: attestation-bundle-extimg-pg${{ matrix.pg }}
+      bundle-artifact: attestations-extimg-pg${{ matrix.pg }}.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1616,48 +1416,26 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions: {} # compares digests; no caller code, no checkout, no writes
+    # The comparison is stele's (#1376), so the job carries the release
+    # jobs' install env and installs stele alone.
+    env:
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
-      - name: Compare the file-class subject manifests
-        env:
-          CLASSES: ${{ inputs.classes }}
-          CRATES_A: ${{ needs.build.outputs.subjects }}
-          CRATES_B: ${{ needs.repro-build.outputs.subjects }}
-          BIN_A: ${{ needs.build-binary.outputs.subjects }}
-          BIN_B: ${{ needs.repro-build-binary.outputs.subjects }}
-          GO_A: ${{ needs.build-go.outputs.subjects }}
-          GO_B: ${{ needs.repro-build-go.outputs.subjects }}
-          SRC_A: ${{ needs.build-source.outputs.subjects }}
-          SRC_B: ${{ needs.repro-build-source.outputs.subjects }}
-          WASM_A: ${{ needs.build-wasm.outputs.subjects }}
-          WASM_B: ${{ needs.repro-build-wasm.outputs.subjects }}
-          EXT_A: ${{ needs.build-extension.outputs.subjects }}
-          EXT_B: ${{ needs.repro-build-extension.outputs.subjects }}
-        run: |
-          set -euo pipefail
-          compared=0
-          check() { # class, first, rebuild
-            local class="${1}" a="${2}" b="${3}"
-            case ",${CLASSES// /}," in *",${class},"*) ;; *) return 0 ;; esac
-            if [[ -z ${a} || -z ${b} ]]; then
-              echo "::error::${class}: a build produced no subjects — an empty proof is not a proof"
-              exit 1
-            fi
-            if [[ ${a} != "${b}" ]]; then
-              echo "::error::${class}: the rebuild does not reproduce the first build bit for bit"
-              diff <(printf '%s\n' "${a}") <(printf '%s\n' "${b}") || true
-              exit 1
-            fi
-            lines=$(wc -l <<< "${a}" | tr -d ' ')
-            echo "::notice::${class}: ${lines} subject(s) reproduced bit for bit"
-            compared=$((compared + 1))
-          }
-          check rust-crate "${CRATES_A}" "${CRATES_B}"
-          check rust-binary "${BIN_A}" "${BIN_B}"
-          check go-binary "${GO_A}" "${GO_B}"
-          check source-archive "${SRC_A}" "${SRC_B}"
-          check wasm-npm "${WASM_A}" "${WASM_B}"
-          check pgrx-extension "${EXT_A}" "${EXT_B}"
-          echo "FILE_COMPARED=${compared}" >> "${GITHUB_ENV}"
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: github:monumental-archive/stele
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ contains(inputs.classes, 'oci-image') && !inputs.dry-run }}
         with:
@@ -1683,66 +1461,60 @@ jobs:
           merge-multiple: true
           path: pgrx-b
 
-      - name: Compare the image-class digests
+      # One comparison for every class the evidence declares (#1376,
+      # stele#401): `stele verify repro` in its pre-release form takes
+      # each class's output from both builds, judges every artifact
+      # (differs, absent from the rebuild, produced only by the
+      # rebuild), and refuses a declared class one build produced
+      # nothing for and a gate that compared nothing. Whether a class
+      # ships files or pushes digests is the class's `subjects` in the
+      # assert policy. The list is the guard's expanded one, so an
+      # extension's image class and a crate's image class arrive by
+      # name; each class's outputs are FIRST_/REBUILD_<class> below, a
+      # manifest written to a file or a digest directory passed as it
+      # is. A rehearsal pushed no image: no digest directory is named,
+      # and --rehearsal reports those classes as not compared.
+      - name: Compare the two builds (stele verify repro)
         env:
-          CLASSES: ${{ inputs.classes }}
+          CLASSES: ${{ needs.guard.outputs.classes }}
+          VERSION: ${{ needs.guard.outputs.version }}
           DRY_RUN: ${{ inputs.dry-run }}
+          FIRST_rust_crate: ${{ needs.build.outputs.subjects }}
+          REBUILD_rust_crate: ${{ needs.repro-build.outputs.subjects }}
+          FIRST_rust_binary: ${{ needs.build-binary.outputs.subjects }}
+          REBUILD_rust_binary: ${{ needs.repro-build-binary.outputs.subjects }}
+          FIRST_go_binary: ${{ needs.build-go.outputs.subjects }}
+          REBUILD_go_binary: ${{ needs.repro-build-go.outputs.subjects }}
+          FIRST_source_archive: ${{ needs.build-source.outputs.subjects }}
+          REBUILD_source_archive: ${{ needs.repro-build-source.outputs.subjects }}
+          FIRST_wasm_npm: ${{ needs.build-wasm.outputs.subjects }}
+          REBUILD_wasm_npm: ${{ needs.repro-build-wasm.outputs.subjects }}
+          FIRST_pgrx_extension: ${{ needs.build-extension.outputs.subjects }}
+          REBUILD_pgrx_extension: ${{ needs.repro-build-extension.outputs.subjects }}
+          FIRST_oci_image: ${{ !inputs.dry-run && 'oci-a' || '' }}
+          REBUILD_oci_image: ${{ !inputs.dry-run && 'oci-b' || '' }}
+          FIRST_oci_image_crate: ${{ !inputs.dry-run && 'oci-a' || '' }}
+          REBUILD_oci_image_crate: ${{ !inputs.dry-run && 'oci-b' || '' }}
+          FIRST_pgrx_extension_image: ${{ !inputs.dry-run && 'pgrx-a' || '' }}
+          REBUILD_pgrx_extension_image: ${{ !inputs.dry-run && 'pgrx-b' || '' }}
         run: |
           set -euo pipefail
-          compared="${FILE_COMPARED:-0}"
-          if [[ ${DRY_RUN} != "true" ]]; then
-            case ",${CLASSES// /}," in
-              *,oci-image,*)
-                for arch in oci-a/*; do
-                  [[ -f ${arch} ]] || {
-                    echo "::error::oci-image: no per-arch digests to compare"
-                    exit 1
-                  }
-                  b="oci-b/$(basename "${arch}")"
-                  [[ -f ${b} ]] || {
-                    echo "::error::oci-image: rebuild produced no $(basename "${arch}") digest"
-                    exit 1
-                  }
-                  if ! cmp -s "${arch}" "${b}"; then
-                    echo "::error::oci-image: $(basename "${arch}") digest differs — the rebuild does not reproduce the image"
-                    exit 1
-                  fi
-                done
-                echo "::notice::oci-image: per-arch digests reproduced bit for bit"
-                compared=$((compared + 1))
-                ;;
-              *) ;; # class not requested
-            esac
-            case ",${CLASSES// /}," in
-              *,pgrx-extension,*)
-                for f in pgrx-a/*.json; do
-                  [[ -f ${f} ]] || {
-                    echo "::error::pgrx images: no index digests to compare"
-                    exit 1
-                  }
-                  b="pgrx-b/$(basename "${f}")"
-                  [[ -f ${b} ]] || {
-                    echo "::error::pgrx images: rebuild produced no $(basename "${f}")"
-                    exit 1
-                  }
-                  da=$(jq -r .digest "${f}")
-                  db=$(jq -r .digest "${b}")
-                  if [[ ${da} != "${db}" ]]; then
-                    echo "::error::pgrx images: $(basename "${f}" .json) index differs (${da} vs ${db})"
-                    exit 1
-                  fi
-                done
-                echo "::notice::pgrx images: per-major index digests reproduced bit for bit"
-                compared=$((compared + 1))
-                ;;
-              *) ;; # class not requested
-            esac
-          fi
-          if ((compared == 0)); then
-            echo "::error::the gate compared nothing — an empty proof is not a proof"
-            exit 1
-          fi
-          echo "::notice::repro gate: ${compared} class comparison(s) reproduced"
+          # A download that found nothing leaves an empty directory, which
+          # stele refuses by class as an empty proof.
+          mkdir -p oci-a oci-b pgrx-a pgrx-b
+          args=()
+          IFS=, read -ra classes <<< "${CLASSES}"
+          for class in "${classes[@]}"; do
+            for pair in first:FIRST rebuild:REBUILD; do
+              side="${pair%%:*}" && var="${pair#*:}_${class//-/_}" && value="${!var:-}"
+              if [[ -n ${value} && ! -d ${value} ]]; then
+                printf '%s\n' "${value}" > "${side}-${class}" && value="${side}-${class}"
+              fi
+              if [[ -n ${value} ]]; then args+=("--${side}" "${class}=${value}"); fi
+            done
+          done
+          stele verify repro --repo "${GITHUB_REPOSITORY}" --tag "v${VERSION}" --classes "${CLASSES}" \
+            --assert-policy .org-canon/slsa/assert-policy.json --rehearsal="${DRY_RUN}" ${args[@]+"${args[@]}"}
   # The commitment barrier (#349 finding 1). Both proofs are class-
   # independent — the SBOM/triage job runs for every release, and the
   # repro gate derives its own required build set from `inputs.classes` —
@@ -1802,86 +1574,65 @@ jobs:
     env:
       SBOM_RESULT: ${{ needs.sbom.result }}
       REPRO_RESULT: ${{ needs.repro-gate.result }}
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
-      - name: Refuse unless every required proof succeeded
-        env:
-          UNTRUSTED_CLASSES: ${{ inputs.classes }}
-          VERSION: ${{ needs.guard.outputs.version }}
-        run: |
-          set -euo pipefail
-          fail=0
-          proofs='[]'
-          for p in "sbom and advisory triage:${SBOM_RESULT}" "repro gate:${REPRO_RESULT}"; do
-            name="${p%:*}" result="${p##*:}"
-            proofs=$(jq -c --arg n "${name}" --arg r "${result}" \
-              '. + [{name: $n, result: $r}]' <<< "${proofs}")
-            if [[ ${result} != "success" ]]; then
-              echo "::error::${name} is '${result}' — absence of a proof is never a proof"
-              fail=1
-            fi
-          done
-          ((fail == 0)) || exit 1
-          # The decision predicate: every proof by name, its conclusion,
-          # the tag and the classes — assembled HERE, in the job that
-          # holds the results, so the claim is the check's return value.
-          decided_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          jq -n \
-            --arg tag "v${VERSION}" \
-            --arg classes "${UNTRUSTED_CLASSES}" \
-            --arg at "${decided_at}" \
-            --argjson proofs "${proofs}" \
-            '{tag: $tag, classes: $classes, conclusion: "OPEN",
-              decidedAt: $at, proofs: $proofs}' \
-            > "${RUNNER_TEMP}/decision-predicate.json"
-          echo "::notice::commit point open: every required proof succeeded"
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        # stele, which judges the proofs and writes the decision. No tool
+        # cache in a job that holds the decision's signing identity.
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: github:monumental-archive/stele
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        # A failed sbom job leaves no artifact to fetch; skipping the
+        # download lets the decision below refuse by the proof's name
+        # rather than by a missing download.
+        if: needs.sbom.result == 'success'
         with:
           name: release-sbom
           path: sbom-subject
 
-      - name: Stage the decision subjects (the inventory the decision covered)
+      # The decision is the engine's (stele#399): every required proof
+      # judged by name — absence of a proof is never a proof — and the
+      # record and its subjects written only once they read back through
+      # the verifier's own decision reader. A planned inventory decides
+      # for itself and names nothing else; with no plan, one decision
+      # covers the whole release. The type and the conclusion are the
+      # verify policy's, so the signing step takes the type from here.
+      - name: Decide over every required proof and the inventory covered
+        id: decision
         env:
+          UNTRUSTED_CLASSES: ${{ inputs.classes }}
+          VERSION: ${{ needs.guard.outputs.version }}
           INVENTORY: ${{ matrix.inventory }}
         run: |
           set -euo pipefail
-          : > "${RUNNER_TEMP}/decision-subjects.sha256"
-          if [[ -n ${INVENTORY} ]]; then
-            # A planned inventory decides for itself and names nothing
-            # else. Resolved by listing, never by building a path out of
-            # the matrix value.
-            found=""
-            listing=$(find sbom-subject -type f | sort)
-            while IFS= read -r f; do
-              [[ -n ${f} ]] || continue
-              name=$(basename "${f}")
-              if [[ ${name} == "${INVENTORY}" ]]; then found="${f}"; fi
-            done <<< "${listing}"
-            [[ -n ${found} ]] || {
-              echo "::error::the plan names ${INVENTORY} but the sbom artifact does not carry it"
-              exit 1
-            }
-            files="${found}"
-          else
-            # No plan: one decision over the whole release, the
-            # invariant every pre-inventory release shipped under.
-            files=$(find sbom-subject -type f | sort)
-          fi
-          while IFS= read -r f; do
-            [[ -n ${f} ]] || continue
-            digest=$(sha256sum "${f}" | cut -d' ' -f1)
-            base=$(basename "${f}")
-            printf '%s  %s\n' "${digest}" "${base}" \
-              >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done <<< "${files}"
-          [[ -s "${RUNNER_TEMP}/decision-subjects.sha256" ]] || {
-            echo "::error::the sbom artifact is empty — a decision over nothing decides nothing"
-            exit 1
-          }
+          stele emit decision \
+            --policy .org-canon/slsa/verify-policy.json \
+            --tag "v${VERSION}" --classes "${UNTRUSTED_CLASSES}" \
+            --proof "sbom and advisory triage=${SBOM_RESULT}" \
+            --proof "repro gate=${REPRO_RESULT}" \
+            --covered sbom-subject --inventory "${INVENTORY}" \
+            --predicate-out "${RUNNER_TEMP}/decision-predicate.json" \
+            --subjects-out "${RUNNER_TEMP}/decision-subjects.sha256" >> "${GITHUB_OUTPUT}"
       - name: Sign the decision under this workflow's identity
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ${{ runner.temp }}/decision-subjects.sha256
-          predicate-type: https://monumental-archive.github.io/attestations/release-decision/v1
+          predicate-type: ${{ steps.decision.outputs.predicate-type }}
           predicate-path: ${{ runner.temp }}/decision-predicate.json
 
   # Last, and only on proof. Attaches the evidence bundle and publishes the
@@ -1893,9 +1644,10 @@ jobs:
   # signer legitimately skipped). A skipped class never blocks; a failed
   # or missing one always does. The VSA jobs are deliberately absent:
   # verdicts run AFTER this job, against the published immutable release
-  # (#209) — attach publishes on evidence, verdicts follow. Assets and
-  # bundles travel as `release-*` / `attestation-bundle-*` artifacts, so
-  # the BYTES need no per-class input.
+  # (#209) — attach publishes on evidence, verdicts follow. Assets
+  # travel as `release-*` artifacts and bundles under the file names
+  # they ship as (`attestations-*.intoto.jsonl`, #1375), so the BYTES
+  # need no per-class input.
   #
   # Their LEG does — its class since stele#185 and its target since
   # stele#223: `stele emit manifest` requires every build subject to be

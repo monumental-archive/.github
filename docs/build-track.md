@@ -143,55 +143,56 @@ verification of it is itself attested (#125 watches the runner half).
 "Base-image approval" named two different scopes in one tree until
 issue #715, which is how a first-party base came to be pinned by
 digest and attributed to nobody. There are three, and each answers a
-different question:
+different question, and since #1377 one verifier answers all three —
+`stele verify base`, judging under `slsa/assert-policy.json`'s
+`evidence.baseImages` — wherever a check runs before instantiation:
 
 | Base | Mechanism | The question it answers |
 | --- | --- | --- |
-| The canon's pgrx build and smoke images (`docker/pgrx-base-images.toml`) | `base-attest.yml` mints a `base-image-approval/v1` over each pinned digest; `build-pgrx-extension.yml` verifies it fail-closed before any container runs | Did the org check the upstream provenance of this build environment and sign that it did? |
-| A caller's `FROM` under `ghcr.io/<owner>/` | `build-oci-image.yml`'s base-approval step, before the build: `gh attestation verify` against the org signer (`security/identity.toml`) at the ref the pinned tag implies — `refs/tags/v<version>`, or `refs/heads/main` for a `latest` stream | Were these bytes produced by the org's own publish path, at a ref that could legitimately have produced them? |
-| Every other `FROM` | `lint:from-digests` in the gate | Are the bytes pinned, so that whatever is instantiated is what was reviewed? |
+| The canon's pgrx build and smoke images (`docker/pgrx-base-images.toml`) | `base-attest.yml` judges each pinned digest's upstream provenance with `stele verify base` (the policy's `upstream` entry for postgres) and mints a `base-image-approval/v1` over it; `build-pgrx-extension.yml` verifies that approval fail-closed before any container runs | Did the org check the upstream provenance of this build environment and sign that it did? |
+| A caller's `FROM` under `ghcr.io/monumental-archive/` | `build-oci-image.yml`'s `bases` job, before any build leg: `stele verify base` under the `shared-signer` scope `org-bases` — the org's one signer workflow, at the ref the pinned tag implies (`refs/tags/v<version>`, or `refs/heads/main` for a `latest` stream) | Were these bytes produced by the org's own publish path, at a ref that could legitimately have produced them? |
+| Every other `FROM` | `lint:from-digests` in the gate; an official image the policy's `upstream` list declares is also judged by the same `bases` job against the source its provenance must name | Are the bytes pinned, so that whatever is instantiated is what was reviewed? |
 
 The three are not interchangeable, and the middle one is the only one
-whose subject the org **produced**. Its identity is therefore derived,
-never declared: the signer comes from the canon's one identity
-declaration, the org path from `GITHUB_REPOSITORY_OWNER` (scope is the
-environment's to supply — `security/identity.toml`'s own rule), and the
-ref from the tag beside the digest, the way the per-repo script this
-replaced derived `1.2.3-pg18` → `refs/tags/v1.2.3`. A declared regex
-per repository would be the literal nothing bumps (#314's class), and a
-per-repo script would be the second derivation #670 deleted.
+whose subject the org **produced**. Its source ref is derived from the
+pin, never declared per repository: the scope declares the org's ONE
+signer workflow, its ghcr prefix and the tag-to-ref convention, and
+stele reads the ref from the tag beside the digest, the way the
+per-repo script #670 deleted derived `1.2.3-pg18` → `refs/tags/v1.2.3`.
+A declared regex per repository would be the literal nothing bumps
+(#314's class). Measured with stele v0.25.0 against the population's
+one first-party base (monumental-archive-db's
+`edtf-postgres:1.3.4-pg18-artifact`): approved at `refs/tags/v1.3.4`;
+the same digest under a `1.3.3` tag is refused, the certificate naming
+`refs/tags/v1.3.4`.
 
-Deliberately *not* pinned in that verification: `--signer-digest`. It
-names the signer commit, and a base signed at an older signer than the
-tree building on it is the normal case rather than a finding —
-measured, 2026-08-21: `release-lab@v0.27.0`'s published index carries
-signer `e4a285f8`, while the canon tree pinned `e90a971e`. Pinning it
-would refuse correct bases on every signer bump.
+Deliberately *not* pinned in that verification: the signer commit. The
+scope matches the signer workflow at any ref, because a base signed at
+an older signer than the tree building on it is the normal case rather
+than a finding — measured, 2026-08-21: `release-lab@v0.27.0`'s
+published index carries signer `e4a285f8`, while the canon tree pinned
+`e90a971e`. Pinning it would refuse correct bases on every signer bump.
 
 The check is network-bound (registry plus the attestation API), so it
 can never be a `lint:*` — [`direction.md`](direction.md)'s determinism
 rule — and a Monday `audit:*` would report a base already shipped. The
-class build is the only place that is both fail-closed and early, and
-it is the only place that knows the caller's Dockerfile.
+class workflow's `bases` job, ahead of its build legs, is the only
+place that is both fail-closed and early, and the only one that knows
+the caller's Dockerfile.
 
 **What this does not do**: it does not move the Build Environment row.
 The runner layer is untouched (#125), and the producer obligation this
 discharges is discharged only for bases the org itself published —
 which is a property of those three bases, not of the population.
 
-`slsa/assert-policy.json`'s `evidence.baseImages` block now carries
-TYPED approval scopes (stele#247, epoch 7), so the schema can express
-more than one mechanism. The canon declares the first row's scope,
-`pin-file`, and only that one. The second row is expressible in
-principle as a `provenance-verified` scope and is deliberately not
-declared, for two measured reasons (#891): no base under
-`ghcr.io/monumental-archive/` exists anywhere in the population today
-— the org's only first-party base is `ghcr.io/carlallenn/edtf-postgres`,
-still in the personal namespace ahead of #83's transfers, where the
-scope's prefix-to-repository derivation does not hold — and the scope
-carries a single `identity` template, while this org's claim has two
-independent dimensions: the org's ONE shared signer workflow, and a
-source ref derived from the pinned tag. Declaring it with a constant
-identity would be strictly weaker than the gate that actually runs and
-would manufacture the impression of coverage. The engine gap is
-stele#269; the table above stays the honest account until it ships.
+`slsa/assert-policy.json`'s `evidence.baseImages` block carries TYPED
+approval scopes (stele#247, epoch 7). The canon declares the first
+row's scope, `pin-file`, and the second row's, `shared-signer`
+(stele#402), which says exactly the two dimensions this org's claim
+has and `provenance-verified`'s single identity template could not
+(#891, stele#269): the org's ONE shared signer workflow, and a source
+ref derived from the pinned tag. Beside the scopes, the `upstream`
+list declares the official images and the source each one's
+provenance must name. The build-time check and the corpus walk read
+one definition, so the gate that runs and the scope the walk reports
+cannot disagree.

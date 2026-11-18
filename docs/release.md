@@ -131,9 +131,16 @@ Phase-1 rules, all proven in iiif-server:
   made from, and the squash carries it into the release commit.
   `lint:release-planned` reds a commit whose trailer is not its parent,
   so the queue removes a stale Release PR before it merges, and the
-  next push regenerates it. While the pull request is queued, the forge
-  refuses to move its branch (HTTP 422); `open-release-pr.sh` exits 0
-  on that refusal by name and still fails on any other.
+  next push regenerates it.
+- **A queued Release PR is regenerated, not left stale** (#1504). The
+  forge refuses to move the branch of a queued pull request (HTTP 422),
+  so on that refusal `open-release-pr.sh` takes the pull request out of
+  the queue (`dequeuePullRequest`), moves the branch as for any other,
+  and comments: "taken out of the merge queue: N commits landed after
+  this release was planned; regenerated at <sha>; queue it again". It
+  never queues it again; merging a release stays a person's act. A
+  dequeue the forge refuses the App exits 0, saying the next push to
+  the default branch regenerates it; any other failure stays a failure.
 - The release PR's commit is created through the GitHub API
   (`createCommitOnBranch`), so it is signed by GitHub and satisfies
   `required_signatures`; the script asserts the commit is `verified` rather
@@ -643,16 +650,22 @@ the gate. The marker is a comment line whose first token is the marker,
 first in its block, sitting directly above the step it authorises — and
 it authorises that step alone (#676), so prose about the convention
 cannot read as an exemption and one marker cannot carry a file. Base
-images are digest-pinned (`lint:from-digests`) and org-approved before
-use, by the mechanism that fits whose bytes they are (tabulated in
-[`build-track.md`](build-track.md)): `base-attest.yml` for the canon's
-own pgrx build environment, which the pgrx build legs verify
-fail-closed, and — for a caller's `FROM` inside the org's own ghcr
-namespace — the oci-image class build's own step, which verifies the
-org signer's attestation over the pinned digest at the ref its tag
-implies, before anything is built (#715). And `audit:attestations`
-proves weekly that nothing published lacks its evidence set — the
-difference between "we attest" and "nothing ships unattested".
+images are digest-pinned (`lint:from-digests`) and approved before use,
+by the mechanism that fits whose bytes they are (tabulated in
+[`build-track.md`](build-track.md)), and the verifier is stele
+throughout (#1377): `stele verify base`, judging under
+`slsa/assert-policy.json`'s `evidence.baseImages`. `base-attest.yml`
+runs it over the canon's own pgrx build environment, each pinned
+postgres base's upstream provenance, and signs that verification, which
+the pgrx build legs verify fail-closed. For a caller's `FROM`, the
+oci-image class's `bases` job runs it over every reference the
+Dockerfile pins, once and before any leg builds (#715): a base under
+the org's ghcr prefix must carry the org signer's provenance at the ref
+its tag implies, and an official image the policy's `upstream` list
+declares must carry upstream provenance naming its source. And
+`audit:attestations` proves weekly that nothing published lacks its
+evidence set — the difference between "we attest" and "nothing ships
+unattested".
 
 ### The repro gate
 
@@ -660,9 +673,12 @@ Every irreversible step — the crates.io upload (yank-only), the npm
 upload (72-hour unpublish window), every ghcr tag, every append-only
 Sigstore entry, the release itself — sits downstream of a full-width
 bit-for-bit proof (#118): each class builds twice, independently, in
-the same run, and the `repro-gate` job compares sha256 subject
-manifests for the file classes and per-arch (oci) / per-major-index
-(pgrx) digests for the image classes. A mismatch fails the release
+the same run, and the `repro-gate` job compares them with one
+`stele verify repro` call in its pre-release form (#1376): sha256
+subject manifests for the file classes and per-arch (oci) /
+per-major-index (pgrx) digests for the image classes, each class's
+shape declared by its `subjects` in the assert policy. A mismatch is a
+typed finding per artifact and fails the release
 outright; there is no warn-and-ship path, because a warn path converts
 the control into a log line. Skew-proofing is free by construction:
 both builds resolve at the caller's pinned SHA in one orchestrator

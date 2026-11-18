@@ -309,47 +309,29 @@ jobs:
         id: inventory
         env:
           GH_TOKEN: ${{ github.token }}
+        # trivy exports each per-arch inventory; stele judges both by the
+        # one admissibility rule (stele#396, #1371): no PURL, or a
+        # versionless one, is a package every scanner is blind to (the
+        # measured 2-of-236, docs/dependency-track.md), and an export
+        # that will not parse cannot be judged. trivy stamps the
+        # document name with the reference it was given, so the product
+        # id IS the digest a consumer pulls — derived, never composed.
         run: |
           set -euo pipefail
           image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          mkdir -p dist
-          subjects=""
+          mkdir -p dist && subjects=""
           for arch in amd64 arm64; do
             digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
-            if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::no ${arch} digest to inventory; refusing to decide about a partial image"
-              exit 1
-            fi
-            out="dist/${arch}.spdx.json"
-            trivy image --config /dev/null --format spdx-json \
-              --output "${out}" "${image}@${digest}"
-            [[ -s ${out} ]] || {
-              echo "::error::image SBOM export produced nothing for ${arch}"
-              exit 1
-            }
-            # The same two assertions the assemble job makes of its own
-            # SBOM: a versionless PURL is invisible to every scanner, so
-            # an inventory carrying one would gate on a set it cannot
-            # see (docs/dependency-track.md, the measured 2-of-236).
-            purls=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl") | .referenceLocator] | length' "${out}")
-            bare=$(jq '[.packages[].externalRefs[]? | select(.referenceType=="purl")
-              | .referenceLocator | select(test("@") | not)] | length' "${out}")
-            if [[ ${purls} -eq 0 || ${bare} -ne 0 ]]; then
-              emsg="${arch} SBOM has ${purls} PURLs, ${bare} versionless — a versionless PURL is invisible to every"
-              emsg+=" scanner, so an inventory carrying one gates on a set it cannot see"
-              echo "::error::${emsg}"
-              exit 1
-            fi
-            # trivy stamps the document name with the reference it was
-            # given, so the product id IS the digest a consumer pulls —
-            # derived, never composed here.
-            name=$(jq -r '.name' "${out}")
-            subjects="${subjects}${subjects:+,}${name}=${out}"
-            echo "::notice::${arch} (${digest}): ${purls} versioned PURLs"
+            [[ ${digest} =~ ^sha256:[0-9a-f]{64}$ ]] \
+              || { echo "::error::no ${arch} digest to inventory; refusing to decide about a partial image" && exit 1; }
+            trivy image --config /dev/null --format spdx-json --output "dist/${arch}.spdx.json" "${image}@${digest}"
+            subjects="${subjects}${subjects:+,}$(jq -r '.name' "dist/${arch}.spdx.json")=dist/${arch}.spdx.json"
           done
+          stele assert inventory dist/amd64.spdx.json dist/arm64.spdx.json
           echo "subjects=${subjects}" >> "${GITHUB_OUTPUT}"
       - name: Derive this publish's VEX and gate on undecided advisories
+        id: vex
         # The release path's leg, unchanged in policy and in tool
         # (publish.yml's sbom job): decisions are keyed by
         # package@version, coverage is derived from the inventory just
@@ -365,7 +347,6 @@ jobs:
         # (#1279) — the run artifact itself expires and is evidence of
         # nothing.
         env:
-          SUBJECTS: ${{ steps.inventory.outputs.subjects }}
           # The instant this publish describes, resolved once in the
           # facts job from the published commit's own committer time —
           # the same value SOURCE_DATE_EPOCH carries into the image. A
@@ -380,51 +361,45 @@ jobs:
             echo "::error::stele is not on the runner — it is a belt tool"
             exit 1
           }
-          # A stream's document is identified by the run that made it:
-          # there is no version to name it after, and two publishes of
-          # the same stream are two different documents.
-          id="https://openvex.dev/docs/public/vex-${GITHUB_REPOSITORY//\//-}-continuous-${GITHUB_RUN_ID}-derived"
+          # A stream's document is identified by the run that made it
+          # (the policy's blastRadius.vexId stream form): there is no
+          # version to name it after, and two publishes of the same
+          # stream are two different documents.
           released=$(date -u -d "@${SOURCE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)
-          # Captured, not streamed, so the verdict reaches the job
-          # summary either way. A refused SCHEDULED rebuild is the case
-          # that decides this: blocking a rebuild preserves MORE
-          # exposure than shipping it, so the refusal has to be
-          # readable by whoever can clear it — the issue's own
-          # reasoning. The red run is the notification; the summary is
-          # what makes it legible without opening a log.
-          code=0
+          # Captured as well as streamed, so the verdict reaches the job
+          # summary either way: the next step writes it.
           stele derive vex \
-            --subjects "${SUBJECTS}" \
-            --vex .org-canon/security/vex \
-            --base-ecosystems "debian,alpine,ubuntu,rocky,redhat,rpm" \
-            --author monumental-archive \
-            --id "${id}" \
+            --policy .org-canon/slsa/assert-policy.json \
+            --inventories dist --vex .org-canon/security/vex \
+            --repo "${GITHUB_REPOSITORY}" --run "${GITHUB_RUN_ID}" \
             --released "${released}" \
-            --out dist/continuous.vex.openvex.json > vex.log 2>&1 || code=$?
-          cat vex.log
+            --out dist/continuous.vex.openvex.json 2>&1 | tee vex.log
+      # A refused SCHEDULED rebuild is the case that decides this:
+      # blocking a rebuild preserves MORE exposure than shipping it, so
+      # the refusal has to be readable by whoever can clear it. The red
+      # run is the notification; the summary is what makes it legible
+      # without opening a log.
+      - name: Summarise the dependency decision
+        if: ${{ !cancelled() && steps.vex.outcome != 'skipped' && hashFiles('vex.log') != '' }}
+        env:
+          OUTCOME: ${{ steps.vex.outcome }}
+          REFUSAL: >-
+            An advisory in the inventory below has no recorded decision.
+            Record one in the canon under security/vex/, keyed by the
+            exact package@version; the next publish derives its coverage
+            from that decision, with no per-release list to extend.
+        run: |
+          set -euo pipefail
           {
-            if [[ ${code} -eq 0 ]]; then
+            if [[ ${OUTCOME} == success ]]; then
               echo "### Dependency decision: OPEN"
             else
-              echo "### Dependency decision: REFUSED — this publish is blocked"
-              echo
-              echo "An advisory in the inventory below has no recorded decision."
-              echo "Record one in the canon under security/vex/, keyed by the"
-              echo "exact package@version; the next publish derives its coverage"
-              echo "from that decision, with no per-release list to extend."
+              printf '%s\n\n%s\n' "### Dependency decision: REFUSED — this publish is blocked" "${REFUSAL}"
             fi
-            echo
-            echo '```'
+            printf '\n```\n'
             cat vex.log
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
-          if [[ ${code} -ne 0 ]]; then
-            exit "${code}"
-          fi
-          if [[ -f dist/continuous.vex.openvex.json ]]; then
-            statements=$(jq '.statements | length' dist/continuous.vex.openvex.json)
-            echo "::notice::derived VEX (${statements} statement(s))"
-          fi
       - name: Triage the tree's lock against the advisory feed
         # The release path's second and third legs, at the commit the
         # stream is publishing rather than at a tag. Both belt tasks
@@ -499,38 +474,33 @@ jobs:
       attestations: write # store the decision in the caller's attestation store
     env:
       SBOM_RESULT: ${{ needs.sbom.result }}
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
-      - name: Refuse unless every required proof succeeded
-        run: |
-          set -euo pipefail
-          fail=0
-          proofs='[]'
-          # An array, not a bare word list: this archetype has exactly
-          # one proof today, and a single-element `for … in "x:y"` is a
-          # loop shellcheck reads as a mistake (SC2066). The array keeps
-          # the release path's shape — add a proof by adding an element,
-          # and lint:release-phases forces the `needs` edge beside it.
-          required=("inventory and advisory triage:${SBOM_RESULT}")
-          for p in "${required[@]}"; do
-            name="${p%:*}" result="${p##*:}"
-            proofs=$(jq -c --arg n "${name}" --arg r "${result}" \
-              '. + [{name: $n, result: $r}]' <<< "${proofs}")
-            if [[ ${result} != "success" ]]; then
-              echo "::error::${name} is '${result}' — absence of a proof is never a proof"
-              fail=1
-            fi
-          done
-          ((fail == 0)) || exit 1
-          decided_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          jq -n \
-            --arg classes "oci-image" \
-            --arg at "${decided_at}" \
-            --argjson proofs "${proofs}" \
-            '{classes: $classes, conclusion: "OPEN",
-              decidedAt: $at, proofs: $proofs}' \
-            > "${RUNNER_TEMP}/decision-predicate.json"
-          echo "::notice::commit point open: every required proof succeeded"
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        # stele, which judges the proof and writes the decision. No tool
+        # cache in a job that holds the decision's signing identity.
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: github:monumental-archive/stele
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        # A failed sbom job leaves no inventory to fetch; skipping the
+        # download lets the decision below refuse by the proof's name
+        # rather than by a missing download.
+        if: needs.sbom.result == 'success'
         with:
           name: continuous-inventory
           path: inventory
@@ -560,44 +530,33 @@ jobs:
             fi
             echo "${arch}=${digest}" >> "${GITHUB_OUTPUT}"
           done
-      - name: Stage the decision subjects (what the decision covered)
+      # The decision is the engine's (stele#399): the proof judged by
+      # name — absence of a proof is never a proof — and the record and
+      # its subjects written only once they read back through the
+      # verifier's own decision reader. A stream has no tag, so the
+      # record names none. Its subjects are every inventory file AND
+      # each per-arch image digest (#859): a checksums line is exactly
+      # an in-toto subject, so the images go in beside the file hashes
+      # rather than into a second attestation — one publish is one
+      # decision — and the store keys by digest, so THOSE lines are what
+      # makes the decision reachable from the registry.
+      - name: Decide over the proof, the inventory and the images
+        id: decision
         env:
           IMAGE: ${{ steps.pulled.outputs.image }}
           AMD64: ${{ steps.pulled.outputs.amd64 }}
           ARM64: ${{ steps.pulled.outputs.arm64 }}
         run: |
           set -euo pipefail
-          : > "${RUNNER_TEMP}/decision-subjects.sha256"
-          # Listed and named in their own statements, publish.yml's
-          # shape: a command substitution inside another command's
-          # arguments masks its exit status, and a `find` that failed
-          # would read here as an empty inventory.
-          listing=$(find inventory -type f | sort)
-          while IFS= read -r f; do
-            [[ -n ${f} ]] || continue
-            digest=$(sha256sum "${f}" | cut -d' ' -f1)
-            base=$(basename "${f}")
-            printf '%s  %s\n' "${digest}" "${base}" \
-              >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done <<< "${listing}"
-          [[ -s "${RUNNER_TEMP}/decision-subjects.sha256" ]] || {
-            echo "::error::the inventory artifact is empty — a decision over nothing decides nothing"
-            exit 1
-          }
-          # And the images themselves (#859). A checksums file is
-          # `<hex>  <name>`, which is exactly an in-toto subject, so the
-          # per-arch digests go in beside the file hashes rather than
-          # into a second attestation — one publish is one decision, and
-          # the subject list is the fan-out. The store keys by digest,
-          # so THESE lines are what makes the decision reachable from
-          # the registry; the name is for the reader.
-          for pair in "amd64=${AMD64}" "arm64=${ARM64}"; do
-            arch="${pair%%=*}" digest="${pair#*=}"
-            printf '%s  %s\n' "${digest#sha256:}" "${IMAGE}@${digest} (${arch})" \
-              >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done
-          covered=$(wc -l < "${RUNNER_TEMP}/decision-subjects.sha256")
-          echo "::notice::decision covers ${covered} subject(s)"
+          stele emit decision \
+            --policy .org-canon/slsa/verify-policy.json \
+            --stream --classes oci-image \
+            --proof "inventory and advisory triage=${SBOM_RESULT}" \
+            --covered inventory \
+            --also "${AMD64#sha256:}  ${IMAGE}@${AMD64} (amd64)" \
+            --also "${ARM64#sha256:}  ${IMAGE}@${ARM64} (arm64)" \
+            --predicate-out "${RUNNER_TEMP}/decision-predicate.json" \
+            --subjects-out "${RUNNER_TEMP}/decision-subjects.sha256" >> "${GITHUB_OUTPUT}"
       # The inventories, each keyed by the image it inventories (#859).
       # This is what makes the SBOM bytes durable: the run artifact
       # below expires in seven days and is unsigned, so it is a
@@ -671,7 +630,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ${{ runner.temp }}/decision-subjects.sha256
-          predicate-type: https://monumental-archive.github.io/attestations/release-decision/v1
+          predicate-type: ${{ steps.decision.outputs.predicate-type }}
           predicate-path: ${{ runner.temp }}/decision-predicate.json
 
   # The index assembly moved out of the build workflow when the
@@ -704,7 +663,7 @@ jobs:
   sign:
     name: Sign image
     needs: assemble
-    uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@f1bb0d6fc29a1aef4c030d746d57b2cc875bc799 # main
     with:
       image-name: ${{ needs.assemble.outputs.image }}
       image-digest: ${{ needs.assemble.outputs.digest }}

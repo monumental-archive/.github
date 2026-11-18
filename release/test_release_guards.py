@@ -45,6 +45,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 CANON = Path(__file__).resolve().parent.parent
 RELEASE = CANON / "release"
@@ -108,7 +109,6 @@ exit 1
 """
 
 
-GIT_ENV_KEPT = frozenset({"GIT_EDITOR"})
 IDENTITY_NAME = "release guard harness"
 IDENTITY_EMAIL = "harness@example.invalid"
 
@@ -116,44 +116,49 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # A row that asserts an input is REQUIRED only means something in an
 # environment where the input is genuinely absent, and a GitHub runner
 # supplies several of them ambiently — `GITHUB_REPOSITORY`, `GITHUB_SHA`,
-# `RUNNER_TEMP`. Locally they are unset, so three rows here passed on a
-# laptop and failed on the first CI run: the scripts read the runner's
-# values and sailed past the guard being tested.
-#
-# So the forge ambient is dropped with git's, and every input a row wants
-# is supplied explicitly through `overrides`. `GH_TOKEN` is named because
-# it is the one required input whose name does not start with a scrubbed
-# prefix.
-FORGE_ENV_PREFIXES = ("GITHUB_", "RUNNER_")
-FORGE_ENV_NAMES = frozenset({"GH_TOKEN"})
+# `RUNNER_TEMP` — as the release job supplies its step inputs
+# (`VERSION`, `PLAN`, `APP_SLUG`). So nothing reaches a fixture by
+# inheritance except what INHERITED names; every input a row wants is
+# supplied explicitly through `overrides`.
 
-
-def _ambient(name: str) -> bool:
-    """Report whether a variable is the caller's rather than a row's.
-
-    Returns:
-        True when the name belongs to git, the forge or the runner, and
-        must therefore not reach a fixture by inheritance.
-
-    """
-    if name.startswith("GIT_"):
-        return name not in GIT_ENV_KEPT
-    return name.startswith(FORGE_ENV_PREFIXES) or name in FORGE_ENV_NAMES
+# What a fixture's process inherits from the suite's, by name, and why
+# (#1508). Everything else a row needs it states itself, through
+# `overrides`. The list is an ALLOW-list on purpose: the deny-list it
+# replaced dropped git's, the forge's and the runner's variables and
+# kept the rest, so the release job's own step inputs reached fixtures
+# — `VERSION: 1.69.4` turned "VERSION must be set" into a row that
+# could not refuse, and the canon could not tag. A deny-list misses the
+# next exported input the same way; an allow-list cannot.
+INHERITED = {
+    # Finding bash, git, jq and the belt's tools at all.
+    "PATH": "the commands a script runs",
+    # mktemp and every tool that writes scratch.
+    "TMPDIR": "where scratch files go",
+    # The scripts print and match UTF-8 (em-dashes in their messages);
+    # under the C locale bash and grep treat them byte-wise.
+    "LANG": "the character set messages are read in",
+    "LC_ALL": "the character set messages are read in",
+    "LC_CTYPE": "the character set messages are read in",
+    # The Rust toolchain's own homes: cargo and rustup find their
+    # installed toolchains here, and a fixture HOME would hide them.
+    "CARGO_HOME": "where cargo's toolchain lives",
+    "RUSTUP_HOME": "where rustup's toolchains live",
+    "RUSTUP_TOOLCHAIN": "the toolchain mise selected for this run",
+}
 
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build an environment the caller's git state cannot reach into.
+    """Build an environment the suite's own environment cannot reach into.
 
     Returns:
-        The caller's environment with git's, the forge's and the
-        runner's variables dropped, HOME and a git identity set, and any
+        The variables INHERITED names, HOME and a git identity set, and any
         overrides applied last.
 
     """
-    env = {name: value for name, value in os.environ.items() if not _ambient(name)}
+    env = {name: os.environ[name] for name in INHERITED if name in os.environ}
     env.update(
         HOME=str(home),
-        GIT_EDITOR=env.get("GIT_EDITOR", "true"),
+        GIT_EDITOR="true",
         GIT_AUTHOR_NAME=IDENTITY_NAME,
         GIT_AUTHOR_EMAIL=IDENTITY_EMAIL,
         GIT_COMMITTER_NAME=IDENTITY_NAME,
@@ -539,6 +544,23 @@ class RecordDraftRegistries(unittest.TestCase):
         )
 
 
+class HermeticEnvironment(unittest.TestCase):
+    """A fixture's environment is what the row gives it (#1508)."""
+
+    def test_the_release_job_inputs_do_not_reach_a_fixture(self) -> None:
+        """The release job exports its step inputs; no fixture sees them."""
+        planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
+        with patch.dict(os.environ, planted), TemporaryDirectory() as d:
+            env = hermetic_env(Path(d))
+        self.assertEqual([], sorted(set(planted) & set(env)))
+
+    def test_a_row_still_states_its_own_input(self) -> None:
+        """Overrides are how a row gives a fixture an input."""
+        with patch.dict(os.environ, {"VERSION": "1.69.4"}), TemporaryDirectory() as d:
+            env = hermetic_env(Path(d), VERSION="2.0.0")
+        self.assertEqual("2.0.0", env["VERSION"])
+
+
 class CoverageFloorApplicability(unittest.TestCase):
     """`derive-coverage-floor.sh` decides whether it applies at all (#652)."""
 
@@ -763,6 +785,33 @@ keep_body() {
   done
 }
 if [[ ${1:-} == api && ${2:-} == graphql ]]; then
+  # The dequeue (#1504): accepted, it takes the branch out of the queue so
+  # the next move succeeds. ${STATE}/dequeue says how the forge answers
+  # otherwise: "forbidden" as GraphQL refuses an integration (HTTP 200,
+  # errors[].type FORBIDDEN), "fails" as a 502.
+  if [[ "$*" == *dequeuePullRequest* ]]; then
+    log graphql dequeuePullRequest
+    printf '%s' "$*" > "${STATE}/dequeue-request"
+    case "$(cat "${STATE}/dequeue" 2> /dev/null)" in
+      forbidden)
+        headers "$@"
+        printf '%s' '{"data":{"dequeuePullRequest":null},"errors":[{"type":'
+        printf '%s' '"FORBIDDEN","message":"Resource not accessible'
+        printf '%s\n' ' by integration"}]}'
+        echo "gh: Resource not accessible by integration" >&2
+        exit 1
+        ;;
+      fails)
+        status="502 Bad Gateway" headers "$@"
+        echo "gh: HTTP 502" >&2
+        exit 1
+        ;;
+    esac
+    rm -f "${STATE}/queued"
+    headers "$@"
+    echo '{"data":{"dequeuePullRequest":{"mergeQueueEntry":{"id":"MQE_1"}}}}'
+    exit 0
+  fi
   if [[ "$*" == *defaultBranchRef* ]]; then
     log graphql head
     [[ -f ${STATE}/head ]] || { echo "gh: HTTP 502" >&2; exit 1; }
@@ -800,6 +849,7 @@ if [[ ${1:-} == api ]]; then
   case "${method} ${path}" in
     "GET users/"*) echo 4242 ;;
     "GET repos/"*"/commits/"*) echo true ;;
+    "GET repos/"*"/compare/"*) cat "${STATE}/ahead" 2> /dev/null || echo 2 ;;
     "GET repos/"*"/git/ref/heads/"*)
       [[ -f ${STATE}/exists ]] && grep -qxF "${path}" "${STATE}/exists" || exit 1
       ;;
@@ -828,6 +878,17 @@ if [[ ${1:-} == pr ]]; then
         if [[ $1 == --comment ]]; then
           printf '%s' "$2" > "${STATE}/comment-${number}"
         fi
+        shift
+      done
+      ;;
+    view)
+      log pr view "$3"
+      cat "${STATE}/view"
+      ;;
+    comment)
+      log pr comment "$3"
+      while [[ $# -gt 0 ]]; do
+        if [[ $1 == --body ]]; then printf '%s' "$2" > "${STATE}/pr-comment"; fi
         shift
       done
       ;;
@@ -1101,31 +1162,106 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         (self.state / "exists").write_text(ref + "\n")
         return f"PATCH repos/{FORGE_REPO}/git/refs/heads/release/next"
 
-    def test_a_queued_release_pr_is_left_to_the_queue(self) -> None:
-        """The forge's 422 for a queued branch exits 0, saying so (#1472).
+    OLD_PLAN = "d" * 40
 
-        Measured on the canon (run 44207123963): Release PR #1462 was in
-        the merge queue, the push ahead of it ran this script, and the
-        branch move was refused with this 422. The run went red.
+    def queue_release_pr(self) -> tuple[str, list[str]]:
+        """Queue the open Release PR #77, planned at OLD_PLAN.
+
+        Returns:
+            The forge call that moves the branch, and the calls a run
+            makes up to and including the move the queue refuses.
+
         """
         move = self.queue_release_branch()
         (self.state / "queued").write_text(move + "\n")
+        (self.state / "open").write_text("77\n")
+        (self.state / "view").write_text(
+            json.dumps({
+                "number": 77,
+                "id": "PR_kwDOqueued",
+                "body": f"Notes.\n\nPlanned-At: {self.OLD_PLAN}\n",
+            })
+        )
+        return move, [*self.PROCEEDED[:7], move]
+
+    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
+    def test_a_queued_release_pr_is_dequeued_and_regenerated(self) -> None:
+        """The 422 for a queued branch: dequeue, move, say so (#1504).
+
+        Measured on the canon: Release PR #1476 was queued and removed four
+        times in an hour, planned at a commit main had passed, because the
+        run that met this 422 exited without moving it and no later push
+        came. Main's script stops at the 422.
+        """
+        move, before = self.queue_release_pr()
+        (self.state / "ahead").write_text("3\n")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(0, result.returncode, result.stderr)
+        said = (
+            "taken out of the merge queue: 3 commits landed after this release"
+            f" was planned; regenerated at {self.PLANNED}; queue it again"
+        )
+        self.assertIn(f"#77 {said}\n", result.stdout)
+        self.assertEqual(said, (self.state / "pr-comment").read_text())
+        self.assertIn(
+            'dequeuePullRequest(input: {id: "PR_kwDOqueued"})',
+            (self.state / "dequeue-request").read_text(),
+        )
+        self.assertEqual(
+            [
+                *before,
+                "pr view release/next",
+                f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
+                "graphql dequeuePullRequest",
+                move,
+                "pr list",
+                "pr edit 77",
+                "pr comment 77",
+                f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
+            ],
+            self.calls(),
+        )
+        self.assertFalse(any("enqueue" in c.lower() for c in self.calls()))
+        body = (self.state / "body").read_text(encoding="utf-8")
+        self.assertEqual(f"Planned-At: {self.PLANNED}", body.splitlines()[-1])
+
+    def test_a_refused_dequeue_takes_the_permitted_response(self) -> None:
+        """The forge refusing the App the dequeue: exit 0, by name (#1504)."""
+        _, before = self.queue_release_pr()
+        (self.state / "dequeue").write_text("forbidden")
         self.forge(self.PLANNED)
         result = self.run_executor()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
-            "release/next is in the merge queue and the forge will not move it;"
-            " the queue's lint:release-planned decides whether it ships, and"
-            " the push after it leaves the queue maintains the Release PR\n",
+            "the forge refused to take #77 out of the merge queue; it stays"
+            f" planned at {self.OLD_PLAN}; the next push to the default branch"
+            " regenerates it\n",
             result.stdout,
         )
         self.assertEqual(
             [
-                *self.PROCEEDED[:7],
-                move,
+                *before,
+                "pr view release/next",
+                f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
+                "graphql dequeuePullRequest",
                 f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
             ],
             self.calls(),
+        )
+
+    def test_a_dequeue_that_fails_otherwise_is_red(self) -> None:
+        """A 502 on the dequeue is a failure by name, not a permission."""
+        self.queue_release_pr()
+        (self.state / "dequeue").write_text("fails")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertEqual("", result.stdout)
+        self.assertIn(
+            "FAIL: could not take #77 out of the merge queue\n"
+            "HTTP/2.0 502 Bad Gateway\n",
+            result.stderr,
         )
 
     def test_any_other_refusal_to_move_the_branch_still_fails(self) -> None:
@@ -1586,25 +1722,20 @@ class TagReleasePush(unittest.TestCase):
         )
 
 
-class InventoryClassRefusal(unittest.TestCase):
-    """publish.yml's inventory step, run for real over stubbed tools (#784).
+class InventoryStepWiring(unittest.TestCase):
+    """publish.yml's inventory step: what it hands its one stele call.
 
-    The step chooses one way to build the inventory for the whole
-    release, and go-binary beside a plan-emitting class used to take the
-    plan branch and publish green without the Go binaries' packages. The
+    The class rules this step used to hold in shell (.github#784's
+    binaries-beside-a-plan refusal, the binaries and plans branches, the
+    per-major coverage) are stele's now, tabled there (stele#396,
+    TestDeriveInventoriesRefusals), so the rows that ran them here went
+    with them (#1371). What stays canon-side is the call's wiring: the
     rows run the step's own `run:` block, extracted from the workflow,
-    so the refusal under test is the one that ships. `stele`, `git` and
-    `date` are stubs: the passing rows need only reach the end of the
-    binaries branch, and GNU `date -d` is not the Mac's.
+    with `stele`, `git` and `date` stubbed — stele records its argv and
+    prints a list, and GNU `date -d` is not the Mac's.
     """
 
     STEP = "Derive the per-artifact inventories and the release view"
-    MESSAGE = (
-        "::error::go-binary cannot yet ship beside rust-binary: the inventory"
-        " would omit the Go binaries' packages (.github#784)"
-    )
-
-    DERIVED = "derive sbom --out dist/tool-1.0.0.spdx.json"
 
     @classmethod
     def _block(cls) -> str:
@@ -1627,17 +1758,17 @@ class InventoryClassRefusal(unittest.TestCase):
             body.append(line[indent:])
         return "\n".join(body) + "\n"
 
-    def _run(self, classes: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+    def _run(
+        self, *, binaries: bool, plans: int, variants: str, refuse: bool = False
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self.enterContext(TemporaryDirectory()))
         stubs = root / ".stubs"
         stubs.mkdir()
-        calls = root / ".stele-calls"
+        calls = root / ".stele-argv"
         (stubs / "stele").write_text(
             "#!/usr/bin/env bash\n"
-            f'echo "$*" >> {calls}\n'
-            "out=\n"
-            "while [[ $# -gt 0 ]]; do [[ $1 == --out ]] && out=$2; shift; done\n"
-            'echo \'{"packages":[{"name":"stub"}]}\' > "${out}"\n',
+            f"printf '%s\\n' \"$@\" > {calls}\n"
+            + ("echo refused >&2; exit 1\n" if refuse else "echo '[\"\"]'\n"),
             encoding="utf-8",
         )
         (stubs / "git").write_text(
@@ -1645,31 +1776,35 @@ class InventoryClassRefusal(unittest.TestCase):
             encoding="utf-8",
         )
         (stubs / "date").write_text(
-            "#!/usr/bin/env bash\necho 2023-11-14T22:13:20Z\n",
-            encoding="utf-8",
+            "#!/usr/bin/env bash\necho 2023-11-14T22:13:20Z\n", encoding="utf-8"
         )
         for stub in stubs.iterdir():
             stub.chmod(0o755)
+        (root / ".org-canon").mkdir()
+        (root / ".org-canon" / "CITATION.cff").write_text("version: 1.69.1\n")
+        for n in range(plans):
+            leg = root / "plans" / f"sbom-plan-{n}"
+            leg.mkdir(parents=True)
+            (leg / "plan.json").write_text("[]\n", encoding="utf-8")
         bins = root / ".bins"
         bins.mkdir()
-        (bins / "tool_linux_amd64").write_text("binary\n", encoding="utf-8")
         script = root / ".step.sh"
         script.write_text(self._block(), encoding="utf-8")
         home = root / ".home"
         home.mkdir()
+        extra = {"BINARIES_DIR": str(bins)} if binaries else {}
         env = hermetic_env(
             home,
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            CLASSES=classes,
-            EVIDENCE_CLASSES=classes,
+            CLASSES="go-binary",
+            EVIDENCE_CLASSES="go-binary",
             VERSION="1.0.0",
-            SBOM_BASENAME="tool",
-            PG_MAJORS="",
-            BINARIES_DIR=str(bins),
+            SBOM_BASENAME="",
+            VARIANTS=variants,
             GITHUB_REPOSITORY="monumental-archive/tool",
             GITHUB_ENV=str(root / ".env"),
             GITHUB_OUTPUT=str(root / ".output"),
-            RUNNER_TEMP=str(root / ".rt"),
+            **extra,
         )
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
@@ -1680,29 +1815,50 @@ class InventoryClassRefusal(unittest.TestCase):
             text=True,
             check=False,
         )
-        return result, calls
+        argv = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+        return result, argv, root
 
-    def test_go_binary_beside_a_plan_class_is_refused_by_name(self) -> None:
-        """go-binary,rust-binary stops by name before anything is derived."""
-        result, calls = self._run("go-binary,rust-binary")
-        self.assertNotEqual(0, result.returncode, result.stdout)
-        self.assertIn(self.MESSAGE, result.stdout.splitlines())
-        self.assertFalse(calls.exists(), "refused after an inventory was derived")
-
-    def test_go_binary_beside_an_image_still_derives_from_the_binaries(self) -> None:
-        """go-binary,oci-image takes the binaries branch as before."""
-        result, calls = self._run("go-binary,oci-image")
+    def test_a_binaries_release_hands_stele_the_binaries(self) -> None:
+        """The binaries directory goes in; the list comes out unchanged."""
+        result, argv, root = self._run(binaries=True, plans=0, variants="")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("release inventory: 1 packages", result.stdout)
-        self.assertIn(self.DERIVED, calls.read_text(encoding="utf-8"))
+        self.assertEqual(["derive", "inventories"], argv[:2])
+        self.assertEqual(str(root / ".bins"), argv[argv.index("--binaries-dir") + 1])
+        self.assertNotIn("--variants", argv)
+        self.assertEqual("1.69.1", argv[argv.index("--machinery-version") + 1])
+        self.assertEqual("2023-11-14T22:13:20Z", argv[argv.index("--created") + 1])
+        output = (root / ".output").read_text(encoding="utf-8")
+        self.assertEqual('list=[""]\n', output)
+        self.assertIn("SBOM_CREATED=2023-11-14T22:13:20Z", (root / ".env").read_text())
 
-    def test_go_binary_alone_still_derives_from_the_binaries(self) -> None:
-        """go-binary alone takes the binaries branch as before."""
-        result, calls = self._run("go-binary")
+    def test_plans_follow_every_flag(self) -> None:
+        """Go's flag parser stops at the first operand: plans go last."""
+        result, argv, _ = self._run(binaries=False, plans=2, variants="16,17")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("release inventory: 1 packages", result.stdout)
-        self.assertNotIn("go-binary cannot yet ship", result.stdout)
-        self.assertIn(self.DERIVED, calls.read_text(encoding="utf-8"))
+        self.assertEqual(
+            ["plans/sbom-plan-0/plan.json", "plans/sbom-plan-1/plan.json"], argv[-2:]
+        )
+        self.assertEqual("16,17", argv[argv.index("--variants") + 1])
+        self.assertNotIn("--binaries-dir", argv)
+        self.assertTrue(all(a.startswith("plans/") for a in argv[-2:]))
+        flags = [a for a in argv[:-2] if a.startswith("--")]
+        self.assertTrue(flags, argv)
+
+    def test_no_plans_hands_stele_no_operand(self) -> None:
+        """An unmatched glob is no plan, never a literal path."""
+        result, argv, _ = self._run(binaries=False, plans=0, variants="")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertFalse(any("sbom-plan-" in a for a in argv), argv)
+        self.assertEqual(".", argv[argv.index("--tree") + 1])
+        self.assertEqual("dist", argv[argv.index("--out-dir") + 1])
+
+    def test_a_stele_refusal_fails_the_step(self) -> None:
+        """Nothing is written for a refused derivation."""
+        result, _, root = self._run(binaries=True, plans=0, variants="", refuse=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("refused", result.stderr)
+        output = root / ".output"
+        self.assertFalse(output.exists() and output.read_text(), "a list was written")
 
 
 if __name__ == "__main__":

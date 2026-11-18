@@ -150,12 +150,17 @@ class DeliveredTreeTest(unittest.TestCase):
         self.assertTrue(pp.obligations(policy))
 
     def test_the_crate_class_is_among_them(self) -> None:
-        """The defect's own class, joined rather than merely present."""
+        """The defect's own class, joined rather than merely present.
+
+        stele writes the crate plan (stele#396, #1371): the leg names its
+        class, and the prefix is the policy's own, read back here.
+        """
         policy, files = delivered()
         self.assertIn(("rust-crate", "sbom-cargo-"), pp.obligations(policy))
         crate = files[".github/workflows/build-rust-crate.yml"]
         self.assertIn(("rust-crate", "sbom-cargo-"), pp.markers(crate)[0])
-        self.assertIn("sbom-cargo-", pp.emitted(crate))
+        self.assertIn("sbom-cargo-", pp.emitted(crate, policy))
+        self.assertEqual(pp.emitted(crate), set())
 
 
 class ObligationsTest(unittest.TestCase):
@@ -294,6 +299,28 @@ class ReaderTest(unittest.TestCase):
             pp.emitted('  | map({class: "wasm-npm", doc: ("sbom-npm-" + .),\n'),
             {"sbom-npm-"},
         )
+
+    def test_the_stele_idiom_is_read_from_the_policy(self) -> None:
+        """A stele-written plan emits under its class's planned prefix."""
+        call = "  stele derive inventory-plan --class rust-crate --policy p.json \\\n"
+        self.assertEqual(pp.emitted(call, POLICY_UNDER_TEST), {"sbom-cargo-"})
+
+    def test_the_stele_idiom_names_nothing_without_the_policy(self) -> None:
+        """The prefix lives in the policy, never in the leg."""
+        call = "  stele derive inventory-plan --class rust-crate --policy p.json\n"
+        self.assertEqual(pp.emitted(call), set())
+
+    def test_a_stele_plan_for_a_class_planning_nothing_is_refused(self) -> None:
+        """Fail-closed: a class with no planned prefix names no document."""
+        leg = (
+            "name: build-source\n"
+            "# plan-producer: source-archive sbom-src-\n"
+            "      - run: stele derive inventory-plan --class source-archive\n"
+            "          name: sbom-plan-src\n"
+        )
+        planted = {**WHOLE, **tree(**{"build-source": leg})}
+        findings = pp.judge(POLICY_UNDER_TEST, planted)
+        self.assertTrue(any("states no document prefix" in f for f in findings))
 
     def test_prose_about_a_prefix_is_not_an_emission(self) -> None:
         """A comment naming a document must not count as producing one."""
