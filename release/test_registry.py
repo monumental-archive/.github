@@ -77,7 +77,7 @@ FACTS = json.dumps({
     "org.opencontainers.image.revision": "0123456789abcdef",
 })
 
-DOCKER_STUB = r'''#!{python} -I -S
+DOCKER_STUB = r'''#!{python} -IS
 """Stub `docker`: logs its argv, answers each subcommand the helper runs."""
 import hashlib, json, os, sys, urllib.request
 args = sys.argv[1:]
