@@ -2394,9 +2394,12 @@ crate: `--list` honours `--shard`, and the default slice sharding cut
 it 3/3/3/0 — an empty shard exits 0 and writes no `outcomes.json`, so
 the leg says "no mutants in this shard" and stays green. Excluded is a
 whole-population figure (a shard is cut after exclusion), reported the
-same by every shard and taken once. The count is adjusted from
-release-lab's first dispatched audit on a runner and recorded on the
-issue; the timeout too. Locally the leg was proven only against real
+same by every shard and taken once. The first runner run
+(release-lab, run 44205918375, 2026-11-18) measured shards of 5m02s to
+6m54s, mostly the cold toolchain install (163-221 s) and lab-pg's pgrx
+baseline. The Rust jobs keep four shards and take a 25-minute
+timeout, about three times the slowest; a larger consumer's run is
+what moves either. Locally the leg was proven only against real
 output on a small crate — five survivors red by name, then green with
 five counted excluded under a reasoned `exclude_re` entry, then the
 same crate across four shards and their totals. *Reopen:* upstream

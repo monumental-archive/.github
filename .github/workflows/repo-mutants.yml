@@ -94,7 +94,11 @@ jobs:
     runs-on: ubuntu-26.04
     # The count is written twice, here and in MUTANTS_SHARDS below; move
     # both together. No fail-fast: every shard reports its own survivors.
-    # No timeout of its own yet: it is set from the first runner run.
+    # The timeout is about three times the slowest shard of the first
+    # runner run (release-lab, run 44205918375: 6m54s, of which 3.5 min
+    # was the cold toolchain install), rounded up for the installs'
+    # spread (163-221 s). Recorded on #1355; move it from a larger run.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
