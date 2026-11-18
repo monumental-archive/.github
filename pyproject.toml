@@ -9,6 +9,51 @@
 # `# pragma: no mutate -- <why>`.
 [tool.mutmut]
 source_paths = ["mise", "release", ".github/rekor-monitor"]
+# The rest of the tracked tree, copied unmutated into mutmut's
+# `mutants/` beside the mutated sources: the canon's tests read the
+# workflows, stubs, docs and policy files they check, and a copy holding
+# only the source paths failed the unmutated suite (self-mutants run
+# 44210688265: `scaffold/.bestpractices.json` missing). mutmut copies
+# these before it writes the mutants, so `.github` brings rekor-monitor
+# along and the mutated copies still land over it.
+# A HAND-KEPT LIST, kept honest by the leg: a new top-level path that a
+# test reads must be added here, and until it is, the unmutated suite
+# fails in `mutants/` and the leg reds "nothing judged" by name.
+also_copy = [
+  ".badge-states",
+  ".bestpractices.json",
+  ".editorconfig",
+  ".github",
+  ".gitignore",
+  ".sqlfluffignore",
+  ".trivyignore",
+  "CHANGELOG.md",
+  "CITATION.cff",
+  "CLAUDE.md",
+  "CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+  "GOVERNANCE.md",
+  "LICENSE",
+  "LICENSES",
+  "MAINTENANCE.md",
+  "README.md",
+  "REUSE.toml",
+  "SECURITY.md",
+  "SUPPORT.md",
+  "default.json",
+  "docker",
+  "docs",
+  "lefthook.yml",
+  "lefthook",
+  "mise.toml",
+  "profile",
+  "renovate.json",
+  "scaffold",
+  "security",
+  "settings",
+  "slsa",
+  "workflow-templates",
+]
 do_not_mutate = [
   # The belt's tests are what judges a mutant, not what is judged.
   "mise/test_*.py",
