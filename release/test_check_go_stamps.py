@@ -16,14 +16,27 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import os
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -71,7 +84,7 @@ def clean_env() -> dict[str, str]:
         config read.
 
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = hermetic.env()
     return {**env, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
 

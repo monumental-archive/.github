@@ -16,14 +16,26 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import os
+import importlib.util
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
@@ -77,7 +89,7 @@ def run_helper(
         (work / "crate").mkdir()
         if manifest is not None:
             (work / "crate" / "Cargo.toml").write_text(manifest)
-        env = {k: v for k, v in os.environ.items() if k != "PLAN_DOC_PREFIX"}
+        env = hermetic.env()
         if prefix is not None:
             env["PLAN_DOC_PREFIX"] = prefix
         # ruff: ignore[subprocess-without-shell-equals-true]
