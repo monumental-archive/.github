@@ -2335,18 +2335,23 @@ runner):
   leg finds the file line from the `def` and the removed line.
 - **No sharding.** 3.8.1 has no shard option, so the Python job is
   one job; a shard other than 0/1 is red.
-- **Subprocess-run helpers (item 3).** mutmut copies every file under
-  its source paths into `mutants/`, exec bits kept, and selects a
-  mutant through an environment variable a child process inherits. A
-  helper a test runs as `python3 mise/x.py` from the copied tree
-  therefore runs its mutated copy. But mutmut maps tests to functions
-  by recording calls in the test process, so a function reached only
-  in a child is "no tests" and is never run. The leg counts that as a
-  survivor, by name. The measurement is owed from the canon's first
-  run on a runner: the "no tests" list is the subprocess-only set, and
-  issue #1354's permitted response (mutate only what the suite imports,
-  listing the rest as not measured) is applied in the canon's config
-  from it.
+- **Subprocess-run helpers (item 3), measured.** mutmut copies every
+  file under its source paths into `mutants/`, and every mutated file
+  starts by importing mutmut's trampoline. The canon's runs
+  (self-mutants 44213905549) showed that a helper a test runs as a
+  child `python3 mise/x.py` then died with "No module named 'mutmut'"
+  on the unmutated baseline: the belt's Python has no mutmut. 53 of
+  the canon's 56 non-test helpers are run that way. The leg therefore
+  writes a start-up hook (`mutants-python.py hook`, owner's ruling on
+  item 3): a temporary `sitecustomize` on `PYTHONPATH` that APPENDS
+  mutmut's own site directory, derived from the installed tool, the
+  way the coverage leg reaches its children. Children then run the
+  mutated copy, and the active mutant too, since the selecting
+  variable is inherited. mutmut still chooses a mutant's tests from
+  calls recorded in the test process, so a function reached only in
+  a child comes out "no tests". The leg names it as a survivor, and
+  the issue's permitted response is applied per function from that
+  real list.
 
 *Reopen:* mutmut gaining sharding (shard the Python job like Rust's),
 or recording calls in child processes (the subprocess-only helpers
