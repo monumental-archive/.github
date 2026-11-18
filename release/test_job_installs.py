@@ -188,6 +188,8 @@ DYNAMIC = {
     "mise/belt-shell.py": "splats its shfmt and shellcheck argvs from lists",
     "mise/embedded-shell.py": "splats its shfmt argv from a list",
     "mise/git-decoy.py": "runs its caller's command against a decoy repository",
+    "mise/mutants-python.py": "asks mutmut's own interpreter, read from its"
+    " installed script, where mutmut lives",
     "mise/with-lock.py": "runs its caller's command under the lock",
     "mise/security-config.py": "builds its gh argv in a variable",
 }
