@@ -100,6 +100,7 @@ for arg in "$@"; do
   case "${arg}" in --coverage.reportsDirectory=*) dir=${arg#*=} ;; esac
 done
 echo "vitest suite ran" >&2
+echo "vitest args: $*" >&2
 lines='{"total": {"lines": {"pct": %s}, "branches": {"pct": %s}}}\\n'
 printf "${lines}" "${STUB_TS}" "${STUB_TS_BR}" > "${dir}/coverage-summary.json"
 echo "TN:" > "${dir}/lcov.info"
@@ -150,6 +151,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     typescript: str | None = None,
     ts: str = "88.0",
     ts_branches: str = "81.0",
+    test_run: str = "echo suite ran",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
@@ -170,7 +172,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     task_json = tmp / "task.json"
     if test_task:
         task_json.write_text(
-            json.dumps({"dir": str(tree), "run": ["echo suite ran"]}),
+            json.dumps({"dir": str(tree), "run": [test_run]}),
             encoding="utf-8",
         )
 
@@ -391,6 +393,29 @@ class TypeScriptRows(CoverageTaskCase):
             "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n",
             done.stdout,
         )
+
+    def test_the_test_task_selection_is_the_measured_selection(self) -> None:
+        """A `test` task narrower than vitest's config is measured as written.
+
+        #1357 item 2: the leg runs the repository's own test command, so a
+        task running `vitest run tests/unit` is measured over tests/unit,
+        not over every file the vitest config would select.
+        """
+        done, _ = self.run_task(
+            "coverage:check",
+            python=False,
+            typescript="vitest",
+            test_run="vitest run tests/unit",
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        runs = [
+            ln.removeprefix("vitest args: ").split()
+            for ln in done.stderr.splitlines()
+            if ln.startswith("vitest args: ")
+        ]
+        self.assertEqual(1, len(runs), done.stderr)
+        self.assertIn("tests/unit", runs[0])
+        self.assertIn("--coverage.enabled=true", runs[0])
 
     def test_report_writes_the_typescript_lcov(self) -> None:
         """The upload is the measured run's own lcov, off lcov.info."""
