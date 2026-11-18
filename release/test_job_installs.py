@@ -74,10 +74,12 @@ IN_SCOPE = [
     ("build-rust-binary.yml", "build"),
     ("build-rust-crate.yml", "build"),
     ("build-wasm-npm.yml", "build"),
+    ("continuous.yml", "commit-point"),
     ("continuous.yml", "facts"),
     ("continuous.yml", "sbom"),
     ("publish-rust-crate.yml", "publish"),
     ("publish-wasm-npm.yml", "publish"),
+    ("publish.yml", "commit-point"),
     ("publish.yml", "facts"),
     ("publish.yml", "sbom"),
     # Not on the release path: the signer-identity watch, scheduled and

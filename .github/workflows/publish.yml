@@ -1791,86 +1791,65 @@ jobs:
     env:
       SBOM_RESULT: ${{ needs.sbom.result }}
       REPRO_RESULT: ${{ needs.repro-gate.result }}
+      # The list is the whole install: no `mise run` installs the rest
+      # (task auto-install is on by default; #1412).
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
-      - name: Refuse unless every required proof succeeded
-        env:
-          UNTRUSTED_CLASSES: ${{ inputs.classes }}
-          VERSION: ${{ needs.guard.outputs.version }}
-        run: |
-          set -euo pipefail
-          fail=0
-          proofs='[]'
-          for p in "sbom and advisory triage:${SBOM_RESULT}" "repro gate:${REPRO_RESULT}"; do
-            name="${p%:*}" result="${p##*:}"
-            proofs=$(jq -c --arg n "${name}" --arg r "${result}" \
-              '. + [{name: $n, result: $r}]' <<< "${proofs}")
-            if [[ ${result} != "success" ]]; then
-              echo "::error::${name} is '${result}' — absence of a proof is never a proof"
-              fail=1
-            fi
-          done
-          ((fail == 0)) || exit 1
-          # The decision predicate: every proof by name, its conclusion,
-          # the tag and the classes — assembled HERE, in the job that
-          # holds the results, so the claim is the check's return value.
-          decided_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          jq -n \
-            --arg tag "v${VERSION}" \
-            --arg classes "${UNTRUSTED_CLASSES}" \
-            --arg at "${decided_at}" \
-            --argjson proofs "${proofs}" \
-            '{tag: $tag, classes: $classes, conclusion: "OPEN",
-              decidedAt: $at, proofs: $proofs}' \
-            > "${RUNNER_TEMP}/decision-predicate.json"
-          echo "::notice::commit point open: every required proof succeeded"
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        # stele, which judges the proofs and writes the decision. No tool
+        # cache in a job that holds the decision's signing identity.
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+          # Only what this job's steps call (#1333): the release path is
+          # uncached, so every tool in scope is paid for on every run.
+          # release/test_job_installs.py holds the list to the calls.
+          install_args: github:monumental-archive/stele
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        # A failed sbom job leaves no artifact to fetch; skipping the
+        # download lets the decision below refuse by the proof's name
+        # rather than by a missing download.
+        if: needs.sbom.result == 'success'
         with:
           name: release-sbom
           path: sbom-subject
 
-      - name: Stage the decision subjects (the inventory the decision covered)
+      # The decision is the engine's (stele#399): every required proof
+      # judged by name — absence of a proof is never a proof — and the
+      # record and its subjects written only once they read back through
+      # the verifier's own decision reader. A planned inventory decides
+      # for itself and names nothing else; with no plan, one decision
+      # covers the whole release. The type and the conclusion are the
+      # verify policy's, so the signing step takes the type from here.
+      - name: Decide over every required proof and the inventory covered
+        id: decision
         env:
+          UNTRUSTED_CLASSES: ${{ inputs.classes }}
+          VERSION: ${{ needs.guard.outputs.version }}
           INVENTORY: ${{ matrix.inventory }}
         run: |
           set -euo pipefail
-          : > "${RUNNER_TEMP}/decision-subjects.sha256"
-          if [[ -n ${INVENTORY} ]]; then
-            # A planned inventory decides for itself and names nothing
-            # else. Resolved by listing, never by building a path out of
-            # the matrix value.
-            found=""
-            listing=$(find sbom-subject -type f | sort)
-            while IFS= read -r f; do
-              [[ -n ${f} ]] || continue
-              name=$(basename "${f}")
-              if [[ ${name} == "${INVENTORY}" ]]; then found="${f}"; fi
-            done <<< "${listing}"
-            [[ -n ${found} ]] || {
-              echo "::error::the plan names ${INVENTORY} but the sbom artifact does not carry it"
-              exit 1
-            }
-            files="${found}"
-          else
-            # No plan: one decision over the whole release, the
-            # invariant every pre-inventory release shipped under.
-            files=$(find sbom-subject -type f | sort)
-          fi
-          while IFS= read -r f; do
-            [[ -n ${f} ]] || continue
-            digest=$(sha256sum "${f}" | cut -d' ' -f1)
-            base=$(basename "${f}")
-            printf '%s  %s\n' "${digest}" "${base}" \
-              >> "${RUNNER_TEMP}/decision-subjects.sha256"
-          done <<< "${files}"
-          [[ -s "${RUNNER_TEMP}/decision-subjects.sha256" ]] || {
-            echo "::error::the sbom artifact is empty — a decision over nothing decides nothing"
-            exit 1
-          }
+          stele emit decision \
+            --policy .org-canon/slsa/verify-policy.json \
+            --tag "v${VERSION}" --classes "${UNTRUSTED_CLASSES}" \
+            --proof "sbom and advisory triage=${SBOM_RESULT}" \
+            --proof "repro gate=${REPRO_RESULT}" \
+            --covered sbom-subject --inventory "${INVENTORY}" \
+            --predicate-out "${RUNNER_TEMP}/decision-predicate.json" \
+            --subjects-out "${RUNNER_TEMP}/decision-subjects.sha256" >> "${GITHUB_OUTPUT}"
       - name: Sign the decision under this workflow's identity
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ${{ runner.temp }}/decision-subjects.sha256
-          predicate-type: https://monumental-archive.github.io/attestations/release-decision/v1
+          predicate-type: ${{ steps.decision.outputs.predicate-type }}
           predicate-path: ${{ runner.temp }}/decision-predicate.json
 
   # Last, and only on proof. Attaches the evidence bundle and publishes the
