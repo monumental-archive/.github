@@ -21,6 +21,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -30,6 +31,17 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -214,7 +226,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
         tracked.append(".coverage-floor")
 
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = hermetic.env()
     env |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
@@ -644,7 +656,7 @@ class UploadStep(unittest.TestCase):
             (tree / ".org-canon").mkdir()
             (tree / ".org-canon" / "mise").symlink_to(BELT)
             out = Path(tmp) / "outputs"
-            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env = hermetic.env()
             env |= {
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
                 "STUB_TASK": str(task),
@@ -776,7 +788,7 @@ class MeasureSelectors(unittest.TestCase):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env = hermetic.env()
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",

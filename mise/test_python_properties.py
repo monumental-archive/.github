@@ -22,13 +22,26 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -97,7 +110,7 @@ echo "3.0.0 (stub interpreter)"
 # REAL repository's index instead of the planted one. Measured here:
 # the first push of this file staged the deletion of every tracked file.
 _GIT_ENV = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+    **hermetic.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }

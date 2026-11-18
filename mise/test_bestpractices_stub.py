@@ -21,15 +21,27 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import json
-import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -82,7 +94,7 @@ def lint(text: str, path: str = STUB_PATH) -> subprocess.CompletedProcess[str]:
         target = Path(tmp) / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [GIT, "init", "-q"], cwd=tmp, env=env, check=True

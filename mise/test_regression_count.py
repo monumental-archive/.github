@@ -20,6 +20,17 @@ import unittest
 from typing import ClassVar
 from unittest import mock
 
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", pathlib.Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
+
 _SPEC = importlib.util.spec_from_file_location(
     "regression_count", pathlib.Path(__file__).with_name("regression-count.py")
 )
@@ -123,7 +134,7 @@ class RepoCase(unittest.TestCase):
 
     def setUp(self) -> None:
         """Isolate git's config, then build the repository."""
-        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        clean = hermetic.env()
         patcher = mock.patch.dict(os.environ, {**clean, **_GIT_ENV}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)

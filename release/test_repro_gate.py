@@ -20,15 +20,28 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import os
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "publish.yml"
@@ -112,11 +125,7 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
         (stubs / "stele").write_text(STELE_STUB)
         (stubs / "stele").chmod(0o755)
         argv, files = tmp / "argv", tmp / "files"
-        inherited = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(("FIRST_", "REBUILD_", "STUB_"))
-        }
+        inherited = hermetic.env()
         env = {
             **inherited,
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",

@@ -49,13 +49,25 @@ test framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import importlib.util
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "pg-upgrade-path.sh"
@@ -81,7 +93,7 @@ def clean_env() -> dict[str, str]:
         below cannot be redirected at the caller's repository (#857).
 
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return hermetic.env()
 
 
 def record_file(

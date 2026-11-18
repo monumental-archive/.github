@@ -30,12 +30,25 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import importlib.util
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
@@ -111,11 +124,7 @@ class PrePushGate(unittest.TestCase):
         (stubs / "mise").write_text(STUB_MISE, encoding="utf-8")
         (stubs / "mise").chmod(0o755)
 
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(("GIT_", "LEFTHOOK", "MISE_"))
-        }
+        env = hermetic.env()
         tools = [str(stubs), str(Path(LEFTHOOK).parent), str(Path(GIT).parent)]
         env |= {
             "PATH": os.pathsep.join([*tools, env.get("PATH", "")]),

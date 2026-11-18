@@ -19,15 +19,27 @@ stdlib `unittest` and `tomllib`, the belt's one test idiom. Run through
 the gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import importlib.util
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
 from fnmatch import fnmatchcase
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
@@ -207,7 +219,7 @@ class Selection(unittest.TestCase):
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", tasks()["audit:mutants"]["run"]],
             cwd=self.belt,
-            env={**os.environ, "ORG_BELT_DIR": str(self.belt), **env},
+            env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env),
             capture_output=True,
             text=True,
             check=False,

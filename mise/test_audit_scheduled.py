@@ -17,13 +17,25 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
 run through the gate as `mise run test`, which `ci` collects.
 """
 
-import os
+import importlib.util
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
@@ -56,9 +68,7 @@ class Scheduled(unittest.TestCase):
         belt = self.tmp / "belt"
         belt.mkdir()
         (belt / "own-audits.sh").write_text(OWN_AUDITS_STUB, encoding="utf-8")
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | {
-            "ORG_BELT_DIR": str(belt)
-        }
+        self.env = hermetic.env() | {"ORG_BELT_DIR": str(belt)}
 
     def workflow(self, name: str, task: str) -> None:
         """Plant a workflow whose one step runs one audit task."""

@@ -47,6 +47,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -57,6 +58,17 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
@@ -168,51 +180,22 @@ exit 1
 IDENTITY_NAME = "pgrx upgrade harness"
 IDENTITY_EMAIL = "harness@example.invalid"
 
-# What a fixture's process inherits from the suite's, by name, and why
-# (#1508). Everything else a row needs it states itself, through
-# `overrides`. The list is an ALLOW-list on purpose: the deny-list it
-# replaced dropped git's, the forge's and the runner's variables and
-# kept the rest, so the release job's own step inputs reached fixtures
-# — `VERSION: 1.69.4` turned "VERSION must be set" into a row that
-# could not refuse, and the canon could not tag. A deny-list misses the
-# next exported input the same way; an allow-list cannot.
-INHERITED = {
-    # Finding bash, git, jq and the belt's tools at all.
-    "PATH": "the commands a script runs",
-    # mktemp and every tool that writes scratch.
-    "TMPDIR": "where scratch files go",
-    # The scripts print and match UTF-8 (em-dashes in their messages);
-    # under the C locale bash and grep treat them byte-wise.
-    "LANG": "the character set messages are read in",
-    "LC_ALL": "the character set messages are read in",
-    "LC_CTYPE": "the character set messages are read in",
-    # The Rust toolchain's own homes: cargo and rustup find their
-    # installed toolchains here, and a fixture HOME would hide them.
-    "CARGO_HOME": "where cargo's toolchain lives",
-    "RUSTUP_HOME": "where rustup's toolchains live",
-    "RUSTUP_TOOLCHAIN": "the toolchain mise selected for this run",
-}
-
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build an environment the suite's own environment cannot reach into.
+    """Build a fixture's environment through mise/hermetic.py (#1508, #1514).
 
     Returns:
-        The variables INHERITED names (#1508), HOME and a git identity
-        set, and any overrides applied last.
+        hermetic.env for `home`, with this harness's git identity, and
+        any overrides applied last.
 
     """
-    env = {name: os.environ[name] for name in INHERITED if name in os.environ}
-    env.update(
-        HOME=str(home),
-        GIT_EDITOR="true",
-        GIT_AUTHOR_NAME=IDENTITY_NAME,
-        GIT_AUTHOR_EMAIL=IDENTITY_EMAIL,
-        GIT_COMMITTER_NAME=IDENTITY_NAME,
-        GIT_COMMITTER_EMAIL=IDENTITY_EMAIL,
-    )
-    env.update(overrides)
-    return env
+    stated = {
+        "GIT_AUTHOR_NAME": IDENTITY_NAME,
+        "GIT_AUTHOR_EMAIL": IDENTITY_EMAIL,
+        "GIT_COMMITTER_NAME": IDENTITY_NAME,
+        "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
+    }
+    return hermetic.env(home, **(stated | overrides))
 
 
 def mise_data_dir() -> str:
@@ -496,7 +479,7 @@ class LeavesTheCallersGitAlone(unittest.TestCase):
             before_digest = hashlib.sha256(index.read_bytes()).hexdigest()
             before_files = git(["ls-files"], linked, home)
 
-            planted = dict(os.environ)
+            planted = hermetic.env()
             planted.update({
                 INNER_RUN: "1",
                 "GIT_DIR": str(gitdir),

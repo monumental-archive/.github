@@ -27,6 +27,17 @@ import tempfile
 import tomllib
 import unittest
 
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", pathlib.Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
+
 _HERE = pathlib.Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location("git_decoy", _HERE / "git-decoy.py")
 gd = importlib.util.module_from_spec(_SPEC)
@@ -35,7 +46,7 @@ _SPEC.loader.exec_module(gd)
 
 GIT = shutil.which("git") or "git"
 BASH = shutil.which("bash") or "bash"
-CLEAN = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+CLEAN = hermetic.env()
 IDENTITY = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -81,7 +92,9 @@ class T(unittest.TestCase):
             subprocess.run(["git", "add", "leak.txt"], cwd=d, env=ENV, check=True)
 """
 
-SCRUB = '{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}'
+# The careful harness's environment, planted as code into a module that
+# cannot import hermetic.py: what git needs and nothing of git's own.
+SCRUB = '{"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}'
 
 
 def body() -> str:

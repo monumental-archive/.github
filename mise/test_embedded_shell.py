@@ -29,6 +29,17 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
+
 _HERE = Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location(
     "embedded_shell",
@@ -44,7 +55,7 @@ BASH = shutil.which("bash") or "bash"
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and `git ls-files` would list the canon's own workflows.
 CLEAN_ENV = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+    **hermetic.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -462,10 +473,7 @@ class OrgConfig(unittest.TestCase):
             workflow('- name: s\n  run: |\n    x=1\n    echo "$x"'),
             encoding="utf-8",
         )
-        env = {k: v for k, v in os.environ.items() if k != "XDG_CONFIG_HOME"}
-        with unittest.mock.patch.dict(
-            os.environ, {**env, "HOME": str(home)}, clear=True
-        ):
+        with unittest.mock.patch.dict(os.environ, hermetic.env(home), clear=True):
             found = es.check(path, fmt=False, lint=True)
         self.assertTrue(any("[SC2250]" in f for f in found), found)
 

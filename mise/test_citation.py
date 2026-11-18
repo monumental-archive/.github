@@ -14,12 +14,24 @@ directory. stdlib `unittest`, matching the other mise/test_*.py; run
 through the gate as `mise run test`.
 """
 
-import os
+import importlib.util
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+_HERMETIC = importlib.util.spec_from_file_location(
+    "hermetic", Path(__file__).resolve().with_name("hermetic.py")
+)
+if _HERMETIC is None or _HERMETIC.loader is None:  # pragma: no cover
+    msg = "cannot load mise/hermetic.py"
+    raise RuntimeError(msg)
+hermetic = importlib.util.module_from_spec(_HERMETIC)
+sys.modules.setdefault("hermetic", hermetic)
+_HERMETIC.loader.exec_module(hermetic)
+
 
 SCRIPT = Path(__file__).resolve().with_name("citation.sh")
 BASH = shutil.which("bash") or "bash"
@@ -41,7 +53,7 @@ def run(reuse: str) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "REUSE.toml").write_text("version = 1\n" + reuse, encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = hermetic.env()
         env["CITATION_OUT"] = str(root / "out.cff")
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
