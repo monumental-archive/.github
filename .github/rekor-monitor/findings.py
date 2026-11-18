@@ -102,13 +102,23 @@ def by_certificate(report: dict) -> dict[int, list[dict]]:
         CT index to its findings, in report order.
 
     Raises:
-        FindingsError: a finding whose subject is not a CT index.
+        FindingsError: findings that are not a list of objects, or a
+            finding whose subject is not a CT index.
 
     """
     grouped: dict[int, list[dict]] = {}
-    for finding in report.get("findings") or []:
+    findings = report.get("findings") or []
+    if not isinstance(findings, list):
+        msg = f"the report's findings are not a list: {findings!r}"
+        raise FindingsError(msg)
+    for finding in findings:
+        # Refused by name, never a traceback (#1332): a traceback exits 1,
+        # and this tool's refusal is 2.
+        if not isinstance(finding, dict):
+            msg = f"a finding is not an object: {finding!r}"
+            raise FindingsError(msg)
         subject = finding.get("subject", "")
-        match = SUBJECT.match(subject)
+        match = SUBJECT.match(subject) if isinstance(subject, str) else None
         if not match:
             msg = f"a finding's subject is not a CT index: {subject!r}"
             raise FindingsError(msg)

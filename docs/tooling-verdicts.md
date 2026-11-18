@@ -32,6 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
+| Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
@@ -2564,6 +2565,50 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   overrides it and travels wrongly when the file is copied (#214).
   *Reopen:* an aqua package appearing, or a repo genuinely needing
   per-file licence variance.
+- **Hypothesis, adopted for Python property testing (#1332,
+  2026-11-17).** Property 3 of the testing standard (#1336), "varies its
+  inputs", had a Rust leg and a Go leg and nothing for the canon's own
+  language. Adopted at 6.170.15 as `pipx:hypothesis`, the sixth `pipx:`
+  exception, after mutmut (#1354); PyPI-only, no aqua package. `abi3`
+  wheels for macOS arm64 and x86_64 and manylinux x86_64 and aarch64,
+  plus an sdist, published 2026-11-06 and so past the seven-day floor;
+  one dependency, `sortedcontainers` (2.4.0 resolved). The first
+  third-party library the belt's tests import, and only from `prop_*.py`
+  files: a repository's `test` task never collects them, so its ordinary
+  suites stay stdlib `unittest` and run on an interpreter with nothing
+  installed, and `test:python-properties` reds a tracked non-property
+  file that imports Hypothesis. #364's refusal of a test framework does
+  not reach this: it refused one for code being ported away, and the
+  ordinary suites still take none. The tool venv's interpreter is the
+  belt's `python` pin, read from its `pyvenv.cfg` (`home =
+  …/installs/python/3.15.2/bin`, `version_info = 3.15.2`) and asserted
+  by both tasks against the repository's `python3` before anything runs.
+  **`mise.lock` does not cover the dependency's hash, or Hypothesis's
+  own:** a `pipx:` entry records `version` and `backend` and nothing
+  else (the lock gained exactly those two lines here), the same as
+  `pipx:reuse` and its `--with charset-normalizer` extra. What holds the
+  closure is uv's resolution under the belt's `UV_EXCLUDE_NEWER` floor
+  and `UV_INDEX_STRATEGY = "first-index"`, and PyPI's own hashes, which
+  uv checks at download; a pinned hash per wheel is not available
+  through this backend. The profiles are the belt's
+  (`mise/python-properties.py`): the gate derandomizes with a bounded
+  `max_examples`, no example database and no deadline, so two runs print
+  the same bytes; the cron takes a random seed it prints first. A test
+  restating a bound is refused. *Reopen:* an aqua package, or a `pipx:`
+  lock entry that carries hashes.
+- **atheris, refused (#1332, 2026-11-17).** The one Python fuzzer
+  Scorecard's `Fuzzing` check detects (the literal `import atheris`,
+  ossf/scorecard `checks/raw/fuzzing.go`). It cannot be installed
+  where the belt runs: 3.1.0 ships three wheels, all
+  `manylinux2014_x86_64`, for cp312, cp313 and cp314, and no sdist
+  (PyPI, read 2026-11-17) — none for the belt's Python 3.15, and none
+  for macOS at all. ClusterFuzzLite is refused with it: it runs
+  atheris in Google's Linux images, CI-only and network-bound, and a
+  ClusterFuzzLite config kept only so Scorecard detects it would be
+  buying the number (#1336). Scorecard `Fuzzing` therefore stays 0 by
+  choice; the inputs are varied by Hypothesis, which Scorecard does
+  not read for Python. *Reopen:* an `abi3` or cp315 wheel plus a
+  macOS wheel.
 - **cargo-fuzz's sanitizers — REOPENED AND ADOPTED, 2026-08-16 (#445).**
   This entry read "deliberately `--sanitizer none` on the pinned STABLE
   toolchain (#316)", on the reasoning that ASan needs nightly and a

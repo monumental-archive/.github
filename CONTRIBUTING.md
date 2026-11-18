@@ -85,7 +85,7 @@ own work and adds the task that runs it to its row.
 |---|---|---|---|---|
 | 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (mutmut; adopt with `[tool.mutmut]` in `pyproject.toml`) [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
 | 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357]; Go has no branch figure, answered by [#1356] |
-| 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust and Go exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`); Python [#1332]; TypeScript exists in monumental-archive (fast-check) |
+| 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust, Go and Python exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`; Hypothesis in `prop_*.py` files, `test:python-properties` and `audit:python-properties`, [#1332]); TypeScript exists in monumental-archive (fast-check) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
 | 5 | Runs on real artifacts, on both platforms | the fixture's imagined world | a written rule: a recorded real artifact outranks a hand-written fixture; the gate already runs on Linux and the Mac | this section |
 | 6 | Reproduces each bug before the fix | the same bug, twice | the regression line in every defect's Done-when; a weekly report; a backfill per repository | [#1335], the canon [#1360], [signer#86], [iiif-server#212] |

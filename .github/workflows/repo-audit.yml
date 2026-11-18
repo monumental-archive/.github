@@ -436,6 +436,39 @@ jobs:
       - name: Report fixes with and without a regression test
         run: mise run audit:regression-tests
 
+  python-properties:
+    name: audit / python properties at a random seed
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+
+      # The cron half of #1332, the Python mirror of the Go fuzz step:
+      # every tracked prop_*.py at a fresh random seed and far wider
+      # bounds than the gate's fixed-seed run. Not the gate, because a
+      # random seed is not deterministic. The seed prints first and a
+      # failure prints Hypothesis's shrunk example: commit it as an
+      # @example row with its fix and the gate replays it. Nothing to
+      # upload, since the log carries both. Skips clean with no
+      # prop_*.py tracked.
+      - name: Run every Python property at a random seed
+        run: mise run audit:python-properties
+
   repo-audits:
     name: audit / this repository's own audit tasks
     runs-on: ubuntu-26.04

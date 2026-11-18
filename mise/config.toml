@@ -524,6 +524,17 @@ python = "3.15.2"
 # the gate, every job without a named list — skips it, and only
 # repo-mutants.yml's `mutants-python` job installs it, by name.
 "pipx:mutmut" = { version = "3.8.1", lazy = true, lazy_bins = ["mutmut"] }
+# Property testing for Python (#1332): the first third-party library
+# the belt's tests import, and only from `prop_*.py` files, which a
+# repository's own `test` task never collects — the ordinary suites
+# stay stdlib `unittest` and run with nothing installed (#364's
+# refusal stands for them). `test:python-properties` (gate, fixed
+# seed) and `audit:python-properties` (Monday, random seed) run every
+# tracked `prop_*.py` on THIS venv's interpreter, which the belt's
+# UV_* env builds on the `python` pin and both tasks assert. The SIXTH
+# pipx: exception; one dependency, sortedcontainers, which mise.lock
+# does not hash (docs/tooling-verdicts.md). Atheris is refused there.
+"pipx:hypothesis" = "6.170.15"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -567,6 +578,10 @@ depends = [
   # in the first place. Guarded and skip-clean like every belt task, so
   # a repo with no pgrx crate pays nothing.
   "test:pgrx",
+  # The Python properties, named for the same reason (#1332): a test,
+  # not a lint, and `test` is the repository's. Skips clean, by name,
+  # where no `prop_*.py` is tracked.
+  "test:python-properties",
 ]
 run = "echo 'ci: all gates green'"
 
@@ -3495,6 +3510,26 @@ dir = "{{cwd}}"
 # set (nothing run, the planned legs checked against the crate).
 run = '''
 "${ORG_BELT_DIR}/pgrx-test.sh"
+'''
+
+[tasks."test:python-properties"]
+description = "Every tracked prop_*.py, under the belt's fixed-seed Hypothesis profile"
+dir = "{{cwd}}"
+# Property 3 of the org's testing standard, "varies its inputs" (#1336),
+# for Python (#1332): the gate half, the Go split's `lint:go-fuzz-seeds`
+# in shape. Deterministic, so it may gate: `derandomize=True` derives
+# each test's examples from the test itself, `max_examples` is bounded,
+# and there is no example database and no deadline — two runs execute
+# the same examples and print the same bytes. The profile is the belt's
+# (python-properties.py); a test restating a bound is refused.
+#
+# `prop_*.py`, never `test_*.py`: a repository's own `test` task does
+# not collect them, so its ordinary suites stay stdlib `unittest` and
+# run with nothing installed (#364's refusal stands for them). The
+# Hypothesis venv's interpreter runs them, asserted to be the belt's
+# python pin. Named in `ci` explicitly, the `test:pgrx` precedent.
+run = '''
+"${ORG_BELT_DIR}/python-properties.sh" gate
 '''
 
 [tasks."lint:gate-surface"]
@@ -8200,6 +8235,25 @@ if [[ -n ${failed} ]]; then
   exit 1
 fi
 echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
+'''
+
+[tasks."audit:python-properties"]
+description = "Every tracked prop_*.py at a random seed and wider bounds (weekly cron, never the gate)"
+dir = "{{cwd}}"
+# The cron half of #1332, the Go split's `audit:go-fuzz` in shape: the
+# same files as `test:python-properties`, a fresh random seed and a far
+# larger `max_examples`. Not the gate, because a random seed is not
+# deterministic: what it finds on a Monday it might not find on the
+# next pull request.
+#
+# WHERE A FINDING LANDS: the output prints the seed first and, on a
+# failure, Hypothesis's shrunk falsifying example. That example is
+# committed as an explicit `@example` row on the property, with its
+# fix, and the gate replays it from then on — the committed corpus
+# keeps it found, as `testdata/fuzz/` does for Go. ORG_PROPERTY_SEED
+# reruns the exact search. The cron never pushes.
+run = '''
+"${ORG_BELT_DIR}/python-properties.sh" audit
 '''
 
 [tasks."audit:mutants"]

@@ -288,6 +288,35 @@ jobs:
       - name: Report fixes with and without a regression test
         run: mise run audit:regression-tests
 
+  python-properties:
+    name: audit / python properties at a random seed
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.6
+          cache: false
+
+      # Tree-local, beside regression-tests and for its reason: this
+      # repository does not call repo-audit.yml, so this job is how its
+      # OWN prop_*.py files meet a random seed; the consumer side is the
+      # matching leg there (#1332). No API reads, so either group would
+      # do and the first is the one with room.
+      - name: Run every Python property at a random seed
+        run: mise run audit:python-properties
+
   template-pins:
     name: audit / template pin staleness
     needs: plan
