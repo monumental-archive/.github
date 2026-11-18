@@ -21,7 +21,12 @@ HELPER = Path(__file__).resolve().with_name("with-lock.py")
 
 
 class LockCase(unittest.TestCase):
-    """A row with its own lock file and scratch directory."""
+    """A row with its own lock file and scratch directory.
+
+    Every helper runs with the row's directory as its cwd: a process
+    left in a deleted directory by an earlier test in the same run
+    must not reach these rows' exact-stderr assertions.
+    """
 
     def setUp(self) -> None:
         """Make a scratch directory for the lock and the markers."""
@@ -50,6 +55,7 @@ class LockCase(unittest.TestCase):
                 "--",
                 *command,
             ],
+            cwd=self.root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

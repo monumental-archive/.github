@@ -57,6 +57,7 @@ class InitCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
+        self.root = root
         bindir = root / "bin"
         bindir.mkdir()
         for name, body in (
@@ -87,6 +88,7 @@ class InitCase(unittest.TestCase):
         return subprocess.Popen(
             [BASH, "-euo", "pipefail", "-c", script],
             env=self.env | env,
+            cwd=self.root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
