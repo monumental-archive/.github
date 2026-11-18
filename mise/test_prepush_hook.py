@@ -7,20 +7,24 @@ v2.2.2). It builds that list from HEAD and keeps only paths that exist
 on disk, so a push that only deletes files, or a branch pushed while
 HEAD sits on a commit the remote already has, went out with the gate
 never run and one grey `(skip) no matching push files` line to say so.
-The hook is now a `script:` job, which lefthook never skips for an
-empty list.
+
+The job was then a `script:` (#1281), which lefthook runs from its
+remote cache in the git directory every worktree shares; a hook in a
+worktree on another canon ref deleted it mid-gate (#1426). It is now an
+inline `run:` whose `{files}` template resolves to one file the tree
+has, which lefthook does not skip (build_command.go:45-49).
 
 Each row is a scratch bare remote and a consumer clone wired exactly
-the way every org repository is: the canon's own `lefthook/org-hooks.yml`
-and `.lefthook/pre-push/ci.sh`, from THIS tree, served as a `file://`
-lefthook remote at a tag. `mise` is a stub on PATH that writes a marker,
-so a row asserts the gate was invoked, and invoked once, rather than
-reading lefthook's output. The pin is the belt's, so these rows run in
-the gate; where `lefthook` is absent the class skips by name.
+the way every org repository is: the canon's own `lefthook/org-hooks.yml`,
+from THIS tree, served as a `file://` lefthook remote at a tag. `mise`
+is a stub on PATH that writes a marker, so a row asserts the gate was
+invoked, and invoked once, rather than reading lefthook's output. The
+pin is the belt's, so these rows run in the gate; where `lefthook` is
+absent the class skips by name.
 
-Mutation, recorded on #1281's pull request: with `script: ci.sh` put
-back to the old `run:` line, the delete-only, add-then-delete,
-HEAD-elsewhere and already-merged rows go red with no marker.
+Mutation, recorded on #1281's pull request: with the job put back to a
+plain `run:` line, the delete-only, add-then-delete, HEAD-elsewhere and
+already-merged rows go red with no marker.
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -35,18 +39,29 @@ from pathlib import Path
 
 CANON = Path(__file__).resolve().parent.parent
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
-SCRIPT = CANON / ".lefthook" / "pre-push" / "ci.sh"
 IDENTITY = CANON / "security" / "identity.toml"
 LEFTHOOK = shutil.which("lefthook")
 GIT = shutil.which("git")
 
-# What the stub records for one gate run: the script's `mise run ci`.
+# What the stub records for one gate run: the job's `mise run ci`.
 GATE_RAN = "run ci\n"
 
-STUB_MISE = '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "${PREPUSH_MARKER}"\n'
+# The stub records its arguments. Where PREPUSH_EVICT names another
+# worktree, it first runs a hook there, as a second session would, and
+# records what is left of the shared remote cache afterwards.
+STUB_MISE = """#!/usr/bin/env bash
+if [[ -n ${PREPUSH_EVICT:-} ]]; then
+  (cd "${PREPUSH_EVICT}" && PREPUSH_EVICT= lefthook run pre-commit > /dev/null)
+  cache="$(git rev-parse --git-common-dir)/info/lefthook-remotes"
+  ls "${cache}" > "${PREPUSH_MARKER}.cache"
+fi
+printf "%s\\n" "$*" >> "${PREPUSH_MARKER}"
+"""
 
 
-def consumer_config(remote: Path, source_dir: str | None = None) -> str:
+def consumer_config(
+    remote: Path, source_dir: str | None = None, ref: str = "v1"
+) -> str:
     """Return a consumer's lefthook.yml: the scaffold's, at a local remote.
 
     Returns:
@@ -57,18 +72,16 @@ def consumer_config(remote: Path, source_dir: str | None = None) -> str:
     return (
         f"{head}remotes:\n"
         f"  - git_url: file://{remote}\n"
-        "    ref: v1\n"
+        f"    ref: {ref}\n"
         "    configs:\n"
         "      - lefthook/org-hooks.yml\n"
     )
 
 
 def plant_canon(tree: Path) -> None:
-    """Copy the canon's hook and script into `tree`, mode included."""
+    """Copy the canon's hook config into `tree`."""
     (tree / "lefthook").mkdir(parents=True, exist_ok=True)
     shutil.copy2(HOOKS, tree / "lefthook" / "org-hooks.yml")
-    (tree / ".lefthook" / "pre-push").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SCRIPT, tree / ".lefthook" / "pre-push" / "ci.sh")
 
 
 def plant_identity(tree: Path) -> None:
@@ -125,7 +138,9 @@ class PrePushGate(unittest.TestCase):
         plant_canon(work)
         self.commit(work, "canon")
         self.git(work, "tag", "v1")
-        self.git(work, "push", "-q", str(self.canon), "main", "v1")
+        self.commit(work, "the next canon release")
+        self.git(work, "tag", "v2")
+        self.git(work, "push", "-q", str(self.canon), "main", "v1", "v2")
 
     def git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         """Run git in `cwd`; a setup step that fails fails the row.
@@ -263,48 +278,30 @@ class PrePushGate(unittest.TestCase):
         self.git(clone, "switch", "-q", "-c", "again")
         self.assert_gated(self.push(clone, "origin", "again"))
 
-    def test_another_source_dir_fails_the_push_never_skips_it(self) -> None:
-        """No script under the consumer's source_dir: refused, not waved on.
+    def test_another_source_dir_still_gets_the_gate(self) -> None:
+        """A consumer's own `source_dir` changes nothing for an inline job.
 
-        lefthook looks for a remote's scripts under the CONSUMER's
-        `source_dir` (internal/command/run.go getSourceDirs at v2.2.2),
-        so a repository that sets its own finds none. The job fails and
-        the push is refused — lefthook still prints its `(skip)` tag on
-        that line, which is why the row asserts the exit status.
+        The job was a script, found under the consumer's `source_dir`,
+        and a repository that set its own got a failed push (#1281). An
+        inline `run:` has no file to find.
         """
         clone = self.consumer(source_dir=".hooks/")
         self.git(clone, "switch", "-q", "-c", "elsewhere-dir")
         write(clone, "new.txt")
         self.commit(clone, "add")
-        done = self.push(clone, "origin", "elsewhere-dir")
-        self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertIn("script does not exist: ci.sh", done.stdout + done.stderr)
-        self.assertFalse(self.marker.exists())
+        self.assert_gated(self.push(clone, "origin", "elsewhere-dir"))
 
     def test_the_canon_tree_gates_once(self) -> None:
-        """The canon carries the script itself and runs the gate once.
-
-        lefthook runs a script from every source directory holding it.
-        The canon's tree and its remote checkout both do, so the remote
-        copy defers to the tree's, which lefthook runs first — but only
-        where the tree TRACKS security/identity.toml, the question every
-        canon-only guard asks (#738).
-        """
+        """The canon consumes its own hooks and runs the gate once."""
         clone = self.consumer()
         self.git(clone, "switch", "-q", "-c", "canon")
         plant_canon(clone)
         plant_identity(clone)
         self.commit(clone, "be the canon")
-        done = self.push(clone, "origin", "canon")
-        self.assert_gated(done)
-        self.assertIn("not running it twice", done.stdout + done.stderr)
+        self.assert_gated(self.push(clone, "origin", "canon"))
 
     def test_a_consumer_planting_its_own_script_still_gets_the_gate(self) -> None:
-        """A consumer's own ci.sh cannot switch the canon's gate off.
-
-        The planted copy exits 0 without gating. It runs, and so does the
-        canon's: the remote copy defers only in the canon.
-        """
+        """A consumer's own pre-push ci.sh neither runs nor replaces the gate."""
         clone = self.consumer()
         self.git(clone, "switch", "-q", "-c", "planted")
         own = clone / ".lefthook" / "pre-push" / "ci.sh"
@@ -314,22 +311,30 @@ class PrePushGate(unittest.TestCase):
         self.commit(clone, "plant a script")
         self.assert_gated(self.push(clone, "origin", "planted"))
 
-    def test_an_untracked_identity_does_not_make_a_canon(self) -> None:
-        """Identity on disk but not tracked: not the canon, both copies run.
+    def test_a_worktree_on_another_canon_ref_cannot_evict_the_gate(self) -> None:
+        """Another worktree's hook mid-gate does not fail this push (#1426).
 
-        The guard asks trackedness, as #738's guards do, so a stray file
-        cannot pass for the declaration. The tree's copy here is the
-        canon's own, so the marker records two runs.
+        Two worktrees of one repository share .git/info/lefthook-remotes/,
+        which holds one canon ref at a time. Mid-gate, the stub runs a
+        hook in a second worktree pinned to v2; lefthook syncs v2 there
+        and deletes this worktree's v1 checkout. The push still goes
+        through, gated once: nothing the job runs lives in that cache.
+        The cache listing proves the eviction happened.
         """
         clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "stray")
-        plant_canon(clone)
-        self.commit(clone, "carry the hook")
-        plant_identity(clone)
-        done = self.push(clone, "origin", "stray")
-        output = done.stdout + done.stderr
-        self.assertEqual(done.returncode, 0, output)
-        self.assertEqual(self.marker.read_text(encoding="utf-8"), GATE_RAN * 2, output)
+        other = self.root / "other"
+        self.git(clone, "worktree", "add", "-q", "-b", "other", str(other))
+        (other / "lefthook.yml").write_text(
+            consumer_config(self.canon, ref="v2"), encoding="utf-8"
+        )
+        self.commit(other, "pin v2")
+        self.git(clone, "switch", "-q", "-c", "evicted")
+        write(clone, "new.txt")
+        self.commit(clone, "add")
+        self.env["PREPUSH_EVICT"] = str(other)
+        self.assert_gated(self.push(clone, "origin", "evicted"))
+        cache = (self.root / "marker.cache").read_text(encoding="utf-8")
+        self.assertEqual(cache, "canon-v2\n")
 
 
 if __name__ == "__main__":
