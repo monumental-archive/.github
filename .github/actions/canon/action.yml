@@ -30,34 +30,10 @@ runs:
     - name: Link the resolved canon tree
       id: resolve
       shell: bash
-      run: |
-        set -euo pipefail
-        root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
-        case "${root}" in
-          */_actions/monumental-archive/.github/*)
-            # Remote resolution: the path segment under _actions is the
-            # ref the caller pinned, verbatim.
-            ref="$(basename "${root}")"
-            ;;
-          *)
-            # Local resolution: the canon running itself, where the tree
-            # is the running commit by definition. Anything else here is
-            # a resolution shape this action does not understand —
-            # refuse rather than guess.
-            if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
-              emsg="canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
-              emsg+=" self-call"
-              echo "::error::${emsg}"
-              exit 1
-            fi
-            ref="${GITHUB_SHA}"
-            ;;
-        esac
-        if [[ ! -f "${root}/mise/config.toml" ]]; then
-          echo "::error::resolved canon tree at '${root}' has no mise/config.toml — not a canon tree"
-          exit 1
-        fi
-        ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
-        echo "canon resolved: ${ref} at ${root}"
-        echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+      env:
+        # The one place the canon names itself; link.sh reads it.
+        CANON_REPOSITORY: monumental-archive/.github
+      # Shipped beside this file and run from the action's own path: it
+      # is the step that makes the canon tree available (#1386).
+      run: '"${GITHUB_ACTION_PATH}/link.sh"'
 ...
