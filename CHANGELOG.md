@@ -10,6 +10,56 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.0](https://github.com/monumental-archive/.github/compare/v1.69.3...v1.70.0) - 2026-11-18
+
+### Added
+
+- adopt the canon's own python coverage floor ([#1492](https://github.com/monumental-archive/.github/pull/1492))
+
+### Fixed
+
+- run the canon's suite with git aimed at a decoy ([#1470](https://github.com/monumental-archive/.github/pull/1470))
+- time out the rust mutation shards at 25 minutes ([#1474](https://github.com/monumental-archive/.github/pull/1474))
+- vary python inputs with a hypothesis property leg ([#1475](https://github.com/monumental-archive/.github/pull/1475))
+- land a release only where it was planned ([#1477](https://github.com/monumental-archive/.github/pull/1477))
+- read mutmut pragmas from comments, not strings ([#1478](https://github.com/monumental-archive/.github/pull/1478))
+- read the plan's majors as the strings it prints ([#1480](https://github.com/monumental-archive/.github/pull/1480))
+- move registry operations into a tested helper (#1382) ([#1464](https://github.com/monumental-archive/.github/pull/1464))
+- show the output of a gomu run that fails ([#1484](https://github.com/monumental-archive/.github/pull/1484))
+- read the actions allowlist from one list ([#1485](https://github.com/monumental-archive/.github/pull/1485))
+- run gomu's binary, never mise's shim ([#1487](https://github.com/monumental-archive/.github/pull/1487))
+- copy the canon's whole tree into mutmut's mutants/ ([#1489](https://github.com/monumental-archive/.github/pull/1489))
+- move the rust and python mutation legs' logic to python ([#1493](https://github.com/monumental-archive/.github/pull/1493))
+- measure the test task's own vitest run ([#1494](https://github.com/monumental-archive/.github/pull/1494))
+- name a test that leaves the process elsewhere ([#1495](https://github.com/monumental-archive/.github/pull/1495))
+- take the pgrx init lock from the kernel ([#1490](https://github.com/monumental-archive/.github/pull/1490))
+- move the canon to stele v0.25.0 at schema 9 ([#1497](https://github.com/monumental-archive/.github/pull/1497))
+- drop python comments by token in test_job_installs ([#1498](https://github.com/monumental-archive/.github/pull/1498))
+- read the command a python helper runs as a call ([#1501](https://github.com/monumental-archive/.github/pull/1501))
+- derive the declared classes with stele (#1378) ([#1505](https://github.com/monumental-archive/.github/pull/1505))
+- open the commit point with stele (#1374) ([#1506](https://github.com/monumental-archive/.github/pull/1506))
+- derive build subjects with one stele call (#1364) ([#1507](https://github.com/monumental-archive/.github/pull/1507))
+- take the population from stele (#1379) ([#1509](https://github.com/monumental-archive/.github/pull/1509))
+- update typos to 1.52.2 ([#1510](https://github.com/monumental-archive/.github/pull/1510))
+- verify releases through stele calls (#1363) ([#1513](https://github.com/monumental-archive/.github/pull/1513))
+- verify base images with stele (#1377) ([#1515](https://github.com/monumental-archive/.github/pull/1515))
+- compare builds with stele verify repro (#1376) ([#1511](https://github.com/monumental-archive/.github/pull/1511))
+- give a fixture only the environment its row names ([#1512](https://github.com/monumental-archive/.github/pull/1512))
+- derive inventories through stele calls (#1371) ([#1516](https://github.com/monumental-archive/.github/pull/1516))
+- update monumental-archive/stele to v0.26.0 ([#1500](https://github.com/monumental-archive/.github/pull/1500))
+- dequeue and regenerate a queued release pr ([#1517](https://github.com/monumental-archive/.github/pull/1517))
+
+### Documentation
+
+- record the pgrx test class cargo-mutants mutates ([#1479](https://github.com/monumental-archive/.github/pull/1479))
+- re-answer regression tests from the checklist ([#1482](https://github.com/monumental-archive/.github/pull/1482))
+- name both belt test legs in CLAUDE.md ([#1488](https://github.com/monumental-archive/.github/pull/1488))
+- count the pgrx init lock row in the answer ([#1502](https://github.com/monumental-archive/.github/pull/1502))
+
+### Testing
+
+- hold the baseline check and the pgrx init to their bugs ([#1454](https://github.com/monumental-archive/.github/pull/1454))
+
 ## [1.69.3](https://github.com/monumental-archive/.github/compare/v1.69.2...v1.69.3) - 2026-11-18
 
 ### Fixed
