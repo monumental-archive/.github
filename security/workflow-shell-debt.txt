@@ -21,6 +21,3 @@
 .github/actions/source-attest/action.yml	Guard the identity and resolve the canon tree	35	# leaving (the source-attest action is deleted): #1362
 .github/actions/source-attest/action.yml	Emit the chain links and push the ledger	19	# leaving (the source-attest action is deleted): #1362
 .github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# stele (derive bump --check --expect): monumental-archive/stele#455
-.github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
-.github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376
-.github/workflows/repro-check.yml	Compare rebuilt digests with the published ones	17	# stele: #1352 unassigned
