@@ -11,6 +11,7 @@ with a scrubbed environment (#857). The last row is the canon itself.
 """
 
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -18,16 +19,18 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
 
 _HERE = Path(__file__).resolve().parent
 HELPER = _HERE / "coverage-exclusions.py"
 GIT = shutil.which("git") or "git"
 BASH = shutil.which("bash") or "bash"
-CLEAN = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-    "GIT_CONFIG_GLOBAL": os.devnull,
-    "GIT_CONFIG_NOSYSTEM": "1",
-}
+# No user or system git config reaches a fixture repository.
+GIT_CONFIG = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
 # The markers are assembled, never written whole, so this file's own
 # comments and strings stay outside the lint's reach by construction.
@@ -157,7 +160,9 @@ class Task(unittest.TestCase):
             (root / name).write_text(body, encoding="utf-8")
         for args in (["init", "-q"], ["add", "."]):
             # ruff: ignore[subprocess-without-shell-equals-true]
-            subprocess.run([GIT, *args], cwd=root, env=CLEAN, check=True)
+            subprocess.run(
+                [GIT, *args], cwd=root, env=hermetic.env(**GIT_CONFIG), check=True
+            )
         return root
 
     @staticmethod
@@ -172,7 +177,7 @@ class Task(unittest.TestCase):
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", task_body()],
             cwd=root,
-            env={**CLEAN, "ORG_BELT_DIR": str(_HERE)},
+            env=hermetic.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG),
             capture_output=True,
             text=True,
             check=False,
@@ -267,7 +272,7 @@ class Canon(unittest.TestCase):
         listing = subprocess.run(
             [GIT, "ls-files", ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js"],
             cwd=root,
-            env=CLEAN,
+            env=hermetic.env(**GIT_CONFIG),
             capture_output=True,
             text=True,
             check=True,
