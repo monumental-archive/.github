@@ -422,7 +422,7 @@ literal):
   **A release tag's source verdict** (#1350) is one signed statement
   binding the tag to its commit and to the source level that commit's
   chain link holds. It is published as the release asset
-  `source-verdict.json` from `.github@v1.70.1` on. One command reads
+  `source-verdict.json` from `.github@v1.70.2` on. One command reads
   it, from a clone holding the branches, the ledger and the tag:
 
   ```bash

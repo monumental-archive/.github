@@ -321,7 +321,7 @@
     },
     "enrichmentFromVersion": "1.41.0",
     "manifestSchemaFromVersion": "1.65.0",
-    "sourceVerdictFromVersion": "1.70.1",
+    "sourceVerdictFromVersion": "1.70.2",
     "sourceVerdictBundle": "source-verdict.json"
   },
   "tags": {
