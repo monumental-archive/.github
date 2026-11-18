@@ -117,19 +117,28 @@ def entries(value: object) -> list[str]:
 def parse_majors(spec: str) -> list[int] | None:
     """Read a `--major` SPEC: the plan's JSON, one major or a list of them.
 
+    The plan (`mise/pgrx-plan.sh`) prints its majors as strings,
+    `["14","18"]`, and a leg's matrix value arrives bare, `18`: both
+    are the same majors, so a string of digits reads as its number.
+
     Returns:
-        The majors, or None for anything that is not a whole number or a
-        list of them.
+        The majors, or None for anything that is not a whole number, a
+        string of digits, or a list of them.
 
     """
     try:
         value = json.loads(spec)
     except json.JSONDecodeError:
         return None
-    value = value if isinstance(value, list) else [value]
-    if not all(isinstance(m, int) and not isinstance(m, bool) for m in value):
-        return None
-    return value
+    majors: list[int] = []
+    for m in value if isinstance(value, list) else [value]:
+        if isinstance(m, int) and not isinstance(m, bool):
+            majors.append(m)
+        elif isinstance(m, str) and m.isascii() and m.isdigit():
+            majors.append(int(m))
+        else:
+            return None
+    return majors
 
 
 def select_majors(
