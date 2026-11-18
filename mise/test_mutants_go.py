@@ -93,6 +93,20 @@ echo '{}' > .gomu_history.json
 exit "${PLANT_GOMU_STATUS:-0}"
 """
 
+COMPILE_ERROR = (
+    "Compilation failed: compilation error: # example.com/p/a\n"
+    "./a.go:9:9: missing return\n"
+)
+SHIM_ERROR = (
+    "Compilation failed: compilation error: mise ERROR No version is set for shim: go\n"
+)
+MISE_STUB = """#!/usr/bin/env bash
+case "$*" in
+  "which gomu") printf '%s\\n' "${PLANT_REAL_GOMU}" ;;
+  *) echo "mise ERROR shim refused: $*" >&2; exit 2 ;;
+esac
+"""
+
 A_GO = """package a
 
 func Add(x, y int) int {
@@ -177,6 +191,8 @@ class Planted(unittest.TestCase):
             path.chmod(0o755)
         self.reports = self.tmp / "reports"
         self.reports.mkdir()
+        # (package, line) to the `error` gomu writes for that mutant.
+        self.errors: dict[tuple[str, int], str] = {}
         self.summary = self.tmp / "summary"
         self.summary.mkdir()
         self.log = self.tmp / "log"
@@ -256,6 +272,7 @@ class Planted(unittest.TestCase):
                         "type": kind,
                     },
                     "status": status,
+                    "error": self.errors.get((pkg, line), ""),
                 }
                 for i, (status, line, kind) in enumerate(results)
             ],
@@ -340,6 +357,7 @@ class Verdicts(Planted):
     def test_clean_run_is_green_with_the_summary(self) -> None:
         """Killed and timed out are killed; not viable is its own count."""
         self.adopt()
+        self.errors["a", 9] = COMPILE_ERROR
         self.report(
             "a",
             ("KILLED", 4, "arithmetic"),
@@ -442,6 +460,33 @@ class Verdicts(Planted):
             "    goroutine 1 [running]:\n"
             f"{LABEL}: not judged: a/a.go: gomu exited 2\n"
             f"{LABEL}: not judged: b/b.go: gomu exited 2\n" + RED_TAIL,
+        )
+
+    def test_the_verdict_counts_results_never_the_reports_totals(self) -> None:
+        """The report said killedMutants 0 beside nine KILLED results (0.3.0)."""
+        self.adopt()
+        self.clean_reports()
+        body = json.loads((self.reports / "a.json").read_text(encoding="utf-8"))
+        body |= {"killedMutants": 0, "statistics": {"killed": 0, "survived": 9}}
+        (self.reports / "a.json").write_text(json.dumps(body), encoding="utf-8")
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, measuring() + summary_line((3, 3, 0, 0, 0, 0)))
+
+    def test_not_viable_counts_only_a_compiler_error(self) -> None:
+        """A compile check that failed for a reason of its own judged nothing."""
+        self.adopt()
+        self.errors["a", 9] = SHIM_ERROR
+        self.report("a", ("KILLED", 4, "arithmetic"), ("NOT_VIABLE", 9, "return"))
+        self.report("b", ("KILLED", 4, "arithmetic"))
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 1)
+        self.assertIn(summary_line((3, 2, 0, 0, 0, 0)), got.stdout)
+        self.assertEqual(
+            got.stderr,
+            f"{LABEL}: not judged: NOT_VIABLE: a/a.go:9:9 return — not the"
+            " compiler: Compilation failed: compilation error: mise ERROR No"
+            " version is set for shim: go\n" + RED_TAIL,
         )
 
     def test_a_red_baseline_is_red_before_any_mutant(self) -> None:
@@ -605,6 +650,21 @@ class Toolchain(Planted):
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertEqual(self.calls("ignore"), [f"ignore {self.root}/.gomuignore"] * 2)
         self.assertNotIn(f"cwd {self.root}", self.calls("cwd"))
+
+    def test_a_mise_shim_is_resolved_to_the_binary(self) -> None:
+        """The binary runs, not the shim, so its go children see real go."""
+        self.adopt()
+        self.clean_reports()
+        misebin = self.tmp / "misebin"
+        misebin.mkdir()
+        (misebin / "mise").write_text(MISE_STUB, encoding="utf-8")
+        (misebin / "mise").chmod(0o755)
+        (misebin / "gomu").symlink_to(misebin / "mise")
+        self.env["PATH"] = f"{misebin}{os.pathsep}{self.env['PATH']}"
+        self.env["PLANT_REAL_GOMU"] = f"{self.shims}/gomu"
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(len(self.calls("gomu run")), 2)
 
     def test_nothing_gomu_writes_lands_in_the_tree(self) -> None:
         """History and report go to a scratch directory, never the tree."""
