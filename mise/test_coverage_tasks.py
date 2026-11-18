@@ -396,7 +396,11 @@ class TypeScriptRows(CoverageTaskCase):
         """The upload is the measured run's own lcov, off lcov.info."""
         done, tree = self.run_task("coverage:report", python=False, typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("coverage:report: lcov-typescript.info written\n", done.stdout)
+        self.assertEqual(
+            "coverage:report: lcov-typescript.info written\n"
+            "coverage:report: upload lcov-typescript.info\n",
+            done.stdout,
+        )
         self.assertTrue((tree / "lcov-typescript.info").is_file())
         self.assertFalse((tree / "lcov.info").exists())
 
@@ -420,7 +424,68 @@ def upload_step() -> str:
 
 
 class UploadStep(unittest.TestCase):
-    """ci.yml's report step asks the probe which legs the tree measures."""
+    """ci.yml's report step uploads what coverage:report says it wrote.
+
+    Which legs a tree measures, and so which reports exist, is the task's
+    answer (#1386): the step reads the task's `upload` line and nothing
+    else. The stub `mise` answers `run coverage:report` with the lines the
+    row gives it, as the real task prints them.
+    """
+
+    def upload(self, report: str, *, has_token: bool = True) -> tuple[str, str]:
+        """Run the lifted step with a stub `coverage:report`.
+
+        Returns:
+            The step's stdout, and what it wrote to GITHUB_OUTPUT.
+
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            stubs = Path(tmp) / "stubs"
+            stubs.mkdir()
+            (Path(tmp) / "report").write_text(report, encoding="utf-8")
+            (stubs / "mise").write_text(
+                "#!/usr/bin/env bash\n"
+                '[[ "$1 $2" == "run coverage:report" ]] || exit 1\n'
+                f'cat "{tmp}/report"\n',
+                encoding="utf-8",
+            )
+            (stubs / "mise").chmod(0o755)
+            out = Path(tmp) / "outputs"
+            env = {
+                "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
+                "HAS_TOKEN": "true" if has_token else "false",
+                "GITHUB_OUTPUT": str(out),
+            }
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
+                [BASH, "-e", "-c", upload_step()],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, done.returncode, done.stderr)
+            return done.stdout, out.read_text("utf-8") if out.exists() else ""
+
+    def test_the_task_list_is_uploaded(self) -> None:
+        """A mixed tree uploads every report the task listed."""
+        _, outputs = self.upload(
+            "coverage:report: coverage.txt written\n"
+            "coverage:report: upload coverage.txt,coverage.xml\n"
+        )
+        self.assertEqual("files=coverage.txt,coverage.xml\nskip=false\n", outputs)
+
+    def test_a_skipped_task_uploads_nothing(self) -> None:
+        """No floor: the task lists nothing, and the upload is skipped."""
+        _, outputs = self.upload("coverage:report: no .coverage-floor, skipped\n")
+        self.assertEqual("files=\nskip=true\n", outputs)
+
+    def test_no_token_skips_without_running_the_task(self) -> None:
+        """No token: nothing is rendered, and the step says why."""
+        stdout, outputs = self.upload("unreachable\n", has_token=False)
+        self.assertEqual("::notice::no token; badge upload skipped\n", stdout)
+        self.assertEqual("files=\nskip=true\n", outputs)
 
     def test_a_python_only_tree_uploads(self) -> None:
         """The step once skipped any tree without Cargo.toml or go.mod."""
@@ -432,7 +497,10 @@ class UploadStep(unittest.TestCase):
             mise = MISE.replace(
                 "exit 1\n",
                 'if [[ "$1 $2" == "run coverage:report" ]]; then\n'
-                "  touch coverage.xml\n  exit 0\nfi\nexit 1\n",
+                "  touch coverage.xml\n"
+                '  echo "coverage:report: coverage.xml written"\n'
+                '  echo "coverage:report: upload coverage.xml"\n'
+                "  exit 0\nfi\nexit 1\n",
             )
             (stubs / "mise").write_text(mise, encoding="utf-8")
             (stubs / "mise").chmod(0o755)
