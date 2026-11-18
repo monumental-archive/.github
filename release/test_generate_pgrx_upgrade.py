@@ -165,28 +165,47 @@ exit 1
 # HOME is redirected with it so no global git config reaches a fixture,
 # and an identity is set because a redirected HOME leaves git without one
 # the moment a row commits - which the planted row below does.
-GIT_ENV_KEPT = frozenset({"GIT_EDITOR"})
 IDENTITY_NAME = "pgrx upgrade harness"
 IDENTITY_EMAIL = "harness@example.invalid"
 
+# What a fixture's process inherits from the suite's, by name, and why
+# (#1508). Everything else a row needs it states itself, through
+# `overrides`. The list is an ALLOW-list on purpose: the deny-list it
+# replaced dropped git's, the forge's and the runner's variables and
+# kept the rest, so the release job's own step inputs reached fixtures
+# — `VERSION: 1.69.4` turned "VERSION must be set" into a row that
+# could not refuse, and the canon could not tag. A deny-list misses the
+# next exported input the same way; an allow-list cannot.
+INHERITED = {
+    # Finding bash, git, jq and the belt's tools at all.
+    "PATH": "the commands a script runs",
+    # mktemp and every tool that writes scratch.
+    "TMPDIR": "where scratch files go",
+    # The scripts print and match UTF-8 (em-dashes in their messages);
+    # under the C locale bash and grep treat them byte-wise.
+    "LANG": "the character set messages are read in",
+    "LC_ALL": "the character set messages are read in",
+    "LC_CTYPE": "the character set messages are read in",
+    # The Rust toolchain's own homes: cargo and rustup find their
+    # installed toolchains here, and a fixture HOME would hide them.
+    "CARGO_HOME": "where cargo's toolchain lives",
+    "RUSTUP_HOME": "where rustup's toolchains live",
+    "RUSTUP_TOOLCHAIN": "the toolchain mise selected for this run",
+}
+
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build an environment the caller's git state cannot reach into.
+    """Build an environment the suite's own environment cannot reach into.
 
     Returns:
-        The caller's environment with every `GIT_*` variable dropped but
-        `GIT_EDITOR`, with HOME and a git identity set, and with any
-        overrides applied last.
+        The variables INHERITED names (#1508), HOME and a git identity
+        set, and any overrides applied last.
 
     """
-    env = {
-        name: value
-        for name, value in os.environ.items()
-        if not name.startswith("GIT_") or name in GIT_ENV_KEPT
-    }
+    env = {name: os.environ[name] for name in INHERITED if name in os.environ}
     env.update(
         HOME=str(home),
-        GIT_EDITOR=env.get("GIT_EDITOR", "true"),
+        GIT_EDITOR="true",
         GIT_AUTHOR_NAME=IDENTITY_NAME,
         GIT_AUTHOR_EMAIL=IDENTITY_EMAIL,
         GIT_COMMITTER_NAME=IDENTITY_NAME,

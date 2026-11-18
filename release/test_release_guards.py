@@ -45,6 +45,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 CANON = Path(__file__).resolve().parent.parent
 RELEASE = CANON / "release"
@@ -108,7 +109,6 @@ exit 1
 """
 
 
-GIT_ENV_KEPT = frozenset({"GIT_EDITOR"})
 IDENTITY_NAME = "release guard harness"
 IDENTITY_EMAIL = "harness@example.invalid"
 
@@ -116,44 +116,49 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # A row that asserts an input is REQUIRED only means something in an
 # environment where the input is genuinely absent, and a GitHub runner
 # supplies several of them ambiently — `GITHUB_REPOSITORY`, `GITHUB_SHA`,
-# `RUNNER_TEMP`. Locally they are unset, so three rows here passed on a
-# laptop and failed on the first CI run: the scripts read the runner's
-# values and sailed past the guard being tested.
-#
-# So the forge ambient is dropped with git's, and every input a row wants
-# is supplied explicitly through `overrides`. `GH_TOKEN` is named because
-# it is the one required input whose name does not start with a scrubbed
-# prefix.
-FORGE_ENV_PREFIXES = ("GITHUB_", "RUNNER_")
-FORGE_ENV_NAMES = frozenset({"GH_TOKEN"})
+# `RUNNER_TEMP` — as the release job supplies its step inputs
+# (`VERSION`, `PLAN`, `APP_SLUG`). So nothing reaches a fixture by
+# inheritance except what INHERITED names; every input a row wants is
+# supplied explicitly through `overrides`.
 
-
-def _ambient(name: str) -> bool:
-    """Report whether a variable is the caller's rather than a row's.
-
-    Returns:
-        True when the name belongs to git, the forge or the runner, and
-        must therefore not reach a fixture by inheritance.
-
-    """
-    if name.startswith("GIT_"):
-        return name not in GIT_ENV_KEPT
-    return name.startswith(FORGE_ENV_PREFIXES) or name in FORGE_ENV_NAMES
+# What a fixture's process inherits from the suite's, by name, and why
+# (#1508). Everything else a row needs it states itself, through
+# `overrides`. The list is an ALLOW-list on purpose: the deny-list it
+# replaced dropped git's, the forge's and the runner's variables and
+# kept the rest, so the release job's own step inputs reached fixtures
+# — `VERSION: 1.69.4` turned "VERSION must be set" into a row that
+# could not refuse, and the canon could not tag. A deny-list misses the
+# next exported input the same way; an allow-list cannot.
+INHERITED = {
+    # Finding bash, git, jq and the belt's tools at all.
+    "PATH": "the commands a script runs",
+    # mktemp and every tool that writes scratch.
+    "TMPDIR": "where scratch files go",
+    # The scripts print and match UTF-8 (em-dashes in their messages);
+    # under the C locale bash and grep treat them byte-wise.
+    "LANG": "the character set messages are read in",
+    "LC_ALL": "the character set messages are read in",
+    "LC_CTYPE": "the character set messages are read in",
+    # The Rust toolchain's own homes: cargo and rustup find their
+    # installed toolchains here, and a fixture HOME would hide them.
+    "CARGO_HOME": "where cargo's toolchain lives",
+    "RUSTUP_HOME": "where rustup's toolchains live",
+    "RUSTUP_TOOLCHAIN": "the toolchain mise selected for this run",
+}
 
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build an environment the caller's git state cannot reach into.
+    """Build an environment the suite's own environment cannot reach into.
 
     Returns:
-        The caller's environment with git's, the forge's and the
-        runner's variables dropped, HOME and a git identity set, and any
+        The variables INHERITED names, HOME and a git identity set, and any
         overrides applied last.
 
     """
-    env = {name: value for name, value in os.environ.items() if not _ambient(name)}
+    env = {name: os.environ[name] for name in INHERITED if name in os.environ}
     env.update(
         HOME=str(home),
-        GIT_EDITOR=env.get("GIT_EDITOR", "true"),
+        GIT_EDITOR="true",
         GIT_AUTHOR_NAME=IDENTITY_NAME,
         GIT_AUTHOR_EMAIL=IDENTITY_EMAIL,
         GIT_COMMITTER_NAME=IDENTITY_NAME,
@@ -537,6 +542,23 @@ class RecordDraftRegistries(unittest.TestCase):
             RUN_URL=RUN,
             REGISTRIES="npm=neutral",
         )
+
+
+class HermeticEnvironment(unittest.TestCase):
+    """A fixture's environment is what the row gives it (#1508)."""
+
+    def test_the_release_job_inputs_do_not_reach_a_fixture(self) -> None:
+        """The release job exports its step inputs; no fixture sees them."""
+        planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
+        with patch.dict(os.environ, planted), TemporaryDirectory() as d:
+            env = hermetic_env(Path(d))
+        self.assertEqual([], sorted(set(planted) & set(env)))
+
+    def test_a_row_still_states_its_own_input(self) -> None:
+        """Overrides are how a row gives a fixture an input."""
+        with patch.dict(os.environ, {"VERSION": "1.69.4"}), TemporaryDirectory() as d:
+            env = hermetic_env(Path(d), VERSION="2.0.0")
+        self.assertEqual("2.0.0", env["VERSION"])
 
 
 class CoverageFloorApplicability(unittest.TestCase):
