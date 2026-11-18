@@ -272,13 +272,10 @@ jobs:
           # other bytes, is as loud as it ever was, and a declared
           # target the release cannot place is CANNOT_JUDGE by name.
           #
-          # Refused rather than omitted when empty: omitting it means
-          # "this rebuild covered every target", which is exactly the
-          # false claim this edit exists to stop a class from making.
-          if [[ -z ${TARGETS//[[:space:]]/} ]]; then
-            echo "::error::${CLASS} declares no rebuild target — an undeclared population judges every target the class published"
-            exit 1
-          fi
+          # Refused rather than omitted when empty, and stele refuses it
+          # (stele#401): omitting it means "this rebuild covered every
+          # target", which is exactly the false claim this edit exists
+          # to stop a class from making.
           stele verify repro \
             --repo "${GITHUB_REPOSITORY}" --tag "${TAG}" \
             --released "${released}" --rebuilt rebuilt.sha256 \
