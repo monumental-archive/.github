@@ -29,7 +29,14 @@ dir="${1:?${usage}}"
 lang="${2:?${usage}}"
 label="audit:mutants: ${lang}"
 
-rows=$(find "${dir}" -name "${lang}.tsv" -type f -exec cat {} + | sort -n)
+# No artifact at all means download-artifact makes no directory, and a
+# `find` of a missing directory fails inside the pipeline above its own
+# message — measured on the canon's first run (44208357536), which died
+# on "No such file or directory" with nothing named.
+rows=""
+if [[ -d ${dir} ]]; then
+  rows=$(find "${dir}" -name "${lang}.tsv" -type f -exec cat {} + | sort -n)
+fi
 if [[ -z ${rows} ]]; then
   echo "${label}: no shard reported a summary — every shard died before its last line" >&2
   exit 1

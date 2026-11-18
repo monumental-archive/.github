@@ -134,21 +134,27 @@ listed=$(awk -F '\t' '$1 == "listed" { print $2 }' <<< "${scan}")
 findings=$(awk -F '\t' '$1 != "listed"' <<< "${scan}")
 
 # Pragmas without a reason, in every tracked Python file. `end` closes a
-# region and is the one form that needs none.
-pragmas=$(git grep -n -E '#.*pragma:.*no mutate' -- ':!vendor/**' '*.py' || true)
+# region and is the one form that needs none. `git grep` narrows the
+# files; the tokenizer decides, since mutmut reads pragmas from COMMENTS
+# only and a string that spells one (a test fixture) is not a site.
+candidates=$(git grep -l -E 'pragma:.*no mutate' -- ':!vendor/**' '*.py' || true)
+pragmas=""
+if [[ -n ${candidates} ]]; then
+  files=()
+  while IFS= read -r f; do files+=("${f}"); done <<< "${candidates}"
+  pragmas=$(python3 "${ORG_BELT_DIR:?unset — no belt}/mutmut-pragmas.py" "${files[@]}")
+fi
 bare=()
 sites=0
-while IFS= read -r hit; do
-  [[ -n ${hit} ]] || continue
-  rest="${hit#*no mutate}"
+while IFS=$'\t' read -r file line comment; do
+  [[ -n ${file} ]] || continue
+  rest="${comment#*no mutate}"
   word=$(awk '{ sub(/^[: ]+/, ""); print $1 }' <<< "${rest}")
   [[ ${word} != end ]] || continue
   if [[ ${rest} =~ \ --\ +[^[:space:]] ]]; then
     sites=$((sites + 1))
   else
-    file="${hit%%:*}"
-    line="${hit#*:}"
-    bare+=("${file}:${line%%:*}")
+    bare+=("${file}:${line}")
   fi
 done <<< "${pragmas}"
 
