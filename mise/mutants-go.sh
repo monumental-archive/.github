@@ -112,7 +112,7 @@ command -v go > /dev/null || {
   echo "${label}: ${adoption} is tracked but go is missing — pin go in mise.toml" >&2
   exit 1
 }
-command -v gomu > /dev/null || {
+gomu_bin=$(command -v gomu) || {
   echo "${label}: gomu missing — the belt pins it lazy; install it by name:" >&2
   echo "    mise install github:sivchari/gomu" >&2
   exit 1
@@ -184,9 +184,18 @@ while IFS=$'\t' read -r path dir _; do
     mkdir "${run}"
     status=0
     (cd "${run}" && gomu run "${file}" --workers 1 --timeout "${timeout}" \
-      --incremental=false --output json --fail-on-gate=false) >> "${scratch}/gomu.log" 2>&1 || status=$?
+      --incremental=false --output json --fail-on-gate=false) > "${run}/out" 2>&1 || status=$?
+    cat "${run}/out" >> "${scratch}/gomu.log"
     if [[ ${status} -ne 0 ]]; then
       printf '%s: gomu exited %s\n' "${file#"${root}"/}" "${status}" >> "${scratch}/runs.log"
+      # The first failure's own output, once: without it a run that
+      # failed for every file says only "exited N" (#1356, stele's first
+      # run: exit 2 on all 26 files of a shard, the cause discarded).
+      if [[ -z ${shown:-} ]]; then
+        shown=1
+        echo "${label}: gomu (${gomu_bin}) exited ${status} on ${file#"${root}"/}; its output:" >&2
+        tail -n 40 "${run}/out" | sed 's/^/    /' >&2
+      fi
     elif [[ -s ${run}/mutation-report.json ]]; then
       mv "${run}/mutation-report.json" "${scratch}/reports/${i}.json"
     else

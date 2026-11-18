@@ -167,6 +167,7 @@ class Planted(unittest.TestCase):
         (self.goroot / "bin").mkdir(parents=True)
         shims = self.tmp / "shims"
         shims.mkdir()
+        self.shims = shims
         for path, body in {
             self.goroot / "bin" / "go": REAL_GO_STUB,
             shims / "go": SHIM_GO_STUB,
@@ -422,6 +423,25 @@ class Verdicts(Planted):
             got.stderr,
             f"{LABEL}: not judged: [1/1] b.go (error: parse failed)\n"
             f"{LABEL}: not judged: b/b.go: gomu wrote no report\n" + RED_TAIL,
+        )
+
+    def test_a_failing_gomu_shows_its_own_output_once(self) -> None:
+        """Exit 2 on every file, as on stele's first run: the cause is shown."""
+        self.adopt()
+        self.env["PLANT_GOMU_STATUS"] = "2"
+        (self.reports / "a.log").write_text(
+            "panic: boom\ngoroutine 1 [running]:\n", encoding="utf-8"
+        )
+        (self.reports / "b.log").write_text("panic: boom\n", encoding="utf-8")
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 1)
+        self.assertEqual(
+            got.stderr,
+            f"{LABEL}: gomu ({self.shims}/gomu) exited 2 on a/a.go; its output:\n"
+            "    panic: boom\n"
+            "    goroutine 1 [running]:\n"
+            f"{LABEL}: not judged: a/a.go: gomu exited 2\n"
+            f"{LABEL}: not judged: b/b.go: gomu exited 2\n" + RED_TAIL,
         )
 
     def test_a_red_baseline_is_red_before_any_mutant(self) -> None:
