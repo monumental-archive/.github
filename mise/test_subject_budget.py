@@ -19,6 +19,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 import importlib.util
 import io
 import json
+import os
 import re
 import sys
 import tomllib
@@ -1175,6 +1176,9 @@ class TestMainGuards(unittest.TestCase):
             The exit status, stdout and stderr.
 
         """
+        # The real directory, read before anything is patched (#1491):
+        # under the patch below, Path.cwd() answers the temporary root.
+        cwd = Path.cwd()
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             belt = root / "belt"
@@ -1199,7 +1203,6 @@ class TestMainGuards(unittest.TestCase):
                 ),
                 mock.patch.object(sb.Path, "cwd", return_value=root),
             ):
-                cwd = Path.cwd()
                 sb.os.chdir(root)
                 try:
                     with redirect_stdout(out), redirect_stderr(err):
@@ -1207,6 +1210,30 @@ class TestMainGuards(unittest.TestCase):
                 finally:
                     sb.os.chdir(cwd)
             return status, out.getvalue(), err.getvalue()
+
+    def test_every_row_leaves_the_directory_where_it_started(self) -> None:
+        """Each row's helper puts the process back where it found it (#1491).
+
+        The row that fails before #1491: `_run` read `Path.cwd()` after
+        patching it, so its restore went back into the temporary root,
+        which was then deleted under the process.
+        """
+        start = Path.cwd()
+        names = [
+            name
+            for name in unittest.TestLoader().getTestCaseNames(TestMainGuards)
+            if name != self._testMethodName
+        ]
+        self.assertTrue(names)
+        for name in names:
+            with self.subTest(row=name):
+                TestMainGuards(name).run(unittest.TestResult())
+                try:
+                    here = str(Path.cwd())
+                except FileNotFoundError:
+                    here = "a deleted directory"
+                os.chdir(start)
+                self.assertEqual(here, str(start))
 
     def test_no_renovate_json_skips_clean(self) -> None:
         """Nothing mints subjects here, so there is nothing to bound."""

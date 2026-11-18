@@ -145,7 +145,8 @@ class Task(unittest.TestCase):
         for root in ROOT_RE.findall(body()):
             (tree / root).mkdir(parents=True, exist_ok=True)
             (tree / root / "test_ok.py").write_text(PASSING, encoding="utf-8")
-        shutil.copy(_HERE / "git-decoy.py", tree / "mise" / "git-decoy.py")
+        for helper in ("git-decoy.py", "unittest-guarded.py"):
+            shutil.copy(_HERE / helper, tree / "mise" / helper)
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
         (tree / "mise" / "test_leaky.py").write_text(leaky, encoding="utf-8")
         return tree, throwaway(base / "real")
