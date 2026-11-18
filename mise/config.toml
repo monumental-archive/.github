@@ -444,14 +444,21 @@ python = "3.15.2"
 # mise/mutants-go.sh. Chosen over gremlins and go-mutesting on a
 # measured comparison (docs/tooling-verdicts.md): eleven kinds of mutant
 # gremlins cannot produce, and a compile check that keeps a mutant that
-# does not build out of the killed count. Not in mise's baked aqua
-# registry; the `github:` backend takes the prebuilt binary, and the
-# lock's checksums equal upstream's gomu_0.3.0_checksums.txt.
+# does not build out of the killed count.
+#
+# BUILT FROM SOURCE BY THE REPOSITORY'S OWN GO, never the prebuilt
+# release: gomu type-checks each file through export data that the
+# repository's `go` writes, and its importer is the one it was built
+# with. The v0.3.0 release binary is built with Go 1.24 and panicked on
+# every import against Go 1.27 ("export data version 5 is greater than
+# maximum supported version 2", stele, 2026-11-18). Built by the go:
+# backend with the toolchain that writes the export data, the two match
+# by construction. The module is verified by Go's checksum database.
 #
 # LAZY, so a bare `mise install` — the gate, and every job without a
 # named install list — skips it: only repo-mutants.yml's `mutants-go` job
-# installs it, by name (`mise install github:sivchari/gomu`).
-"github:sivchari/gomu" = { version = "v0.3.0", lazy = true, lazy_bins = [
+# installs it, by name, after the repository's own go pin.
+"go:github.com/sivchari/gomu/cmd/gomu" = { version = "0.3.0", lazy = true, lazy_bins = [
   "gomu",
 ] }
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must

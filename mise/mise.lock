@@ -875,51 +875,9 @@ checksum_source = "mise-versions"
 url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.51.0/cargo-semver-checks-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/608677294"
 
-[[tools."github:sivchari/gomu"]]
+[[tools."go:github.com/sivchari/gomu/cmd/gomu"]]
 version = "0.3.0"
-backend = "github:sivchari/gomu"
-
-[tools."github:sivchari/gomu"."platforms.linux-arm64"]
-checksum = "sha256:49bc7fec3bb359820eee0f4a52f3d0d26080dd73474920f81f79842735ca7f34"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017460"
-
-[tools."github:sivchari/gomu"."platforms.linux-arm64-musl"]
-checksum = "sha256:49bc7fec3bb359820eee0f4a52f3d0d26080dd73474920f81f79842735ca7f34"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017460"
-
-[tools."github:sivchari/gomu"."platforms.linux-x64"]
-checksum = "sha256:4c774a1bef028ecc7d6cff0859ce63a5f84792accabd0c5c731042064aa337d6"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017458"
-
-[tools."github:sivchari/gomu"."platforms.linux-x64-musl"]
-checksum = "sha256:4c774a1bef028ecc7d6cff0859ce63a5f84792accabd0c5c731042064aa337d6"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017458"
-
-[tools."github:sivchari/gomu"."platforms.macos-arm64"]
-checksum = "sha256:9b042d1b8c9fb6370ac9bc115ac04bdc96f3c592da8fa8005fa4030c037e033c"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017464"
-
-[tools."github:sivchari/gomu"."platforms.macos-x64"]
-checksum = "sha256:4bec9b9a76f23eac4f253be131287595e1346d9f4aad046d63a67b2b707eb8a9"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017459"
-
-[tools."github:sivchari/gomu"."platforms.windows-x64"]
-checksum = "sha256:cd071160ae260a77f4f06888c4f4de8eeaf495f3253b0916bdb0b5d21e1da66c"
-checksum_source = "mise-versions"
-url = "https://github.com/sivchari/gomu/releases/download/v0.3.0/gomu_0.3.0_windows_amd64.zip"
-url_api = "https://api.github.com/repos/sivchari/gomu/releases/assets/651017515"
+backend = "go:github.com/sivchari/gomu/cmd/gomu"
 
 [[tools.jq]]
 version = "1.8.2"

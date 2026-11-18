@@ -221,10 +221,11 @@ jobs:
 
       # The belt pins gomu `lazy`, so the bare install above — and every
       # gate and release job — skips it. This job is the one place it is
-      # installed: the prebuilt binary, checksummed in the lock. The
-      # repository's own go pin was installed above.
+      # installed: built from source by the repository's own go pin,
+      # installed above, so gomu reads the export data that go writes
+      # (#1356: the prebuilt v0.3.0 could not read Go 1.27's).
       - name: Install gomu, by name
-        run: mise install github:sivchari/gomu
+        run: mise install go:github.com/sivchari/gomu/cmd/gomu
 
       # The leg writes its counts for the totals job into the summary
       # directory (it creates it) as go.tsv.
