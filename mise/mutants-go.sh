@@ -114,7 +114,7 @@ command -v go > /dev/null || {
 }
 gomu_bin=$(command -v gomu) || {
   echo "${label}: gomu missing — the belt pins it lazy; install it by name:" >&2
-  echo "    mise install github:sivchari/gomu" >&2
+  echo "    mise install go:github.com/sivchari/gomu/cmd/gomu" >&2
   exit 1
 }
 # The binary itself, never mise's shim. A shim runs gomu under mise's own
@@ -137,6 +137,29 @@ export PATH
 resolved=$(command -v go)
 if [[ ${resolved} != "${goroot}/bin/go" ]]; then
   echo "${label}: go resolves to ${resolved}, not ${goroot}/bin/go" >&2
+  exit 1
+fi
+
+# gomu reads export data with the importer of the Go it was built with,
+# so one built with an older Go than the toolchain it runs under cannot
+# read that toolchain's export data: the v0.3.0 release binary, built
+# with Go 1.24.13, panicked on every import against Go 1.27 (#1356). The
+# belt builds it with the repository's own go; a stale local binary or a
+# cache restored across a Go bump is refused here, by name, before it can
+# panic or quietly lose its type information.
+built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2; exit }')
+running=$(go env GOVERSION)
+older=$(awk -v b="${built#go}" -v r="${running#go}" 'BEGIN {
+  nb = split(b, x, "."); nr = split(r, y, ".")
+  for (i = 1; i <= 3; i++) {
+    if ((x[i] + 0) < (y[i] + 0)) { print "yes"; exit }
+    if ((x[i] + 0) > (y[i] + 0)) { exit }
+  }
+}')
+if [[ -z ${built} || -n ${older} ]]; then
+  echo "${label}: ${gomu_bin} was built with ${built:-an unreadable Go}, older than the ${running} it runs under —" >&2
+  echo "  it cannot read this toolchain's export data; rebuild it with the repository's go:" >&2
+  echo "    mise install go:github.com/sivchari/gomu/cmd/gomu" >&2
   exit 1
 fi
 

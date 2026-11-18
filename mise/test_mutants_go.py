@@ -59,10 +59,12 @@ RED_TAIL = (
 
 REAL_GO_STUB = """#!/usr/bin/env bash
 printf 'go %s\\n' "$*" >> "${PLANT_LOG}"
-case "$1" in
-  env) printf '%s\\n' "${PLANT_GOROOT}" ;;
-  list) cat "${PLANT_LIST}" ;;
-  test)
+case "$*" in
+  "env GOROOT") printf '%s\\n' "${PLANT_GOROOT}" ;;
+  "env GOVERSION") printf '%s\\n' "${PLANT_GO:-go1.27.4}" ;;
+  "version -m "*) printf '%s: %s\\n' "$3" "${PLANT_GOMU_GO:-go1.27.4}" ;;
+  list*) cat "${PLANT_LIST}" ;;
+  test*)
     for a in "$@"; do
       [[ ${a} != -coverprofile=* ]] || cp "${PLANT_COVER}" "${a#-coverprofile=}"
     done
@@ -672,6 +674,32 @@ class Toolchain(Planted):
         got = self.run_leg()
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertEqual(len(self.calls("gomu run")), 2)
+
+    def test_a_gomu_built_with_an_older_go_is_refused(self) -> None:
+        """The v0.3.0 release binary (Go 1.24.13) under Go 1.27 is red."""
+        self.adopt()
+        self.clean_reports()
+        self.env["PLANT_GOMU_GO"] = "go1.24.13"
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 1)
+        self.assertEqual(got.stdout, "")
+        self.assertEqual(
+            got.stderr,
+            f"{LABEL}: {self.shims}/gomu was built with go1.24.13, older than the"
+            " go1.27.4 it runs under —\n"
+            "  it cannot read this toolchain's export data; rebuild it with the"
+            " repository's go:\n"
+            "    mise install go:github.com/sivchari/gomu/cmd/gomu\n",
+        )
+        self.assertEqual(self.calls("gomu"), [])
+
+    def test_a_gomu_built_with_the_same_go_runs(self) -> None:
+        """Equal build and toolchain versions pass the check."""
+        self.adopt()
+        self.clean_reports()
+        self.env |= {"PLANT_GOMU_GO": "go1.27.4", "PLANT_GO": "go1.27.4"}
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
 
     def test_nothing_gomu_writes_lands_in_the_tree(self) -> None:
         """History and report go to a scratch directory, never the tree."""

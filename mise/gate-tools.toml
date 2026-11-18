@@ -245,7 +245,7 @@ when = []
 tasks = []
 when = []
 
-[tools."github:sivchari/gomu"]
+[tools."go:github.com/sivchari/gomu/cmd/gomu"]
 # audit:mutants only, and pinned lazy: no bare install fetches it (#1356).
 tasks = []
 when = []

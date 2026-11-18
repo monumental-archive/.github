@@ -43,7 +43,7 @@ honestly blocked on.
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
-| gomu (`github:` backend, lazy, upstream checksums) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
+| gomu (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
 | editorconfig-checker (`aqua:`, binary `editorconfig-checker`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
@@ -2039,12 +2039,27 @@ held by a stub row* (`mise/test_mutants_go.py`; no row runs gomu):
   the runner's memory is measured by the first audit runs before this is
   raised.
 
-*Pin and checksums.* `github:sivchari/gomu` at v0.3.0, released
-2026-10-17, pinned lazy so only the audit job that names it installs it.
-Not in mise's baked aqua registry. `mise lock` (2026.11.6) recorded, for
-all seven lock platforms, checksums equal to upstream's
-`gomu_0.3.0_checksums.txt` — five distinct assets, compared by hand on
-2026-11-17; the musl platforms take the glibc-named Linux archive. One
+*Pin: built from source, never the release binary.*
+`go:github.com/sivchari/gomu/cmd/gomu` at v0.3.0, released 2026-10-17,
+pinned lazy so only the `mutants-go` job installs it, after the
+repository's own go pin. It was first pinned on the `github:` backend,
+the prebuilt binary with checksums equal to upstream's
+`gomu_0.3.0_checksums.txt`, and that binary could not do the job: gomu
+type-checks each file through export data that the repository's `go`
+writes, its importer is the one it was built with, and the release is
+built with Go 1.24.13. Against Go 1.27 it panicked on the first import
+of every file — `cannot decode "fmt", export data version 5 is greater
+than maximum supported version 2` — in all four shards of stele's run
+44266340133, and on a Mac once `GOROOT` was exported as mise exports it
+(without it the probes passed, which is how the panic got past them).
+`go install` of the same v0.3.0 with Go 1.27.4 — the module verified by
+Go's checksum database, `h1:Msjp6gpKH/pPGrD/IWMVFhD4NG8t3nXkUiNZn+4jS64=`
+— ran the same probe clean. Built by the toolchain whose export data it
+reads, the two match by construction, so a Go bump cannot strand it; the
+lock records the version and the checksum database is the trust. The leg
+holds it there: a gomu whose build Go (`go version -m`) is older than the
+`go` it runs under is refused by name before it runs — measured, the
+release binary is red that way and the source-built one runs. One
 maintainer, recorded as the risk it is.
 
 *Not proven on a Mac, by ruling.* No full mutation run is made locally:
