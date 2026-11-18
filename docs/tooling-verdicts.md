@@ -2407,6 +2407,40 @@ same crate across four shards and their totals. *Reopen:* upstream
 publishing arm64 assets with checksums (move to `github:`), or an aqua
 package appearing.
 
+**A class every pgrx adopter meets: cargo-mutants mutates the pgrx
+tests.** A pgrx extension's `#[pg_test]` module is compiled under
+`cfg(any(test, feature = "pg_test"))` (pgrx builds the tests into the
+extension). cargo-mutants' own test filter skips `#[test]` functions
+and `cfg(test)` code and does not recognise that cfg, so it mutates
+the tests themselves (`replace tests::answers with ()`). The tests
+always pass with such a mutant, so it always survives. Measured on
+release-lab's first run (run 44205918375). By the rule it stays a
+per-repository exclusion, never belt-delivered, but it is the same
+fact in every pgrx repository, so copy this into `.cargo/mutants.toml`
+with the crate's own path and nothing broader:
+
+```toml
+exclude_re = [
+  # <crate>'s `tests::` functions are test code: pgrx compiles its
+  # #[pg_test] module under `cfg(any(test, feature = "pg_test"))`, which
+  # cargo-mutants' own test filter (it skips `#[test]` and `cfg(test)`)
+  # does not recognise, so it mutates the tests themselves.
+  '^crates/<crate>/src/lib\.rs:[0-9]+:[0-9]+: replace (tests::|.* in tests::)',
+]
+```
+
+The two alternatives are cargo-mutants' two name forms: a whole
+function replaced (`replace tests::answers with ()`) and a mutant
+inside one (`replace == with != in tests::answers`). A file other than
+`lib.rs` that holds a `#[pg_test]` module gets its own entry.
+
+A second pgrx fact for the triage: an assertion added to a pgrx
+crate rides an existing `#[pg_test]` where the crate's `pg_test`
+module carries `single_call_fn` expectations. pgrx's generated runner
+calls `pg_test::setup` once per test, so a second test leaves those
+expectations unfulfilled (measured with `lint:pg-clippy` on
+release-lab).
+
 **sqlfluff, the third `pipx:` exception, provable only in
 monumental-archive-db** (#403). PyPI-only — no aqua package — so it
 rides checksummed uv under the `UV_*` floor environment like reuse and
