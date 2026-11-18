@@ -462,6 +462,17 @@ class Verdicts(Planted):
             f"{LABEL}: not judged: b/b.go: gomu exited 2\n" + RED_TAIL,
         )
 
+    def test_the_verdict_counts_results_never_the_reports_totals(self) -> None:
+        """The report said killedMutants 0 beside nine KILLED results (0.3.0)."""
+        self.adopt()
+        self.clean_reports()
+        body = json.loads((self.reports / "a.json").read_text(encoding="utf-8"))
+        body |= {"killedMutants": 0, "statistics": {"killed": 0, "survived": 9}}
+        (self.reports / "a.json").write_text(json.dumps(body), encoding="utf-8")
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, measuring() + summary_line((3, 3, 0, 0, 0, 0)))
+
     def test_not_viable_counts_only_a_compiler_error(self) -> None:
         """A compile check that failed for a reason of its own judged nothing."""
         self.adopt()
