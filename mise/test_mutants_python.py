@@ -108,6 +108,7 @@ class Planted(unittest.TestCase):
             "PLANT_RESULTS": str(self.results),
             "PLANT_SHOW": str(self.show),
             "MUTANTS_SUMMARY_DIR": str(self.summary),
+            "ORG_BELT_DIR": str(BELT),
         }
         self.git("init", "-q")
 
@@ -342,6 +343,27 @@ class Reasons(Planted):
                 REASON,
             ],
         )
+        self.assertEqual(log, [])
+
+    def test_pragma_text_in_a_string_is_not_a_site(self) -> None:
+        """Pragmas live in comments only; a fixture string is not a site.
+
+        The canon's own first run went red on this file's fixtures, which
+        spell pragmas inside strings (run 44208357536).
+        """
+        module = MODULE + 'FIXTURE = "x = 1  # pragma: no mutate"\n'
+        self.plant(KILLED, module=module)
+        done, _ = self.run_leg()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("0 excluded (sites)", done.stdout)
+
+    def test_untokenizable_file_is_red_by_name(self) -> None:
+        """A file the tokenizer cannot read is a site nobody checked."""
+        self.plant(KILLED)
+        self.track("pkg/broken.py", 'x = """  # pragma: no mutate\n')
+        done, log = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("mutmut-pragmas: pkg/broken.py: could not tokenize:", done.stderr)
         self.assertEqual(log, [])
 
     def test_region_end_needs_no_reason(self) -> None:

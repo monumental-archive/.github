@@ -29,7 +29,7 @@ class Totals(unittest.TestCase):
     def setUp(self) -> None:
         """Make an empty download directory."""
         self.dir = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.dir)
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
 
     def shard(self, k: int, row: str, lang: str = "rust") -> None:
         """Plant one shard's artifact the way download-artifact lays it out."""
@@ -46,7 +46,7 @@ class Totals(unittest.TestCase):
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(SCRIPT), str(self.dir), lang],
-            cwd=self.dir,
+            cwd=self.dir.parent,
             capture_output=True,
             text=True,
             check=False,
@@ -132,6 +132,21 @@ class Totals(unittest.TestCase):
             ],
         )
 
+    def test_missing_directory_is_named_not_mute(self) -> None:
+        """No artifact means no directory: the same named red, not a crash."""
+        shutil.rmtree(self.dir)
+        done = self.run_totals()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [
+                (
+                    f"{LABEL}: no shard reported a summary"
+                    " — every shard died before its last line"
+                )
+            ],
+        )
+
     def test_only_the_named_language_is_totalled(self) -> None:
         """One language per call: another leg's files are not read."""
         for k in range(2):
@@ -164,7 +179,7 @@ class Totals(unittest.TestCase):
         """No language named: refused, never a total of everything."""
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(SCRIPT), str(self.dir)],
-            cwd=self.dir,
+            cwd=self.dir.parent,
             capture_output=True,
             text=True,
             check=False,
