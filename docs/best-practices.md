@@ -62,27 +62,34 @@ re-score by hand whenever a change lands that a criterion would notice.
 
 Silver now stands on one remaining MUST:
 
-- `regression_tests_added50` — **Unmet, measured 2026-11-17 (#1335)**.
+- `regression_tests_added50` — **Unmet, re-answered 2026-11-18
+  (#1360)**. Window 2026-05-17 to `9f1b3ec`: 213 bugs fixed — the 58
+  `fix` commits that arrived with a test, and 155 of the 176 that
+  arrived without one (the other 21 were not bugs). **49 (23.0%)** are
+  now held by a test shown failing on its own assertion with the fix
+  reverted: 30 of the 58 tests that arrived with their fix, every one
+  revert-checked (#1335 sampled 30, #1360 checked the other 28), and
+  19 tests backfilled under #1360. Counting every test, proven or
+  not: 77 (36.2%). Of the other 136, 119 live in workflow YAML or
+  task bodies (left for #1352), 12 fixed code since removed, 4 need a
+  live Postgres, a container or macOS, and 1 (#1140, the pgrx init
+  lock) waits on its own defect; #1360's checklist names each.
+
   `mise/regression-count.py` sorts every `fix`-typed commit into test
   added, no test, not a code fix (docs, data, pins, Renovate's
-  `fix(deps)` and `fix(canon)`) and unclassifiable. Over the six months
-  to 2026-11-17: 58 test added, 176 no test, 261 not a code fix, 0
-  unclassifiable — a raw 24.8%. The hand-check corrects both halves:
-  of 30 "no test" fixes, 24 were bugs; of 30 "test added", 11 tests
-  fail on their own assertion with the fix's code reverted, 13 test
-  code the fix itself created (a revert removes what they call, so
-  they prove nothing about the bug), and 6 pass with the fix reverted.
-  That is about **11%** of bug fixes held by a test proven against
-  the bug, 23% at most if every test that arrived with its fix is
-  counted. The samples and the arithmetic are on #1335.
+  `fix(deps)` and `fix(canon)`) and unclassifiable, and reports 58 of
+  234 (24.8%) for the window. That is tests that arrived with the fix:
+  it counts a fix by whether its own diff touched a test, so a later
+  `test` commit cannot move it, and the backfill is counted from the
+  checklist by hand.
 
   `audit:regression-tests`, a Monday leg of `audit.yml` and
   `repo-audit.yml`, prints the four lists and puts the six-month ratio
   and the last seven days' "no test" fixes in the job summary. It is a
   report and exits 0 whatever the ratio: a diff cannot tell a bug fix
   from a `fix`-typed pin bump, so a gate on it would need an opt-out.
-  The backfill that moves the figure is #1360, and each backfilled test
-  is proven against its reverted fix before it counts.
+  Each backfilled test is proven against its reverted fix before it
+  counts.
 
 `test_statement_coverage80` was the wall, and its history is kept in
 [tooling-verdicts.md](tooling-verdicts.md) (the kcov entry): the bash
