@@ -27,6 +27,7 @@ run through the gate as `mise run test`, which `ci` collects.
 """
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -421,6 +422,81 @@ class Selection(Planted):
                 "actions/x/action.yml",
             ],
         )
+
+
+def belt_patterns() -> list[str]:
+    """List the belt's patterns beyond the two GitHub owners.
+
+    Returns:
+        The patterns the org setting must carry.
+
+    """
+    return [
+        f"{owner()}/*",
+        "jdx/mise-action@*",
+        "codecov/codecov-action@*",
+        "ossf/scorecard-action@*",
+    ]
+
+
+class AllowlistAudit(Planted):
+    """audit:actions-allowlist against a stub `gh` answering the live setting.
+
+    The audit and the lint read one list, mise/actions-allowed.sh. The
+    audit used to scrape the lint's `allowed=` line; when that line
+    became an array the scrape matched nothing and the audit died with
+    no message (the canon's audit run 44209677660). On that body the
+    first row here fails with exit 1 and empty output.
+    """
+
+    def audit(self, patterns: list[str]) -> subprocess.CompletedProcess:
+        """Run the audit with the org answering `patterns`.
+
+        Returns:
+            The finished process.
+
+        """
+        live = json.dumps({
+            "github_owned_allowed": True,
+            "verified_allowed": False,
+            "patterns_allowed": patterns,
+        })
+        stub = self.bin / "gh"
+        stub.write_text("#!/usr/bin/env bash\nprintf '%s' \"${STUB_LIVE}\"\n", "utf-8")
+        stub.chmod(0o755)
+        self.env |= {
+            "STUB_LIVE": live,
+            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+        }
+        self.plant({"security/identity.toml": ""})
+        return self.run_task("audit:actions-allowlist")
+
+    def test_the_live_setting_matching_the_belt_is_green(self) -> None:
+        """The org carrying the belt's list, in any order."""
+        done = self.audit(list(reversed(belt_patterns())))
+        self.assertEqual(
+            (done.returncode, done.stdout, done.stderr),
+            (0, "audit:actions-allowlist: live org allowlist matches the belt\n", ""),
+        )
+
+    def test_a_widened_live_setting_is_drift_by_name(self) -> None:
+        """One pattern more in the org than in the belt."""
+        done = self.audit([*belt_patterns(), "docker/login-action@*"])
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stdout, "")
+        self.assertIn("audit:actions-allowlist: patterns differ", done.stderr)
+        self.assertIn("docker/login-action@*", done.stderr)
+        self.assertIn(
+            "reconcile mise/actions-allowed.sh and security/README.md", done.stderr
+        )
+
+    def test_the_lint_and_the_audit_read_one_list(self) -> None:
+        """Neither task body spells a pattern of its own."""
+        for task in ("lint:actions-allowed", "audit:actions-allowlist"):
+            with self.subTest(task=task):
+                text = body(task)
+                self.assertIn('. "${ORG_BELT_DIR}/actions-allowed.sh"', text)
+                self.assertNotIn("mise-action@", text)
 
 
 class GateInstalls(unittest.TestCase):
