@@ -18,7 +18,10 @@ Each gomu result is classed by its `status`:
 
 - KILLED and TIMED_OUT are killed;
 - NOT_VIABLE is counted on its own and is never killed: gomu's compile
-  check rejected the mutant, so no test was asked anything;
+  check rejected the mutant, so no test was asked anything. It counts
+  only when the error is the compiler's, naming a `.go` file and line;
+  any other failure of the check (a shim, a missing toolchain) was not a
+  judgement of the mutant, and is red as not judged;
 - SURVIVED on a line no test executes is NOT COVERED — gomu takes no
   coverage, so this is where that verdict is made, keyed on the
   report's file and line against the profile's executed blocks;
@@ -48,6 +51,7 @@ it was given. Exit 1 on any red.
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +59,8 @@ from pathlib import Path
 MARK = "//mutants:equivalent"
 KILLED = frozenset({"KILLED", "TIMED_OUT"})
 SKIPPED = ("(error:", "(execution error:")
+# A compiler error names its place: `file.go:LINE:COL: message`.
+COMPILER = re.compile(r"\.go:\d+:\d+: ")
 
 
 @dataclass
@@ -261,8 +267,11 @@ def class_report(shard: Shard, verdict: Verdict, report: Path) -> None:
         status = result["status"]
         if status in KILLED:
             verdict.killed += 1
-        elif status == "NOT_VIABLE":
+        elif status == "NOT_VIABLE" and COMPILER.search(result.get("error") or ""):
             verdict.not_viable += 1
+        elif status == "NOT_VIABLE":
+            reason = (result.get("error") or "no error given").splitlines()[0]
+            verdict.unjudged.append(f"NOT_VIABLE: {site} — not the compiler: {reason}")
         elif status == "SURVIVED":
             class_survivor(shard, verdict, mutant, site)
         else:

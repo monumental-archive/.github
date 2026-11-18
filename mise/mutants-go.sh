@@ -117,6 +117,19 @@ gomu_bin=$(command -v gomu) || {
   echo "    mise install github:sivchari/gomu" >&2
   exit 1
 }
+# The binary itself, never mise's shim. A shim runs gomu under mise's own
+# environment, which puts the shims back ahead of the real toolchain set
+# below, so gomu's `go build` and `go test` reach the `go` shim instead:
+# outside a directory that pins go it fails ("No version is set for shim:
+# go"), and gomu reads every mutant as NOT_VIABLE (measured, #1356, on a
+# one-function module; the binary itself killed 3 of 4 in the same run).
+target=$(readlink "${gomu_bin}" || true)
+if [[ ${target##*/} == mise ]]; then
+  gomu_bin=$(mise which gomu) || {
+    echo "${label}: gomu resolves to a mise shim and \`mise which gomu\` names no binary" >&2
+    exit 1
+  }
+fi
 
 goroot=$(go env GOROOT)
 PATH="${goroot}/bin:${PATH}"
@@ -183,7 +196,7 @@ while IFS=$'\t' read -r path dir _; do
     run="${scratch}/run-${i}"
     mkdir "${run}"
     status=0
-    (cd "${run}" && gomu run "${file}" --workers 1 --timeout "${timeout}" \
+    (cd "${run}" && "${gomu_bin}" run "${file}" --workers 1 --timeout "${timeout}" \
       --incremental=false --output json --fail-on-gate=false) > "${run}/out" 2>&1 || status=$?
     cat "${run}/out" >> "${scratch}/gomu.log"
     if [[ ${status} -ne 0 ]]; then

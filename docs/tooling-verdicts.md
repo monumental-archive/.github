@@ -2024,6 +2024,16 @@ held by a stub row* (`mise/test_mutants_go.py`; no row runs gomu):
 - **The real toolchain first on PATH**, and the leg refuses to run if
   `go` resolves elsewhere: a `go test` that fails for an environment
   reason is killed to gomu as well (probed on a module of one function).
+- **gomu's binary, never mise's shim.** Called through the shim, gomu
+  runs under mise's own environment, which puts the shims back ahead of
+  that toolchain: its `go build` reached the `go` shim, which refused a
+  directory that pins no go, and every mutant read NOT_VIABLE. Measured
+  on a one-function module: the v1.69.1 leg reported 4 mutants, 0
+  killed, 4 not viable, green; the binary itself, 3 killed and 1 not
+  viable. stele's first run (44207892842) exited 2 on every file under
+  the same shim. So the leg resolves a shim with `mise which gomu`, and
+  a NOT_VIABLE counts only when its error is the compiler's, naming a
+  `.go` file and line; any other is red as not judged.
 - **One worker per shard.** A Mac ran out of memory (93 GB) while four
   parallel `-overlay` workers ran on stele beside other lanes' gates;
   the runner's memory is measured by the first audit runs before this is
