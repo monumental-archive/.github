@@ -593,61 +593,20 @@ jobs:
           IMAGE: ${{ steps.name.outputs.image }}
           UNTRUSTED_CONTEXT: ${{ inputs.context }}
           UNTRUSTED_DOCKERFILE: ${{ inputs.dockerfile }}
-        run: |
-          set -euo pipefail
-          pairs=$(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${FACTS}")
-          LABELS=()
-          while IFS= read -r kv; do LABELS+=(--label "${kv}"); done <<< "${pairs}"
-          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          # push-by-digest: no tag yet. A tag would make the untested
-          # per-architecture image pullable by name before the manifest
-          # exists and before anything has been proved.
-          #
-          # This rebuilds, but from the same builder in the same job, so
-          # every layer is already resolved. That is builder state, not a
-          # cache anyone else can poison.
-          # Build as its own statement, then read the metadata. Sequencing
-          # the two inside one command substitution would hand the exit
-          # status to jq and mask a failed build entirely, and silencing
-          # the build would throw away the log needed to explain it.
-          #
-          # oci-mediatypes=true is load-bearing, not cosmetic: the exporter
-          # default is false, a Docker-mediatype manifest makes imagetools
-          # create assemble a Docker manifest list, and that format has no
-          # annotations field — buildx drops index annotations SILENTLY
-          # (docker/buildx#1965). The assert step downstream proves the
-          # published index is OCI precisely because this is the failure
-          # mode that looks exactly like success.
-          # --provenance=false and --sbom=false, measured (#118): buildx
-          # otherwise embeds a per-build attestation manifest carrying
-          # wall-clock metadata, so two identical builds NEVER share a
-          # digest — the lab's first full-width gate run proved it on
-          # every image class. The org's provenance is its own signed
-          # evidence (the signer), never the embedded blob, so nothing
-          # is lost. rewrite-timestamp=true clamps layer mtimes to
-          # SOURCE_DATE_EPOCH — RUN and COPY otherwise record the
-          # build's own clock into the layer bytes.
-          outspec="type=image,name=${IMAGE},push-by-digest=true"
-          outspec+=",name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true"
-          docker buildx build \
-            --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}" \
-            "${LABELS[@]}" \
-            --provenance=false --sbom=false \
-            --output "${outspec}" \
-            --metadata-file /tmp/meta.json \
-            "${UNTRUSTED_CONTEXT}"
-          digest=$(jq -r '."containerimage.digest"' /tmp/meta.json)
-          if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::no digest from the push"
-            exit 1
-          fi
-          # Written to a file, not to a job output. Outputs of a MATRIX
-          # job overwrite one another — the legs share one output map — so
-          # a digest passed that way is a race that surfaces later as a
-          # manifest silently missing an architecture.
-          mkdir -p /tmp/digests
-          printf '%s' "${digest}" > "/tmp/digests/${ARCH}"
-          echo "::notice::${ARCH} pushed as ${digest}"
+        # push-by-digest, no tag: a tag would make the untested
+        # per-architecture image pullable by name before the manifest
+        # exists and before anything has been proved. This rebuilds, but
+        # from the same builder in the same job, so every layer is
+        # already resolved: builder state, not a cache anyone else can
+        # poison. The push, its determinism set (#118), the digest check
+        # and the per-arch record (a file, because a matrix job's outputs
+        # overwrite one another) are release/registry.py (#1382), tested
+        # by release/test_registry.py.
+        run: >-
+          python3 .org-canon/release/registry.py push --image "${IMAGE}"
+          --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}"
+          --context "${UNTRUSTED_CONTEXT}" --digests /tmp/digests
+          --arch "${ARCH}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.dry-run }}
         with:
