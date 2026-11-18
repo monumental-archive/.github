@@ -663,7 +663,7 @@ jobs:
           list=$(stele derive inventories --policy .org-canon/slsa/assert-policy.json --classes "${CLASSES}" \
             --evidence-classes "${EVIDENCE_CLASSES}" --machinery-version "${machinery}" \
             --repo "${GITHUB_REPOSITORY}" --name "${SBOM_BASENAME}" --version "${VERSION}" --created "${created}" \
-            --tree . --out-dir dist "${opts[@]}" "${plans[@]}")
+            --tree . --out-dir dist ${opts[@]+"${opts[@]}"} ${plans[@]+"${plans[@]}"})
           echo "list=${list}" >> "${GITHUB_OUTPUT}"
       - name: Derive this release's VEX and gate on undecided advisories
         # Decisions are keyed by package@version; coverage is derived from
