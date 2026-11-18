@@ -108,8 +108,14 @@ command -v mutmut > /dev/null || {
   exit 1
 }
 
+# Children of the run can import mutmut (#1354 item 3): a test that
+# runs a helper as `python3 helper.py` runs its mutated copy, which
+# imports mutmut's trampoline. The hook APPENDS mutmut's site directory
+# to sys.path in every Python the run starts; mutants-python.py derives
+# the directory from the installed tool.
+python3 "${belt}/mutants-python.py" hook "${scratch}/hook"
 status=0
-mutmut run || status=$?
+PYTHONPATH="${scratch}/hook${PYTHONPATH:+:${PYTHONPATH}}" mutmut run || status=$?
 if [[ ${status} -ne 0 ]]; then
   echo "${label}: mutmut run exited ${status} — nothing judged (a failing unmutated suite exits 1)" >&2
   exit 1

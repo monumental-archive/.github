@@ -21,6 +21,7 @@ import importlib.util
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,15 +38,74 @@ _SPEC = importlib.util.spec_from_file_location(
 helper = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(helper)
 
-MUTMUT_STUB = """#!/usr/bin/env bash
-printf 'mutmut %s\\n' "$*" >> "${PLANT_LOG}"
-case "$1" in
-  run) exit "${PLANT_RUN:-0}" ;;
-  results) cat "${PLANT_RESULTS}" ;;
-  show) cat "${PLANT_SHOW}/$2" ;;
-  *) exit 99 ;;
-esac
+# The stub is an installed console script the way pipx:mutmut's is: its
+# first line names a venv's interpreter, and that venv holds a `mutmut`
+# package, so the leg's start-up hook derives mutmut's site directory
+# from it for real. `run` starts PLANT_CHILD as a child `python3`, the
+# way a suite runs a helper, before it exits with the row's status.
+MUTMUT_STUB = """#!{python}
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+with open(os.environ["PLANT_LOG"], "a", encoding="utf-8") as log:
+    log.write("mutmut " + " ".join(sys.argv[1:]) + "\\n")
+command = sys.argv[1]
+if command == "run":
+    child = os.environ.get("PLANT_CHILD")
+    if child and subprocess.run(["python3", child], check=False).returncode:
+        sys.exit(1)
+    sys.exit(int(os.environ.get("PLANT_RUN", "0")))
+if command == "results":
+    sys.stdout.write(Path(os.environ["PLANT_RESULTS"]).read_text())
+    sys.exit(0)
+if command == "show":
+    sys.stdout.write((Path(os.environ["PLANT_SHOW"]) / sys.argv[2]).read_text())
+    sys.exit(0)
+sys.exit(99)
 """
+# What a mutated copy starts with (mutmut 3.8.1, trampoline_templates):
+# the import a child `python3` without mutmut cannot satisfy.
+TRAMPOLINE = (
+    "from mutmut.mutation.trampoline import wrap_in_trampoline\n"
+    "import sys\n"
+    "print(sys.path[-1])\n"
+)
+VENV: dict[str, Path] = {}
+
+
+def setUpModule() -> None:
+    """Build one venv holding a `mutmut` package, for every row's stub."""
+    root = Path(tempfile.mkdtemp())
+    unittest.addModuleCleanup(shutil.rmtree, root)
+    venv = root / "venv"
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True
+    )
+    python = venv / "bin" / "python"
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    site = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import sysconfig; print(sysconfig.get_paths()['purelib'])",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    package = Path(site) / "mutmut" / "mutation"
+    package.mkdir(parents=True)
+    (package.parent / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "trampoline.py").write_text(
+        "wrap_in_trampoline = None\n", encoding="utf-8"
+    )
+    VENV["python"] = python
+    VENV["site"] = Path(site)
+
 
 CONFIG = '[tool.mutmut]\nsource_paths = ["pkg"]\n'
 # The module the survivor rows mutate: `answer` starts on line 10, and
@@ -100,7 +160,9 @@ class Planted(unittest.TestCase):
         bins = self.tmp / "bin"
         bins.mkdir()
         stub = bins / "mutmut"
-        stub.write_text(MUTMUT_STUB, encoding="utf-8")
+        stub.write_text(
+            MUTMUT_STUB.replace("{python}", str(VENV["python"])), encoding="utf-8"
+        )
         stub.chmod(0o755)
         self.log = self.tmp / "log"
         self.log.touch()
@@ -510,6 +572,82 @@ class Reasons(Planted):
                 REASON,
             ],
         )
+
+
+class ChildProcesses(Planted):
+    """A helper the suite runs as a child `python3` (#1354 item 3).
+
+    Measured on the canon's self-mutants run 44213905549: a mutated copy
+    starts with mutmut's trampoline import, and a child interpreter
+    without mutmut died with "No module named 'mutmut'" on the unmutated
+    baseline, so nothing was judged.
+    """
+
+    def test_without_the_hook_the_child_cannot_import_mutmut(self) -> None:
+        """The failure the hook exists for, reproduced as it was measured."""
+        self.track("pkg/helper.py", TRAMPOLINE)
+        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [python3, "pkg/helper.py"],
+            cwd=self.tree,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("ModuleNotFoundError: No module named 'mutmut'", done.stderr)
+
+    def test_under_the_leg_the_baseline_passes(self) -> None:
+        """The same child, run by `mutmut run` under the leg, imports mutmut."""
+        self.plant(KILLED)
+        self.track("pkg/helper.py", TRAMPOLINE)
+        done, log = self.run_leg(PLANT_CHILD="pkg/helper.py")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout.splitlines(),
+            [
+                str(VENV["site"]),
+                f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded (sites)",
+            ],
+        )
+        self.assertEqual(log, ["mutmut run", "mutmut results --all true"])
+
+    def test_the_hook_appends_never_prepends(self) -> None:
+        """The child's own imports resolve first; mutmut's directory comes last."""
+        hook = self.tmp / "hook"
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [sys.executable, str(BELT / "mutants-python.py"), "hook", str(hook)],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            (hook / "sitecustomize.py").read_text(encoding="utf-8"),
+            f"import sys\nsys.path.append({str(VENV['site'])!r})\n",
+        )
+
+    def test_a_tool_with_no_readable_interpreter_is_red(self) -> None:
+        """A `mutmut` whose first line names no Python is refused by name."""
+        self.plant(KILLED)
+        stub = self.tmp / "bin" / "mutmut"
+        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        done, log = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [
+                (
+                    f"{LABEL}: cannot read mutmut's own interpreter from {stub}"
+                    " (its first line names none)"
+                )
+            ],
+        )
+        self.assertEqual(log, [])
 
 
 class ConfigReader(unittest.TestCase):

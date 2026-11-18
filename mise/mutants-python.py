@@ -16,6 +16,17 @@ comes under the canon's coverage figure and its own mutation run
   Prints the count of reasoned sites and entries, or each refusal.
   Read as TEXT, never with tomllib or configparser: the rule is about
   the comment above an entry, and both parsers drop comments.
+- `hook DIR`: writes DIR/sitecustomize.py, which APPENDS mutmut's own
+  site directory to `sys.path` in every Python the run starts (#1354
+  item 3). mutmut's mutated copies import its trampoline, so a test
+  that runs a helper as a child `python3` died with "No module named
+  'mutmut'" on the unmutated baseline (canon self-mutants run
+  44213905549). Appended, never prepended, so the suite's own imports
+  resolve as they do unmutated: the coverage leg's hook, the same way.
+  The directory is derived from the installed tool, by asking the
+  interpreter its `mutmut` script names where `mutmut` lives; that
+  interpreter must be the suite's own Python version, or the children
+  would load another build's compiled modules.
 - `survivors RESULTS`: the mutants `mutmut results --all true` calls
   survived or "no tests", one name per line, for the shell to `show`.
 - `verdict RESULTS SHOWS`: maps every result state to killed, survived
@@ -31,6 +42,8 @@ byte for byte: test_mutants_python.py's stub rows hold them.
 import argparse
 import os
 import re
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -372,6 +385,82 @@ def locate(source: str, func: str, removed: str) -> int:
     return start
 
 
+# uv writes a long interpreter path as a `/bin/sh` re-exec, whose second
+# line names the interpreter in quotes.
+SH_REEXEC = re.compile(r"^'''exec' \"?([^\"\s]+)\"?")
+# The answer is two lines: the site directory, then sys.version.
+WHERE_LINES = 2
+WHERE = (
+    "import mutmut, os, sys; "
+    "print(os.path.dirname(os.path.dirname(mutmut.__file__))); "
+    "print(sys.version)"
+)
+
+
+def tool_interpreter(script: str) -> str:
+    """Read the interpreter an installed console script runs on.
+
+    Returns:
+        The interpreter path, or "" when the script names none.
+
+    """
+    with Path(script).open(encoding="utf-8", errors="replace") as handle:
+        first = handle.readline().strip()
+        second = handle.readline().strip()
+    if first.startswith("#!/bin/sh"):
+        found = SH_REEXEC.match(second)
+        return found.group(1) if found else ""
+    named = first[2:].split()[0] if first.startswith("#!") and first[2:] else ""
+    return named if "python" in Path(named).name else ""
+
+
+def hook(directory: Path) -> int:
+    """Write the start-up hook that lets child processes import mutmut.
+
+    Returns:
+        0 when written; EXIT_RED, named, when the tool cannot be read.
+
+    """
+    script = shutil.which("mutmut")
+    interpreter = tool_interpreter(script) if script else ""
+    if not interpreter:
+        print(
+            f"{LABEL}: cannot read mutmut's own interpreter from"
+            f" {script or 'PATH'} (its first line names none)",
+            file=sys.stderr,
+        )
+        return EXIT_RED
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    asked = subprocess.run(
+        [interpreter, "-c", WHERE],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    lines = asked.stdout.splitlines()
+    if asked.returncode != 0 or len(lines) < WHERE_LINES:
+        print(
+            f"{LABEL}: mutmut's interpreter {interpreter} could not say where"
+            " mutmut lives",
+            file=sys.stderr,
+        )
+        return EXIT_RED
+    site, version = lines[0], "\n".join(lines[1:])
+    if version != sys.version:
+        print(
+            f"{LABEL}: mutmut runs on '{version}' but the suite's python3 is"
+            f" '{sys.version}' — the tool venv must be built on the belt's"
+            " python pin (reinstall: mise install -f pipx:mutmut)",
+            file=sys.stderr,
+        )
+        return EXIT_RED
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "sitecustomize.py").write_text(
+        f"import sys\nsys.path.append({site!r})\n", encoding="utf-8"
+    )
+    return 0
+
+
 def survivors(results_file: Path) -> int:
     """Print the survivors' names, one per line, for the shell to show.
 
@@ -452,6 +541,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     checked = sub.add_parser("exclusions")
     checked.add_argument("config", type=Path)
     checked.add_argument("pragmas", type=Path)
+    sub.add_parser("hook").add_argument("directory", type=Path)
     sub.add_parser("survivors").add_argument("results", type=Path)
     judged = sub.add_parser("verdict")
     judged.add_argument("results", type=Path)
@@ -470,6 +560,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.command == "exclusions":
         return exclusions(args.config, args.pragmas)
+    if args.command == "hook":
+        return hook(args.directory)
     if args.command == "survivors":
         return survivors(args.results)
     return verdict(args.results, args.shows, args.excluded)
