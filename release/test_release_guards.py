@@ -721,9 +721,12 @@ class OpenReleasePrInputs(unittest.TestCase):
 # `gh` for the Release-PR rows: a forge that answers every call
 # open-release-pr.sh and close-release-pr.sh make and records each one,
 # one normalised line per call, so a row can assert exactly what was
-# written and in what order. A ref read answers "absent", so a run that
-# proceeds creates both refs; the open pull requests are a state file,
-# and a close keeps the comment it was given.
+# written and in what order. A ref read answers "absent" unless its path
+# is listed in ${STATE}/exists, so a run that proceeds creates both refs;
+# the open pull requests are a state file, a close keeps the comment it
+# was given, and a create or edit keeps the body. A call listed in
+# ${STATE}/queued is refused the way the forge refuses to move the branch
+# of a pull request in the merge queue (#1472).
 RELEASE_FORGE_STUB = """#!/usr/bin/env bash
 set -uo pipefail
 log() { printf '%s\\n' "$*" >> "${STATE}/calls"; }
@@ -741,6 +744,23 @@ refused() {
   echo '{"message":"Resource not accessible by integration","status":"403"}'
   echo "gh: Resource not accessible by integration (HTTP 403)" >&2
   exit 1
+}
+queued() {
+  [[ -f ${STATE}/queued ]] && grep -qxF "$1" "${STATE}/queued" || return 1
+  status="422 Unprocessable Entity" headers "${@:2}"
+  printf '%s' '{"message":"A pull request for this branch has been added to'
+  printf '%s' ' a merge queue. Branches that are queued for merging cannot be'
+  printf '%s' ' updated. To modify this branch, dequeue the associated'
+  printf '%s\n' ' pull request.","status":"422"}'
+  printf '%s' "gh: A pull request for this branch has been added" >&2
+  printf '%s\n' " to a merge queue. (HTTP 422)" >&2
+  exit 1
+}
+keep_body() {
+  while [[ $# -gt 0 ]]; do
+    if [[ $1 == --body ]]; then printf '%s' "$2" > "${STATE}/body"; fi
+    shift
+  done
 }
 if [[ ${1:-} == api && ${2:-} == graphql ]]; then
   if [[ "$*" == *defaultBranchRef* ]]; then
@@ -769,6 +789,7 @@ if [[ ${1:-} == api ]]; then
   done
   log "${method} ${path}"
   refused "${method} ${path}" "${args[@]}"
+  queued "${method} ${path}" "${args[@]}"
   # An App installation token has no user context: the forge answers
   # `user` with this 403 (#58, measured in the release lab).
   if [[ ${path} == user ]]; then
@@ -779,7 +800,9 @@ if [[ ${1:-} == api ]]; then
   case "${method} ${path}" in
     "GET users/"*) echo 4242 ;;
     "GET repos/"*"/commits/"*) echo true ;;
-    "GET repos/"*"/git/ref/heads/"*) exit 1 ;;
+    "GET repos/"*"/git/ref/heads/"*)
+      [[ -f ${STATE}/exists ]] && grep -qxF "${path}" "${STATE}/exists" || exit 1
+      ;;
   esac
   exit 0
 fi
@@ -790,7 +813,14 @@ if [[ ${1:-} == pr ]]; then
       [[ ! -f ${STATE}/list-fails ]] || { echo "gh: HTTP 502" >&2; exit 1; }
       [[ ! -f ${STATE}/open ]] || cat "${STATE}/open"
       ;;
-    create) log pr create ;;
+    create)
+      log pr create
+      keep_body "$@"
+      ;;
+    edit)
+      log pr edit "$3"
+      keep_body "$@"
+      ;;
     close)
       log pr close "$3"
       number=$3
@@ -1045,6 +1075,72 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
             result.stdout,
         )
         self.assertEqual(["graphql head"], self.calls())
+
+    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
+    def test_the_body_says_where_the_release_was_planned(self) -> None:
+        """The PR body ends in `Planned-At: <planned commit>` (#1472).
+
+        The squash takes the body, so the release commit carries the
+        commit it was planned from, and lint:release-planned reads it.
+        """
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(0, result.returncode, result.stderr)
+        body = (self.state / "body").read_text(encoding="utf-8")
+        self.assertEqual(f"Planned-At: {self.PLANNED}", body.splitlines()[-1])
+        self.assertEqual(1, body.count("Planned-At:"))
+
+    def queue_release_branch(self) -> str:
+        """Make release/next exist, so the run moves it rather than creating it.
+
+        Returns:
+            The forge call that moves it.
+
+        """
+        ref = f"repos/{FORGE_REPO}/git/ref/heads/release/next"
+        (self.state / "exists").write_text(ref + "\n")
+        return f"PATCH repos/{FORGE_REPO}/git/refs/heads/release/next"
+
+    def test_a_queued_release_pr_is_left_to_the_queue(self) -> None:
+        """The forge's 422 for a queued branch exits 0, saying so (#1472).
+
+        Measured on the canon (run 44207123963): Release PR #1462 was in
+        the merge queue, the push ahead of it ran this script, and the
+        branch move was refused with this 422. The run went red.
+        """
+        move = self.queue_release_branch()
+        (self.state / "queued").write_text(move + "\n")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            "release/next is in the merge queue and the forge will not move it;"
+            " the queue's lint:release-planned decides whether it ships, and"
+            " the push after it leaves the queue maintains the Release PR\n",
+            result.stdout,
+        )
+        self.assertEqual(
+            [
+                *self.PROCEEDED[:7],
+                move,
+                f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
+            ],
+            self.calls(),
+        )
+
+    def test_any_other_refusal_to_move_the_branch_still_fails(self) -> None:
+        """Only the queue's 422 is let through; a 403 on the move is red."""
+        move = self.queue_release_branch()
+        (self.state / "refuse").write_text(move + "\n")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertEqual("", result.stdout)
+        self.assertIn(
+            f"FAIL: could not move release/next to the release commit {self.OID}\n"
+            "HTTP/2.0 403 Forbidden\n",
+            result.stderr,
+        )
 
     def test_a_head_read_that_fails_is_never_read_as_unchanged(self) -> None:
         """No answer, or an answer that is not a commit, fails by name."""

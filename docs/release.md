@@ -123,6 +123,17 @@ Phase-1 rules, all proven in iiif-server:
   write and write nothing if it has moved since the run planned. When
   `main` holds nothing to release, an open Release PR is closed with a
   comment saying so; the branch is left for the next release.
+- **A release lands where it was planned, or not at all** (#1472). A
+  merge queue squashes a Release PR on top of whatever is queued ahead
+  of it, with release notes written before those commits landed; canon
+  v1.69.3 shipped four pull requests its changelog never names. The
+  Release PR body ends in `Planned-At: <sha>`, the commit the plan was
+  made from, and the squash carries it into the release commit.
+  `lint:release-planned` reds a commit whose trailer is not its parent,
+  so the queue removes a stale Release PR before it merges, and the
+  next push regenerates it. While the pull request is queued, the forge
+  refuses to move its branch (HTTP 422); `open-release-pr.sh` exits 0
+  on that refusal by name and still fails on any other.
 - The release PR's commit is created through the GitHub API
   (`createCommitOnBranch`), so it is signed by GitHub and satisfies
   `required_signatures`; the script asserts the commit is `verified` rather

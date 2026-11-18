@@ -9733,6 +9733,60 @@ fi
 echo "lint:hook-jobs: every job in ${hooks} is an inline run:"
 '''
 
+[tasks."lint:release-planned"]
+description = "A release commit lands on the commit it was planned from: its Planned-At trailer equals HEAD^"
+dir = "{{cwd}}"
+# A Release PR in the merge queue is squashed on top of whatever is ahead
+# of it, with release notes written before those commits landed. Canon
+# v1.69.3 shipped four pull requests its changelog never names (#1472).
+# open-release-pr.sh writes `Planned-At: <sha>` into the Release PR body,
+# the default-branch commit the plan was made from, and the squash
+# carries it into the release commit. In a merge group HEAD is that
+# commit as it will land, and HEAD^ what it lands on: anything else
+# means unlisted commits would ship, so the gate goes red and the queue
+# removes the pull request itself. The next push regenerates it.
+#
+# Applicable only to a commit that carries the trailer, so every other
+# commit skips clean. Two git reads; the gate checks out with full
+# history, so HEAD^ and the planned commit are both present.
+run = '''
+message=$(git log -1 --format=%B HEAD 2> /dev/null) || {
+  echo "lint:release-planned: no HEAD commit, skipped"
+  exit 0
+}
+trailers=$(grep -E '^Planned-At:' <<< "${message}" || true)
+if [[ -z ${trailers} ]]; then
+  echo "lint:release-planned: HEAD carries no Planned-At trailer, not a release commit, skipped"
+  exit 0
+fi
+count=$(wc -l <<< "${trailers}")
+if [[ ${count} -ne 1 || ! ${trailers} =~ ^Planned-At:\ [0-9a-f]{40}$ ]]; then
+  echo "lint:release-planned: HEAD's Planned-At trailer is not one full commit sha:" >&2
+  echo "${trailers}" >&2
+  exit 1
+fi
+planned=${trailers#Planned-At: }
+if ! parent=$(git rev-parse --verify -q 'HEAD^'); then
+  echo "lint:release-planned: HEAD has no parent in this checkout; it was planned at ${planned}" >&2
+  exit 1
+fi
+if [[ ${parent} == "${planned}" ]]; then
+  echo "lint:release-planned: the release lands on ${planned}, where it was planned"
+  exit 0
+fi
+if git cat-file -e "${planned}^{commit}" 2> /dev/null; then
+  between="$(git rev-list --count "${planned}..${parent}") commits"
+else
+  between="commits (${planned} is not in this checkout)"
+fi
+{
+  echo "lint:release-planned: the release was planned at ${planned} but lands on ${parent}:"
+  echo "  ${between} would ship without release notes;"
+  echo "  the Release PR is regenerated on the next push (#1472)"
+} >&2
+exit 1
+'''
+
 [tasks."lint:bash-portability"]
 description = "No bash 4+ syntax: it runs on the runner and not on a Mac"
 dir = "{{cwd}}"
