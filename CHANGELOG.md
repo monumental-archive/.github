@@ -10,6 +10,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.69.3](https://github.com/monumental-archive/.github/compare/v1.69.2...v1.69.3) - 2026-11-18
+
+### Fixed
+
+- stop counting a bare fixtures directory as a test ([#1456](https://github.com/monumental-archive/.github/pull/1456))
+- publish crates and npm via tested helpers (#1383) ([#1457](https://github.com/monumental-archive/.github/pull/1457))
+- package and build go through tested helpers (#1384) ([#1459](https://github.com/monumental-archive/.github/pull/1459))
+- read every action file in the action lints (#1448) ([#1461](https://github.com/monumental-archive/.github/pull/1461))
+- update first-party canon ([#1460](https://github.com/monumental-archive/.github/pull/1460))
+- stand up the python leg of mutation testing ([#1450](https://github.com/monumental-archive/.github/pull/1450))
+- hold a rust branch floor on the monday audit ([#1455](https://github.com/monumental-archive/.github/pull/1455))
+- run the pre-push gate inline, never from the cache ([#1465](https://github.com/monumental-archive/.github/pull/1465))
+- prove the extension the pgrx image ships (#1439) ([#1467](https://github.com/monumental-archive/.github/pull/1467))
+- move the extension build into tracked scripts (#1380) ([#1453](https://github.com/monumental-archive/.github/pull/1453))
+- move the last small workflow steps to helpers (#1386) ([#1458](https://github.com/monumental-archive/.github/pull/1458))
+- read every action file in the run-block lints (#1448) ([#1469](https://github.com/monumental-archive/.github/pull/1469))
+
+### Documentation
+
+- name each language's mutation adoption file ([#1468](https://github.com/monumental-archive/.github/pull/1468))
+
+### Testing
+
+- hold the badge derivation's image and licence to their bugs ([#1466](https://github.com/monumental-archive/.github/pull/1466))
+
 ## [1.69.2](https://github.com/monumental-archive/.github/compare/v1.69.1...v1.69.2) - 2026-11-17
 
 ### Fixed
