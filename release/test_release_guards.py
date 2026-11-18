@@ -785,6 +785,33 @@ keep_body() {
   done
 }
 if [[ ${1:-} == api && ${2:-} == graphql ]]; then
+  # The dequeue (#1504): accepted, it takes the branch out of the queue so
+  # the next move succeeds. ${STATE}/dequeue says how the forge answers
+  # otherwise: "forbidden" as GraphQL refuses an integration (HTTP 200,
+  # errors[].type FORBIDDEN), "fails" as a 502.
+  if [[ "$*" == *dequeuePullRequest* ]]; then
+    log graphql dequeuePullRequest
+    printf '%s' "$*" > "${STATE}/dequeue-request"
+    case "$(cat "${STATE}/dequeue" 2> /dev/null)" in
+      forbidden)
+        headers "$@"
+        printf '%s' '{"data":{"dequeuePullRequest":null},"errors":[{"type":'
+        printf '%s' '"FORBIDDEN","message":"Resource not accessible'
+        printf '%s\n' ' by integration"}]}'
+        echo "gh: Resource not accessible by integration" >&2
+        exit 1
+        ;;
+      fails)
+        status="502 Bad Gateway" headers "$@"
+        echo "gh: HTTP 502" >&2
+        exit 1
+        ;;
+    esac
+    rm -f "${STATE}/queued"
+    headers "$@"
+    echo '{"data":{"dequeuePullRequest":{"mergeQueueEntry":{"id":"MQE_1"}}}}'
+    exit 0
+  fi
   if [[ "$*" == *defaultBranchRef* ]]; then
     log graphql head
     [[ -f ${STATE}/head ]] || { echo "gh: HTTP 502" >&2; exit 1; }
@@ -822,6 +849,7 @@ if [[ ${1:-} == api ]]; then
   case "${method} ${path}" in
     "GET users/"*) echo 4242 ;;
     "GET repos/"*"/commits/"*) echo true ;;
+    "GET repos/"*"/compare/"*) cat "${STATE}/ahead" 2> /dev/null || echo 2 ;;
     "GET repos/"*"/git/ref/heads/"*)
       [[ -f ${STATE}/exists ]] && grep -qxF "${path}" "${STATE}/exists" || exit 1
       ;;
@@ -850,6 +878,17 @@ if [[ ${1:-} == pr ]]; then
         if [[ $1 == --comment ]]; then
           printf '%s' "$2" > "${STATE}/comment-${number}"
         fi
+        shift
+      done
+      ;;
+    view)
+      log pr view "$3"
+      cat "${STATE}/view"
+      ;;
+    comment)
+      log pr comment "$3"
+      while [[ $# -gt 0 ]]; do
+        if [[ $1 == --body ]]; then printf '%s' "$2" > "${STATE}/pr-comment"; fi
         shift
       done
       ;;
@@ -1123,31 +1162,106 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         (self.state / "exists").write_text(ref + "\n")
         return f"PATCH repos/{FORGE_REPO}/git/refs/heads/release/next"
 
-    def test_a_queued_release_pr_is_left_to_the_queue(self) -> None:
-        """The forge's 422 for a queued branch exits 0, saying so (#1472).
+    OLD_PLAN = "d" * 40
 
-        Measured on the canon (run 44207123963): Release PR #1462 was in
-        the merge queue, the push ahead of it ran this script, and the
-        branch move was refused with this 422. The run went red.
+    def queue_release_pr(self) -> tuple[str, list[str]]:
+        """Queue the open Release PR #77, planned at OLD_PLAN.
+
+        Returns:
+            The forge call that moves the branch, and the calls a run
+            makes up to and including the move the queue refuses.
+
         """
         move = self.queue_release_branch()
         (self.state / "queued").write_text(move + "\n")
+        (self.state / "open").write_text("77\n")
+        (self.state / "view").write_text(
+            json.dumps({
+                "number": 77,
+                "id": "PR_kwDOqueued",
+                "body": f"Notes.\n\nPlanned-At: {self.OLD_PLAN}\n",
+            })
+        )
+        return move, [*self.PROCEEDED[:7], move]
+
+    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
+    def test_a_queued_release_pr_is_dequeued_and_regenerated(self) -> None:
+        """The 422 for a queued branch: dequeue, move, say so (#1504).
+
+        Measured on the canon: Release PR #1476 was queued and removed four
+        times in an hour, planned at a commit main had passed, because the
+        run that met this 422 exited without moving it and no later push
+        came. Main's script stops at the 422.
+        """
+        move, before = self.queue_release_pr()
+        (self.state / "ahead").write_text("3\n")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(0, result.returncode, result.stderr)
+        said = (
+            "taken out of the merge queue: 3 commits landed after this release"
+            f" was planned; regenerated at {self.PLANNED}; queue it again"
+        )
+        self.assertIn(f"#77 {said}\n", result.stdout)
+        self.assertEqual(said, (self.state / "pr-comment").read_text())
+        self.assertIn(
+            'dequeuePullRequest(input: {id: "PR_kwDOqueued"})',
+            (self.state / "dequeue-request").read_text(),
+        )
+        self.assertEqual(
+            [
+                *before,
+                "pr view release/next",
+                f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
+                "graphql dequeuePullRequest",
+                move,
+                "pr list",
+                "pr edit 77",
+                "pr comment 77",
+                f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
+            ],
+            self.calls(),
+        )
+        self.assertFalse(any("enqueue" in c.lower() for c in self.calls()))
+        body = (self.state / "body").read_text(encoding="utf-8")
+        self.assertEqual(f"Planned-At: {self.PLANNED}", body.splitlines()[-1])
+
+    def test_a_refused_dequeue_takes_the_permitted_response(self) -> None:
+        """The forge refusing the App the dequeue: exit 0, by name (#1504)."""
+        _, before = self.queue_release_pr()
+        (self.state / "dequeue").write_text("forbidden")
         self.forge(self.PLANNED)
         result = self.run_executor()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
-            "release/next is in the merge queue and the forge will not move it;"
-            " the queue's lint:release-planned decides whether it ships, and"
-            " the push after it leaves the queue maintains the Release PR\n",
+            "the forge refused to take #77 out of the merge queue; it stays"
+            f" planned at {self.OLD_PLAN}; the next push to the default branch"
+            " regenerates it\n",
             result.stdout,
         )
         self.assertEqual(
             [
-                *self.PROCEEDED[:7],
-                move,
+                *before,
+                "pr view release/next",
+                f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
+                "graphql dequeuePullRequest",
                 f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
             ],
             self.calls(),
+        )
+
+    def test_a_dequeue_that_fails_otherwise_is_red(self) -> None:
+        """A 502 on the dequeue is a failure by name, not a permission."""
+        self.queue_release_pr()
+        (self.state / "dequeue").write_text("fails")
+        self.forge(self.PLANNED)
+        result = self.run_executor()
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertEqual("", result.stdout)
+        self.assertIn(
+            "FAIL: could not take #77 out of the merge queue\n"
+            "HTTP/2.0 502 Bad Gateway\n",
+            result.stderr,
         )
 
     def test_any_other_refusal_to_move_the_branch_still_fails(self) -> None:

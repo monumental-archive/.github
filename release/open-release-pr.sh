@@ -195,32 +195,87 @@ if [[ ${verified} != "true" ]]; then
   exit 1
 fi
 
-# One move: old release commit -> new release commit. The branch never holds
-# a tree equal to main, so an open PR stays open and simply shows a
-# force-push.
-#
-# A queued Release PR is not this run's to move (#1472). The forge refuses
-# to move a branch whose pull request is in the merge queue (HTTP 422,
-# "Branches that are queued for merging cannot be updated"). Whether the
-# queued release ships is decided by the queue's own gate:
-# lint:release-planned reds a release commit that would land anywhere but
-# where it was planned. The push after it leaves the queue maintains it.
-# Every other refusal to move the branch is still a failure.
-if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1; then
+# Takes the Release PR out of the merge queue (#1504), setting `dequeued`
+# to the line the run logs and comments once the PR is regenerated. A
+# dequeue the forge refuses for want of permission exits 0 with nothing
+# moved, saying the next push to the default branch regenerates it: the
+# canon's next queued Release PR is the measurement of whether the App
+# may dequeue (#1504). Any other failure, and any read this needs, fails
+# the run by name.
+dequeue_queued_pr() {
+  local pr number id planned landed mutation
+  pr=$(gh pr view "${branch}" --json number,id,body) || {
+    echo "FAIL: could not read the queued pull request for ${branch}" >&2
+    exit 1
+  }
+  number=$(jq -r '.number' <<< "${pr}")
+  id=$(jq -r '.id' <<< "${pr}")
+  planned=$(jq -r '.body' <<< "${pr}" | sed -n 's/^Planned-At: \([0-9a-f]\{40\}\)$/\1/p')
+  landed="commits landed"
+  if [[ -n ${planned} ]]; then
+    landed=$(forge "compare ${planned} with ${head}" \
+      "repos/${GITHUB_REPOSITORY}/compare/${planned}...${head}" --jq '.ahead_by')
+    if [[ ${landed} == 1 ]]; then
+      landed="1 commit landed"
+    else
+      landed="${landed} commits landed"
+    fi
+  fi
+  # The id is written into the mutation, as planned-head.sh writes the
+  # repository into its query: a single-quoted `$id` is one shellcheck
+  # cannot tell from an unexpanded shell variable (SC2016).
+  mutation="mutation { dequeuePullRequest(input: {id: \"${id}\"})"
+  mutation+=" { mergeQueueEntry { id } } }"
   forge_refusal=""
   # shellcheck disable=SC2310  # forge's status is the answer, read below
-  if ! forge "move ${branch} to the release commit ${oid}" \
-    "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
-    --method PATCH -f sha="${oid}" -F force=true > /dev/null; then
-    if grep -qE '^HTTP/[0-9.]+ 422' <<< "${forge_refusal}" \
-      && grep -qF 'queued for merging cannot be updated' <<< "${forge_refusal}"; then
-      echo "${branch} is in the merge queue and the forge will not move it;" \
-        "the queue's lint:release-planned decides whether it ships, and" \
-        "the push after it leaves the queue maintains the Release PR"
+  if ! forge "take #${number} out of the merge queue" graphql \
+    -f query="${mutation}" > /dev/null; then
+    if grep -qE '^HTTP/[0-9.]+ 403|"type": *"FORBIDDEN"|Resource not accessible by integration' \
+      <<< "${forge_refusal}"; then
+      echo "the forge refused to take #${number} out of the merge queue;" \
+        "it stays planned at ${planned:-an older commit}; the next push" \
+        "to the default branch regenerates it"
       org_done=1
       exit 0
     fi
     exit 1
+  fi
+  dequeued_pr=${number}
+  dequeued="taken out of the merge queue: ${landed} after this release was"
+  dequeued+=" planned; regenerated at ${head}; queue it again"
+}
+
+# One move: old release commit -> new release commit. The branch never holds
+# a tree equal to main, so an open PR stays open and simply shows a
+# force-push.
+#
+# A queued Release PR is taken out of the queue and regenerated (#1504).
+# The forge refuses to move a branch whose pull request is in the merge
+# queue (HTTP 422, "Branches that are queued for merging cannot be
+# updated"). Left there, the queue removes it for landing past its plan
+# (lint:release-planned, #1472), and nothing regenerates it until another
+# push: v1.69.4's Release PR was queued and removed four times in an hour.
+# So the run dequeues it, moves the branch as for any other, and says so
+# on the pull request. It never queues it again: merging a release stays
+# a person's act, and dequeuing merges nothing. lint:release-planned
+# stays the guard for the race in which the queue has already built its
+# group. Every other refusal to move the branch is still a failure.
+move_branch() {
+  forge "move ${branch} to the release commit ${oid}" \
+    "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
+    --method PATCH -f sha="${oid}" -F force=true > /dev/null
+}
+dequeued=""
+if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1; then
+  forge_refusal=""
+  # shellcheck disable=SC2310  # forge's status is the answer, read below
+  if ! move_branch; then
+    if ! grep -qE '^HTTP/[0-9.]+ 422' <<< "${forge_refusal}" \
+      || ! grep -qF 'queued for merging cannot be updated' <<< "${forge_refusal}"; then
+      exit 1
+    fi
+    dequeue_queued_pr
+    move_branch
   fi
 else
   forge "create ${branch} at the release commit ${oid}" \
@@ -258,6 +313,10 @@ existing=$(gh pr list --head "${branch}" --state open --json number --jq '.[0].n
 if [[ -n ${existing} ]]; then
   gh pr edit "${existing}" --title "${title}" --body "${body}"
   echo "updated PR #${existing}"
+  if [[ -n ${dequeued} ]]; then
+    gh pr comment "${dequeued_pr}" --body "${dequeued}"
+    echo "#${dequeued_pr} ${dequeued}"
+  fi
 else
   gh pr create --head "${branch}" --base main --title "${title}" --body "${body}"
   echo "opened the release PR for v${version}"
