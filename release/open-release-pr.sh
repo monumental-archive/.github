@@ -71,11 +71,15 @@ require_planned_head
 #
 # `--include` goes last so the call still reads as the call; gh prints the
 # response headers, a blank line, then the body any `--jq` has filtered.
+#
+# A refused call also leaves the forge's whole answer in `forge_refusal`,
+# for the one caller that tells one refusal from another.
 forge() {
   local what=$1 out status=0
   shift
   out=$(gh api "$@" --include) || status=$?
   if ((status != 0)); then
+    forge_refusal=${out}
     {
       echo "FAIL: could not ${what}"
       tr -d '\r' <<< "${out}" \
@@ -194,10 +198,30 @@ fi
 # One move: old release commit -> new release commit. The branch never holds
 # a tree equal to main, so an open PR stays open and simply shows a
 # force-push.
+#
+# A queued Release PR is not this run's to move (#1472). The forge refuses
+# to move a branch whose pull request is in the merge queue (HTTP 422,
+# "Branches that are queued for merging cannot be updated"). Whether the
+# queued release ships is decided by the queue's own gate:
+# lint:release-planned reds a release commit that would land anywhere but
+# where it was planned. The push after it leaves the queue maintains it.
+# Every other refusal to move the branch is still a failure.
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1; then
-  forge "move ${branch} to the release commit ${oid}" \
+  forge_refusal=""
+  # shellcheck disable=SC2310  # forge's status is the answer, read below
+  if ! forge "move ${branch} to the release commit ${oid}" \
     "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
-    --method PATCH -f sha="${oid}" -F force=true > /dev/null
+    --method PATCH -f sha="${oid}" -F force=true > /dev/null; then
+    if grep -qE '^HTTP/[0-9.]+ 422' <<< "${forge_refusal}" \
+      && grep -qF 'queued for merging cannot be updated' <<< "${forge_refusal}"; then
+      echo "${branch} is in the merge queue and the forge will not move it;" \
+        "the queue's lint:release-planned decides whether it ships, and" \
+        "the push after it leaves the queue maintains the Release PR"
+      org_done=1
+      exit 0
+    fi
+    exit 1
+  fi
 else
   forge "create ${branch} at the release commit ${oid}" \
     "repos/${GITHUB_REPOSITORY}/git/refs" \
@@ -221,6 +245,12 @@ publishes at all.
 
 Review the changelog as release notes: this text is what the GitHub release
 will carry.
+
+The line below is the default-branch commit this release was planned
+from. The squash carries it into the release commit, and the gate refuses
+to land that commit anywhere else (lint:release-planned).
+
+Planned-At: ${head}
 EOF
 )
 
