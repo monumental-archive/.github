@@ -2007,7 +2007,10 @@ dir = "{{cwd}}"
 # audits read run: content and cannot follow a script call.
 run = '''
 set -euo pipefail
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" ".github/actions/*/action.y*ml")
+# The action lints' one selection (#1448): an action's run: blocks are
+# read wherever its action.yml lives, not only under .github/actions/.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
 [[ -n ${files} ]] || {
   echo "lint:shell-embedded: no workflows or actions, skipped"
   exit 0
@@ -2049,8 +2052,11 @@ dir = "{{cwd}}"
 # with a block over the ceiling carries its own debt file, and one that
 # tracks no workflow skips clean.
 run = '''
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" \
-  ".github/actions/*/action.y*ml" "workflow-templates/*.y*ml")
+# The action lints' one selection (#1448), and the workflow templates.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
+templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
+[[ -z ${templates} ]] || files+=$'\n'"${templates}"
 [[ -n ${files} ]] || {
   echo "lint:workflow-shell: no workflows, actions or templates, skipped"
   exit 0
@@ -2069,8 +2075,11 @@ dir = "{{cwd}}"
 # removed — and never adds an entry: a block over the ceiling that is not
 # listed stays red until its logic moves out.
 run = '''
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" \
-  ".github/actions/*/action.y*ml" "workflow-templates/*.y*ml")
+# The action lints' one selection (#1448), and the workflow templates.
+. "${ORG_BELT_DIR}/action-files.sh"
+files=$(action_files)
+templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
+[[ -z ${templates} ]] || files+=$'\n'"${templates}"
 [[ -n ${files} ]] || {
   echo "fix:workflow-shell: no workflows, actions or templates, nothing to fix"
   exit 0
