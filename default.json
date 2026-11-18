@@ -126,6 +126,14 @@
       "commitMessageTopic": "govulncheck"
     },
     {
+      "description": "77 as minted, 5 past: the Go mutation leg's tool, built from source (#1356).",
+      "matchPackageNames": [
+        "go:github.com/sivchari/gomu/cmd/gomu",
+        "github.com/sivchari/gomu/cmd/gomu"
+      ],
+      "commitMessageTopic": "gomu"
+    },
+    {
       "description": "75 as minted, 3 past.",
       "matchPackageNames": ["github.com/transparency-dev/merkle"],
       "commitMessageTopic": "merkle"
