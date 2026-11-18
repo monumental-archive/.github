@@ -2,11 +2,17 @@
 """Tests for pgrx-env.sh's `org_pgrx_init`, against a stand-in cargo (#1360).
 
 `org_pgrx_init` registers each declared Postgres with `cargo pgrx init`.
-One of its fixes is logic around that call rather than anything a live
-Postgres has to show, so a stand-in `cargo` is enough to hold it:
-`cargo pgrx init` rewrites `config.toml` on every call, and the new
-timestamp made cargo rebuild pgrx-pg-sys on an exact cache hit (#1173).
-An init that changed no registration keeps the old timestamp.
+Its fixes here are logic around that call rather than anything a live
+Postgres has to show, so a stand-in `cargo` that records what happened
+is enough to hold them:
+
+- #1140, #1481: tasks the gate runs in parallel each initialised at
+  once, and two inits beside each other both call initdb. One at a
+  time, under a lock the kernel holds, which a killed holder cannot
+  strand.
+- #1173: `cargo pgrx init` rewrites `config.toml` on every call, and the
+  new timestamp made cargo rebuild pgrx-pg-sys on an exact cache hit.
+  An init that changed no registration keeps the old timestamp.
 
 The function under test is the belt's own, sourced by bash exactly as a
 task sources it. stdlib `unittest`, matching the other mise/test_*.py;
@@ -15,22 +21,29 @@ run through the gate as `mise run test`.
 
 import os
 import shutil
+import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 ENV_SH = Path(__file__).resolve().with_name("pgrx-env.sh")
 BASH = shutil.which("bash") or "bash"
 
-# `cargo pgrx init` as far as these rows need it: it writes config.toml
-# from $NEW_CONFIG, the way pgrx rewrites it on every call.
+# `cargo pgrx init` as far as these rows need it: it logs its start and
+# end around $STUB_HOLD seconds of work (two by default), so two inits
+# that ran together log start, start, end, end, and it writes
+# config.toml from $NEW_CONFIG, the way pgrx rewrites it on every call.
 CARGO_STUB = r"""#!/usr/bin/env bash
 [[ $1 == pgrx && $2 == init ]] || exit 1
+echo start >> "${PGRX_HOME}.log"
+sleep "${STUB_HOLD:-2}"
 mkdir -p "${PGRX_HOME}"
 if [[ -n ${NEW_CONFIG:-} ]]; then
   printf '%s' "${NEW_CONFIG}" > "${PGRX_HOME}/config.toml"
 fi
+echo end >> "${PGRX_HOME}.log"
 """
 
 OLD = 946684800  # 2000-01-01, far from any timestamp a row writes
@@ -44,6 +57,7 @@ class InitCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
+        self.root = root
         bindir = root / "bin"
         bindir.mkdir()
         for name, body in (
@@ -59,7 +73,7 @@ class InitCase(unittest.TestCase):
             "PGRX_HOME": str(self.home),
         }
 
-    def init(self, **env: str) -> subprocess.Popen[str]:
+    def init(self, *, group: bool = False, **env: str) -> subprocess.Popen[str]:
         """Start one task's `org_pgrx_init` for Postgres 18.
 
         Returns:
@@ -74,10 +88,71 @@ class InitCase(unittest.TestCase):
         return subprocess.Popen(
             [BASH, "-euo", "pipefail", "-c", script],
             env=self.env | env,
+            cwd=self.root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=group,
         )
+
+    @staticmethod
+    def finish(task: subprocess.Popen[str]) -> tuple[int, str]:
+        """Wait for one init and close its pipes.
+
+        Returns:
+            (exit status, stderr).
+
+        """
+        code = task.wait(timeout=120)
+        err = task.stderr.read() if task.stderr else ""
+        for pipe in (task.stdout, task.stderr):
+            if pipe:
+                pipe.close()
+        return code, err
+
+    def log(self) -> list[str]:
+        """Read what the stand-in cargo recorded.
+
+        Returns:
+            One line per event, in order.
+
+        """
+        path = Path(f"{self.home}.log")
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+class OneInitAtATime(InitCase):
+    """Parallel tasks initialise in turn, never together (#1140, #1481)."""
+
+    def test_two_tasks_never_init_at_once(self) -> None:
+        """The gate starts several pgrx tasks together; their inits queue.
+
+        With #1140's `mkdir` lock this logged start, start, end, end on
+        a Linux runner (#1481): the waiters judged the holder by pid.
+        """
+        tasks = [self.init(), self.init()]
+        results = [self.finish(t) for t in tasks]
+        self.assertEqual([0, 0], [code for code, _ in results], results)
+        self.assertEqual(["start", "end", "start", "end"], self.log(), results)
+
+    def test_a_killed_holder_does_not_strand_the_next_init(self) -> None:
+        """A holder killed mid-init takes the lock with it.
+
+        The holder is killed mid-init. The next init proceeds at once
+        rather than waiting out the ten-minute bound.
+        """
+        holder = self.init(group=True, STUB_HOLD="60")
+        deadline = time.monotonic() + 30
+        while self.log() != ["start"]:
+            self.assertLess(time.monotonic(), deadline, "the holder never started")
+            time.sleep(0.1)
+        os.killpg(holder.pid, signal.SIGKILL)
+        self.finish(holder)
+        started = time.monotonic()
+        code, err = self.finish(self.init(STUB_HOLD="0"))
+        self.assertEqual(0, code, err)
+        self.assertLess(time.monotonic() - started, 20, err)
+        self.assertEqual(["start", "start", "end"], self.log())
 
 
 class UnchangedConfigKeepsItsTime(InitCase):

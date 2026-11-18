@@ -152,29 +152,33 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
   # Measured on the runner the first time coverage joined the three that
   # were already there (release-lab#311) — never locally, where the
   # tasks had only been run one after another. So the init is serialised
-  # with a directory lock: `mkdir` is atomic everywhere and needs no
-  # tool the runner or a Mac might lack. The waiter then runs its own
-  # init over a finished home, which is the idempotent case.
+  # with an exclusive lock on a file beside PGRX_HOME. The waiter then
+  # runs its own init over a finished home, which is the idempotent case.
   #
-  # The lock names its holder so a holder that was killed — mise stops
-  # the sibling tasks when one fails — cannot strand the next run.
+  # The lock is the KERNEL's (#1481): `with-lock.py` holds an `flock` for
+  # as long as the locked command runs, and the kernel releases it when
+  # the holder exits, killed included — mise stops the sibling tasks
+  # when one fails. #1140's `mkdir` lock named its holder in a pid file
+  # and let a waiter remove a lock whose holder `kill -0` called dead;
+  # on a Linux runner two inits then ran at once with that lock in place
+  # (#1481). A guess at liveness is the defect, so nothing here guesses:
+  # no pid, no stale branch, and only the holder ever lets the lock go.
+  # `flock(1)` would do the same and macOS does not ship it. A new name,
+  # `.init.flock`, so a directory the old lock left behind cannot stand
+  # where the file must be. The ten-minute bound is the helper's timeout.
   local home="${PGRX_HOME:-${HOME}/.pgrx}"
-  local lock="${home}.init.lock" holder waited=0 status=0
+  local lock="${home}.init.flock"
   mkdir -p "$(dirname "${home}")"
-  until mkdir "${lock}" 2> /dev/null; do
-    holder=$(cat "${lock}/pid" 2> /dev/null) || holder=""
-    if [[ -n ${holder} ]] && ! kill -0 "${holder}" 2> /dev/null; then
-      rm -rf "${lock}"
-      continue
-    fi
-    waited=$((waited + 1))
-    if [[ ${waited} -gt 600 ]]; then
-      echo "pgrx-env: waited ten minutes for another task's Postgres init (${lock})" >&2
-      return 1
-    fi
-    sleep 1
-  done
-  echo "$$" > "${lock}/pid"
+  python3 "$(dirname "${BASH_SOURCE[0]}")/with-lock.py" --timeout 600 \
+    --message "pgrx-env: waited ten minutes for another task's Postgres init (${lock})" \
+    "${lock}" -- bash -euo pipefail -c \
+    "$(declare -f org_pgrx_init_locked); org_pgrx_init_locked \"\$@\"" \
+    org_pgrx_init_locked "${home}" "${args[@]}"
+}
+
+org_pgrx_init_locked() { # usage: org_pgrx_init_locked <home> <init args…>, under the lock
+  local home="$1" status=0
+  shift
   # AN INIT THAT CHANGED NOTHING MUST NOT LOOK LIKE A CHANGE (#1165).
   # pgrx-pg-sys's build script declares `rerun-if-changed` on
   # ${PGRX_HOME}/config.toml, and `cargo pgrx init` rewrites that file
@@ -203,7 +207,7 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
       before=""
     }
   fi
-  cargo pgrx init "${args[@]}" || status=$?
+  cargo pgrx init "$@" || status=$?
   if [[ -n ${before} ]]; then
     # One step per assignment: a sort that failed must read as "changed"
     # and keep the new timestamp, never as two empty, equal sets.
@@ -216,7 +220,6 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
     fi
     rm -f "${before}"
   fi
-  rm -rf "${lock}"
   return "${status}"
 }
 
