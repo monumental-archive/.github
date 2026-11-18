@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.1](https://github.com/monumental-archive/.github/compare/v1.70.0...v1.70.1) - 2026-11-18
+
+### Changed
+
+- compare gomu's build go in python ([#1525](https://github.com/monumental-archive/.github/pull/1525))
+
+### Fixed
+
+- update monumental-archive/signer to f1bb0d6 ([#1518](https://github.com/monumental-archive/.github/pull/1518))
+- let mutmut's child processes import mutmut ([#1503](https://github.com/monumental-archive/.github/pull/1503))
+- build every fixture environment through one allow-list ([#1521](https://github.com/monumental-archive/.github/pull/1521))
+- build gomu with the repository's own go ([#1524](https://github.com/monumental-archive/.github/pull/1524))
+- enforce the no-coverage-exclusions rule ([#1523](https://github.com/monumental-archive/.github/pull/1523))
+- update monumental-archive/signer to 54e77ff ([#1527](https://github.com/monumental-archive/.github/pull/1527))
+
 ## [1.70.0](https://github.com/monumental-archive/.github/compare/v1.69.3...v1.70.0) - 2026-11-18
 
 ### Added
