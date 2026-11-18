@@ -39,7 +39,6 @@
 .github/workflows/level-assert.yml	Assert the published board is the measured one	18	# stele: #1352 unassigned
 .github/workflows/level-assert.yml	Report	20	# canon helper (the remaining small steps): #1386
 .github/workflows/level.yml	Check this repository against the canon roster	26	# stele: monumental-archive/stele#388, canon swap #1379
-.github/workflows/publish.yml	Check the ref and the class	50	# stele: monumental-archive/stele#403, canon swap #1378
 .github/workflows/publish.yml	Derive the per-artifact inventories and the release view	129	# stele: monumental-archive/stele#396, canon swap #1371
 .github/workflows/publish.yml	Compare the file-class subject manifests	25	# stele: monumental-archive/stele#401, canon swap #1376
 .github/workflows/publish.yml	Compare the image-class digests	55	# stele: monumental-archive/stele#401, canon swap #1376

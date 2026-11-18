@@ -79,6 +79,8 @@ IN_SCOPE = [
     ("publish-rust-crate.yml", "publish"),
     ("publish-wasm-npm.yml", "publish"),
     ("publish.yml", "facts"),
+    # The class derivation, `stele derive classes` (#1378).
+    ("publish.yml", "guard"),
     ("publish.yml", "sbom"),
     # Not on the release path: the signer-identity watch, scheduled and
     # in sequential legs while a backlog lasts (#1339). It installs stele
