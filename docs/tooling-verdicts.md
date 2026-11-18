@@ -2834,11 +2834,11 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   python-branches 89.32 with child processes measured, against
   92.45 and 88.66 with the unittest runners alone (3,021 statements,
   1,200 branches; test files omitted, since a suite executes itself
-  completely by construction). The canon
-  adopts in the commit after the release that ships the leg, since the
-  floor derives from the released measurement. **The bash half is
-  unchanged and still blocked**: kcov is v43 with no binary assets and
-  not in aqua, the trigger above stands, and the shell stays
+  completely by construction). The canon adopted on 2026-11-18, after
+  the release that carried the leg and its upload: 94.9 statements and
+  91.1 branches, `.coverage-floor` 89.1, the codecov shield rendered.
+  **The bash half is unchanged and still blocked**: kcov is v43 with
+  no binary assets and not in aqua, the trigger above stands, and the shell stays
   unmeasured — the floor covers the Python legs only. Rejected, so it
   is not re-proposed: stdlib `trace` (no Codecov format, an order of
   magnitude slower, no branch coverage), and waiting for a bash tool
