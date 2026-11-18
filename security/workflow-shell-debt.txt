@@ -32,12 +32,7 @@
 .github/workflows/build-go-binary.yml	Compute the subject manifest	38	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-oci-image.yml	Verify every first-party base carries its org attestation	65	# stele: monumental-archive/stele#402, canon swap #1377
 .github/workflows/build-oci-image.yml	Push by digest	22	# canon helper (registry operations): #1382
-.github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# canon helper: #1352 unassigned
-.github/workflows/build-pgrx-extension.yml	Refuse a control file that strands existing installations	25	# canon helper (pgrx extension build): #1380
-.github/workflows/build-pgrx-extension.yml	Build, test and package inside the target Postgres	145	# canon helper (pgrx extension build): #1380
-.github/workflows/build-pgrx-extension.yml	Assert the glibc floor	18	# canon helper: #1352 unassigned
-.github/workflows/build-pgrx-extension.yml	Smoke the package on both distros	32	# canon helper (pgrx extension build): #1380
-.github/workflows/build-pgrx-extension.yml	Execute the upgrade from the previous release	48	# canon helper (pgrx extension build): #1380
+.github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# stele (derive bump --check --expect): monumental-archive/stele#455
 .github/workflows/build-pgrx-extension.yml	Emit the inventory plan (what this cell built, from its own inputs)	17	# stele: #1352 unassigned
 .github/workflows/build-pgrx-extension.yml	Compute the subject manifest	48	# stele: monumental-archive/stele#393, canon swap #1364
 .github/workflows/build-pgrx-images.yml	Build both platforms and push by digest, untagged (#118)	37	# canon helper (registry operations): #1382
