@@ -153,6 +153,30 @@ class OneInitAtATime(InitCase):
         self.assertEqual(["start", "start", "end"], self.log())
 
 
+class LoopMeasure(unittest.TestCase):
+    """#1481 Done-when: fifty pairs with the new lock. MEASUREMENT ONLY."""
+
+    def test_fifty_pairs(self) -> None:
+        """Run fifty pairs and report every overlap."""
+        overlaps = []
+        for n in range(50):
+            case = OneInitAtATime("test_two_tasks_never_init_at_once")
+            case.setUp()
+            tasks = [case.init(STUB_HOLD="1"), case.init(STUB_HOLD="1")]
+            results = [case.finish(t) for t in tasks]
+            log = case.log()
+            if log != ["start", "end", "start", "end"]:
+                overlaps.append(f"pair {n}: log {log} {results}")
+            case.doCleanups()
+        print(f"\nLOOP-MEASURE: {len(overlaps)} overlap(s) in 50 pairs", flush=True)
+        for o in overlaps:
+            print("LOOP-MEASURE " + o, flush=True)
+        self.assertEqual([], overlaps)
+        self.fail(
+            "LOOP-MEASURE: 0 overlaps in 50 pairs (red on purpose, to show the log)"
+        )
+
+
 class UnchangedConfigKeepsItsTime(InitCase):
     """An init that registered nothing new does not touch the timestamp (#1173)."""
 
