@@ -413,6 +413,25 @@ class Majors(unittest.TestCase):
             by_major(PG_LIST, "[14,18]"),
         )
 
+    def test_the_plans_own_list_is_strings(self) -> None:
+        """The list as `mise/pgrx-plan.sh` prints it: strings, not numbers.
+
+        Recorded from the coverage upload of release-lab's gate run
+        44207730352, which refused `["14","15","16","17","18"]` as a
+        usage error.
+        """
+        self.assertEqual(
+            (
+                0,
+                (
+                    "install=aqua:theseus-rs/postgresql-binaries@14.24.1"
+                    " aqua:theseus-rs/postgresql-binaries@18.6.1\n"
+                ),
+                "",
+            ),
+            by_major(PG_LIST, '["14","18"]'),
+        )
+
     def test_the_legs_major_absent_is_refused_by_name(self) -> None:
         """A planned major the pin has no entry for: refused, never newest."""
         self.assertEqual(
@@ -493,7 +512,7 @@ class Majors(unittest.TestCase):
 
     def test_a_malformed_major_is_a_usage_error(self) -> None:
         """Not a whole number or a list of them: refused before reading."""
-        for spec in ("pg18", '[18, "17"]', "true", ""):
+        for spec in ("pg18", '[18, "pg17"]', "[18.5]", '["-18"]', "true", ""):
             with (
                 self.subTest(spec=spec),
                 self.assertRaises(SystemExit) as exit_,
