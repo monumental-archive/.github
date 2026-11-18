@@ -42,7 +42,7 @@ name: attach-release
         type: string
       # The per-LEG split of the build subjects, which only the
       # publisher holds. `stele emit manifest` requires every build
-      # subject in `--assets` to be claimed by exactly one build leg —
+      # subject it hashes to be claimed by exactly one build leg —
       # one class and one target (stele#223, manifest schema 4;
       # stele#185 asked the same of the class alone) — and the fan-in
       # below flattens `release-*` with
@@ -237,9 +237,10 @@ jobs:
           install_args: jq github:monumental-archive/stele
 
       # By pattern, not by name: every build class uploads its assets as
-      # `release-*` and every sign job its bundle as `attestation-bundle-*`,
-      # so any subset of classes fans in here without this step knowing
-      # which. A class that pushed only to a registry (oci-image)
+      # `release-*` and every sign job its bundle under the file name it
+      # ships as (`attestations-*.intoto.jsonl`, the names the assert
+      # policy declares), so any subset of classes fans in here without
+      # this step knowing which. A class that pushed only to a registry (oci-image)
       # contributes a bundle and no files, which is why an empty dist is
       # legal below while an empty bundle set is not.
       #
@@ -256,64 +257,9 @@ jobs:
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: attestation-bundle-*
+          pattern: attestations-*.intoto.jsonl
           path: bundle
 
-      - name: Name each provenance after the class it describes
-        env:
-          DRY_RUN: ${{ inputs.dry-run }}
-        run: |
-          set -euo pipefail
-          # SLSA distributing-provenance: provenance "SHOULD have a
-          # filename that is directly related to the build artifact
-          # filename". One bundle covers one class's subjects, so each is
-          # named for its class — attestations-<class>.intoto.jsonl, still
-          # inside the `*.intoto.jsonl` pattern Scorecard's Signed-Releases
-          # check recognises.
-          mkdir -p dist
-          found=0
-          for dir in bundle/attestation-bundle-*/; do
-            [[ -d ${dir} ]] || continue
-            class=$(basename "${dir}")
-            class="${class#attestation-bundle-}"
-            # -print -quit, never `| head -1`: find's own first-match stop, so
-            # there is no pipe to break and no walk to finish (#682).
-            src=$(find "${dir}" -type f -print -quit)
-            [[ -n ${src} ]] || {
-              echo "::error::empty bundle for ${class}"
-              exit 1
-            }
-            mv "${src}" "dist/attestations-${class}.intoto.jsonl"
-            found=$((found + 1))
-          done
-          if ((found == 0)); then
-            # download-artifact is layout-inconsistent, measured across two
-            # releases: two matched artifacts arrive in per-name
-            # subdirectories, exactly one arrives FLAT in the target path.
-            # The flat case carries no artifact name, so the class cannot
-            # be recovered — and with a single bundle it need not be: one
-            # bundle covering the whole release truthfully takes the
-            # umbrella name, which is the same `*.intoto.jsonl` pattern
-            # Scorecard recognises and SLSA's naming SHOULD asks for.
-            # -print -quit, never `| head -1`: find's own first-match stop, so
-            # there is no pipe to break and no walk to finish (#682).
-            flat=$(find bundle -maxdepth 1 -type f -print -quit 2> /dev/null)
-            if [[ -n ${flat} ]]; then
-              mv "${flat}" "dist/attestations.intoto.jsonl"
-              found=1
-            fi
-          fi
-          if ((found == 0)); then
-            if [[ ${DRY_RUN} == "true" ]]; then
-              # An oci-only rehearsal signs nothing: its signer runs only
-              # against a really-pushed digest. Loud, never silent.
-              echo "::warning::rehearsal: no Sigstore bundle to attach"
-            else
-              echo "::error::no Sigstore bundle — a release without evidence does not publish"
-              exit 1
-            fi
-          fi
-          echo "::notice::${found} attestation bundle(s) attached"
       - name: Assert the SBOM arrived
         run: |
           set -euo pipefail
@@ -355,6 +301,7 @@ jobs:
       # verdict CANNOT_JUDGE. Measured on v1.45.0.
       - name: Write the evidence manifest
         env:
+          DRY_RUN: ${{ inputs.dry-run }}
           CLASSES: ${{ inputs.classes }}
           SUBJECTS_RUST_CRATE: ${{ inputs.rust-crate-leg-subjects }}
           SUBJECTS_RUST_BINARY: ${{ inputs.rust-binary-leg-subjects }}
@@ -366,98 +313,32 @@ jobs:
           REGISTRY_WASM_NPM: ${{ inputs.wasm-npm-registry-subjects }}
           REGISTRY_PGRX_EXTENSION_IMAGE: ${{ inputs.pgrx-extension-image-registry-subjects }}
           PGRX_EXTENSION_IMAGE_CLASS: ${{ inputs.pgrx-extension-image-class }}
+        # One call (stele#400, #1375): stele hashes dist itself, reads
+        # the machinery version from the canon tree's version mirror,
+        # places each bundle under the name of its artifact directory
+        # (one flat bundle as the policy's umbrella name; SLSA's
+        # distributing-provenance naming), and splits each class's raw
+        # `<target> <sha256>  <name>` lines into legs, refusing a line
+        # with no target (#637), a target that is not a plain name, and
+        # lines with no class. Each class's lines reach it by one line
+        # here; a class that did not run passes nothing. A rehearsal
+        # with no bundle (an oci-only one signs nothing) is reported,
+        # never silent; a release with none is refused.
         run: |
           set -euo pipefail
-          # The machinery version is the canon tree's own, read from the
-          # version mirror the pinned tree carries — the caller's `uses:`
-          # ref is a commit SHA (the tag-pin rule), so the version is a
-          # fact about the TREE, not about the ref's spelling. For the
-          # canon's own releases the mirror already carries the version
-          # being cut, so one read covers both cases.
-          machinery=$(awk '/^version:/{print $2; exit}' .org-canon/CITATION.cff)
-          [[ -n ${machinery} ]] || {
-            echo "::error::the pinned canon tree's CITATION.cff names no version — the manifest cannot state its machinery"
-            exit 1
-          }
-          # Pass one of two: everything the release ships BEFORE the
-          # manifest exists, because a manifest cannot pin itself and
-          # the format says so. The checksum step below is pass two and
-          # covers everything including it.
-          (cd dist && sha256sum ./* | sed 's| \./| |') > "${RUNNER_TEMP}/assets.sha256"
-          # The leg split, one --leg-subjects per (class, target) that
-          # built something. stele demands every build subject in
-          # --assets be claimed by exactly one leg, so a class whose
-          # matrix ran contributes one flag per target it built and a
-          # class that did not run contributes nothing. An unset input
-          # is the empty string, so this loop is also what makes a
-          # single-class release pass exactly the flags its one class
-          # earned.
-          # Named once each, class beside its input: no name mangling
-          # between the two, so a class that is added or renamed is one
-          # line here and grep finds it.
-          #
-          # The target column is READ, never invented: the leg that
-          # built the artifact wrote it. A line without one refuses
-          # rather than defaulting, because a build subject with no
-          # target goes unjudged by every scoped rebuild — silently,
-          # which is the failure #637 exists to end.
-          #
-          # The registry subjects ride the same function under their own
-          # flag: the grammar is one, and what differs is only which
-          # population stele places the line in. The flag is part of the
-          # file name so a class that one day has both cannot have one
-          # leg's file overwrite the other's.
-          #
-          # A class NAME that arrives empty beside subjects that do not
-          # is the orchestrator contradicting itself, and is refused
-          # here rather than handed to stele as a leg with no class.
-          subject_flags=()
-          claim() {
-            local flag="$1" class="$2" legs="$3" line target path
-            local -a targets=()
-            [[ -n ${legs//[[:space:]]/} ]] || return 0
-            if [[ -z ${class} ]]; then
-              echo "::error::${flag}: subjects arrived with no class to attribute them to"
-              exit 1
-            fi
-            while IFS= read -r line; do
-              [[ -n ${line//[[:space:]]/} ]] || continue
-              target="${line%% *}"
-              line="${line#* }"
-              if [[ -z ${target} || ${line} == "${target}" ]]; then
-                echo "::error::${class}: subject line names no target — an untargeted artifact no scoped rebuild judges"
-                exit 1
-              fi
-              if [[ ${target} =~ [^A-Za-z0-9._-] ]]; then
-                echo "::error::${class}: target ${target} is not a plain name — it becomes a file this step writes"
-                exit 1
-              fi
-              path="${RUNNER_TEMP}/${flag}-${class}-${target}.sha256"
-              if [[ " ${targets[*]-} " != *" ${target} "* ]]; then
-                targets+=("${target}")
-                : > "${path}"
-                subject_flags+=("--${flag}" "${class}:${target}=${path}")
-              fi
-              printf '%s\n' "${line}" >> "${path}"
-            done <<< "${legs}"
-            echo "::notice::${class} claims ${#targets[@]} ${flag} leg(s): ${targets[*]}"
-          }
-          claim leg-subjects rust-crate "${SUBJECTS_RUST_CRATE}"
-          claim leg-subjects rust-binary "${SUBJECTS_RUST_BINARY}"
-          claim leg-subjects go-binary "${SUBJECTS_GO_BINARY}"
-          claim leg-subjects source-archive "${SUBJECTS_SOURCE_ARCHIVE}"
-          claim leg-subjects pgrx-extension "${SUBJECTS_PGRX_EXTENSION}"
-          claim registry-subjects "${OCI_IMAGE_CLASS}" "${REGISTRY_OCI_IMAGE}"
-          claim registry-subjects wasm-npm "${REGISTRY_WASM_NPM}"
-          claim registry-subjects "${PGRX_EXTENSION_IMAGE_CLASS}" "${REGISTRY_PGRX_EXTENSION_IMAGE}"
-          stele emit manifest \
-            --classes "${CLASSES}" \
-            --store-vsa true \
-            --machinery-version "${machinery}" \
-            --assets "${RUNNER_TEMP}/assets.sha256" \
-            "${subject_flags[@]}" \
-            --assert-policy .org-canon/slsa/assert-policy.json \
-            --out dist/evidence-manifest.json
+          rehearsal=()
+          [[ ${DRY_RUN} != "true" ]] || rehearsal=(--rehearsal)
+          stele emit manifest --classes "${CLASSES}" --store-vsa true "${rehearsal[@]}" \
+            --machinery-tree .org-canon --assets-dir dist --bundles-dir bundle \
+            --leg-lines rust-crate=<(printf '%s\n' "${SUBJECTS_RUST_CRATE}") \
+            --leg-lines rust-binary=<(printf '%s\n' "${SUBJECTS_RUST_BINARY}") \
+            --leg-lines go-binary=<(printf '%s\n' "${SUBJECTS_GO_BINARY}") \
+            --leg-lines source-archive=<(printf '%s\n' "${SUBJECTS_SOURCE_ARCHIVE}") \
+            --leg-lines pgrx-extension=<(printf '%s\n' "${SUBJECTS_PGRX_EXTENSION}") \
+            --registry-lines "${OCI_IMAGE_CLASS}"=<(printf '%s\n' "${REGISTRY_OCI_IMAGE}") \
+            --registry-lines wasm-npm=<(printf '%s\n' "${REGISTRY_WASM_NPM}") \
+            --registry-lines "${PGRX_EXTENSION_IMAGE_CLASS}"=<(printf '%s\n' "${REGISTRY_PGRX_EXTENSION_IMAGE}") \
+            --assert-policy .org-canon/slsa/assert-policy.json --out dist/evidence-manifest.json
       - name: Checksum everything that ships
         run: |
           set -euo pipefail

@@ -829,30 +829,19 @@ jobs:
           }
           base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
           base="${base#.}"
-          release_purl="pkg:github/${GITHUB_REPOSITORY}@v${VERSION}"
-          # Subjects: the release view under the release's own purl,
-          # plus every per-artifact inventory under its artifact's name
-          # — a statement then names the artifact a consumer actually
-          # holds, not just the release that contained it (#492).
-          subjects="${release_purl}=dist/${base}-${VERSION}.spdx.json"
-          for doc in dist/sbom-*-"${VERSION}".spdx.json; do
-            [[ -e ${doc} ]] || continue
-            artifact=$(jq -r '.name' "${doc}")
-            subjects="${subjects},${artifact}=${doc}"
-          done
-          out="dist/${base}-${VERSION}.vex.openvex.json"
+          # The ecosystems and the author are the assert policy's
+          # (blastRadius), the document id its vexId template, and the
+          # release view's product the verify policy's resourceUri
+          # (stele#397, #1372). Every other inventory in dist/ is
+          # covered under its own document name.
           stele derive vex \
-            --subjects "${subjects}" \
+            --policy .org-canon/slsa/assert-policy.json \
+            --verify-policy .org-canon/slsa/verify-policy.json \
+            --inventories dist --release-view "dist/${base}-${VERSION}.spdx.json" \
             --vex .org-canon/security/vex \
-            --base-ecosystems "debian,alpine,ubuntu,rocky,redhat,rpm" \
-            --author monumental-archive \
-            --id "https://openvex.dev/docs/public/vex-${GITHUB_REPOSITORY//\//-}-v${VERSION}-derived" \
+            --repo "${GITHUB_REPOSITORY}" --version "${VERSION}" \
             --released "${SBOM_CREATED}" \
-            --out "${out}"
-          if [[ -f ${out} ]]; then
-            statements=$(jq '.statements | length' "${out}")
-            echo "::notice::derived VEX shipped (${statements} statement(s))"
-          fi
+            --out "dist/${base}-${VERSION}.vex.openvex.json"
       - name: Triage the tagged lock against the advisory feed
         # Dependency L2's own wording — triage all known vulnerabilities
         # BEFORE release — enforced against the release rather than the
@@ -1025,7 +1014,7 @@ jobs:
     with:
       image-name: ${{ needs.assemble-oci.outputs.image }}
       image-digest: ${{ needs.assemble-oci.outputs.digest }}
-      bundle-artifact: attestation-bundle-image
+      bundle-artifact: attestations-image.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1095,7 +1084,7 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
     with:
       subjects: ${{ needs.verify.outputs.subjects }}
-      bundle-artifact: attestation-bundle-crates
+      bundle-artifact: attestations-crates.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1190,7 +1179,7 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
     with:
       subjects: ${{ needs.build-binary.outputs.subjects }}
-      bundle-artifact: attestation-bundle-binaries
+      bundle-artifact: attestations-binaries.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1243,7 +1232,7 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
     with:
       subjects: ${{ needs.build-go.outputs.subjects }}
-      bundle-artifact: attestation-bundle-go-binaries
+      bundle-artifact: attestations-go-binaries.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1289,7 +1278,7 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
     with:
       subjects: ${{ needs.build-source.outputs.subjects }}
-      bundle-artifact: attestation-bundle-source
+      bundle-artifact: attestations-source.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1372,7 +1361,7 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
     with:
       subjects: ${{ needs.verify-wasm.outputs.subjects }}
-      bundle-artifact: attestation-bundle-npm
+      bundle-artifact: attestations-npm.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1444,7 +1433,7 @@ jobs:
     uses: monumental-archive/signer/.github/workflows/sign.yml@d153ea66d88f212e09dcb861a319c4f461994644 # main
     with:
       subjects: ${{ needs.build-extension.outputs.subjects }}
-      bundle-artifact: attestation-bundle-extensions
+      bundle-artifact: attestations-extensions.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1548,7 +1537,7 @@ jobs:
     with:
       image-name: ${{ matrix.image }}
       image-digest: ${{ matrix.digest }}
-      bundle-artifact: attestation-bundle-extimg-pg${{ matrix.pg }}
+      bundle-artifact: attestations-extimg-pg${{ matrix.pg }}.intoto.jsonl
     permissions:
       id-token: write # the signer mints the Sigstore identity
       attestations: write # the signer persists the provenance
@@ -1893,9 +1882,10 @@ jobs:
   # signer legitimately skipped). A skipped class never blocks; a failed
   # or missing one always does. The VSA jobs are deliberately absent:
   # verdicts run AFTER this job, against the published immutable release
-  # (#209) — attach publishes on evidence, verdicts follow. Assets and
-  # bundles travel as `release-*` / `attestation-bundle-*` artifacts, so
-  # the BYTES need no per-class input.
+  # (#209) — attach publishes on evidence, verdicts follow. Assets
+  # travel as `release-*` artifacts and bundles under the file names
+  # they ship as (`attestations-*.intoto.jsonl`, #1375), so the BYTES
+  # need no per-class input.
   #
   # Their LEG does — its class since stele#185 and its target since
   # stele#223: `stele emit manifest` requires every build subject to be
