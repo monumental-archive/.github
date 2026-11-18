@@ -131,9 +131,16 @@ Phase-1 rules, all proven in iiif-server:
   made from, and the squash carries it into the release commit.
   `lint:release-planned` reds a commit whose trailer is not its parent,
   so the queue removes a stale Release PR before it merges, and the
-  next push regenerates it. While the pull request is queued, the forge
-  refuses to move its branch (HTTP 422); `open-release-pr.sh` exits 0
-  on that refusal by name and still fails on any other.
+  next push regenerates it.
+- **A queued Release PR is regenerated, not left stale** (#1504). The
+  forge refuses to move the branch of a queued pull request (HTTP 422),
+  so on that refusal `open-release-pr.sh` takes the pull request out of
+  the queue (`dequeuePullRequest`), moves the branch as for any other,
+  and comments: "taken out of the merge queue: N commits landed after
+  this release was planned; regenerated at <sha>; queue it again". It
+  never queues it again; merging a release stays a person's act. A
+  dequeue the forge refuses the App exits 0, saying the next push to
+  the default branch regenerates it; any other failure stays a failure.
 - The release PR's commit is created through the GitHub API
   (`createCommitOnBranch`), so it is signed by GitHub and satisfies
   `required_signatures`; the script asserts the commit is `verified` rather
