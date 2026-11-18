@@ -81,13 +81,21 @@ if [[ -n ${tracked_js} ]]; then
   # shellcheck disable=SC2086  # one argument per tracked path; none has a space
   ts_runner=$(python3 "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" ${tracked_js}) || exit 1
 fi
+# The leg measures the repository's own `test` task (#1357 item 2), so a
+# vitest tree with no `test` task has no suite the gate runs: it skips
+# clean, as a Python tree with no `test` task does.
+ts_test=""
+if [[ ${ts_runner} == vitest\ * ]]; then
+  ts_test=${python_test}
+  [[ -n ${ts_test} ]] || ts_test=$(mise tasks info test --json 2> /dev/null) || ts_test=""
+fi
 
 if [[ ${legs} == probe ]]; then
   [[ -f go.mod ]] && echo go
   [[ -f Cargo.toml ]] && echo rust
   [[ -n ${python_test} ]] && echo python
   case "${ts_runner}" in
-    vitest\ *) echo typescript ;;
+    vitest\ *) [[ -z ${ts_test} ]] || echo typescript ;;
     unsupported\ *)
       echo "${label}: typescript: ${ts_runner#unsupported } is not a runner the leg supports (vitest), skipped" >&2
       ;;
@@ -335,7 +343,7 @@ EOF
   echo "python-branches ${br_pct}"
 fi
 
-if [[ ${ts_runner} == vitest\ * && ${legs} =~ ^(all|typescript)$ ]]; then
+if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   # The repository's own runner under its own coverage provider (#1357):
   # vitest from the repository's node_modules, the provider its lockfile
   # pins. The belt pins neither, and adds no second instrumentation.
@@ -354,12 +362,42 @@ if [[ ${ts_runner} == vitest\ * && ${legs} =~ ^(all|typescript)$ ]]; then
       ;;
     *) ;;
   esac
-  vitest=node_modules/.bin/vitest
+  vitest="${PWD}/node_modules/.bin/vitest"
   if [[ ! -x ${vitest} ]]; then
     echo "${label}: vitest is in the lockfile but not installed — install from the" >&2
     echo "  tracked lockfile before measuring" >&2
     exit 1
   fi
+  # The vitest run the gate's `test` task makes, read from the task and
+  # every task it depends on (#1357 item 2): one plain invocation, its
+  # arguments and its task's dir, or a refusal by name. The depends are
+  # walked here with the same read-only `mise tasks info` the python leg
+  # makes; the reading of the scripts is coverage-js-runner.py's.
+  tasks_json=""
+  queue="test"
+  seen=" "
+  while [[ -n ${queue// /} ]]; do
+    name=${queue%% *}
+    queue=${queue#"${name}"}
+    queue=${queue# }
+    [[ -n ${name} && ${seen} != *" ${name} "* ]] || continue
+    seen="${seen}${name} "
+    info=$(mise tasks info "${name}" --json 2> /dev/null) || {
+      echo "${label}: typescript: cannot read task '${name}' with mise tasks info" >&2
+      exit 1
+    }
+    tasks_json+=$(jq -c --arg n "${name}" '. + {name: $n}' <<< "${info}")$'\n'
+    deps=$(jq -r '(.depends // [])[] | if type == "string" then . else (.task // empty) end' <<< "${info}")
+    queue="${queue} ${deps//$'\n'/ }"
+  done
+  command_json=$(python3 "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
+    --vitest-command "${label}" <<< "${tasks_json}") || exit 1
+  test_dir=$(jq -r '.dir' <<< "${command_json}")
+  args_lines=$(jq -r '.args[]' <<< "${command_json}")
+  test_args=()
+  while IFS= read -r arg; do
+    test_args+=("${arg}")
+  done <<< "${args_lines}"
   ts_work=$(mktemp -d)
   rc=0
   # Completion-guarded (#1233), and clearing the python leg's directory
@@ -370,12 +408,12 @@ if [[ ${ts_runner} == vitest\ * && ${legs} =~ ^(all|typescript)$ ]]; then
   # loaded unless it is set). The leg sets only what makes the number
   # readable here: the provider, the two reporters, and a directory of
   # its own, so nothing lands in the tree unasked.
-  if ! "${vitest}" run \
+  if ! (cd "${test_dir}" && "${vitest}" "${test_args[@]}" \
     --coverage.enabled=true \
     --coverage.provider="${provider}" \
     --coverage.reporter=json-summary \
     --coverage.reporter=lcov \
-    --coverage.reportsDirectory="${ts_work}" >&2; then
+    --coverage.reportsDirectory="${ts_work}") >&2; then
     echo "${label}: the vitest suite failed under measurement — a suite that" >&2
     echo "  does not pass cannot measure a floor" >&2
     exit 1

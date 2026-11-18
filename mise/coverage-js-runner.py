@@ -25,10 +25,32 @@ an untracked lockfile is never read). Prints one line, or nothing:
 The leg supports vitest. Any other runner is named, from the root
 package.json's dependencies or its `test` script, so a skip says what
 it skipped rather than reading as a tree with nothing to measure.
+
+`--vitest-command <label>` is the second question: WHICH vitest run
+the leg measures. #1357 item 2 says the leg runs the repository's own
+test command, so the suite measured is the suite the gate runs (#707),
+never vitest's whole configured suite where the `test` task runs a
+narrower one. Standard input carries `mise tasks info --json` for the
+`test` task and every task it depends on, one per line. The one plain
+vitest invocation in their `run` scripts is printed as JSON,
+`{"dir": <the task's dir>, "args": [<its arguments>]}`, and the caller
+runs the repository's own vitest with exactly those arguments plus the
+coverage flags. Running the task's scripts with a coverage-adding
+`vitest` first on PATH was measured and refused: `pnpm exec` and `npx`
+put `node_modules/.bin` at the head of PATH, so the repository's own
+binary runs and the shim never does, and vitest reads no environment
+variable that enables coverage.
+
+A task whose vitest command cannot be read is refused by name, never
+guessed at: no vitest command (a `pnpm test` behind a package.json
+script, say), more than one, a shell expansion in it, vitest inside a
+compound line, a vitest subcommand other than `run`, or a coverage
+flag the leg would contradict.
 """
 
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -103,6 +125,198 @@ def other_runner(manifest: dict) -> str | None:
     return None
 
 
+# What may stand before `vitest` on its line: the package managers'
+# ways of running a dependency's binary, or nothing. A path ending in
+# `/vitest` (`node_modules/.bin/vitest`) is the binary itself.
+LAUNCHERS = (
+    (),
+    ("pnpm",),
+    ("pnpm", "exec"),
+    ("npx",),
+    ("npx", "--no-install"),
+    ("npx", "--no"),
+    ("yarn",),
+    ("yarn", "exec"),
+    ("npm", "exec"),
+    ("npm", "exec", "--"),
+)
+
+# Characters that make a line more than one plain command, or make its
+# arguments something only the shell can resolve.
+COMPOUND = re.compile(r"[;&|<>()]")
+EXPANSION = re.compile(r"[$`]")
+
+# vitest subcommands other than `run`; arguments that start with neither
+# are file filters, which `vitest run` takes as they are.
+SUBCOMMANDS = frozenset(
+    {"watch", "dev", "bench", "init", "list", "related", "typecheck"},
+)
+
+FORMS = (
+    "`vitest …`, `pnpm exec vitest …`, `npx vitest …`, `yarn vitest …`"
+    " or `node_modules/.bin/vitest …`"
+)
+
+
+def logical_lines(script: str) -> list[str]:
+    """Split a run script into lines, joining backslash continuations.
+
+    Returns:
+        The script's logical lines, comments and blanks dropped.
+
+    """
+    out: list[str] = []
+    pending = ""
+    for raw in script.splitlines():
+        line = pending + raw
+        if line.rstrip().endswith("\\"):
+            pending = line.rstrip()[:-1] + " "
+            continue
+        pending = ""
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(stripped)
+    if pending.strip():
+        out.append(pending.strip())
+    return out
+
+
+def is_vitest(word: str) -> bool:
+    """Say whether a shell word names the vitest binary.
+
+    Returns:
+        True for `vitest` and for a path ending in `/vitest`.
+
+    """
+    return word == "vitest" or word.endswith("/vitest")
+
+
+def refusal(line: str, words: list[str]) -> str | None:
+    """Say why a line that runs vitest cannot be read, if it cannot.
+
+    Returns:
+        The reason, or None when the line is one plain invocation.
+
+    """
+    at = next(i for i, w in enumerate(words) if is_vitest(w))
+    checks = (
+        (EXPANSION.search(line), f"a shell expansion in `{line}`"),
+        (COMPOUND.search(line), f"vitest inside a compound line, `{line}`"),
+        (
+            tuple(words[:at]) not in LAUNCHERS,
+            f"vitest behind a command the leg does not read, `{line}`",
+        ),
+    )
+    return next((reason for failed, reason in checks if failed), None)
+
+
+def read_line(line: str) -> tuple[list[str] | None, str | None]:
+    """Read one logical line for a vitest invocation.
+
+    Returns:
+        The arguments after `vitest` and None; None and the reason the
+        line is refused; or (None, None) when the line runs no vitest.
+
+    """
+    try:
+        words = shlex.split(line, comments=True)
+    except ValueError:
+        reason = f"an unreadable line, `{line}`" if "vitest" in line else None
+        return None, reason
+    if not any(is_vitest(w) for w in words):
+        return None, None
+    reason = refusal(line, words)
+    if reason is not None:
+        return None, reason
+    at = next(i for i, w in enumerate(words) if is_vitest(w))
+    return words[at + 1 :], None
+
+
+def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
+    """Read every task's run scripts for vitest invocations.
+
+    Returns:
+        Each readable invocation as (its task's dir, its arguments), and
+        each refused line as `<task>: <reason>`.
+
+    """
+    found: list[tuple[str, list[str]]] = []
+    refused: list[str] = []
+    for raw in stream.splitlines():
+        if not raw.strip():
+            continue
+        task = json.loads(raw)
+        run = task.get("run") or []
+        for script in [run] if isinstance(run, str) else run:
+            for line in logical_lines(script):
+                args, reason = read_line(line)
+                if reason is not None:
+                    refused.append(f"{task.get('name', 'test')}: {reason}")
+                elif args is not None:
+                    found.append((task.get("dir") or ".", args))
+    return found, refused
+
+
+def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str]:
+    """Say why the collected invocations are not one measurable run.
+
+    Returns:
+        The refusal's lines after its head, or none when there is one
+        plain `vitest run`.
+
+    """
+    if refused:
+        return [
+            ", and cannot read it —",
+            *(f"  {reason}" for reason in refused),
+            f"  write it as one plain line: {FORMS}",
+        ]
+    if not found:
+        return [
+            ", and the test task and its depends run none —",
+            f"  run vitest from the test task as {FORMS}",
+        ]
+    if len(found) > 1:
+        return [
+            f", and the test task and its depends run {len(found)} —",
+            "  the leg measures one suite; run vitest once",
+        ]
+    args = found[0][1]
+    if args and args[0] in SUBCOMMANDS:
+        return [
+            f", and `vitest {args[0]}` is not a run —",
+            "  the leg measures `vitest run`",
+        ]
+    if any(a.startswith("--coverage") for a in args):
+        return [
+            ", and it sets coverage itself —",
+            "  the leg sets the coverage flags; drop them from the test task",
+        ]
+    return []
+
+
+def vitest_command(label: str, stream: str) -> int:
+    """Print the test task's one vitest invocation, or refuse it by name.
+
+    Returns:
+        0 with the JSON on stdout, or 1 with the refusal on stderr.
+
+    """
+    found, refused = collect(stream)
+    lines = problems(found, refused)
+    if lines:
+        head = f"{label}: typescript: the leg measures the test task's own"
+        print(f"{head} vitest command{lines[0]}", file=sys.stderr)
+        for line in lines[1:]:
+            print(line, file=sys.stderr)
+        return 1
+    directory, args = found[0]
+    if not args or args[0] != "run":
+        args = ["run", *args]
+    print(json.dumps({"dir": directory, "args": args}))
+    return 0
+
+
 def main(tracked: list[str]) -> int:
     """Print the runner line for the tree in the working directory.
 
@@ -137,4 +351,6 @@ def main(tracked: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--vitest-command"]:
+        sys.exit(vitest_command(sys.argv[2], sys.stdin.read()))
     sys.exit(main(sys.argv[1:]))

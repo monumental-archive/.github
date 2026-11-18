@@ -83,9 +83,15 @@ esac
 
 MISE = """\
 #!/usr/bin/env bash
-if [[ "$1 $2 $3" == "tasks info test" && -f ${STUB_TASK} ]]; then
-  cat "${STUB_TASK}"
-  exit 0
+# `tasks info <name> --json`: the planted test task, or a planted
+# dependency of it beside that file as task.<name>.json.
+if [[ "$1 $2" == "tasks info" ]]; then
+  f=${STUB_TASK}
+  [[ $3 == test ]] || f="${STUB_TASK%.json}.$3.json"
+  if [[ -f ${f} ]]; then
+    cat "${f}"
+    exit 0
+  fi
 fi
 exit 1
 """
@@ -101,10 +107,16 @@ for arg in "$@"; do
 done
 echo "vitest suite ran" >&2
 echo "vitest args: $*" >&2
+[[ -n ${dir} ]] || exit 0
 lines='{"total": {"lines": {"pct": %s}, "branches": {"pct": %s}}}\\n'
 printf "${lines}" "${STUB_TS}" "${STUB_TS_BR}" > "${dir}/coverage-summary.json"
 echo "TN:" > "${dir}/lcov.info"
 """
+
+# The head of every refusal of the test task's vitest command.
+HEAD_MSG = (
+    "coverage:check: typescript: the leg measures the test task's own vitest command"
+)
 
 # Lockfile entries, in pnpm's form, by what the row plants.
 PNPM_VITEST = "  vitest@4.1.12:\n    resolution: {integrity: stub}\n"
@@ -151,7 +163,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     typescript: str | None = None,
     ts: str = "88.0",
     ts_branches: str = "81.0",
-    test_run: str = "echo suite ran",
+    test_run: str | None = None,
+    depends: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
@@ -170,9 +183,21 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (stubs / name).chmod(0o755)
     (stubs / "python3").symlink_to(sys.executable)
     task_json = tmp / "task.json"
+    if test_run is None and typescript is not None:
+        # A vitest tree's test task runs vitest (#1357 item 2); the python
+        # leg runs the same line, so it is the stub binary, not pnpm.
+        test_run = "node_modules/.bin/vitest run"
+    for name, run in (depends or {}).items():
+        (tmp / f"task.{name}.json").write_text(
+            json.dumps({"dir": str(tree), "run": [run]}), encoding="utf-8"
+        )
     if test_task:
         task_json.write_text(
-            json.dumps({"dir": str(tree), "run": [test_run]}),
+            json.dumps({
+                "dir": str(tree),
+                "run": [test_run or "echo suite ran"],
+                "depends": sorted(depends or {}),
+            }),
             encoding="utf-8",
         )
 
@@ -416,6 +441,89 @@ class TypeScriptRows(CoverageTaskCase):
         self.assertEqual(1, len(runs), done.stderr)
         self.assertIn("tests/unit", runs[0])
         self.assertIn("--coverage.enabled=true", runs[0])
+
+    def test_a_depended_on_vitest_task_is_followed(self) -> None:
+        """The test task's `depends` are read: vitest may live in one."""
+        done, _ = self.run_task(
+            "coverage:check",
+            python=False,
+            typescript="vitest",
+            test_run="echo test: unit tests green",
+            depends={"test:unit": "pnpm exec vitest run tests/unit"},
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            "vitest args: run tests/unit --coverage.enabled=true", done.stderr
+        )
+
+    def test_a_vitest_tree_without_a_test_task_skips_clean(self) -> None:
+        """No test task, no suite the gate runs: nothing to measure."""
+        done, _ = self.run_task(
+            "coverage:check", python=False, typescript="vitest", test_task=False
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn("no measurable language", done.stdout)
+        self.assertNotIn("vitest suite ran", done.stderr)
+
+    def refused(self, run: str, message: str, **plant: object) -> None:
+        """Assert a test task whose vitest command is refused, by message."""
+        done, _ = self.run_task(
+            "coverage:check",
+            python=False,
+            typescript="vitest",
+            test_run=run,
+            **plant,  # type: ignore[arg-type]
+        )
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(message, done.stderr)
+        self.assertNotIn("vitest suite ran", done.stderr)
+
+    def test_a_test_task_without_vitest_is_refused(self) -> None:
+        """A `pnpm test` behind a package.json script is not read through."""
+        self.refused(
+            "pnpm test", HEAD_MSG + ", and the test task and its depends run none —\n"
+        )
+
+    def test_two_vitest_commands_are_refused(self) -> None:
+        """The leg measures one suite."""
+        self.refused(
+            "vitest run tests/a",
+            HEAD_MSG + ", and the test task and its depends run 2 —\n",
+            depends={"test:more": "vitest run tests/b"},
+        )
+
+    def test_a_shell_expansion_is_refused(self) -> None:
+        """Arguments only the shell can resolve are not guessed at."""
+        self.refused(
+            "vitest run ${FILES}",
+            "  test: a shell expansion in `vitest run ${FILES}`\n",
+        )
+
+    def test_a_compound_line_is_refused(self) -> None:
+        """A `cd` before vitest is a directory the leg would not honour."""
+        self.refused(
+            "cd web && vitest run",
+            "  test: vitest inside a compound line, `cd web && vitest run`\n",
+        )
+
+    def test_an_unknown_launcher_is_refused(self) -> None:
+        """Only the package managers' plain launchers are read."""
+        self.refused(
+            "bunx vitest run",
+            "  test: vitest behind a command the leg does not read,"
+            " `bunx vitest run`\n",
+        )
+
+    def test_a_subcommand_other_than_run_is_refused(self) -> None:
+        """`vitest watch` is not a suite run."""
+        self.refused("vitest watch", HEAD_MSG + ", and `vitest watch` is not a run —\n")
+
+    def test_a_coverage_flag_in_the_task_is_refused(self) -> None:
+        """The leg owns the coverage flags."""
+        self.refused(
+            "vitest run --coverage.enabled=false",
+            HEAD_MSG + ", and it sets coverage itself —\n",
+        )
 
     def test_report_writes_the_typescript_lcov(self) -> None:
         """The upload is the measured run's own lcov, off lcov.info."""
