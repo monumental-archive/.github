@@ -1,0 +1,31 @@
+# The canon's own weekly mutation run — this repository running the
+# stub every other repository runs (#1354).
+#
+# The same file `workflow-templates/mutants.yml` ships, with the one
+# difference every canon self-application has: the `uses:` is local,
+# because the canon calls its own workflow at the running commit rather
+# than pinning a release of itself (the gate.yml and self-level.yml
+# convention). Named `self-mutants.yml` because `repo-mutants.yml` is
+# the callee. The canon adopts Python only (pyproject.toml's
+# `[tool.mutmut]`); every other language's jobs are skipped here.
+---
+name: self-mutants
+
+"on":
+  schedule:
+    # Mondays 07:00 UTC, the stub's own slot.
+    - cron: 0 7 * * 1
+  workflow_dispatch: {}
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  mutants:
+    permissions:
+      contents: read # this repository's contents, read-only
+    uses: ./.github/workflows/repo-mutants.yml # zizmor: ignore[self-repository]
+...

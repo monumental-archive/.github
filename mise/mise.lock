@@ -1063,6 +1063,10 @@ url_api = "https://api.github.com/repos/lycheeverse/lychee/releases/assets/40995
 version = "7.17.2"
 backend = "pipx:coverage"
 
+[[tools."pipx:mutmut"]]
+version = "3.8.1"
+backend = "pipx:mutmut"
+
 [[tools."pipx:reuse"]]
 version = "6.3.0"
 backend = "pipx:reuse"
