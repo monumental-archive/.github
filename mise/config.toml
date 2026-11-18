@@ -6420,16 +6420,18 @@ files=$(action_files)
   echo "lint:actions-allowed: no workflows or actions, skipped"
   exit 0
 }
-# github_owned_allowed=true covers the actions/ and github/ orgs.
-# verified_allowed=false — a Marketplace verification badge is a
-# publisher check, not a supply-chain one, and it is not ours to revoke.
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
-# An array, quoted at every use: as one unquoted string, `actions/*`
-# expanded against the working directory, and in a repository tracking
-# `actions/<name>/` every GitHub-owned action was reported forbidden
-# (#1448). The patterns are matched against references, never paths.
-allowed=("actions/*" "github/*" "${canon_owner}/*" "jdx/mise-action@*" "codecov/codecov-action@*" "ossf/scorecard-action@*")
+# The list is mise/actions-allowed.sh, the one copy this lint and
+# audit:actions-allowlist both read. An array, quoted at every use: as
+# one unquoted string, `actions/*` expanded against the working
+# directory, and in a repository tracking `actions/<name>/` every
+# GitHub-owned action was reported forbidden (#1448). The patterns are
+# matched against references, never paths.
+. "${ORG_BELT_DIR}/actions-allowed.sh"
+listed=$(org_actions_allowed "${canon_owner}")
+allowed=()
+while IFS= read -r pat; do allowed+=("${pat}"); done <<< "${listed}"
 bad=""
 checked=0
 while IFS= read -r f; do
@@ -6507,13 +6509,19 @@ jq -e '.patterns_allowed | type == "array"' <<< "${live}" > /dev/null || {
   exit 1
 }
 live_patterns=$(jq -r '.patterns_allowed | sort | join(" ")' <<< "${live}")
-# The task text holds the owner as ${canon_owner}, unexpanded — expand
-# it from the same declaration before comparing (#579).
-belt_patterns=$(mise tasks info "lint:actions-allowed" --json \
-  | jq -r '.run[0]' | sed -n 's|^allowed="\(.*\)"$|\1|p' \
-  | sed "s|\${canon_owner}|${canon_owner}|g" \
-  | tr " " "\n" | grep -v "^actions/\*$" | grep -v "^github/\*$" \
-  | sort | tr "\n" " " | sed "s| $||")
+# The belt's list is mise/actions-allowed.sh, the copy the lint judges
+# with: called, never scraped from the lint's text. The two GitHub
+# owners are the github_owned_allowed switch, not patterns. awk, not
+# grep, so a list with nothing left is empty, never an exit status;
+# and an empty list is refused by name rather than compared.
+. "${ORG_BELT_DIR}/actions-allowed.sh"
+belt_list=$(org_actions_allowed "${canon_owner}")
+belt_patterns=$(awk '$0 != "actions/*" && $0 != "github/*"' <<< "${belt_list}" \
+  | LC_ALL=C sort | tr "\n" " " | sed "s| $||")
+if [[ -z ${belt_patterns} ]]; then
+  echo "audit:actions-allowlist: mise/actions-allowed.sh names no pattern beyond the GitHub owners; refusing to compare" >&2
+  exit 1
+fi
 fail=""
 [[ ${live_patterns} == "${belt_patterns}" ]] \
   || fail="patterns differ — live: [${live_patterns}] belt: [${belt_patterns}]"
@@ -6523,7 +6531,7 @@ jq -e '.verified_allowed == false' <<< "${live}" > /dev/null \
   || fail="${fail}; verified_allowed is true — the Marketplace badge is not a supply-chain control"
 if [[ -n ${fail} ]]; then
   echo "audit:actions-allowlist: ${fail}" >&2
-  echo "  reconcile mise/config.toml lint:actions-allowed and security/README.md" >&2
+  echo "  reconcile mise/actions-allowed.sh and security/README.md" >&2
   echo "  with the live setting, or put the live setting back" >&2
   exit 1
 fi

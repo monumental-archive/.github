@@ -106,8 +106,9 @@ Two mechanisms keep it honest, because GitHub enforces the allowlist at
 `Set up job`, where a run dies before any step executes and nothing is
 red until then:
 
-- `lint:actions-allowed` carries the enforcement copy in the belt, so
-  every repo fails a forbidden `uses:` in the gate. It lints composite
+- `lint:actions-allowed` judges with the enforcement copy in the belt
+  (`mise/actions-allowed.sh`, the one list the audit below reads too),
+  so every repo fails a forbidden `uses:` in the gate. It lints composite
   actions (`.github/actions/*/action.yml`) as well as workflows — the
   blind spot that let `sigstore/cosign-installer` reach a live lab run
   (#207).
