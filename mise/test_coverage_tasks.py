@@ -894,5 +894,99 @@ class ReportsSelector(unittest.TestCase):
         )
 
 
+# The real coverage.py the belt pins, or None. The rows below run the
+# python leg with it, not a stub: what they hold is coverage's own
+# reading of a child started from another directory (#1528).
+COVERAGE_TOOL = shutil.which("coverage")
+COVERAGE_MISSING = (
+    "coverage is not on PATH: these rows run the belt's real coverage.py"
+    " over a planted suite — run: mise install"
+)
+
+# The refusal the python leg prints when coverage recorded a file that
+# no longer resolves, with the planted child's file named.
+NO_SOURCE_MSG = (
+    "coverage:test: coverage recorded 'helper.py', which no file in the tree"
+    " matches —\n"
+    "  a test ran a Python child under measurement from a directory other than"
+    " the\n"
+    "  repository root, and its files were recorded relative to that directory;\n"
+    "  start the child from the repository root\n"
+)
+
+
+def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], bool]:
+    """Measure a planted tree's python leg with the real coverage.py.
+
+    The tree tracks `sub/helper.py`; its test task is `test_run`, read
+    through the stub `mise`.
+
+    Returns:
+        The finished measurement, and whether it wrote coverage.xml.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "tree"
+        stubs = Path(tmp) / "stubs"
+        (tree / "sub").mkdir(parents=True)
+        stubs.mkdir()
+        (stubs / "mise").write_text(MISE, encoding="utf-8")
+        (stubs / "mise").chmod(0o755)
+        (tree / "sub" / "helper.py").write_text("print('hi')\n", encoding="utf-8")
+        task = Path(tmp) / "task.json"
+        task.write_text(
+            json.dumps({"dir": str(tree), "run": [test_run]}), encoding="utf-8"
+        )
+        env = hermetic.env()
+        env |= {
+            "ORG_BELT_DIR": str(BELT),
+            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "STUB_TASK": str(task),
+        }
+        for args in (["init", "-q"], ["add", "sub/helper.py"]):
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [GIT, *args], cwd=tree, env=env, check=True
+            )
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "python"],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done, (tree / "coverage.xml").is_file()
+
+
+class ChildFromAnotherDirectory(unittest.TestCase):
+    """A child measured from a subdirectory is refused by name (#1528).
+
+    Under `relative_files` a child records its files relative to its own
+    directory, so a child started in `sub/` records `helper.py`, and the
+    report cannot find it. The gate renders coverage.xml on every run
+    since #1528, where it rendered only the JSON before.
+    """
+
+    def setUp(self) -> None:
+        """Assert the tool first, as the belt's tasks assert theirs."""
+        if COVERAGE_TOOL is None:
+            self.fail(COVERAGE_MISSING)
+
+    def test_a_child_run_from_a_subdirectory_is_red_by_name(self) -> None:
+        """The belt's words, the recorded file, and the remedy."""
+        done, wrote = run_python_leg("cd sub && python3 helper.py")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(NO_SOURCE_MSG, done.stderr)
+        self.assertEqual("", done.stdout)
+        self.assertFalse(wrote)
+
+    def test_the_same_child_from_the_root_renders_the_report(self) -> None:
+        """Control: started from the root, it measures and renders."""
+        done, wrote = run_python_leg("python3 sub/helper.py")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("python 100.0\npython-branches 100.0\n", done.stdout)
+        self.assertTrue(wrote)
+
+
 if __name__ == "__main__":
     unittest.main()

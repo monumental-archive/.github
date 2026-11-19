@@ -284,6 +284,32 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
   echo "rust-branches ${br_pct}"
 fi
 
+# One coverage.py report, with its one failure the leg can name (#1528):
+# a file recorded under a path no tracked file has. `relative_files`
+# records a file relative to the directory its process ran in, so a
+# test that starts a Python child from a subdirectory leaves a path the
+# report cannot open, and coverage stops on a raw `No source for code`.
+# The leg names the file, the cause and the remedy. The file is not
+# dropped from the report: a measurement that silently loses a file
+# would hold a floor over less than it says.
+py_report() {
+  local out missing
+  if out=$(coverage "$@" 2>&1); then
+    [[ -z ${out} ]] || printf '%s\n' "${out}" >&2
+    return 0
+  fi
+  missing=$(sed -n "s/^No source for code: '\([^']*\)'.*/\1/p" <<< "${out}" | sed -n 1p)
+  if [[ -z ${missing} ]]; then
+    printf '%s\n' "${out}" >&2
+    exit 1
+  fi
+  echo "${label}: coverage recorded '${missing}', which no file in the tree matches —" >&2
+  echo "  a test ran a Python child under measurement from a directory other than the" >&2
+  echo "  repository root, and its files were recorded relative to that directory;" >&2
+  echo "  start the child from the repository root" >&2
+  exit 1
+}
+
 if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
   # coverage.py, measuring the repository's own `test` task (#1331). The
   # discovery roots stay where the repository wrote them; the belt never
@@ -383,7 +409,7 @@ EOF
     echo "  that reads nothing must not become a floor" >&2
     exit 1
   fi
-  coverage json --rcfile="${work}/rc" --quiet -o "${work}/coverage.json" >&2
+  py_report json --rcfile="${work}/rc" --quiet -o "${work}/coverage.json"
   py_pct=$(jq -r '.totals.percent_statements_covered // empty' "${work}/coverage.json")
   br_pct=$(jq -r '.totals.percent_branches_covered // empty' "${work}/coverage.json")
   if [[ -z ${py_pct} || -z ${br_pct} ]]; then
@@ -394,7 +420,7 @@ EOF
   # The report Codecov receives is rendered from this measurement's own
   # data, so the badge and the floor read one run (#707's law), and
   # the gate's run is the one the badge job uploads (#1528).
-  coverage xml --rcfile="${work}/rc" --quiet -o coverage.xml >&2
+  py_report xml --rcfile="${work}/rc" --quiet -o coverage.xml
   echo "python ${py_pct}"
   echo "python-branches ${br_pct}"
 fi

@@ -785,14 +785,15 @@ class AbsentSqlfluffFailsByName(unittest.TestCase):
         its own and the whole group is killed at the timeout, since the
         self-exec loop outlives the test process that started it.
         """
-        row = (
-            f"{Path(__file__).stem}.SqlSkipsOwnedSnapshots"
-            ".test_extension_at_the_workspace_root_is_left_out"
-        )
+        row = "SqlSkipsOwnedSnapshots.test_extension_at_the_workspace_root_is_left_out"
+        # From the repository root, the directory the suite runs in: under
+        # the python coverage leg a child records its files relative to
+        # its own directory, and one run from mise/ left `hermetic.py`
+        # where `coverage xml` could not find it (#1528).
         # ruff: ignore[subprocess-without-shell-equals-true]
         child = subprocess.Popen(
-            [sys.executable, "-m", "unittest", row],
-            cwd=BELT,
+            [sys.executable, str(Path(__file__).resolve()), row],
+            cwd=BELT.parent,
             env=hermetic.env(PATH=without_sqlfluff()),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
