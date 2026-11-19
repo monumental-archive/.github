@@ -50,6 +50,7 @@ import caller_pins
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import call_names
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -462,28 +463,12 @@ def argv_commands(tree: ast.Module) -> tuple[set[str], list[str]]:
         The commands, and one line per call whose argv cannot be read.
 
     """
-    modules, functions = set(), set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules |= {
-                a.asname or a.name for a in node.names if a.name == "subprocess"
-            }
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-            functions |= {
-                a.asname or a.name for a in node.names if a.name in SUBPROCESS_CALLS
-            }
+    qualify = call_names.qualifier(tree)
+    calls = {f"subprocess.{name}" for name in SUBPROCESS_CALLS}
     names = constants(tree)
     commands, dynamic = set(), []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if not (
-            isinstance(func, ast.Attribute)
-            and func.attr in SUBPROCESS_CALLS
-            and isinstance(func.value, ast.Name)
-            and func.value.id in modules
-        ) and not (isinstance(func, ast.Name) and func.id in functions):
+        if not isinstance(node, ast.Call) or qualify(node.func) not in calls:
             continue
         arg = node.args[0] if node.args else None
         arg = arg or next((k.value for k in node.keywords if k.arg == "args"), None)

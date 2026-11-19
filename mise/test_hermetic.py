@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import call_names
 import hermetic
 
 if TYPE_CHECKING:
@@ -162,10 +163,19 @@ def reads_whole(node: ast.AST, env: Callable[[ast.AST | None], bool]) -> bool:
 
 
 # What starts a process, by module: `subprocess.run(...)`, `os.execv(...)`.
-STARTS = {
-    "subprocess": ("run", "Popen", "check_output", "check_call", "call"),
-    "os": ("exec", "spawn", "posix_spawn"),
-}
+# What starts a process, by its module's own dotted name, however the
+# file imported it (call_names.qualifier): exact names, and the `os`
+# families by prefix (`os.execve`, `os.spawnlpe`, `os.posix_spawnp`).
+STARTS = frozenset({
+    "subprocess.run",
+    "subprocess.Popen",
+    "subprocess.check_output",
+    "subprocess.check_call",
+    "subprocess.call",
+    "asyncio.create_subprocess_exec",
+    "asyncio.create_subprocess_shell",
+})
+STARTS_BY_PREFIX = ("os.exec", "os.spawn", "os.posix_spawn")
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -183,33 +193,30 @@ def dotted(node: ast.AST) -> str | None:
     return None
 
 
-def starts_process(call: ast.Call) -> bool:
-    """Say whether a call starts a process (see STARTS).
+def starts_process(spelled: str | None) -> bool:
+    """Say whether a call, by its dotted name, starts a process.
 
     Returns:
-        True for `subprocess.run(...)` and its siblings, and `os.exec*`.
+        True for a name in STARTS or under a STARTS_BY_PREFIX family.
 
     """
-    spelled = dotted(call.func) or ""
-    module, _, attr = spelled.partition(".")
-    names = STARTS.get(module, ())
-    return bool(attr) and (
-        attr in names if module == "subprocess" else attr.startswith(names)
-    )
+    return spelled in STARTS or (spelled or "").startswith(STARTS_BY_PREFIX)
 
 
-def given_environment(call: ast.Call) -> list[ast.AST]:
+def given_environment(call: ast.Call, spelled: str) -> list[ast.AST]:
     """Find the environment a process-starting call is handed.
 
     Returns:
-        Its `env=` argument, and for `os.execve` and the other `os` calls
-        ending in `e`, which take it last by place, that argument.
+        Its `env=` argument; for `os.posix_spawn` and `os.posix_spawnp`,
+        the third by place; for `os.execve` and the other `os.exec*` and
+        `os.spawn*` names ending in `e`, the last by place.
 
     """
     given = [k.value for k in call.keywords if k.arg == "env"]
-    spelled = dotted(call.func) or ""
-    if spelled.startswith("os.") and spelled.endswith("e") and call.args:
-        given.append(call.args[-1])
+    if spelled.startswith("os.posix_spawn"):
+        given += call.args[2:3]
+    elif spelled.startswith(("os.exec", "os.spawn")) and spelled.endswith("e"):
+        given += call.args[-1:]
     return given
 
 
@@ -219,6 +226,7 @@ class Environments:
     def __init__(self, source: str) -> None:
         """Read the file's assignments, returns and parameters by scope."""
         self.module = ast.parse(source)
+        self.qualify = call_names.qualifier(self.module)
         self.parent: dict[ast.AST, ast.AST] = {}
         # (scope, name) -> values; scope is a function or the module.
         self.assigned: dict[tuple[ast.AST, str], list[ast.AST]] = {}
@@ -308,10 +316,11 @@ class Environments:
         """Find the environment a composite expression starts from.
 
         Returns:
-            The left of `|`, the first `**` of a display, the mapping a
-            comprehension filters, or the branch of a conditional whose
-            other branch is the same; False for a composite that starts
-            from nothing; None for a node that is not composite.
+            The left of `|`, the first `**` of a display, or the mapping
+            a comprehension filters; False for a display or comprehension
+            that starts from nothing; None for any other node, which
+            `hermetic` then judges itself (a conditional expression is
+            not followed, so it is refused).
 
         """
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -369,8 +378,11 @@ class Environments:
                 refused.add(value.lineno)
 
         calls = [n for n in ast.walk(self.module) if isinstance(n, ast.Call)]
-        for call in filter(starts_process, calls):
-            for value in given_environment(call):
+        for call in calls:
+            spelled = self.qualify(call.func)
+            if not starts_process(spelled):
+                continue
+            for value in given_environment(call, spelled or ""):
                 judge(value, call)
         while pending:
             forwarded = pending.pop()
@@ -661,6 +673,7 @@ class TheLaw(unittest.TestCase):
         for name, source in refused.items():
             with self.subTest(name):
                 self.assertEqual(lines[name], Environments(source).built_by_hand())
+
         allowed = {
             "the call": head + "subprocess.run(a, env=hermetic.env(A='1'))\n",
             "extended": head + "subprocess.run(a, env=hermetic.env() | {'A': '1'})\n",
@@ -679,6 +692,43 @@ class TheLaw(unittest.TestCase):
             + "run(hermetic.env())\n",
             "no env": head + "subprocess.run(a)\n",
             "not a process": "f(env={'A': '1'})\n",
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual([], Environments(source).built_by_hand())
+
+    def test_every_spelling_of_a_process_start_is_judged(self) -> None:
+        """Planted: each import form and each starter, refused at its line."""
+        hand = "{'PATH': p}"
+        refused = {
+            "import as": f"import subprocess as sp\nsp.run(a, env={hand})\n",
+            "from import": f"from subprocess import run\nrun(a, env={hand})\n",
+            "from import as": (
+                f"from subprocess import Popen as Spawn\nSpawn(a, env={hand})\n"
+            ),
+            "os as": f"import os as o\no.execve(p, a, {hand})\n",
+            "from os": f"from os import execve\nexecve(p, a, {hand})\n",
+            "posix_spawn": f"import os\nos.posix_spawn(p, a, {hand})\n",
+            "posix_spawnp env=": f"import os\nos.posix_spawnp(p, a, env={hand})\n",
+            "asyncio exec": (
+                f"import asyncio\nasyncio.create_subprocess_exec(p, env={hand})\n"
+            ),
+            "asyncio shell": (
+                "from asyncio import create_subprocess_shell as sh\n"
+                f"sh(p, env={hand})\n"
+            ),
+            "conditional": (
+                "import subprocess\n"
+                f"subprocess.run(a, env=hermetic.env() if c else {hand})\n"
+            ),
+        }
+        for name, source in refused.items():
+            with self.subTest(name):
+                self.assertEqual([2], Environments(source).built_by_hand())
+        allowed = {
+            "import as": "import subprocess as sp\nsp.run(a, env=hermetic.env())\n",
+            "posix_spawn": "import os\nos.posix_spawn(p, a, hermetic.env())\n",
+            "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
         }
         for name, source in allowed.items():
             with self.subTest(name):
