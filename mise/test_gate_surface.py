@@ -82,6 +82,36 @@ def stub(*lines: str) -> Path:
     return path
 
 
+def majors_of(pkg: dict) -> list[int]:
+    """Decode a package and read its majors.
+
+    Returns:
+        What `majors` reads from the decoded package.
+
+    """
+    return gate_surface.majors(gate_surface.package(pkg))
+
+
+def directory_of(pkg: dict, root: str) -> str:
+    """Decode a package and locate it.
+
+    Returns:
+        What `directory` reads from the decoded package.
+
+    """
+    return gate_surface.directory(gate_surface.package(pkg), root)
+
+
+def crate(name: str, majors: tuple[int, ...] = ()) -> gate_surface.Crate:
+    """Build one surface record of the shared three-crate workspace.
+
+    Returns:
+        The record `published` and `invariant` consume.
+
+    """
+    return gate_surface.Crate(name, f"{name}@1.3.1", majors, f"crates/{name}")
+
+
 PG_FEATURES = {
     "pg14": [],
     "pg15": [],
@@ -98,25 +128,25 @@ class MajorsTest(unittest.TestCase):
     def test_the_dependency_and_the_features_together(self) -> None:
         """The org shape: edtf-postgres exactly."""
         self.assertEqual(
-            gate_surface.majors(member("ext", features=PG_FEATURES, pgrx=True)),
+            majors_of(member("ext", features=PG_FEATURES, pgrx=True)),
             [14, 15, 16, 17, 18],
         )
 
     def test_features_without_the_dependency_are_not_pgrx(self) -> None:
         """A crate may name a feature `pg17` and never touch pgrx."""
         self.assertEqual(
-            gate_surface.majors(member("ext", features=PG_FEATURES, pgrx=False)),
+            majors_of(member("ext", features=PG_FEATURES, pgrx=False)),
             [],
         )
 
     def test_the_dependency_without_features_is_not_an_extension(self) -> None:
         """A crate that merely depends on pgrx declares no majors."""
-        self.assertEqual(gate_surface.majors(member("ext", pgrx=True)), [])
+        self.assertEqual(majors_of(member("ext", pgrx=True)), [])
 
     def test_pg_test_is_not_a_major(self) -> None:
         """Pgrx's own harness switch would otherwise become a Postgres."""
         self.assertEqual(
-            gate_surface.majors(
+            majors_of(
                 member("ext", features={"pg17": [], "pg_test": []}, pgrx=True),
             ),
             [17],
@@ -125,7 +155,7 @@ class MajorsTest(unittest.TestCase):
     def test_only_the_majors_declared_are_returned(self) -> None:
         """A repo that drops a major must not have the gate keep it."""
         self.assertEqual(
-            gate_surface.majors(
+            majors_of(
                 member("ext", features={"pg17": [], "pg18": []}, pgrx=True),
             ),
             [17, 18],
@@ -134,7 +164,7 @@ class MajorsTest(unittest.TestCase):
     def test_the_majors_come_back_ascending(self) -> None:
         """Declaration order in a manifest is not a promise."""
         self.assertEqual(
-            gate_surface.majors(
+            majors_of(
                 member("ext", features={"pg18": [], "pg14": [], "pg16": []}, pgrx=True),
             ),
             [14, 16, 18],
@@ -158,7 +188,7 @@ class MembersTest(unittest.TestCase):
             },
         )
         self.assertEqual(
-            [pkg["name"] for pkg in gate_surface.members(doc)],
+            [pkg.name for pkg in gate_surface.members(gate_surface.metadata(doc))],
             ["edtf-core"],
         )
 
@@ -169,7 +199,7 @@ class DirectoryTest(unittest.TestCase):
     def test_a_member_resolves_relative_to_the_workspace(self) -> None:
         """The form the publish stub writes."""
         self.assertEqual(
-            gate_surface.directory(member("ext"), ROOT),
+            directory_of(member("ext"), ROOT),
             "crates/ext",
         )
 
@@ -177,7 +207,7 @@ class DirectoryTest(unittest.TestCase):
         """A path dependency elsewhere on disk is not a stub's crate-dir."""
         odd = member("ext")
         odd["manifest_path"] = "/somewhere/else/Cargo.toml"
-        self.assertEqual(gate_surface.directory(odd, ROOT), "")
+        self.assertEqual(directory_of(odd, ROOT), "")
 
 
 class StubInputsTest(unittest.TestCase):
@@ -238,23 +268,14 @@ class PublishedTest(unittest.TestCase):
     """Which crates get built. Mutation: ignore the stub's `exclude`."""
 
     @staticmethod
-    def surface() -> list[dict]:
+    def surface() -> list[gate_surface.Crate]:
         """Build the three-crate workspace these rows share.
 
         Returns:
             The surface records `published` consumes.
 
         """
-        return [
-            {"name": "core", "spec": "core@1.3.1", "majors": [], "dir": "crates/core"},
-            {"name": "wasm", "spec": "wasm@1.3.1", "majors": [], "dir": "crates/wasm"},
-            {
-                "name": "ext",
-                "spec": "ext@1.3.1",
-                "majors": [17],
-                "dir": "crates/ext",
-            },
-        ]
+        return [crate("core"), crate("wasm"), crate("ext", (17,))]
 
     def test_the_workspace_classes_take_every_member(self) -> None:
         """rust-crate publishes the workspace, not a named list."""
@@ -341,15 +362,7 @@ class InvariantTest(unittest.TestCase):
         hold out is one the stub excludes too. That is the invariant
         biting, not a quirk of the fixture.
         """
-        surface = [
-            *self.surface,
-            {
-                "name": "bench",
-                "spec": "bench@1.3.1",
-                "majors": [],
-                "dir": "crates/bench",
-            },
-        ]
+        surface = [*self.surface, crate("bench")]
         both = stub(
             "    with:",
             "      classes: rust-crate,pgrx-extension",

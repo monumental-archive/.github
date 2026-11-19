@@ -109,7 +109,7 @@ def mise_version(workflow: str) -> str:
             would name a cache the install does not make.
 
     """
-    found = sorted(set(VERSION.findall(workflow)))
+    found = sorted({m.group(1) for m in VERSION.finditer(workflow)})
     if len(found) != 1:
         msg = (
             f"expected one mise version pinned in the workflow, found {found or 'none'}"
@@ -204,6 +204,14 @@ def names(
     return {"key": key, "prefix": prefix, "dir": data_dir(env)}
 
 
+class Args(argparse.Namespace):
+    """The command line, typed where argparse writes it."""
+
+    name: str
+    canon: Path
+    install: str
+
+
 def main(argv: list[str] | None = None, now: float | None = None) -> int:
     """Write the tool cache's names to GITHUB_OUTPUT.
 
@@ -223,7 +231,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         default="",
         help="the job's install_args, for a job that installs a list (#1408)",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     env = dict(os.environ)
     try:
         workflow = args.canon / ".github" / "workflows" / "ci.yml"
