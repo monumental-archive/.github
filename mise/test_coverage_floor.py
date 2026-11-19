@@ -731,5 +731,165 @@ class TestMain(unittest.TestCase):
         self.assertEqual(parsed.floor, Decimal("94.8"))
 
 
+def legs_record(floor: str, legs: str, *extra: str) -> str:
+    """Build a derived floor file that names its legs (#1666).
+
+    Returns:
+        The file text, with `# legs:` and any extra comment lines.
+
+    """
+    head, number = record(floor).rsplit("\n", 2)[0], floor
+    lines = [head, f"# legs: {legs}", *extra, number]
+    return "\n".join(lines) + "\n"
+
+
+REMEDY = (
+    "  {needs}; or record the leg's removal on purpose:"
+    " `# dropped: {leg} <reason>` in .coverage-floor\n"
+)
+TS_NEEDS = (
+    "the typescript leg needs a root package.json whose lockfile pins "
+    "vitest and a coverage provider, and a `test` task that runs vitest"
+)
+PG_NEEDS = (
+    "the plpgsql leg needs the suite's teardown to call "
+    "plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set"
+)
+
+
+class TestLegsRecord(unittest.TestCase):
+    """The floor names the legs it holds, and holds them (#1666)."""
+
+    def test_a_recorded_leg_that_reports_none_is_red_by_name(self) -> None:
+        """Each of plpgsql and typescript is named, with what it needs."""
+        for leg, needs in (("plpgsql", PG_NEEDS), ("typescript", TS_NEEDS)):
+            with self.subTest(leg=leg):
+                text = legs_record("93.4", f"python {leg}")
+                with Tree(text) as tree:
+                    status, out, err = run(
+                        cf.hold, tree.path, "coverage:check", "python 96.0\n"
+                    )
+                self.assertEqual(1, status)
+                self.assertEqual(
+                    "coverage:check: python leg holds the floor 93.4 (96.0%)\n", out
+                )
+                self.assertEqual(
+                    f"coverage:check: the floor was derived with {leg} and this"
+                    " run measured none\n" + REMEDY.format(needs=needs, leg=leg),
+                    err,
+                )
+
+    def test_an_unrecorded_measured_leg_is_held_and_named(self) -> None:
+        """A new leg is held now and joins the record at the derivation."""
+        with Tree(legs_record("93.4", "python")) as tree:
+            status, out, err = run(
+                cf.hold, tree.path, "coverage:check", "python 96.0\nplpgsql 97.5\n"
+            )
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(
+            "coverage:check: python leg holds the floor 93.4 (96.0%)\n"
+            "coverage:check: plpgsql leg holds the floor 93.4 (97.5%)\n"
+            "coverage:check: plpgsql: not yet in the floor's record: it joins"
+            " at the next derivation\n",
+            out,
+        )
+
+    def test_a_leg_below_the_floor_is_red(self) -> None:
+        """Every leg is judged; the one below is named."""
+        with Tree(legs_record("93.4", "python plpgsql")) as tree:
+            status, _, err = run(
+                cf.hold, tree.path, "coverage:check", "python 96.0\nplpgsql 90.1\n"
+            )
+        self.assertEqual(1, status)
+        self.assertEqual(
+            "coverage:check: plpgsql: 90.1% is below the derived floor 93.4%\n", err
+        )
+
+    def test_a_dropped_leg_is_not_demanded(self) -> None:
+        """A recorded leg consciously dropped is not red when it is gone."""
+        text = legs_record("93.4", "python plpgsql", "# dropped: plpgsql moved out")
+        with Tree(text) as tree:
+            status, _, err = run(cf.hold, tree.path, "lbl", "python 96.0\n")
+        self.assertEqual((0, ""), (status, err))
+
+    def test_no_legs_record_demands_nothing(self) -> None:
+        """Every floor today: held, none demanded, nothing named."""
+        with Tree(record("93.4")) as tree:
+            status, out, err = run(cf.hold, tree.path, "lbl", "python 96.0\n")
+        self.assertEqual(
+            (0, "lbl: python leg holds the floor 93.4 (96.0%)\n", ""),
+            (status, out, err),
+        )
+
+    def test_a_derivation_writes_the_legs_line(self) -> None:
+        """A floor with no record gains it at its next derivation."""
+        with Tree(record("93.4")) as tree:
+            status, _, _ = run(
+                cf.derive,
+                tree.path,
+                "python 96.0\npython-branches 95.5\n",
+                "v1.2.0",
+                adopt=False,
+            )
+            parsed, problems = cf.parse(tree.text())
+        self.assertEqual((0, []), (status, problems))
+        self.assertEqual(("python", "python-branches"), parsed.legs)
+
+    def test_a_derivation_that_drops_a_leg_fails_without_dropped(self) -> None:
+        """A recorded leg the run did not measure refuses the derivation."""
+        text = legs_record("93.4", "python plpgsql")
+        with Tree(text) as tree:
+            status, _, err = run(
+                cf.derive, tree.path, "python 96.0\n", "v1.2.0", adopt=False
+            )
+            after = tree.text()
+        self.assertEqual(1, status)
+        self.assertEqual(text, after)
+        self.assertEqual(
+            "coverage-floor: the floor records plpgsql and this derivation"
+            " measured none. A leg leaves the record only on purpose: restore"
+            " what it measures, or add `# dropped: plpgsql <reason>` to"
+            f" {tree.path}\n",
+            err,
+        )
+
+    def test_a_derivation_that_drops_a_leg_passes_with_dropped(self) -> None:
+        """With its reason recorded, the leg leaves the record."""
+        text = legs_record("93.4", "python plpgsql", "# dropped: plpgsql moved out")
+        with Tree(text) as tree:
+            status, _, err = run(
+                cf.derive, tree.path, "python 96.0\n", "v1.2.0", adopt=False
+            )
+            parsed, _ = cf.parse(tree.text())
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(("python",), parsed.legs)
+
+    def test_the_record_lines_are_held_to_their_shape(self) -> None:
+        """A legs or dropped line the derivation could not have written."""
+        for name, extra, expected in (
+            ("empty legs", "# legs:", "records `legs:` with no leg"),
+            ("a duplicate", "# legs: python python", "is not a list of distinct"),
+            ("a separate leg", "# legs: rust-branches", "is not a list of distinct"),
+            ("no reason", "# dropped: plpgsql", "is not `dropped: <leg> <reason>`"),
+        ):
+            with self.subTest(name):
+                text = record("93.4").replace("93.4\n", f"{extra}\n93.4\n")
+                parsed, problems = cf.parse(text)
+                self.assertIsNone(parsed)
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn(expected, problems[0])
+
+    def test_legs_prints_the_record(self) -> None:
+        """One leg a line; nothing for no file or no record."""
+        with Tree(legs_record("93.4", "python plpgsql")) as tree:
+            self.assertEqual(
+                (0, "python\nplpgsql\n", ""), run(cf.recorded_legs, tree.path)
+            )
+        with Tree(record("93.4")) as tree:
+            self.assertEqual((0, "", ""), run(cf.recorded_legs, tree.path))
+        with Tree(None) as tree:
+            self.assertEqual((0, "", ""), run(cf.recorded_legs, tree.path))
+
+
 if __name__ == "__main__":
     unittest.main()

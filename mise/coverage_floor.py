@@ -49,10 +49,11 @@ repository's choice.
 """
 
 import argparse
+import re
 import sys
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TextIO
 
 NAME = "coverage-floor"
 DEFAULT_PATH = Path(".coverage-floor")
@@ -84,10 +85,15 @@ BAND_KEY = "band"
 MEASURED_KEY = "measured"
 DERIVED_KEY = "derived"
 RESET_KEY = "reset"
+# The legs the floor holds (#1666): written by every derivation, read by
+# `coverage:check`, and left only through a `dropped:` line.
+LEGS_KEY = "legs"
+DROPPED_KEY = "dropped"
+LEG_NAME = re.compile(r"[a-z][a-z0-9-]*")
 # The legs held as floors of their own rather than in the minimum.
 SEPARATE = ("rust-branches", "go-branches")
 KEYS = frozenset(
-    {BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY}
+    {BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY, LEGS_KEY}
     | {f"{leg} {MEASURED_KEY}" for leg in SEPARATE},
 )
 
@@ -107,8 +113,27 @@ TEMPLATE = """\
 # band: {band}
 # measured: {measured}
 # derived: {provenance}
+# legs: {legs}
 {floor}
 """
+
+# A leg the record names is demanded at every `coverage:check` (#1666):
+# the floor was derived with it, so a run that measures none of it is
+# red rather than quietly taking the minimum over fewer legs. What each
+# leg needs, for the line that follows that refusal.
+NEEDS = {
+    "go": "the go leg needs go.mod",
+    "rust": "the rust leg needs Cargo.toml and llvm-tools",
+    "python": "the python leg needs tracked *.py and a `test` task",
+    "typescript": (
+        "the typescript leg needs a root package.json whose lockfile pins "
+        "vitest and a coverage provider, and a `test` task that runs vitest"
+    ),
+    "plpgsql": (
+        "the plpgsql leg needs the suite's teardown to call "
+        "plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set"
+    ),
+}
 
 SEPARATE_TEMPLATE = """\
 #
@@ -130,6 +155,11 @@ class Record(NamedTuple):
     # Leg name to (floor, measured) for each SEPARATE leg the file holds;
     # `parse` always sets it, so None is only the unparsed default.
     separate: dict[str, tuple[Decimal, Decimal]] | None = None
+    # The main-floor legs the record names (#1666); None for a file that
+    # predates the record, which demands no leg until its next derivation.
+    legs: tuple[str, ...] | None = None
+    # Leg name to the reason it was consciously dropped.
+    dropped: dict[str, str] | None = None
 
 
 def quantise(value: Decimal) -> Decimal:
@@ -397,7 +427,66 @@ def parse(text: str) -> tuple[Record | None, list[str]]:
     main, problems = main_form(record, floor, band)
     if main is None:
         return None, problems
-    return main._replace(separate=held), []
+    recorded, problems = legs_of(record)
+    dropped, unread = dropped_of(text)
+    if problems or unread:
+        return None, problems + unread
+    return main._replace(separate=held, legs=recorded, dropped=dropped), []
+
+
+def legs_of(record: dict[str, str]) -> tuple[tuple[str, ...] | None, list[str]]:
+    """Read the `legs:` record: the main-floor legs the floor holds.
+
+    Returns:
+        The legs (None when the file states no `legs:` line), and the
+        problems that refused the line.
+
+    """
+    stated = record.get(LEGS_KEY)
+    if stated is None:
+        return None, []
+    named = tuple(stated.split())
+    if not named:
+        return None, ["records `legs:` with no leg: the line names every leg it holds"]
+    bad = [leg for leg in named if not LEG_NAME.fullmatch(leg) or leg in SEPARATE]
+    if bad or len(set(named)) != len(named):
+        return None, [
+            (
+                f"legs record {stated!r} is not a list of distinct main-floor "
+                "legs (a leg held apart keeps its own line). The record is "
+                "written by the derivation: restore it, or re-derive with "
+                "`mise run coverage:adopt`"
+            ),
+        ]
+    return named, []
+
+
+def dropped_of(text: str) -> tuple[dict[str, str], list[str]]:
+    """Read every `dropped: <leg> <reason>` line.
+
+    Returns:
+        Leg name to reason, and the problems with any line not of that
+        shape.
+
+    """
+    dropped: dict[str, str] = {}
+    problems: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("#"):
+            continue
+        key, sep, value = line.lstrip("#").strip().partition(":")
+        if not sep or key.strip() != DROPPED_KEY:
+            continue
+        leg, _, reason = value.strip().partition(" ")
+        if not LEG_NAME.fullmatch(leg) or not reason.strip():
+            problems.append(
+                f"dropped line {line!r} is not `dropped: <leg> <reason>`: a "
+                "leg leaves the record on purpose, so the reason is stated",
+            )
+            continue
+        dropped[leg] = reason.strip()
+    return dropped, problems
 
 
 def legs(text: str) -> tuple[list[tuple[str, Decimal]], list[str]]:
@@ -429,6 +518,7 @@ def render(
     measured: Decimal,
     provenance: str,
     separate: dict[str, Decimal] | None = None,
+    legs: list[str] | None = None,
 ) -> str:
     """Write the file the derivation describes.
 
@@ -442,8 +532,11 @@ def render(
         band=BAND,
         measured=quantised,
         provenance=provenance,
+        legs=" ".join(legs or ()),
         floor=max(FLOOR_MIN, quantised - BAND),
     )
+    if not legs:
+        text = text.replace("# legs: \n", "")
     for leg in SEPARATE:
         if separate is None or leg not in separate:
             continue
@@ -479,10 +572,11 @@ def read(path: Path, leg: str | None = None) -> int:
     if record is None:
         complain(problems, path)
         return 1
+    held = record.separate or {}
     if leg is None:
         print(record.floor)
-    elif leg in (record.separate or {}):
-        print(record.separate[leg][0])
+    elif leg in held:
+        print(held[leg][0])
     return 0
 
 
@@ -512,15 +606,20 @@ def ratchet_separate(record: Record, separate: dict[str, Decimal]) -> bool:
     return held
 
 
-def write(
+def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a measurement
     path: Path,
     measured: Decimal,
     provenance: str,
     *,
     adopt: bool,
     separate: dict[str, Decimal] | None = None,
+    legs: list[str] | None = None,
 ) -> int:
     """Re-derive the floor from a fresh measurement.
+
+    `legs` is the main-floor legs this measurement reported, written as
+    the `legs:` record. A leg the record names that this run did not
+    measure refuses the derivation unless a `dropped:` line names it.
 
     `separate` is the SEPARATE legs measured this time; a leg the file
     already holds and this run did not measure is carried through as it
@@ -544,7 +643,7 @@ def write(
         if not adopt:
             print(f"{NAME}: no {path}, skipped")
             return 0
-        path.write_text(render(measured, provenance, fresh), encoding="utf-8")
+        path.write_text(render(measured, provenance, fresh, legs), encoding="utf-8")
         print(f"{NAME}: adopted {path} at {derived} (measured {quantised}){noted}")
         return 0
 
@@ -562,7 +661,7 @@ def write(
         # conscious act, so a recordless or drifted floor is exactly what
         # it exists to migrate. It still cannot lower a floor whose record
         # parses: that path falls through to the ratchet below.
-        path.write_text(render(measured, provenance, fresh), encoding="utf-8")
+        path.write_text(render(measured, provenance, fresh, legs), encoding="utf-8")
         print(f"{NAME}: rewrote {path} at {derived} (measured {quantised}){noted}")
         return 0
 
@@ -579,7 +678,8 @@ def write(
         )
     # Every leg is judged before anything returns, so one run names every
     # refusal rather than the first.
-    if not ratchet_separate(record, fresh) or not main_held:
+    kept_legs = record_holds(record, legs or [], path)
+    if not ratchet_separate(record, fresh) or not main_held or not kept_legs:
         return 1
 
     # The ratchet passed, so `measured - band >= floor` holds by
@@ -588,9 +688,31 @@ def write(
     # its own way of being wrong. A SEPARATE leg this run did not measure
     # keeps the measurement its record states.
     kept = {leg: m for leg, (_, m) in (record.separate or {}).items()} | fresh
-    path.write_text(render(measured, provenance, kept), encoding="utf-8")
+    path.write_text(render(measured, provenance, kept, legs), encoding="utf-8")
     print(f"{NAME}: floor {record.floor} -> {derived} (measured {quantised}){noted}")
     return 0
+
+
+def record_holds(record: Record, legs: list[str], path: Path) -> bool:
+    """Hold a derivation to the legs the record names (#1666).
+
+    Returns:
+        True when every recorded leg was measured or is consciously
+        dropped, False (each missing leg named) otherwise.
+
+    """
+    dropped = record.dropped or {}
+    missing = [
+        leg for leg in record.legs or () if leg not in legs and leg not in dropped
+    ]
+    for leg in missing:
+        print(
+            f"{NAME}: the floor records {leg} and this derivation measured "
+            "none. A leg leaves the record only on purpose: restore what it "
+            f"measures, or add `# dropped: {leg} <reason>` to {path}",
+            file=sys.stderr,
+        )
+    return not missing
 
 
 def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
@@ -617,7 +739,98 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
     # deriving from an average, or from the language that happens to be
     # measured last, writes a floor the gate will then refuse.
     weakest = min(percent for _, percent in measured)
-    return write(path, weakest, provenance, adopt=adopt, separate=separate)
+    return write(
+        path,
+        weakest,
+        provenance,
+        adopt=adopt,
+        separate=separate,
+        legs=[leg for leg, _ in measured],
+    )
+
+
+def recorded_legs(path: Path) -> int:
+    """Print the main-floor legs the record names, one per line.
+
+    Returns:
+        0, with nothing printed when there is no floor or no `legs:`
+        record; 1 when the file does not hold to its own record.
+
+    """
+    if not path.exists():
+        return 0
+    record, problems = parse(path.read_text(encoding="utf-8"))
+    if record is None:
+        complain(problems, path)
+        return 1
+    for leg in record.legs or ():
+        print(leg)
+    return 0
+
+
+def needs(leg: str) -> str:
+    """Name what a leg needs to report, for the line after its refusal.
+
+    Returns:
+        The remedy line.
+
+    """
+    family = leg.removesuffix("-branches")
+    what = NEEDS.get(family, "restore what the leg measures")
+    return (
+        f"  {what}; or record the leg's removal on purpose: "
+        f"`# dropped: {leg} <reason>` in .coverage-floor"
+    )
+
+
+def hold(path: Path, label: str, source: str) -> int:
+    """Hold this run's legs to the floor, and the floor's legs to this run.
+
+    Every measured leg is held to the floor. A leg the record names that
+    this run did not measure is red by name (#1666); a measured leg the
+    record does not name is held like any other and named, since it
+    joins the record at the next derivation. A file with no `legs:`
+    record demands no leg.
+
+    Returns:
+        0 when every leg holds and every recorded leg reported, else 1.
+
+    """
+    record, problems = parse(path.read_text(encoding="utf-8"))
+    if record is None:
+        complain(problems, path)
+        return 1
+    measured, problems = legs(source)
+    if problems:
+        complain(problems, path)
+        return 1
+    status = 0
+    names = [leg for leg, _ in measured]
+    for leg, pct in measured:
+        if pct < record.floor:
+            print(
+                f"{label}: {leg}: {pct}% is below the derived floor {record.floor}%",
+                file=sys.stderr,
+            )
+            status = 1
+            continue
+        print(f"{label}: {leg} leg holds the floor {record.floor} ({pct}%)")
+        if record.legs is not None and leg not in record.legs:
+            print(
+                f"{label}: {leg}: not yet in the floor's record: it joins at "
+                "the next derivation",
+            )
+    dropped = record.dropped or {}
+    for leg in record.legs or ():
+        if leg in names or leg in dropped:
+            continue
+        print(
+            f"{label}: the floor was derived with {leg} and this run measured none",
+            file=sys.stderr,
+        )
+        print(needs(leg), file=sys.stderr)
+        status = 1
+    return status
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -641,6 +854,12 @@ def main(argv: list[str] | None = None) -> int:
         help="re-derive the floor from `<leg> <percent>` lines on stdin",
     )
     writer.add_argument("--provenance", required=True)
+    sub.add_parser("legs", help="print the legs the floor's record names")
+    holder = sub.add_parser(
+        "hold",
+        help="hold `<leg> <percent>` lines on stdin to the floor and its record",
+    )
+    holder.add_argument("--label", required=True)
     writer.add_argument(
         "--adopt",
         action="store_true",
@@ -648,9 +867,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.command == "read":
-        return read(args.path, args.leg)
-    return derive(args.path, sys.stdin.read(), args.provenance, adopt=args.adopt)
+    # argparse answers in Any; each value is typed once, where it is read.
+    command: str = args.command
+    path: Path = args.path
+    if command == "read":
+        leg: str | None = args.leg
+        return read(path, leg)
+    if command == "legs":
+        return recorded_legs(path)
+    # typeshed types sys.stdin as possibly Any; it is a text stream here.
+    stdin: TextIO = sys.stdin
+    if command == "hold":
+        label: str = args.label
+        return hold(path, label, stdin.read())
+    provenance: str = args.provenance
+    adopt: bool = args.adopt
+    return derive(path, stdin.read(), provenance, adopt=adopt)
 
 
 if __name__ == "__main__":

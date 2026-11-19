@@ -48,11 +48,13 @@
 # `rust-branches <percent>` for the Monday audit and `coverage:adopt`.
 #
 # `plpgsql` (#1547) measures PL/pgSQL through plpgsql_check, in a
-# database only the repository's suite has: applicable where a tracked
-# file declares a PL/pgSQL function and a `test` task exists, it sets
-# ORG_PLPGSQL_COVERAGE, naming a report the suite's teardown writes, in
-# the one run of that task, and prints `plpgsql <percent>` and
-# `plpgsql-branches <percent>`. The task is walked by task_walk.py
+# database only the repository's suite has. It makes no search of the
+# tree (#1666): whenever the measurement runs the `test` task it sets
+# ORG_PLPGSQL_COVERAGE, naming a report the suite's teardown writes, and
+# a report written means the leg reported: `plpgsql <percent>` and
+# `plpgsql-branches <percent>`. Which legs a floor holds is the floor's
+# own record (`legs:`), and coverage:check reds a recorded leg that
+# reported nothing. The task is walked by task_walk.py
 # (#1608) and its steps run once for every leg that reads them, under
 # the union of those legs' variables; the reading and the refusals are
 # plpgsql_coverage.py's.
@@ -226,14 +228,16 @@ if [[ ${ts_runner} == vitest\ * ]]; then
   [[ -n ${ts_test} ]] || ts_test=$(mise tasks info test --json 2> /dev/null) || ts_test=""
 fi
 
-# PL/pgSQL is declared by a tracked file's LANGUAGE clause (quoted or
-# not, any case), and measured through the repository's `test` task.
-plpgsql_test="" plpgsql_skip=""
-if git grep -qiIE "language[[:space:]]+'?plpgsql" 2> /dev/null; then
-  plpgsql_test=$(mise tasks info test --json 2> /dev/null) || plpgsql_test=""
-  [[ -n ${plpgsql_test} ]] || plpgsql_skip="tracked PL/pgSQL but no test task"
-elif git ls-files -- '*.sql' 2> /dev/null | grep -q .; then
-  plpgsql_skip="no tracked file declares a PL/pgSQL function"
+# The legs the floor's record names (#1666), and the `test` task. The
+# measurement runs the task when the python leg applies, when the record
+# names a leg that reads the task, when the plpgsql leg is asked for, and
+# always to discover (ORG_COVERAGE_DISCOVER, coverage:adopt): that run is
+# how a PL/pgSQL leg is first found and recorded.
+recorded=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_floor.py" legs 2> /dev/null) || recorded=""
+test_task=${python_test} reads_task=""
+if [[ ${recorded} =~ (^|$'\n')(python|plpgsql) || ${legs} == plpgsql ]]; then reads_task=1; fi
+if [[ -z ${test_task} && -n ${reads_task}${ORG_COVERAGE_DISCOVER:-} ]]; then
+  test_task=$(mise tasks info test --json 2> /dev/null) || test_task=""
 fi
 
 if [[ ${legs} == probe ]]; then
@@ -247,11 +251,15 @@ if [[ ${legs} == probe ]]; then
       ;;
     *) ;;
   esac
-  if [[ -n ${plpgsql_test} ]]; then
+  if [[ -n ${ORG_COVERAGE_DISCOVER:-} && -n ${test_task} ]]; then
     echo plpgsql
-  elif [[ -n ${plpgsql_skip} ]]; then
-    echo "${label}: plpgsql: ${plpgsql_skip}, skipped" >&2
   fi
+  # A leg the record names is probed whether or not the tree still shows
+  # it: the run then measures none of it, and coverage:check reds it by
+  # name rather than skipping (#1666).
+  while read -r leg; do
+    [[ -z ${leg} ]] || echo "${leg%-branches}"
+  done <<< "${recorded}"
   exit 0
 fi
 
@@ -466,7 +474,7 @@ py_report() {
 # selected leg adds its own variables to that run, and nothing else.
 measure_py="" measure_pg=""
 if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then measure_py=1; fi
-if [[ -n ${plpgsql_test} && ${legs} =~ ^(all|plpgsql)$ ]]; then measure_pg=1; fi
+if [[ -n ${test_task} && ${legs} =~ ^(all|plpgsql)$ ]]; then measure_pg=1; fi
 
 if [[ -n ${measure_py}${measure_pg} ]]; then
   # Removed by the EXIT trap above.
@@ -656,9 +664,10 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   echo "typescript ${ts_pct}"
   echo "typescript-branches ${ts_br}"
 fi
-if [[ -n ${measure_pg} ]]; then
+if [[ -n ${measure_pg} && -f ${work}/plpgsql-coverage.json ]]; then
   # The report the test run's teardown wrote; the reading and every
-  # refusal are plpgsql_coverage.py's.
+  # refusal are plpgsql_coverage.py's. No report is no plpgsql figure,
+  # and the floor's record decides whether that is red.
   "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql_coverage.py" \
     totals "${label}" "${work}/plpgsql-coverage.json" || exit 1
 fi

@@ -9,9 +9,11 @@ in a planted git tree whose `test` task calls the real helper in its
 teardown position, so a row states the database's figures and asserts
 what the gate does with them.
 
-The canon's own tracked files never carry a PL/pgSQL LANGUAGE clause:
-the leg would apply to the canon itself. The planted clause is built
-from two halves here for that reason.
+The leg searches no file (#1666): which legs a floor holds is the
+floor's own `legs:` record, and a report written by the suite's
+teardown is the plpgsql leg's answer. So the clause is written whole
+here, and the rows plant it where a search would have switched the leg
+on.
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -37,8 +39,7 @@ BASH = shutil.which("bash")
 GIT = shutil.which("git")
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 
-# Never written whole in a tracked canon file (see the docstring).
-CLAUSE = "LANGUAGE " + "plpgsql"
+CLAUSE = "LANGUAGE plpgsql"
 
 PRELOAD = "pg_stat_statements,plpgsql,plpgsql_check"
 
@@ -553,16 +554,36 @@ class RefusalRows(Collecting):
                 )
 
 
+# The clause, whole, in three tracked files of three kinds.
+MENTIONS = {
+    "README.md": f"Functions are declared with `{CLAUSE}`.\n",
+    "helper.py": f"# {CLAUSE}\nprint('hi')\n",
+    "schema.sql": f"CREATE FUNCTION f() RETURNS trigger {CLAUSE} AS $$ $$;\n",
+}
+
+HELD = {
+    "101": ("public.guard()", "0.9\t1\t10\t9\t1"),
+    "102": ("public.stamp(integer)", "1\t0.8\t10\t10\t1"),
+}
+
+
 class LegRows(unittest.TestCase):
-    """`coverage:check` over the plpgsql leg, in a planted tree."""
+    """`coverage:check` over the plpgsql leg, decided by the floor's record."""
 
     def check(
         self,
         functions: dict[str, tuple[str, str]],
         *,
-        clause: bool = True,
+        legs: str,
+        files: dict[str, str],
+        collects: bool = True,
     ) -> subprocess.CompletedProcess:
-        """Run coverage:check's body; the test task's teardown collects.
+        """Run coverage:check's body in a planted tree.
+
+        `legs` is the floor's `legs:` record, `files` the tracked files
+        beside it, and `collects` whether the suite's teardown calls the
+        helper. A tracked `*.py` brings the python leg in, measured by
+        the stub coverage.py.
 
         Returns:
             The finished task.
@@ -571,65 +592,107 @@ class LegRows(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, functions)
+        (stubs / "coverage").write_text(COVERAGE, encoding="utf-8")
+        (stubs / "coverage").chmod(0o755)
+        (stubs / "python3").symlink_to(sys.executable)
         tree = tmp / "tree"
         tree.mkdir()
-        body = f"CREATE FUNCTION f() RETURNS trigger {CLAUSE} AS $$ $$;\n"
-        if not clause:
-            body = "CREATE TABLE t (id integer);\n"
-        (tree / "schema.sql").write_text(body, encoding="utf-8")
-        (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
-        teardown = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py"'
+        for name, text in files.items():
+            (tree / name).write_text(text, encoding="utf-8")
+        floor = FLOOR.replace("80.0\n", f"# legs: {legs}\n80.0\n")
+        (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
+        run_ = ["echo suite ran >&2"]
+        if collects:
+            run_.append(
+                '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py"'
+                " collect postgres://stub"
+            )
         task = tmp / "task.json"
-        task.write_text(
-            json.dumps({
-                "dir": str(tree),
-                "run": ["echo suite ran >&2", f"{teardown} collect postgres://stub"],
-            }),
-            encoding="utf-8",
+        task.write_text(json.dumps({"dir": str(tree), "run": run_}), "utf-8")
+        env = stub_env(
+            stubs,
+            answers,
+            STUB_TASK=str(task),
+            STUB_PYTHON=sys.executable,
+            STUB_PY="90.0",
+            STUB_BR="85.0",
         )
-        env = stub_env(stubs, answers, STUB_TASK=str(task))
         run([GIT, "init", "-q"], env, tree)
-        run([GIT, "add", "schema.sql", ".coverage-floor"], env, tree)
+        run([GIT, "add", *files, ".coverage-floor"], env, tree)
         script = CONFIG["tasks"]["coverage:check"]["run"]
         return run([BASH, "-euo", "pipefail", "-c", script], env, tree)
 
-    def test_the_floor_is_held(self) -> None:
-        """Both PL/pgSQL legs print and each holds the floor by name."""
-        held = {
-            "101": ("public.guard()", "0.9\t1\t10\t9\t1"),
-            "102": ("public.stamp(integer)", "1\t0.8\t10\t10\t1"),
-        }
-        done = self.check(held)
+    PYTHON_HELD = (
+        "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
+        "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
+    )
+
+    def test_the_clause_in_files_switches_nothing_on(self) -> None:
+        """No search: a README, a .py and a .sql naming the clause (#1666)."""
+        done = self.check(
+            TWO,
+            legs="python python-branches",
+            files=MENTIONS,
+            collects=False,
+        )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: plpgsql leg holds the floor 80.0 (95.00%)\n"
+            self.PYTHON_HELD + "coverage:check: upload coverage.xml\n", done.stdout
+        )
+        self.assertNotIn("plpgsql", done.stdout + done.stderr)
+
+    def test_a_recorded_leg_is_held_with_no_sql_tracked(self) -> None:
+        """The report is the answer: no .sql file is needed to find it."""
+        done = self.check(
+            HELD,
+            legs="python python-branches plpgsql plpgsql-branches",
+            files={"helper.py": "print('hi')\n"},
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            self.PYTHON_HELD
+            + "coverage:check: plpgsql leg holds the floor 80.0 (95.00%)\n"
             "coverage:check: plpgsql-branches leg holds the floor 80.0 (90.00%)\n"
-            "coverage:check: upload none — every leg measured has no upload"
-            " format (plpgsql, plpgsql-branches)\n",
+            "coverage:check: upload coverage.xml\n",
             done.stdout,
         )
-        self.assertIn("suite ran", done.stderr)
 
     def test_below_the_floor_is_red_by_name(self) -> None:
         """Statements at 60% red the plpgsql leg by its name."""
-        done = self.check(TWO)
+        done = self.check(
+            TWO, legs="plpgsql plpgsql-branches", files={"schema.sql": "-- sql\n"}
+        )
         self.assertEqual(1, done.returncode)
         self.assertIn(
             "coverage:check: plpgsql: 60.00% is below the derived floor 80.0%\n",
             done.stderr,
         )
 
-    def test_no_tracked_plpgsql_is_skipped_clean(self) -> None:
-        """Tracked SQL with no PL/pgSQL function skips the leg by name."""
-        done = self.check(TWO, clause=False)
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            "coverage:check: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, package.json with vitest, or"
-            " tracked PL/pgSQL with a test task), skipped\n",
-            done.stdout,
+    def test_a_recorded_leg_that_reports_nothing_is_red_by_name(self) -> None:
+        """The teardown stopped collecting: the leg is named, never dropped."""
+        done = self.check(
+            TWO,
+            legs="python python-branches plpgsql plpgsql-branches",
+            files={"helper.py": "print('hi')\n"},
+            collects=False,
         )
-        self.assertNotIn("suite ran", done.stderr)
+        self.assertEqual(1, done.returncode)
+        remedy = (
+            "  the plpgsql leg needs the suite's teardown to call"
+            " plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set;"
+            " or record the leg's removal on purpose:"
+            " `# dropped: {leg} <reason>` in .coverage-floor\n"
+        )
+        self.assertIn(
+            "coverage:check: the floor was derived with plpgsql and this run"
+            " measured none\n" + remedy.format(leg="plpgsql"),
+            done.stderr,
+        )
+        self.assertIn(
+            "coverage:check: the floor was derived with plpgsql-branches and"
+            " this run measured none\n" + remedy.format(leg="plpgsql-branches"),
+            done.stderr,
+        )
 
 
 # The coverage.py stub the python leg's rows use, read from its suite.
@@ -702,6 +765,7 @@ class RunOnceRows(unittest.TestCase):
             stubs,
             answers,
             STUB_TASKS=str(defs),
+            ORG_COVERAGE_DISCOVER="1",
             STUB_PYTHON=sys.executable,
             STUB_PY="90.0",
             STUB_BR="85.0",
