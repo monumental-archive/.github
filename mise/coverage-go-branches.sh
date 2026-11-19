@@ -67,7 +67,10 @@ fi
 # this toolchain's syntax. The belt builds it with the repository's own
 # go; a stale local binary or a cache restored across a Go bump is
 # refused by name, as gomu's is (#1356). An unreadable version is older.
-built=$(go version -m "${gobco_bin}" | awk 'NR == 1 { print $2; exit }')
+# awk reads to the end, never `exit`s at line 1: under pipefail an early
+# exit can SIGPIPE `go version -m` mid-write and kill this script with
+# nothing on stderr (it reddened this leg's own rows on the runner).
+built=$(go version -m "${gobco_bin}" | awk 'NR == 1 { print $2 }')
 [[ ${built} =~ ^go[0-9] ]] || built=""
 running=$(go env GOVERSION)
 if awk -v b="${built}" -v r="${running}" '
