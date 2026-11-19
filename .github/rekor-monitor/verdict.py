@@ -14,9 +14,10 @@ last leg (standing-issue.py).
                 checkpoint, red when it did not. A finding in the report
                 is red whatever the exit code: a certificate that does not
                 reconcile is what this watch exists to raise.
-  anything else red: stele did not finish, exited otherwise, or the
+  anything else red: stele did not finish, exited otherwise, the
                 checkpoint was not saved (no report was written, or a
-                finding could not be filed).
+                finding could not be filed), or the report could not be
+                read here (its findings cannot be counted).
 
 Usage:
   verdict.py --exit-code N --report FILE --saved true|false
@@ -64,7 +65,9 @@ def read_report(path: Path) -> Report:
             return Report({}, 0, f"the report is not stele's {TARGET} report")
         facts = {f["name"]: f["value"] for f in doc.get("facts") or []}
         return Report(facts, len(doc.get("findings") or []), None)
-    except ValueError, TypeError, KeyError, AttributeError:
+    # Recursion: JSON nested past the parser's depth, a traceback until
+    # prop_verdict.py (#1557).
+    except ValueError, TypeError, KeyError, AttributeError, RecursionError:
         return Report({}, 0, "the report could not be read")
 
 
@@ -77,9 +80,15 @@ def judge(code: str, report: Report, *, saved: bool) -> tuple[bool, str]:
     """
     if not code.isdigit():
         return True, KILLED
-    if not saved:
+    if not saved or report.missing:
+        # Saved, yet unreadable here, is red too: its findings cannot be
+        # counted, and a finding is red whatever the exit code. Facts that
+        # were not stele's shape hid a finding, green on exit 0, until #1557.
         lost = report.missing or "a finding could not be filed"
-        return True, f"stele exited {code} and the checkpoint was not saved: {lost}"
+        state = "its report could not be judged"
+        if not saved:
+            state = "the checkpoint was not saved"
+        return True, f"stele exited {code} and {state}: {lost}"
     if report.findings:
         return True, (
             f"{report.findings} finding(s): a certificate did not reconcile;"
