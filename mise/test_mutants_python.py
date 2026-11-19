@@ -941,6 +941,10 @@ class ResultsAndLines(unittest.TestCase):
         """A function's `x_` and a method's class are not its name."""
         self.assertEqual(helper.function_of("pkg.mod.x_answer__mutmut_12"), "answer")
         self.assertEqual(helper.function_of("pkg.mod.xǁShapeǁarea__mutmut_3"), "area")
+        # A method whose own name starts `x_` keeps it (#1555).
+        self.assertEqual(
+            helper.function_of("pkg.mod.xǁShapeǁx_offset__mutmut_1"), "x_offset"
+        )
 
     def test_a_show_diff_names_the_file_and_both_lines(self) -> None:
         """The `---` path, the first removed and added lines, marks dropped."""
