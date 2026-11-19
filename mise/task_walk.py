@@ -36,7 +36,9 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeIs
+from typing import TYPE_CHECKING
+
+from decoded import UndecodableError, is_array, is_object, is_strings, load_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -84,36 +86,6 @@ class Walk:
 
     tasks: tuple[str, ...]
     steps: tuple[Step, ...]
-
-
-def is_object(value: object) -> TypeIs[dict[str, object]]:
-    """Say whether a JSON value is an object.
-
-    Returns:
-        True for a dict keyed by strings.
-
-    """
-    return isinstance(value, dict) and all(isinstance(k, str) for k in value)
-
-
-def is_array(value: object) -> TypeIs[list[object]]:
-    """Say whether a JSON value is an array.
-
-    Returns:
-        True for a list.
-
-    """
-    return isinstance(value, list)
-
-
-def is_strings(value: object) -> TypeIs[list[str]]:
-    """Say whether a JSON value is an array of strings.
-
-    Returns:
-        True for a list whose every item is a str.
-
-    """
-    return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
 def entries(value: object, task: str, field: str) -> list[object]:
@@ -351,10 +323,9 @@ def mise_json(*args: str) -> object:
     if r.returncode != 0:
         return None
     try:
-        answer: object = json.loads(r.stdout)
-    except ValueError:
+        return load_json(r.stdout)
+    except UndecodableError:
         return None
-    return answer
 
 
 def task_names() -> list[str]:

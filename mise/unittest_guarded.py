@@ -44,6 +44,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, override
 from warnings import catch_warnings, simplefilter
 
+from decoded import UndecodableError, load_json
+
 if TYPE_CHECKING:
     from types import ModuleType
 
@@ -449,10 +451,9 @@ def load(path: Path) -> object:
 
     """
     try:
-        document: object = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+        return load_json(path.read_bytes())
+    except OSError, UndecodableError:
         return None
-    return document
 
 
 def strings(value: object) -> list[str] | None:
