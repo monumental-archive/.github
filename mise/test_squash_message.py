@@ -158,9 +158,15 @@ class SquashMessage(unittest.TestCase):
         )
         self.assertFalse((self.tmp / "mise-args").exists())
 
+    def test_committer_as_a_bare_prefix(self) -> None:
+        """#1529: no delimiter is needed; `committerx y` was spliced too."""
+        done = self.squash("fix: x", "Plain line.\ncommitterx y")
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("PR body line 2 begins with 'committer'", done.stdout)
+
     def test_committer_inside_a_line_is_not_a_header(self) -> None:
-        """Only a line START reads as a header: the word itself is fine."""
-        body = "the author and the committer) and\n    committer x\n"
+        """The measured verified shapes: mid-line, indented, capitalised."""
+        body = "the committer) x\n    committer x\nCommitter x\nauthor x\n"
         done = self.squash("fix: x", body)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(done.stdout, PASSES)
