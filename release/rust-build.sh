@@ -73,6 +73,9 @@
 #   SOURCE_DATE_EPOCH      normally supplied by the caller; derived from
 #                          the checked-out commit when it is not
 set -euo pipefail
+# The canon's one writer of workflow commands (#1660), in this tree.
+# shellcheck source=mise/workflow-command.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../mise/workflow-command.sh"
 
 target="${TARGET:-}"
 package="${PACKAGE:-}"
@@ -84,15 +87,15 @@ plan_artifact_suffix="${PLAN_ARTIFACT_SUFFIX:-}"
 plan_dir="${PLAN_DIR:-plan}"
 
 [[ -n ${target} ]] || {
-  echo "::error::rust-build: TARGET is unset"
+  org_error "rust-build: TARGET is unset"
   exit 1
 }
 [[ -n ${stage_dir} ]] || {
-  echo "::error::rust-build: STAGE_DIR is unset"
+  org_error "rust-build: STAGE_DIR is unset"
   exit 1
 }
 if [[ -n ${plan_class} && -z ${plan_doc_prefix} ]]; then
-  echo "::error::rust-build: PLAN_CLASS is set but PLAN_DOC_PREFIX is not — a plan names a document"
+  org_error "rust-build: PLAN_CLASS is set but PLAN_DOC_PREFIX is not — a plan names a document"
   exit 1
 fi
 
@@ -110,7 +113,7 @@ if [[ -n ${package} ]]; then
   present=$(jq -r --arg p "${package}" \
     '[.packages[] | select(.name == $p) | .name] | length' <<< "${meta}")
   if [[ ${present} != "1" ]]; then
-    echo "::error::rust-build: ${present} workspace package(s) named '${package}'"
+    org_error "rust-build: ${present} workspace package(s) named '${package}'"
     exit 1
   fi
   build_flags+=(--package "${package}")
@@ -147,7 +150,7 @@ fi
 command -v cargo-auditable > /dev/null || {
   emsg="cargo-auditable missing — pin cargo-auditable in this repository's mise config; it is a build"
   emsg+=" input of every class that ships a Rust binary"
-  echo "::error::${emsg}"
+  org_error "${emsg}"
   exit 1
 }
 
@@ -211,19 +214,19 @@ while IFS= read -r b; do
   if [[ -n ${b} ]]; then bins+=("${b}"); fi
 done <<< "${bin_list}"
 if ((${#bins[@]} == 0)); then
-  echo "::error::rust-build: no bin targets in scope — nothing to ship"
+  org_error "rust-build: no bin targets in scope — nothing to ship"
   exit 1
 fi
 mkdir -p "${stage_dir}"
 for b in "${bins[@]}"; do
   src="target/${target}/release/${b}"
   if [[ ! -x ${src} ]]; then
-    echo "::error::rust-build: expected binary ${src} was not produced"
+    org_error "rust-build: expected binary ${src} was not produced"
     exit 1
   fi
   install -m 0755 "${src}" "${stage_dir}/${b}"
 done
-echo "::notice::rust-build: staged ${#bins[@]} binary(ies) for ${target} in ${stage_dir}"
+org_notice "rust-build: staged ${#bins[@]} binary(ies) for ${target} in ${stage_dir}"
 
 # The inventory plan: the artifact-to-package mapping as data, emitted
 # where it is certain — here, in the job that just built the artifact
@@ -241,6 +244,13 @@ if [[ -n ${plan_class} ]]; then
      | map({class: $class, doc: ($prefix + .), params: {cargoPackage: .}}
            + (if $suffix == "" then {} else {artifact: (. + $suffix)} end))' \
     <<< "${scope}" > "${plan_dir}/plan.json"
-  jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' \
-    "${plan_dir}/plan.json"
+  # NUL-delimited, so a field's own newline stays inside its notice; a
+  # file between, so jq's own status stops the script.
+  notices=$(mktemp)
+  jq -j '.[] | "plans inventory \(.doc) for package \(.params.cargoPackage)\u0000"' \
+    "${plan_dir}/plan.json" > "${notices}"
+  while IFS= read -r -d '' planned; do
+    org_notice "${planned}"
+  done < "${notices}"
+  rm -f "${notices}"
 fi

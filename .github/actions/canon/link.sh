@@ -22,6 +22,16 @@ set -euo pipefail
 : "${GITHUB_WORKSPACE:?}"
 : "${GITHUB_OUTPUT:?}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# A tree without the belt is refused before anything is read from it,
+# so its one command is a literal and the path follows on a plain line.
+if [[ ! -f "${root}/mise/config.toml" || ! -f "${root}/mise/workflow-command.sh" ]]; then
+  echo "::error::the resolved canon tree has no mise/config.toml or mise/workflow-command.sh — not a canon tree"
+  echo "  resolved: ${root}"
+  exit 1
+fi
+# The canon's one writer of workflow commands (#1660), in this tree.
+# shellcheck source=mise/workflow-command.sh
+. "${root}/mise/workflow-command.sh"
 case "${root}" in
   */_actions/"${CANON_REPOSITORY}"/*)
     # Remote resolution: the path segment under _actions is the ref the
@@ -35,16 +45,12 @@ case "${root}" in
     if [[ ${GITHUB_REPOSITORY} != "${CANON_REPOSITORY}" ]]; then
       emsg="canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
       emsg+=" self-call"
-      echo "::error::${emsg}"
+      org_error "${emsg}"
       exit 1
     fi
     ref="${GITHUB_SHA}"
     ;;
 esac
-if [[ ! -f "${root}/mise/config.toml" ]]; then
-  echo "::error::resolved canon tree at '${root}' has no mise/config.toml — not a canon tree"
-  exit 1
-fi
 ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
 echo "canon resolved: ${ref} at ${root}"
 echo "ref=${ref}" >> "${GITHUB_OUTPUT}"

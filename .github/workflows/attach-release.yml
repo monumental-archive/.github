@@ -263,6 +263,8 @@ jobs:
       - name: Assert the SBOM arrived
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           # Generation moved to the publish orchestrator's sbom job (and,
           # for images, the build's pull-back step) — class-shaped, derived
           # from what actually ships (docs/dependency-track.md). This job
@@ -276,15 +278,15 @@ jobs:
           # at generation now; this assertion is the backstop.
           n=$(find dist -maxdepth 1 -name "*.spdx.json" | wc -l | tr -d " ")
           if [[ ${n} -eq 0 ]]; then
-            echo "::error::no SBOM in dist — the sbom job should have delivered one"
+            org_error "no SBOM in dist — the sbom job should have delivered one"
             exit 1
           fi
           hidden=$(find dist -maxdepth 1 -name ".*" -type f | wc -l | tr -d " ")
           if [[ ${hidden} -ne 0 ]]; then
-            echo "::error::dotfile in dist — dist/* globs and the checksum loop would silently skip it"
+            org_error "dotfile in dist — dist/* globs and the checksum loop would silently skip it"
             exit 1
           fi
-          echo "::notice::${n} SBOM(s) in the bundle"
+          org_notice "${n} SBOM(s) in the bundle"
       # The declared contract, attested at the tag (stele#40, from
       # #109): which classes shipped, the verdict layout, the machinery
       # version obligations are derived from, and every asset pinned and

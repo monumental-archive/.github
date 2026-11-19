@@ -151,9 +151,11 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           majors=$(.org-canon/mise/pgrx-plan.sh .org-canon)
           echo "majors=${majors}" >> "${GITHUB_OUTPUT}"
-          echo "::notice::pgrx legs planned: ${majors}"
+          org_notice "pgrx legs planned: ${majors}"
   # Everything the gate runs except the extension's own suite, which the
   # `pgrx` legs below run one major each. This was the job named `ci`;
   # that name now belongs to the final job, because `ci / ci` is the one
@@ -758,9 +760,13 @@ jobs:
             [[ ${result} != success ]] || continue
             if [[ ${name} == "pgrx legs" && ${result} == skipped ]]; then
               [[ ${MAJORS} != "[]" ]] || continue
-              echo "::error::pgrx legs were skipped although ${MAJORS} were planned"
+              # No canon tree in this job: the command is a literal, and the
+              # outside text follows on a plain line, never at its start (#1660).
+              echo "::error::pgrx legs were skipped although majors were planned"
+              echo "  planned: ${MAJORS}"
             else
-              echo "::error::${name}: ${result}"
+              echo "::error::a job the gate needs did not succeed"
+              echo "  ${name}: ${result}"
             fi
             status=1
           done

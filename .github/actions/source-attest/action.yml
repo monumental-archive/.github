@@ -80,10 +80,12 @@ runs:
         SA_STAGE: ${{ inputs.stage }}
       run: |
         set -euo pipefail
+        # The canon's one writer of workflow commands (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/workflow-command.sh"
         case "${SA_STAGE}" in
           claims | attest) ;;
           *)
-            echo "::error::source-attest stage must be 'claims' or 'attest', got '${SA_STAGE}' (#240)"
+            org_error "source-attest stage must be 'claims' or 'attest', got '${SA_STAGE}' (#240)"
             exit 1
             ;;
         esac
@@ -99,14 +101,14 @@ runs:
             if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
               emsg="source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
               emsg+=" self-call"
-              echo "::error::${emsg}"
+              org_error "${emsg}"
               exit 1
             fi
             canon_ref="${GITHUB_SHA}"
             ;;
         esac
         if [[ ! -f "${root}/slsa/verify-policy.json" ]]; then
-          echo "::error::resolved canon tree at '${root}' has no slsa/verify-policy.json"
+          org_error "resolved canon tree at '${root}' has no slsa/verify-policy.json"
           exit 1
         fi
         work="${RUNNER_TEMP}/source-attest"
@@ -143,6 +145,8 @@ runs:
         MISE_LOCKED: "1"
       run: | # zizmor: ignore[github-env]
         set -euo pipefail
+        # The canon's one writer of workflow commands (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/workflow-command.sh"
         # Retried with backoff: the GitHub release download behind this
         # died twice on 2026-08-12 alone (#265). The retry shortens the
         # window; the auto-heal in chain.sh is what makes losing it
@@ -150,10 +154,10 @@ runs:
         for attempt in 1 2 3 4 5; do
           mise install "aqua:sigstore/cosign" "github:monumental-archive/stele" && break
           if [[ ${attempt} == 5 ]]; then
-            echo "::error::could not install cosign after ${attempt} attempts"
+            org_error "could not install cosign after ${attempt} attempts"
             exit 1
           fi
-          echo "::warning::cosign install failed (attempt ${attempt}), retrying"
+          org_warning "cosign install failed (attempt ${attempt}), retrying"
           sleep $((attempt * 10))
         done
         # The audit is right in general and wrong here, so this is a
@@ -211,10 +215,12 @@ runs:
         SA_CLAIMS_B64: ${{ inputs.claims }}
       run: |
         set -euo pipefail
+        # The canon's one writer of workflow commands (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/workflow-command.sh"
         [[ -n ${SA_CLAIMS_B64} ]] || {
           emsg="stage 'attest' requires the claims payload from the claims job — wire this input to"
           emsg+=" needs.claims.outputs.claims (#240)"
-          echo "::error::${emsg}"
+          org_error "${emsg}"
           exit 1
         }
         base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"

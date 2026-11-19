@@ -147,7 +147,9 @@ class Derivation:
             (self.root / "next-data.sql").write_text(data)
             args.append(str(self.root / "next-data.sql"))
         prev_v, new_v = versions
-        env = hermetic.env(EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v)
+        env = hermetic.env(
+            EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v, ORG_MISE_DIR=str(CANON / "mise")
+        )
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [hermetic.tool("python3"), str(self.source), *args],

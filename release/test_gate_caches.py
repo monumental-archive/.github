@@ -289,7 +289,7 @@ class Planted(unittest.TestCase):
 
     def test_a_save_in_a_fourth_job(self) -> None:
         """A save step added to the plan job is a cache outside the three."""
-        notice = '          echo "::notice::pgrx legs planned: ${majors}"\n'
+        notice = '          org_notice "pgrx legs planned: ${majors}"\n'
         save = (
             "      - name: Save the plan cache (default branch only)\n"
             "        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && always() }}\n"

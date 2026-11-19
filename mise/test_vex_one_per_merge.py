@@ -364,7 +364,7 @@ class OneWording(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("ONE_PER_MERGE: .org-canon/mise/vex-one-per-merge.txt", workflow)
-        self.assertIn('echo "::error::$(< "${ONE_PER_MERGE}")"', workflow)
+        self.assertIn('org_error "$(< "${ONE_PER_MERGE}")"', workflow)
         self.assertNotIn(SENTENCE, workflow)
 
 

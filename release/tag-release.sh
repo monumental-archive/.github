@@ -20,6 +20,9 @@
 set -euo pipefail
 
 canon="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The canon's one writer of workflow commands (#1660).
+# shellcheck source=mise/workflow-command.sh
+. "${canon}/mise/workflow-command.sh"
 repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
 repo_url="https://github.com/${repo_slug}"
 groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
@@ -54,7 +57,7 @@ order+=",Testing,Build,CI,Dependencies,Reverted"
 # worth reporting deterministically rather than arbitrarily.
 resumed=$(git tag --points-at HEAD --list 'v[0-9]*' | sort -V | tail -1)
 if [[ -n ${resumed} ]]; then
-  echo "${resumed} already exists; nothing to do"
+  echo "already minted, nothing to do: ${resumed}"
   exit 0
 fi
 
@@ -81,19 +84,32 @@ if ! stele derive release-plan \
   exit 1
 fi
 
+# Each refusal the plan names, one error command each: a detail is the
+# planner's text, and read raw a newline in it began a log line of its
+# own (#1660). NUL-delimited, so the newline stays inside its refusal.
+refused() {
+  local refusal listed
+  listed=$(mktemp)
+  jq -j '(.refusals // [])[] | .cause + ": " + .detail + "\u0000"' "${plan}" > "${listed}"
+  while IFS= read -r -d '' refusal; do
+    org_error "${refusal}"
+  done < "${listed}"
+  rm -f "${listed}"
+}
+
 version=$(jq -r '.version // ""' "${plan}")
 tag=$(jq -r '.tag // ""' "${plan}")
 subject=$(jq -r '.commit.subject // ""' "${plan}")
 if [[ -z ${tag} || -z ${version} ]]; then
   echo "FAIL: the plan names no tag to mint" >&2
-  jq -r '(.refusals // [])[] | "  " + .cause + ": " + .detail' "${plan}" >&2
+  refused >&2
   exit 1
 fi
 
-refusals=$(jq -r '(.refusals // [])[] | "  " + .cause + ": " + .detail' "${plan}")
-if [[ -n ${refusals} ]]; then
+refusal_count=$(jq '(.refusals // []) | length' "${plan}")
+if [[ ${refusal_count} -gt 0 ]]; then
   echo "FAIL: the release plan refuses:" >&2
-  echo "${refusals}" >&2
+  refused >&2
   exit 1
 fi
 
@@ -231,7 +247,7 @@ git push origin "${tag}" 2> "${push_log}" || push_rc=$?
 if [[ ${push_rc} -ne 0 ]] \
   && grep -qF "refusing to allow a GitHub App to create or update workflow" "${push_log}"; then
   git tag -d "${tag}" > /dev/null
-  echo "::error::the push of ${tag} was refused: a workflow-changing commit reached the default" \
+  org_error "the push of ${tag} was refused: a workflow-changing commit reached the default" \
     "branch after the release commit, so its workflow files differ from the release commit's, and" \
     "GitHub will not let the tag-mint App create a ref that would change them. ${tag} has not been" \
     "minted and ${version} is not spent. Land one change on the default branch that makes its" \

@@ -47,6 +47,10 @@ set -euo pipefail
 : "${GITHUB_REPOSITORY:?}"
 
 canon="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The canon's one writer of workflow commands (#1660); the containers
+# below read the copy each build places in its /work.
+# shellcheck source=mise/workflow-command.sh
+. "${canon}/mise/workflow-command.sh"
 
 emit() {
   if [[ -n ${GITHUB_OUTPUT:-} ]]; then
@@ -242,6 +246,8 @@ for control in "${controls[@]}"; do
   # read-only, so the traversal bit is set here, once, on the host.
   chmod 755 "${work}"
   mkdir -p "${work}/prevroot" "${work}/out"
+  # The writer of workflow commands, where both containers read /work.
+  cp "${canon}/mise/workflow-command.sh" "${work}/"
 
   echo "deriving ${name}: ${prev} -> ${VERSION} (pg${pg})"
   gh release download "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
@@ -287,6 +293,7 @@ for control in "${controls[@]}"; do
   # leg needs only the generated schema and the loadable library).
   cat > "${work}/build.sh" << 'EOSH'
 set -euo pipefail
+. /work/workflow-command.sh
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # Headers at exactly the server the pinned image already carries
@@ -300,7 +307,7 @@ if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; th
   msg="image ${BUILD_IMAGE} carries server ${server}; the apt repository"
   msg+=" no longer serves its headers — move the image pin in"
   msg+=" docker/pgrx-base-images.toml"
-  echo "::error::${msg}"
+  org_error "${msg}"
   exit 1
 fi
 apt-get install -y -qq --no-install-recommends \
@@ -308,7 +315,7 @@ apt-get install -y -qq --no-install-recommends \
   ca-certificates curl pkg-config libclang-dev git
 after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 [[ ${after} == "${server}" ]] || {
-  echo "::error::the build moved the server from ${server} to ${after}"
+  org_error "the build moved the server from ${server} to ${after}"
   exit 1
 }
 mkdir -p /build
@@ -363,12 +370,16 @@ EOSH
   # output — not arbitrary SQL — and fails loudly on anything it cannot
   # soundly migrate, naming the statement. The round-trip proof below is
   # the authority either way.
-  EXT_NAME="${name}" PREV_V="${prev}" NEW_V="${VERSION}" \
+  EXT_NAME="${name}" PREV_V="${prev}" NEW_V="${VERSION}" ORG_MISE_DIR="${canon}/mise" \
     python3 - "${prev_schema}" "${new_schema}" "${work}/upgrade.sql" \
     ${data_fragment:+"${data_fragment}"} << 'EOPY'
 import os
 import re
 import sys
+
+# The canon's one writer of workflow commands (#1660).
+sys.path.insert(0, os.environ["ORG_MISE_DIR"])
+import workflow_command
 
 prev_path, new_path, out_path = sys.argv[1:4]
 data_path = sys.argv[4] if len(sys.argv) > 4 else ""
@@ -644,13 +655,13 @@ for cls, key, n, s in n_order:
 if failures:
     if not data_path:
         for f in failures:
-            print(f"::error::{ext}: {f}", file=sys.stderr)
+            workflow_command.error(f"{ext}: {f}", stream=sys.stderr)
         sys.exit(1)
     for f in failures:
-        print(
-            f"::warning::{ext}: {f} — assuming sql/next-data.sql handles it; "
+        workflow_command.warning(
+            f"{ext}: {f} — assuming sql/next-data.sql handles it; "
             "the round-trip proof decides",
-            file=sys.stderr,
+            stream=sys.stderr,
         )
 
 data = ""
@@ -775,11 +786,12 @@ cp -a "/new${ext}/." "${ext}/"
 cp /work/upgrade.sql "${ext}/${NAME}--${PREV}--${NEW}.sql"
 su -w PG,NAME,PREV,NEW postgres -s /bin/bash -c '
   set -euo pipefail
+  . /work/workflow-command.sh
   psql -v ON_ERROR_STOP=1 -d upgraded -c "ALTER EXTENSION ${NAME} UPDATE TO '\''${NEW}'\'';" > /dev/null
   got=$(psql -v ON_ERROR_STOP=1 -d upgraded -tA -c \
     "SELECT extversion FROM pg_extension WHERE extname = '\''${NAME}'\'';")
   if [[ ${got} != "${NEW}" ]]; then
-    echo "::error::upgrade left extversion ${got}, wanted ${NEW}"
+    org_error "upgrade left extversion ${got}, wanted ${NEW}"
     exit 1
   fi
   createdb fresh
@@ -790,14 +802,14 @@ su -w PG,NAME,PREV,NEW postgres -s /bin/bash -c '
   for db in upgraded fresh; do
     psql -v ON_ERROR_STOP=1 -d "${db}" -tA -v ext="${NAME}" -f /work/snapshot.sql > "/tmp/${db}.snap"
     if [[ ! -s /tmp/${db}.snap ]]; then
-      echo "::error::${db} catalog snapshot of ${NAME} is empty — the proof read nothing"
+      org_error "${db} catalog snapshot of ${NAME} is empty — the proof read nothing"
       exit 1
     fi
   done
   if ! diff -u /tmp/upgraded.snap /tmp/fresh.snap; then
-    emsg="::error::upgraded ${NAME} catalog differs from a fresh ${NEW} install — the derived script is"
+    emsg="upgraded ${NAME} catalog differs from a fresh ${NEW} install — the derived script is"
     emsg+=" unsound; see the diff above"
-    echo "${emsg}"
+    org_error "${emsg}"
     exit 1
   fi
   # Rows, not lines: a function definition spans several lines.

@@ -5,6 +5,10 @@
 #
 #   upgrade-cluster.sh create|update
 set -euo pipefail
+# The canon's one writer of workflow commands (#1660): the copy the
+# container run mounts and names, or this tree's own on the runner.
+# shellcheck source=mise/workflow-command.sh
+. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
 : "${PG:?}"
 : "${NAME:?}"
 : "${PREV:?}"
@@ -19,13 +23,13 @@ case $1 in
     psql -c "ALTER EXTENSION ${NAME} UPDATE TO '${NEW}';"
     got=$(psql -tA -c "SELECT extversion FROM pg_extension WHERE extname = '${NAME}';")
     if [[ ${got} != "${NEW}" ]]; then
-      echo "::error::upgrade left extversion ${got}, wanted ${NEW}"
+      org_error "upgrade left extversion ${got}, wanted ${NEW}"
       exit 1
     fi
     echo "upgraded ${PREV} -> ${got}"
     ;;
   *)
-    echo "::error::upgrade-cluster.sh: unknown phase '$1' (create or update)"
+    org_error "upgrade-cluster.sh: unknown phase '$1' (create or update)"
     exit 2
     ;;
 esac

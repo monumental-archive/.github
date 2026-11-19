@@ -191,6 +191,16 @@ class Escapes(unittest.TestCase):
             written(lambda: workflow_command.endgroup(stream=None)), "::endgroup::\n"
         )
 
+    def test_group_then_endgroup_in_process(self) -> None:
+        """Called directly, the two write the group's start and its end."""
+        out = io.StringIO()
+        with redirect_stdout(out):
+            workflow_command.group("npm debug log\n::error::x")
+            workflow_command.endgroup()
+        self.assertEqual(
+            out.getvalue(), "::group::npm debug log%0A::error::x\n::endgroup::\n"
+        )
+
     def test_the_stream_is_the_callers(self) -> None:
         """stream= takes the line, and stdout gets nothing."""
         err = io.StringIO()

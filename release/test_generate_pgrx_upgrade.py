@@ -981,7 +981,10 @@ def run_header_install(
         The completed process and the arguments apt-get received.
 
     """
-    block = "\n".join(header_install(SCRIPT.read_text()))
+    # Both sites source the canon's writer of workflow commands (#1660)
+    # before this block; the cut-out block is given it the same way.
+    writer = CANON / "mise" / "workflow-command.sh"
+    block = f'. "{writer}"\n' + "\n".join(header_install(SCRIPT.read_text()))
     with TemporaryDirectory() as d:
         tmp = Path(d)
         stubs = tmp / "bin"
@@ -1445,6 +1448,8 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
             (root / "work" / "snapshot.sql").write_text(
                 snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
             )
+            # The writer the real run copies into /work (#1660).
+            shutil.copy(CANON / "mise" / "workflow-command.sh", root / "work")
             script = proof_sh(SCRIPT.read_text())
             # One pass, never a replace() per prefix: on Linux the scratch
             # root is itself under /tmp/, so a later replace() rewrote the

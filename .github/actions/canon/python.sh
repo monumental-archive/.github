@@ -22,11 +22,14 @@ set -euo pipefail
 : "${GITHUB_ENV:?}"
 : "${RUNNER_TEMP:?}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# The canon's one writer of workflow commands (#1660), in this tree.
+# shellcheck source=mise/workflow-command.sh
+. "${root}/mise/workflow-command.sh"
 config="${root}/mise/config.toml"
 lock="${root}/mise/mise.lock"
 version=$(awk -F'"' '/^python = "/ { print $2 }' "${config}")
 if [[ -z ${version} || ${version} == *$'\n'* ]]; then
-  echo "::error::the belt's python: ${config} does not pin exactly one python version"
+  org_error "the belt's python: ${config} does not pin exactly one python version"
   exit 1
 fi
 # The lock must hold the version the config pins: a locked install of a
@@ -34,7 +37,7 @@ fi
 locked=$(awk '$0 == "[[tools.python]]" { seen = 1; next }
   seen && /^version = / { gsub(/"/, "", $3); print $3; exit }' "${lock}")
 if [[ ${locked} != "${version}" ]]; then
-  echo "::error::the belt's python: ${lock} does not hold python ${version}" \
+  org_error "the belt's python: ${lock} does not hold python ${version}" \
     "(it holds '${locked}'), so the install cannot be checked"
   exit 1
 fi
@@ -50,16 +53,16 @@ export MISE_GLOBAL_CONFIG_FILE="${config}"
 export MISE_TRUSTED_CONFIG_PATHS="${root}"
 export MISE_LOCKED=1
 if ! mise install python; then
-  echo "::error::the belt's python: mise could not install python ${version} from ${lock}"
+  org_error "the belt's python: mise could not install python ${version} from ${lock}"
   exit 1
 fi
 if ! where=$(mise where "python@${version}"); then
-  echo "::error::the belt's python: mise installed python ${version} but cannot say where"
+  org_error "the belt's python: mise installed python ${version} but cannot say where"
   exit 1
 fi
 python="${where}/bin/python3"
 if [[ ! -x ${python} ]]; then
-  echo "::error::the belt's python: ${python} is not an executable interpreter"
+  org_error "the belt's python: ${python} is not an executable interpreter"
   exit 1
 fi
 echo "ORG_PYTHON=${python}" >> "${GITHUB_ENV}"

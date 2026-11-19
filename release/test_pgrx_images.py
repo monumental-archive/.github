@@ -35,6 +35,11 @@ import hermetic
 
 RELEASE = Path(__file__).resolve().parent
 CANON = RELEASE.parent
+# The writer of workflow commands each proof container is given (#1660).
+WRITER_MOUNT = (
+    f"-v {CANON}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
+    " -e ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh"
+)
 STAGE = RELEASE / "pgrx_images.py"
 PROOF = RELEASE / "pgrx-image-proof.sh"
 TABLE = CANON / "docker" / "pgrx-base-images.toml"
@@ -483,7 +488,7 @@ class Proof(unittest.TestCase):
         )
         docker_dir = (CANON / "docker").resolve()
         self.assertEqual(
-            f"run --rm -v {docker_dir}:/proof:ro consumer-proof:pg17"
+            f"run --rm -v {docker_dir}:/proof:ro {WRITER_MOUNT} consumer-proof:pg17"
             " bash /proof/pgrx-copy-proof.sh edtf_postgres",
             calls[1],
         )
@@ -511,7 +516,7 @@ class Proof(unittest.TestCase):
         )
         docker_dir = (CANON / "docker").resolve()
         self.assertEqual(
-            f"run --rm --user postgres -v {docker_dir}:/proof:ro"
+            f"run --rm --user postgres -v {docker_dir}:/proof:ro {WRITER_MOUNT}"
             " consumer-path-proof:pg18 bash /proof/pgrx-path-proof.sh",
             calls[3],
         )

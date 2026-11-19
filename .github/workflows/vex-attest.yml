@@ -154,6 +154,8 @@ jobs:
             "any=\(.cells | length > 0)"
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
             mode=() none="no changed statements" list=$("${ORG_PYTHON}" .org-canon/mise/vex_one_per_merge.py --list "${BEFORE}..")
           else
@@ -162,14 +164,23 @@ jobs:
           IFS=$'\n' read -r -d '' -a files <<< "${list}" || true
           # Nothing to sign ends here: no output is `any` unset, which
           # every consumer reads as false.
-          [[ ${#files[@]} -gt 0 ]] || exec echo "::notice::${none}"
-          [[ ${#mode[@]} -gt 0 || ${#files[@]} -eq 1 ]] || (echo "::error::$(< "${ONE_PER_MERGE}")" && exit 1)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            org_notice "${none}"
+            exit 0
+          fi
+          if [[ ${#mode[@]} -eq 0 && ${#files[@]} -ne 1 ]]; then
+            org_error "$(< "${ONE_PER_MERGE}")"
+            exit 1
+          fi
           rc=0
           stele derive vex-subjects "${mode[@]}" "${files[@]/#/--decision=}" \
             --policy slsa/assert-policy.json --org "${OWNER}" --out plan.json || rc=$?
           # 1 is refusals, which the job below reddens; 4 is an unreadable
           # store; anything else is the tool failing.
-          [[ ${rc} -ne 4 ]] || (echo "::error::${UNREADABLE}" && exit 4)
+          if [[ ${rc} -eq 4 ]]; then
+            org_error "${UNREADABLE}"
+            exit 4
+          fi
           [[ ${rc} -le 1 ]] || exit "${rc}"
           jq -r "${OUTPUTS}" plan.json >> "${GITHUB_OUTPUT}"
   sign-vex:
@@ -209,6 +220,9 @@ jobs:
           REFUSALS: ${{ needs.plan.outputs.refusals }}
         run: |
           set -euo pipefail
-          echo "::error::signed nothing for, and refused to guess about:${REFUSALS}"
+          # No canon tree in this job: the command is a literal, and the
+          # outside text follows on a plain line, never at its start (#1660).
+          echo "::error::signed nothing for, and refused to guess about, the decisions below"
+          echo "  refused:${REFUSALS}"
           exit 1
 ...

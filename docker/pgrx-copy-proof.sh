@@ -14,11 +14,15 @@
 # the system paths so the tests run this file against a planted tree;
 # in the image it is unset.
 set -euo pipefail
+# The canon's one writer of workflow commands (#1660): the copy the
+# container run mounts and names, or this tree's own on the runner.
+# shellcheck source=mise/workflow-command.sh
+. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../mise/workflow-command.sh}"
 ext="${1:?the extension the artifact image ships}"
 root="${PGRX_PROOF_ROOT:-}"
 controls=("${root}"/usr/share/postgresql/*/extension/"${ext}".control)
 if [[ ! -e ${controls[0]} ]]; then
-  echo "::error::${ext}.control is not under /usr/share/postgresql/*/extension; the COPY did not place the shipped extension"
+  org_error "${ext}.control is not under /usr/share/postgresql/*/extension; the COPY did not place the shipped extension"
   exit 1
 fi
 su postgres -c "

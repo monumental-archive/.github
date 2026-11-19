@@ -131,13 +131,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           rc=0
           stele level \
             --repo "${GITHUB_REPOSITORY}" \
             --out-dir levels \
             --policy .org-canon/slsa/assert-policy.json || rc=$?
           if [[ ${rc} -ne 0 && ${rc} -ne 4 ]]; then
-            echo "::error::stele level failed (exit ${rc}) — nothing published"
+            org_error "stele level failed (exit ${rc}) — nothing published"
             exit "${rc}"
           fi
           echo "investigate=${rc}" >> "${GITHUB_ENV}"

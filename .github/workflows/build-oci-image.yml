@@ -328,9 +328,9 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n ${UNTRUSTED_PREPARE} && -n ${UNTRUSTED_BINARY_CRATE} ]]; then
-            emsg="prepare and binary-crate are both declared — the class materialises the context one way or the"
-            emsg+=" other; delete the prepare script the declaration replaces (#775)"
-            echo "::error::${emsg}"
+            # A literal: no tree is linked yet, and nothing here is outside text.
+            echo "::error::prepare and binary-crate are both declared — the class materialises the context" \
+              "one way or the other; delete the prepare script the declaration replaces (#775)"
             exit 1
           fi
       - name: Check out caller repository
@@ -387,8 +387,10 @@ jobs:
           UNTRUSTED_PREPARE: ${{ inputs.prepare }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           if [[ ! -x ${UNTRUSTED_PREPARE} ]]; then
-            echo "::error::prepare ${UNTRUSTED_PREPARE} is not executable"
+            org_error "prepare ${UNTRUSTED_PREPARE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_PREPARE}" "${ARCH}"
@@ -518,8 +520,10 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           if [[ ! -x ${UNTRUSTED_SMOKE} ]]; then
-            echo "::error::smoke-test ${UNTRUSTED_SMOKE} is not executable"
+            org_error "smoke-test ${UNTRUSTED_SMOKE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_SMOKE}" "oci-under-test:${ARCH}"
