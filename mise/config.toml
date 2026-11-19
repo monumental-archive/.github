@@ -2285,11 +2285,11 @@ dir = "{{cwd}}"
 # script's `__main__`, so a function reached only by running its helper
 # as a script is one mutation cannot judge, and coverage and the type
 # checker cannot see it either. mise/in_process.py reads the syntax trees
-# of the four roots (mise/, release/, .github/rekor-monitor/, settings/)
-# and says what reaches a function; the unreached are listed in
+# of every tracked .py outside vendor/, naming no directory, and says what
+# reaches a function; the unreached are listed in
 # security/helper-import-debt.txt, which only shrinks. Red on an
 # unreached function not listed, and on a stale entry. Tracked files
-# only; a repository with no helper in the four roots skips clean.
+# only; a repository with no Python helper tracked skips clean.
 run = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/in_process.py"'
 
 [tasks."fix:in-process"]

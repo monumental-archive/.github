@@ -16,10 +16,12 @@ a two-file project (`answer(n): return n + 1`, mutant `n - 1`):
     imports the module, the mutant's own name          prints 0, the mutant
 
 THE UNIT IS THE FUNCTION, AND REACH IS FOLLOWED (amendment on #1673). A
-helper is any tracked `.py` in the four roots (`mise/`, `release/`,
-`.github/rekor-monitor/`, `settings/`) that is not a `test_*.py` or
-`prop_*.py`; its units are its top-level functions and its classes'
-methods (`Class.method`). A unit is REACHED when:
+helper is every tracked `.py` outside `vendor/` that is not a
+`test_*.py` or `prop_*.py`, wherever it lives (the law names no
+directory: a repository's helpers in `tools/` are judged like the
+canon's in `mise/`); a test module is every tracked one that is. A
+helper's units are its top-level functions and its classes' methods
+(`Class.method`). A unit is REACHED when:
 
 - a test module calls it in-process: the call's target, spelled by its
   module's real name however the module was imported
@@ -56,15 +58,14 @@ from pathlib import Path, PurePosixPath
 
 import call_names
 
-ROOTS = ("mise", "release", ".github/rekor-monitor", "settings")
 DEBT = "security/helper-import-debt.txt"
 NOTE = "# #1673 unassigned"
 LABEL = "lint:in-process"
 FIX = "mise run fix:in-process"
 HEADER = f"""\
-# Helper import debt (#1673): every function or method of a helper module
-# in the four roots ({", ".join(r + "/" for r in ROOTS)})
-# that no test reaches in-process, as the tree had it when lint:in-process
+# Helper import debt (#1673): every function or method of a tracked
+# Python helper (outside vendor/, not a test_*.py or prop_*.py) that no
+# test reaches in-process, as the tree had it when lint:in-process
 # landed. A function reached only through a script in a child process is
 # one mutation cannot judge (mutmut runs a mutant only in the module it was
 # named for, never in a script's `__main__`), and coverage and the type
@@ -397,7 +398,7 @@ def check(root: Path, paths: list[str]) -> list[str]:
 
 
 def tracked(root: Path) -> list[str]:
-    """Name the tracked `.py` files in the four roots.
+    """Name the tracked `.py` files outside `vendor/`.
 
     Returns:
         Their paths, relative to root; empty when none is tracked.
@@ -412,7 +413,7 @@ def tracked(root: Path) -> list[str]:
         raise RuntimeError(msg)
     # ruff: ignore[subprocess-without-shell-equals-true]
     listed = subprocess.run(
-        [git, "ls-files", "-z", "--", *(f"{r}/*.py" for r in ROOTS)],
+        [git, "ls-files", "-z", "--", "*.py", ":!vendor/**"],
         cwd=root,
         capture_output=True,
         text=True,
@@ -474,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = tracked(root)
     if all(is_test(p) for p in paths):
         word = "fix:in-process" if write else LABEL
-        print(f"{word}: no helper module tracked in {', '.join(ROOTS)}, skipped")
+        print(f"{word}: no Python helper tracked, skipped")
         return 0
     if write:
         print(write_debt(root, paths))

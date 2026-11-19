@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Tests for in_process.py and the law it holds the tree to (#1673).
 
-The law: every function and method of a helper module in the four roots
-is reached in-process from a test module, or is listed in the
+The law: every function and method of a tracked Python helper, wherever
+it lives, is reached in-process from a test module, or is listed in the
 shrink-only debt file. The rows call the helper's functions in this
 process, the rule the law states; one row runs it as a script, for the
 script contract alone.
@@ -240,16 +240,13 @@ class Tree(Case):
         return status, out.getvalue(), err.getvalue()
 
     def test_no_helper_skips_clean(self) -> None:
-        """A tree with no helper in the four roots is not judged."""
+        """A tree with no Python helper tracked is not judged."""
         self.git("rm", "-q", "--cached", "mise/hello.py")
         self.same(
             self.main(),
             (
                 0,
-                (
-                    "lint:in-process: no helper module tracked in mise, release,"
-                    " .github/rekor-monitor, settings, skipped\n"
-                ),
+                "lint:in-process: no Python helper tracked, skipped\n",
                 "",
             ),
         )
@@ -306,6 +303,24 @@ class Tree(Case):
         self.same((status, out), (2, ""))
         self.assertTrue(err.startswith("usage: in_process.py [--write] [--root DIR]"))
 
+    def test_a_helper_in_a_directory_of_any_name_is_judged(self) -> None:
+        """The law names no directory: a helper in tools/ is judged too."""
+        self.track("tools/sweep.py", "def sweep() -> int:\n    return 0\n")
+        self.main("--write")
+        debt = (self.root / in_process.DEBT).read_text(encoding="utf-8")
+        self.same(sorted(in_process.read_debt(debt)), [ENTRY, "tools/sweep.py:sweep"])
+        self.track("tools/test_sweep.py", "import sweep\nsweep.sweep()\n")
+        status, _, err = self.main()
+        self.same(status, 1)
+        self.assertIn("tools/sweep.py:sweep: listed in", err)
+
+    def test_vendored_python_is_not_judged(self) -> None:
+        """A helper under vendor/ is someone else's code."""
+        self.track("vendor/lib/thing.py", "def thing() -> int:\n    return 0\n")
+        self.main("--write")
+        debt = (self.root / in_process.DEBT).read_text(encoding="utf-8")
+        self.same(sorted(in_process.read_debt(debt)), [ENTRY])
+
     def test_the_script_contract(self) -> None:
         """Run as a script: red, by name, exit 1 (the one end-to-end row)."""
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
@@ -324,7 +339,9 @@ class Law(Case):
 
     def test_the_canon_keeps_the_law(self) -> None:
         """Every helper function is reached in-process, or listed as debt."""
-        paths = hermetic.tracked(CANON, *(f"{r}/*.py" for r in in_process.ROOTS))
+        paths = [
+            p for p in hermetic.tracked(CANON, "*.py") if not p.startswith("vendor/")
+        ]
         self.same(in_process.check(CANON, paths), [])
 
 
