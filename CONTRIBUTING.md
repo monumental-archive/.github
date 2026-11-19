@@ -94,7 +94,7 @@ own work and adds the task that runs it to its row.
 | # | Property | What breaks without it | Mechanism | Issue |
 |---|---|---|---|---|
 | 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (mutmut; adopt with `[tool.mutmut]` in `pyproject.toml`) [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
-| 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357]; Go has no branch figure, answered by [#1356] |
+| 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357], Go: `audit:coverage-go-branches` (gobco's condition coverage, the `go-branches` floor; [tooling verdict][go-branches]) [#1546] |
 | 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust, Go and Python exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`; Hypothesis in `prop_*.py` files, `test:python-properties` and `audit:python-properties`, [#1332]); TypeScript in `*.prop.test.*` files (fast-check, the repository's own; `test:typescript-properties` and `audit:typescript-properties`, [#1549]) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
 | 5 | Runs on real artifacts, on both platforms | the fixture's imagined world | a written rule: a recorded real artifact outranks a hand-written fixture; the gate already runs on Linux and the Mac | this section |
@@ -110,7 +110,9 @@ own work and adds the task that runs it to its row.
 [#1358]: https://github.com/monumental-archive/.github/issues/1358
 [#1359]: https://github.com/monumental-archive/.github/issues/1359
 [#1360]: https://github.com/monumental-archive/.github/issues/1360
+[#1546]: https://github.com/monumental-archive/.github/issues/1546
 [#1549]: https://github.com/monumental-archive/.github/issues/1549
+[go-branches]: docs/tooling-verdicts.md
 [signer#86]: https://github.com/monumental-archive/signer/issues/86
 [iiif-server#212]: https://github.com/monumental-archive/iiif-server/issues/212
 
@@ -154,9 +156,10 @@ The gate stays fast and deterministic. A mechanism enters `ci` only
 with its measured cost written in its issue. Mutation testing, which
 repeats the suite once per mutant, runs on its own weekly mutation
 workflow, apart from the audit, never on a pull request. Anything
-that is random (the random half of property testing) or needs a
-second toolchain (Rust branch coverage) runs on the Monday audit,
-never on a pull request.
+that is random (the random half of property testing), needs a
+second toolchain (Rust branch coverage) or re-runs the suite at
+several times its cost (Go condition coverage) runs on the Monday
+audit, never on a pull request.
 
 ### Every defect issue carries the regression line
 

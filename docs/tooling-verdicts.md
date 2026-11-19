@@ -46,6 +46,7 @@ honestly blocked on.
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
 | gomu (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
+| gobco (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go condition coverage as a floor of its own (`go-branches`, #1546), held by the Monday audit (`audit:coverage-go-branches`), never the gate: each operand of `&&` and `\|\|` taken both ways, one package per call; chosen over gocoverageplus on a measured comparison |
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
 | editorconfig-checker (`aqua:`, binary `editorconfig-checker`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
@@ -2074,8 +2075,9 @@ hashes.
 **gomu, the Go leg of `audit:mutants`, chosen against two others**
 (#1356, under #1336's property 1, "fails when any behaviour changes").
 Coverage counts a line as covered when a test runs it, whether or not
-any test would notice a change to it, and Go's coverage has no branch
-figure either: for Go a mutation run is the only answer to both. The leg
+any test would notice a change to it, and Go's own coverage has no
+branch figure either (gobco's condition figure, below, answers that
+half since #1546). The leg
 (`mise/mutants-go.sh`, its verdict in `mise/mutants-go.py`) runs on the
 Monday cron, never in `ci` and never on a pull request, because the run
 repeats the suite once per mutant; `mise/test_task_contract.py` holds
@@ -2191,6 +2193,83 @@ list, the count and the job's timeout where they matter. **Reopen** when
 a Go release ships that gomu cannot type-check or build against, or when
 a gomu release adds coverage or a per-site exclusion of its own (the leg
 would then defer to it).
+
+**gobco, the Go branch figure, chosen against gocoverageplus** (#1546,
+under #1336's property 2, "takes every decision both ways"). Go's own
+`go test -cover` counts statements, and an `if` with no `else` has no
+block for the path not taken, so a statement figure cannot see it; the
+request for branch coverage in Go (golang/go#28888) was closed in 2019.
+Calling Go's block coverage a branch figure was rejected for that
+reason, and nothing was adopted on reputation: gobco's last release,
+v1.3.4 (2024-03-08), predates three Go releases.
+
+*Two candidates, measured on stele* (`1d775be`, Go 1.27.4, each built
+from source by that Go, the real toolchain first on PATH, one package
+at a time with one worker, 2026-11-19, load 15–19 on the Mac). A planted
+module carried an untaken `else`, an `if` whose false path no test
+takes, and an `a && b` that is true once and false only through `a`;
+statement coverage read it as 90.0% and saw one of the three.
+
+| | gobco v1.3.4 (default mode) | gocoverageplus v1.2.0 |
+| --- | --- | --- |
+| Planted untaken `else` | reported | not reported |
+| Planted `if` false path | reported | not reported |
+| Planted half-taken `a && b` | reported (`"b"` true, never false) | not reported: 3/3 branches, 100% |
+| Every stele package | 46 of 46 clean | crashes on every profile: its `golang.org/x/tools` v0.26.0 fails on Go 1.27 (`package "encoding/base64" without types`), exit 1, no report |
+| Figure | 10549/11602 conditions, 90.92% (each package's own tests) | none |
+| What counts as a branch | each condition: every `if`, `for` and `switch` case condition and every operand of `&&` and `\|\|`, each needing both outcomes | one per `if` line, covered once the line runs: block coverage relabelled |
+| Wall-clock | 1225 s against `go test`'s 199 s, per package in series: 6.15 times | 1–2 s before the crash; it reads an existing profile and runs no tests |
+| Tree | untouched: it instruments a copy under `$TMPDIR` | untouched |
+| `go test`'s result | unchanged on all 46 (exit 0 both ways) | n/a |
+
+`-branch` mode was measured too and refused: it missed the planted
+`a && b` (4/6), the very gap the issue named.
+
+*What the leg does for gobco* (`mise/coverage-go-branches.sh`, held by
+stub rows in `mise/test_coverage_go_branches.py`; no row runs gobco). A
+helper of its own rather than a selector of `coverage-measure.sh`: the
+gate's tool derivation (#1410) reads every call in a script a gate task
+runs, and `coverage:check` runs that one, so a gobco call there would
+record the gate as calling a tool it never runs.
+
+- **One package per call.** v1.3.4 panics on more than one ("checking
+  multiple packages doesn't work yet"), so the leg loops `go list ./...`
+  and sums the counts. A package that fails under gobco is red by name,
+  as is one that prints no count, and 0 of 0 overall is refused, never
+  floored.
+- **The real Go directory first on PATH**, and the leg refuses to run if
+  `go` resolves elsewhere. gobco copies the module, its `mise.toml` with
+  it, into a temporary directory and runs `go test` there; through mise's
+  `go` shim the copy's config is untrusted and every run died "go test .:
+  exit status 1" (measured). gobco's binary, never its shim, as gomu's.
+- **A build Go older than the running Go is refused.** gobco parses with
+  the go/parser it was built with; the belt builds it with the
+  repository's own go, and a stale binary or a cache restored across a
+  Go bump is red by name, as gomu's is.
+- **Stated limits.** Only a package's own tests count: there is no
+  `-coverpkg`, so a condition exercised only by a neighbouring package's
+  tests reads untaken (the `go` leg measures with `-coverpkg=./...`). A
+  package with no tests counts all its conditions untaken. `select` is
+  not covered (gobco's README).
+
+*Where it runs.* Item 2's rule, from the measured cost: 6.15 times
+`go test` is far over the fifth of `coverage:check` the gate allows, so
+the figure is held by `audit:coverage-go-branches` on the Monday cron in
+`repo-audit.yml`, beside the Rust branch floor, and never in the gate.
+Its floor is a second line of `.coverage-floor`, `go-branches
+<percent>`, derived by `coverage:adopt` under the same law and band as
+`rust-branches` and carried through by the release path. Chosen by the
+owner, 2026-11-19. The runner's whole-module wall-clock comes from the
+first dispatched audit after the pin.
+
+*Pin.* `go:github.com/rillig/gobco` at v1.3.4, lazy, so only the audit
+job's named install builds it, after the repository's own go pin. The
+module is verified by Go's checksum database,
+`h1:4weHt9u2CyTOnEJ/7z6fAcHZvJHy1pNXm8danDh3TA8=`. BSD-2-Clause. One
+maintainer, recorded as the risk it is. **Reopen** when a Go release
+ships syntax gobco cannot parse, when gobco gains multi-package runs (the
+loop goes), or when Go gains branch coverage of its own (the leg becomes
+a flag on the `go` leg and the line folds into the main floor).
 
 **eslint, typescript-eslint and knip stay repo-side** — not a rejection,
 a placement. A flat eslint config is a JS module that imports its plugins
@@ -3206,6 +3285,19 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   replaced by one flag on the gate's `rust` leg, and the
   `rust-branches` line folds into the main floor the way
   `python-branches` does.
+- **gocoverageplus for the Go branch figure** — skipped (#1546,
+  2026-11-19), measured beside gobco on stele (the table under gobco's
+  entry). It crashed on every stele profile under Go 1.27: its pinned
+  `golang.org/x/tools` v0.26.0 cannot load the toolchain's packages
+  (`internal error: package "encoding/base64" without types was imported
+  from ".../internal/dsse"`), exit 1, no report. And what it calls a
+  branch is one per `if` line, covered once the line runs, so a
+  multi-condition statement is one branch (its own README): on the
+  planted module it read 3/3, 100%, over an untaken `else`, an untaken
+  `if` path and a half-taken `a && b`. That is block coverage, which the
+  issue rejected as a branch figure. *Reopen:* a release that runs every
+  stele package on the belt's Go and reports the planted `a && b` at
+  condition level.
 - **`lint:belt-shell` (shellcheck/shfmt over the belt's own task
   bodies)** — **this skip was revoked and the task built (#619,
   2026-08-20).** The entry stays here rather than being deleted, because

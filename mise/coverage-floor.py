@@ -38,7 +38,9 @@ into the minimum the main floor is cut from: `coverage:check` cannot
 measure it, so the gate would be holding a number it never reads. The
 Monday audit reads it (`read --leg rust-branches`); `coverage:adopt`
 writes it; the release path, which measures on stable, carries it
-through unchanged.
+through unchanged. `go-branches` (#1546), gobco's Go condition
+coverage, is held apart the same way and for the same reason: the gate
+never runs it, so it is the Monday audit's (`read --leg go-branches`).
 
 Opt-in is unchanged: a repository with no `.coverage-floor` owes nothing
 and skips clean in both directions. The belt offers the mechanism; the
@@ -83,7 +85,7 @@ MEASURED_KEY = "measured"
 DERIVED_KEY = "derived"
 RESET_KEY = "reset"
 # The legs held as floors of their own rather than in the minimum.
-SEPARATE = ("rust-branches",)
+SEPARATE = ("rust-branches", "go-branches")
 KEYS = frozenset(
     {BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY}
     | {f"{leg} {MEASURED_KEY}" for leg in SEPARATE},
