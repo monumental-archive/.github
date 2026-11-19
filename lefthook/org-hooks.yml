@@ -125,7 +125,7 @@ post-checkout:
         repo="${pin% *}"; sha="${pin#* }";
         [ "${#sha}" -eq 40 ] || { echo "org-belt: the gate stub pins ${sha}, not a 40-hex sha; nothing linked" >&2; exit 1; };
         cache="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt"; tree="${cache}/${sha}";
-        unset $(git rev-parse --local-env-vars);
+        vars="$(git rev-parse --local-env-vars)" || exit 1; for v in ${vars}; do unset "${v}"; done;
         if [ ! -d "${tree}" ]; then
         mkdir -p "${cache}" && tmp="$(mktemp -d "${cache}/.fetch.XXXXXX")" || exit 1;
         if ! { git -C "${tmp}" init -q && git -C "${tmp}" fetch -q --depth 1 "https://github.com/${repo}" "${sha}"
@@ -140,7 +140,8 @@ post-checkout:
         dir="${top}/.config/mise"; mkdir -p "${dir}/conf.d" || exit 1; changed=0;
         for pair in "conf.d/belt.toml:config.toml" "mise.lock:mise.lock"; do
         link="${dir}/${pair%%:*}"; want="${tree}/mise/${pair#*:}";
-        if [ "$(readlink "${link}" 2>/dev/null)" != "${want}" ]; then
+        cur="$(readlink "${link}" 2>/dev/null)" || cur="";
+        if [ "${cur}" != "${want}" ]; then
         ln -sfn "${want}" "${link}" || exit 1; changed=1; fi; done;
         [ "${changed}" -eq 0 ] || echo "org-belt: .config/mise links the belt of ${repo}@${sha}"
 

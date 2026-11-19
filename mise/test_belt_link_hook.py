@@ -293,6 +293,24 @@ class TheBeltLinkHook(unittest.TestCase):
         self.assertEqual(self.cached(), [])
         self.assertEqual(self.links(), dict.fromkeys(self.linked(self.shas[0])))
 
+    def test_git_variables_a_hook_inherits_do_not_reach_the_fetch(self) -> None:
+        """Under a hook git exports GIT_DIR: the cache is not the clone's."""
+        git_dir = self.consumer / ".git"
+        refs_before = sorted(p.name for p in (git_dir / "refs" / "heads").iterdir())
+        done = self.hook(
+            GIT_DIR=str(git_dir),
+            GIT_INDEX_FILE=str(git_dir / "index"),
+            GIT_WORK_TREE=str(self.consumer),
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        tree = self.cache / "org-belt" / self.shas[0]
+        head = self.git(tree, "rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(head, self.shas[0])
+        self.assertEqual(self.links(), self.linked(self.shas[0]))
+        refs_after = sorted(p.name for p in (git_dir / "refs" / "heads").iterdir())
+        self.assertEqual(refs_after, refs_before)
+        self.assertFalse((git_dir / "FETCH_HEAD").exists())
+
     def test_a_clone_with_no_pin_does_nothing(self) -> None:
         """No gate stub (the canon itself): no cache, no link, no output."""
         shutil.rmtree(self.consumer / ".github")
