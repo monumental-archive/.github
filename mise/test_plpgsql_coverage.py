@@ -53,7 +53,11 @@ sql="${*: -1}"
 case "${sql}" in
   *"CREATE EXTENSION"*) exit 0 ;;
   *current_setting*) printf '%s\\t%s\\n' "${STUB_PROFILER}" "${STUB_PRELOAD}" ;;
-  *lanname*) cat "${STUB_DIR}/functions" ;;
+  *lanname*)
+    cat "${STUB_DIR}/functions"
+    # An extension's own functions answer any listing that keeps them.
+    [[ ${sql} == *"d.deptype = 'e'"* ]] || cat "${STUB_DIR}/extension"
+    ;;
   *plpgsql_coverage_statements*)
     oid=${sql#*plpgsql_coverage_statements(}
     oid=${oid%%::*}
@@ -80,18 +84,36 @@ exit 1
 # A floor the derived-state law accepts: measured 82.0 minus the band.
 FLOOR = "# band: 2\n# measured: 82.0\n# derived: v1.0.0\n80.0\n"
 
-# Two functions: 4 of 5 statements and every branch, then 5 of 10
-# statements and half the branches. Weighted by statements: 9/15 is
-# 60.00%; branches (5 + 5)/15 is 66.66%, truncated, never rounded up.
+# A reading, as psql prints it: the statement and branch fractions,
+# then statements, executed statements, and statements that branch.
+# Two functions: 4 of 5 statements and every branch of its IF, then 5
+# of 10 statements and half the branches. Statements: 9 of 15, 60.00%.
+# Branches, statement-weighted: (1 x 5 + 0.5 x 10)/15 = 66.66%,
+# truncated, never rounded up.
 TWO = {
-    "101": ("public.guard()", "0.8\t1\t5"),
-    "102": ("public.stamp(integer)", "0.5\t0.5\t10"),
+    "101": ("public.guard()", "0.8\t1\t5\t4\t1"),
+    "102": ("public.stamp(integer)", "0.5\t0.5\t10\t5\t2"),
 }
 
-TWO_REPORT = (
-    "{label}: plpgsql: public.guard(): statements 80.00% of 5, branches 100.00%\n"
-    "{label}: plpgsql: public.stamp(integer): statements 50.00% of 10,"
+GUARD = (
+    "{label}: plpgsql: public.guard(): statements 4 of 5 (80.00%), branches 100.00%\n"
+)
+STAMP = (
+    "{label}: plpgsql: public.stamp(integer): statements 5 of 10 (50.00%),"
     " branches 50.00%\n"
+)
+TWO_REPORT = (
+    GUARD
+    + STAMP
+    + "{label}: plpgsql: total statements 9 of 15 (60.00%), branches 66.66%"
+    " statement-weighted\n"
+)
+
+# A branch-free function: no IF, CASE or loop, and the extension's 1.
+TOUCH = ("public.touch()", "1\t1\t2\t2\t0")
+TOUCH_LINE = (
+    "{label}: plpgsql: public.touch(): statements 2 of 2 (100.00%),"
+    " branches none (left out of the branch total)\n"
 )
 
 
@@ -115,6 +137,11 @@ def plant_stubs(
         (stubs / name).chmod(0o755)
     listing = "".join(f"{oid}\t{sig}\n" for oid, (sig, _) in functions.items())
     (answers / "functions").write_text(listing, encoding="utf-8")
+    # postgis owns PL/pgSQL functions in a non-system schema; uncovered.
+    (answers / "extension").write_text(
+        "900\tpublic.postgis_owned()\n", encoding="utf-8"
+    )
+    (answers / "read.900").write_text("0\t0\t40\t0\t3\n", encoding="utf-8")
     for oid, (_, figures) in functions.items():
         (answers / f"read.{oid}").write_text(f"{figures}\n", encoding="utf-8")
     for oid, error in (unreadable or {}).items():
@@ -190,6 +217,43 @@ class HelperRows(unittest.TestCase):
         self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", read.stdout)
         self.assertEqual(TWO_REPORT.format(label="leg"), read.stderr)
 
+    def test_a_branch_free_function_is_left_out_of_the_branch_total(self) -> None:
+        """It counts toward statements; the branch total is unchanged."""
+        collected, read = self.measure(TWO | {"103": TOUCH})
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 64.70\nplpgsql-branches 66.66\n", read.stdout)
+        self.assertEqual(
+            (
+                GUARD
+                + STAMP
+                + TOUCH_LINE
+                + "{label}: plpgsql: total statements 11 of 17 (64.70%),"
+                " branches 66.66% statement-weighted\n"
+            ).format(label="leg"),
+            read.stderr,
+        )
+
+    def test_no_branch_anywhere_prints_no_branch_leg(self) -> None:
+        """A branch total over no branch would be a number about nothing."""
+        collected, read = self.measure({"103": TOUCH})
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 100.00\n", read.stdout)
+        self.assertEqual(
+            TOUCH_LINE.format(label="leg")
+            + "leg: plpgsql: total statements 2 of 2 (100.00%), branches none:"
+            " no function has a branch\n",
+            read.stderr,
+        )
+
+    def test_extension_members_are_not_listed(self) -> None:
+        """An extension's own PL/pgSQL (postgis's) never enters the total."""
+        collected, read = self.measure(TWO)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertNotIn("postgis_owned", read.stderr)
+        self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", read.stdout)
+
     def test_an_unreadable_function_is_listed_and_red(self) -> None:
         """The function stays in the report, named, and nothing is totalled."""
         collected, read = self.measure(
@@ -218,7 +282,7 @@ class HelperRows(unittest.TestCase):
 
     def test_the_profiler_off_is_red_by_name_never_zero(self) -> None:
         """Off reads 0% for every function; the setting is refused instead."""
-        off = {"101": ("public.guard()", "0\t0\t5")}
+        off = {"101": ("public.guard()", "0\t0\t5\t0\t1")}
         collected, read = self.measure(off, STUB_PROFILER="off")
         self.assertEqual(0, collected.returncode, collected.stderr)
         self.assertEqual(1, read.returncode)
@@ -319,8 +383,8 @@ class LegRows(unittest.TestCase):
     def test_the_floor_is_held(self) -> None:
         """Both PL/pgSQL legs print and each holds the floor by name."""
         held = {
-            "101": ("public.guard()", "0.9\t1\t10"),
-            "102": ("public.stamp(integer)", "1\t0.8\t10"),
+            "101": ("public.guard()", "0.9\t1\t10\t9\t1"),
+            "102": ("public.stamp(integer)", "1\t0.8\t10\t10\t1"),
         }
         done = self.check(held)
         self.assertEqual(0, done.returncode, done.stderr)

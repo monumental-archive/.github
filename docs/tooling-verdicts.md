@@ -3313,17 +3313,28 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   suite's. postgis owns 22 PL/pgSQL functions in a non-system schema,
   which is why extension members (`pg_depend` `deptype 'e'`) are
   excluded. A function the extension cannot read is listed with its
-  error and reds the leg; it is never dropped from the total. The
-  totals are weighted by statement count, which is exact for
-  statements (the visible statements are the rows of
-  `plpgsql_profiler_function_statements_tb`); the extension returns
-  its branch fraction without the branch count behind it, so the
-  branch total takes the same statement weight. **Rejected, so it is
-  not re-proposed:** adding the extension to the published database
-  image (a test tool in a production image); a report the repository
-  computes itself (the number would be the repository's claim, not
-  the belt's measurement); pgTAP (a test framework, where this is a
-  measurement of the tests a repository already has).
+  error and reds the leg; it is never dropped from the total.
+  `plpgsql` is exact: executed statements over all statements, the
+  statements being the extension's own denominator, the rows of
+  `plpgsql_profiler_function_statements_tb`. `plpgsql-branches` is
+  **statement-weighted**: the extension returns each function's branch
+  fraction without the branch count behind it, so each fraction is
+  weighted by its function's statement count. A branch-free function
+  (fraction 1 with no `IF`, `CASE` or loop) reads 1 whether or not it
+  ran and is left out of the branch total; one whose only branches are
+  exception handlers, all taken, is read the same way and left out,
+  which never raises the total. The leg's log lists every function's
+  figures beside the totals, so the totals can be checked by hand.
+  *Reopen the weighting:* plpgsql_check exposing its branch counts.
+  **Rejected, so it is not re-proposed:** adding the extension to the
+  published database image (a test tool in a production image); a
+  report the repository computes itself (the number would be the
+  repository's claim, not the belt's measurement); pgTAP (a test
+  framework, where this is a measurement of the tests a repository
+  already has); for the branch total, an unweighted mean of the
+  functions' fractions, the lowest function's figure, and a branch
+  count parsed from the function source (a second PL/pgSQL parser
+  beside the one the extension already is).
 - **Rust branch coverage in the gate** — skipped, for now
   (#1359, 2026-11-17). `cargo llvm-cov --branch` needs a nightly
   toolchain: measured 2026-11-17 on a one-function crate, the dated

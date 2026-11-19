@@ -53,12 +53,21 @@ Three readings decide the refusals (measured at plpgsql_check 2.10.16):
 - A function the extension cannot read is listed with the error and
   reds the leg. It is never dropped from the total.
 
-The totals are weighted by statement count: the denominator of
-plpgsql_check's statement figure is its visible statements, which are
-exactly the rows of `plpgsql_profiler_function_statements_tb`. The
-branch figure is weighted by the same count, because the extension
-computes its branch count internally and returns only the fraction.
-A function with no branches reads 1 by the extension's own rule.
+`plpgsql` is exact: executed statements over all statements, where
+the statements are the denominator of plpgsql_check's own statement
+figure, the visible ones, exactly the rows of
+`plpgsql_profiler_function_statements_tb`. `plpgsql-branches` is
+STATEMENT-WEIGHTED: the extension computes its branch count internally
+and returns only the fraction, so each function's branch fraction is
+weighted by its statement count. A branch-free function reads 1 by the
+extension's rule, ran or not, and is left out of the branch total; it
+is recognised as fraction 1 with no IF, CASE or loop statement. A
+function whose only branches are exception handlers, every one taken,
+is read as branch-free too: left out, it never raises the total.
+Rejected (#1547 ruling): an unweighted mean, the lowest function's
+figure, and parsing the function source for a branch count, which
+would be a second PL/pgSQL parser. The report lists every function's
+figures beside the totals, so the totals can be checked by hand.
 """
 
 import json
@@ -67,7 +76,7 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 
 NAME = "plpgsql-coverage"
@@ -98,12 +107,19 @@ SELECT p.oid, p.oid::regprocedure
         AND d.deptype = 'e')
  ORDER BY 2"""
 
-READ_SQL = (
-    "SELECT plpgsql_coverage_statements({oid}::regprocedure),"
-    " plpgsql_coverage_branches({oid}::regprocedure),"
-    " (SELECT count(*)"
-    " FROM plpgsql_profiler_function_statements_tb({oid}::regprocedure))"
-)
+# One function's figures: the extension's two fractions, then over its
+# visible statements (the statement fraction's own denominator) the
+# count, the executed count, and how many open a branch. Statement
+# types are plpgsql's own names; every loop's starts LOOP, WHILE or FOR.
+READ_SQL = """\
+SELECT plpgsql_coverage_statements({oid}::regprocedure),
+       plpgsql_coverage_branches({oid}::regprocedure),
+       s.statements, s.executed, s.branching
+  FROM (SELECT count(*) AS statements,
+               count(*) FILTER (WHERE exec_stmts > 0) AS executed,
+               count(*) FILTER (WHERE stmtname IN ('IF', 'CASE', 'LOOP', 'WHILE')
+                                   OR stmtname LIKE 'FOR%') AS branching
+          FROM plpgsql_profiler_function_statements_tb({oid}::regprocedure)) s"""
 
 PLACES = Decimal("0.01")
 HUNDRED = Decimal(100)
@@ -159,15 +175,17 @@ def read_function(psql_bin: str, conninfo: str, oid: str, signature: str) -> dic
     entry: dict = {"function": signature}
     try:
         rows = psql(psql_bin, conninfo, READ_SQL.format(oid=oid))
-        statements, branches, count = rows[0]
+        statements, branches, count, executed, branching = rows[0]
         entry |= {
             "statements": float(statements),
             "branches": float(branches),
             "statement_count": int(count),
+            "executed": int(executed),
+            "branch_free": Decimal(branches) == 1 and int(branching) == 0,
         }
     except ReadError as exc:
         entry["error"] = str(exc)
-    except IndexError, ValueError:
+    except IndexError, ValueError, InvalidOperation:
         entry["error"] = f"unreadable figures: {rows!r}"
     return entry
 
@@ -218,20 +236,36 @@ def percent(value: Decimal) -> str:
     return str((value * HUNDRED).quantize(PLACES, rounding=ROUND_DOWN))
 
 
-def combined(functions: list[dict], key: str) -> Decimal:
-    """Combine one figure across functions, weighted by statement count.
-
-    The branch figure takes the statement count too: plpgsql_check
-    returns its branch fraction without the count behind it.
+def statement_total(functions: list[dict]) -> tuple[int, int]:
+    """Count covered statements over all statements: the exact figure.
 
     Returns:
-        The weighted fraction.
+        (executed, statements) summed over every function.
 
     """
-    weight = sum(Decimal(f["statement_count"]) for f in functions)
+    executed = sum(f["executed"] for f in functions)
+    return executed, sum(f["statement_count"] for f in functions)
+
+
+def branch_total(functions: list[dict]) -> Decimal | None:
+    """Combine the branch fractions, statement-weighted.
+
+    plpgsql_check returns each function's branch fraction without the
+    branch count behind it, so each fraction is weighted by its
+    function's statement count. A branch-free function (fraction 1 and
+    no IF, CASE or loop) is left out: the extension reads 1 for it
+    whether or not it ran, and counting it would raise the total
+    without one branch being taken.
+
+    Returns:
+        The weighted fraction, or None when no function has a branch.
+
+    """
+    branching = [f for f in functions if not f["branch_free"]]
+    weight = sum(f["statement_count"] for f in branching)
     if weight == 0:
-        return Decimal(0)
-    covered = sum(Decimal(str(f[key])) * f["statement_count"] for f in functions)
+        return None
+    covered = sum(Decimal(str(f["branches"])) * f["statement_count"] for f in branching)
     return covered / weight
 
 
@@ -300,11 +334,16 @@ def totals(label: str, report_path: str) -> int:
         return 1
     functions = report.get("functions", [])
     for f in functions:
+        branches = (
+            "none (left out of the branch total)"
+            if f["branch_free"]
+            else f"{percent(Decimal(str(f['branches'])))}%"
+        )
         print(
             f"{label}: plpgsql: {f['function']}:"
-            f" statements {percent(Decimal(str(f['statements'])))}%"
-            f" of {f['statement_count']},"
-            f" branches {percent(Decimal(str(f['branches'])))}%",
+            f" statements {f['executed']} of {f['statement_count']}"
+            f" ({percent(Decimal(str(f['statements'])))}%),"
+            f" branches {branches}",
             file=sys.stderr,
         )
     if not functions:
@@ -313,8 +352,24 @@ def totals(label: str, report_path: str) -> int:
             file=sys.stderr,
         )
         return 0
-    print(f"plpgsql {percent(combined(functions, 'statements'))}")
-    print(f"plpgsql-branches {percent(combined(functions, 'branches'))}")
+    executed, statements = statement_total(functions)
+    branched = branch_total(functions)
+    stmt_pct = (
+        percent(Decimal(executed) / Decimal(statements)) if statements else "0.00"
+    )
+    print(
+        f"{label}: plpgsql: total statements {executed} of {statements}"
+        f" ({stmt_pct}%), branches "
+        + (
+            "none: no function has a branch"
+            if branched is None
+            else f"{percent(branched)}% statement-weighted"
+        ),
+        file=sys.stderr,
+    )
+    print(f"plpgsql {stmt_pct}")
+    if branched is not None:
+        print(f"plpgsql-branches {percent(branched)}")
     return 0
 
 
