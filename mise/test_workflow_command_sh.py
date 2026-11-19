@@ -28,16 +28,17 @@ stdlib `unittest`, matching the rest of mise/.
 
 import os
 import re
-import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import unittest
 from pathlib import Path
 
+import hermetic
+
 CANON = Path(__file__).resolve().parents[1]
 WRITER = CANON / "mise" / "workflow-command.sh"
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 SKIP = {".git", "node_modules", "target", "vendor", "__pycache__", ".venv", "testdata"}
 
 # Where a command begins: a quote, `::`, a name, then `::` or a space.
