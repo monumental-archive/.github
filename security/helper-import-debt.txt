@@ -1,0 +1,185 @@
+# Helper import debt (#1673): every function or method of a helper module
+# in the four roots (mise/, release/, .github/rekor-monitor/, settings/)
+# that no test reaches in-process, as the tree had it when lint:in-process
+# landed. A function reached only through a script in a child process is
+# one mutation cannot judge (mutmut runs a mutant only in the module it was
+# named for, never in a script's `__main__`), and coverage and the type
+# checker cannot see it. mise/in_process.py says what reaches a function.
+#
+# The list only shrinks. lint:in-process is red on an unreached function
+# that is not listed, and on an entry whose function is now reached or is
+# gone; fix:in-process removes a stale entry. It writes entries only when
+# this file does not exist: a new helper is tested in-process from its
+# first commit (CONTRIBUTING.md, "Testing standard").
+#
+# One entry per line, two tab-separated fields: `<path>:<function>` (a
+# method as `<Class>.<method>`) and a `#` note naming the issue that
+# converts its tests. The issue that converts them deletes the entries in
+# the same pull request. An entry no issue names yet carries `# #1673 unassigned`.
+#
+# Generated from the tree by the lint's own reader (mise/in_process.py),
+# never typed.
+.github/rekor-monitor/findings.py:already_filed	# #1673 unassigned
+.github/rekor-monitor/findings.py:file_all	# #1673 unassigned
+.github/rekor-monitor/findings.py:gh	# #1673 unassigned
+.github/rekor-monitor/findings.py:main	# #1673 unassigned
+.github/rekor-monitor/standing_issue.py:behind	# #1673 unassigned
+.github/rekor-monitor/standing_issue.py:caught_up	# #1673 unassigned
+.github/rekor-monitor/standing_issue.py:gh	# #1673 unassigned
+.github/rekor-monitor/standing_issue.py:keep	# #1673 unassigned
+.github/rekor-monitor/standing_issue.py:main	# #1673 unassigned
+.github/rekor-monitor/standing_issue.py:open_standing	# #1673 unassigned
+.github/rekor-monitor/verdict.py:main	# #1673 unassigned
+mise/biome_config.py:main	# #1673 unassigned
+mise/coverage_exclusions.py:main	# #1673 unassigned
+mise/coverage_js_runner.py:walked_command	# #1673 unassigned
+mise/embedded_shell.py:main	# #1673 unassigned
+mise/gate_stub_fix.py:fix	# #1673 unassigned
+mise/gate_stub_fix.py:is_caller	# #1673 unassigned
+mise/gate_stub_fix.py:main	# #1673 unassigned
+mise/gate_stub_fix.py:right	# #1673 unassigned
+mise/gate_stub_fix.py:wanted	# #1673 unassigned
+mise/gate_tools.py:main	# #1673 unassigned
+mise/git_decoy.py:main	# #1673 unassigned
+mise/lock_arch.py:main	# #1673 unassigned
+mise/lock_platforms.py:canon_defaults	# #1673 unassigned
+mise/lock_platforms.py:configured	# #1673 unassigned
+mise/lock_platforms.py:declared	# #1673 unassigned
+mise/lock_platforms.py:lock_entries	# #1673 unassigned
+mise/lock_platforms.py:main	# #1673 unassigned
+mise/lock_platforms.py:report	# #1673 unassigned
+mise/lock_platforms.py:targets_of	# #1673 unassigned
+mise/mutants_go.py:Verdict.green	# #1673 unassigned
+mise/mutants_go.py:build_go	# #1673 unassigned
+mise/mutants_go.py:class_report	# #1673 unassigned
+mise/mutants_go.py:main	# #1673 unassigned
+mise/mutants_go.py:malformed	# #1673 unassigned
+mise/mutants_go.py:parse_args	# #1673 unassigned
+mise/mutants_go.py:read_shard	# #1673 unassigned
+mise/mutants_go.py:report	# #1673 unassigned
+mise/mutants_go.py:rows	# #1673 unassigned
+mise/mutants_go.py:unmatched	# #1673 unassigned
+mise/mutants_python.py:exclusions	# #1673 unassigned
+mise/mutants_python.py:hook	# #1673 unassigned
+mise/mutants_python.py:main	# #1673 unassigned
+mise/mutants_python.py:parse_args	# #1673 unassigned
+mise/mutants_python.py:tool_interpreter	# #1673 unassigned
+mise/mutants_python.py:verdict	# #1673 unassigned
+mise/mutants_rust.py:judge_run	# #1673 unassigned
+mise/mutants_rust.py:main	# #1673 unassigned
+mise/mutants_rust.py:parse_args	# #1673 unassigned
+mise/mutants_rust.py:plan	# #1673 unassigned
+mise/mutants_rust.py:read_runs	# #1673 unassigned
+mise/mutants_rust.py:reasons	# #1673 unassigned
+mise/mutants_rust.py:report	# #1673 unassigned
+mise/mutants_typescript.py:Verdict.green	# #1673 unassigned
+mise/mutants_typescript.py:check_config	# #1673 unassigned
+mise/mutants_typescript.py:class_mutant	# #1673 unassigned
+mise/mutants_typescript.py:classify	# #1673 unassigned
+mise/mutants_typescript.py:judge	# #1673 unassigned
+mise/mutants_typescript.py:main	# #1673 unassigned
+mise/mutants_typescript.py:site	# #1673 unassigned
+mise/plpgsql_coverage.py:as_list	# #1673 unassigned
+mise/plpgsql_coverage.py:as_object	# #1673 unassigned
+mise/plpgsql_coverage.py:branch_total	# #1673 unassigned
+mise/plpgsql_coverage.py:collect	# #1673 unassigned
+mise/plpgsql_coverage.py:count_field	# #1673 unassigned
+mise/plpgsql_coverage.py:decode	# #1673 unassigned
+mise/plpgsql_coverage.py:decode_function	# #1673 unassigned
+mise/plpgsql_coverage.py:encode	# #1673 unassigned
+mise/plpgsql_coverage.py:fraction_field	# #1673 unassigned
+mise/plpgsql_coverage.py:gather	# #1673 unassigned
+mise/plpgsql_coverage.py:main	# #1673 unassigned
+mise/plpgsql_coverage.py:percent	# #1673 unassigned
+mise/plpgsql_coverage.py:psql	# #1673 unassigned
+mise/plpgsql_coverage.py:read_function	# #1673 unassigned
+mise/plpgsql_coverage.py:refusals	# #1673 unassigned
+mise/plpgsql_coverage.py:text_field	# #1673 unassigned
+mise/plpgsql_coverage.py:totals	# #1673 unassigned
+mise/python_properties.py:Report.__init__	# #1673 unassigned
+mise/python_properties.py:flatten	# #1673 unassigned
+mise/python_properties.py:is_property	# #1673 unassigned
+mise/python_properties.py:load	# #1673 unassigned
+mise/python_properties.py:main	# #1673 unassigned
+mise/python_properties.py:method	# #1673 unassigned
+mise/python_properties.py:outcome	# #1673 unassigned
+mise/python_properties.py:own_bounds	# #1673 unassigned
+mise/python_properties.py:run	# #1673 unassigned
+mise/python_properties.py:run_file	# #1673 unassigned
+mise/python_roots.py:main	# #1673 unassigned
+mise/python_roots.py:module_of	# #1673 unassigned
+mise/python_roots.py:root_of	# #1673 unassigned
+mise/python_roots.py:roots	# #1673 unassigned
+mise/python_types_seams.py:comment_findings	# #1673 unassigned
+mise/python_types_seams.py:findings	# #1673 unassigned
+mise/python_types_seams.py:main	# #1673 unassigned
+mise/python_types_seams.py:name_findings	# #1673 unassigned
+mise/queue_head.py:check	# #1673 unassigned
+mise/queue_head.py:commit	# #1673 unassigned
+mise/queue_head.py:fetch_head	# #1673 unassigned
+mise/queue_head.py:git	# #1673 unassigned
+mise/queue_head.py:main	# #1673 unassigned
+mise/queue_head.py:number_of	# #1673 unassigned
+mise/security_config.py:main	# #1673 unassigned
+mise/squash_message.py:check	# #1673 unassigned
+mise/squash_message.py:main	# #1673 unassigned
+mise/typescript_properties.py:collected	# #1673 unassigned
+mise/typescript_properties.py:lint	# #1673 unassigned
+mise/typescript_properties.py:locked	# #1673 unassigned
+mise/typescript_properties.py:main	# #1673 unassigned
+mise/typescript_properties.py:stage	# #1673 unassigned
+mise/typescript_properties.py:verify	# #1673 unassigned
+mise/unittest_guarded.py:GuardedResult.stopTest	# #1673 unassigned
+mise/unittest_guarded.py:GuardedRunner.run	# #1673 unassigned
+mise/unittest_guarded.py:Parallel.__init__	# #1673 unassigned
+mise/unittest_guarded.py:Parallel.run	# #1673 unassigned
+mise/unittest_guarded.py:RecordingLoader.__init__	# #1673 unassigned
+mise/unittest_guarded.py:RecordingLoader.loadTestsFromModule	# #1673 unassigned
+mise/unittest_guarded.py:Reported.__init__	# #1673 unassigned
+mise/unittest_guarded.py:Reported.__str__	# #1673 unassigned
+mise/unittest_guarded.py:Reported.shortDescription	# #1673 unassigned
+mise/unittest_guarded.py:WorkerRunner.__init__	# #1673 unassigned
+mise/unittest_guarded.py:WorkerRunner.run	# #1673 unassigned
+mise/unittest_guarded.py:_recording_chdir	# #1673 unassigned
+mise/unittest_guarded.py:load	# #1673 unassigned
+mise/unittest_guarded.py:main	# #1673 unassigned
+mise/unittest_guarded.py:merge	# #1673 unassigned
+mise/unittest_guarded.py:pairs	# #1673 unassigned
+mise/unittest_guarded.py:plan	# #1673 unassigned
+mise/unittest_guarded.py:read_action	# #1673 unassigned
+mise/unittest_guarded.py:read_outcome	# #1673 unassigned
+mise/unittest_guarded.py:read_spec	# #1673 unassigned
+mise/unittest_guarded.py:strings	# #1673 unassigned
+mise/unittest_guarded.py:timings	# #1673 unassigned
+mise/unittest_guarded.py:where	# #1673 unassigned
+mise/unittest_guarded.py:work	# #1673 unassigned
+mise/unittest_guarded.py:worker	# #1673 unassigned
+mise/unittest_guarded.py:workers	# #1673 unassigned
+mise/vex_one_per_merge.py:changed	# #1673 unassigned
+mise/vex_one_per_merge.py:count	# #1673 unassigned
+mise/vex_one_per_merge.py:git	# #1673 unassigned
+mise/vex_one_per_merge.py:main	# #1673 unassigned
+mise/vex_one_per_merge.py:message	# #1673 unassigned
+mise/vex_one_per_merge.py:tip	# #1673 unassigned
+mise/with_lock.py:acquire	# #1673 unassigned
+mise/with_lock.py:main	# #1673 unassigned
+mise/workflow_command.py:endgroup	# #1673 unassigned
+release/attach_publish.py:converge	# #1673 unassigned
+release/attach_publish.py:gh	# #1673 unassigned
+release/attach_publish.py:main	# #1673 unassigned
+release/attach_publish.py:publish	# #1673 unassigned
+release/build_go_commands.py:main	# #1673 unassigned
+release/check_go_stamps.py:check_staged	# #1673 unassigned
+release/check_go_stamps.py:git	# #1673 unassigned
+release/check_go_stamps.py:main	# #1673 unassigned
+release/mint_doi.py:_NoRedirect.redirect_request	# #1673 unassigned
+release/package_crates.py:main	# #1673 unassigned
+release/pgrx/previous_release.py:answer	# #1673 unassigned
+release/pgrx/previous_release.py:fetch	# #1673 unassigned
+release/pgrx/previous_release.py:guard	# #1673 unassigned
+release/pgrx/previous_release.py:listing	# #1673 unassigned
+release/pgrx/previous_release.py:main	# #1673 unassigned
+release/pgrx/previous_release.py:record	# #1673 unassigned
+release/repro_issue.py:main	# #1673 unassigned
+release/repro_resolve.py:main	# #1673 unassigned
+release/source_archive.py:main	# #1673 unassigned
