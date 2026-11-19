@@ -62,19 +62,32 @@ ua="${GITHUB_REPOSITORY_OWNER}/.github audit:badges (https://github.com/${GITHUB
 ask_code=""
 ask_body=""
 ask_stale=""
-# A cached answer past its own lifetime is not the issuer's answer
-# either (#1649): the Scorecard API served stele a 404 that had sat in
-# its cache for twelve hours against `max-age=600` while the API held
-# stele's result, and no request header asked past it. So `ask` keeps
-# the headers and sets `ask_stale` to the seconds a response is past
-# its lifetime — `Age` minus `s-maxage`, else `max-age`, when both are
-# numbers and the difference is positive; empty otherwise (no header,
-# no claim). Every leg reads it before the status: a stale answer of
-# any status is a question unanswered, never an absence and never a
-# pass. An `if` leg tests `-n ${ask_stale}` first; a `case` leg switches
-# on `${ask_stale:+stale }${ask_code}`, which no status arm matches, so
-# a stale answer reaches its `*` arm, `unanswered`. A header block per
-# attempt or hop starts at its status line, so the last block is read.
+ask_old=""
+# A cached answer past its own lifetime (#1649). The Scorecard API
+# served stele a 404 that had sat in its cache for twelve hours against
+# `max-age=600` while the API held stele's result, and no request header
+# asked past it. So `ask` keeps the headers and sets `ask_stale` to the
+# seconds a response is past its lifetime — `Age` minus `s-maxage`, else
+# `max-age`, when both are numbers and the difference is positive; empty
+# otherwise (no header, no claim). A header block per attempt or hop
+# starts at its status line, so the last block is the one read.
+#
+# What staleness costs depends on what was answered. An ABSENCE (a 404,
+# or a 200 with nothing a leg can read) has to be the issuer's current
+# word, because nothing in it says when it was true: stale, it is a
+# question unanswered. A PRESENCE carries its own evidence, and is judged
+# on it whatever its cache age — the first audit after #1649 found seven
+# of eight Scorecard answers past `max-age=600`, six of them 200s holding
+# a dated result. One bound holds for both: an answer older than this
+# audit's own period is not this audit's answer.
+#
+# `unheard <content>` is the test an `if` leg makes before reading the
+# status; `heard` is the status a `case` leg switches on, `old …` or
+# `stale 404` reaching only its `*` arm.
+#
+# The audit runs weekly (audit.yml, Monday 07:00), so `Age` beyond a
+# week is older than the run before this one.
+audit_week=604800
 ask_headers=$(mktemp)
 rc=0
 trap 'rc=$?; rm -f "${ask_headers}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
@@ -88,7 +101,8 @@ ask() {
     -H "User-Agent: ${ua}" -D "${ask_headers}" -w '\n%{http_code}' "$@" || true)
   ask_code="${out##*$'\n'}"
   ask_body="${out%$'\n'*}"
-  ask_stale=$(awk '
+  local cached
+  cached=$(awk '
     { sub(/\r$/, ""); h = tolower($0) }
     h ~ /^http\// { age = ""; life = "" }
     h ~ /^age: *[0-9]+ *$/ { age = h; sub(/^age: */, "", age) }
@@ -98,12 +112,32 @@ ask() {
       if (match(h, /(^|[ ,:])max-age=[0-9]+/)) { max = substr(h, RSTART, RLENGTH); sub(/.*=/, "", max) }
       life = (shared != "" ? shared : max)
     }
-    END { if (age != "" && life != "" && age - life > 0) print age - life }
+    END {
+      stale = (age != "" && life != "" && age - life > 0) ? age - life : ""
+      print stale "|" age
+    }
   ' "${ask_headers}")
+  ask_stale="${cached%%|*}"
+  ask_old="${cached#*|}"
+  [[ -n ${ask_old} && ${ask_old} -gt ${audit_week} ]] || ask_old=""
+}
+unheard() { # usage: unheard <what the leg read from the answer>
+  [[ -n ${ask_old} ]] || [[ ${ask_code} != 200 && ${ask_code} != 404 ]] \
+    || [[ -n ${ask_stale} && (${ask_code} == 404 || -z ${1}) ]]
+}
+heard() {
+  if [[ -n ${ask_old} ]]; then
+    echo "old ${ask_code}"
+  elif [[ -n ${ask_stale} && ${ask_code} == 404 ]]; then
+    echo "stale 404"
+  else
+    echo "${ask_code}"
+  fi
 }
 unanswered() {
-  failed="${failed} ${repo}(${1}: ${2} did not answer — HTTP ${ask_code:-none}"
-  failed+="${ask_stale:+, answered from a cache ${ask_stale} seconds past its lifetime}"
+  local why="${ask_stale:+, answered from a cache ${ask_stale} seconds past its lifetime}"
+  [[ -z ${ask_old} ]] || why=", answered from a cache ${ask_old} seconds old, older than the audit's week"
+  failed="${failed} ${repo}(${1}: ${2} did not answer — HTTP ${ask_code:-none}${why}"
   failed+=", a question unanswered, not an absence)"
 }
 sc_prefix=$(org_identity shield-scorecard)
@@ -187,8 +221,12 @@ while read -r repo; do
         # The shield is the project's own API path with `/badge` added.
         ask "${url%/badge}"
         score=$(jq -r '.score // empty' <<< "${ask_body}" 2> /dev/null || true)
+        # The result dates itself; printed, never judged here (#1649).
+        sc_date=$(jq -r '.date // empty' <<< "${ask_body}" 2> /dev/null || true)
+        sc_date="${sc_date:+result of ${sc_date%%T*}}"
         floor=$(awk -v r="${repo}" '$1 == r {print $2}' "${floors}")
-        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
+        if unheard "${score}"; then
           unanswered scorecard "api.scorecard.dev, about ${repo},"
         elif [[ ${ask_code} == 404 || -z ${score} ]]; then
           failed="${failed} ${repo}(scorecard: issuer returned no score — a shield over nothing)"
@@ -197,9 +235,9 @@ while read -r repo; do
         elif awk -v s="${score}" -v f="${floor}" 'BEGIN {exit !(s < f)}'; then
           failed="${failed} ${repo}(scorecard: ${score} below floor ${floor} — regression)"
         elif awk -v s="${score}" -v f="${floor}" 'BEGIN {exit !(s >= f + 0.3)}'; then
-          note "${repo}: scorecard ${score} well above floor ${floor} — ratchet: raise the floor"
+          note "${repo}: scorecard ${score} well above floor ${floor} — ratchet: raise the floor${sc_date:+ (${sc_date})}"
         else
-          note "${repo}: scorecard ${score} (floor ${floor})"
+          note "${repo}: scorecard ${score} (floor ${floor}${sc_date:+, ${sc_date}})"
         fi
         ;;
       https://www.bestpractices.dev/projects/*/badge | https://bestpractices.dev/projects/*/badge)
@@ -207,7 +245,8 @@ while read -r repo; do
         id="${id%/badge}"
         ask "https://www.bestpractices.dev/projects/${id}.json"
         bp="${ask_body}"
-        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
+        if unheard "${bp}"; then
           unanswered bestpractices "bestpractices.dev, about project ${id},"
         elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
@@ -232,7 +271,8 @@ while read -r repo; do
         id="${id%/baseline}"
         ask "https://www.bestpractices.dev/projects/${id}.json"
         bp="${ask_body}"
-        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
+        if unheard "${bp}"; then
           unanswered baseline "bestpractices.dev, about project ${id},"
         elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
@@ -255,7 +295,7 @@ while read -r repo; do
         proj="${url#https://api.reuse.software/badge/}"
         ask "https://api.reuse.software/status/${proj}"
         st=$(jq -r '.status // empty' <<< "${ask_body}" 2> /dev/null || true)
-        case "${ask_stale:+stale }${ask_code}" in
+        case "$(heard)" in
           200)
             if [[ ${st} != "compliant" ]]; then
               failed="${failed} ${repo}(reuse: status '${st:-none}' is not compliant)"
@@ -283,7 +323,8 @@ while read -r repo; do
         doc="${doc//%2F//}"
         ask "${doc}"
         sj="${ask_body}"
-        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
+        if unheard "${sj}"; then
           unanswered level-shield "${doc}"
         elif [[ ${ask_code} == 404 || -z ${sj} ]]; then
           failed="${failed} ${repo}(level-shield: published judgment ${doc} unreadable — the badge renders nothing)"
@@ -349,7 +390,7 @@ while read -r repo; do
         # and no -L, because the question is whether doi.org knows the
         # name, not whether the landing page is up.
         ask -I "https://doi.org/${doi}"
-        case "${ask_stale:+stale }${ask_code}" in
+        case "$(heard)" in
           2?? | 3??) note "${repo}: DOI resolves" ;;
           404) failed="${failed} ${repo}(doi: ${doi} does not resolve)" ;;
           *) unanswered doi "doi.org, about ${doi}," ;;
@@ -359,7 +400,7 @@ while read -r repo; do
         crate="${url##*/}"
         crate="${crate%.svg}"
         ask "https://crates.io/api/v1/crates/${crate}"
-        case "${ask_stale:+stale }${ask_code}" in
+        case "$(heard)" in
           200) note "${repo}: crate ${crate} exists" ;;
           404) failed="${failed} ${repo}(crates: ${crate} not on crates.io)" ;;
           *) unanswered crates "crates.io, about ${crate}," ;;
@@ -369,7 +410,7 @@ while read -r repo; do
         pkg="${url#https://img.shields.io/npm/v/}"
         pkg="${pkg%.svg}"
         ask "https://registry.npmjs.org/${pkg//%2F//}"
-        case "${ask_stale:+stale }${ask_code}" in
+        case "$(heard)" in
           200) note "${repo}: npm package exists" ;;
           404) failed="${failed} ${repo}(npm: package not on the registry)" ;;
           *) unanswered npm "the npm registry" ;;
@@ -411,7 +452,7 @@ while read -r repo; do
         # check that only asked "is there a number" stayed green. An
         # hour's grace covers an upload still in flight.
         ask "${cc_api}/${cc}"
-        case "${ask_stale:+stale }${ask_code}" in
+        case "$(heard)" in
           200)
             ccb=$(jq -r '.branch // empty' <<< "${ask_body}" 2> /dev/null || true)
             ask "${cc_api}/${cc}/commits?branch=${ccb:-main}"
@@ -422,7 +463,8 @@ while read -r repo; do
             gh_sha="${gh_head%%$'\t'*}"
             gh_at="${gh_head##*$'\t'}"
             now=$(date -u +%s)
-            if [[ -n ${ask_stale} || ${ask_code} != "200" ]]; then
+            # shellcheck disable=SC2310  # unheard's status is the answer, not an error
+            if [[ ${ask_code} != 200 ]] || unheard "${cov}"; then
               unanswered codecov "Codecov, about ${cc}'s commits,"
             elif [[ -z ${cov} ]]; then
               failed="${failed} ${repo}(codecov: no coverage report for ${cc}'s ${ccb:-main}"

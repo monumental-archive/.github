@@ -36,6 +36,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import belt_shell as bs
 import hermetic
@@ -61,6 +65,7 @@ case "$2" in
     printf '<!-- badges:begin -->\\n[![s](%s)](x)\\n<!-- badges:end -->\\n' \\
       "${SHIELD//@REPO@/${r##*/}}" | base64 | tr -d '\\n'
     ;;
+  repos/*/commits/*) printf 'abc1234\\t%s\\n' "$(date +%s)" ;;
   *) exit 1 ;;
 esac
 """
@@ -432,14 +437,113 @@ class LevelShieldRead(Planted):
 
 STALE = ("age: 43302", "cache-control: public, max-age=600")
 PAST = "answered from a cache 42702 seconds past its lifetime"
+# release-lab's Scorecard answer in the first audit after #1649: a 200
+# with a dated result, 45495 s past `max-age=600`.
+AGED = ("age: 45495", "cache-control: max-age=600")
+OLD = ("age: 700000", "cache-control: max-age=600")
+WEEK = "answered from a cache 700000 seconds old, older than the audit's week"
+NOT_ANSWERED = ", a question unanswered, not an absence)"
+COVERED = '{"results": [{"totals": {"coverage": 90.5}, "commitid": "abc1234"}]}'
+
+# Each leg that asks an issuer: its shield, the suffix its question's
+# last path component carries, how `unanswered` names the issuer for
+# alpha, a 200 body it judges clean for a repository, and its note.
+LEGS = (
+    (
+        "scorecard",
+        f"{PROJECT}/@REPO@/badge",
+        "",
+        "api.scorecard.dev, about alpha,",
+        lambda _r: '{"score": 5.0}',
+        lambda r: f"audit:badges: {r}: scorecard 5.0 (floor 5.0)",
+    ),
+    (
+        "bestpractices",
+        "https://www.bestpractices.dev/projects/@REPO@/badge",
+        ".json",
+        "bestpractices.dev, about project alpha,",
+        lambda r: entry(r, badge_percentage_0=100),
+        lambda r: f"audit:badges: {r}: bestpractices {r} passing",
+    ),
+    (
+        "baseline",
+        "https://www.bestpractices.dev/projects/@REPO@/baseline",
+        ".json",
+        "bestpractices.dev, about project alpha,",
+        lambda r: entry(r, achieved_baseline_1_at="2026-01-01"),
+        lambda r: f"audit:badges: {r}: OSPS Baseline level 1 achieved",
+    ),
+    (
+        "level-shield",
+        "https://img.shields.io/endpoint?url=https%3A%2F%2Fpages.example%2F@REPO@.json",
+        ".json",
+        f"{PAGES}/alpha.json",
+        lambda _r: '{"schemaVersion": 1, "label": "slsa", "message": "L3"}',
+        lambda r: f"audit:badges: {r}: level shield slsa L3 published and live",
+    ),
+    (
+        "reuse",
+        "https://api.reuse.software/badge/@REPO@",
+        "",
+        "api.reuse.software",
+        lambda _r: '{"status": "compliant"}',
+        lambda r: f"audit:badges: {r}: reuse compliant",
+    ),
+    (
+        "doi",
+        "https://zenodo.org/badge/DOI/10.5281/@REPO@.svg",
+        "",
+        "doi.org, about 10.5281/alpha,",
+        lambda _r: "",
+        lambda r: f"audit:badges: {r}: DOI resolves",
+    ),
+    (
+        "crates",
+        "https://img.shields.io/crates/v/@REPO@",
+        "",
+        "crates.io, about alpha,",
+        lambda _r: "{}",
+        lambda r: f"audit:badges: {r}: crate {r} exists",
+    ),
+    (
+        "npm",
+        "https://img.shields.io/npm/v/@REPO@",
+        "",
+        "the npm registry",
+        lambda _r: "{}",
+        lambda r: f"audit:badges: {r}: npm package exists",
+    ),
+    (
+        "codecov",
+        f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg",
+        "",
+        "Codecov, about alpha,",
+        lambda _r: '{"branch": "main"}',
+        lambda r: f"audit:badges: {r}: codecov holds 90.5% for {r} at abc1234",
+    ),
+)
 
 
 class StaleAnswer(Planted):
-    """A cached answer past its own lifetime is unanswered (#1649).
+    """What an answer's cache age costs depends on what it says (#1649).
 
-    The headers are the ones measured on 2026-11-19: Scorecard served
-    stele a 404 with `age: 43302` against `max-age=600`.
+    An absence has to be the issuer's current word, so a stale one is a
+    question unanswered (Scorecard served stele a 404 with `age: 43302`
+    against `max-age=600`). A presence is judged on its content whatever
+    its cache age, up to the audit's own week.
     """
+
+    def plant(
+        self, suffix: str, body: Callable[[str], str], headers: tuple[str, ...]
+    ) -> None:
+        """Plant both repositories' answers, and Codecov's commits read."""
+        self.org((200, body("alpha")), (200, body("beta")), suffix)
+        for name in ("alpha", "beta"):
+            self.headers(f"{name}{suffix}", *headers)
+        commits = "commits?branch=main"
+        (self.stubs / f"{commits}.code").write_text("200", encoding="utf-8")
+        (self.stubs / f"{commits}.body").write_text(COVERED, encoding="utf-8")
+        self.headers(commits, *headers)
 
     def test_a_stale_404_is_a_question_unanswered(self) -> None:
         """The measured stale 404 names the cache, never an absence."""
@@ -449,18 +553,47 @@ class StaleAnswer(Planted):
             1,
             ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
             f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did not"
-            f" answer — HTTP 404, {PAST}, a question unanswered, not an absence)",
+            f" answer — HTTP 404, {PAST}{NOT_ANSWERED}",
         )
 
-    def test_a_stale_200_is_not_a_pass(self) -> None:
-        """A score from an expired cache is not what the issuer says now."""
-        self.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
-        self.headers("alpha", *STALE)
+    def test_a_stale_200_is_judged_on_its_score(self) -> None:
+        """A dated result past `max-age` passes or fails on its score."""
+        for alpha, code, said in (
+            ("5.0", 0, ""),
+            ("4.2", 1, f"{DEFECTS}alpha(scorecard: 4.2 below floor 5.0 — regression)"),
+        ):
+            with self.subTest(score=alpha):
+                (self.stubs / "curl.log").unlink(missing_ok=True)
+                self.org((200, f'{{"score": {alpha}}}'), (200, '{"score": 5.1}'))
+                self.headers("alpha", *AGED)
+                self.headers("beta", *AGED)
+                beta = "audit:badges: beta: scorecard 5.1 (floor 5.0)"
+                self.verdict(code, [beta], said)
+
+    def test_an_answer_older_than_the_week_is_unanswered(self) -> None:
+        """Past the audit's own period, whatever `max-age` says."""
+        for lines in (OLD, ("age: 700000", "cache-control: max-age=31536000")):
+            with self.subTest(headers=lines):
+                (self.stubs / "curl.log").unlink(missing_ok=True)
+                self.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
+                self.headers("alpha", *lines)
+                self.verdict(
+                    1,
+                    ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
+                    f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did"
+                    f" not answer — HTTP 200, {WEEK}{NOT_ANSWERED}",
+                )
+
+    def test_the_scorecard_note_names_its_result_date(self) -> None:
+        """The result's own date is printed beside the score, not judged."""
+        dated = '{"score": 5.0, "date": "2026-11-18T18:00:22Z"}'
+        self.org((200, dated), (200, '{"score": 5.1}'))
         self.verdict(
-            1,
-            ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
-            f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did not"
-            f" answer — HTTP 200, {PAST}, a question unanswered, not an absence)",
+            0,
+            [
+                "audit:badges: alpha: scorecard 5.0 (floor 5.0, result of 2026-11-18)",
+                "audit:badges: beta: scorecard 5.1 (floor 5.0)",
+            ],
         )
 
     def test_fresh_or_headerless_answers_read_as_today(self) -> None:
@@ -485,98 +618,49 @@ class StaleAnswer(Planted):
                 self.headers("beta", *lines)
                 self.verdict(1, [beta], absent)
 
-    def test_every_leg_reads_ask_stale(self) -> None:
-        """Each leg that asks an issuer sends a stale 200 to `unanswered`."""
-        legs = (
-            (
-                "scorecard",
-                f"{PROJECT}/@REPO@/badge",
-                "",
-                "api.scorecard.dev, about alpha,",
-                '{"score": 9.0}',
-            ),
-            (
-                "bestpractices",
-                "https://www.bestpractices.dev/projects/@REPO@/badge",
-                ".json",
-                "bestpractices.dev, about project alpha,",
-                entry("alpha", badge_percentage_0=100),
-            ),
-            (
-                "baseline",
-                "https://www.bestpractices.dev/projects/@REPO@/baseline",
-                ".json",
-                "bestpractices.dev, about project alpha,",
-                entry("alpha", achieved_baseline_1_at="2026-01-01"),
-            ),
-            (
-                "level-shield",
-                "https://img.shields.io/endpoint?url=https%3A%2F%2Fpages.example%2F@REPO@.json",
-                ".json",
-                f"{PAGES}/alpha.json",
-                '{"schemaVersion": 1, "label": "slsa", "message": "L3"}',
-            ),
-            (
-                "reuse",
-                "https://api.reuse.software/badge/@REPO@",
-                "",
-                "api.reuse.software",
-                '{"status": "compliant"}',
-            ),
-            (
-                "doi",
-                "https://zenodo.org/badge/DOI/10.5281/@REPO@.svg",
-                "",
-                "doi.org, about 10.5281/alpha,",
-                "",
-            ),
-            (
-                "crates",
-                "https://img.shields.io/crates/v/@REPO@",
-                "",
-                "crates.io, about alpha,",
-                "{}",
-            ),
-            (
-                "npm",
-                "https://img.shields.io/npm/v/@REPO@",
-                "",
-                "the npm registry",
-                "{}",
-            ),
-            (
-                "codecov",
-                f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg",
-                "",
-                "Codecov, about alpha,",
-                '{"branch": "main"}',
-            ),
-        )
-        for leg, shield, suffix, who, text in legs:
+    def test_every_leg_judges_a_stale_presence(self) -> None:
+        """Each leg reads a 200 past `max-age` on its content."""
+        for leg, shield, suffix, _who, body, note in LEGS:
             with self.subTest(leg=leg):
                 (self.stubs / "curl.log").unlink(missing_ok=True)
                 self.env["SHIELD"] = shield
-                self.org((200, text), (200, text), suffix)
-                self.headers(f"alpha{suffix}", *STALE)
-                self.headers(f"beta{suffix}", *STALE)
-                said = (
-                    f"({leg}: {who} did not answer — HTTP 200,"
-                    f" {PAST}, a question unanswered, not an absence)"
-                )
+                self.plant(suffix, body, AGED)
+                asks = 4 if leg == "codecov" else 2
+                self.verdict(0, [note("alpha"), note("beta")], asks=asks)
+
+    def test_every_leg_reads_the_week_bound(self) -> None:
+        """Each leg sends an answer older than the week to `unanswered`."""
+        for leg, shield, suffix, who, body, _note in LEGS:
+            with self.subTest(leg=leg):
+                (self.stubs / "curl.log").unlink(missing_ok=True)
+                self.env["SHIELD"] = shield
+                self.plant(suffix, body, OLD)
+                said = f"({leg}: {who} did not answer — HTTP 200, {WEEK}{NOT_ANSWERED}"
                 beta = said.replace("alpha", "beta")
                 self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
 
-    def test_codecov_commits_read_reads_ask_stale(self) -> None:
+    def test_codecov_commits_read_reads_the_week_bound(self) -> None:
         """The leg's second question, the branch head, is held the same."""
         self.env["SHIELD"] = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
-        self.org((200, '{"branch": "main"}'), (200, '{"branch": "main"}'))
+        self.plant("", lambda _r: '{"branch": "main"}', ())
+        self.headers("commits?branch=main", *OLD)
+        said = (
+            "(codecov: Codecov, about alpha's commits, did not answer"
+            f" — HTTP 200, {WEEK}{NOT_ANSWERED}"
+        )
+        beta = said.replace("alpha", "beta")
+        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}", asks=4)
+
+    def test_codecov_stale_empty_commits_is_unanswered(self) -> None:
+        """No coverage in a stale commits answer is an absence: unanswered."""
+        self.env["SHIELD"] = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
+        self.plant("", lambda _r: '{"branch": "main"}', ())
         commits = "commits?branch=main"
-        (self.stubs / f"{commits}.code").write_text("200", encoding="utf-8")
         (self.stubs / f"{commits}.body").write_text("{}", encoding="utf-8")
         self.headers(commits, *STALE)
         said = (
             "(codecov: Codecov, about alpha's commits, did not answer"
-            f" — HTTP 200, {PAST}, a question unanswered, not an absence)"
+            f" — HTTP 200, {PAST}{NOT_ANSWERED}"
         )
         beta = said.replace("alpha", "beta")
         self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}", asks=4)
