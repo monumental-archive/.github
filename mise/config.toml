@@ -8520,7 +8520,7 @@ dir = "{{cwd}}"
 run = '"${ORG_BELT_DIR}/mutants.sh"'
 
 [tasks."lint:licence"]
-description = "The repo carries its licence: tracked LICENSE or LICENSES/, and REUSE.toml's expression filled"
+description = "The repo carries its licence: tracked LICENSE or LICENSES/, REUSE.toml filled, every text it names"
 dir = "{{cwd}}"
 # "Every repo carries its own" was a statement of intent that nothing
 # implemented, and the predictable result was that no repo carried one
@@ -8530,9 +8530,14 @@ dir = "{{cwd}}"
 # 0BSD; a crate repo will dual-license MIT OR Apache-2.0); what the
 # belt enforces is only that the choice was MADE: a tracked licence
 # text exists, and a tracked REUSE.toml does not still carry the
-# scaffold's angle-bracket placeholder. Deterministic, offline,
-# tracked files only. Skips only an empty tree — a repo with content
-# and no licence is exactly the defect, never an exemption.
+# scaffold's angle-bracket placeholder. And the choice can be READ
+# (#1589): every SPDX identifier a tracked REUSE.toml names has its text
+# tracked at LICENSES/<id>.txt, red by name on a missing one — the half
+# of "a copied fixture carries its source's licence" a machine can hold
+# (licence-texts.py; the rest is CONTRIBUTING.md's review rule).
+# Deterministic, offline, tracked files only. Skips only an empty tree —
+# a repo with content and no licence is exactly the defect, never an
+# exemption.
 run = '''
 tracked=$(git ls-files | sed -n 1p)
 [[ -n ${tracked} ]] || {
@@ -8545,11 +8550,7 @@ if [[ -z ${lic} ]]; then
   echo "  with no licence the default is all rights reserved, the opposite of the intent" >&2
   exit 1
 fi
-if git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 \
-  && grep -q "<SPDX expression>" "REUSE.toml"; then
-  echo "lint:licence: REUSE.toml still carries the scaffold's <SPDX expression> placeholder — pick the licence (#214)" >&2
-  exit 1
-fi
+git ls-files -z ':!vendor/**' | python3 "${ORG_BELT_DIR}/licence-texts.py" || exit 1
 echo "lint:licence: ok"
 '''
 
