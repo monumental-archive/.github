@@ -800,6 +800,40 @@ class MeasureSelectors(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("rust 61.5\n", done.stdout)
 
+    def test_a_go_and_rust_tree_measures_both_legs(self) -> None:
+        """Every tracked language runs its leg, not the first one (#471).
+
+        A mixed repository once took the Rust leg alone and reported the
+        floor held over a Go module nothing had measured.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "tree"
+            stubs = Path(tmp) / "stubs"
+            tree.mkdir()
+            stubs.mkdir()
+            for name, text in (("rustup", RUSTUP), ("cargo", CARGO), ("go", GO)):
+                (stubs / name).write_text(text, encoding="utf-8")
+                (stubs / name).chmod(0o755)
+            (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+            (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+            env = hermetic.env()
+            env |= {
+                "ORG_BELT_DIR": str(BELT),
+                "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+                "STUB_RUST": "61.5",
+                "STUB_GO": "93.0",
+            }
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "all"],
+                cwd=tree,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("go 93.0\nrust 61.5\n", done.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
