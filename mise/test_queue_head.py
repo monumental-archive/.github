@@ -8,7 +8,11 @@ row asserts the step's message.
 
 The real case is edtf#265, whose base, merged group and two heads are
 the bundle in testdata/queue-head/: the group carries the old head's
-tree, and the pull request's head had already moved.
+tree, and the pull request's head had already moved. The bundle is
+fetched from the real repository, not written by hand: a hand-made
+fixture would prove only what its author believed. It is kept gzipped,
+as release/testdata keeps its .crate: a bundle opens with a text
+header, so the text linters would read it as text.
 
 stdlib `unittest`, matching the other tests here. Every git call passes
 its own scrubbed environment (#1463).
@@ -16,6 +20,7 @@ its own scrubbed environment (#1463).
 
 from __future__ import annotations
 
+import gzip
 import os
 import pathlib
 import re
@@ -29,7 +34,7 @@ import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "queue-head.py"
-BUNDLE = HERE / "testdata" / "queue-head" / "edtf-265.bundle"
+BUNDLE = HERE / "testdata" / "queue-head" / "edtf-265.bundle.gz"
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 GIT = shutil.which("git") or "git"
 
@@ -257,6 +262,8 @@ class QueueHead(unittest.TestCase):
         """The real case: edtf#265's group carries its old head's tree."""
         checkout = self.tmp / "checkout"
         origin = self.tmp / "origin"
+        bundle = self.tmp / "edtf-265.bundle"
+        bundle.write_bytes(gzip.decompress(BUNDLE.read_bytes()))
         for repo in (checkout, origin):
             git(self.tmp, "init", "-q", str(repo))
             # The bundle holds the four commits and no history behind
@@ -266,7 +273,7 @@ class QueueHead(unittest.TestCase):
             checkout,
             "fetch",
             "-q",
-            str(BUNDLE),
+            str(bundle),
             "refs/heads/base:refs/heads/main",
             "refs/heads/group:refs/heads/group",
             "refs/heads/old-head:refs/heads/old-head",
@@ -275,7 +282,7 @@ class QueueHead(unittest.TestCase):
             origin,
             "fetch",
             "-q",
-            str(BUNDLE),
+            str(bundle),
             "refs/heads/current-head:refs/pull/265/head",
         )
         git(checkout, "remote", "add", "origin", str(origin))
