@@ -22,6 +22,8 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -29,7 +31,9 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import decoded
 import hermetic
 import mutants_rust as helper
 
@@ -396,6 +400,19 @@ class Verdict(Planted):
             ],
         )
 
+    def test_an_outcomes_json_that_does_not_decode_is_red_by_name(self) -> None:
+        """A document decoded's loader refuses is not judged, never a crash."""
+        self.plant(package("alpha", str(self.tree)), result=outcomes(3, 3, 0))
+        self.files["outcomes.json"].write_text(
+            '{"missed": 0, "missed": 1}', encoding="utf-8"
+        )
+        done, _ = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [f'{LABEL}: workspace: outcomes.json: duplicate key "missed"', *RED],
+        )
+
     def test_a_count_outcomes_json_does_not_state_is_red_by_name(self) -> None:
         """No `timeout` in outcomes.json: not judged, never read as zero."""
         result = outcomes(3, 3, 0)
@@ -734,11 +751,51 @@ class Readers(unittest.TestCase):
                 {"name": "bare", "features": {}},
             ]
         }
-        self.assertEqual(helper.default_major(meta, "one"), "pg17")
-        self.assertEqual(helper.default_major(meta, "two"), "")
-        self.assertEqual(helper.default_major(meta, "none"), "")
-        self.assertEqual(helper.default_major(meta, "bare"), "")
-        self.assertEqual(helper.default_major(meta, "absent"), "")
+        packages = helper.read_metadata(meta)
+        self.assertEqual(helper.default_major(packages, "one"), "pg17")
+        self.assertEqual(helper.default_major(packages, "two"), "")
+        self.assertEqual(helper.default_major(packages, "none"), "")
+        self.assertEqual(helper.default_major(packages, "bare"), "")
+        self.assertEqual(helper.default_major(packages, "absent"), "")
+
+    def test_metadata_of_the_wrong_shape_is_refused_by_name(self) -> None:
+        """Each field the default major reads, where it is."""
+        rows: tuple[tuple[object, str], ...] = (
+            ([], "the metadata is not an object"),
+            ({"packages": {}}, "packages is not a list"),
+            ({"packages": [3]}, "packages[0] is not an object"),
+            ({"packages": [{"name": 3}]}, "packages[0].name is not a string"),
+            (
+                {"packages": [{"name": "a", "features": ["default"]}]},
+                "packages[0].features is not an object",
+            ),
+            (
+                {"packages": [{"name": "a", "features": {"default": "pg17"}}]},
+                "packages[0].features.default is not a list",
+            ),
+            (
+                {"packages": [{"name": "a", "features": {"default": [17]}}]},
+                "packages[0].features.default[0] is not a string",
+            ),
+        )
+        for value, why in rows:
+            with self.subTest(value=value):
+                with self.assertRaises(decoded.UndecodableError) as caught:
+                    helper.read_metadata(value)
+                self.assertEqual(str(caught.exception), why)
+
+    def test_default_major_refuses_metadata_it_cannot_read(self) -> None:
+        """The step says so on stderr and exits 1; the leg stops with it."""
+        err = io.StringIO()
+        with (
+            mock.patch("sys.stdin", io.StringIO('{"packages": 1}')),
+            contextlib.redirect_stderr(err),
+        ):
+            status = helper.main(["default-major", "a"])
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            err.getvalue(), f"{LABEL}: cargo metadata: packages is not a list\n"
+        )
 
     def test_a_listing_counts_lines_with_anything_on_them(self) -> None:
         """Blank and whitespace-only lines are not mutants."""
