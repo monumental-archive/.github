@@ -39,16 +39,19 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
-import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypedDict, cast, override
+from warnings import catch_warnings, simplefilter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from types import ModuleType
 
 START = str(Path.cwd())
 SELF = str(Path(__file__).resolve())
+
+# A warnings filter action, as unittest's runner takes it.
+type Action = Literal["default", "error", "ignore", "always", "module", "once"]
 
 # The default ceiling on workers: the gate runner has four cores, and a
 # workstation running several gates at once should keep cores to spare.
@@ -111,7 +114,7 @@ def workers() -> int:
 class GuardedResult(unittest.TextTestResult):
     """unittest's text result, plus the working-directory check."""
 
-    # ruff: ignore[invalid-function-name]
+    @override
     def stopTest(self, test: unittest.TestCase) -> None:
         """After every test, judge the directory and put it back."""
         message = where()
@@ -126,13 +129,19 @@ class GuardedResult(unittest.TextTestResult):
         super().stopTest(test)
 
 
-class Reported:
-    """A test that ran in a worker, standing in by its description."""
+class Reported(unittest.TestCase):
+    """A test that ran in a worker, standing in by its description.
+
+    A TestCase so the result's lists hold what their type says; it is
+    never run, only printed.
+    """
 
     def __init__(self, description: str) -> None:
         """Hold the description the worker's result gave the test."""
+        super().__init__()
         self.description = description
 
+    @override
     def __str__(self) -> str:
         """Return the description, which is what the summary prints.
 
@@ -142,10 +151,39 @@ class Reported:
         """
         return self.description
 
-    @staticmethod
-    # ruff: ignore[invalid-function-name]
-    def shortDescription() -> None:
-        """Return nothing: the description already carries the docstring."""
+    @override
+    def shortDescription(self) -> str | None:
+        """Return nothing: the description already carries the docstring.
+
+        Returns:
+            None.
+
+        """
+        return None
+
+
+class Spec(TypedDict):
+    """What a worker needs to run one module as the parent's run would."""
+
+    module: str
+    path: list[str]
+    patterns: list[str] | None
+    verbosity: int
+    buffer: bool
+    tb_locals: bool
+    warnings: Action | None
+
+
+class Outcome(TypedDict):
+    """What a worker hands back: its counts and descriptions."""
+
+    run: int
+    errors: list[tuple[str, str]]
+    failures: list[tuple[str, str]]
+    expectedFailures: list[tuple[str, str]]
+    skipped: list[tuple[str, str]]
+    unexpectedSuccesses: list[str]
+    durations: list[tuple[str, float]]
 
 
 class RecordingLoader(unittest.TestLoader):
@@ -156,9 +194,9 @@ class RecordingLoader(unittest.TestLoader):
         super().__init__()
         self.modules: dict[int, tuple[str, unittest.TestSuite]] = {}
 
-    # ruff: ignore[invalid-function-name]
-    def loadTestsFromModule(  # type: ignore[override]
-        self, module: object, *args: object, **kwargs: object
+    @override
+    def loadTestsFromModule(
+        self, module: ModuleType, *, pattern: str | None = None
     ) -> unittest.TestSuite:
         """Load as unittest does, and record the suite against the module.
 
@@ -166,8 +204,8 @@ class RecordingLoader(unittest.TestLoader):
             The module's suite, unchanged.
 
         """
-        suite = super().loadTestsFromModule(module, *args, **kwargs)  # type: ignore[arg-type]
-        self.modules[id(suite)] = (getattr(module, "__name__", ""), suite)
+        suite = super().loadTestsFromModule(module, pattern=pattern)
+        self.modules[id(suite)] = (module.__name__, suite)
         return suite
 
 
@@ -175,7 +213,7 @@ LOADER = RecordingLoader()
 
 # A unit of the plan: a module's name and suite, run in a worker, or a
 # test with no module (an import that failed), run here.
-Unit = tuple[str | None, unittest.TestSuite | unittest.TestCase]
+type Unit = tuple[str | None, unittest.TestSuite | unittest.TestCase]
 
 
 def plan(suite: unittest.TestSuite) -> list[Unit]:
@@ -199,16 +237,49 @@ def plan(suite: unittest.TestSuite) -> list[Unit]:
     return units
 
 
-def flatten(test: unittest.TestSuite | unittest.TestCase) -> list[object]:
-    """List the tests of a suite.
+class Parallel(unittest.TestSuite):
+    """The discovered suite, its modules run in workers and merged here."""
 
-    Returns:
-        Every test case, depth first.
+    def __init__(self, units: list[Unit], spec: Spec, count: int) -> None:
+        """Hold the plan, the worker settings and the worker count."""
+        super().__init__()
+        self.units = units
+        self.spec = spec
+        self.count = count
 
-    """
-    if isinstance(test, unittest.TestSuite):
-        return [case for item in test for case in flatten(item)]
-    return [test]
+    @override
+    def run(
+        self, result: unittest.TestResult, debug: bool = False
+    ) -> unittest.TestResult:
+        """Run every unit, printing and merging in discovery order.
+
+        Returns:
+            The result, holding every unit's outcome.
+
+        """
+        with (
+            tempfile.TemporaryDirectory() as scratch,
+            ThreadPoolExecutor(max_workers=self.count) as pool,
+        ):
+            started: list[Future[subprocess.CompletedProcess[str]] | None] = []
+            for index, (module, _) in enumerate(self.units):
+                if module is None:
+                    started.append(None)
+                    continue
+                spec = Path(scratch) / f"{index}.json"
+                spec.write_text(
+                    json.dumps(self.spec | {"module": module}), encoding="utf-8"
+                )
+                started.append(pool.submit(work, spec))
+            for index, ((module, item), future) in enumerate(
+                zip(self.units, started, strict=True)
+            ):
+                if future is None:
+                    item(result)
+                    continue
+                outcome = Path(scratch) / f"{index}.out"
+                merge(result, module or "", future.result(), outcome)
+        return result
 
 
 class GuardedRunner(unittest.TextTestRunner):
@@ -220,7 +291,10 @@ class GuardedRunner(unittest.TextTestRunner):
 
     resultclass = GuardedResult
 
-    def run(self, test: unittest.TestSuite | unittest.TestCase) -> unittest.TestResult:  # type: ignore[override]
+    @override
+    def run(
+        self, test: unittest.TestSuite | unittest.TestCase
+    ) -> unittest.TextTestResult:
         """Run the suite, its files in parallel when there are workers.
 
         Returns:
@@ -230,17 +304,8 @@ class GuardedRunner(unittest.TextTestRunner):
         count = workers()
         if count == 1 or self.failfast or not isinstance(test, unittest.TestSuite):
             return super().run(test)
-        return super().run(self.parallel(plan(test), count))
-
-    def spec(self, module: str) -> dict[str, object]:
-        """Describe one worker's run.
-
-        Returns:
-            What the worker needs to run one module as this run would.
-
-        """
-        return {
-            "module": module,
+        spec: Spec = {
+            "module": "",
             "path": sys.path,
             "patterns": LOADER.testNamePatterns,
             "verbosity": self.verbosity,
@@ -248,40 +313,7 @@ class GuardedRunner(unittest.TextTestRunner):
             "tb_locals": self.tb_locals,
             "warnings": self.warnings,
         }
-
-    def parallel(
-        self, units: list[Unit], count: int
-    ) -> Callable[[unittest.TestResult], None]:
-        """Build the callable unittest's runner runs in place of the suite.
-
-        Returns:
-            A callable that runs every unit and merges into the result.
-
-        """
-
-        def run_all(result: unittest.TestResult) -> None:
-            with (
-                tempfile.TemporaryDirectory() as scratch,
-                ThreadPoolExecutor(max_workers=count) as pool,
-            ):
-                started: list[Future[subprocess.CompletedProcess[str]] | None] = []
-                for index, (module, _) in enumerate(units):
-                    if module is None:
-                        started.append(None)
-                        continue
-                    spec = Path(scratch) / f"{index}.json"
-                    spec.write_text(json.dumps(self.spec(module)), encoding="utf-8")
-                    started.append(pool.submit(work, spec))
-                for index, ((module, item), future) in enumerate(
-                    zip(units, started, strict=True)
-                ):
-                    if future is None:
-                        item(result)
-                        continue
-                    outcome = Path(scratch) / f"{index}.out"
-                    merge(result, module or "", future.result(), outcome)
-
-        return run_all
+        return super().run(Parallel(plan(test), spec, count))
 
 
 def work(spec: Path) -> subprocess.CompletedProcess[str]:
@@ -314,38 +346,49 @@ def merge(
     if not outcome.exists():
         # A worker that died without a result (a crash, an exit from a
         # test) is an error on its module, never a module that vanished.
-        holder = Reported(f"{module} (worker)")
         result.testsRun += 1
         result.errors.append((
-            holder,  # type: ignore[arg-type]
+            Reported(f"{module} (worker)"),
             (
                 f"the worker for {module} exited {done.returncode} with no result; "
                 "its output is printed above\n"
             ),
         ))
         return
-    got = json.loads(outcome.read_text(encoding="utf-8"))
+    got = cast("Outcome", json.loads(outcome.read_text(encoding="utf-8")))
     result.testsRun += got["run"]
-    for name in ("errors", "failures", "expectedFailures"):
-        getattr(result, name).extend(
-            (Reported(description), text) for description, text in got[name]
-        )
+    result.errors.extend((Reported(d), text) for d, text in got["errors"])
+    result.failures.extend((Reported(d), text) for d, text in got["failures"])
+    result.expectedFailures.extend(
+        (Reported(d), text) for d, text in got["expectedFailures"]
+    )
     result.skipped.extend((Reported(d), reason) for d, reason in got["skipped"])
     result.unexpectedSuccesses.extend(Reported(d) for d in got["unexpectedSuccesses"])
     result.collectedDurations.extend((d, s) for d, s in got["durations"])
 
 
-class WorkerRunner(unittest.TextTestRunner):
+class WorkerRunner(GuardedRunner):
     """Run one module, print its progress, and write its outcome."""
 
-    resultclass = GuardedResult
-
-    def __init__(self, outcome: Path, **kwargs: object) -> None:
-        """Remember where the outcome goes."""
-        super().__init__(**kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        outcome: Path,
+        *,
+        verbosity: int,
+        buffer: bool,
+        tb_locals: bool,
+        warnings: Action | None,
+    ) -> None:
+        """Take the parent's settings, and where the outcome goes."""
+        super().__init__(
+            verbosity=verbosity, buffer=buffer, tb_locals=tb_locals, warnings=warnings
+        )
         self.outcome = outcome
 
-    def run(self, test: unittest.TestSuite | unittest.TestCase) -> unittest.TestResult:  # type: ignore[override]
+    @override
+    def run(
+        self, test: unittest.TestSuite | unittest.TestCase
+    ) -> unittest.TextTestResult:
         """Run the module; the summary is the parent's to print.
 
         Returns:
@@ -356,39 +399,38 @@ class WorkerRunner(unittest.TextTestRunner):
         unittest.registerResult(result)
         result.buffer = self.buffer
         result.tb_locals = self.tb_locals
-        with warnings.catch_warnings():
+        with catch_warnings():
             if self.warnings:
-                warnings.simplefilter(self.warnings)
+                simplefilter(self.warnings)
             result.startTestRun()
             try:
                 test(result)
             finally:
                 result.stopTestRun()
 
-        def described(pairs: list[tuple[object, str]]) -> list[list[str]]:
-            return [[result.getDescription(t), text] for t, text in pairs]  # type: ignore[arg-type]
+        def described(
+            pairs: list[tuple[unittest.TestCase, str]],
+        ) -> list[tuple[str, str]]:
+            return [(result.getDescription(t), text) for t, text in pairs]
 
-        self.outcome.write_text(
-            json.dumps({
-                "run": result.testsRun,
-                "errors": described(result.errors),
-                "failures": described(result.failures),
-                "expectedFailures": described(result.expectedFailures),
-                "skipped": described(result.skipped),
-                "unexpectedSuccesses": [
-                    result.getDescription(t)  # type: ignore[arg-type]
-                    for t in result.unexpectedSuccesses
-                ],
-                "durations": result.collectedDurations,
-            }),
-            encoding="utf-8",
-        )
+        outcome: Outcome = {
+            "run": result.testsRun,
+            "errors": described(result.errors),
+            "failures": described(result.failures),
+            "expectedFailures": described(result.expectedFailures),
+            "skipped": described(result.skipped),
+            "unexpectedSuccesses": [
+                result.getDescription(t) for t in result.unexpectedSuccesses
+            ],
+            "durations": list(result.collectedDurations),
+        }
+        self.outcome.write_text(json.dumps(outcome), encoding="utf-8")
         return result
 
 
 def worker(spec_path: Path) -> None:
     """Run the one module a spec names, as the parent's run would."""
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec = cast("Spec", json.loads(spec_path.read_text(encoding="utf-8")))
     sys.path[:] = spec["path"]
     loader = unittest.TestLoader()
     loader.testNamePatterns = spec["patterns"]
