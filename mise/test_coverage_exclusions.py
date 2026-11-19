@@ -268,15 +268,9 @@ class Canon(unittest.TestCase):
         carried a coverage pragma.
         """
         root = _HERE.parent
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        listing = subprocess.run(
-            [GIT, "ls-files", ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js"],
-            cwd=root,
-            env=hermetic.env(**GIT_CONFIG),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.split()
+        listing = hermetic.tracked(
+            root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
+        )
         r = helper(root, *listing)
         self.assertEqual(r.returncode, 0, r.stderr)
 

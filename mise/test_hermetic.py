@@ -3,18 +3,22 @@
 
 The helper: a variable the suite's process carries reaches a fixture
 only if INHERITED or a named tool extension names it; a row's override
-always does. The law: no test file in the four discovery roots builds
-a fixture's environment by copying the caller's.
+always does. Its reader names the files a tree tracks, from a checkout
+or from a gitignored copy of the tree inside it (#1618). The law: no
+test file in the four discovery roots builds a fixture's environment by
+copying the caller's, or lists the canon's tree with `git ls-files`.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
+import ast
 import os
 import re
 import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -49,6 +53,93 @@ COPIES = re.compile(
     r"os\.environ\.items\(\)|\{\*\*os\.environ|(?<![\w.])dict\(os\.environ"
     r"|os\.environ\.copy\(\)|os\.environ \|"
 )
+
+
+def test_files() -> list[str]:
+    """Name every test file in the four discovery roots.
+
+    Returns:
+        Their paths, relative to the canon.
+
+    """
+    return hermetic.tracked(
+        CANON,
+        *(f"{r}/test_*.py" for r in ROOTS),
+        *(f"{r}/prop_*.py" for r in ROOTS),
+    )
+
+
+def rooted_names(module: ast.Module) -> set[str]:
+    """Name every variable that is the canon's tree or a path in it.
+
+    A name is rooted when what is assigned to it reads `__file__` or
+    another rooted name: `HERE = Path(__file__).parent`, `CANON =
+    HERE.parent`, a row's `root = _HERE.parent`.
+
+    Returns:
+        The rooted names, at every scope.
+
+    """
+    assigned: list[tuple[set[str], ast.AST]] = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.Assign):
+            targets = {
+                n.id
+                for t in node.targets
+                for n in ast.walk(t)
+                if isinstance(n, ast.Name)
+            }
+            assigned.append((targets, node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            assigned.append((
+                {n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)},
+                node.value,
+            ))
+    rooted = {"__file__"}
+    grew = True
+    while grew:
+        grew = False
+        for targets, value in assigned:
+            if (
+                targets - rooted
+                and {n.id for n in ast.walk(value) if isinstance(n, ast.Name)} & rooted
+            ):
+                rooted |= targets
+                grew = True
+    return rooted
+
+
+def lists_the_tree(source: str) -> bool:
+    """Say whether a test file runs `git ls-files` in the canon's tree.
+
+    A call whose argument list holds `"ls-files"` lists the tree when
+    its `cwd=`, or the argument after `-C`, reads a rooted name. A
+    listing in a scratch repository the row built reads no rooted name
+    and is not judged.
+
+    Returns:
+        True when some call lists the canon's tree directly.
+
+    """
+    module = ast.parse(source)
+    rooted = rooted_names(module)
+
+    def reads_rooted(node: ast.AST) -> bool:
+        return any(isinstance(n, ast.Name) and n.id in rooted for n in ast.walk(node))
+
+    for call in (n for n in ast.walk(module) if isinstance(n, ast.Call)):
+        for arg in call.args:
+            if not isinstance(arg, (ast.List, ast.Tuple)):
+                continue
+            words = [e.value if isinstance(e, ast.Constant) else None for e in arg.elts]
+            if "ls-files" not in words:
+                continue
+            where = [kw.value for kw in call.keywords if kw.arg == "cwd"]
+            where += [arg.elts[i + 1] for i, w in enumerate(words[:-1]) if w == "-C"]
+            if any(reads_rooted(w) for w in where):
+                return True
+    return False
+
 
 # Excepted by name: the helper itself, and this file, which plants and
 # names the spellings it looks for.
@@ -108,28 +199,71 @@ class Env(unittest.TestCase):
             hermetic.env(tools=("no-such-tool",))
 
 
+class Tracked(unittest.TestCase):
+    """hermetic.tracked, in a checkout and in a copy of it (#1618)."""
+
+    def setUp(self) -> None:
+        """Plant a repository whose tree mutmut's way copies into `mutants/`."""
+        self.root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.root)
+        for name in ("a.py", "pkg/b.py", "pkg/c.sh", "vendor/v.py", "uncopied.py"):
+            (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_text("x\n", encoding="utf-8")
+        (self.root / ".gitignore").write_text("mutants/\n", encoding="utf-8")
+        self.git("init", "-q")
+        self.git("add", ".")
+        # The copy: every tracked file but one, and one file only the
+        # copy holds, the way mutmut writes mutants/.
+        self.copy = self.root / "mutants"
+        for name in ("a.py", "pkg/b.py", "pkg/c.sh", "vendor/v.py", ".gitignore"):
+            (self.copy / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(self.root / name, self.copy / name)
+        (self.copy / "mutmut-only.py").write_text("x\n", encoding="utf-8")
+
+    def git(self, *args: str) -> None:
+        """Run git in the planted repository."""
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
+
+    def test_a_gitignored_copy_lists_what_the_checkout_lists(self) -> None:
+        """The row that fails before #1618: the copy's listing was empty."""
+        specs = (":!vendor/**", "*.py", "*.sh")
+        self.assertEqual(
+            hermetic.tracked(self.root, *specs),
+            ["a.py", "pkg/b.py", "pkg/c.sh", "uncopied.py"],
+        )
+        self.assertEqual(
+            hermetic.tracked(self.copy, *specs), ["a.py", "pkg/b.py", "pkg/c.sh"]
+        )
+
+    def test_a_subdirectory_pathspec_is_anchored_at_the_top(self) -> None:
+        """`pkg/*.py` from the copy names the copy's `pkg/b.py`."""
+        self.assertEqual(hermetic.tracked(self.copy, "pkg/*.py"), ["pkg/b.py"])
+
+    def test_an_empty_listing_is_red_by_name(self) -> None:
+        """Files asked for and none listed is never a pass."""
+        with self.assertRaises(RuntimeError) as raised:
+            hermetic.tracked(self.copy, "*.rs")
+        self.assertEqual(
+            str(raised.exception),
+            f"hermetic.tracked: git lists no tracked file under {self.copy}"
+            " for ['*.rs']",
+        )
+
+    def test_magic_is_kept_and_anchored(self) -> None:
+        """Every pathspec gains `top`, and keeps its own magic."""
+        self.assertEqual(
+            [hermetic.top(s) for s in ("*.py", ":!v/**", ":^v", ":(glob)**/x")],
+            [":(top)*.py", ":(top,exclude)v/**", ":(top,exclude)v", ":(top,glob)**/x"],
+        )
+
+
 class TheLaw(unittest.TestCase):
     """No test file copies the caller's environment (#1514 item 3)."""
 
     def test_no_test_file_copies_the_callers_environment(self) -> None:
         """Every fixture environment is built through hermetic.env."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        listed = subprocess.run(
-            [
-                GIT,
-                "-C",
-                str(CANON),
-                "ls-files",
-                "--",
-                *(f"{r}/test_*.py" for r in ROOTS),
-                *(f"{r}/prop_*.py" for r in ROOTS),
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=hermetic.env(),
-        ).stdout.split()
-        self.assertTrue(listed, "git listed no test files")
+        listed = test_files()
         offenders = [
             path
             for path in listed
@@ -137,6 +271,30 @@ class TheLaw(unittest.TestCase):
             and COPIES.search((CANON / path).read_text(encoding="utf-8"))
         ]
         self.assertEqual([], offenders)
+
+    def test_no_test_file_lists_the_canons_tree_directly(self) -> None:
+        """Every listing of the canon's own tree goes through tracked (#1618)."""
+        offenders = [
+            path
+            for path in test_files()
+            if lists_the_tree((CANON / path).read_text(encoding="utf-8"))
+        ]
+        self.assertEqual([], offenders)
+
+    def test_the_law_sees_each_way_a_test_lists_the_tree(self) -> None:
+        """Planted: `cwd=`, `-C` and a row-local root are found; a scratch is not."""
+        head = "HERE = Path(__file__).parent\nCANON = HERE.parent\n"
+        planted = {
+            "cwd": head + 'run([GIT, "ls-files"], cwd=CANON)\n',
+            "dash-C": head + 'run([GIT, "-C", str(CANON), "ls-files"])\n',
+            "local": head + "def f():\n    root = HERE.parent\n"
+            '    run([GIT, "ls-files", "*.py"], cwd=root)\n',
+        }
+        for name, source in planted.items():
+            with self.subTest(name):
+                self.assertTrue(lists_the_tree(source))
+        scratch = head + 'tree = make()\nrun([GIT, "ls-files"], cwd=tree)\n'
+        self.assertFalse(lists_the_tree(scratch))
 
 
 if __name__ == "__main__":
