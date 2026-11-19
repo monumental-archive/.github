@@ -569,6 +569,14 @@ python = "3.15.2"
 # pipx: exception; one dependency, sortedcontainers, which mise.lock
 # does not hash (docs/tooling-verdicts.md). Atheris is refused there.
 "pipx:hypothesis" = "6.170.15"
+# Python type checking (#1604): mypy at its strictest, the owner's
+# ruling on a three-way measurement (ty, pyright, mypy) in
+# docs/tooling-verdicts.md. The SEVENTH pipx: exception: PyPI-only, no
+# aqua package; its five dependencies are unhashed in mise.lock, as
+# Hypothesis's one is. The config is delivered (mise/mypy.ini) and
+# audit:python-types runs it; the task enters `ci` as
+# lint:python-types once the canon's findings are run down.
+"pipx:mypy" = "2.4.1"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -8479,6 +8487,21 @@ dir = "{{cwd}}"
 # reruns the exact search. The cron never pushes.
 run = '''
 "${ORG_BELT_DIR}/python-properties.sh" audit
+'''
+
+[tasks."audit:python-types"]
+description = "Type-check tracked Python with mypy at its strictest, the belt's config (enters ci as lint:python-types)"
+dir = "{{cwd}}"
+# #1604: mypy over every tracked .py/.pyi, mise/mypy.ini delivered, and
+# the seams mypy lets through refused (python-types.sh says which).
+# STAGED, not advisory: outside `ci`, run by the canon's Monday audit
+# (audit.yml, red until the canon conforms; lint:audit-scheduled
+# refuses an audit task no workflow runs). It is here so the canon's
+# findings can be run down against the real task, one lane per
+# directory; the pull request that clears the last renames it
+# `lint:python-types`, which `ci` collects, and drops the audit leg.
+run = '''
+"${ORG_BELT_DIR}/python-types.sh" audit:python-types
 '''
 
 [tasks."audit:typescript-properties"]

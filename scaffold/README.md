@@ -5,8 +5,8 @@ root at creation or migration time — they are the *entire* per-repo
 footprint of the governance stack.
 
 What is deliberately NOT here: the config of any tool only the belt runs.
-clippy, rustfmt, pinact, typos, ruff, biome's RULES, yamllint, rumdl and
-sqlfluff are configured from `mise/` and passed
+clippy, rustfmt, pinact, typos, ruff, mypy, biome's RULES, yamllint, rumdl
+and sqlfluff are configured from `mise/` and passed
 to the tool by the task that runs it (`ORG_BELT_DIR`, #445), so a repo
 carries nothing to drift and gets the current rules at the canon SHA it
 pins. Everything below is here because something OUTSIDE the belt reads

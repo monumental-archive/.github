@@ -28,7 +28,7 @@ shared lives here and nowhere else. Five layers:
    `workflow-templates/`.
 2. **The toolbelt** (`mise/`): `config.toml` + `mise.lock`, and beside
    them the configs of the tools only the belt runs — `clippy.toml`,
-   `rustfmt.toml`, `pinact.yaml`, `typos.toml`, `ruff.toml`,
+   `rustfmt.toml`, `pinact.yaml`, `typos.toml`, `ruff.toml`, `mypy.ini`,
    `biome-org.json` (+ `biome-domains.tsv`,
    `biome-nursery-domains.tsv`), `yamllint.yaml`,
    `rumdl.toml`, `sqlfluff.cfg`, `lychee.toml`, `taplo-org.toml`,
