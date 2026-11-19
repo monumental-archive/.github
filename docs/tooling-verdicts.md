@@ -2014,14 +2014,22 @@ Proven by running 2.4.1:
   is not a finding. The one suppression left is
   `# type: ignore[<code>]`: it names its rule, and `unused-ignore`
   reds it once it suppresses nothing.
-- **Hyphenated names and `importlib` loads.** A hyphenated file is
-  checked when passed by path; no checker follows a
-  `spec_from_file_location` load, so a helper loaded that way is a
-  `ModuleType` and its calls are untyped. That is a conformance
-  question for the helpers, not a belt one.
-- Two files of one basename are one module to mypy and stop the run;
-  `explicit_package_bases` keeps them apart, with the canon's findings
-  unchanged. `cache_dir = /dev/null`: the task writes nothing.
+- **Hyphenated names and `importlib` loads (#1634).** No checker
+  follows a `spec_from_file_location` load, so a helper loaded that
+  way was a `ModuleType` and every use of it untyped: 2,439 findings.
+  Every helper now has a module name (`lint:python-module-names` reds
+  a hyphenated `.py` by name; ruff's N999 does not fire outside a
+  package) and is imported by it. A file reaching a sibling root names
+  it from its own `__file__` with a `sys.path` entry, which holds under
+  every runner and inside mutmut's copy; a law row in
+  `mise/test_helper_imports.py` refuses a load by path. mypy follows
+  neither a script's own directory nor that entry, so `python-types.sh`
+  passes the roots as `MYPYPATH`, derived from the tracked files by
+  `mise/python_roots.py` and never listed in the delivered config.
+- Two files that would be one module stop mypy ("Duplicate module");
+  `python_roots.py` refuses them by name first, and
+  `explicit_package_bases` keeps every other file's module name its
+  path. `cache_dir = /dev/null`: the task writes nothing.
 - The interpreter mypy resolves imports through is the Hypothesis
   venv's where Hypothesis is installed (the `prop_*.py` files import
   it; without it, 54 `import-not-found`), asserted to be the same
@@ -2054,9 +2062,10 @@ typed precisely by Hypothesis; its six findings were bare `dict`/`set`
 return annotations (five, typed here) and a type from a helper loaded
 through `importlib` (one, which #1634's rename answers). Reach: the
 properties runner puts the belt's directory on the path for the run,
-the types task sets `MYPYPATH` to it, and `test:python-properties`
-reds a property file that takes `given` from `hypothesis`, so a
-repository needs only `from typed_hypothesis import given`.
+the types task adds it to `MYPYPATH` after the derived roots, and
+`test:python-properties` reds a property file that takes `given` from
+`hypothesis`, so a repository needs only
+`from typed_hypothesis import given`.
 
 **Staged, not advisory.** The canon held 10 874 findings over its 226
 tracked files when the pin landed: 1719 in the helpers (`mise/` 1295,
