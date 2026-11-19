@@ -52,9 +52,9 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
 
 import decoded
+import typed_std
 
 NAME = "gate-surface"
 
@@ -207,7 +207,9 @@ def majors(pkg: Package) -> list[int]:
     if "pgrx" not in pkg.dependencies:
         return []
     found = [
-        int(hit.group(1)) for feature in pkg.features if (hit := MAJOR.match(feature))
+        int(typed_std.group(hit, 1) or "")
+        for feature in pkg.features
+        if (hit := MAJOR.match(feature))
     ]
     return sorted(found)
 
@@ -256,9 +258,8 @@ def stub_inputs(text: str) -> tuple[dict[str, str], list[str]]:
         hit = re.match(r"^\s+([a-z0-9-]+):\s*(.*)$", line)
         if not hit:
             continue
-        key: str = hit.group(1)
-        raw_value: str = hit.group(2)
-        value = raw_value.strip().strip("'\"")
+        key = typed_std.group(hit, 1) or ""
+        value = (typed_std.group(hit, 2) or "").strip().strip("'\"")
         if key not in wanted:
             continue
         if not value:
@@ -313,8 +314,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv, namespace=Args())
 
     try:
-        stdin: TextIO = sys.stdin
-        document = decoded.load_json(stdin.read())
+        document = decoded.load_json(typed_std.stdin_text())
+    except typed_std.NoStdinError as bad:
+        print(f"{NAME}: {bad}", file=sys.stderr)
+        return 1
     except decoded.UndecodableError as bad:
         print(f"{NAME}: cargo metadata did not give JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)

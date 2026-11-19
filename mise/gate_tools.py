@@ -67,6 +67,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
 
 import caller_pins
 import decoded
+import typed_std
 import workflow_command
 
 HERE = Path(__file__).resolve().parent
@@ -113,7 +114,7 @@ def strip_literals(text: str) -> str:
 
 
 def _keep_substitution(m: re.Match[str]) -> str:
-    whole: str = m.group(0)
+    whole = typed_std.group(m) or ""
     return whole if "$(" in whole else '""'
 
 
@@ -293,11 +294,7 @@ def _words(text: str) -> list[str]:
         Each run of word characters, dots, slashes and dashes.
 
     """
-    out: list[str] = []
-    for found in re.finditer(r"[\w./-]+", text):
-        word: str = found.group(0)
-        out.append(word)
-    return out
+    return [typed_std.group(found) or "" for found in re.finditer(r"[\w./-]+", text)]
 
 
 def _task_bodies(text: str) -> str:

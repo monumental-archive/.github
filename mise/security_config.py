@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Protocol
 
 import decoded
+import typed_std
 
 GH = shutil.which("gh") or "gh"
 
@@ -172,8 +173,8 @@ def gh_fetch(endpoint: str, *, paginate: bool = False) -> tuple[int, object]:
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         match = re.search(r"\(HTTP (\d{3})\)", result.stderr)
-        code: str = match.group(1) if match else "0"
-        return (int(code), None)
+        code = typed_std.group(match, 1) if match else None
+        return (int(code or "0"), None)
     if not result.stdout.strip():
         return (HTTP_NO_CONTENT, None)
     try:

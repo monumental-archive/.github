@@ -516,6 +516,22 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 0, msg=err)
         self.assertEqual(len(out.splitlines()), 1)
 
+    def test_no_standard_input_is_red(self) -> None:
+        """A process started with no stdin is refused by name, not raised."""
+        err = io.StringIO()
+        original = gate_surface.sys.stdin
+        gate_surface.sys.stdin = None
+        try:
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                status = gate_surface.main([])
+        finally:
+            gate_surface.sys.stdin = original
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            err.getvalue(),
+            "gate-surface: no standard input: the process was started without one\n",
+        )
+
     def test_metadata_that_is_not_json_is_red(self) -> None:
         """A broken cargo must not read as a workspace with no crates."""
         status, _out, err = self.invoke(None)

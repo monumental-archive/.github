@@ -54,6 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import decoded
+import typed_std
 
 NAME = "plan-producers"
 
@@ -178,8 +179,7 @@ def markers(text: str) -> tuple[list[tuple[str, str]], list[str]]:
         found = MARKER.match(line)
         if not found:
             continue
-        rest: str = found.group("rest")
-        words = rest.split()
+        words = (typed_std.group(found, "rest") or "").split()
         if len(words) != MARKER_WORDS:
             malformed.append(line.strip())
             continue
@@ -206,14 +206,11 @@ def emitted(text: str, policy: Policy | None = None) -> set[str]:
     for line in text.splitlines():
         found = ENV_PREFIX.match(line)
         if found:
-            prefix: str = found.group("prefix")
-            env.add(prefix.strip("\"'"))
-        for hit in JQ_DOC.finditer(line):
-            doc: str = hit.group("prefix")
-            jq.add(doc)
-        for hit in STELE_PLAN.finditer(line):
-            klass: str = hit.group("klass")
-            called.add(klass)
+            env.add((typed_std.group(found, "prefix") or "").strip("\"'"))
+        jq.update(typed_std.group(hit, "prefix") or "" for hit in JQ_DOC.finditer(line))
+        called.update(
+            typed_std.group(hit, "klass") or "" for hit in STELE_PLAN.finditer(line)
+        )
     planned = obligations(policy) if policy is not None else set()
     stele = {prefix for klass, prefix in planned if klass in called}
     return env | jq | stele
