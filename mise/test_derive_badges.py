@@ -376,11 +376,40 @@ class LicenceShield(unittest.TestCase):
         """Annotations that disagree leave the shield nothing true to say."""
         done, _ = render({"REUSE.toml": reuse_with("0BSD", "MIT")})
         self.assertEqual(done.returncode, 1, done.stderr)
-        self.assertIn(
+        self.assertEqual(
             "fix:badges: REUSE.toml names several licence expressions:\n"
-            "  0BSD\n  MIT\n",
+            "  0BSD\n  MIT\n"
+            "  say which is the project's in .badge-states:"
+            " 'licence <SPDX expression>'\n",
             done.stderr,
         )
+
+    def test_the_declared_expression_is_the_shields(self) -> None:
+        """Several expressions and a `licence` line: the line decides (#1589)."""
+        done, block = render({
+            "REUSE.toml": reuse_with("0BSD", "MIT OR Apache-2.0"),
+            ".badge-states": "licence 0BSD\n",
+        })
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(
+            "[![license](https://img.shields.io/badge/license-0BSD-blue)](LICENSES/)",
+            block,
+        )
+
+    def test_a_declaration_reuse_does_not_name_is_red(self) -> None:
+        """A licence no file is under never reaches the shield (#1589)."""
+        done, block = render({
+            "REUSE.toml": reuse_with("0BSD", "MIT OR Apache-2.0"),
+            ".badge-states": "licence MIT\n",
+        })
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            "fix:badges: .badge-states declares licence MIT,"
+            " and REUSE.toml names no such expression:\n"
+            "  0BSD\n  MIT OR Apache-2.0\n",
+            done.stderr,
+        )
+        self.assertEqual("", block)
 
 
 class CoverageShield(unittest.TestCase):

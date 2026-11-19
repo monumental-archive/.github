@@ -43,11 +43,6 @@ repo="${repo_url##*/}"
 org_path="${repo_url#https://github.com/}"
 state() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2; exit}' .badge-states || true; }
 states_extra() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2}' .badge-states || true; }
-# The rest of a state line, for a value that holds spaces (an SPDX
-# expression is `MIT OR Apache-2.0`).
-state_rest() {
-  [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {sub(/^[^[:space:]]+[[:space:]]+/, ""); print; exit}' .badge-states || true
-}
 # shields.io's static-badge escaping: a literal hyphen or underscore is
 # doubled, and anything a URL or a markdown link would trip on is
 # percent-encoded. `%` first, or the encodings would be re-encoded.
@@ -187,20 +182,13 @@ fi
 # carries several (code under one licence, documentation under
 # another), nothing here can know which one is the PROJECT's, and
 # guessing is how a badge comes to lie: the repository says so, once,
-# as `licence <SPDX expression>`.
-lic=$(state_rest licence)
-if [[ -z ${lic} ]]; then
-  lic=$(grep -E "^[[:space:]]*SPDX-License-Identifier[[:space:]]*=" REUSE.toml \
-    | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | sort -u || true)
-fi
+# as `licence <SPDX expression>`. project-licence.py decides, and
+# citation.sh asks it the same question, so the shield and the
+# citation cannot state two licences (#1589).
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project-licence.py" fix:badges)
 if [[ -z ${lic} ]]; then
   echo "fix:badges: REUSE.toml carries no SPDX-License-Identifier — the licence shield has nothing to state" >&2
-  exit 1
-fi
-if [[ ${lic} == *$'\n'* ]]; then
-  echo "fix:badges: REUSE.toml names several licence expressions:" >&2
-  printf '  %s\n' "${lic//$'\n'/$'\n'  }" >&2
-  echo "  say which is the project's in .badge-states: 'licence <SPDX expression>'" >&2
   exit 1
 fi
 lic_esc=$(shield_esc "${lic}")
