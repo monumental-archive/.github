@@ -46,7 +46,9 @@ import os
 import re
 import runpy
 import shutil
+import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -72,7 +74,18 @@ GIT = shutil.which("git") or "git"
 SNAPSHOT = "crates/ext/schema.snapshot.sql"
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
-SQLFLUFF = shutil.which("sqlfluff") or "sqlfluff"
+# The belt's real sqlfluff, or None. Never a bare-name fallback (#1528):
+# the rows below put a shim NAMED sqlfluff first on PATH and exec this
+# from it, so with no real one installed a bare name resolved to the
+# shim, which exec'd itself until the job's timeout. Measured on the
+# canon's own suite with only the badge job's five tools installed:
+# 8,364 self-execs in 1m33s on the first lint:sql row, and on main the
+# coverage upload job sat in it for its whole 30 minutes on every push.
+SQLFLUFF = shutil.which("sqlfluff")
+SQLFLUFF_MISSING = (
+    "sqlfluff is not on PATH: these rows run the belt's real sqlfluff behind"
+    " a shim named sqlfluff, and cannot run without it — run: mise install"
+)
 
 RAW = """\
 /* <begin connected objects> */
@@ -538,7 +551,13 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        """Make a repository, the shims, and an empty member list."""
+        """Make a repository, the shims, and an empty member list.
+
+        The tool is asserted first, as the belt's tasks assert theirs: a
+        row that needs sqlfluff fails by name without it (#1528).
+        """
+        if SQLFLUFF is None:
+            self.fail(SQLFLUFF_MISSING)
         self.root = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         git(self.root, "init", "-q")
@@ -735,6 +754,62 @@ class Usage(unittest.TestCase):
                 status, out, err = run_main(argv)
                 self.assertEqual((status, out), (1, ""))
                 self.assertIn("usage:", err)
+
+
+# How long the planted row may take before it counts as the hang. The
+# row it runs finishes in about a second.
+ABSENT_TIMEOUT = 60
+
+
+def without_sqlfluff() -> str:
+    """PATH with every directory that holds a sqlfluff left out.
+
+    Returns:
+        The current PATH less those entries, mise's shims among them.
+
+    """
+    return os.pathsep.join(
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and not (Path(entry) / "sqlfluff").exists()
+    )
+
+
+class AbsentSqlfluffFailsByName(unittest.TestCase):
+    """With sqlfluff absent, its rows fail by name instead of hanging (#1528)."""
+
+    def test_the_first_lint_row_reds_naming_sqlfluff(self) -> None:
+        """The row the badge job hung in, run with sqlfluff off PATH.
+
+        Bounded, so the hang itself is red: the child runs in a session of
+        its own and the whole group is killed at the timeout, since the
+        self-exec loop outlives the test process that started it.
+        """
+        row = (
+            f"{Path(__file__).stem}.SqlSkipsOwnedSnapshots"
+            ".test_extension_at_the_workspace_root_is_left_out"
+        )
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        child = subprocess.Popen(
+            [sys.executable, "-m", "unittest", row],
+            cwd=BELT,
+            env=os.environ | {"PATH": without_sqlfluff()},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            _, err = child.communicate(timeout=ABSENT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGKILL)
+            child.communicate()
+            self.fail(
+                f"{row} ran past {ABSENT_TIMEOUT}s with sqlfluff absent: the"
+                " shim is exec'ing itself (#1528)"
+            )
+        self.assertNotEqual(0, child.returncode, err)
+        self.assertIn(SQLFLUFF_MISSING, err)
 
 
 if __name__ == "__main__":
