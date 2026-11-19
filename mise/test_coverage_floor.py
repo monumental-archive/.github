@@ -193,6 +193,12 @@ class TestParseAccepts(unittest.TestCase):
         self.assertEqual(parsed.derived, "v0.20.0")
         self.assertIsNone(parsed.reset)
 
+    def test_blank_lines_are_not_lines(self) -> None:
+        """A blank line anywhere in the file reads as nothing (#1659)."""
+        parsed, problems = cf.parse("\n" + record("93.4").replace("\n", "\n\n"))
+        self.assertEqual(problems, [])
+        self.assertEqual(parsed.floor, Decimal("93.4"))
+
     def test_trailing_zeros_are_the_same_number(self) -> None:
         """Agreement is numeric, so 93.40 and 93.4 are one floor."""
         parsed, problems = cf.parse(record("93.40"))
@@ -628,6 +634,11 @@ class TestSeparateLeg(unittest.TestCase):
                 "not a number",
                 "# rust-branches measured: 72.4\nrust-branches high\n",
                 "is not `rust-branches <percent>`",
+            ),
+            (
+                "a record that is not a percentage",
+                "# rust-branches measured: lots\nrust-branches 70.4\n",
+                "rust-branches measured 'lots' is not a percentage",
             ),
         ]
         for name, extra, expected in rows:
