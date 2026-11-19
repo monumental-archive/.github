@@ -33,8 +33,6 @@ import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
-SH = shutil.which("sh")
-GIT = shutil.which("git")
 
 
 def template_command() -> str:
@@ -77,22 +75,6 @@ def run(
     )
 
 
-def tool(found: str | None, name: str) -> str:
-    """Return a tool's path, or fail by name.
-
-    Returns:
-        The path.
-
-    Raises:
-        RuntimeError: the tool is not on PATH.
-
-    """
-    if found is None:
-        msg = f"{name} is not on PATH"
-        raise RuntimeError(msg)
-    return found
-
-
 def plant_belt(tree: Path) -> Path:
     """Make `tree` a canon tree: a belt config with clippy.toml beside it.
 
@@ -120,7 +102,7 @@ class WhereTheBeltIs(unittest.TestCase):
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         run(
-            [tool(GIT, "git"), "init", "-q", "."],
+            [hermetic.tool("git"), "init", "-q", "."],
             self.repo,
             hermetic.env(self.home),
             check=True,
@@ -170,7 +152,7 @@ class WhereTheBeltIs(unittest.TestCase):
             extra["MISE_GLOBAL_CONFIG_FILE"] = self.global_file
         if path is not None:
             extra["PATH"] = path
-        argv = [tool(SH, "sh"), "-o", "errexit", "-c", template_command()]
+        argv = [hermetic.tool("sh"), "-o", "errexit", "-c", template_command()]
         return run(argv, where, hermetic.env(self.home, **extra))
 
     def link_dir(self) -> Path:
@@ -241,7 +223,7 @@ class WhereTheBeltIs(unittest.TestCase):
         bare = self.tmp / "bin"
         bare.mkdir()
         for name in ("dirname", "readlink", "cat"):
-            found = shutil.which(name)
+            found = hermetic.optional_tool(name)
             if found is not None:
                 (bare / name).symlink_to(found)
         done = self.resolve(self.link_dir(), path=str(bare))

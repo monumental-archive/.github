@@ -36,8 +36,6 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-GIT = shutil.which("git")
-MISE = shutil.which("mise")
 UV_KEY = '"aqua:astral-sh/uv"'
 
 
@@ -59,22 +57,6 @@ def run(
         check=check,
         timeout=120,
     )
-
-
-def tool(found: str | None, name: str) -> str:
-    """Return a tool's path, or fail by name.
-
-    Returns:
-        The path.
-
-    Raises:
-        RuntimeError: the tool is not on PATH.
-
-    """
-    if found is None:
-        msg = f"{name} is not on PATH"
-        raise RuntimeError(msg)
-    return found
 
 
 def block(key: str) -> re.Pattern[str]:
@@ -132,7 +114,9 @@ class LockedFromTheLinkedLock(unittest.TestCase):
         self.repo = self.tmp / "repo"
         conf = self.repo / ".config" / "mise" / "conf.d"
         conf.mkdir(parents=True)
-        run([tool(GIT, "git"), "init", "-q", "."], self.repo, self.env(), check=True)
+        run(
+            [hermetic.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
+        )
         (self.repo / "mise.toml").write_text(f"[tools]\n{line}", "utf-8")
         (conf / "belt.toml").symlink_to(tree / "config.toml")
         (conf.parent / "mise.lock").symlink_to(tree / "mise.lock")
@@ -173,7 +157,7 @@ class LockedFromTheLinkedLock(unittest.TestCase):
             The run.
 
         """
-        argv = [tool(MISE, "mise"), "install", "--dry-run", key.strip('"')]
+        argv = [hermetic.tool("mise"), "install", "--dry-run", key.strip('"')]
         return run(argv, self.repo, self.env())
 
     def assert_resolves(self, key: str, name: str) -> None:

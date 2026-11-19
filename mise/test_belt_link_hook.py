@@ -34,9 +34,7 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
-GIT = shutil.which("git")
-SH = shutil.which("sh")
-LEFTHOOK = shutil.which("lefthook")
+LEFTHOOK = hermetic.optional_tool("lefthook")
 OWNER_REPO = "example-org/.github"
 
 # A git that fetches the canon's main whatever sha it is asked for: a
@@ -95,22 +93,6 @@ def run(
     )
 
 
-def tool(found: str | None, name: str) -> str:
-    """Return a tool's path, or fail by name.
-
-    Returns:
-        The path.
-
-    Raises:
-        RuntimeError: the tool is not on PATH.
-
-    """
-    if found is None:
-        msg = f"{name} is not on PATH"
-        raise RuntimeError(msg)
-    return found
-
-
 class HookFixture(unittest.TestCase):
     """A bare canon with two commits, a consumer pinning the first, a cache."""
 
@@ -160,7 +142,7 @@ class HookFixture(unittest.TestCase):
             The run.
 
         """
-        return run([tool(GIT, "git"), *args], cwd, self.env(), check=True)
+        return run([hermetic.tool("git"), *args], cwd, self.env(), check=True)
 
     def pin(self, sha: str) -> None:
         """Write the consumer's gate stub, pinning the canon at `sha`."""
@@ -180,7 +162,9 @@ class HookFixture(unittest.TestCase):
 
         """
         return run(
-            [tool(SH, "sh"), "-c", hook_command()], self.consumer, self.env(**extra)
+            [hermetic.tool("sh"), "-c", hook_command()],
+            self.consumer,
+            self.env(**extra),
         )
 
     def links(self) -> dict[str, str | None]:
@@ -318,7 +302,7 @@ class TheCacheAndTheLinks(HookFixture):
         stubs = self.tmp / "stubs"
         stubs.mkdir()
         (stubs / "git").write_text(
-            WRONG_FETCH.replace("{git}", tool(GIT, "git")), encoding="utf-8"
+            WRONG_FETCH.replace("{git}", hermetic.tool("git")), encoding="utf-8"
         )
         (stubs / "git").chmod(0o755)
         done = self.hook(PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}")
@@ -349,7 +333,7 @@ class TheCloneStaysItsOwn(HookFixture):
         self.assertEqual(self.hook().returncode, 0)
         worktree = self.tmp / "worktree"
         self.git(self.consumer, "worktree", "add", "-q", "-b", "side", str(worktree))
-        done = run([tool(SH, "sh"), "-c", hook_command()], worktree, self.env())
+        done = run([hermetic.tool("sh"), "-c", hook_command()], worktree, self.env())
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue((worktree / ".config/mise/conf.d/belt.toml").is_symlink())
         self.assertEqual(self.git(worktree, "status", "--porcelain").stdout, "")
@@ -387,7 +371,7 @@ class TheCloneStaysItsOwn(HookFixture):
         (self.consumer / "lefthook.yml").write_text(
             HOOKS.read_text(encoding="utf-8"), encoding="utf-8"
         )
-        argv = [tool(LEFTHOOK, "lefthook"), "run", "post-checkout"]
+        argv = [hermetic.tool("lefthook"), "run", "post-checkout"]
         done = run(argv, self.consumer, self.env())
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn(

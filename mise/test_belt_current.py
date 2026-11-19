@@ -30,8 +30,6 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "belt-current.sh"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
 MISE_VERSION = "2026.11.7"
 PIN = "a" * 40
 OTHER = "b" * 40
@@ -55,22 +53,6 @@ def run(
         check=check,
         timeout=60,
     )
-
-
-def tool(found: str | None, name: str) -> str:
-    """Return a tool's path, or fail by name.
-
-    Returns:
-        The path.
-
-    Raises:
-        RuntimeError: the tool is not on PATH.
-
-    """
-    if found is None:
-        msg = f"{name} is not on PATH"
-        raise RuntimeError(msg)
-    return found
 
 
 def plant_canon(tree: Path, version: str) -> Path:
@@ -112,7 +94,9 @@ class TheBeltIsThePinned(unittest.TestCase):
         self.path = f"{stubs}{os.pathsep}{os.environ['PATH']}"
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        run([tool(GIT, "git"), "init", "-q", "."], self.repo, self.env(), check=True)
+        run(
+            [hermetic.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
+        )
 
     def env(self, **extra: str) -> dict[str, str]:
         """Build the row's environment.
@@ -156,7 +140,7 @@ class TheBeltIsThePinned(unittest.TestCase):
 
         """
         return run(
-            [tool(BASH, "bash"), str(SCRIPT)],
+            [hermetic.tool("bash"), str(SCRIPT)],
             self.repo,
             self.env(ORG_CANON_DIR=str(belt), PATH=self.path, **extra),
         )
@@ -239,7 +223,7 @@ class TheBeltIsThePinned(unittest.TestCase):
         plant_canon(self.repo, "1.2.0")
         (self.repo / "security").mkdir()
         (self.repo / "security" / "identity.toml").write_text("", encoding="utf-8")
-        run([tool(GIT, "git"), "add", "-A"], self.repo, self.env(), check=True)
+        run([hermetic.tool("git"), "add", "-A"], self.repo, self.env(), check=True)
         done = self.check(self.repo)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(
@@ -253,7 +237,7 @@ class TheBeltIsThePinned(unittest.TestCase):
         plant_canon(self.repo, "1.2.0")
         (self.repo / "security").mkdir()
         (self.repo / "security" / "identity.toml").write_text("", encoding="utf-8")
-        run([tool(GIT, "git"), "add", "-A"], self.repo, self.env(), check=True)
+        run([hermetic.tool("git"), "add", "-A"], self.repo, self.env(), check=True)
         other = plant_canon(self.tmp / "checkout", "1.2.0")
         done = self.check(other)
         self.assertEqual(done.returncode, 1, done.stdout)

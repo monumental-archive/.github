@@ -25,8 +25,6 @@ import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
 NAME = "lint:belt-link"
 CLAIM = (
     "lint:belt-link: the belt's link and lock live in .config/mise/; a repository's\n"
@@ -52,22 +50,6 @@ def run(
         check=check,
         timeout=60,
     )
-
-
-def tool(found: str | None, name: str) -> str:
-    """Return a tool's path, or fail by name.
-
-    Returns:
-        The path.
-
-    Raises:
-        RuntimeError: the tool is not on PATH.
-
-    """
-    if found is None:
-        msg = f"{name} is not on PATH"
-        raise RuntimeError(msg)
-    return found
 
 
 def body() -> str:
@@ -98,7 +80,7 @@ class TheBeltClaimsItsDirectory(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the repository, checked."""
-        run([tool(GIT, "git"), *args], self.repo, self.env, check=True)
+        run([hermetic.tool("git"), *args], self.repo, self.env, check=True)
 
     def track(self, rel: str) -> None:
         """Write and stage a file at `rel`."""
@@ -114,7 +96,7 @@ class TheBeltClaimsItsDirectory(unittest.TestCase):
             The run.
 
         """
-        argv = [tool(BASH, "bash"), "-euo", "pipefail", "-c", body()]
+        argv = [hermetic.tool("bash"), "-euo", "pipefail", "-c", body()]
         return run(argv, self.repo, self.env)
 
     def test_a_tracked_config_toml_is_red(self) -> None:
