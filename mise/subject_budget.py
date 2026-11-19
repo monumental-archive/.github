@@ -24,9 +24,10 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, TextIO
+from typing import TYPE_CHECKING, NamedTuple
 
 import decoded
+import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -322,20 +323,6 @@ def table(
         return value
     report.append(f"{path}: `{key}` is not a table")
     return {}
-
-
-def captured(match: re.Match[str], group: int | str) -> str | None:
-    """Read one group of a match, None where it did not take part.
-
-    Returns:
-        The text the group captured, or None when the pattern has no
-        such named group or the group matched nothing.
-
-    """
-    if isinstance(group, str) and group not in match.re.groupindex:
-        return None
-    start, end = match.span(group)
-    return None if start < 0 else match.string[start:end]
 
 
 # ---------------------------------------------------------------------
@@ -863,7 +850,7 @@ def from_actions(files: list[Path], report: list[str]) -> list[Dep]:
         if content is None:
             continue
         for match in USES.finditer(content):
-            ref = captured(match, 1) or ""
+            ref = typed_std.group(match, 1) or ""
             # Local (`./`), self-repository (`$/`) and container steps
             # name no upstream dependency, and Renovate raises nothing.
             if ref.startswith(("./", "$/", "docker://")) or "@" not in ref:
@@ -874,7 +861,7 @@ def from_actions(files: list[Path], report: list[str]) -> list[Dep]:
                 continue
             # The trailing `# vX.Y.Z` is what Renovate writes into the
             # subject for a SHA-pinned action; without one, the ref is.
-            comment = captured(match, 2) or ""
+            comment = typed_std.group(match, 2) or ""
             if VERSION_LIKE.fullmatch(comment):
                 current = comment
             elif SHA_PIN.fullmatch(pinned):
@@ -985,9 +972,14 @@ def from_gomod(files: list[Path], report: list[str]) -> list[Dep]:
             continue
         found = GO_REQUIRE.finditer(content)
         deps += [
-            Dep(captured(m, 1) or "", captured(m, 2) or "", "gomod", str(path))
+            Dep(
+                typed_std.group(m, 1) or "",
+                typed_std.group(m, 2) or "",
+                "gomod",
+                str(path),
+            )
             for m in found
-            if "indirect" not in (captured(m, 3) or "")
+            if "indirect" not in (typed_std.group(m, 3) or "")
         ]
     return deps
 
@@ -1035,13 +1027,16 @@ def custom_matches(
     deps: list[Dep] = []
     for raw in manager.match_strings:
         for match in re.finditer(JS_GROUP.sub("(?P<", raw), content):
-            name = template if literal else captured(match, "depName")
+            # Every named group the pattern has, as groupdict() would
+            # give them: a group the pattern lacks is simply absent.
+            taken = {n: typed_std.group(match, n) for n in match.re.groupindex}
+            name = template if literal else taken.get("depName")
             if not name:
                 unresolved = f"{origin}: {path} (template {template!r})"
                 deps.append(Dep("", "", "custom.regex", unresolved))
                 continue
-            value = captured(match, "currentValue")
-            current = value or captured(match, "currentDigest") or ""
+            value = taken.get("currentValue")
+            current = value or taken.get("currentDigest") or ""
             deps.append(Dep(name, current, "custom.regex", str(path)))
     return deps
 
@@ -1228,8 +1223,7 @@ def main() -> int:
         0 when every declared dependency fits, 1 when any does not.
 
     """
-    stdin: TextIO = sys.stdin
-    files = [Path(line) for line in stdin.read().split("\n") if line]
+    files = [Path(line) for line in typed_std.stdin_text().split("\n") if line]
     if Path("renovate.json") not in files:
         print("lint:subject-budget: no renovate.json tracked, skipped")
         return 0
