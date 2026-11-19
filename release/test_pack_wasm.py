@@ -62,7 +62,7 @@ class Run:
     pkg: str
 
 
-def run_helper(manifest: dict[str, object], mode: str = "ok") -> Run:
+def run_helper(manifest: object, mode: str = "ok") -> Run:
     """Run the helper on one package.json.
 
     Returns:
@@ -221,6 +221,18 @@ class Refuses(unittest.TestCase):
         self.assert_refused(
             run, f"::error::package.json says null, tag says {VERSION}\n"
         )
+
+    def test_a_package_json_that_is_not_an_object_is_refused(self) -> None:
+        """`0` and `[]` refuse by name (#1556's shrunk examples).
+
+        Both died with an AttributeError traceback before.
+        """
+        for manifest in (0, []):
+            with self.subTest(manifest=manifest):
+                self.assert_refused(
+                    run_helper(manifest),
+                    "::error::crates/edtf-wasm/pkg/package.json is not a JSON object\n",
+                )
 
 
 class EmptyPack(unittest.TestCase):

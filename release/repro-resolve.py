@@ -84,7 +84,8 @@ def first_entry_name(path: pathlib.Path) -> str:
         entries, or a first entry with no name.
 
     Raises:
-        StepError: The manifest is not a JSON object.
+        StepError: The manifest is not a JSON object, or its entries
+            are not a list.
 
     """
     if not path.is_file() or path.stat().st_size == 0:
@@ -98,6 +99,12 @@ def first_entry_name(path: pathlib.Path) -> str:
         msg = f"{path} is not a JSON object"
         raise StepError(msg)
     entries = doc.get("entries") or []
+    # Entries that are not a list type nothing; `{"entries": true}` and
+    # `{"entries": {"": null}}` died here as a TypeError and a KeyError
+    # (#1556).
+    if not isinstance(entries, list):
+        msg = f"{path} is not an evidence manifest: its entries are not a list"
+        raise StepError(msg)
     first = entries[0] if entries and isinstance(entries[0], dict) else {}
     name = first.get("name")
     if name is None or name is False:

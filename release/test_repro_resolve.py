@@ -182,6 +182,22 @@ class ReadTheLatestRelease(unittest.TestCase):
         )
         self.assertEqual(out, "")
 
+    def test_manifest_whose_entries_are_not_a_list(self) -> None:
+        """Refused by name (#1556's shrunk examples), nothing written.
+
+        `true` died with a TypeError and `{"": null}` with a KeyError.
+        """
+        for entries in (True, {"": None}, "abc"):
+            with self.subTest(entries=entries):
+                done, out = self.resolve(manifest=json.dumps({"entries": entries}))
+                self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+                self.assertEqual(
+                    done.stdout,
+                    "::error::evidence-manifest.json is not an evidence manifest:"
+                    " its entries are not a list\n",
+                )
+                self.assertEqual(out, "")
+
 
 if __name__ == "__main__":
     unittest.main()

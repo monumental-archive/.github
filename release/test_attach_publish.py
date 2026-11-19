@@ -215,6 +215,23 @@ class AttachAndPublish(unittest.TestCase):
             done.stdout,
         )
 
+    def test_manifest_whose_entries_are_not_a_list(self) -> None:
+        """`{"entries": true}` refuses by name (#1556's shrunk example).
+
+        It died with a TypeError before: the entries were iterated
+        whatever they were.
+        """
+        (self.fixtures / "evidence-manifest.json").write_text(
+            '{"entries": true}', encoding="utf-8"
+        )
+        done, _ = self.publish("false")
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "::error::published-manifest.json is not an evidence manifest:"
+            " its entries are not a list\n",
+        )
+
     def test_draft_uploads_and_publishes(self) -> None:
         """A draft takes every asset, then is published."""
         done, calls = self.publish("true")

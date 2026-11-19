@@ -123,6 +123,30 @@ def check(manifest: Mapping[str, object], version: str, caller: str) -> None:
         raise RefusedError(msg)
 
 
+def read_manifest(path: Path) -> Mapping[str, object]:
+    """Read package.json, which must be a JSON object.
+
+    `0`, `[]` or text that is not JSON died here with a traceback
+    (#1556); each is refused by name.
+
+    Returns:
+        The parsed object.
+
+    Raises:
+        RefusedError: it is not JSON, or not a JSON object.
+
+    """
+    try:
+        manifest = json.loads(path.read_text("utf-8"))
+    except json.JSONDecodeError as err:
+        msg = f"{path} is not JSON: {err}"
+        raise RefusedError(msg) from err
+    if not isinstance(manifest, dict):
+        msg = f"{path} is not a JSON object"
+        raise RefusedError(msg)
+    return manifest
+
+
 def pack(env: Mapping[str, str]) -> list[str]:
     """Check the package, pack it and hash the tarball.
 
@@ -130,13 +154,14 @@ def pack(env: Mapping[str, str]) -> list[str]:
         The lines for $GITHUB_OUTPUT.
 
     Raises:
-        RefusedError: a check failed, or npm packed nothing.
+        RefusedError: package.json is not a JSON object, a check failed,
+            or npm packed nothing.
 
     """
     dist = Path("dist")
     dist.mkdir(parents=True, exist_ok=True)
     pkg = Path(env["UNTRUSTED_CRATE_DIR"]) / "pkg"
-    manifest = json.loads((pkg / "package.json").read_text("utf-8"))
+    manifest = read_manifest(pkg / "package.json")
     version = env["UNTRUSTED_VERSION"]
     check(manifest, version, env["GITHUB_REPOSITORY"])
     tarball = npm(dist, "pack", str(pkg.resolve()), "--silent")
