@@ -175,6 +175,14 @@ ORG_CANON_DIR = "{{ env.ORG_BELT_DIR | dirname }}"
 # template re-enters mise, which evaluates this template again; measured
 # on 2026.11.6), and the command holds no backslash: Tera refuses one.
 ORG_PYTHON = '''{{ exec(command=`b="${ORG_BELT_DIR:-}"; v=""; if [ -n "$b" ] && [ -f "$b/config.toml" ]; then v=$(awk -F'"' '/^python = "/ { print $2 }' "$b/config.toml"); fi; d="${XDG_DATA_HOME:-$HOME/.local/share}/mise"; d="${MISE_DATA_DIR:-$d}"; p="$d/installs/python/$v/bin/python3"; if [ -n "$v" ] && [ -x "$p" ]; then echo "$p"; elif [ -n "${ORG_PYTHON:-}" ]; then echo "$ORG_PYTHON"; fi`) }}'''
+# The one refusal of an empty ORG_PYTHON in a task body (#1582): every
+# helper start reads `"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}"`, so the
+# refusal rides the expansion and no body gains a line. Locally it is
+# empty where a repository pins its own Python and the belt's was never
+# installed beside it; the message names the one command that does, the
+# version read from the belt's file like ORG_PYTHON's, never typed here.
+# No apostrophe: bash drops one inside `${VAR:?...}` (#1543).
+ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise install python@{{ exec(command=`b="${ORG_BELT_DIR:-}"; if [ -n "$b" ] && [ -f "$b/config.toml" ]; then awk -F'"' '/^python = "/ { print $2 }' "$b/config.toml"; fi`) }} (CI: the canon action)'''
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
@@ -1620,7 +1628,7 @@ fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
-  | python3 "${ORG_BELT_DIR}/biome-config.py" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
@@ -1698,7 +1706,7 @@ fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
-  | python3 "${ORG_BELT_DIR}/biome-config.py" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
@@ -2079,7 +2087,7 @@ files=$(action_files)
 # said nothing. ORG_BELT_DIR resolves in both worlds (#445).
 helper="${ORG_BELT_DIR}/embedded-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${helper}" ${files}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" ${files}
 '''
 
 [tasks."lint:workflow-shell"]
@@ -2120,7 +2128,7 @@ templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --ceiling security/workflow-shell-debt.txt ${files}
 '''
 
@@ -2143,7 +2151,7 @@ templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --ceiling security/workflow-shell-debt.txt --write ${files}
 '''
 
@@ -2173,7 +2181,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --task-ceiling security/task-shell-debt.txt ${files}
 '''
 
@@ -2194,7 +2202,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --task-ceiling security/task-shell-debt.txt --write ${files}
 '''
 
@@ -2407,7 +2415,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 # the name is declared there, not here. Nothing restates it.
 helper="${ORG_BELT_DIR}/belt-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${helper}" --env-from "${ORG_BELT_DIR}/config.toml" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" --env-from "${ORG_BELT_DIR}/config.toml" \
   --source-path "${ORG_BELT_DIR}" ${files}
 '''
 
@@ -2454,7 +2462,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 }
 helper="${ORG_BELT_DIR}/belt-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${helper}" --write ${files}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" --write ${files}
 '''
 
 [tasks."lint:commits"]
@@ -2551,7 +2559,7 @@ dir = "{{cwd}}"
 # ceiling is read from the delivered committed.toml rather than restated
 # — one definition of 72, which is what made the file's delivery the
 # first step of #576.
-run = 'git ls-files ":!vendor/**" | python3 "${ORG_BELT_DIR}/subject-budget.py"'
+run = 'git ls-files ":!vendor/**" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/subject-budget.py"'
 
 [tasks."lint:zizmor"]
 description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"
@@ -2732,7 +2740,7 @@ cargo deny check bans licenses sources
 # helper resolves from the belt, which is where the org's policy lives;
 # a repo running without the canon cannot quietly skip this.
 helper="${ORG_BELT_DIR}/deny-skips.py"
-variants=$(python3 "${helper}" deny.toml)
+variants=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" deny.toml)
 stale=""
 while IFS=$'\t' read -r name variant; do
   [[ -n ${name} ]] || continue
@@ -3090,7 +3098,7 @@ cargo fetch --locked
 # without being compiled at all. Derived, never declared: the repo says
 # nothing and cannot get it wrong.
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 [[ -n ${surface} ]] || {
   echo "lint:rust: a Cargo.toml is tracked but cargo metadata names no workspace member" >&2
   exit 1
@@ -3241,7 +3249,7 @@ cargo fetch --locked
 # of #726 is the POPULATION, and a population computed twice is two
 # populations (#813).
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 excludes=""
 fixing=""
 excluded=""
@@ -3275,7 +3283,7 @@ if [[ -n ${extensions} ]]; then
   . "${ORG_BELT_DIR}/pgrx-env.sh"
   org_pgrx_darwin_flags
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-    | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${ext_majors}" \
+    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${ext_majors}" \
     | org_pgrx_init
   for name in ${extensions}; do
     # shellcheck disable=SC2086  # ${ladder} holds whole flag words
@@ -3386,14 +3394,14 @@ extensions=""
 # would arrive as an EMPTY here-string and this task would report having
 # verified a workspace it never saw (SC2312, and the fail-open shape the
 # gate exists to refuse).
-surface=$(python3 "${ORG_BELT_DIR}/gate-surface.py" \
+surface=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" \
   --exclude "${CLIPPY_EXCLUDE:-}" < "${tmp}/metadata.json")
 while IFS=$'\t' read -r record spec kind majors _dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   extensions="${extensions} ${spec%@*}"
   pgrx="${pgrx}${pgrx:+,}${spec%@*}:${majors##*,}"
 done <<< "${surface}"
-plan=$(python3 "${ORG_BELT_DIR}/msrv-plan.py" \
+plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv-plan.py" \
   --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
   --pgrx "${pgrx}" < "${tmp}/metadata.json")
 [[ -n ${plan} ]] || {
@@ -3409,7 +3417,7 @@ if [[ -n ${extensions} && ${plan} == *"--features pg"* ]]; then
   org_pgrx_darwin_flags
   majors="${pgrx##*:}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-    | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
     | org_pgrx_init > /dev/null
 fi
 features="${CLIPPY_FEATURES:---all-features}"
@@ -3505,7 +3513,7 @@ majors=""
 # so a red derivation would read as a workspace with no extension and
 # this task would skip clean having checked nothing.
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 while IFS=$'\t' read -r record spec kind crate_majors _dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   specs="${specs} ${spec}:${crate_majors##*,}"
@@ -3531,7 +3539,7 @@ contradiction_count=$(org_clippy_pgrx_contradiction_count)
 . "${ORG_BELT_DIR}/pgrx-env.sh"
 org_pgrx_darwin_flags
 mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-  | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
   | org_pgrx_init > /dev/null
 count=0
 linted=""
@@ -3720,7 +3728,7 @@ command -v cargo > /dev/null || {
   exit 1
 }
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" \
     --publish .github/workflows/publish.yml)
 count=0
 while IFS=$'\t' read -r record _spec _kind _majors _dir; do
@@ -4062,7 +4070,7 @@ while IFS= read -r cfg; do
     rc=1
     continue
   fi
-  python3 "${ORG_BELT_DIR}/tsconfig-dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/tsconfig-dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
     --name "${cfg}" < "${tmp}/resolved.json" || rc=1
 done <<< "${cfgs}"
 [[ ${rc} -eq 0 ]] || {
@@ -4898,7 +4906,7 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
-        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(bestpractices: ${bp_owner})"
         elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
           failed="${failed} ${repo}(bestpractices: passing percentage below 100)"
@@ -4918,7 +4926,7 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
-        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(baseline: ${bp_owner})"
         elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
           failed="${failed} ${repo}(baseline: shield worn but the issuer records no achieved level)"
@@ -5239,7 +5247,7 @@ git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
 }
 top=$(git rev-parse --show-toplevel)
 readme=$(git ls-files | grep -iE '^readme(\.md|\.markdown)?$' | head -n 1 || true)
-python3 "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
 '''
 
 [tasks."audit:links"]
@@ -5339,7 +5347,7 @@ if ((status != 0 && (status < 10 || status > 14))); then
   exit "${status}"
 fi
 left=0
-python3 "${ORG_BELT_DIR}/zizmor-signer.py" --signer-workflow "${signer_wf}" < "${json}" || left=$?
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/zizmor-signer.py" --signer-workflow "${signer_wf}" < "${json}" || left=$?
 ((left == 0)) && exit 0
 ((left == 1)) || exit "${left}"
 status=0
@@ -5969,7 +5977,7 @@ command -v cargo > /dev/null || {
 }
 cargo fetch --locked
 cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/workspace-inherit.py"
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace-inherit.py"
 '''
 
 [tasks."lint:gate-stub"]
@@ -6760,7 +6768,7 @@ command -v gh > /dev/null || {
 }
 . "${ORG_BELT_DIR}/identity.sh"
 owner=$(org_identity owner)
-python3 "${ORG_BELT_DIR}/security-config.py" --owner "${owner}" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/security-config.py" --owner "${owner}" \
   --record security/org-default.json --private-record security/org-private.json \
   --roster slsa/assert-policy.json
 '''
@@ -7039,7 +7047,7 @@ files=$(git ls-files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
   echo "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or JavaScript tracked, skipped"
   exit 0
 }
-python3 "${ORG_BELT_DIR}/coverage-exclusions.py" <<< "${files}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-exclusions.py" <<< "${files}"
 '''
 
 [tasks."coverage:check"]
@@ -7075,7 +7083,7 @@ dir = "{{cwd}}"
 # (#1410): a tree with none of these can measure nothing, so the gate
 # need not install a coverage tool for it.
 run = '''
-floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
 tracked_py=$(git ls-files -- '*.py') || tracked_py=""
 if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked_py} && ! -f package.json ]]; then
   if [[ -z ${floor} ]]; then
@@ -7140,7 +7148,7 @@ if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
 elif [[ -f Cargo.toml ]]; then
   echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
 fi
-python3 "${ORG_BELT_DIR}/coverage-floor.py" write \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
 '''
 
@@ -8109,7 +8117,7 @@ done
 # tracks (#505, #354, #693). A disagreeing roster prints no members, so
 # it derives nothing and the reconciliation below says why.
 owed=""
-if [[ -n ${repos} ]] && ! owed=$(python3 "${derive}" <<< "${population}"); then
+if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${derive}" <<< "${population}"); then
   echo "audit:adoption: the population document was refused, so no obligations were derived" >&2
   exit 1
 fi
@@ -8355,7 +8363,7 @@ run = '''
   echo "audit:coverage-branches: no Cargo.toml, skipped"
   exit 0
 }
-floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg rust-branches) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read --leg rust-branches) || exit 1
 [[ -n ${floor} ]] || {
   echo "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped"
   exit 0
@@ -9002,7 +9010,7 @@ lock="mise.lock"
   exit 0
 }
 git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
-  | python3 "${ORG_BELT_DIR}/lock-platforms.py" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock-platforms.py" \
     --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
     --config "${cfg}" --lock "${lock}"
 '''
@@ -9038,7 +9046,7 @@ command -v gh > /dev/null || {
   echo "  release which assets it published; without gh it cannot ask." >&2
   exit 1
 }
-candidates=$(printf '%s\n' "${locks}" | python3 "${ORG_BELT_DIR}/lock-arch.py")
+candidates=$(printf '%s\n' "${locks}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock-arch.py")
 # Dated allowances. A KNOWN, FILED, DEFERRED mismatch is carried the way
 # deny.toml carries a skip — with its date and the issue that retires
 # it — and for the same reason: the alternative is a scheduled red that
@@ -9301,7 +9309,7 @@ args=(--since "6 months ago" --recent "7 days ago")
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   args+=(--summary "${GITHUB_STEP_SUMMARY}")
 fi
-python3 "${ORG_BELT_DIR}/regression-count.py" "${args[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/regression-count.py" "${args[@]}"
 '''
 
 [tasks."lint:nested-permissions"]
@@ -9645,7 +9653,7 @@ while IFS= read -r f; do
 done << EOF
 ${listing}
 EOF
-python3 "${ORG_BELT_DIR}/plan-producers.py" --policy "${policy}" ${flows[@]+"${flows[@]}"}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/plan-producers.py" --policy "${policy}" ${flows[@]+"${flows[@]}"}
 '''
 
 [tasks."lint:caller-permissions"]
@@ -10056,7 +10064,7 @@ while IFS= read -r f; do
 done <<< "${files}"
 traps=0
 # shellcheck disable=SC2086  # the file lists are newline-separated on purpose
-python3 "${ORG_BELT_DIR}/exit-trap.py" ${scripts} ${configs} || traps=$?
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/exit-trap.py" ${scripts} ${configs} || traps=$?
 if [[ -n ${found} ]]; then
   echo "lint:bash-portability: bash 4+ syntax found (macOS ships 3.2):" >&2
   printf "%b\n" "${found}" >&2
