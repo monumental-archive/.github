@@ -206,6 +206,13 @@ class Refuses(unittest.TestCase):
             "crate/Cargo.toml names no package — a cell plans the crate it built",
         )
 
+    def test_a_package_that_is_not_a_table_is_refused(self) -> None:
+        """`package = false` (#1556's shrunk example): an AttributeError before."""
+        self.assert_refused(
+            run_helper(manifest="package = false\n"),
+            "crate/Cargo.toml names no package — a cell plans the crate it built",
+        )
+
     def test_a_wrong_argument_count_is_usage(self) -> None:
         """Two positional arguments, never fewer."""
         run = run_helper(args=("crate",))
