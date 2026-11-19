@@ -175,7 +175,7 @@ jobs:
       # artifact of its merge-group or push run, instead of measuring the
       # same commit again. Listing a run's artifacts and downloading one
       # takes `actions: read`; it reads, and writes nothing.
-      actions: read
+      actions: read # the gate's coverage figures for this commit, read-only (#1622)
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml

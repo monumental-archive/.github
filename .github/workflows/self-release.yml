@@ -50,7 +50,7 @@ jobs:
       # floor step reads the coverage figures the gate kept for the
       # commit (the `coverage-figures-<sha>` artifact) instead of
       # measuring it again (#1622). Read-only.
-      actions: read
+      actions: read # the gate's coverage figures for this commit, read-only (#1622)
       # Passed through to release.yml's tag job, where gitsign spends it
       # on the keyless tag signature (#349 S4) — the callee's
       # capability-boundary marker carries the argument.
