@@ -19,12 +19,18 @@ from __future__ import annotations
 
 import os
 import pathlib
+import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
+)
 
 CANON = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = CANON / ".github" / "actions" / "canon" / "python.sh"
@@ -245,9 +251,9 @@ def starters() -> list[pathlib.Path]:
     listed = subprocess.run(
         [git, "ls-files", "-z", "*.sh"],
         cwd=CANON,
-        # Without git's own variables: the suite aims GIT_DIR at a decoy
-        # repository (#1463), where this listing would come back empty.
-        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        # hermetic.env carries no git variables: the suite aims GIT_DIR at
+        # a decoy repository (#1463), where this listing would be empty.
+        env=hermetic.env(),
         capture_output=True,
         text=True,
         check=True,

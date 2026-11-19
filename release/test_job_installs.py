@@ -33,8 +33,8 @@ GATE_LISTS names them, and GATE_WHOLE the job that keeps everything.
 import ast
 import importlib.util
 import io
-import os
 import re
+import runpy
 import shlex
 import shutil
 
@@ -45,7 +45,12 @@ import tokenize
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
@@ -1314,9 +1319,9 @@ def tracked_helpers() -> set[str]:
     listed = subprocess.run(
         [git, "ls-files", "-z", "*.py"],
         cwd=CANON,
-        # Without git's own variables: the suite aims GIT_DIR at a decoy
-        # repository (#1463), where this listing would come back empty.
-        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        # hermetic.env carries no git variables: the suite aims GIT_DIR at
+        # a decoy repository (#1463), where this listing would be empty.
+        env=hermetic.env(),
         capture_output=True,
         text=True,
         check=True,
