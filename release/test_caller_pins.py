@@ -211,6 +211,31 @@ class Refusals(unittest.TestCase):
             install(None, "rust", "cargo-auditable"),
         )
 
+    def test_tools_that_is_not_a_table(self) -> None:
+        """`tools = 0` and `tools = [0]` refuse by name (#1556's shrunk examples).
+
+        Both died with a TypeError before: the reader iterated the value
+        as if it were a table. The gate's `pinned_names` reads them as
+        pinning nothing.
+        """
+        for config in ("tools = 0\n", "tools = [0]\n", 'tools = ["rust"]\n'):
+            with self.subTest(config=config):
+                self.assertEqual(
+                    (
+                        1,
+                        "",
+                        (
+                            "::error::tools in mise.toml is not a table, so no tool"
+                            " is pinned there; pin the build inputs of every class"
+                            " that ships a Rust binary under [tools]\n"
+                        ),
+                    ),
+                    install(config, "rust"),
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    (Path(tmp) / "mise.toml").write_text(config, "utf-8")
+                    self.assertEqual(set(), caller_pins.pinned_names(Path(tmp)))
+
     def test_the_other_config_names_are_read(self) -> None:
         """`.mise.toml` and `mise/config.toml` are configs too."""
         for name in (".mise.toml", "mise/config.toml"):

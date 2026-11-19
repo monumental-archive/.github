@@ -187,6 +187,22 @@ def find_config(root: Path) -> Path | None:
     return None
 
 
+def tools_of(path: Path) -> dict | None:
+    """Read a config's `[tools]` table.
+
+    `tools` is a table in every config mise accepts; TOML also lets a
+    file say `tools = 1` or `tools = ["rust"]`, and those pin nothing
+    (#1556: both died here as a TypeError).
+
+    Returns:
+        The table, empty where the file has none, or None where `tools`
+        is some other value.
+
+    """
+    tools = tomllib.loads(path.read_text("utf-8")).get("tools", {})
+    return tools if isinstance(tools, dict) else None
+
+
 # Every config file mise reads [tools] from in a checkout, for a question
 # that must not miss one: which tools does this repository pin at all?
 EVERY_CONFIG = (*CANDIDATES, ".config/mise.toml", ".config/mise/config.toml")
@@ -209,8 +225,7 @@ def pinned_names(root: Path) -> set[str]:
     for name in EVERY_CONFIG:
         path = root / name
         if path.is_file():
-            tools = tomllib.loads(path.read_text("utf-8")).get("tools", {})
-            names.update(tool_name(key) for key in tools)
+            names.update(tool_name(key) for key in tools_of(path) or {})
     return names
 
 
@@ -230,9 +245,9 @@ def read_pins(
         has one per major, in the order the majors were named.
 
     Raises:
-        RefusalError: no config, a needed tool unpinned, a tool pinned
-            under two keys, or a major with no entry or two; every such
-            tool is named.
+        RefusalError: no config, a `tools` that is not a table, a needed
+            tool unpinned, a tool pinned under two keys, or a major with
+            no entry or two; every such tool is named.
 
     """
     majors = {name: wanted for name, wanted in (majors or {}).items() if wanted}
@@ -245,7 +260,13 @@ def read_pins(
             f" config: they are build inputs of {input_of}"
         )
         raise RefusalError(msg)
-    tools = tomllib.loads(config.read_text("utf-8")).get("tools", {})
+    tools = tools_of(config)
+    if tools is None:
+        msg = (
+            f"tools in {config.name} is not a table, so no tool is pinned"
+            f" there; pin the build inputs of {input_of} under [tools]"
+        )
+        raise RefusalError(msg)
     keys: dict[str, list[str]] = {}
     for key in tools:
         keys.setdefault(tool_name(key), []).append(key)
