@@ -13,8 +13,9 @@ Counted is what the range adds or modifies under
 diffed from the merge base so a main that moved on is not counted. A
 deletion signs nothing, and a non-decision file there (the README) is
 not a decision. Renames are off: a decision moved to a new name is a
-new document there, counted, never folded into an `R` the filter drops. The refusal prints `vex-one-per-merge.txt`, the one
-sentence the workflow prints too, then the files.
+new document there, counted, never folded into an `R` the filter drops.
+The refusal prints `vex-one-per-merge.txt`, the one sentence the
+workflow prints too, then the files.
 
 Skips clean, by name: where no decision is tracked, where there is no
 `origin/main`, and where nothing is ahead of it (the default branch
@@ -35,6 +36,8 @@ GIT = shutil.which("git") or "git"
 DECISIONS = "security/vex/*.openvex.json"
 BASE = "origin/main"
 NAME = "lint:vex-one-per-merge"
+# A merge commit's parents line: the commit, then its two parents.
+MERGE_WORDS = 3
 
 
 def git(*args: str) -> str:
@@ -69,7 +72,7 @@ def tip() -> str:
 
     """
     parents = git("rev-list", "--parents", "-n", "1", "HEAD").split()
-    return "HEAD^2" if len(parents) > 2 else "HEAD"
+    return "HEAD^2" if len(parents) >= MERGE_WORDS else "HEAD"
 
 
 def main() -> int:

@@ -132,7 +132,7 @@ class OnePerMerge(unittest.TestCase):
         self.assertIn("1 VEX decision(s) changed ahead of origin/main", done.stdout)
 
     def test_two_are_red_naming_both(self) -> None:
-        """Two decisions, across two commits, are red with the sentence and both files."""
+        """Two decisions over two commits: red, with the sentence and both files."""
         self.tree.commit(B)
         self.tree.commit(A)
         done = self.tree.run()
@@ -193,10 +193,8 @@ class OnePerMerge(unittest.TestCase):
         self.tree.mark_main()
         done = self.tree.run()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn(
-            f"{TASK}: nothing ahead of origin/main (the default branch itself), skipped",
-            done.stdout,
-        )
+        skipped = "nothing ahead of origin/main (the default branch itself), skipped"
+        self.assertIn(f"{TASK}: {skipped}", done.stdout)
 
     def test_no_origin_main_skips_by_name(self) -> None:
         """A clone with no default branch to diverge from skips."""
