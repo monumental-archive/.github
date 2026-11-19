@@ -31,7 +31,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[0] / "mise" / "hermetic.py"))
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
 )
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_issue.py"

@@ -29,7 +29,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[0] / "mise" / "hermetic.py"))
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
 )
 
 HERE = pathlib.Path(__file__).resolve().parent
