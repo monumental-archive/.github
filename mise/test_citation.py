@@ -98,5 +98,36 @@ class AbsentFieldIsNamed(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
 
 
+class TheRenderMatchesTheStamp(unittest.TestCase):
+    """The render byte-matches what a release stamped (#327)."""
+
+    def test_the_canons_stamped_citation_renders_unchanged(self) -> None:
+        """The canon's own files: the release wrote date-released bare.
+
+        The stamper rewrites the line unquoted at every release, so a
+        render that quoted it reddened lint:citation on every release
+        pull request (measured on canon v1.20.0's).
+        """
+        canon = Path(__file__).resolve().parent.parent
+        stamped = (canon / "CITATION.cff").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copyfile(canon / "REUSE.toml", root / "REUSE.toml")
+            (root / "CITATION.cff").write_text(stamped, encoding="utf-8")
+            env = hermetic.env()
+            env["CITATION_OUT"] = str(root / "out.cff")
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
+                [BASH, str(SCRIPT)],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, done.returncode, done.stderr)
+            self.assertEqual(stamped, (root / "out.cff").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
