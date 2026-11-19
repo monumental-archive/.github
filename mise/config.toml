@@ -516,7 +516,7 @@ python = "3.15.2"
 # manylinux x86_64/aarch64, so the Mac and the runner run one build.
 # The tool venv is built on the `python` pin above, never one uv
 # fetched — the measurement runs the tests on that interpreter.
-"pipx:coverage" = "7.17.2"
+"pipx:coverage" = "7.17.3"
 # Mutation testing for Python (#1354): `audit:mutants`' Python leg.
 # mutmut 3.8.1, PyPI-only (no aqua package), so the FIFTH pipx:
 # exception, on the same checksummed uv under the UV_* floor env and
