@@ -626,6 +626,53 @@ class Nested(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class NestedBadges(unittest.TestCase):
+    """lint:badges never runs fix:badges through a nested mise (#394).
+
+    lint:badges obtained the badge block with `mise run fix:badges`, and
+    that nested mise raced the lint fan-out `ci` runs, so `mise run ci`
+    failed on a many-core machine and every push needed `--no-verify`.
+    The derivation moved to mise/derive-badges.sh, which both tasks now
+    run directly. These rows run the nested-mise check over the REAL
+    mise/config.toml, as it is and with #394's old line put back.
+    """
+
+    CONFIG = Path(__file__).with_name("config.toml")
+    NOW = 'BADGES_OUT="${tmp}" "${ORG_BELT_DIR}/derive-badges.sh" > /dev/null\n'
+    OLD = 'BADGES_OUT="${tmp}" mise run fix:badges > /dev/null\n'
+
+    @staticmethod
+    def findings(text: str) -> list[str]:
+        """Run the check over a copy of the belt's config holding `text`.
+
+        Returns:
+            The findings that name lint:badges.
+
+        """
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(text, encoding="utf-8")
+            found = bs.nested({path: bs.read(path)})
+        return [f for f in found if ": lint:badges: " in f]
+
+    def test_the_belt_as_it_is_runs_the_derivation_directly(self) -> None:
+        """The real body calls derive-badges.sh, and the check is silent."""
+        text = self.CONFIG.read_text(encoding="utf-8")
+        self.assertEqual(self.findings(text), [])
+        self.assertEqual(text.count(self.NOW), 1)
+
+    def test_the_old_nested_call_is_named(self) -> None:
+        """#394's line, back in the real body, is refused by task name."""
+        text = self.CONFIG.read_text(encoding="utf-8").replace(self.NOW, self.OLD)
+        found = self.findings(text)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(
+            ": lint:badges: the body executes `mise run` — a nested mise races"
+            " the parallel lint fan-out",
+            found[0],
+        )
+
+
 class NestedMarker(unittest.TestCase):
     """What excuses an invocation, and what only looks like it does.
 
