@@ -114,6 +114,20 @@ own work and adds the task that runs it to its row.
 [signer#86]: https://github.com/monumental-archive/signer/issues/86
 [iiif-server#212]: https://github.com/monumental-archive/iiif-server/issues/212
 
+### A copied fixture keeps its source's licence
+
+Property 5 means fixtures copied from other works: a published crate,
+a git bundle, a captured API response. Those bytes are that work's,
+not this repository's, so the pull request that adds one also adds a
+`REUSE.toml` annotation for its path, `precedence = "override"`,
+quoting the source's own copyright line and licence expression, and
+the text of each licence it names under `LICENSES/`. Nothing in a
+file's bytes says where it came from, so review holds the annotation;
+`lint:licence` holds the texts, red on any identifier a `REUSE.toml`
+names without its `LICENSES/<id>.txt` ([#1589]).
+
+[#1589]: https://github.com/monumental-archive/.github/issues/1589
+
 ### No number can be bought
 
 - The mutation measure is "no unexplained surviving mutant", never a
