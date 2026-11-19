@@ -44,9 +44,9 @@ def header_line(body: str) -> None:
 
     A body line that begins with `committer` makes the merge queue's
     squash commit unverifiable (#1529). GitHub signs the commit, then
-    writes its `gpgsig` header after the LAST line that begins with
-    `committer` — and when the body holds one, that is inside the
-    message. The signature is good over the commit without the splice
+    writes its `gpgsig` header after a line that begins with
+    `committer` — and when the body holds one, it lands there, inside
+    the message. The signature is good over the commit without the splice
     and bad over the commit as stored, so `required_signatures` reads
     it `invalid`, and the queue removes the green pull request with
     `branch_protection_failure` and no other word. Measured on #1512,
