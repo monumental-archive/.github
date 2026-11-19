@@ -445,7 +445,9 @@ class GateRows(GoBranchCase):
         done, _, calls = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: go leg holds the floor 90.0 (95.0%)\n", done.stdout
+            "coverage:check: go leg holds the floor 90.0 (95.0%)\n"
+            "coverage:check: upload coverage.txt\n",
+            done.stdout,
         )
         self.assertEqual([], calls)
 
