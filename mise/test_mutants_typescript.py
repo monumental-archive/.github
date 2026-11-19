@@ -145,6 +145,7 @@ class Planted(unittest.TestCase):
             PLANT_REPORT=str(self.planted),
             MUTANTS_SUMMARY_DIR=str(self.summary),
             ORG_BELT_DIR=str(BELT),
+            CI="true",
         )
         self.git("init", "-q")
         self.track(".gitignore", "node_modules/\nreports/\n")
@@ -242,6 +243,35 @@ class Adoption(Planted):
             ],
         )
         self.assertEqual(log, [])
+
+    def test_a_workstation_is_refused_by_name(self) -> None:
+        """No CI: adopted, the leg refuses before anything runs."""
+        self.plant(*KILLED)
+        env = dict(self.env)
+        del env["CI"]
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, str(SCRIPT)],
+            cwd=self.tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [
+                (
+                    f"{LABEL}: CI is unset — mutants run in place with the tree's own"
+                    " environment,"
+                ),
+                (
+                    "  so this leg runs on a runner only (repo-mutants.yml), never a"
+                    " workstation"
+                ),
+            ],
+        )
+        self.assertEqual(self.log.read_text(encoding="utf-8"), "")
 
     def test_stryker_missing_is_red_by_name(self) -> None:
         """Adopted with no StrykerJS installed: red, naming what to add."""

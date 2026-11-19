@@ -32,7 +32,12 @@
 # place (#1358). In place, nothing is copied and every import sees the
 # mutant. StrykerJS restores each file after; the leg refuses a tree with
 # uncommitted tracked changes before the run, and is red if one remains
-# after it. An audit-job tool, never a workstation one.
+# after it. The wrapper passes `--inPlace` itself; the repository cannot
+# turn it off through the leg (ruling on #1358).
+#
+# A RUNNER ONLY: refused, by name, where `CI` is unset. In place, every
+# mutant runs with whatever environment the tree holds, so mutated code
+# never runs beside a workstation's live `.env` (ruling on #1358).
 #
 # STRYKERJS EXITS 0 WHATEVER SURVIVES (no `thresholds.break`, which the
 # config may not set), so the verdict is read from its JSON report, never
@@ -77,6 +82,12 @@ if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then
   echo "${label}: no ${adoption} tracked, skipped"
   summary "0/1"$'\t'"skipped"
   exit 0
+fi
+
+if [[ -z ${CI:-} ]]; then
+  echo "${label}: CI is unset — mutants run in place with the tree's own environment," >&2
+  echo "  so this leg runs on a runner only (repo-mutants.yml), never a workstation" >&2
+  exit 1
 fi
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"

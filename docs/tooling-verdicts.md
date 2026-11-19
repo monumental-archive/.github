@@ -2420,8 +2420,14 @@ What the leg does, each measured on 10.1.1 and held by a stub row
   its mutant: on one file, 144 of 144 "survived" and none was killed.
   `--inPlace` gave 106 killed, 5 timed out, 30 survived and 3 not
   covered, the same as a sandbox run with hand-written aliases. The
-  leg refuses uncommitted tracked changes before the run and is red
-  if one remains after it.
+  leg passes `--inPlace` itself, refuses uncommitted tracked changes
+  before the run and is red if one remains after it (orchestrator's
+  ruling on #1358; keeping the sandbox with per-package aliases was
+  rejected).
+- **A runner only.** In place, a mutant runs with whatever
+  environment the tree holds, so the leg refuses, by name, where `CI`
+  is unset: mutated code never runs beside a workstation's live
+  `.env` (same ruling).
 - **What counts.** The JSON report (`reports/mutation/mutation.json`,
   schema 1.0) gives one status per mutant. Killed and Timeout are
   killed. Survived is a survivor, and NoCoverage is a survivor named
