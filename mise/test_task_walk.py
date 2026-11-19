@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import decoded
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
@@ -39,7 +40,7 @@ def captured(key: str) -> object:
         ValueError: the capture is not the object recorded.
 
     """
-    if not tw.is_object(CAPTURE) or key not in CAPTURE:
+    if not decoded.is_object(CAPTURE) or key not in CAPTURE:
         msg = f"tasks-info.json holds no {key!r}"
         raise ValueError(msg)
     return CAPTURE[key]
@@ -56,7 +57,7 @@ def info_map() -> dict[str, object]:
 
     """
     answers = captured("tasks info --json")
-    if not tw.is_object(answers):
+    if not decoded.is_object(answers):
         msg = "tasks-info.json: its answers are not an object"
         raise ValueError(msg)
     return answers
@@ -73,7 +74,7 @@ def name_list() -> list[str]:
 
     """
     names = captured("tasks ls --hidden --json")
-    if not tw.is_strings(names):
+    if not decoded.is_strings(names):
         msg = "tasks-info.json: its names are not strings"
         raise ValueError(msg)
     return names
@@ -94,7 +95,7 @@ def answer(name: str, **fields: object) -> dict[str, object]:
 
     """
     found = INFO.get(name)
-    if not tw.is_object(found):
+    if not decoded.is_object(found):
         msg = f"tasks-info.json holds no task {name!r}"
         raise ValueError(msg)
     return found | fields
