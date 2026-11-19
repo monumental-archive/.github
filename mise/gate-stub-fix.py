@@ -84,7 +84,9 @@ def fix(text: str) -> str | None:
     if start is None:
         return None
     end = start + 1
-    while end < len(lines) and (lines[end][:1] in {" ", "\t"} or not lines[end].strip()):
+    while end < len(lines) and (
+        lines[end][:1] in {" ", "\t"} or not lines[end].strip()
+    ):
         end += 1
     while end > start + 1 and not lines[end - 1].strip():
         end -= 1
