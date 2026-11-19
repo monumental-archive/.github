@@ -18,8 +18,12 @@ URLs when it is not, or when the entry names no repository at all.
 """
 
 import argparse
-import json
 import sys
+from dataclasses import dataclass
+from typing import Self
+
+import decoded
+from typed_std import NoStdinError, stdin_text
 
 
 def normalised(url: str) -> str:
@@ -35,16 +39,38 @@ def normalised(url: str) -> str:
     return url.removesuffix(".git")
 
 
-def finding(entry: dict, wearer: str) -> str | None:
+@dataclass(frozen=True)
+class Entry:
+    """The two fields of a project entry the verdict reads."""
+
+    project: str  # the entry's `id` as the finding writes it, or `?`
+    repo_url: str | None  # None unless the entry carries a string
+
+    @classmethod
+    def of(cls, entry: dict[str, object]) -> Self:
+        """Read the two fields from a decoded project object.
+
+        Returns:
+            The entry; a missing or non-string `repo_url` is None.
+
+        """
+        url = entry.get("repo_url")
+        return cls(
+            project=str(entry.get("id", "?")),
+            repo_url=url if isinstance(url, str) else None,
+        )
+
+
+def finding(entry: Entry, wearer: str) -> str | None:
     """Compare an entry's repository with the wearer's.
 
     Returns:
         None when the entry belongs to the wearer, else the finding.
 
     """
-    project = entry.get("id", "?")
-    repo_url = entry.get("repo_url")
-    if not isinstance(repo_url, str) or not repo_url.strip():
+    project = entry.project
+    repo_url = entry.repo_url
+    if repo_url is None or not repo_url.strip():
         return f"project {project} names no repo_url, so nothing binds it to {wearer}"
     if normalised(repo_url) == normalised(wearer):
         return None
@@ -52,6 +78,12 @@ def finding(entry: dict, wearer: str) -> str | None:
         f"project {project}'s repo_url is {repo_url}, not {wearer}, "
         "the repository wearing it"
     )
+
+
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    wearer: str
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,16 +95,19 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("wearer", help="https URL of the repository wearing the shield")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     try:
-        entry = json.load(sys.stdin)
-    except json.JSONDecodeError as err:
+        entry = decoded.load_json(stdin_text())
+    except NoStdinError as err:
+        print(f"the issuer's answer cannot be read: {err}")
+        return 1
+    except decoded.UndecodableError as err:
         print(f"the issuer's answer is not JSON: {err}")
         return 1
-    if not isinstance(entry, dict):
+    if not decoded.is_object(entry):
         print("the issuer's answer is not a project object")
         return 1
-    found = finding(entry, args.wearer)
+    found = finding(Entry.of(entry), args.wearer)
     if found is None:
         return 0
     print(found)

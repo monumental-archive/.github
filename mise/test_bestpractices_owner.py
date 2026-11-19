@@ -124,6 +124,23 @@ class Normalisation(unittest.TestCase):
             "https://github.com/monumental-archive/.github\n",
         )
 
+    def test_a_process_with_no_stdin_is_red_by_name(self) -> None:
+        """No standard input is named, never a traceback (#1681)."""
+        out = io.StringIO()
+        real = owner.sys.stdin
+        owner.sys.stdin = None
+        try:
+            with redirect_stdout(out):
+                status = owner.main([CANON_WEARER])
+        finally:
+            owner.sys.stdin = real
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            out.getvalue(),
+            "the issuer's answer cannot be read: no standard input: the"
+            " process was started without one\n",
+        )
+
     def test_a_non_object_answer_is_red(self) -> None:
         """A list is not a project."""
         self.assertEqual(run([CANON], CANON_WEARER)[0], 1)

@@ -78,7 +78,8 @@ class Exemption(unittest.TestCase):
     ) -> None:
         """Case of owner and repository does not matter."""
         found, on = drawn
-        self.assertEqual(zs.on_signer(found, zs.signer_repository(WORKFLOW)), on, found)
+        signer = zs.signer_repository(WORKFLOW)
+        self.assertEqual(zs.on_signer(zs.Finding.of(found), signer), on, found)
 
     @given(st.data(), st.lists(finding(), max_size=6))
     def test_order_does_not_matter(

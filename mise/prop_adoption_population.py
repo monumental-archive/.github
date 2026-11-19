@@ -80,7 +80,7 @@ class Obligations(unittest.TestCase):
     @given(MEMBER)
     def test_what_a_member_owes(self, member: dict) -> None:
         """Each artifact owed exactly when its condition holds."""
-        owed = {artifact for artifact, _ in ap.obligations(member)}
+        owed = {artifact for artifact, _ in ap.obligations(ap.Member.of(member, "m"))}
         self.assertLessEqual({"ci", "audit"}, owed)
         public = member["visibility"] != "private"
         self.assertEqual("scorecard" in owed, public)

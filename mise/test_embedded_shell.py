@@ -883,6 +883,23 @@ class Tasks(unittest.TestCase):
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("every task body fits 15 lines or its debt entry (0 over", out)
 
+    def test_a_config_that_is_not_toml_is_refused_by_name(self) -> None:
+        """An undecodable config is a refusal naming it, in each mode (#1681)."""
+        try:
+            tomllib.loads("lint")
+        except tomllib.TOMLDecodeError as exc:
+            why = str(exc)
+        for write, label in ((False, "task-shell"), (True, "fix:task-shell")):
+            rc, out, err = self.run_ceiling("lint", write=write)
+            self.assertEqual((rc, out), (1, ""))
+            self.assertEqual(err, f"{label}: {self.cfg}: not TOML: {why}\n")
+
+    def test_tasks_that_is_not_a_table_is_refused_by_name(self) -> None:
+        """`tasks = 1` has no bodies to weigh; it is named, not a crash."""
+        rc, out, err = self.run_ceiling("tasks = 1\n")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(err, f"task-shell: {self.cfg}: tasks is not a table\n")
+
     def test_no_debt_file_and_no_long_body_passes(self) -> None:
         """A repository with nothing over the ceiling carries no file."""
         rc, out, _ = self.run_ceiling(config(lint_a=3, fix_a=[2, 2]))
