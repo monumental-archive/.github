@@ -26,7 +26,7 @@ import re
 import sys
 import tokenize
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, override
 
 PYTHON = frozenset({".py", ".pyi"})
 RUST = frozenset({".rs"})
@@ -85,6 +85,7 @@ class Finding(NamedTuple):
     line: int
     rule: str
 
+    @override
     def __str__(self) -> str:
         """Render as `path:line: rule`.
 
@@ -167,7 +168,8 @@ def scan(path: str) -> list[Finding]:
 
 def main() -> None:
     """Scan the paths on stdin and report."""
-    paths = [p for p in sys.stdin.read().splitlines() if p]
+    listed: str = sys.stdin.read()
+    paths = [p for p in listed.splitlines() if p]
     found = [f for p in paths for f in scan(p)]
     for finding in found:
         print(finding, file=sys.stderr)

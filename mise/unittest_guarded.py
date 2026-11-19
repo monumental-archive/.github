@@ -75,7 +75,9 @@ _chdir = os.chdir
 _last = {"path": START}
 
 
-def _recording_chdir(path: os.PathLike[str] | str | int) -> None:
+def _recording_chdir(
+    path: int | str | bytes | os.PathLike[str] | os.PathLike[bytes],
+) -> None:
     """Change directory and remember where to, for the report."""
     _chdir(path)
     _last["path"] = str(Path.cwd())
@@ -121,6 +123,16 @@ def workers() -> int:
     return int(raw)
 
 
+def _left(message: str) -> None:
+    """Raise the left-the-process error, for its traceback.
+
+    Raises:
+        LeftTheProcessError: always.
+
+    """
+    raise LeftTheProcessError(message)
+
+
 class GuardedResult(unittest.TextTestResult):
     """unittest's text result, plus the working-directory check."""
 
@@ -131,11 +143,12 @@ class GuardedResult(unittest.TextTestResult):
         if message is not None:
             _chdir(START)
             _last["path"] = START
-            # Reported, never raised: the test has already returned, and
-            # there is no frame of its to point at.
-            self.addError(
-                test, (LeftTheProcessError, LeftTheProcessError(message), None)
-            )
+            # Reported, never raised into the test: it has already
+            # returned, and there is no frame of its to point at.
+            try:
+                _left(message)
+            except LeftTheProcessError:
+                self.addError(test, sys.exc_info())
         super().stopTest(test)
 
 
@@ -299,7 +312,17 @@ class GuardedRunner(unittest.TextTestRunner):
     command line's verbosity, failfast and buffer settings.
     """
 
-    resultclass = GuardedResult
+    @override
+    def _makeResult(self) -> GuardedResult:
+        """Build the result unittest's own run reports through.
+
+        Returns:
+            A GuardedResult on the runner's stream and settings.
+
+        """
+        return GuardedResult(
+            self.stream, self.descriptions, self.verbosity, durations=self.durations
+        )
 
     @override
     def run(
