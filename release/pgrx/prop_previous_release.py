@@ -7,12 +7,13 @@ release listings, versions and crate directories. `gh` and `tar` are
 replaced in-process by the row's answers.
 
 The predecessor is no longer GitHub's latest release (#1592): it is the
-newest version the extension's upgrade graph upgrades TO, other than the
+newest version the extension's upgrade graph upgrades TO, LOWER than the
 version under release, that a non-draft release carries tarballs for,
 and that release's tag whatever it is named. So:
 
-- V: `predecessor` is the numerically greatest graph target other than
-  the version, among those the listing carries, whatever order the
+- V: `predecessor` is the numerically greatest graph target lower than
+  the version, among those the listing carries (a release on an older
+  line never upgrades from a newer one), whatever order the
   listing and the directory come in, with the first release in listing
   order that carries it; nothing when no target is carried.
 - V: the guard refuses exactly when the listing was read, this version
@@ -65,6 +66,8 @@ CRATE = st.lists(SEGMENT, min_size=1, max_size=3).map("/".join)
 # Numerically 1.0.10 is newer; as text it sorts first.
 CARRIES_1_0_10 = "demo-1.0.10-pg18-linux-amd64.tar.gz"
 CARRIES_1_0_2 = "demo-1.0.2-pg18-linux-amd64.tar.gz"
+# An older line: releasing 1.2.3 beside a published 1.3.0.
+CARRIES_1_3_0 = "demo-1.3.0-pg18-linux-amd64.tar.gz"
 EDGES = st.lists(st.tuples(VERSION, VERSION), max_size=5)
 
 
@@ -101,11 +104,15 @@ def model(
         for _, to in edges:
             if asset.startswith(f"{name}-{to}-pg"):
                 carried.setdefault(to, tag)
-    carried.pop(version, None)
-    if not carried:
+
+    def numeric(v: str) -> list[int]:
+        return [int(p) for p in v.split(".")]
+
+    lower = {v: t for v, t in carried.items() if numeric(v) < numeric(version)}
+    if not lower:
         return None
-    newest = max(carried, key=lambda v: [int(p) for p in v.split(".")])
-    return newest, carried[newest]
+    newest = max(lower, key=numeric)
+    return newest, lower[newest]
 
 
 def lay(sql: Path, name: str, edges: list[tuple[str, str]]) -> None:
@@ -168,6 +175,12 @@ class OneAnswer(unittest.TestCase):
         version="1.2.3",
         backwards=False,
     )
+    @example(
+        listing=[("v1.3.0", CARRIES_1_3_0), ("v1.0.10", CARRIES_1_0_10)],
+        edges=[("1.0.2", "1.0.10"), ("1.0.10", "1.3.0")],
+        version="1.2.3",
+        backwards=False,
+    )
     def test_the_greatest_carried_target(
         self,
         listing: list[tuple[str, str]],
@@ -175,7 +188,7 @@ class OneAnswer(unittest.TestCase):
         version: str,
         backwards: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
     ) -> None:
-        """The newest installable target, its first carrier, never `version`."""
+        """The newest installable target below `version`, its first carrier."""
         want = model(listing, edges, "demo", version)
         with tempfile.TemporaryDirectory() as tmp:
             sql = Path(tmp) / "sql"

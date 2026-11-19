@@ -130,13 +130,19 @@ echo "installable set recorded in ${record}:"
 sed 's/^/  /' "${record}"
 files_out=" ${record}"
 
-if [[ ${graph_head} == "${VERSION}" ]]; then
+if grep -qxF "${VERSION}" <<< "${graph_targets}"; then
   echo "upgrade graph already reaches ${VERSION}; nothing to derive"
   emit "files=${files_out# }"
   exit 0
 fi
-if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${graph_head}" ]]; then
-  echo "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${graph_head}"
+# The predecessor's candidates are the graph's versions LOWER than this
+# one (#1592): on an older line, a newer published version is not where
+# an installation upgrades to this release from. On a single line they
+# are the whole graph, and `below_head` is the graph's head.
+graph_below=$("${ORG_PYTHON}" "${predecessor_helper}" graph --below "${VERSION}" "${controls[@]}")
+below_head=$(head -n 1 <<< "${graph_below}")
+if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${below_head}" ]]; then
+  echo "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${below_head}"
 fi
 
 # rust and cargo-pgrx are caller build inputs, pinned in the caller's own
@@ -195,18 +201,18 @@ for control in "${controls[@]}"; do
   prev="${answer%%$'\t'*}"
   prev_tag="${answer#*$'\t'}"
   while IFS= read -r candidate; do
-    [[ -n ${candidate} && ${candidate} != "${VERSION}" ]] || continue
+    [[ -n ${candidate} ]] || continue
     [[ ${candidate} != "${prev}" ]] || break
     echo "NOTE: ${name} ${candidate} is in the upgrade graph but no non-draft release"
     echo "      carries its tarballs; not installable, trying the next older version"
-  done <<< "${graph_targets}"
+  done <<< "${graph_below}"
   if [[ -z ${prev} ]]; then
     echo "no non-draft release carries any ${name} tarball; first publish of this extension, no upgrade path needed"
     continue
   fi
-  if [[ ${prev} != "${graph_head}" ]]; then
+  if [[ ${prev} != "${below_head}" ]]; then
     echo "NOTE: deriving ${name} from ${prev}, the newest installable published"
-    echo "      version; graph head ${graph_head} is not installable"
+    echo "      version; graph head ${below_head} is not installable"
   fi
   shipped=$(gh release view "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
     --json assets --jq \

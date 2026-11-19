@@ -12,9 +12,12 @@ an imported tag scheme (#762), a burned head (#816) and a maintenance
 release published after a newer one each split them.
 
 THE PREDECESSOR. The candidates are the versions an `<ext>--<from>--<to>.sql`
-in the extension's `sql/` directory upgrades TO, newest first, the version
-under release excluded: an upgrade graph is the record of what was
-published, where a tag scheme is only a fact about a repository's past.
+in the extension's `sql/` directory upgrades TO that are LOWER than the
+version under release, newest first: an upgrade graph is the record of
+what was published, where a tag scheme is only a fact about a
+repository's past. Lower, not merely other: releasing 1.2.5 on an older
+line while 1.3.0 is published, the predecessor is 1.2.4, and a path from
+1.3.0 would be a downgrade.
 The predecessor is the first candidate a non-draft release carries this
 extension's tarballs for, with that release's tag, whatever it is named.
 A candidate no release carries burned, or lost its release, and is passed
@@ -45,9 +48,10 @@ Stdlib only, so the logic sits under the coverage and mutation legs
         Print the predecessor of the extension FILE declares as
         `VERSION<TAB>TAG`, or nothing on a first publish.
 
-    previous-release.py graph CONTROL...
+    previous-release.py graph [--below V] CONTROL...
         Print the versions any of these extensions' graphs upgrade TO,
-        newest first, one per line: nothing is the empty graph.
+        newest first, one per line: nothing is the empty graph. With
+        --below, only those lower than V: the predecessor's candidates.
 
     previous-release.py record --repo R --version V --out FILE CONTROL...
         The derivation's one forge walk: write the installability record
@@ -123,13 +127,15 @@ class Graph(NamedTuple):
 
 
 def version_key(version: str) -> tuple[int, ...]:
-    """Order `X.Y.Z` numerically.
+    """Order `X.Y.Z` numerically, by its core where it carries a suffix.
 
     Returns:
-        The parts as integers.
+        The core's parts as integers: `1.3.0-rc.1` keys as 1.3.0, so
+        1.3.0 is not lower than it and 1.2.x is.
 
     """
-    return tuple(int(part) for part in version.split("."))
+    core = version.split("+", 1)[0].split("-", 1)[0]
+    return tuple(int(part) for part in core.split("."))
 
 
 def upgrade_graph(sql_dir: Path, name: str) -> Graph:
@@ -174,13 +180,14 @@ def predecessor(
     """Answer which release came before `version` of this extension.
 
     Returns:
-        The newest graph target other than `version` that a non-draft
+        The newest graph target lower than `version` that a non-draft
         release carries, with that release's tag; None when no candidate
         is installable, the one meaning of first publish.
 
     """
+    ceiling = version_key(version)
     for candidate in upgrade_graph(sql_dir, name).targets:
-        if candidate == version:
+        if version_key(candidate) >= ceiling:
             continue
         tag = carrier(rows, name, candidate)
         if tag is not None:
@@ -374,8 +381,10 @@ def targets(args: argparse.Namespace) -> int:
     union = set()
     for control in args.controls:
         union.update(upgrade_graph(*control_parts(control)).targets)
+    ceiling = version_key(args.below) if args.below else None
     for version in sorted(union, key=version_key, reverse=True):
-        print(version)
+        if ceiling is None or version_key(version) < ceiling:
+            print(version)
     return 0
 
 
@@ -389,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="previous-release.py")
     sub = parser.add_subparsers(dest="mode", required=True)
     graph = sub.add_parser("graph")
+    graph.add_argument("--below")
     graph.add_argument("controls", nargs="+")
     for mode in ("guard", "fetch", "predecessor", "record"):
         p = sub.add_parser(mode)

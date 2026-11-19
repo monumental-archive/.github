@@ -816,6 +816,33 @@ class AsksTheOnePredecessor(unittest.TestCase):
         self.assertNotIn(("1.2.3", "1.3.0"), captured_edges("v1.2.3"))
 
 
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
+class DerivesOnTheOlderLine(unittest.TestCase):
+    """Releasing 1.2.5 beside a published 1.3.0 derives from 1.2.4 (#1592).
+
+    The listing is authored, in the REST shape the captures have: no
+    real repository has released on an older line yet, and the row is
+    about the rule, not a history.
+    """
+
+    def test_the_derivation_starts_below_the_version(self) -> None:
+        """1.2.4 on v1.2.4, and no NOTE calls 1.3.0 uninstallable."""
+        tarball = "lab_pg-{}-pg18-linux-amd64.tar.gz"
+        listing = [
+            {"assets": [{"name": tarball.format(v)}], "draft": False, "tag_name": t}
+            for v, t in (("1.3.0", "v1.3.0"), ("1.2.4", "v1.2.4"))
+        ]
+        with TemporaryDirectory() as d:
+            fixture = Path(d) / "listing.json"
+            fixture.write_text(json.dumps(listing))
+            edges = [("1.2.3", "1.2.4"), ("1.2.4", "1.3.0")]
+            repo = Repo(d, "lab_pg", "lab-pg", "1.2.5", edges)
+            result = repo.derive("1.2.5", "1.2.4", str(fixture))
+        self.assertIn("deriving lab_pg: 1.2.4 -> 1.2.5", result.stdout)
+        self.assertIn("release download v1.2.4", result.stderr)
+        self.assertNotIn("NOTE:", result.stdout)
+
+
 def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
     """Pack a predecessor tarball with these files under `top`.
 

@@ -123,7 +123,7 @@ esac
 # the last reversible moment: a stale derivation refuses the MINT, and
 # nothing burns. The predecessor is the one answer the generator and the
 # publish guard use, previous-release.py's (#1592): the newest version in
-# the extension's upgrade graph, other than this one, that a non-draft
+# the extension's upgrade graph LOWER than this one that a non-draft
 # release carries tarballs for, and that release's tag whatever it is
 # named. It used to be GitHub's "latest" release with a `v` on its tag,
 # which an imported tag scheme, a burned head or a maintenance release

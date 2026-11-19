@@ -612,6 +612,59 @@ class OnePredecessor(PreviousRelease):
         )
 
 
+class OlderLine(PreviousRelease):
+    """The predecessor is LOWER than the version under release (#1592).
+
+    1.2.4 and 1.3.0 are both published. A release on the older line,
+    1.2.5, upgrades from 1.2.4: a path from 1.3.0 would be a downgrade.
+    A release on the newer line, 1.3.1, upgrades from 1.3.0.
+    """
+
+    def setUp(self) -> None:
+        """Publish 1.2.4 and 1.3.0, each on its own `v` release."""
+        super().setUp()
+        self.forge(
+            [
+                release("v1.3.0", "demo_ext-1.3.0-pg18-linux-arm64.tar.gz"),
+                release("v1.2.4", "demo_ext-1.2.4-pg18-linux-arm64.tar.gz"),
+            ],
+            "v1.3.0",
+        )
+        self.graph("demo_ext--1.2.3--1.2.4.sql", "demo_ext--1.2.4--1.3.0.sql")
+
+    def predecessor(self, version: str) -> subprocess.CompletedProcess[str]:
+        """Ask the helper for demo_ext's predecessor of `version`.
+
+        Returns:
+            The completed process.
+
+        """
+        argv = [str(PREVIOUS), "predecessor", "--repo", "acme/demo"]
+        control = f"{self.CRATE}/demo_ext.control"
+        argv += ["--version", version, "--control", control]
+        return run(argv, self.env, cwd=self.root)
+
+    def test_each_line_yields_its_own_predecessor(self) -> None:
+        """1.2.5 comes from 1.2.4 on v1.2.4; 1.3.1 from 1.3.0 on v1.3.0."""
+        for version, want in (
+            ("1.2.5", "1.2.4\tv1.2.4\n"),
+            ("1.3.1", "1.3.0\tv1.3.0\n"),
+        ):
+            with self.subTest(version=version):
+                result = self.predecessor(version)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(want, result.stdout)
+
+    def test_the_guard_owes_no_downgrade_path(self) -> None:
+        """Releasing 1.2.5 with 1.2.4--1.2.5 present passes; 1.3.0 is not asked."""
+        self.graph("demo_ext--1.2.4--1.2.5.sql")
+        result = self.previous("guard", version="1.2.5")
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertEqual(
+            "::notice::upgrade path 1.2.4 -> 1.2.5 present\n", result.stdout
+        )
+
+
 class NoSiteAsksForTheLatestRelease(unittest.TestCase):
     """No tracked file under release/ finds a predecessor as "latest" (#1592).
 
