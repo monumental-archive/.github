@@ -531,6 +531,12 @@ python = "3.15.2"
 # the gate, every job without a named list — skips it, and only
 # repo-mutants.yml's `mutants-python` job installs it, by name.
 "pipx:mutmut" = { version = "3.8.1", lazy = true, lazy_bins = ["mutmut"] }
+# Mutation testing for TypeScript (#1358): `audit:mutants`' TypeScript
+# leg, mise/mutants-typescript.sh, runs StrykerJS — and pins nothing
+# here. StrykerJS is the repository's, from its own lockfile under its
+# own npm provenance policy (`@stryker-mutator/core` and its runner in
+# devDependencies), the way its test runner is: a second belt copy
+# could disagree with the runner plugin the repository resolved.
 # Property testing for Python (#1332): the first third-party library
 # the belt's tests import, and only from `prop_*.py` files, which a
 # repository's own `test` task never collects — the ordinary suites
@@ -8447,6 +8453,7 @@ leg() {
 leg go
 leg python
 leg rust
+leg typescript
 if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
   echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2
   exit 1
