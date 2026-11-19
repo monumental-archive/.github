@@ -49,7 +49,9 @@ _SPEC.loader.exec_module(helper)
 # first line names a venv's interpreter, and that venv holds a `mutmut`
 # package, so the leg's start-up hook derives mutmut's site directory
 # from it for real. `run` starts PLANT_CHILD as a child `python3`, the
-# way a suite runs a helper, before it exits with the row's status.
+# way a suite runs a helper, before it exits with the row's status: in
+# PLANT_CHILD_CWD when the row names one, and with MUTANT_UNDER_TEST
+# set, as mutmut 3.8.1's statistics pass sets it.
 MUTMUT_STUB = """#!{python}
 import os
 import subprocess
@@ -61,7 +63,11 @@ with open(os.environ["PLANT_LOG"], "a", encoding="utf-8") as log:
 command = sys.argv[1]
 if command == "run":
     child = os.environ.get("PLANT_CHILD")
-    if child and subprocess.run(["python3", child], check=False).returncode:
+    where = os.environ.get("PLANT_CHILD_CWD")
+    under = os.environ | {"MUTANT_UNDER_TEST": "stats"}
+    if child and subprocess.run(
+        ["python3", child], cwd=where, env=under, check=False
+    ).returncode:
         sys.exit(1)
     sys.exit(int(os.environ.get("PLANT_RUN", "0")))
 if command == "results":
@@ -79,6 +85,30 @@ TRAMPOLINE = (
     "import sys\n"
     "print(sys.path[-1])\n"
 )
+# What every mutated function does first in the statistics pass (mutmut
+# 3.8.1, stats.record_trampoline_hit): read the run's configuration.
+STATS_HIT = (
+    "from mutmut.configuration import config\nconfig()\nprint('statistics recorded')\n"
+)
+# The stand-in's loader reads the CURRENT directory, lazily, once, and
+# fails with mutmut's own words where there is no configuration.
+CONFIGURATION = """from pathlib import Path
+
+_config = None
+
+
+def config():
+    global _config
+    if _config is None:
+        if not Path("pyproject.toml").is_file():
+            raise FileNotFoundError(
+                "Could not figure out where the code to mutate is."
+                ' Please specify it by adding "source_paths=code_dir"'
+                " in setup.cfg to the [mutmut] section."
+            )
+        _config = Path.cwd()
+    return _config
+"""
 VENV: dict[str, Path] = {}
 
 
@@ -110,6 +140,7 @@ def setUpModule() -> None:
     (package / "trampoline.py").write_text(
         "wrap_in_trampoline = None\n", encoding="utf-8"
     )
+    (package.parent / "configuration.py").write_text(CONFIGURATION, encoding="utf-8")
     VENV["python"] = python
     VENV["site"] = Path(site)
 
@@ -633,9 +664,10 @@ class ChildProcesses(Planted):
             check=False,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            (hook / "sitecustomize.py").read_text(encoding="utf-8"),
-            f"import sys\nsys.path.append({str(VENV['site'])!r})\n",
+        self.assertTrue(
+            (hook / "sitecustomize.py")
+            .read_text(encoding="utf-8")
+            .startswith(f"import sys\nsys.path.append({str(VENV['site'])!r})\n"),
         )
 
     def test_a_tool_with_no_readable_interpreter_is_red(self) -> None:
@@ -655,6 +687,138 @@ class ChildProcesses(Planted):
             ],
         )
         self.assertEqual(log, [])
+
+
+class ChildConfiguration(Planted):
+    """A helper the suite runs as a child from ANOTHER directory (#1542).
+
+    Measured on the canon's self-mutants run 44298570855: in the
+    statistics pass every mutated function reads mutmut's configuration,
+    which mutmut loads lazily from the current directory; a child a test
+    started in a scratch directory found none and died with "Could not
+    figure out where the code to mutate is", so nothing was judged.
+    """
+
+    def scratch(self) -> Path:
+        """Make a directory with no configuration, outside the tree.
+
+        Returns:
+            The directory.
+
+        """
+        where = self.tmp / "scratch"
+        where.mkdir()
+        return where
+
+    def child(self, hook: Path, where: Path, **env: str) -> subprocess.CompletedProcess:
+        """Run the planted helper as `python3 helper.py` from WHERE.
+
+        Returns:
+            The finished child.
+
+        """
+        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
+            [python3, str(self.tree / "pkg" / "helper.py")],
+            cwd=where,
+            env=self.env | {"PYTHONPATH": str(hook)} | env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def write_hook(self, where: Path) -> Path:
+        """Run the leg's `hook` step from WHERE, as the leg runs it.
+
+        Returns:
+            The hook's directory.
+
+        """
+        hook = self.tmp / "hook"
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [sys.executable, str(BELT / "mutants-python.py"), "hook", str(hook)],
+            cwd=where,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return hook
+
+    def test_with_1503s_hook_the_child_cannot_find_the_configuration(self) -> None:
+        """The failure this hook exists for, reproduced as it was measured."""
+        self.plant(KILLED)
+        self.track("pkg/helper.py", STATS_HIT)
+        hook = self.tmp / "hook1503"
+        hook.mkdir()
+        (hook / "sitecustomize.py").write_text(
+            f"import sys\nsys.path.append({str(VENV['site'])!r})\n",
+            encoding="utf-8",
+        )
+        done = self.child(hook, self.scratch(), MUTANT_UNDER_TEST="stats")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(
+            "FileNotFoundError: Could not figure out where the code to mutate is.",
+            done.stderr,
+        )
+
+    def test_under_the_leg_a_child_elsewhere_gets_the_runs_configuration(
+        self,
+    ) -> None:
+        """The same child, under the leg, from a scratch directory, exits 0."""
+        self.plant(KILLED)
+        self.track("pkg/helper.py", STATS_HIT)
+        done, log = self.run_leg(
+            PLANT_CHILD=str(self.tree / "pkg" / "helper.py"),
+            PLANT_CHILD_CWD=str(self.scratch()),
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout.splitlines(),
+            [
+                "statistics recorded",
+                f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded (sites)",
+            ],
+        )
+        self.assertEqual(log, ["mutmut run", "mutmut results --all true"])
+
+    def test_the_child_goes_back_to_its_own_directory(self) -> None:
+        """The load changes directory and back: the child runs where it started."""
+        self.plant(KILLED)
+        self.track("pkg/helper.py", STATS_HIT + "import os\nprint(os.getcwd())\n")
+        where = self.scratch()
+        done = self.child(self.write_hook(self.tree), where, MUTANT_UNDER_TEST="stats")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout.splitlines(),
+            ["statistics recorded", str(where.resolve())],
+        )
+
+    def test_a_hook_with_no_configuration_fails_the_child_by_name(self) -> None:
+        """A run directory with no configuration is the leg's message, exit 1."""
+        self.plant(KILLED)
+        self.track("pkg/helper.py", STATS_HIT)
+        empty = self.scratch()
+        done = self.child(self.write_hook(empty), self.tree, MUTANT_UNDER_TEST="stats")
+        self.assertEqual(done.returncode, 1)
+        refused = (
+            f"{LABEL}: a child's start-up hook cannot load mutmut's"
+            f" configuration in {empty.resolve()}: Could not figure out where"
+            " the code to mutate is. Please specify it by adding"
+            ' "source_paths=code_dir" in setup.cfg to the [mutmut] section.'
+        )
+        self.assertEqual(done.stderr.splitlines(), [refused])
+        self.assertEqual(done.stdout, "")
+
+    def test_outside_a_mutant_the_hook_loads_nothing(self) -> None:
+        """MUTANT_UNDER_TEST unset: the hook only appends, as #1503's did."""
+        self.track("pkg/helper.py", "print('ran')\n")
+        done = self.child(self.write_hook(self.scratch()), self.tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "ran\n")
 
 
 class ConfigReader(unittest.TestCase):
