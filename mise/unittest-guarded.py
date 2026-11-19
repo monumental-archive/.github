@@ -41,7 +41,7 @@ import tempfile
 import unittest
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypedDict, cast, override
+from typing import TYPE_CHECKING, Literal, TypedDict, override
 from warnings import catch_warnings, simplefilter
 
 if TYPE_CHECKING:
@@ -52,6 +52,14 @@ SELF = str(Path(__file__).resolve())
 
 # A warnings filter action, as unittest's runner takes it.
 type Action = Literal["default", "error", "ignore", "always", "module", "once"]
+ACTIONS: dict[str, Action] = {
+    "default": "default",
+    "error": "error",
+    "ignore": "ignore",
+    "always": "always",
+    "module": "module",
+    "once": "once",
+}
 
 # The default ceiling on workers: the gate runner has four cores, and a
 # workstation running several gates at once should keep cores to spare.
@@ -343,19 +351,20 @@ def merge(
     sys.stdout.flush()
     sys.stderr.write(done.stderr)
     sys.stderr.flush()
-    if not outcome.exists():
+    got = read_outcome(outcome)
+    if not isinstance(got, dict):
         # A worker that died without a result (a crash, an exit from a
-        # test) is an error on its module, never a module that vanished.
+        # test), or part-way through writing it, is an error on its
+        # module, never a module that vanished or a traceback here.
         result.testsRun += 1
         result.errors.append((
             Reported(f"{module} (worker)"),
             (
-                f"the worker for {module} exited {done.returncode} with no result; "
+                f"the worker for {module} exited {done.returncode} with {got}; "
                 "its output is printed above\n"
             ),
         ))
         return
-    got = cast("Outcome", json.loads(outcome.read_text(encoding="utf-8")))
     result.testsRun += got["run"]
     result.errors.extend((Reported(d), text) for d, text in got["errors"])
     result.failures.extend((Reported(d), text) for d, text in got["failures"])
@@ -428,9 +437,181 @@ class WorkerRunner(GuardedRunner):
         return result
 
 
+# A decoded [description, text] or [description, seconds] has two items.
+PAIR = 2
+
+
+def load(path: Path) -> object:
+    """Read a JSON file the runner wrote, or None when it cannot be read.
+
+    Returns:
+        The decoded document, as an object to be checked.
+
+    """
+    try:
+        document: object = json.loads(path.read_text(encoding="utf-8"))
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+        return None
+    return document
+
+
+def strings(value: object) -> list[str] | None:
+    """Check a decoded list of strings.
+
+    Returns:
+        The strings, or None when the value is not a list of them.
+
+    """
+    if not isinstance(value, list):
+        return None
+    out: list[str] = []
+    item: object
+    for item in value:
+        if not isinstance(item, str):
+            return None
+        out.append(item)
+    return out
+
+
+def pairs(value: object) -> list[tuple[str, str]] | None:
+    """Check a decoded list of [description, text] pairs.
+
+    Returns:
+        The pairs, or None when the value is not a list of them.
+
+    """
+    if not isinstance(value, list):
+        return None
+    out: list[tuple[str, str]] = []
+    item: object
+    for item in value:
+        both = strings(item)
+        if both is None or len(both) != PAIR:
+            return None
+        out.append((both[0], both[1]))
+    return out
+
+
+def timings(value: object) -> list[tuple[str, float]] | None:
+    """Check a decoded list of [description, seconds] pairs.
+
+    Returns:
+        The pairs, or None when the value is not a list of them.
+
+    """
+    if not isinstance(value, list):
+        return None
+    out: list[tuple[str, float]] = []
+    item: object
+    for item in value:
+        if not isinstance(item, list) or len(item) != PAIR:
+            return None
+        name: object = item[0]
+        seconds: object = item[1]
+        if (
+            not isinstance(name, str)
+            or not isinstance(seconds, (int, float))
+            or isinstance(seconds, bool)
+        ):
+            return None
+        out.append((name, float(seconds)))
+    return out
+
+
+def read_outcome(path: Path) -> Outcome | str:
+    """Read and check a worker's outcome file.
+
+    Returns:
+        The outcome, or what was wrong with it, for the error message.
+
+    """
+    if not path.exists():
+        return "no result"
+    unreadable = "an unreadable result"
+    document = load(path)
+    if not isinstance(document, dict):
+        return unreadable
+    run: object = document.get("run")
+    if not isinstance(run, int) or isinstance(run, bool):
+        return unreadable
+    lists = {
+        name: pairs(document.get(name))
+        for name in ("errors", "failures", "expectedFailures", "skipped")
+    }
+    errors, failures = lists["errors"], lists["failures"]
+    expected, skipped = lists["expectedFailures"], lists["skipped"]
+    if errors is None or failures is None or expected is None or skipped is None:
+        return unreadable
+    unexpected = strings(document.get("unexpectedSuccesses"))
+    durations = timings(document.get("durations"))
+    if unexpected is None or durations is None:
+        return unreadable
+    return {
+        "run": run,
+        "errors": errors,
+        "failures": failures,
+        "expectedFailures": expected,
+        "skipped": skipped,
+        "unexpectedSuccesses": unexpected,
+        "durations": durations,
+    }
+
+
+def read_action(value: object) -> tuple[bool, Action | None]:
+    """Check a decoded warnings action, which may be absent.
+
+    Returns:
+        Whether it is valid, and the action (None when absent).
+
+    """
+    if value is None:
+        return True, None
+    action = ACTIONS.get(value) if isinstance(value, str) else None
+    return action is not None, action
+
+
+def read_spec(path: Path) -> Spec | None:
+    """Read and check a worker's spec file.
+
+    Returns:
+        The spec, or None when it cannot be read or is the wrong shape.
+
+    """
+    document = load(path)
+    if not isinstance(document, dict):
+        return None
+    module: object = document.get("module")
+    search = strings(document.get("path"))
+    if not isinstance(module, str) or search is None:
+        return None
+    raw_patterns: object = document.get("patterns")
+    patterns = None if raw_patterns is None else strings(raw_patterns)
+    if raw_patterns is not None and patterns is None:
+        return None
+    verbosity: object = document.get("verbosity")
+    buffer: object = document.get("buffer")
+    tb_locals: object = document.get("tb_locals")
+    if not isinstance(verbosity, int) or not isinstance(buffer, bool):
+        return None
+    valid, action = read_action(document.get("warnings"))
+    if not isinstance(tb_locals, bool) or not valid:
+        return None
+    return {
+        "module": module,
+        "path": search,
+        "patterns": patterns,
+        "verbosity": verbosity,
+        "buffer": buffer,
+        "tb_locals": tb_locals,
+        "warnings": action,
+    }
+
+
 def worker(spec_path: Path) -> None:
     """Run the one module a spec names, as the parent's run would."""
-    spec = cast("Spec", json.loads(spec_path.read_text(encoding="utf-8")))
+    spec = read_spec(spec_path)
+    if spec is None:
+        sys.exit(f"unittest-guarded: worker spec {spec_path} is unreadable")
     sys.path[:] = spec["path"]
     loader = unittest.TestLoader()
     loader.testNamePatterns = spec["patterns"]

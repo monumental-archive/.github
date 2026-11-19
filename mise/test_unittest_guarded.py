@@ -140,6 +140,23 @@ class T(unittest.TestCase):
         os._exit(3)
 """
 
+# A test that, once its worker has written the outcome, overwrites it
+# with what the row plants: the shape of a worker that died part-way.
+SPOILS = """\
+import atexit
+import pathlib
+import sys
+import unittest
+
+OUT = pathlib.Path(sys.argv[2]).with_suffix(".out")
+atexit.register(OUT.write_text, {body!r}, encoding="utf-8")
+
+
+class T(unittest.TestCase):
+    def test_spoiled(self):
+        pass
+"""
+
 # Code under measurement, and a two-file suite over it that also runs a
 # helper as a child, as the canon's suites do.
 MEASURED = {
@@ -404,6 +421,46 @@ class Runner(unittest.TestCase):
         self.assertIn("ERROR: test_exits (worker)", r.stderr)
         self.assertIn("the worker for test_exits exited 3 with no result", r.stderr)
         self.assertIn("FAILED (errors=1)", r.stderr)
+
+    def test_an_unreadable_outcome_is_an_error_on_its_file(self) -> None:
+        """A truncated or wrong-shaped result reds its file; the rest report."""
+        for name, body in (
+            ("truncated", '{"run": 1, "errors": [['),
+            ("wrong-shaped", '{"run": "one", "errors": {}}'),
+        ):
+            with self.subTest(outcome=name):
+                start, _ = self.tree(
+                    test_spoiled=SPOILS.format(body=body), test_clean=CLEAN
+                )
+                r = self.guarded(start)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("ERROR: test_spoiled (worker)", r.stderr)
+                self.assertIn(
+                    "the worker for test_spoiled exited 0 with an unreadable result",
+                    r.stderr,
+                )
+                self.assertIn("Ran 3 tests in", r.stderr)
+                self.assertIn("FAILED (errors=1)", r.stderr)
+
+    def test_an_unreadable_spec_stops_the_worker_by_name(self) -> None:
+        """A worker handed a spec it cannot read exits 1, naming the file."""
+        start, _ = self.tree(test_clean=CLEAN)
+        spec = start.parent / "bad.json"
+        for body in ("{", '{"module": 1}'):
+            with self.subTest(spec=body):
+                spec.write_text(body, encoding="utf-8")
+                r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                    [sys.executable, str(RUNNER), "--worker", str(spec)],
+                    cwd=start,
+                    env=hermetic.env(),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertEqual(
+                    r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
+                )
 
 
 class Measured(unittest.TestCase):
