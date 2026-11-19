@@ -52,11 +52,13 @@ import json
 import re
 import shlex
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 # The one walk of a task (#1608), a module beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import decoded
 import task_walk
 
 if TYPE_CHECKING:
@@ -102,14 +104,51 @@ def providers(lock: str) -> set[str]:
         `v8` and/or `istanbul`.
 
     """
-    found = set()
+    found: set[str] = set()
     for match in PROVIDER.finditer(lock):
-        package = match.group(1) or match.group(2)
+        package: str = match.group(1) or match.group(2)
         found.add(package.rsplit("-", 1)[-1])
     return found
 
 
-def other_runner(manifest: dict) -> str | None:
+@dataclass(frozen=True)
+class Manifest:
+    """What the leg reads of a root package.json."""
+
+    # Every package named in `dependencies` and `devDependencies`.
+    declared: frozenset[str]
+    # The `scripts.test` string, if there is one.
+    test_script: str | None
+    # Whether `vitest` appears anywhere in the manifest.
+    mentions_vitest: bool
+
+
+def read_manifest(value: object) -> Manifest:
+    """Decode a package.json for the fields the leg reads.
+
+    npm's own reading is the leg's: a manifest that is not an object, or
+    a section or script of another shape, declares nothing.
+
+    Returns:
+        The manifest.
+
+    """
+    manifest = value if decoded.is_object(value) else {}
+    declared: set[str] = set()
+    for field in ("dependencies", "devDependencies"):
+        section = manifest.get(field)
+        if decoded.is_object(section):
+            declared |= section.keys()
+    scripts = manifest.get("scripts")
+    script = scripts.get("test") if decoded.is_object(scripts) else None
+    return Manifest(
+        declared=frozenset(declared),
+        test_script=script if isinstance(script, str) else None,
+        mentions_vitest="vitest" in json.dumps(manifest),
+    )
+
+
+def other_runner(manifest: Manifest) -> str | None:
     """Name a test runner the leg does not support.
 
     Returns:
@@ -117,17 +156,11 @@ def other_runner(manifest: dict) -> str | None:
         None when the manifest declares no test runner.
 
     """
-    declared: dict = {}
-    for field in ("dependencies", "devDependencies"):
-        section = manifest.get(field)
-        if isinstance(section, dict):
-            declared |= section
     for runner in OTHER_RUNNERS:
-        if runner in declared:
+        if runner in manifest.declared:
             return runner
-    scripts = manifest.get("scripts")
-    script = scripts.get("test") if isinstance(scripts, dict) else None
-    if isinstance(script, str) and script.strip() and NPM_PLACEHOLDER not in script:
+    script = manifest.test_script
+    if script is not None and script.strip() and NPM_PLACEHOLDER not in script:
         words = script.split()
         if words[:2] == ["node", "--test"]:
             return "node --test"
@@ -321,7 +354,8 @@ def vitest_command(label: str, walked: Walk) -> int:
     directory, args = found[0]
     if not args or args[0] != "run":
         args = ["run", *args]
-    print(json.dumps({"dir": directory, "args": args}))
+    record: dict[str, object] = {"dir": directory, "args": args}
+    print(json.dumps(record))
     return 0
 
 
@@ -350,12 +384,10 @@ def main(tracked: list[str]) -> int:
     if "package.json" not in tracked:
         return 0
     try:
-        manifest = json.loads(Path("package.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        manifest = read_manifest(decoded.load_json(Path("package.json").read_bytes()))
+    except (OSError, decoded.UndecodableError) as exc:
         print(f"coverage-js-runner: package.json: {exc}", file=sys.stderr)
         return 1
-    if not isinstance(manifest, dict):
-        manifest = {}
     lockfile = next((name for name in LOCKFILES if name in tracked), None)
     lock = Path(lockfile).read_text(encoding="utf-8") if lockfile else ""
     if RUNNER.search(lock):
@@ -364,7 +396,7 @@ def main(tracked: list[str]) -> int:
         print(f"vitest {provider}")
         return 0
     runner = other_runner(manifest)
-    if runner == "vitest" or (runner is None and "vitest" in json.dumps(manifest)):
+    if runner == "vitest" or (runner is None and manifest.mentions_vitest):
         # Declared, but the lockfile pins no vitest: nothing the leg may run.
         print("unsupported vitest-without-a-lockfile-entry")
         return 0
