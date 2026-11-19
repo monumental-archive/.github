@@ -10,10 +10,16 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
+import contextlib
+import io
 import json
+import os
 import re
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import task_walk as tw
 
@@ -259,6 +265,81 @@ class Refusals(unittest.TestCase):
         """A field mise leaves out is no entry, not a refusal."""
         empty: dict[str, object] = {"x": {}}
         self.assertEqual(tw.walk("x", empty.get, list), tw.Walk(("x",), ()))
+
+
+# A `mise` answering the read-only questions the walk asks of it.
+MISE = """\
+#!/usr/bin/env bash
+case "$*" in
+  "tasks ls --hidden --json") echo '[{"name": "a"}, {"nope": 1}, "b", {"name": 2}]' ;;
+  "tasks info x --json") echo '{"run": ["echo hi"]}' ;;
+  "tasks info bad --json") echo 'not json' ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+class Mise(unittest.TestCase):
+    """The walk's questions to mise, against a stub on PATH (#1659)."""
+
+    def setUp(self) -> None:
+        """Put the stub, and nothing else, on PATH."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        stub = Path(tmp.name) / "mise"
+        stub.write_text(MISE, encoding="utf-8")
+        stub.chmod(0o755)
+        bash = shutil.which("bash") or "/bin/bash"
+        (Path(tmp.name) / "bash").symlink_to(bash)
+        patcher = mock.patch.dict(os.environ, {"PATH": tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_task_names_keeps_only_named_rows(self) -> None:
+        """A row with no string name is not a task."""
+        self.assertEqual(["a"], tw.task_names())
+
+    def test_an_answer_mise_cannot_give_is_none(self) -> None:
+        """A failed question and an unreadable answer both read as none."""
+        self.assertIsNone(tw.mise_json("tasks", "info", "gone"))
+        self.assertIsNone(tw.mise_json("tasks", "info", "bad"))
+
+    def test_no_mise_on_path_is_none(self) -> None:
+        """Without mise there is nothing to ask."""
+        with mock.patch.dict(os.environ, {"PATH": ""}):
+            self.assertIsNone(tw.mise_json("tasks", "ls"))
+
+    def test_steps_from_a_named_root(self) -> None:
+        """`steps <label> <task>` walks from that task."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = tw.main(["steps", "leg", "x"])
+        self.assertEqual(0, status)
+        self.assertEqual("- ZWNobyBoaQ==\n", out.getvalue())
+
+    def test_a_usage_error(self) -> None:
+        """Anything but `steps` is exit 2 with the usage."""
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            status = tw.main([])
+        self.assertEqual(2, status)
+        self.assertEqual("usage: task_walk.py steps <label> [<task>]\n", err.getvalue())
+
+
+class Fields(unittest.TestCase):
+    """A field mise reports as one entry, or in no documented form."""
+
+    def test_a_single_script_is_one_entry(self) -> None:
+        """`run` as a string is that one script."""
+        walked = tw.walk("x", {"x": {"run": "echo hi"}}.get, list)
+        self.assertEqual(("echo hi",), tuple(step.script for step in walked.steps))
+
+    def test_a_field_of_no_documented_form_is_refused(self) -> None:
+        """A number where entries belong is named, never read as none."""
+        with self.assertRaisesRegex(
+            tw.RefusedError, "task 'x': its depends is not a form mise documents"
+        ):
+            tw.walk("x", {"x": {"depends": 5}}.get, list)
 
 
 if __name__ == "__main__":
