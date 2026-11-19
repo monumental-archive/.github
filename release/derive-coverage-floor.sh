@@ -71,39 +71,73 @@ fi
 # below by one law.
 figures="$(dirname "${BASH_SOURCE[0]}")/coverage_figures.py"
 sha=$(git rev-parse HEAD)
-legs=""
-if [[ -z ${GH_TOKEN:-} || -z ${GITHUB_REPOSITORY:-} ]]; then
-  echo "release:coverage-floor: not reading the gate's figures: no GH_TOKEN or GITHUB_REPOSITORY" >&2
-else
+
+# One artifact's figures: the gate job's (no argument) or one pgrx job's
+# (`pgrx-pg<major>`, #1692). Sets `read_legs` to the leg lines, empty
+# when anything about the artifact is refused (coverage_figures.py
+# prints why). Never fails: every step is a condition, so a refusal is
+# an empty answer and the caller measures.
+read_figures() { # usage: read_figures [pgrx-pg<major>]
+  local leg="${1:-}" artifact_name api choice artifact run where zip
+  read_legs=""
+  if [[ -z ${GH_TOKEN:-} || -z ${GITHUB_REPOSITORY:-} ]]; then
+    echo "release:coverage-floor: not reading the gate's figures: no GH_TOKEN or GITHUB_REPOSITORY" >&2
+    return 0
+  fi
+  artifact_name="coverage-figures-${leg:+${leg}-}${sha}"
   api="repos/${GITHUB_REPOSITORY}/actions"
-  if choice=$(gh api "${api}/artifacts?name=coverage-figures-${sha}&per_page=100" \
-    | "${ORG_PYTHON}" "${figures}" choose "${sha}"); then
+  if choice=$(gh api "${api}/artifacts?name=${artifact_name}&per_page=100" \
+    | "${ORG_PYTHON}" "${figures}" choose "${sha}" ${leg:+"${leg}"}); then
     read -r artifact run <<< "${choice}"
     if where=$(gh api "${api}/runs/${run}" | "${ORG_PYTHON}" "${figures}" judge "${sha}"); then
       zip=$(mktemp)
       if gh api "${api}/artifacts/${artifact}/zip" > "${zip}" \
-        && legs=$("${ORG_PYTHON}" "${figures}" figures "${sha}" < "${zip}"); then
-        echo "release:coverage-floor: read the gate's figures for ${sha} from ${where}" >&2
+        && read_legs=$("${ORG_PYTHON}" "${figures}" figures "${sha}" ${leg:+"${leg}"} < "${zip}"); then
+        echo "release:coverage-floor: read ${artifact_name} from ${where}" >&2
       else
-        legs=""
+        read_legs=""
       fi
       rm -f "${zip}"
     fi
   fi
-fi
+  return 0
+}
+
+read_figures
+legs=${read_legs}
 if [[ -z ${legs} ]]; then
   # One measurement shared with the gate, so the flags cannot drift apart
   # (#316's shape, #652's fix).
   echo "release:coverage-floor: measuring ${sha}" >&2
   legs=$("${belt}/coverage-measure.sh" "release:coverage-floor")
 fi
-# A pgrx extension's `pgrx-pgNN` legs (#1656) are measured by its own
-# suite, test:pgrx, every declared major, through the `pgrx` selector:
-# the gate holds them to the floor in its pgrx jobs, never in
-# coverage:check, so they are not in the gate's figures and are
-# measured here whichever way the rest arrived. Nothing is printed where
-# there is no extension.
-legs+=$'\n'$("${belt}/coverage-measure.sh" "release:coverage-floor" pgrx)
+
+# A pgrx extension's `pgrx-pgNN` legs (#1656) are held to the floor by
+# the gate's pgrx jobs, one per major, never by coverage:check, so they
+# are not in the gate job's figures: each pgrx job keeps its own
+# (#1692). Every major the `pgrx` selector measures, listed by the same
+# derivation (`pgrx-majors`), is read; all of them read, nothing is
+# measured. Any one missing or refused, the step names it and measures
+# the extension at every major, as before: never a floor from some
+# majors read and others measured. Nothing where there is no extension.
+majors=$("${belt}/coverage-measure.sh" "release:coverage-floor" pgrx-majors)
+if [[ -n ${majors} ]]; then
+  pgrx_legs=""
+  unread=""
+  while read -r major; do
+    read_figures "pgrx-pg${major}"
+    if [[ -n ${read_legs} ]]; then
+      pgrx_legs+="${read_legs}"$'\n'
+    else
+      unread="${unread} pg${major}"
+    fi
+  done <<< "${majors}"
+  if [[ -n ${unread} ]]; then
+    echo "release:coverage-floor: no figure read for the extension at${unread}; measuring every major" >&2
+    pgrx_legs=$("${belt}/coverage-measure.sh" "release:coverage-floor" pgrx)
+  fi
+  legs+=$'\n'${pgrx_legs}
+fi
 "${ORG_PYTHON}" "${belt}/coverage_floor.py" write --provenance "v${VERSION}" <<< "${legs}"
 
 emit "files=.coverage-floor"

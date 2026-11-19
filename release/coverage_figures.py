@@ -53,12 +53,14 @@ LABEL = "release:coverage-floor"
 FILE = "coverage-figures.txt"
 # The runs that judge the tree that lands.
 EVENTS = frozenset({"merge_group", "push"})
-# A subcommand and the commit it answers for.
-ARGS = 2
+# A subcommand and the commit it answers for, then one leg's name or not.
+ARGS = (2, 3)
+# A leg a pgrx job keeps alone (#1692).
+ONE_LEG = re.compile(r"pgrx-pg[0-9]+")
 # What the forge answered, piped in by the caller.
 STDIN = 0
 # One leg line as coverage-measure.sh prints it.
-LEG = re.compile(r"[a-z][a-z-]*\s+[0-9]+(\.[0-9]+)?")
+LEG = re.compile(r"[a-z][a-z0-9-]*\s+[0-9]+(\.[0-9]+)?")
 
 
 class RefusedError(Exception):
@@ -73,14 +75,15 @@ class Choice:
     run: int
 
 
-def name(sha: str) -> str:
-    """Name the gate's artifact for one commit.
+def name(sha: str, leg: str = "") -> str:
+    """Name the gate's artifact for one commit, and one leg's if named.
 
     Returns:
-        `coverage-figures-<sha>`.
+        `coverage-figures-<sha>` for the gate job's figures, or
+        `coverage-figures-<leg>-<sha>` for one pgrx job's (#1692).
 
     """
-    return f"coverage-figures-{sha}"
+    return f"coverage-figures-{leg}-{sha}" if leg else f"coverage-figures-{sha}"
 
 
 def ident(value: object) -> int | None:
@@ -96,12 +99,12 @@ def ident(value: object) -> int | None:
         return None
 
 
-def choose(listing: object, sha: str) -> Choice:
+def choose(listing: object, sha: str, leg: str = "") -> Choice:
     """Pick this commit's artifact from an artifacts listing.
 
     Returns:
-        The newest unexpired artifact of the commit's name kept by a run
-        of that commit.
+        The newest unexpired artifact of the commit's name (and the leg's,
+        when one is named) kept by a run of that commit.
 
     Raises:
         RefusedError: no such artifact, or only ones for another commit.
@@ -124,7 +127,7 @@ def choose(listing: object, sha: str) -> Choice:
             kept.get("head_sha"),
         )
         if (
-            entry.get("name") != name(sha)
+            entry.get("name") != name(sha, leg)
             or entry.get("expired") is not False
             or artifact is None
             or run is None
@@ -133,12 +136,12 @@ def choose(listing: object, sha: str) -> Choice:
             continue
         named.append((artifact, run, head))
     if not named:
-        msg = f"no unexpired gate artifact {name(sha)}"
+        msg = f"no unexpired gate artifact {name(sha, leg)}"
         raise RefusedError(msg)
     ours = [(artifact, run) for artifact, run, head in named if head == sha]
     if not ours:
         others = ", ".join(sorted({head for _, _, head in named}))
-        msg = f"the artifact {name(sha)} was kept by a run of {others}, not {sha}"
+        msg = f"the artifact {name(sha, leg)} was kept by a run of {others}, not {sha}"
         raise RefusedError(msg)
     artifact, run = max(ours)
     return Choice(artifact, run)
@@ -174,14 +177,18 @@ def judge(run: object, sha: str) -> str:
     return url if isinstance(url, str) else f"run {number}"
 
 
-def figures(text: str) -> str:
+def figures(text: str, leg: str = "") -> str:
     """Check the figures file: one `<leg> <percent>` line or more.
+
+    With a leg named, the file is one pgrx job's (#1692), and holds that
+    leg's line and nothing else.
 
     Returns:
         The lines, newline-terminated.
 
     Raises:
-        RefusedError: an empty file or a line that is not a leg.
+        RefusedError: an empty file, a line that is not a leg, or not
+            exactly the named leg.
 
     """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -192,6 +199,10 @@ def figures(text: str) -> str:
         if not LEG.fullmatch(line):
             msg = f"{FILE} holds a line that is not a leg: {line!r}"
             raise RefusedError(msg)
+    held = [line.split()[0] for line in lines]
+    if leg and held != [leg]:
+        msg = f"{FILE} holds {' '.join(held)}, not exactly {leg}"
+        raise RefusedError(msg)
     return "".join(f"{line}\n" for line in lines)
 
 
@@ -231,21 +242,22 @@ def parse(data: bytes) -> object:
         raise RefusedError(msg) from None
 
 
-def answer(command: str, sha: str, data: bytes) -> str:
+def answer(command: str, sha: str, data: bytes, leg: str = "") -> str:
     """Answer one subcommand over what the forge returned.
 
     Returns:
         `choose`: `<artifact id> <run id>`; `judge`: the run's address;
-        `figures`: the leg lines. A refusal raises RefusedError from the
-        check that made it.
+        `figures`: the leg lines. A leg, when named, is one pgrx job's
+        (#1692). A refusal raises RefusedError from the check that made
+        it.
 
     """
     if command == "choose":
-        choice = choose(parse(data), sha)
+        choice = choose(parse(data), sha, leg)
         return f"{choice.artifact} {choice.run}\n"
     if command == "judge":
         return judge(parse(data), sha) + "\n"
-    return figures(unpack(data))
+    return figures(unpack(data), leg)
 
 
 def main(argv: list[str]) -> int:
@@ -258,19 +270,22 @@ def main(argv: list[str]) -> int:
     """
     commands = ("choose", "judge", "figures")
     if (
-        len(argv) != ARGS
+        len(argv) not in ARGS
         or argv[0] not in commands
         or not re.fullmatch(r"[0-9a-f]{40}", argv[1])
+        or (len(argv) == max(ARGS) and not ONE_LEG.fullmatch(argv[-1]))
     ):
         print(
-            f"usage: coverage_figures.py {{{','.join(commands)}}} <40-hex sha>",
+            f"usage: coverage_figures.py {{{','.join(commands)}}} <40-hex sha>"
+            " [pgrx-pg<major>]",
             file=sys.stderr,
         )
         return 2
+    leg = argv[2] if len(argv) == max(ARGS) else ""
     try:
         with open(STDIN, "rb", closefd=False) as stdin:
             data = stdin.read()
-        said = answer(argv[0], argv[1], data)
+        said = answer(argv[0], argv[1], data, leg)
     except RefusedError as refused:
         print(f"{LABEL}: not reading the gate's figures: {refused}", file=sys.stderr)
         return 1

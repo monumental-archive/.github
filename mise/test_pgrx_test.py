@@ -296,6 +296,25 @@ class MeasuredRun(Planted):
         )
         self.assertTrue((reports / "lcov-pgrx-pg18.info").is_file())
 
+    def test_a_held_major_keeps_its_figure_beside_its_report(self) -> None:
+        """coverage-figures.txt: the line held, for the release job (#1692)."""
+        self.floor()
+        reports = self.tmp / "reports"
+        done, _ = self.run_pgrx(PLANT_LH="17", ORG_COVERAGE_REPORTS=str(reports))
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "pgrx-pg18 94.44444444444444\n",
+            (reports / "coverage-figures.txt").read_text(encoding="utf-8"),
+        )
+
+    def test_a_major_below_the_floor_keeps_no_figure(self) -> None:
+        """Red before it is kept: nothing for the release to read."""
+        self.floor()
+        reports = self.tmp / "reports"
+        done, _ = self.run_pgrx(ORG_COVERAGE_REPORTS=str(reports))
+        self.assertEqual(1, done.returncode)
+        self.assertFalse((reports / "coverage-figures.txt").exists())
+
     def test_a_measured_run_leaves_the_tree_clean(self) -> None:
         """No report in the tree, named directory or not (#1628).
 
@@ -457,6 +476,19 @@ class CoverageTasks(Planted):
         got = sorted(done.stdout.splitlines())
         self.assertEqual(want, got)
         self.assertEqual(2, len(self.suites(log)))
+
+    def test_the_majors_selector_lists_what_the_pgrx_selector_measures(
+        self,
+    ) -> None:
+        """pgrx-majors: the same majors, one per line, and no suite run (#1692)."""
+        done, log = self.run_bash([
+            str(self.belt / "coverage-measure.sh"),
+            "release:coverage-floor",
+            "pgrx-majors",
+        ])
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("17\n18\n", done.stdout)
+        self.assertFalse(self.suites(log), log)
 
     def test_the_pgrx_selector_holds_no_floor(self) -> None:
         """Adoption and the release derive the floor; measuring is not holding."""
