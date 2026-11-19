@@ -1482,6 +1482,8 @@ class ReadCitation(unittest.TestCase):
              "identifiers:\n  - value: 10.1/c\n  - value: 10.1/d\n",
              ([], "", "10.1/c")),
             ("no identifiers is a first mint", "title: x\n", ([], "", "")),
+            # #1556's shrunk example: zip(strict=True) raised on it.
+            ("an empty file reads as nothing", "", ([], "", "")),
         ]  # fmt: skip
         for name, text, want in rows:
             with self.subTest(name):
