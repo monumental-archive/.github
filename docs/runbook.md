@@ -228,9 +228,10 @@ That is the whole wiring.
   rather than layering on it, so no repository carries one:
   `lint:codecov-yml` is red by name on any tracked `codecov.yml`,
   `.codecov.yml`, `codecov.yaml` or `.codecov.yaml` at the root or
-  under `dev/` or `.github/`, the locations Codecov reads. edtf's
-  file is where this reasoning began (edtf#141): a number that gates
-  merges gets gamed rather than improved.
+  under `dev/` or `.github/`, the locations Codecov reads. This
+  began with edtf's file (edtf#141), for a reason that no longer
+  holds: it refused any threshold, and the org has had the floor
+  since. The reason now is the one above: one threshold, the gate's.
 
 ## Cutting a release
 
