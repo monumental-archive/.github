@@ -3,14 +3,20 @@
 # shared half of #652.
 #
 # `coverage:check` enforces this number, the release path derives the
-# floor from it, and `coverage:report` takes the profile written here as
-# the artifact it uploads — so there is ONE measurement with one set of
-# flags rather than several that agree until they do not. That is not a
-# hypothetical shape: a second hardcoded `--workspace` beside
-# coverage:check's drifted from it the instant a repository excluded a
-# member, and reddened main (#316); and a second `go test -coverprofile`
+# floor from it, and the badge job uploads the reports written here by
+# the gate's own run (#1528) — so there is ONE measurement with one set
+# of flags rather than several that agree until they do not. That is
+# not a hypothetical shape: a second hardcoded `--workspace` beside
+# coverage:check's drifted from it the instant a repository excluded
+# a member, and reddened main (#316); and a second `go test -coverprofile`
 # without `-coverpkg` handed Codecov 94.9% while the gate held the same
-# tree to a floor derived from 95.4% (#707, measured on stele).
+# tree to a floor derived from 95.4% (#707, measured on stele). The
+# badge job's own re-measurement, with a smaller toolset than the
+# gate's, hung on main for a day (#1528).
+#
+# Every leg that runs writes the report Codecov parses beside its
+# number, in the working tree: coverage.txt (go), lcov.info (rust),
+# coverage.xml (python), lcov-typescript.info (typescript).
 #
 # Prints `<leg> <percent>` on stdout, one line per language the tree
 # tracks and nothing else; every tool's own output goes to stderr, so a
@@ -47,12 +53,9 @@ set -euo pipefail
 # actually ran.
 label="${1:-coverage:measure}"
 
-# Which language legs to run. `coverage:report` needs the GO profile and
-# renders its own Rust lcov — a format this script does not produce — so
-# it asks for `go` rather than paying for a second Rust test run (#707);
-# it asks for `python` to have the Cobertura report written beside the
-# number, and `typescript` for the lcov beside its number. Default `all`: every caller that reads the percentages wants
-# them all, because the floor is a minimum every leg must hold.
+# Which language legs to run. Default `all`: every caller that reads
+# the percentages wants them all, because the floor is a minimum every
+# leg must hold. A single leg's selector measures that leg alone.
 legs="${2:-all}"
 case "${legs}" in
   all | go | rust | rust-branches | python | typescript | probe) ;;
@@ -176,10 +179,25 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   # `.data[0].totals.lines.percent` 61.53846153846154, so comparing the
   # extracted percentage is the same test with the number visible.
   #
+  # The run writes lcov.info, the report Codecov receives, and the
+  # number is read out of that same file (#1528): one run is both the
+  # floor's measurement and the badge's upload, where they were two
+  # `cargo llvm-cov` runs in two jobs. `cargo llvm-cov report` cannot
+  # render a second format from the run instead: it takes no
+  # `--exclude`, so it would report the members COVERAGE_EXCLUDE left
+  # out. Lines found and hit (LF, LH) summed over every file are the
+  # json summary's `.data[0].totals.lines` count and covered: measured
+  # equal on a two-member workspace, 7/17 whole and 5/11 with one
+  # member excluded.
+  #
   # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
   # which cargo must receive as separate arguments
-  report=$(cargo llvm-cov --workspace --locked ${excludes} --json --summary-only)
-  rust_pct=$(jq -r '.data[0].totals.lines.percent // empty' <<< "${report}")
+  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info >&2
+  rust_pct=$(awk -F: '
+    $1 == "LF" { found += $2 }
+    $1 == "LH" { hit += $2 }
+    END { if (found > 0) printf "%.16g\n", hit * 100 / found }
+  ' lcov.info 2> /dev/null) || rust_pct=""
   if [[ -z ${rust_pct} ]]; then
     echo "${label}: could not read a total from the Rust report — a" >&2
     echo "  measurement that reads nothing must not become a floor" >&2
@@ -336,10 +354,9 @@ EOF
     exit 1
   fi
   # The report Codecov receives is rendered from this measurement's own
-  # data, so the badge and the floor read one run (#707's law).
-  if [[ ${legs} == python ]]; then
-    coverage xml --rcfile="${work}/rc" --quiet -o coverage.xml >&2
-  fi
+  # data, so the badge and the floor read one run (#707's law), and
+  # the gate's run is the one the badge job uploads (#1528).
+  coverage xml --rcfile="${work}/rc" --quiet -o coverage.xml >&2
   echo "python ${py_pct}"
   echo "python-branches ${br_pct}"
 fi
@@ -429,9 +446,7 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   fi
   # The upload is this run's own lcov (#707's law). A name of its own:
   # lcov.info is the Rust leg's.
-  if [[ ${legs} == typescript ]]; then
-    cp "${ts_work}/lcov.info" lcov-typescript.info
-  fi
+  cp "${ts_work}/lcov.info" lcov-typescript.info
   echo "typescript ${ts_pct}"
   echo "typescript-branches ${ts_br}"
 fi

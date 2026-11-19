@@ -82,7 +82,14 @@ esac
 GO = """\
 #!/usr/bin/env bash
 case "$1" in
-  test) ;;
+  test)
+    # The profile `go test -coverprofile` writes, unless the row plants
+    # a run that wrote none.
+    [[ -z ${STUB_GO_NO_PROFILE:-} ]] || exit 0
+    for arg in "$@"; do
+      [[ ${arg} != -coverprofile=* ]] || echo "mode: atomic" > "${arg#*=}"
+    done
+    ;;
   tool) printf 'total:\\t(statements)\\t%s%%\\n' "${STUB_GO}" ;;
   *) exit 1 ;;
 esac
@@ -158,6 +165,18 @@ def plant_typescript(tree: Path, runner: str) -> list[str]:
     return tracked
 
 
+def plant_leftovers(tree: Path, leftovers: dict[str, bool]) -> list[str]:
+    """Plant report files as an earlier run would leave them.
+
+    Returns:
+        The names to track: those the row marks as the repository's own.
+
+    """
+    for name in leftovers:
+        (tree / name).write_text("leftover\n", encoding="utf-8")
+    return [name for name, is_tracked in leftovers.items() if is_tracked]
+
+
 def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
     task: str,
     *,
@@ -172,8 +191,13 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     ts_branches: str = "81.0",
     test_run: str | None = None,
     depends: dict[str, str] | None = None,
+    leftovers: dict[str, bool] | None = None,
+    go_profile: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
+
+    `leftovers` plants report files as an earlier run would leave them:
+    name to whether the repository tracks it. Each holds "leftover".
 
     Returns:
         The finished process, and a snapshot directory holding the
@@ -220,6 +244,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if floor:
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
         tracked.append(".coverage-floor")
+    tracked += plant_leftovers(tree, leftovers or {})
 
     env = hermetic.env()
     env |= {
@@ -229,6 +254,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_PY": py,
         "STUB_BR": branches,
         "STUB_GO": go or "",
+        "STUB_GO_NO_PROFILE": "" if go_profile else "1",
         "STUB_TASK": str(task_json),
         "STUB_TS": ts,
         "STUB_TS_BR": ts_branches,
@@ -277,7 +303,8 @@ class CheckRows(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n",
+            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
+            "coverage:check: upload coverage.xml\n",
             done.stdout,
         )
         self.assertIn("suite ran", done.stderr)
@@ -325,7 +352,8 @@ class CheckRows(CoverageTaskCase):
         self.assertEqual(
             "coverage:check: go leg holds the floor 80.0 (93.0%)\n"
             "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n",
+            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
+            "coverage:check: upload coverage.txt,coverage.xml\n",
             done.stdout,
         )
 
@@ -348,7 +376,8 @@ class TypeScriptRows(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n"
-            "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n",
+            "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n"
+            "coverage:check: upload lcov-typescript.info\n",
             done.stdout,
         )
         self.assertIn("vitest suite ran", done.stderr)
@@ -422,7 +451,8 @@ class TypeScriptRows(CoverageTaskCase):
             "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
             "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
             "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n"
-            "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n",
+            "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n"
+            "coverage:check: upload lcov-typescript.info,coverage.xml\n",
             done.stdout,
         )
 
@@ -532,28 +562,27 @@ class TypeScriptRows(CoverageTaskCase):
             HEAD_MSG + ", and it sets coverage itself —\n",
         )
 
-    def test_report_writes_the_typescript_lcov(self) -> None:
+    def test_check_writes_the_typescript_lcov(self) -> None:
         """The upload is the measured run's own lcov, off lcov.info."""
-        done, tree = self.run_task("coverage:report", python=False, typescript="vitest")
+        done, tree = self.run_task("coverage:check", python=False, typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            "coverage:report: lcov-typescript.info written\n"
-            "coverage:report: upload lcov-typescript.info\n",
+        self.assertTrue(
+            done.stdout.endswith("coverage:check: upload lcov-typescript.info\n"),
             done.stdout,
         )
-        self.assertTrue((tree / "lcov-typescript.info").is_file())
+        self.assertEqual("TN:\n", (tree / "lcov-typescript.info").read_text("utf-8"))
         self.assertFalse((tree / "lcov.info").exists())
 
 
 def upload_step() -> str:
-    """Read the upload job's "Generate the report" run block from ci.yml.
+    """Read the upload job's "List the reports" run block from ci.yml.
 
     Returns:
         The block, dedented, as the runner's bash receives it.
 
     """
     lines = (CANON / ".github/workflows/ci.yml").read_text("utf-8").splitlines()
-    at = lines.index("      - name: Generate the report")
+    at = lines.index("      - name: List the reports")
     at = lines.index("        run: |", at) + 1
     body = []
     for line in lines[at:]:
@@ -563,125 +592,82 @@ def upload_step() -> str:
     return "\n".join(body) + "\n"
 
 
-class UploadStep(unittest.TestCase):
-    """ci.yml's report step uploads what coverage:report says it wrote.
+def run_upload_step(
+    reports: list[str], *, has_token: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run the lifted step beside the planted reports.
 
-    Which legs a tree measures, and so which reports exist, is the task's
-    answer (#1386): the step reads the task's `upload` line and nothing
-    else. The stub `mise` answers `run coverage:report` with the lines the
-    row gives it, as the real task prints them.
+    Returns:
+        The finished step, its GITHUB_OUTPUT appended to stdout.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in reports:
+            (Path(tmp) / name).write_text("report\n", encoding="utf-8")
+        out = Path(tmp) / "outputs"
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HAS_TOKEN": "true" if has_token else "false",
+            "GITHUB_OUTPUT": str(out),
+        }
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [BASH, "-e", "-c", upload_step()],
+            cwd=tmp,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        done.stdout += out.read_text("utf-8") if out.exists() else ""
+        return done
+
+
+class UploadStep(unittest.TestCase):
+    """ci.yml's upload job hands Codecov what the gate's artifact holds.
+
+    The job measures nothing (#1528): it downloads the reports the gate's
+    coverage:check wrote and lists them, in coverage:check's order. These
+    rows run the lifted step in a directory holding the planted reports.
     """
 
-    def upload(self, report: str, *, has_token: bool = True) -> tuple[str, str]:
-        """Run the lifted step with a stub `coverage:report`.
-
-        Returns:
-            The step's stdout, and what it wrote to GITHUB_OUTPUT.
-
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            stubs = Path(tmp) / "stubs"
-            stubs.mkdir()
-            (Path(tmp) / "report").write_text(report, encoding="utf-8")
-            (stubs / "mise").write_text(
-                "#!/usr/bin/env bash\n"
-                '[[ "$1 $2" == "run coverage:report" ]] || exit 1\n'
-                f'cat "{tmp}/report"\n',
-                encoding="utf-8",
-            )
-            (stubs / "mise").chmod(0o755)
-            out = Path(tmp) / "outputs"
-            env = {
-                "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
-                "HAS_TOKEN": "true" if has_token else "false",
-                "GITHUB_OUTPUT": str(out),
-            }
-            # ruff: ignore[subprocess-without-shell-equals-true]
-            done = subprocess.run(
-                [BASH, "-e", "-c", upload_step()],
-                cwd=tmp,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(0, done.returncode, done.stderr)
-            return done.stdout, out.read_text("utf-8") if out.exists() else ""
-
-    def test_the_task_list_is_uploaded(self) -> None:
-        """A mixed tree uploads every report the task listed."""
-        _, outputs = self.upload(
-            "coverage:report: coverage.txt written\n"
-            "coverage:report: upload coverage.txt,coverage.xml\n"
+    def test_every_report_the_gate_wrote_is_named_and_uploaded(self) -> None:
+        """A mixed tree uploads each report, in coverage:check's order."""
+        done = run_upload_step(["coverage.xml", "lcov.info", "coverage.txt"])
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "upload lcov.info,coverage.txt,coverage.xml\n"
+            "files=lcov.info,coverage.txt,coverage.xml\n",
+            done.stdout,
         )
-        self.assertEqual("files=coverage.txt,coverage.xml\nskip=false\n", outputs)
-
-    def test_a_skipped_task_uploads_nothing(self) -> None:
-        """No floor: the task lists nothing, and the upload is skipped."""
-        _, outputs = self.upload("coverage:report: no .coverage-floor, skipped\n")
-        self.assertEqual("files=\nskip=true\n", outputs)
-
-    def test_no_token_skips_without_running_the_task(self) -> None:
-        """No token: nothing is rendered, and the step says why."""
-        stdout, outputs = self.upload("unreachable\n", has_token=False)
-        self.assertEqual("::notice::no token; badge upload skipped\n", stdout)
-        self.assertEqual("files=\nskip=true\n", outputs)
 
     def test_a_python_only_tree_uploads(self) -> None:
         """The step once skipped any tree without Cargo.toml or go.mod."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "tree"
-            stubs = Path(tmp) / "stubs"
-            tree.mkdir()
-            stubs.mkdir()
-            mise = MISE.replace(
-                "exit 1\n",
-                'if [[ "$1 $2" == "run coverage:report" ]]; then\n'
-                "  touch coverage.xml\n"
-                '  echo "coverage:report: coverage.xml written"\n'
-                '  echo "coverage:report: upload coverage.xml"\n'
-                "  exit 0\nfi\nexit 1\n",
-            )
-            (stubs / "mise").write_text(mise, encoding="utf-8")
-            (stubs / "mise").chmod(0o755)
-            task = Path(tmp) / "task.json"
-            task.write_text(json.dumps({"dir": str(tree), "run": ["true"]}), "utf-8")
-            (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
-            (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
-            (tree / ".org-canon").mkdir()
-            (tree / ".org-canon" / "mise").symlink_to(BELT)
-            out = Path(tmp) / "outputs"
-            env = hermetic.env()
-            env |= {
-                "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
-                "STUB_TASK": str(task),
-                "HAS_TOKEN": "true",
-                "GITHUB_OUTPUT": str(out),
-            }
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [GIT, "init", "-q"], cwd=tree, env=env, check=True
-            )
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [GIT, "add", "helper.py", ".coverage-floor"],
-                cwd=tree,
-                env=env,
-                check=True,
-            )
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [BASH, "-e", "-c", upload_step()],
-                cwd=tree,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            outputs = out.read_text("utf-8") if out.exists() else ""
+        done = run_upload_step(["coverage.xml"])
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("files=coverage.xml\nskip=false\n", outputs)
+        self.assertEqual("upload coverage.xml\nfiles=coverage.xml\n", done.stdout)
+
+    def test_no_token_skips_and_says_why(self) -> None:
+        """No token: nothing is uploaded, and the step says why."""
+        done = run_upload_step(["coverage.xml"], has_token=False)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "::notice::no token; badge upload skipped\nfiles=\n",
+            done.stdout,
+        )
+
+    def test_an_empty_artifact_is_refused(self) -> None:
+        """An artifact with no report is red, never an upload of nothing."""
+        done = run_upload_step(["unrelated.txt"])
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            "::error::the gate's coverage-reports artifact holds no report",
+            done.stdout,
+        )
 
 
-class AdoptAndReportRows(CoverageTaskCase):
-    """The write-mode and upload halves read the same measurement."""
+class AdoptRows(CoverageTaskCase):
+    """The write-mode half reads the same measurement."""
 
     def test_adopt_derives_from_the_weakest_python_leg(self) -> None:
         """Branches below statements set the floor."""
@@ -704,50 +690,67 @@ class AdoptAndReportRows(CoverageTaskCase):
             done.stdout,
         )
 
-    def test_report_writes_the_cobertura_report(self) -> None:
-        """The upload is rendered from the leg's own run, and listed."""
-        done, tree = self.run_task("coverage:report")
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            "coverage:report: coverage.xml written\n"
-            "coverage:report: upload coverage.xml\n",
-            done.stdout,
-        )
-        self.assertTrue((tree / "coverage.xml").is_file())
 
-    def test_report_without_a_floor_lists_nothing(self) -> None:
-        """No floor: skipped, and no upload line for the badge job to read."""
-        done, _ = self.run_task("coverage:report", floor=False)
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("coverage:report: no .coverage-floor, skipped\n", done.stdout)
+class CheckUploadLine(CoverageTaskCase):
+    """coverage:check names the reports this run wrote (#1528).
 
-    def test_report_without_a_measurable_language_lists_nothing(self) -> None:
-        """Nothing measurable: skipped, and no upload line."""
-        done, _ = self.run_task("coverage:report", test_task=False)
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            "coverage:report: no measurable language, skipped\n", done.stdout
-        )
+    The badge job uploads what the gate measured instead of measuring
+    again, so the gate's run must write each leg's report and say which.
+    """
 
-    def test_report_mixed_tree_lists_every_report_it_wrote(self) -> None:
-        """#1386: the upload list is what exists, in one order."""
-        done, _ = self.run_task("coverage:report", go="90.0")
+    def test_the_line_lists_the_report_the_run_wrote(self) -> None:
+        """The Cobertura report is rendered from the leg's own run."""
+        done, tree = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertTrue(
-            done.stdout.endswith("coverage:report: upload coverage.xml\n"),
+            done.stdout.endswith("coverage:check: upload coverage.xml\n"),
             done.stdout,
         )
+        self.assertEqual("<coverage/>\n", (tree / "coverage.xml").read_text("utf-8"))
 
-    def test_report_that_wrote_nothing_is_refused(self) -> None:
+    def test_an_untracked_leftover_is_not_listed(self) -> None:
+        """A report an earlier run left behind is removed, never uploaded."""
+        done, tree = self.run_task(
+            "coverage:check", leftovers={"lcov.info": False, "coverage.txt": False}
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertTrue(
+            done.stdout.endswith("coverage:check: upload coverage.xml\n"),
+            done.stdout,
+        )
+        self.assertFalse((tree / "lcov.info").exists())
+        self.assertFalse((tree / "coverage.txt").exists())
+
+    def test_a_tracked_file_of_the_same_name_is_left_alone(self) -> None:
+        """The repository's own file is never deleted by the belt."""
+        done, tree = self.run_task("coverage:check", leftovers={"lcov.info": True})
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("leftover\n", (tree / "lcov.info").read_text("utf-8"))
+
+    def test_a_run_that_wrote_no_report_is_refused(self) -> None:
         """A leg that ran and left no report is refused by the task."""
         # The Go stub measures but writes no profile, so the Go leg ran
         # and nothing exists to upload.
-        done, _ = self.run_task("coverage:report", go="90.0", python=False)
+        done, _ = self.run_task(
+            "coverage:check", go="90.0", python=False, go_profile=False
+        )
         self.assertEqual(1, done.returncode, done.stdout)
         self.assertIn(
-            "coverage:report: wrote no report — nothing to upload", done.stderr
+            "coverage:check: the legs above wrote no report — nothing for the"
+            " badge to upload",
+            done.stderr,
         )
         self.assertNotIn("upload ", done.stdout)
+
+    def test_no_floor_lists_nothing(self) -> None:
+        """No floor: skipped, and no upload line for the badge to read."""
+        done, _ = self.run_task("coverage:check", floor=False)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertNotIn("upload", done.stdout)
+
+    def test_report_task_is_gone(self) -> None:
+        """The badge's second measurement no longer exists to drift."""
+        self.assertNotIn("coverage:report", CONFIG["tasks"])
 
 
 # The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
@@ -762,7 +765,14 @@ CARGO = """\
 case "$1" in
   metadata) echo '{"packages": [], "workspace_members": []}' ;;
   llvm-cov)
-    printf '{"data": [{"totals": {"lines": {"percent": %s}}}]}\\n' "${STUB_RUST}"
+    out=""
+    while [[ $# -gt 0 ]]; do
+      [[ $1 == --output-path ]] && out=$2
+      shift
+    done
+    record='SF:%s\\nLF:%s\\nLH:%s\\nend_of_record\\n'
+    printf "${record}" a.rs "${STUB_LF}" "${STUB_LH}" > "${out}"
+    printf "${record}" b.rs 0 0 >> "${out}"
     ;;
   *) exit 1 ;;
 esac
@@ -787,7 +797,8 @@ class MeasureSelectors(unittest.TestCase):
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
-                "STUB_RUST": "61.5",
+                "STUB_LF": "13",
+                "STUB_LH": "8",
             }
             done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
@@ -797,8 +808,11 @@ class MeasureSelectors(unittest.TestCase):
                 text=True,
                 check=False,
             )
+            written = (tree / "lcov.info").is_file()
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("rust 61.5\n", done.stdout)
+        # 8 of 13 lines, summed over every file: the report it wrote.
+        self.assertEqual("rust 61.53846153846154\n", done.stdout)
+        self.assertTrue(written)
 
     def test_a_go_and_rust_tree_measures_both_legs(self) -> None:
         """Every tracked language runs its leg, not the first one (#471).

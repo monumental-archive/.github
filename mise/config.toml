@@ -7066,12 +7066,12 @@ dir = "{{cwd}}"
 # A repo without a floor has adopted no ratchet and skips clean; a repo
 # with one cannot merge below it. Deterministic — the number is local,
 # the run is local; the Codecov upload (the badge) lives in ci.yml as a
-# separate non-blocking job.
+# separate non-blocking job, which uploads the reports THIS run wrote.
 #
 # The measurement is mise/coverage-measure.sh, shared with
-# release/derive-coverage-floor.sh and coverage:report, so the number
-# enforced here, the number the floor is derived from and the profile
-# the badge uploads cannot come from different flags (#707) —
+# release/derive-coverage-floor.sh, so the number enforced here, the
+# number the floor is derived from and the reports the badge uploads
+# cannot come from different flags (#707) —
 # the #316 shape, where a second hardcoded --workspace drifted from the
 # first the instant a repo excluded a member. Each leg measures what its
 # language measures (statements for Go, lines for Rust, statements and
@@ -7082,6 +7082,18 @@ dir = "{{cwd}}"
 # half, written where mise/gate-tools.py's derivation can read it
 # (#1410): a tree with none of these can measure nothing, so the gate
 # need not install a coverage tool for it.
+#
+# The badge is fed from this run (#1528). Every leg writes the report
+# Codecov parses beside its number, and the last line names the files
+# this run wrote: `coverage:check: upload <files>`. On a push to the
+# default branch the gate job keeps them as an artifact and the badge
+# job uploads that, measuring nothing. It used to re-measure with a
+# toolset of its own in a second task, coverage:report, and hung on
+# main for a day in a test the gate passes. A report left untracked
+# by an earlier run is removed before measuring, so the list is this
+# run's; a tracked file of the same name is the repository's, never
+# touched. A leg that ran and wrote no report is refused here, where
+# it happened (#1386).
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
 tracked_py=$(git ls-files -- '*.py') || tracked_py=""
@@ -7098,6 +7110,12 @@ if [[ -z ${applies} ]]; then
   echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), skipped"
   exit 0
 fi
+reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
+for f in "${reports[@]}"; do
+  if [[ -f ${f} ]] && ! git ls-files --error-unmatch -- "${f}" > /dev/null 2>&1; then
+    rm -f -- "${f}"
+  fi
+done
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
 if [[ -z ${legs} ]]; then
   echo "coverage:check: no leg was measured — a check that reads nothing must not pass" >&2
@@ -7110,6 +7128,15 @@ while read -r leg pct; do
   fi
   echo "coverage:check: ${leg} leg holds the floor ${floor} (${pct}%)"
 done <<< "${legs}"
+files=""
+for f in "${reports[@]}"; do
+  [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
+done
+if [[ -z ${files} ]]; then
+  echo "coverage:check: the legs above wrote no report — nothing for the badge to upload" >&2
+  exit 1
+fi
+echo "coverage:check: upload ${files}"
 '''
 
 [tasks."coverage:adopt"]
@@ -7124,8 +7151,8 @@ dir = "{{cwd}}"
 #
 # It cannot lower a floor whose record parses — that is the ratchet, and
 # stepping down is a conscious `reset: <why>` a human writes and a
-# reviewer sees. A `coverage:*` sibling rather than a `fix:*` one, like
-# coverage:report beside it: the `fix` aggregate collects `fix:*`
+# reviewer sees. A `coverage:*` sibling rather than a `fix:*` one: the
+# `fix` aggregate collects `fix:*`
 # wildcard, and a fixer that runs the whole test suite does not belong
 # in a sweep nobody asked for.
 #
@@ -7150,103 +7177,6 @@ elif [[ -f Cargo.toml ]]; then
 fi
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
-'''
-
-[tasks."coverage:report"]
-description = "Render the reports the Codecov badge feed uploads (never the gate)"
-dir = "{{cwd}}"
-# The upload half of the ratchet, as a TASK rather than an inline
-# command in ci.yml — because "which members are coverable" is a
-# property of the repo (COVERAGE_EXCLUDE in its mise.toml), and a
-# second hardcoded --workspace invocation drifted from coverage:check
-# the instant a repo excluded anything: the lab excludes lab-pg (pgrx,
-# needs a live postgres), the badge job did not, and it reddened main
-# on the first push after coverage landed (#316). One task, one
-# exclusion set, same llvm-tools assertion — never a task-time rustup,
-# which races every other task driving the toolchain.
-#
-# The Go leg no longer has its own invocation at all: it calls the
-# shared measurement (#707), so the drift class is closed for Go by
-# construction rather than by two copies staying in step. The Rust leg
-# still renders here because lcov is an output format the measurement
-# script does not produce; its exclusion set is the one place a second
-# copy survives, and it is asserted by the identical COVERAGE_EXCLUDE
-# loop rather than a hardcoded --workspace.
-run = '''
-[[ -f .coverage-floor ]] || {
-  echo "coverage:report: no .coverage-floor, skipped"
-  exit 0
-}
-applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:report probe) || exit 1
-[[ -n ${applies} ]] || {
-  echo "coverage:report: no measurable language, skipped"
-  exit 0
-}
-# Go leg (#392): the profile go test writes IS the upload format —
-# Codecov parses Go coverprofiles natively, so the report is the
-# measurement, with no converter to drift.
-# Every tracked language renders its own report, for the same reason
-# coverage:check runs every leg: a mixed repo used to render lcov.info
-# alone while ci.yml, guessing the filename from `hashFiles('go.mod')`,
-# asked Codecov for a coverage.txt nothing had written. The uploader
-# now takes the list of reports that actually exist.
-if [[ -f go.mod ]]; then
-  # ONE `go test -coverprofile` in the belt (#707). The profile Codecov
-  # receives is the profile coverage:check enforces from, because it is
-  # the same invocation — not two that happen to agree. This leg used to
-  # write its own without `-coverpkg=./...` and handed the badge 94.9%
-  # while the gate held the same tree to a floor derived from 95.4%
-  # (measured on stele, 1818498). The `go` selector keeps the Rust half
-  # below, which renders lcov this script does not produce.
-  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report go > /dev/null
-  echo "coverage:report: coverage.txt written"
-fi
-# Python leg (#1331): Cobertura XML, which Codecov parses natively, so
-# like Go's profile the upload needs no converter. Rendered by the
-# measurement script from the run it measures, never by a second
-# invocation with its own flags. coverage.xml, not lcov: lcov.info is
-# the Rust leg's name, and a mixed tree renders both.
-if grep -qx python <<< "${applies}"; then
-  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report python > /dev/null
-  echo "coverage:report: coverage.xml written"
-fi
-# TypeScript leg (#1357): the lcov vitest's own provider wrote in the
-# measured run, renamed off lcov.info, which the Rust leg below owns.
-if grep -qx typescript <<< "${applies}"; then
-  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report typescript > /dev/null
-  echo "coverage:report: lcov-typescript.info written"
-fi
-if [[ -f Cargo.toml ]]; then
-  if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
-    echo "coverage:report: llvm-tools component missing — declare it with the" >&2
-    echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
-    exit 1
-  fi
-  # The same provisioning the measurement gets, from the same function,
-  # so the report and the number it accompanies are built against one
-  # Postgres (#917).
-  . "${ORG_BELT_DIR}/pgrx-env.sh"
-  org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
-  excludes=""
-  for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-  # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
-  # which cargo must receive as separate arguments
-  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
-  echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
-fi
-# What to upload is this task's answer, because it knows which legs ran
-# (#1386): the list is what the task WROTE, never a guess from repo
-# shape. A mixed repo renders every report and uploads every one; the
-# workflow's old `hashFiles('go.mod')` selector once named coverage.txt
-# for repos whose Rust-only leg had written lcov.info. The badge job
-# reads this line and nothing else; a leg that ran and wrote nothing is
-# refused here, where it happened.
-files=$(for f in lcov{,-typescript}.info coverage.{txt,xml}; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
-if [[ -z ${files} ]]; then
-  echo "coverage:report: wrote no report — nothing to upload" >&2
-  exit 1
-fi
-echo "coverage:report: upload ${files}"
 '''
 
 [tasks."lint:fuzz-build"]
