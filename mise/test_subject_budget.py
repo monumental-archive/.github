@@ -28,6 +28,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+import decoded
 import subject_budget as sb
 
 # What Renovate appends to an advisory subject, and what default.json
@@ -86,7 +87,17 @@ def owned(
 
     """
     repo = {**(repo_top or {}), "packageRules": repo_rules or []}
-    return sb.Template(source, repo, suffix)
+    return sb.Template(sb.decode_config(source), sb.decode_config(repo), suffix)
+
+
+def rule_of(doc: dict) -> sb.Rule:
+    """Decode one packageRule the way a config's rules are decoded.
+
+    Returns:
+        The rule `selects()` reads.
+
+    """
+    return sb.decode_rule(doc, "packageRules[0]")
 
 
 def template(**overrides: object) -> dict:
@@ -192,25 +203,25 @@ class TestSelects(unittest.TestCase):
     def test_manager_only(self) -> None:
         """A manager-scoped rule takes that manager and no other."""
         rule = {"matchManagers": ["gomod"]}
-        self.assertTrue(sb.selects(rule, dep("x", manager="gomod")))
-        self.assertFalse(sb.selects(rule, dep("x", manager="mise")))
+        self.assertTrue(sb.selects(rule_of(rule), dep("x", manager="gomod")))
+        self.assertFalse(sb.selects(rule_of(rule), dep("x", manager="mise")))
 
     def test_names_only(self) -> None:
         """A name-scoped rule ignores which manager declared it."""
         rule = {"matchPackageNames": ["ruff"]}
-        self.assertTrue(sb.selects(rule, dep("ruff", manager="mise")))
-        self.assertFalse(sb.selects(rule, dep("rumdl", manager="mise")))
+        self.assertTrue(sb.selects(rule_of(rule), dep("ruff", manager="mise")))
+        self.assertFalse(sb.selects(rule_of(rule), dep("rumdl", manager="mise")))
 
     def test_both_matchers_must_hold(self) -> None:
         """Renovate ANDs across matcher kinds; so does this."""
         rule = {"matchManagers": ["gomod"], "matchPackageNames": ["ruff"]}
-        self.assertTrue(sb.selects(rule, dep("ruff", manager="gomod")))
-        self.assertFalse(sb.selects(rule, dep("ruff", manager="mise")))
-        self.assertFalse(sb.selects(rule, dep("rumdl", manager="gomod")))
+        self.assertTrue(sb.selects(rule_of(rule), dep("ruff", manager="gomod")))
+        self.assertFalse(sb.selects(rule_of(rule), dep("ruff", manager="mise")))
+        self.assertFalse(sb.selects(rule_of(rule), dep("rumdl", manager="gomod")))
 
     def test_rule_with_no_matcher_selects_nothing(self) -> None:
         """A rule setting something this task does not render is inert."""
-        self.assertFalse(sb.selects({"automerge": True}, dep("ruff")))
+        self.assertFalse(sb.selects(rule_of({"automerge": True}), dep("ruff")))
 
     def test_dep_names_does_not_fall_back_to_the_package_name(self) -> None:
         """The measured difference between the two name matchers (#574).
@@ -227,7 +238,7 @@ class TestSelects(unittest.TestCase):
             {"matchDepNames": ["github:monumental-archive/**"]},
         ]
         self.assertEqual(
-            [sb.selects(rule, stele) for rule in rules],
+            [sb.selects(rule_of(rule), stele) for rule in rules],
             [True, False, True],
         )
 
@@ -240,7 +251,7 @@ class TestSelects(unittest.TestCase):
             {"matchFileNames": ["mise/config.toml"]},
         ]
         self.assertEqual(
-            [sb.selects(rule, row) for rule in rules],
+            [sb.selects(rule_of(rule), row) for rule in rules],
             [True, True, False],
         )
 
@@ -250,15 +261,17 @@ class TestSelects(unittest.TestCase):
         A rule carrying only `matchUpdateTypes` was dropped entirely
         before, which models a widening rule at the value it overrides.
         """
-        self.assertIsNone(sb.selects({"matchUpdateTypes": ["major"]}, dep("ruff")))
+        self.assertIsNone(
+            sb.selects(rule_of({"matchUpdateTypes": ["major"]}), dep("ruff"))
+        )
 
     def test_a_modelled_matcher_that_refuses_settles_the_whole_rule(
         self,
     ) -> None:
         """Renovate ANDs, so one refusal is a decision, not a maybe."""
         rule = {"matchManagers": ["gomod"], "matchUpdateTypes": ["major"]}
-        self.assertEqual(sb.selects(rule, dep("x", manager="mise")), False)
-        self.assertIsNone(sb.selects(rule, dep("x", manager="gomod")))
+        self.assertEqual(sb.selects(rule_of(rule), dep("x", manager="mise")), False)
+        self.assertIsNone(sb.selects(rule_of(rule), dep("x", manager="gomod")))
 
     def test_every_modelled_matcher_must_hold_together(self) -> None:
         """Four kinds now, and the AND runs across all of them."""
@@ -274,7 +287,7 @@ class TestSelects(unittest.TestCase):
             sb.Dep("rumdl", "0.2.53", "aqua", "mise/config.toml"),
         ]
         self.assertEqual(
-            [sb.selects(rule, row) for row in rows],
+            [sb.selects(rule_of(rule), row) for row in rows],
             [True, False, False, False],
         )
 
@@ -824,7 +837,9 @@ class TestAdvisorySubject(unittest.TestCase):
 
     def test_the_suffix_is_read_from_the_vulnerability_block(self) -> None:
         """It arrives from a nested block, not from a packageRule."""
-        self.assertEqual(sb.advisory_suffix(PRESET, {}), SUFFIX)
+        self.assertEqual(
+            sb.advisory_suffix(sb.decode_config(PRESET), sb.decode_config({})), SUFFIX
+        )
 
     def test_a_repo_block_wins_the_field_it_sets(self) -> None:
         """The repo's own value is the one minted.
@@ -833,12 +848,18 @@ class TestAdvisorySubject(unittest.TestCase):
         writes its own suffix is not modelled at the preset's.
         """
         repo = {"vulnerabilityAlerts": {"commitMessageSuffix": "[CVE]"}}
-        self.assertEqual(sb.advisory_suffix(PRESET, repo), "[CVE]")
+        self.assertEqual(
+            sb.advisory_suffix(sb.decode_config(PRESET), sb.decode_config(repo)),
+            "[CVE]",
+        )
 
     def test_a_repo_block_without_the_field_falls_to_the_preset(self) -> None:
         """A partly declared block does not erase the preset's value."""
         repo = {"vulnerabilityAlerts": {"enabled": True}}
-        self.assertEqual(sb.advisory_suffix(PRESET, repo), SUFFIX)
+        self.assertEqual(
+            sb.advisory_suffix(sb.decode_config(PRESET), sb.decode_config(repo)),
+            SUFFIX,
+        )
 
     def test_an_absent_suffix_is_a_hard_error_not_an_empty_string(
         self,
@@ -850,7 +871,7 @@ class TestAdvisorySubject(unittest.TestCase):
         failure #576 exists to kill.
         """
         with self.assertRaises(SystemExit) as caught:
-            sb.advisory_suffix({}, {})
+            sb.advisory_suffix(sb.decode_config({}), sb.decode_config({}))
         self.assertIn("commitMessageSuffix", str(caught.exception))
 
     def test_the_suffix_renders_last_before_the_pull_request_tail(
@@ -973,6 +994,84 @@ class TestAdvisorySubject(unittest.TestCase):
         self.assertEqual(sb.judge(row, owned(shorter, suffix=SUFFIX), 72, []), [])
 
 
+class TestConfigRefusals(unittest.TestCase):
+    """A Renovate config of the wrong shape is refused where it is read.
+
+    Each value the template is resolved from is decoded once, so a
+    wrong one is named by where it sits rather than failing later as a
+    traceback (#1677).
+    """
+
+    ROWS = (
+        ({"packageRules": {}}, "packageRules is not a list"),
+        ({"packageRules": ["x"]}, "packageRules[0] is not an object"),
+        (
+            {"packageRules": [{"matchManagers": "gomod"}]},
+            "packageRules[0].matchManagers is not a list",
+        ),
+        (
+            {"packageRules": [{"matchFileNames": [1]}]},
+            "packageRules[0].matchFileNames[0] is not a string",
+        ),
+        (
+            {"packageRules": [{"matchManagers": [], "commitMessageTopic": 1}]},
+            "packageRules[0].commitMessageTopic is not a string",
+        ),
+        ({"semanticCommitType": None}, "semanticCommitType is not a string"),
+        ({"vulnerabilityAlerts": []}, "vulnerabilityAlerts is not an object"),
+        (
+            {"vulnerabilityAlerts": {"commitMessageSuffix": False}},
+            "vulnerabilityAlerts.commitMessageSuffix is not a string",
+        ),
+        ({"customManagers": "x"}, "customManagers is not a list"),
+        ({"customManagers": [[]]}, "customManagers[0] is not an object"),
+        (
+            {"customManagers": [{"managerFilePatterns": "x"}]},
+            "customManagers[0].managerFilePatterns is not a list",
+        ),
+        (
+            {"customManagers": [{"matchStrings": [{}]}]},
+            "customManagers[0].matchStrings[0] is not a string",
+        ),
+        (
+            {"customManagers": [{"depNameTemplate": 7}]},
+            "customManagers[0].depNameTemplate is not a string",
+        ),
+    )
+
+    def test_each_wrong_shape_is_refused_by_where_it_sits(self) -> None:
+        """One row per value decoded, each refused by its own message."""
+        for doc, message in self.ROWS:
+            with (
+                self.subTest(message=message),
+                self.assertRaises(decoded.UndecodableError) as caught,
+            ):
+                sb.decode_config(doc)
+            self.assertEqual(str(caught.exception), message)
+
+    def test_a_wrong_shaped_file_stops_the_task_by_name(self) -> None:
+        """The refusal carries the task's label and the file's path."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "renovate.json"
+            path.write_text('{"packageRules": {}}', encoding="utf-8")
+            with self.assertRaises(SystemExit) as caught:
+                sb.read_config(path, [])
+        self.assertEqual(
+            str(caught.exception),
+            f"lint:subject-budget: {path}: packageRules is not a list",
+        )
+
+    def test_an_unreadable_file_decodes_as_an_empty_config(self) -> None:
+        """It is recorded as unmodelled, the way every tracked file is."""
+        report: list[str] = []
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "renovate.json"
+            path.write_text("[]", encoding="utf-8")
+            config = sb.read_config(path, report)
+        self.assertEqual(config, sb.Renovate({}, (), None, ()))
+        self.assertEqual(report, [f"{path}: not a JSON object"])
+
+
 class TestCeiling(unittest.TestCase):
     """The ceiling comes from the delivered config or the task stops."""
 
@@ -1007,6 +1106,27 @@ class TestCeiling(unittest.TestCase):
             self.assertRaises(SystemExit),
         ):
             sb.ceiling()
+
+    def test_a_ceiling_of_the_wrong_shape_is_refused_by_name(self) -> None:
+        """Unparsable, absent or not an integer: the task stops, named."""
+        rows = (
+            ("subject_length = \n", "Invalid value (at line 1, column 18)"),
+            ("x = 1\n", "subject_length is not an integer"),
+            ('subject_length = "72"\n', "subject_length is not an integer"),
+        )
+        for text, message in rows:
+            with TemporaryDirectory() as tmp:
+                config = Path(tmp) / "committed.toml"
+                config.write_text(text, encoding="utf-8")
+                with (
+                    self.subTest(text=text),
+                    mock.patch.dict(sb.os.environ, {"ORG_BELT_DIR": tmp}),
+                    self.assertRaises(SystemExit) as caught,
+                ):
+                    sb.ceiling()
+            self.assertEqual(
+                str(caught.exception), f"lint:subject-budget: {config}: {message}"
+            )
 
     def test_the_canon_ceiling_is_what_the_org_ships(self) -> None:
         """The delivered file parses and carries a subject_length."""
@@ -1098,7 +1218,7 @@ class TestWalks(unittest.TestCase):
                 "depNameTemplate": "monumental-archive/.github",
             }
             found = sb.from_custom_managers(
-                [("default.json", {"customManagers": [manager]})],
+                [("default.json", sb.decode_config({"customManagers": [manager]}))],
                 [path],
                 [],
             )
@@ -1125,7 +1245,7 @@ class TestWalks(unittest.TestCase):
                 "depNameTemplate": "postgres",
             }
             found = sb.from_custom_managers(
-                [("default.json", {"customManagers": [manager]})],
+                [("default.json", sb.decode_config({"customManagers": [manager]}))],
                 [path],
                 [],
             )
@@ -1145,7 +1265,7 @@ class TestWalks(unittest.TestCase):
                 "matchStrings": ['"[0-9]+" = "postgres:(?<currentValue>[0-9.]+)"'],
             }
             found = sb.from_custom_managers(
-                [("renovate.json", {"customManagers": [manager]})],
+                [("renovate.json", sb.decode_config({"customManagers": [manager]}))],
                 [path],
                 report,
             )
@@ -1522,7 +1642,8 @@ class TestScaffoldKeysFitTheBudget(unittest.TestCase):
             sb.Dep(key, sb.widest_version(spec), "mise", "scaffold/mise.toml")
             for key, spec in self.PINS.items()
         ]
-        template = sb.Template(preset, {}, sb.advisory_suffix(preset, {}))
+        decoded, repo = sb.decode_config(preset), sb.decode_config({})
+        template = sb.Template(decoded, repo, sb.advisory_suffix(decoded, repo))
         findings = sb.judge(deps, template, limit, [])
         self.assertEqual(
             [],

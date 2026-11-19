@@ -84,7 +84,6 @@ MOVING = frozenset({
     "mise/prop_deny_skips.py",
     "mise/prop_security_config.py",
     "mise/security_config.py",
-    "mise/subject_budget.py",
     "mise/test_action_lints.py",
     "mise/test_audit_scheduled.py",
     "mise/test_belt_shell.py",
