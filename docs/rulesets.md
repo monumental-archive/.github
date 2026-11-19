@@ -160,6 +160,19 @@ a `merge_group` trigger; `lint:gate-stub` requires it in every
 repository, queue or not, so the trigger is always in place before the
 ruleset arrives.
 
+**`branch_protection_failure` after a green merge-group run is a bad
+signature.** The queue removes the pull request with that reason and
+nothing else. Read the group commit's signature at once — GraphQL
+`pullRequest { mergeQueueEntry { headCommit { oid } } }` right after
+queueing, then `gh api repos/<repo>/git/commits/<oid> --jq
+.verification` — and if it says `verified: false`, the PR body is the
+cause: shorten or reword it and re-queue. The one cause measured is a
+body line that begins with `committer`: GitHub writes its `gpgsig`
+header after that line, inside the message, so the signature no longer
+matches the commit it is stored in (#1529). The gate's squash-message
+step refuses such a body by line number, so it should not reach the
+queue.
+
 **Private repositories have no queue.** On the Team plan GitHub offers
 it to public repositories only, so `monumental-archive` keeps the
 rebase route; Renovate rebases its own pull requests there. `apply`
