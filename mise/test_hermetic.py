@@ -505,6 +505,28 @@ def lists_the_tree(source: str) -> bool:
     return False
 
 
+def which_calls(source: str) -> list[int]:
+    """Find every line where a test looks a tool up itself (#1684).
+
+    A call is judged by what it calls, however the file imported it
+    (call_names.qualifier): `shutil.which`, `s.which` under `import
+    shutil as s`, and `which` or its alias under `from shutil import
+    which`. A name for `shutil.which` that is never called, as in
+    `mock.patch.object(shutil, "which", ...)`, looks nothing up.
+
+    Returns:
+        The line of each call, sorted.
+
+    """
+    module = ast.parse(source)
+    qualify = call_names.qualifier(module)
+    return sorted(
+        node.lineno
+        for node in ast.walk(module)
+        if isinstance(node, ast.Call) and qualify(node.func) == "shutil.which"
+    )
+
+
 # Excepted by name: the helper itself, and this file, which plants and
 # names the spellings it looks for.
 EXCEPTED = frozenset({"mise/hermetic.py", "mise/test_hermetic.py"})
@@ -889,6 +911,65 @@ class TheLaw(unittest.TestCase):
         for name, source in allowed.items():
             with self.subTest(name):
                 self.assertEqual([], copies(source))
+
+    def test_no_test_file_looks_a_tool_up_itself(self) -> None:
+        """Every lookup is hermetic.tool or hermetic.optional_tool (#1684)."""
+        offenders = [
+            f"{path}:{line}"
+            for path in listed_test_files()
+            if path not in EXCEPTED
+            for line in which_calls((CANON / path).read_text(encoding="utf-8"))
+        ]
+        self.assertEqual(list[str](), offenders)
+
+    def test_every_spelling_of_a_lookup_is_found(self) -> None:
+        """Planted: each way to call `shutil.which`, at its line."""
+        planted = {
+            "shutil.which": "import shutil\nX = shutil.which('git')\n",
+            "with a fallback": "import shutil\nX = shutil.which('git') or 'git'\n",
+            "from shutil import which": "from shutil import which\nX = which('git')\n",
+            "from shutil import which as w": (
+                "from shutil import which as w\nX = w('git')\n"
+            ),
+            "import shutil as s": "import shutil as s\nX = s.which('git')\n",
+            "in a row": (
+                "import shutil\nclass T:\n    def f(self):\n"
+                "        return shutil.which('git', path='/bin')\n"
+            ),
+            "in a decorator": (
+                "import shutil\nimport unittest\n"
+                "@unittest.skipUnless(shutil.which('dash'), 'no dash')\n"
+                "class T(unittest.TestCase):\n    pass\n"
+            ),
+        }
+        lines = {
+            "shutil.which": [2],
+            "with a fallback": [2],
+            "from shutil import which": [2],
+            "from shutil import which as w": [2],
+            "import shutil as s": [2],
+            "in a row": [4],
+            "in a decorator": [3],
+        }
+        for name, source in planted.items():
+            with self.subTest(name):
+                self.assertEqual(lines[name], which_calls(source))
+
+    def test_the_fixture_lookup_is_allowed(self) -> None:
+        """The fixture's lookups, a patched `which`, and another `which` pass."""
+        allowed = {
+            "tool": "import hermetic\nX = hermetic.tool('git')\n",
+            "optional_tool": "import hermetic\nX = hermetic.optional_tool('dash')\n",
+            "patched, not called": (
+                "import shutil\nfrom unittest import mock\n"
+                "with mock.patch.object(shutil, 'which', return_value=None):\n"
+                "    pass\n"
+            ),
+            "a local which": "def which(x):\n    return x\nX = which('git')\n",
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual(list[int](), which_calls(source))
 
     def test_no_test_file_lists_the_canons_tree_directly(self) -> None:
         """Every listing of the canon's own tree goes through tracked (#1618)."""
