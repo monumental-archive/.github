@@ -187,6 +187,7 @@ class AnyPackageJson(unittest.TestCase):
     )
     @example("[]")
     @example("{")
+    @example('{"repository": "\\n"}')
     def test_packs_or_refuses(self, package_json: str) -> None:
         """Exit 0, or 1 with one error line; never a raise."""
         code, out = run_step(package_json)
