@@ -6,6 +6,9 @@ generated versions, workspaces and toolchain listings:
 
 - Round trip (T): a version written out by `show` reads back as
   itself, and a two-part version reads as its zero-padded three.
+- Refusal (R): `parse_version` reads any string and answers with a
+  version or None, never a traceback (#1555: a non-ASCII digit such
+  as `²` passed `isdigit` and `int()` raised).
 - Invariance (V): the order of the members never changes which
   members are grouped under which promise; only active, installed
   toolchains are pins; the `--pgrx` pairs read the same in any order.
@@ -18,7 +21,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -43,6 +46,18 @@ class Versions(unittest.TestCase):
         self.assertEqual(
             mp.parse_version(f"{version[0]}.{version[1]}"), (version[0], version[1], 0)
         )
+
+
+class Refusal(unittest.TestCase):
+    """Any string: a version, or None."""
+
+    @given(st.text(max_size=20))
+    @example("1.2.²")
+    @example("nightly-2026-07-20")
+    def test_any_string_is_read_or_refused(self, raw: str) -> None:
+        """A version or None."""
+        got = mp.parse_version(raw)
+        self.assertTrue(got is None or len(got) == 3)  # ruff: ignore[magic-value-comparison] - three parts
 
 
 @st.composite
