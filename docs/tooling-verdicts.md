@@ -2367,6 +2367,21 @@ runner):
   a child comes out "no tests". The leg names it as a survivor, and
   the issue's permitted response is applied per function from that
   real list.
+- **A child's configuration (#1542), measured.** In the statistics
+  pass every mutated function reads mutmut's configuration, which
+  mutmut loads lazily from the CURRENT directory; a child a test
+  started in a scratch directory found none and died with "Could not
+  figure out where the code to mutate is" (self-mutants
+  44298570855). The hook therefore also carries the directory the
+  leg runs `mutmut run` in, and under a mutant (`MUTANT_UNDER_TEST`
+  set) loads the configuration there through mutmut's own
+  `config()`, then changes back; a hook that cannot load it fails
+  the child by name. Cost, measured on mutmut 3.8.1 with Python
+  3.15.2 (macOS, 60 starts each, median): a bare child `python3`
+  starts in 30 ms without the load and 75 ms with it, almost all of
+  it the import of mutmut's package, which a child running mutated
+  code pays anyway. Every Python child of the statistics pass pays
+  it once.
 
 *Reopen:* mutmut gaining sharding (shard the Python job like Rust's),
 or recording calls in child processes (the subprocess-only helpers

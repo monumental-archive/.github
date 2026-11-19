@@ -27,6 +27,14 @@ comes under the canon's coverage figure and its own mutation run
   interpreter its `mutmut` script names where `mutmut` lives; that
   interpreter must be the suite's own Python version, or the children
   would load another build's compiled modules.
+  The hook also carries the directory the leg runs `mutmut run` in (the
+  directory `hook` is run from), and in a child started under a mutant
+  (`MUTANT_UNDER_TEST` set) it loads mutmut's configuration there, once,
+  through mutmut's own `config()` (#1542): every mutated function calls
+  it from the trampoline, it reads the CURRENT directory, and a child a
+  test started in a scratch directory found no configuration and died
+  in the statistics pass (self-mutants run 44298570855). A hook that
+  cannot load it fails the child by name, never silently.
 - `survivors RESULTS`: the mutants `mutmut results --all true` calls
   survived or "no tests", one name per line, for the shell to `show`.
 - `verdict RESULTS SHOWS`: maps every result state to killed, survived
@@ -397,6 +405,26 @@ WHERE = (
 )
 
 
+# The hook's second half (#1542): under a mutant, a child loads mutmut's
+# configuration where the run loaded it, then goes back where it was.
+# os._exit, not sys.exit: a SystemExit out of sitecustomize is a fatal
+# "Failed to import the site module" with a traceback, not a message.
+CHILD_CONFIG = """import os
+if os.environ.get("MUTANT_UNDER_TEST"):
+    here = os.getcwd()
+    try:
+        os.chdir(RUN)
+        import mutmut.configuration
+        mutmut.configuration.config()
+    except Exception as error:
+        sys.stderr.write(REFUSED + str(error) + "\\n")
+        sys.stderr.flush()
+        os._exit(1)
+    finally:
+        os.chdir(here)
+"""
+
+
 def tool_interpreter(script: str) -> str:
     """Read the interpreter an installed console script runs on.
 
@@ -454,9 +482,16 @@ def hook(directory: Path) -> int:
             file=sys.stderr,
         )
         return EXIT_RED
+    run = str(Path.cwd())
+    refused = (
+        f"{LABEL}: a child's start-up hook cannot load mutmut's configuration"
+        f" in {run}: "
+    )
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "sitecustomize.py").write_text(
-        f"import sys\nsys.path.append({site!r})\n", encoding="utf-8"
+        f"import sys\nsys.path.append({site!r})\n"
+        + CHILD_CONFIG.replace("RUN", repr(run)).replace("REFUSED", repr(refused)),
+        encoding="utf-8",
     )
     return 0
 
