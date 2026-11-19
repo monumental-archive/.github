@@ -57,6 +57,37 @@
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
 set -euo pipefail
+
+# `runs-test` (#1623 item 3) answers whether this measurement runs the
+# repository's WHOLE `test` task, depends first (walk_task): it prints
+# the legs that do, one per line, or nothing. `ci` reads it to collect
+# its plain `test` only where nothing else runs it, so a suite with a
+# floor runs once per gate. The legs that run the task are python and
+# plpgsql; go and rust run commands of their own (`go test -coverpkg`,
+# `cargo llvm-cov`) that are not the repository's `test` (its -race,
+# --all-features, doctests), and typescript runs one vitest invocation.
+#
+# Answered from the tree alone, before anything below asks mise or
+# needs the belt's Python (a template's exec sees neither ORG_PYTHON
+# nor ORG_BELT_DIR from the belt's [env], measured): `ci`'s
+# depends call this while mise is loading its config, and a selector
+# that asked `mise tasks info` there would reload the config, call
+# itself, and recurse without end (measured: 493 nested calls in 60 s).
+# A `test` task that does not exist needs no answer here: `ci` collects
+# it as optional. A floor file that does not parse reds coverage:check,
+# so reading its presence is reading the floor for every green gate.
+if [[ ${2:-} == runs-test ]]; then
+  [[ -f .coverage-floor ]] || exit 0
+  # Captured, never piped into `grep -q`: under pipefail the writer
+  # dies of SIGPIPE when grep leaves early, and the answer flips.
+  tracked_py=$(git ls-files -- '*.py' 2> /dev/null) || tracked_py=""
+  [[ -z ${tracked_py} ]] || echo python
+  if git grep -qiIE "language[[:space:]]+'?plpgsql" 2> /dev/null; then
+    echo plpgsql
+  fi
+  exit 0
+fi
+
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 # The caller's name, so a remedy printed here names the task the session
@@ -73,7 +104,7 @@ case "${legs}" in
   all | go | rust | rust-branches | python | typescript | plpgsql | probe | reports) ;;
   *)
     echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
-      "rust-branches, python, typescript, plpgsql, probe or reports" >&2
+      "rust-branches, python, typescript, plpgsql, probe, reports or runs-test" >&2
     exit 1
     ;;
 esac

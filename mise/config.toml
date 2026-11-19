@@ -618,7 +618,17 @@ description = "The gate: everything the org enforces, plus this repo's tasks"
 dir = "{{cwd}}"
 depends = [
   "lint:*",
-  { task = "test", optional = true },
+  # `test` once per gate (#1623 item 3): collected unless the coverage
+  # measurement already runs the whole task, which coverage-measure.sh's
+  # `runs-test` answers (python and plpgsql legs, with a floor). The
+  # belt's directory reaches the exec through Tera's `env`, never the
+  # shell's (the exec's shell does not see the belt's [env]), and the
+  # exec moves to `cwd`, the tree `ci` runs in (it starts in the
+  # global config's own directory, measured). The exec
+  # always exits 0 and prints nothing where the belt or the script is
+  # absent or unreadable, so `test` is then kept, never an error: a
+  # template that fails crashes mise on load (#569).
+  { task = '''{% set belt = env.ORG_BELT_DIR | default(value="") | replace(from=`'`, to=`'\\''`) %}{% set here = cwd | replace(from=`'`, to=`'\\''`) %}{% if exec(command=`f='` ~ belt ~ `/coverage-measure.sh'; if [ -n '` ~ belt ~ `' ] && [ -r "$f" ] && cd '` ~ here ~ `'; then bash "$f" ci runs-test 2> /dev/null || true; fi`) == "" %}test{% endif %}''', optional = true },
   { task = "build", optional = true },
   # The coverage ratchet joins the gate the moment a repo commits a
   # floor; without one it skips clean like every guarded belt task.
