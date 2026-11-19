@@ -620,7 +620,8 @@ depends = [
   "lint:*",
   # `test` once per gate (#1623 item 3): collected unless the coverage
   # measurement already runs the whole task, which coverage-measure.sh's
-  # `runs-test` answers (python and plpgsql legs, with a floor). The
+  # `runs-test` answers (the python leg, or a leg the floor's record
+  # names that runs the task, #1666). The
   # belt's directory reaches the exec through Tera's `env`, never the
   # shell's (the exec's shell does not see the belt's [env]), and the
   # exec moves to `cwd`, the tree `ci` runs in (it starts in the
@@ -6739,29 +6740,23 @@ dir = "{{cwd}}"
 # times here.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
-tracked=$(git ls-files -- '*.py' && { git grep -lIiE "language[[:space:]]+'?plpgsql" || true; }) || tracked=""
+tracked=$(git ls-files -- '*.py' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" legs) || tracked=""
 if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked} && ! -f package.json ]]; then
   if [[ -z ${floor} ]]; then
     echo "coverage:check: no .coverage-floor, skipped"
   else
-    echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), skipped"
+    echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), skipped"
   fi
   exit 0
 fi
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1
 if [[ -z ${applies} ]]; then
-  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), skipped"
+  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), skipped"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports) || exit 1
 upload=${legs##*$'\n'} legs=${legs%$'\n'*}
-while read -r leg pct; do
-  if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-    echo "coverage:check: ${leg}: ${pct}% is below the derived floor ${floor}%" >&2
-    exit 1
-  fi
-  echo "coverage:check: ${leg} leg holds the floor ${floor} (${pct}%)"
-done <<< "${legs}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" hold --label coverage:check <<< "${legs}" || exit 1
 echo "${upload}"
 '''
 
@@ -6801,12 +6796,12 @@ dir = "{{cwd}}"
 # floor in its own pgrx job, so the floor is derived from them too. The
 # selector prints nothing where there is no extension.
 run = '''
-applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
+applies=$(ORG_COVERAGE_DISCOVER=1 "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
-  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), nothing to measure"
+  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), nothing to measure"
   exit 0
 fi
-legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt && "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt pgrx) || exit 1
+legs=$(ORG_COVERAGE_DISCOVER=1 "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt && "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt pgrx) || exit 1
 if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
   branches=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt rust-branches) || exit 1
   legs="${legs}"$'\n'"${branches}"

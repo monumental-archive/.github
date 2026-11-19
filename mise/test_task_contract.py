@@ -47,11 +47,6 @@ GIT = shutil.which("git") or "git"
 CONFIG = BELT / "config.toml"
 MEASURE = BELT / "coverage-measure.sh"
 
-# The PL/pgSQL leg applies wherever any tracked file carries the
-# LANGUAGE clause, the canon included: the planted clause is built from
-# two halves so this file never switches the leg on for the canon (the
-# trap test_plpgsql_coverage.py's header names).
-PLPGSQL = "plpg" + "sql"
 
 # The step line mise prints for a planned `test` in a dry run.
 TEST_STEP = re.compile(r"^\[test\] \$ ", re.MULTILINE)
@@ -339,19 +334,23 @@ class RunsTest(unittest.TestCase):
         )
 
     def test_each_tree_gets_its_answer(self) -> None:
-        """Python and plpgsql with a floor; nothing for the rest."""
+        """Python, or a leg the floor records; never a searched clause (#1666)."""
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            pg = plant(base, "pg", "schema.sql")
-            (pg / "schema.sql").write_text(
-                "CREATE FUNCTION f() RETURNS int LANGUAGE "
-                + PLPGSQL
-                + " AS $$ BEGIN RETURN 1; END $$;\n",
+            clause = plant(base, "clause", "schema.sql")
+            (clause / "schema.sql").write_text(
+                "CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql"
+                " AS $$ BEGIN RETURN 1; END $$;\n",
                 encoding="utf-8",
+            )
+            recorded = plant(base, "recorded", "README.md")
+            (recorded / ".coverage-floor").write_text(
+                "# legs: typescript plpgsql plpgsql-branches\n80.0\n", encoding="utf-8"
             )
             for tree, want in (
                 (plant(base, "py", "a.py"), "python\n"),
-                (pg, "plpgsql\n"),
+                (clause, ""),
+                (recorded, "plpgsql\n"),
                 (plant(base, "go", "go.mod"), ""),
                 (plant(base, "rust", "Cargo.toml"), ""),
                 (plant(base, "ts", "package.json"), ""),
