@@ -146,6 +146,8 @@ def run(
             "PATH": os.pathsep.join(path),
             "HOME": scratch,
             "ORG_BELT_DIR": str(BELT),
+            # The interpreter the script starts its helpers under (#1543).
+            "ORG_PYTHON": str(PYTHON),
             **(env or {}),
         }
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
