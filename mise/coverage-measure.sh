@@ -62,7 +62,8 @@ legs="${2:-all}"
 case "${legs}" in
   all | go | rust | rust-branches | python | typescript | probe | reports) ;;
   *)
-    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, rust-branches, python, typescript, probe or reports" >&2
+    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
+      "rust-branches, python, typescript, probe or reports" >&2
     exit 1
     ;;
 esac
