@@ -489,6 +489,26 @@ class MainTest(unittest.TestCase):
             for field in fields:
                 self.assertNotEqual(field, "", msg=line)
 
+    def test_metadata_that_is_not_an_object_is_red(self) -> None:
+        """The shrunk example, `[]`: refused by name, not raised (#1555)."""
+        status, out, err = self.invoke([])
+        self.assertEqual(status, 1)
+        self.assertEqual(out, "")
+        self.assertIn("is not a JSON object", err)
+
+    def test_fields_of_the_wrong_type_read_as_absent(self) -> None:
+        """A package, member id or field of the wrong type is no crate (#1555)."""
+        good = metadata(member("a"))
+        doc = {
+            **good,
+            "packages": [1, *good["packages"], {"id": [], "name": 2}],
+            "workspace_members": [[], *good["workspace_members"]],
+            "workspace_root": 5,
+        }
+        status, out, err = self.invoke(doc)
+        self.assertEqual(status, 0, msg=err)
+        self.assertEqual(len(out.splitlines()), 1)
+
     def test_metadata_that_is_not_json_is_red(self) -> None:
         """A broken cargo must not read as a workspace with no crates."""
         status, _out, err = self.invoke(None)

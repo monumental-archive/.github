@@ -114,6 +114,25 @@ own work and adds the task that runs it to its row.
 [signer#86]: https://github.com/monumental-archive/signer/issues/86
 [iiif-server#212]: https://github.com/monumental-archive/iiif-server/issues/212
 
+### A copied fixture keeps its source's licence
+
+Property 5 means fixtures captured from elsewhere, and the line that
+decides their licence is authorship, not origin. A fixture that holds
+another work's source code or prose (a published crate, a bundle of
+commits, a vendored file, documentation text) is that work's, so the
+pull request that adds it also adds a `REUSE.toml` annotation for its
+path, `precedence = "override"`, quoting the source's own copyright
+line and licence expression, and the text of each licence it names
+under `LICENSES/`. A capture of facts about another party (a tool's
+listing of a package, a registry's index record, a log's checkpoints,
+an API's status answer) holds no authored work and stays under this
+repository's own annotation. Nothing in a file's bytes says which kind
+it is, so review holds the annotation; `lint:licence` holds the texts,
+red on any identifier a `REUSE.toml` names without its
+`LICENSES/<id>.txt` ([#1589]).
+
+[#1589]: https://github.com/monumental-archive/.github/issues/1589
+
 ### No number can be bought
 
 - The mutation measure is "no unexplained surviving mutant", never a

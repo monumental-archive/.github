@@ -82,17 +82,24 @@ def references(finding: dict) -> list[str]:
         when the finding carries none in that shape.
 
     """
-    audit = AUDITS.get(finding.get("ident"))
+    ident = finding.get("ident")
+    audit = AUDITS.get(ident) if isinstance(ident, str) else None
     if audit is None:
         return []
     kind = audit[0]
     refs = []
-    for location in finding.get("locations") or []:
+    # Every level is checked for its type: a field of the wrong one
+    # carries no reference, so the finding is kept and reported, never
+    # exempted (#1555: one raised a traceback here).
+    locations = finding.get("locations")
+    for location in locations if isinstance(locations, list) else []:
         if not isinstance(location, dict):
             continue
-        if (location.get("symbolic") or {}).get("kind") != kind:
+        symbolic = location.get("symbolic")
+        if not isinstance(symbolic, dict) or symbolic.get("kind") != kind:
             continue
-        feature = (location.get("concrete") or {}).get("feature")
+        concrete = location.get("concrete")
+        feature = concrete.get("feature") if isinstance(concrete, dict) else None
         if isinstance(feature, str):
             refs.extend(location_references(feature))
     return refs
@@ -123,8 +130,6 @@ def on_signer(finding: dict, signer: str) -> bool:
         the finding names is in the signer's repository.
 
     """
-    if finding.get("ident") not in AUDITS:
-        return False
     refs = references(finding)
     if not refs:
         return False

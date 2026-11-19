@@ -167,6 +167,7 @@ when = []
 for = [
   "pipx:coverage",
   "pipx:hypothesis",
+  "pipx:mypy",
   "pipx:reuse",
   "pipx:sqlfluff",
   "pipx:yamllint",
@@ -179,13 +180,16 @@ when = []
 # Every belt helper; lint:subject-budget runs one with no guard.
 tasks = [
   "coverage:check",
+  "lint:badges",
   "lint:bash-portability",
   "lint:belt-shell",
   "lint:belt-tree",
   "lint:biome",
+  "lint:citation",
   "lint:coverage-exclusions",
   "lint:deny",
   "lint:fuzz-build",
+  "lint:licence",
   "lint:gate-surface",
   "lint:lock-platforms",
   "lint:msrv",
@@ -294,3 +298,10 @@ when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
 # git's default pathspec lets `*` cross a slash.
 tasks = ["test:python-properties"]
 when = ["*prop_*.py"]
+
+[tools."pipx:mypy"]
+# audit:python-types only (#1604): no gate task calls it until the task
+# is renamed lint:python-types, whose row is then `when = ["*.py",
+# "*.pyi"]`, the task's own guard.
+tasks = []
+when = []

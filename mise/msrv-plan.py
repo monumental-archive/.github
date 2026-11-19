@@ -56,6 +56,19 @@ NAME = "msrv-plan"
 VERSION_PARTS = (2, 3)
 
 
+def digits(text: str) -> bool:
+    """Say whether text is a run of ASCII digits.
+
+    `str.isdigit` also accepts `²` and other digits `int()` refuses
+    (#1555: `1.2.²` raised ValueError), and no version spells one.
+
+    Returns:
+        True for one or more of 0-9 and nothing else.
+
+    """
+    return text.isascii() and text.isdigit()
+
+
 def parse_version(raw: str) -> tuple[int, int, int] | None:
     """Read a bare version into its zero-padded parts.
 
@@ -65,7 +78,7 @@ def parse_version(raw: str) -> tuple[int, int, int] | None:
 
     """
     parts = raw.strip().split(".")
-    if len(parts) not in VERSION_PARTS or not all(p.isdigit() for p in parts):
+    if len(parts) not in VERSION_PARTS or not all(digits(p) for p in parts):
         return None
     parts += ["0"] * (3 - len(parts))
     return (int(parts[0]), int(parts[1]), int(parts[2]))
@@ -199,7 +212,7 @@ def features(declared: str) -> dict[str, str]:
     chosen: dict[str, str] = {}
     for pair in declared.split(","):
         name, _, major = pair.partition(":")
-        if name.strip() and major.strip().isdigit():
+        if name.strip() and digits(major.strip()):
             chosen[name.strip()] = f"--no-default-features --features pg{major.strip()}"
     return chosen
 

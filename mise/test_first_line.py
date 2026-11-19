@@ -59,7 +59,7 @@ class FirstLineOfALongListing(unittest.TestCase):
             root = Path(tmp)
             tree = root / "repo"
             tree.mkdir()
-            env = hermetic.env(root / "home")
+            env = hermetic.env(root / "home", ORG_BELT_DIR=str(BELT))
             (tree / "LICENSE").write_text("0BSD\n", encoding="utf-8")
             for i in range(FILES):
                 (tree / f"{NAME}{i:05}").touch()

@@ -48,6 +48,19 @@ NAME = "pgrx-postgres"
 PACKAGE = "aqua:theseus-rs/postgresql-binaries"
 
 
+def digits(text: str) -> bool:
+    """Say whether text is a run of ASCII digits.
+
+    `str.isdigit` also accepts `²` and other digits `int()` refuses
+    (#1555: a version `²` raised ValueError), and no major spells one.
+
+    Returns:
+        True for one or more of 0-9 and nothing else.
+
+    """
+    return text.isascii() and text.isdigit()
+
+
 def pinned(listing: list[dict]) -> tuple[dict[int, dict], list[str]]:
     """Read the Postgres majors this repository's config actually pins.
 
@@ -68,7 +81,7 @@ def pinned(listing: list[dict]) -> tuple[dict[int, dict], list[str]]:
             continue
         raw = str(entry.get("version", ""))
         head = raw.split(".", 1)[0]
-        if not head.isdigit():
+        if not digits(head):
             continue
         if entry.get("installed"):
             found[int(head)] = entry
@@ -164,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {bad}", file=sys.stderr)
         return 1
 
-    majors = [int(m) for m in args.majors.split(",") if m.strip().isdigit()]
+    majors = [int(m) for m in args.majors.split(",") if digits(m.strip())]
     if not majors:
         print(f"{NAME}: --majors named no Postgres major", file=sys.stderr)
         return 1

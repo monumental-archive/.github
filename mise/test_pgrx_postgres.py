@@ -99,6 +99,11 @@ class PinnedTest(unittest.TestCase):
         found, _absent = pgrx_postgres.pinned([entry("latest")])
         self.assertEqual(found, {})
 
+    def test_a_non_ascii_digit_is_not_a_major(self) -> None:
+        """`²` passes str.isdigit, and int() refuses it (#1555)."""
+        found, _absent = pgrx_postgres.pinned([entry("²"), entry("\u0661\u0667.1.0")])
+        self.assertEqual(found, {})
+
 
 class PgConfigTest(unittest.TestCase):
     """Finding pg_config. Mutation: look only at the top-level bin/."""
@@ -193,6 +198,13 @@ class MainTest(unittest.TestCase):
         status, out, err = self.invoke("18", [entry("18.6.0")])
         self.assertEqual(status, 0, msg=err)
         self.assertTrue(out.startswith("pg\t18\t"))
+
+    def test_a_non_ascii_major_names_no_major(self) -> None:
+        """`--majors ²` is refused by name, not a ValueError (#1555)."""
+        status, out, err = self.invoke("\u00b2", [entry("18.6.0")])
+        self.assertEqual(status, 1)
+        self.assertEqual(out, "")
+        self.assertIn("--majors named no Postgres major", err)
 
     def test_a_missing_pin_is_red_with_no_records(self) -> None:
         """Both halves: the exit status and the empty plan."""

@@ -42,6 +42,7 @@ honestly blocked on.
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Three more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), and `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
+| mypy (`pipx:` backend via aqua-backed uv) | Python type checking at its strictest (#1604), config delivered as `mise/mypy.ini`: `audit:python-types` while the canon conforms, then `lint:python-types` in the gate |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
 | gomu (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
@@ -1950,6 +1951,95 @@ a crash found and written, the gate then red on the committed input.
 *Reopen:* the first Go repo with fuzz targets, to measure `FUZZ_SECONDS`
 against something real rather than the 60s default.
 
+**mypy at its strictest, chosen against ty and pyright** (#1604,
+2026-11-19). Nothing type-checked the belt's Python, and the property
+tests of #1555-#1557 had just found the cost: 25 bugs, 14 of them one
+class, a `json.loads` or `tomllib` value of the wrong type reaching
+`.get`, `in` or an index. The owner chose ty; the amendment ran three
+checkers side by side, each at its strictest, from scratch
+environments over the canon's 61 non-test helpers at `610447d`, and
+over each buggy helper at the commit before its fix:
+
+| | ty 0.0.101 | pyright 1.1.414 | mypy 2.4.1 |
+| --- | --- | --- | --- |
+| strictest setting | `--error all` (150 rules) | `strict` + every rule it leaves off | `--strict` + every `--disallow-any-*` + 13 optional codes |
+| findings, 61 helpers | 181 | 1361 | 1701 |
+| wall-clock, cold | 0.2 s | 2.2 s | 2.2 s |
+| wrong-type bugs reported, of 14 | 1 | 8 (2 directly) | 14 (3 directly) |
+| install under the belt | `aqua:`, sha256 + GitHub attestation | Node, or a run-time download | `pipx:` via uv |
+
+The other 11 bugs (undecodable bytes, recursion depth, `isdigit` on
+non-ASCII digits, logic) are not type errors and no checker reports
+them. The 14 are the whole argument. Every one of those values is
+typed `Any`, and **ty never reports `Any` where it is used**: its
+`unsound-*` rules fire only at a typed return, assignment or yield,
+and no rule refuses an explicit `Any`, so its own config cannot close
+the hole. pyright strict reports *Unknown* but not explicit `Any`, so
+it caught these only where a parameter was a bare `dict`.
+`disallow_any_expr` refuses every expression of type `Any`, which is
+the issue's sentence exactly: the class refused where the value is
+first read. The cost is the same fact from the other side: 1701
+findings, 1541 of them `Any` that must be validated into a typed
+shape, which is the fix the properties forced one helper at a time.
+ty's and pyright's refusals are under Skipped.
+
+Proven by running 2.4.1:
+
+- **`--config-file` replaces discovery.** A tracked `mypy.ini` and a
+  `pyproject.toml` `[tool.mypy]`, each saying `ignore_errors`, change
+  nothing beside it; alone, they silence the run. So the belt's
+  `mise/mypy.ini` is delivered, never copied, and a repository cannot
+  lower it from a config file.
+- **The strictest setting is read from the tool.** `strict` is named,
+  never spelled out, because it is a group that grows with mypy (the
+  clippy rule: a group fails closed, an enable-list fails open). On
+  top of it, every boolean `--strict` leaves at its lax value
+  (`disallow_any_expr`, `_explicit`, `_decorated`, `_unimported`,
+  `warn_unreachable`, `strict_equality_for_none`,
+  `warn_unused_configs`), and every error code `mypy.errorcodes`
+  marks off by default (13). No Python version: mypy takes the
+  interpreter's, asserted to be the belt's pin.
+- **A missing config refuses (exit 2), but an unknown key and an
+  unparsable file each warn and exit 0 under mypy's defaults.** The
+  task reds any line mypy prints about the config file.
+- **Three seams in a source file lower the level and mypy reports none
+  of them**: an inline `# mypy:` comment (`ignore-errors`,
+  `allow-any-expr`, `disable-error-code`); a bare `# type: ignore`
+  before the first statement, which ignores the module and which
+  `ignore-without-code` does not fire on; and `typing.no_type_check`,
+  silent even under `disallow_any_decorated`. `mise/python-types-seams.py`
+  names each, read with `tokenize` and `ast` so the text in a string
+  is not a finding. The one suppression left is
+  `# type: ignore[<code>]`: it names its rule, and `unused-ignore`
+  reds it once it suppresses nothing.
+- **Hyphenated names and `importlib` loads.** A hyphenated file is
+  checked when passed by path; no checker follows a
+  `spec_from_file_location` load, so a helper loaded that way is a
+  `ModuleType` and its calls are untyped. That is a conformance
+  question for the helpers, not a belt one.
+- Two files of one basename are one module to mypy and stop the run;
+  `explicit_package_bases` keeps them apart, with the canon's findings
+  unchanged. `cache_dir = /dev/null`: the task writes nothing.
+- The interpreter mypy resolves imports through is the Hypothesis
+  venv's where Hypothesis is installed (the `prop_*.py` files import
+  it; without it, 54 `import-not-found`), asserted to be the same
+  Python as the repository's `python3`.
+
+**Staged, not advisory.** The canon held 10 874 findings over its 226
+tracked files when the pin landed: 1719 in the helpers (`mise/` 1295,
+`release/` 335, the rest 89) and 9155 in their tests. A `ci` task
+would stop every merge until the last was fixed, so the task lands as
+`audit:python-types`, run by the canon's Monday audit and red there
+(`lint:audit-scheduled` refuses an audit task no workflow runs); the
+findings are run down one lane per directory, and the pull request
+that clears the last renames it `lint:python-types`, which `ci`
+collects, and drops the audit leg. `pipx:mypy` is the
+seventh `pipx:` exception; its five dependencies (`typing_extensions`,
+`mypy_extensions`, `pathspec`, `librt`, `ast-serialize`) are unhashed
+in `mise.lock`, held by uv under the `UV_*` floor, as Hypothesis's one
+is. *Reopen:* an aqua package, or a `pipx:` lock entry that carries
+hashes.
+
 **gomu, the Go leg of `audit:mutants`, chosen against two others**
 (#1356, under #1336's property 1, "fails when any behaviour changes").
 Coverage counts a line as covered when a test runs it, whether or not
@@ -3161,6 +3251,25 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   on four upstream defects, ultimately not adopted as issuer: the org
   built its own emitter (#207). Lives on as a *candidate cross-check*
   of our VSAs, never their issuer — watched as #199.
+- **ty, for Python type checking** (#1604, 2026-11-19) — the owner's
+  first choice, measured against mypy and pyright (the mypy entry under
+  Adopted holds the table). It passes every belt prior: `aqua:`,
+  sha256 per asset and a verified GitHub attestation, every one of its
+  150 rules holdable at error, a missing or unparsable config refused
+  (exit 2), an unknown rule name red (exit 1), `--config-file`
+  replacing discovery, and a ruleless or unused `# ty: ignore` red. It
+  reports 1 of the 14 wrong-type bugs, because it follows the gradual
+  guarantee: an `Any` is never reported where it is used, and no rule
+  refuses one. It is also ten times faster. *Reopen:* a ty rule that
+  refuses `Any` at a use site (or an explicit `Any`), measured against
+  the same 14 pre-fix helpers.
+- **pyright, for Python type checking** (#1604) — 8 of the 14
+  wrong-type bugs at `strict` with every rule it leaves off turned on,
+  and it reports *Unknown* but never explicit `Any`, so `json.loads`
+  goes unseen unless the parameter was a bare `dict`. It also fails
+  the install prior: it is an npm package, the belt carries no Node
+  (tsc is native), and the PyPI wrapper downloads Node and pyright at
+  run time. *Reopen:* a native, checksummed pyright release.
 
 ## Watched, as filed issues
 

@@ -114,6 +114,11 @@ class ParseVersionTest(unittest.TestCase):
         """`1.82.0-beta.1` is a channel, and cannot verify a promise."""
         self.assertIsNone(msrv_plan.parse_version("1.82.0-beta.1"))
 
+    def test_a_non_ascii_digit_is_not_a_version(self) -> None:
+        """`1.2.²` passes str.isdigit, and int() refuses it (#1555)."""
+        self.assertIsNone(msrv_plan.parse_version("1.2.²"))
+        self.assertIsNone(msrv_plan.parse_version("\u0661.82"))
+
 
 class MembersTest(unittest.TestCase):
     """Which packages are the workspace's. Mutation: return all packages."""
@@ -415,6 +420,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(msrv_plan.features("ext:"), {})
         self.assertEqual(msrv_plan.features(":18"), {})
         self.assertEqual(msrv_plan.features(""), {})
+        self.assertEqual(msrv_plan.features("ext:¹⁸"), {})
 
     def test_a_declaration_this_cannot_compare_is_red(self) -> None:
         """Refuse rather than verify a promise the check never read."""

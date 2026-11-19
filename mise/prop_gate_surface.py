@@ -11,16 +11,24 @@ generated cargo packages and publish stubs:
   blank lines and quoting surround them; the crates the publish path
   builds do not depend on the order or spacing of `classes` and
   `exclude`, and an excluded crate is never built by a workspace class.
+- Refusal (R): whatever JSON cargo metadata hands over, `main` prints
+  the surface (0) or refuses by name (1), never a traceback (#1555: a
+  non-object document, or a package or field of the wrong type,
+  raised).
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import contextlib
 import importlib.util
+import io
+import json
+import sys
 import unittest
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -145,6 +153,58 @@ class Stub(unittest.TestCase):
         self.assertEqual(one, two)
         if not set(classes) & {"pgrx-extension", "wasm-npm"}:
             self.assertFalse(one & set(excluded))
+
+
+JSON = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.text(max_size=8),
+    lambda inner: (
+        st.lists(inner, max_size=3)
+        | st.dictionaries(st.text(max_size=8), inner, max_size=3)
+    ),
+    max_leaves=10,
+)
+PACKAGE = st.fixed_dictionaries(
+    {},
+    optional={
+        "id": st.one_of(NAME, JSON),
+        "name": st.one_of(NAME, JSON),
+        "version": st.one_of(st.just("0.1.0"), JSON),
+        "features": st.one_of(st.dictionaries(FEATURE, st.just([])), JSON),
+        "dependencies": st.one_of(
+            st.lists(st.fixed_dictionaries({"name": NAME})), JSON
+        ),
+        "manifest_path": st.one_of(st.just("/ws/a/Cargo.toml"), JSON),
+    },
+)
+METADATA = st.fixed_dictionaries(
+    {},
+    optional={
+        "workspace_root": st.one_of(st.just("/ws"), JSON),
+        "workspace_members": st.one_of(st.lists(st.one_of(NAME, JSON)), JSON),
+        "packages": st.one_of(st.lists(st.one_of(PACKAGE, JSON), max_size=3), JSON),
+    },
+)
+
+
+class Refusal(unittest.TestCase):
+    """Any metadata document: the surface, or a refusal by name."""
+
+    @given(st.one_of(JSON, METADATA))
+    @example([])
+    @example({"packages": [1], "workspace_members": []})
+    def test_main_answers_any_document(self, doc: object) -> None:
+        """0, or 1 with the reason on stderr."""
+        out, err = io.StringIO(), io.StringIO()
+        old = sys.stdin
+        sys.stdin = io.StringIO(json.dumps(doc))
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = gs.main([])
+        finally:
+            sys.stdin = old
+        self.assertIn(status, (0, 1))
+        if status:
+            self.assertIn("gate-surface: ", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -175,6 +175,14 @@ ORG_CANON_DIR = "{{ env.ORG_BELT_DIR | dirname }}"
 # template re-enters mise, which evaluates this template again; measured
 # on 2026.11.6), and the command holds no backslash: Tera refuses one.
 ORG_PYTHON = '''{{ exec(command=`b="${ORG_BELT_DIR:-}"; v=""; if [ -n "$b" ] && [ -f "$b/config.toml" ]; then v=$(awk -F'"' '/^python = "/ { print $2 }' "$b/config.toml"); fi; d="${XDG_DATA_HOME:-$HOME/.local/share}/mise"; d="${MISE_DATA_DIR:-$d}"; p="$d/installs/python/$v/bin/python3"; if [ -n "$v" ] && [ -x "$p" ]; then echo "$p"; elif [ -n "${ORG_PYTHON:-}" ]; then echo "$ORG_PYTHON"; fi`) }}'''
+# The one refusal of an empty ORG_PYTHON in a task body (#1582): every
+# helper start reads `"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}"`, so the
+# refusal rides the expansion and no body gains a line. Locally it is
+# empty where a repository pins its own Python and the belt's was never
+# installed beside it; the message names the one command that does, the
+# version read from the belt's file like ORG_PYTHON's, never typed here.
+# No apostrophe: bash drops one inside `${VAR:?...}` (#1543).
+ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise install python@{{ exec(command=`b="${ORG_BELT_DIR:-}"; if [ -n "$b" ] && [ -f "$b/config.toml" ]; then awk -F'"' '/^python = "/ { print $2 }' "$b/config.toml"; fi`) }} (CI: the canon action)'''
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
@@ -280,7 +288,7 @@ jq = "1.8.2"
 # universal layer that dropped Python the moment the canon's own count
 # fell to two would have to re-adopt it for the first adopter who
 # writes one.
-ruff = "0.17.4"
+ruff = "0.17.5"
 # The org's JS/TS/JSON layer (#82), at every rule biome has: `preset:
 # "all"` for the eight stable groups plus each nursery rule NAMED in
 # mise/biome-org.json. 514 rules at 2.5.7, not the 525 this comment
@@ -561,6 +569,14 @@ python = "3.15.2"
 # pipx: exception; one dependency, sortedcontainers, which mise.lock
 # does not hash (docs/tooling-verdicts.md). Atheris is refused there.
 "pipx:hypothesis" = "6.170.15"
+# Python type checking (#1604): mypy at its strictest, the owner's
+# ruling on a three-way measurement (ty, pyright, mypy) in
+# docs/tooling-verdicts.md. The SEVENTH pipx: exception: PyPI-only, no
+# aqua package; its five dependencies are unhashed in mise.lock, as
+# Hypothesis's one is. The config is delivered (mise/mypy.ini) and
+# audit:python-types runs it; the task enters `ci` as
+# lint:python-types once the canon's findings are run down.
+"pipx:mypy" = "2.4.1"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
@@ -1620,7 +1636,7 @@ fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
-  | python3 "${ORG_BELT_DIR}/biome-config.py" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
@@ -1698,7 +1714,7 @@ fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 git ls-files ':!vendor/**' "package.json" "*/package.json" \
-  | python3 "${ORG_BELT_DIR}/biome-config.py" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome-config.py" \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
@@ -2079,7 +2095,7 @@ files=$(action_files)
 # said nothing. ORG_BELT_DIR resolves in both worlds (#445).
 helper="${ORG_BELT_DIR}/embedded-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${helper}" ${files}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" ${files}
 '''
 
 [tasks."lint:workflow-shell"]
@@ -2120,7 +2136,7 @@ templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --ceiling security/workflow-shell-debt.txt ${files}
 '''
 
@@ -2143,7 +2159,7 @@ templates=$(git ls-files ':!vendor/**' "workflow-templates/*.y*ml")
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --ceiling security/workflow-shell-debt.txt --write ${files}
 '''
 
@@ -2173,7 +2189,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --task-ceiling security/task-shell-debt.txt ${files}
 '''
 
@@ -2194,7 +2210,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   exit 0
 }
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/embedded-shell.py" \
   --task-ceiling security/task-shell-debt.txt --write ${files}
 '''
 
@@ -2407,7 +2423,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 # the name is declared there, not here. Nothing restates it.
 helper="${ORG_BELT_DIR}/belt-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${helper}" --env-from "${ORG_BELT_DIR}/config.toml" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" --env-from "${ORG_BELT_DIR}/config.toml" \
   --source-path "${ORG_BELT_DIR}" ${files}
 '''
 
@@ -2454,7 +2470,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 }
 helper="${ORG_BELT_DIR}/belt-shell.py"
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
-python3 "${helper}" --write ${files}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" --write ${files}
 '''
 
 [tasks."lint:commits"]
@@ -2551,7 +2567,7 @@ dir = "{{cwd}}"
 # ceiling is read from the delivered committed.toml rather than restated
 # — one definition of 72, which is what made the file's delivery the
 # first step of #576.
-run = 'git ls-files ":!vendor/**" | python3 "${ORG_BELT_DIR}/subject-budget.py"'
+run = 'git ls-files ":!vendor/**" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/subject-budget.py"'
 
 [tasks."lint:zizmor"]
 description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"
@@ -2744,7 +2760,7 @@ cargo deny check bans licenses sources
 # helper resolves from the belt, which is where the org's policy lives;
 # a repo running without the canon cannot quietly skip this.
 helper="${ORG_BELT_DIR}/deny-skips.py"
-variants=$(python3 "${helper}" deny.toml)
+variants=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" deny.toml)
 stale=""
 while IFS=$'\t' read -r name variant; do
   [[ -n ${name} ]] || continue
@@ -3102,7 +3118,7 @@ cargo fetch --locked
 # without being compiled at all. Derived, never declared: the repo says
 # nothing and cannot get it wrong.
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 [[ -n ${surface} ]] || {
   echo "lint:rust: a Cargo.toml is tracked but cargo metadata names no workspace member" >&2
   exit 1
@@ -3253,7 +3269,7 @@ cargo fetch --locked
 # of #726 is the POPULATION, and a population computed twice is two
 # populations (#813).
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 excludes=""
 fixing=""
 excluded=""
@@ -3287,7 +3303,7 @@ if [[ -n ${extensions} ]]; then
   . "${ORG_BELT_DIR}/pgrx-env.sh"
   org_pgrx_darwin_flags
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-    | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${ext_majors}" \
+    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${ext_majors}" \
     | org_pgrx_init
   for name in ${extensions}; do
     # shellcheck disable=SC2086  # ${ladder} holds whole flag words
@@ -3398,14 +3414,14 @@ extensions=""
 # would arrive as an EMPTY here-string and this task would report having
 # verified a workspace it never saw (SC2312, and the fail-open shape the
 # gate exists to refuse).
-surface=$(python3 "${ORG_BELT_DIR}/gate-surface.py" \
+surface=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" \
   --exclude "${CLIPPY_EXCLUDE:-}" < "${tmp}/metadata.json")
 while IFS=$'\t' read -r record spec kind majors _dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   extensions="${extensions} ${spec%@*}"
   pgrx="${pgrx}${pgrx:+,}${spec%@*}:${majors##*,}"
 done <<< "${surface}"
-plan=$(python3 "${ORG_BELT_DIR}/msrv-plan.py" \
+plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv-plan.py" \
   --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
   --pgrx "${pgrx}" < "${tmp}/metadata.json")
 [[ -n ${plan} ]] || {
@@ -3421,7 +3437,7 @@ if [[ -n ${extensions} && ${plan} == *"--features pg"* ]]; then
   org_pgrx_darwin_flags
   majors="${pgrx##*:}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-    | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
     | org_pgrx_init > /dev/null
 fi
 features="${CLIPPY_FEATURES:---all-features}"
@@ -3517,7 +3533,7 @@ majors=""
 # so a red derivation would read as a workspace with no extension and
 # this task would skip clean having checked nothing.
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 while IFS=$'\t' read -r record spec kind crate_majors _dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   specs="${specs} ${spec}:${crate_majors##*,}"
@@ -3543,7 +3559,7 @@ contradiction_count=$(org_clippy_pgrx_contradiction_count)
 . "${ORG_BELT_DIR}/pgrx-env.sh"
 org_pgrx_darwin_flags
 mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-  | python3 "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx-postgres.py" --majors "${majors}" \
   | org_pgrx_init > /dev/null
 count=0
 linted=""
@@ -3732,7 +3748,7 @@ command -v cargo > /dev/null || {
   exit 1
 }
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" \
     --publish .github/workflows/publish.yml)
 count=0
 while IFS=$'\t' read -r record _spec _kind _majors _dir; do
@@ -4074,7 +4090,7 @@ while IFS= read -r cfg; do
     rc=1
     continue
   fi
-  python3 "${ORG_BELT_DIR}/tsconfig-dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/tsconfig-dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
     --name "${cfg}" < "${tmp}/resolved.json" || rc=1
 done <<< "${cfgs}"
 [[ ${rc} -eq 0 ]] || {
@@ -4910,7 +4926,7 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
-        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(bestpractices: ${bp_owner})"
         elif ! jq -e '(.badge_percentage_0 // 0) >= 100' <<< "${bp}" > /dev/null; then
           failed="${failed} ${repo}(bestpractices: passing percentage below 100)"
@@ -4930,7 +4946,7 @@ while read -r repo; do
         bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
         if [[ -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
-        elif ! bp_owner=$(python3 "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
+        elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-owner.py" "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(baseline: ${bp_owner})"
         elif ! jq -e '[.achieved_baseline_1_at, .achieved_baseline_2_at, .achieved_baseline_3_at] | any(. != null)' <<< "${bp}" > /dev/null 2>&1; then
           failed="${failed} ${repo}(baseline: shield worn but the issuer records no achieved level)"
@@ -5251,7 +5267,7 @@ git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
 }
 top=$(git rev-parse --show-toplevel)
 readme=$(git ls-files | grep -iE '^readme(\.md|\.markdown)?$' | head -n 1 || true)
-python3 "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
 '''
 
 [tasks."audit:links"]
@@ -5351,7 +5367,7 @@ if ((status != 0 && (status < 10 || status > 14))); then
   exit "${status}"
 fi
 left=0
-python3 "${ORG_BELT_DIR}/zizmor-signer.py" --signer-workflow "${signer_wf}" < "${json}" || left=$?
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/zizmor-signer.py" --signer-workflow "${signer_wf}" < "${json}" || left=$?
 ((left == 0)) && exit 0
 ((left == 1)) || exit "${left}"
 status=0
@@ -5981,7 +5997,7 @@ command -v cargo > /dev/null || {
 }
 cargo fetch --locked
 cargo metadata --no-deps --format-version 1 --locked \
-  | python3 "${ORG_BELT_DIR}/workspace-inherit.py"
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace-inherit.py"
 '''
 
 [tasks."lint:gate-stub"]
@@ -6772,7 +6788,7 @@ command -v gh > /dev/null || {
 }
 . "${ORG_BELT_DIR}/identity.sh"
 owner=$(org_identity owner)
-python3 "${ORG_BELT_DIR}/security-config.py" --owner "${owner}" \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/security-config.py" --owner "${owner}" \
   --record security/org-default.json --private-record security/org-private.json \
   --roster slsa/assert-policy.json
 '''
@@ -7051,7 +7067,7 @@ files=$(git ls-files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
   echo "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or JavaScript tracked, skipped"
   exit 0
 }
-python3 "${ORG_BELT_DIR}/coverage-exclusions.py" <<< "${files}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-exclusions.py" <<< "${files}"
 '''
 
 [tasks."coverage:check"]
@@ -7070,12 +7086,12 @@ dir = "{{cwd}}"
 # A repo without a floor has adopted no ratchet and skips clean; a repo
 # with one cannot merge below it. Deterministic — the number is local,
 # the run is local; the Codecov upload (the badge) lives in ci.yml as a
-# separate non-blocking job.
+# separate non-blocking job, which uploads the reports THIS run wrote.
 #
 # The measurement is mise/coverage-measure.sh, shared with
-# release/derive-coverage-floor.sh and coverage:report, so the number
-# enforced here, the number the floor is derived from and the profile
-# the badge uploads cannot come from different flags (#707) —
+# release/derive-coverage-floor.sh, so the number enforced here, the
+# number the floor is derived from and the reports the badge uploads
+# cannot come from different flags (#707) —
 # the #316 shape, where a second hardcoded --workspace drifted from the
 # first the instant a repo excluded a member. Each leg measures what its
 # language measures (statements for Go, lines for Rust, statements and
@@ -7086,8 +7102,19 @@ dir = "{{cwd}}"
 # half, written where mise/gate-tools.py's derivation can read it
 # (#1410): a tree with none of these can measure nothing, so the gate
 # need not install a coverage tool for it.
+#
+# The badge is fed from this run (#1528). Every leg writes the report
+# Codecov parses beside its number, and the last line names the files
+# this run wrote: `coverage:check: upload <files>`. On a push to the
+# default branch the gate job keeps them as an artifact and the badge
+# job uploads that, measuring nothing. It used to re-measure with a
+# toolset of its own in a second task, coverage:report, and hung on
+# main for a day in a test the gate passes. Which files, and the
+# refusals of a run that measured or wrote nothing, are the measurement
+# script's `reports` answer, asked before the floor is held so a refusal
+# is never preceded by a hold line. The line is printed last.
 run = '''
-floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
 tracked_py=$(git ls-files -- '*.py') || tracked_py=""
 if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked_py} && ! -f package.json ]]; then
   if [[ -z ${floor} ]]; then
@@ -7103,10 +7130,7 @@ if [[ -z ${applies} ]]; then
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
-if [[ -z ${legs} ]]; then
-  echo "coverage:check: no leg was measured — a check that reads nothing must not pass" >&2
-  exit 1
-fi
+upload=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports <<< "${legs}") || exit 1
 while read -r leg pct; do
   if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
     echo "coverage:check: ${leg}: ${pct}% is below the derived floor ${floor}%" >&2
@@ -7114,6 +7138,7 @@ while read -r leg pct; do
   fi
   echo "coverage:check: ${leg} leg holds the floor ${floor} (${pct}%)"
 done <<< "${legs}"
+echo "${upload}"
 '''
 
 [tasks."coverage:adopt"]
@@ -7128,8 +7153,8 @@ dir = "{{cwd}}"
 #
 # It cannot lower a floor whose record parses — that is the ratchet, and
 # stepping down is a conscious `reset: <why>` a human writes and a
-# reviewer sees. A `coverage:*` sibling rather than a `fix:*` one, like
-# coverage:report beside it: the `fix` aggregate collects `fix:*`
+# reviewer sees. A `coverage:*` sibling rather than a `fix:*` one: the
+# `fix` aggregate collects `fix:*`
 # wildcard, and a fixer that runs the whole test suite does not belong
 # in a sweep nobody asked for.
 #
@@ -7152,105 +7177,8 @@ if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
 elif [[ -f Cargo.toml ]]; then
   echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
 fi
-python3 "${ORG_BELT_DIR}/coverage-floor.py" write \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
-'''
-
-[tasks."coverage:report"]
-description = "Render the reports the Codecov badge feed uploads (never the gate)"
-dir = "{{cwd}}"
-# The upload half of the ratchet, as a TASK rather than an inline
-# command in ci.yml — because "which members are coverable" is a
-# property of the repo (COVERAGE_EXCLUDE in its mise.toml), and a
-# second hardcoded --workspace invocation drifted from coverage:check
-# the instant a repo excluded anything: the lab excludes lab-pg (pgrx,
-# needs a live postgres), the badge job did not, and it reddened main
-# on the first push after coverage landed (#316). One task, one
-# exclusion set, same llvm-tools assertion — never a task-time rustup,
-# which races every other task driving the toolchain.
-#
-# The Go leg no longer has its own invocation at all: it calls the
-# shared measurement (#707), so the drift class is closed for Go by
-# construction rather than by two copies staying in step. The Rust leg
-# still renders here because lcov is an output format the measurement
-# script does not produce; its exclusion set is the one place a second
-# copy survives, and it is asserted by the identical COVERAGE_EXCLUDE
-# loop rather than a hardcoded --workspace.
-run = '''
-[[ -f .coverage-floor ]] || {
-  echo "coverage:report: no .coverage-floor, skipped"
-  exit 0
-}
-applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:report probe) || exit 1
-[[ -n ${applies} ]] || {
-  echo "coverage:report: no measurable language, skipped"
-  exit 0
-}
-# Go leg (#392): the profile go test writes IS the upload format —
-# Codecov parses Go coverprofiles natively, so the report is the
-# measurement, with no converter to drift.
-# Every tracked language renders its own report, for the same reason
-# coverage:check runs every leg: a mixed repo used to render lcov.info
-# alone while ci.yml, guessing the filename from `hashFiles('go.mod')`,
-# asked Codecov for a coverage.txt nothing had written. The uploader
-# now takes the list of reports that actually exist.
-if [[ -f go.mod ]]; then
-  # ONE `go test -coverprofile` in the belt (#707). The profile Codecov
-  # receives is the profile coverage:check enforces from, because it is
-  # the same invocation — not two that happen to agree. This leg used to
-  # write its own without `-coverpkg=./...` and handed the badge 94.9%
-  # while the gate held the same tree to a floor derived from 95.4%
-  # (measured on stele, 1818498). The `go` selector keeps the Rust half
-  # below, which renders lcov this script does not produce.
-  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report go > /dev/null
-  echo "coverage:report: coverage.txt written"
-fi
-# Python leg (#1331): Cobertura XML, which Codecov parses natively, so
-# like Go's profile the upload needs no converter. Rendered by the
-# measurement script from the run it measures, never by a second
-# invocation with its own flags. coverage.xml, not lcov: lcov.info is
-# the Rust leg's name, and a mixed tree renders both.
-if grep -qx python <<< "${applies}"; then
-  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report python > /dev/null
-  echo "coverage:report: coverage.xml written"
-fi
-# TypeScript leg (#1357): the lcov vitest's own provider wrote in the
-# measured run, renamed off lcov.info, which the Rust leg below owns.
-if grep -qx typescript <<< "${applies}"; then
-  "${ORG_BELT_DIR}/coverage-measure.sh" coverage:report typescript > /dev/null
-  echo "coverage:report: lcov-typescript.info written"
-fi
-if [[ -f Cargo.toml ]]; then
-  if ! rustup component list --installed 2> /dev/null | grep -q "^llvm-tools"; then
-    echo "coverage:report: llvm-tools component missing — declare it with the" >&2
-    echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
-    exit 1
-  fi
-  # The same provisioning the measurement gets, from the same function,
-  # so the report and the number it accompanies are built against one
-  # Postgres (#917).
-  . "${ORG_BELT_DIR}/pgrx-env.sh"
-  org_pgrx_provision coverage:report "${COVERAGE_EXCLUDE:-}"
-  excludes=""
-  for m in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${m}"; done
-  # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
-  # which cargo must receive as separate arguments
-  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info
-  echo "coverage:report: lcov.info written${excludes:+ (excluding${excludes//--exclude/})}"
-fi
-# What to upload is this task's answer, because it knows which legs ran
-# (#1386): the list is what the task WROTE, never a guess from repo
-# shape. A mixed repo renders every report and uploads every one; the
-# workflow's old `hashFiles('go.mod')` selector once named coverage.txt
-# for repos whose Rust-only leg had written lcov.info. The badge job
-# reads this line and nothing else; a leg that ran and wrote nothing is
-# refused here, where it happened.
-files=$(for f in lcov{,-typescript}.info coverage.{txt,xml}; do [[ ! -f ${f} ]] || echo "${f}"; done | paste -sd, -)
-if [[ -z ${files} ]]; then
-  echo "coverage:report: wrote no report — nothing to upload" >&2
-  exit 1
-fi
-echo "coverage:report: upload ${files}"
 '''
 
 [tasks."lint:fuzz-build"]
@@ -8121,7 +8049,7 @@ done
 # tracks (#505, #354, #693). A disagreeing roster prints no members, so
 # it derives nothing and the reconciliation below says why.
 owed=""
-if [[ -n ${repos} ]] && ! owed=$(python3 "${derive}" <<< "${population}"); then
+if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${derive}" <<< "${population}"); then
   echo "audit:adoption: the population document was refused, so no obligations were derived" >&2
   exit 1
 fi
@@ -8367,7 +8295,7 @@ run = '''
   echo "audit:coverage-branches: no Cargo.toml, skipped"
   exit 0
 }
-floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg rust-branches) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read --leg rust-branches) || exit 1
 [[ -n ${floor} ]] || {
   echo "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped"
   exit 0
@@ -8485,6 +8413,21 @@ run = '''
 "${ORG_BELT_DIR}/python-properties.sh" audit
 '''
 
+[tasks."audit:python-types"]
+description = "Type-check tracked Python with mypy at its strictest, the belt's config (enters ci as lint:python-types)"
+dir = "{{cwd}}"
+# #1604: mypy over every tracked .py/.pyi, mise/mypy.ini delivered, and
+# the seams mypy lets through refused (python-types.sh says which).
+# STAGED, not advisory: outside `ci`, run by the canon's Monday audit
+# (audit.yml, red until the canon conforms; lint:audit-scheduled
+# refuses an audit task no workflow runs). It is here so the canon's
+# findings can be run down against the real task, one lane per
+# directory; the pull request that clears the last renames it
+# `lint:python-types`, which `ci` collects, and drops the audit leg.
+run = '''
+"${ORG_BELT_DIR}/python-types.sh" audit:python-types
+'''
+
 [tasks."audit:typescript-properties"]
 description = "Every tracked *.prop.test.* at a random fast-check seed and a far larger run count (weekly cron, never the gate)"
 dir = "{{cwd}}"
@@ -8532,7 +8475,7 @@ dir = "{{cwd}}"
 run = '"${ORG_BELT_DIR}/mutants.sh"'
 
 [tasks."lint:licence"]
-description = "The repo carries its licence: tracked LICENSE or LICENSES/, and REUSE.toml's expression filled"
+description = "The repo carries its licence: tracked LICENSE or LICENSES/, REUSE.toml filled, every text it names"
 dir = "{{cwd}}"
 # "Every repo carries its own" was a statement of intent that nothing
 # implemented, and the predictable result was that no repo carried one
@@ -8542,9 +8485,14 @@ dir = "{{cwd}}"
 # 0BSD; a crate repo will dual-license MIT OR Apache-2.0); what the
 # belt enforces is only that the choice was MADE: a tracked licence
 # text exists, and a tracked REUSE.toml does not still carry the
-# scaffold's angle-bracket placeholder. Deterministic, offline,
-# tracked files only. Skips only an empty tree — a repo with content
-# and no licence is exactly the defect, never an exemption.
+# scaffold's angle-bracket placeholder. And the choice can be READ
+# (#1589): every SPDX identifier a tracked REUSE.toml names has its text
+# tracked at LICENSES/<id>.txt, red by name on a missing one — the half
+# of "a copied fixture carries its source's licence" a machine can hold
+# (licence-texts.py; the rest is CONTRIBUTING.md's review rule).
+# Deterministic, offline, tracked files only. Skips only an empty tree —
+# a repo with content and no licence is exactly the defect, never an
+# exemption.
 run = '''
 tracked=$(git ls-files | sed -n 1p)
 [[ -n ${tracked} ]] || {
@@ -8557,11 +8505,7 @@ if [[ -z ${lic} ]]; then
   echo "  with no licence the default is all rights reserved, the opposite of the intent" >&2
   exit 1
 fi
-if git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 \
-  && grep -q "<SPDX expression>" "REUSE.toml"; then
-  echo "lint:licence: REUSE.toml still carries the scaffold's <SPDX expression> placeholder — pick the licence (#214)" >&2
-  exit 1
-fi
+git ls-files -z ':!vendor/**' | "${ORG_PYTHON}" "${ORG_BELT_DIR}/licence-texts.py" || exit 1
 echo "lint:licence: ok"
 '''
 
@@ -9014,7 +8958,7 @@ lock="mise.lock"
   exit 0
 }
 git ls-files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
-  | python3 "${ORG_BELT_DIR}/lock-platforms.py" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock-platforms.py" \
     --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
     --config "${cfg}" --lock "${lock}"
 '''
@@ -9050,7 +8994,7 @@ command -v gh > /dev/null || {
   echo "  release which assets it published; without gh it cannot ask." >&2
   exit 1
 }
-candidates=$(printf '%s\n' "${locks}" | python3 "${ORG_BELT_DIR}/lock-arch.py")
+candidates=$(printf '%s\n' "${locks}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock-arch.py")
 # Dated allowances. A KNOWN, FILED, DEFERRED mismatch is carried the way
 # deny.toml carries a skip — with its date and the issue that retires
 # it — and for the same reason: the alternative is a scheduled red that
@@ -9313,7 +9257,7 @@ args=(--since "6 months ago" --recent "7 days ago")
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   args+=(--summary "${GITHUB_STEP_SUMMARY}")
 fi
-python3 "${ORG_BELT_DIR}/regression-count.py" "${args[@]}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/regression-count.py" "${args[@]}"
 '''
 
 [tasks."lint:nested-permissions"]
@@ -9657,7 +9601,7 @@ while IFS= read -r f; do
 done << EOF
 ${listing}
 EOF
-python3 "${ORG_BELT_DIR}/plan-producers.py" --policy "${policy}" ${flows[@]+"${flows[@]}"}
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/plan-producers.py" --policy "${policy}" ${flows[@]+"${flows[@]}"}
 '''
 
 [tasks."lint:caller-permissions"]
@@ -10068,7 +10012,7 @@ while IFS= read -r f; do
 done <<< "${files}"
 traps=0
 # shellcheck disable=SC2086  # the file lists are newline-separated on purpose
-python3 "${ORG_BELT_DIR}/exit-trap.py" ${scripts} ${configs} || traps=$?
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/exit-trap.py" ${scripts} ${configs} || traps=$?
 if [[ -n ${found} ]]; then
   echo "lint:bash-portability: bash 4+ syntax found (macOS ships 3.2):" >&2
   printf "%b\n" "${found}" >&2

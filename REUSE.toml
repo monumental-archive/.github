@@ -16,3 +16,19 @@ path = ["**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Carl Allen"
 SPDX-License-Identifier = "0BSD"
+
+# A fixture copied from another work carries that work's own declaration,
+# not the canon's (#1589): a real fixture is required, and the bytes of
+# one captured from a sister repository are that repository's. Each
+# entry quotes the source's REUSE.toml verbatim; override, so the 0BSD
+# blanket above never also claims them. CONTRIBUTING.md holds the rule.
+[[annotations]]
+path = [
+  # A published crate of monumental-archive/edtf (release/ tests).
+  "release/testdata/edtf-core-1.3.3.crate",
+  # A git bundle of monumental-archive/edtf commits (#1422).
+  "mise/testdata/queue-head/edtf-265.bundle.gz",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) the edtf contributors"
+SPDX-License-Identifier = "MIT OR Apache-2.0"

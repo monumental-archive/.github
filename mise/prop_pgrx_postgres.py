@@ -7,6 +7,9 @@ generated `mise ls` listings and declared majors:
 - Invariance (V): only an active entry is a pin, and only an
   installed one serves; the majors served are the leading components
   of those versions, in whatever order the listing comes.
+- Refusal (R): `pinned` reads any listing, whatever its versions say,
+  and never raises (#1555: a version `²` passed `isdigit` and `int()`
+  raised).
 - Invariance (V): a plan is all or nothing: one record per declared
   major when every one is pinned with a `pg_config`, and no record at
   all, with one finding per major missing, when any is not.
@@ -20,7 +23,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -63,6 +66,26 @@ class Pinned(unittest.TestCase):
             sorted(e["version"] for e in listing if e["active"] and not e["installed"]),
         )
         self.assertEqual(sorted(absent), sorted(absent_two))
+
+
+class Refusal(unittest.TestCase):
+    """Any listing is read."""
+
+    @given(
+        st.lists(
+            st.fixed_dictionaries({
+                "version": st.text(max_size=8),
+                "active": st.booleans(),
+                "installed": st.booleans(),
+            }),
+            max_size=4,
+        )
+    )
+    @example([{"version": "²", "active": True, "installed": True}])
+    def test_any_versions(self, listing: list[dict]) -> None:
+        """Majors are ints; nothing raises."""
+        found, _ = pp.pinned(listing)
+        self.assertTrue(all(isinstance(m, int) for m in found))
 
 
 class Plan(unittest.TestCase):
