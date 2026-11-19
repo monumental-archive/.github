@@ -10,7 +10,7 @@ machine's conf.d (a machine not yet moved). Each row plants all the
 carriers it names and asserts the one that answers.
 
 The command under test is the template's own, read out of
-mise/config.toml with tomllib and run by `sh -o errexit` as mise runs
+mise/config.toml through decoded.py and run by `sh -o errexit` as mise runs
 it, in a planted git tree. It must stay total: a template that exits
 nonzero aborts every mise invocation of the belt (#569), so the rows
 with no carrier, and with no git, assert exit 0 and no output.
@@ -26,10 +26,10 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -47,10 +47,10 @@ def template_command() -> str:
         AssertionError: the template is not an exec of one command.
 
     """
-    belt = tomllib.loads((CANON / "mise" / "config.toml").read_text("utf-8"))
-    found = re.fullmatch(
-        r"\{\{ exec\(command=`(.*)`\) \}\}", belt["env"]["ORG_BELT_DIR"]
-    )
+    belt = decoded.load_toml((CANON / "mise" / "config.toml").read_text("utf-8"))
+    env = decoded.as_object(belt["env"], "the belt's [env]")
+    template = decoded.as_str(env["ORG_BELT_DIR"], "ORG_BELT_DIR")
+    found = re.fullmatch(r"\{\{ exec\(command=`(.*)`\) \}\}", template)
     if found is None:
         msg = "ORG_BELT_DIR is not `{{ exec(command=`...`) }}`"
         raise AssertionError(msg)

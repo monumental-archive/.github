@@ -28,10 +28,10 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -96,8 +96,9 @@ def pin(key: str) -> str:
         The version.
 
     """
-    belt = tomllib.loads((BELT / "config.toml").read_text("utf-8"))
-    return belt["tools"][key.strip('"')]
+    belt = decoded.load_toml((BELT / "config.toml").read_text("utf-8"))
+    tools = decoded.as_object(belt["tools"], "the belt's [tools]")
+    return decoded.as_str(tools[key.strip('"')], f"the belt's {key} pin")
 
 
 class LockedFromTheLinkedLock(unittest.TestCase):

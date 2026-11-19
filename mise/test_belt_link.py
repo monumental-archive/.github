@@ -6,7 +6,7 @@ and mise reads one lock per config directory, so the belt claims that
 directory: a tracked file there is red by name.
 
 The body under test is the task's own `run` string, read out of
-mise/config.toml with tomllib and run by bash in a planted git tree, not
+mise/config.toml through decoded.py and run by bash in a planted git tree, not
 a copy of it. Red rows assert the whole message.
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
@@ -18,10 +18,10 @@ from __future__ import annotations
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -77,8 +77,10 @@ def body() -> str:
         The task body.
 
     """
-    belt = tomllib.loads((CANON / "mise" / "config.toml").read_text("utf-8"))
-    return belt["tasks"][NAME]["run"]
+    belt = decoded.load_toml((CANON / "mise" / "config.toml").read_text("utf-8"))
+    tasks = decoded.as_object(belt["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks[NAME], NAME)
+    return decoded.as_str(task["run"], f"{NAME}'s run")
 
 
 class TheBeltClaimsItsDirectory(unittest.TestCase):
