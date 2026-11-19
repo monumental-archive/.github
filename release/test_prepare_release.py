@@ -57,7 +57,6 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import textwrap
@@ -75,10 +74,10 @@ CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "prepare-release.sh"
 # Absolute, resolved once: a partial path lets PATH decide which binary a
 # test ran, which is not a thing a test should leave open.
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
-CARGO = shutil.which("cargo")
-STELE = shutil.which("stele")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
+CARGO = hermetic.optional_tool("cargo")
+STELE = hermetic.optional_tool("stele")
 
 # The real stub every new repository is told to copy (#742, shipped by
 # #847). Read from the tree rather than transcribed: a copy here would
@@ -217,7 +216,7 @@ class Tree:
         """Run one cargo command in the fixture."""
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
-            [CARGO, *args],
+            [hermetic.tool("cargo"), *args],
             cwd=self.root,
             env=hermetic_env(self.home),
             check=True,
@@ -256,7 +255,7 @@ class Tree:
         )
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
-            [CARGO, "generate-lockfile", "--offline"],
+            [hermetic.tool("cargo"), "generate-lockfile", "--offline"],
             cwd=self.root / "fuzz",
             env=hermetic_env(self.home),
             check=True,

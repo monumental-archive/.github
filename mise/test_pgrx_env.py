@@ -20,7 +20,6 @@ run through the gate as `mise run test`.
 """
 
 import os
-import shutil
 import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -31,7 +30,7 @@ from pathlib import Path
 import hermetic
 
 ENV_SH = Path(__file__).resolve().with_name("pgrx-env.sh")
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 
 # `cargo pgrx init` as far as these rows need it: it logs its start and
 # end around $STUB_HOLD seconds of work (two by default), so two inits

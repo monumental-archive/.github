@@ -19,7 +19,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 from unittest import mock
 
 import call_names
@@ -27,11 +27,12 @@ import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
 HERE = Path(__file__).resolve().parent
 
 CANON = HERE.parent
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 ROOTS = ("mise", "release", ".github/rekor-monitor", "settings")
 
 # The release job's step inputs, the runner's ambient, and the
@@ -504,6 +505,28 @@ def lists_the_tree(source: str) -> bool:
     return False
 
 
+def which_calls(source: str) -> list[int]:
+    """Find every line where a test looks a tool up itself (#1684).
+
+    A call is judged by what it calls, however the file imported it
+    (call_names.qualifier): `shutil.which`, `s.which` under `import
+    shutil as s`, and `which` or its alias under `from shutil import
+    which`. A name for `shutil.which` that is never called, as in
+    `mock.patch.object(shutil, "which", ...)`, looks nothing up.
+
+    Returns:
+        The line of each call, sorted.
+
+    """
+    module = ast.parse(source)
+    qualify = call_names.qualifier(module)
+    return sorted(
+        node.lineno
+        for node in ast.walk(module)
+        if isinstance(node, ast.Call) and qualify(node.func) == "shutil.which"
+    )
+
+
 # Excepted by name: the helper itself, and this file, which plants and
 # names the spellings it looks for.
 EXCEPTED = frozenset({"mise/hermetic.py", "mise/test_hermetic.py"})
@@ -619,6 +642,85 @@ class Tracked(unittest.TestCase):
             [hermetic.top(s) for s in ("*.py", ":!v/**", ":^v", ":(glob)**/x")],
             [":(top)*.py", ":(top,exclude)v/**", ":(top,exclude)v", ":(top,glob)**/x"],
         )
+
+
+def on_path(path: str) -> AbstractContextManager[object]:
+    """Replace the suite's PATH for one block.
+
+    Returns:
+        The patch, entered by the row.
+
+    """
+    values: dict[str, str] = {"PATH": path}
+    return mock.patch.dict(os.environ, values)
+
+
+class Tool(unittest.TestCase):
+    """hermetic.tool and hermetic.optional_tool (#1684)."""
+
+    @override
+    def setUp(self) -> None:
+        """Plant a directory holding one executable, `planted-tool`."""
+        self.bin = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.bin)
+        (self.bin / "planted-tool").write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.bin / "planted-tool").chmod(0o755)
+
+    def test_a_present_tool_is_its_absolute_path(self) -> None:
+        """Found on PATH, the path is absolute."""
+        with on_path(str(self.bin)):
+            found = hermetic.tool("planted-tool")
+        self.assertEqual(str(self.bin / "planted-tool"), found)
+        self.assertTrue(Path(found).is_absolute())
+
+    def test_a_relative_path_entry_still_gives_an_absolute_path(self) -> None:
+        """A relative PATH entry is made absolute and normal, never resolved."""
+        with on_path(os.path.relpath(self.bin)):
+            found = hermetic.tool("planted-tool")
+        self.assertEqual(str(self.bin / "planted-tool"), found)
+
+    def test_a_link_is_not_resolved(self) -> None:
+        """A mise shim is a link that dispatches on its own name."""
+        shims = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, shims)
+        (shims / "shim").symlink_to(self.bin / "planted-tool")
+        self.assertEqual(str(shims / "shim"), hermetic.tool("shim", path=str(shims)))
+
+    def test_a_missing_tool_is_red_by_name(self) -> None:
+        """The message names the tool, where it looked, and the remedy."""
+        with (
+            on_path(str(self.bin)),
+            self.assertRaises(hermetic.MissingToolError) as raised,
+        ):
+            hermetic.tool("no-such-tool")
+        self.assertEqual(
+            "hermetic.tool: no-such-tool is not on PATH;"
+            " the belt provides it: run mise install",
+            str(raised.exception),
+        )
+
+    def test_the_search_path_is_honoured(self) -> None:
+        """`path=` is searched instead of the suite's PATH, both ways."""
+        empty = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, empty)
+        with on_path(str(empty)):
+            found = hermetic.tool("planted-tool", path=str(self.bin))
+        self.assertEqual(str(self.bin / "planted-tool"), found)
+        with (
+            on_path(str(self.bin)),
+            self.assertRaises(hermetic.MissingToolError) as raised,
+        ):
+            hermetic.tool("planted-tool", path=str(empty))
+        self.assertIn(f"the search path {str(empty)!r}", str(raised.exception))
+
+    def test_an_optional_tool_is_none_when_absent(self) -> None:
+        """Absence is the row's decision: None, never a raise."""
+        with on_path(str(self.bin)):
+            self.assertIsNone(hermetic.optional_tool("no-such-tool"))
+            self.assertEqual(
+                str(self.bin / "planted-tool"),
+                hermetic.optional_tool("planted-tool"),
+            )
 
 
 class TheLaw(unittest.TestCase):
@@ -809,6 +911,65 @@ class TheLaw(unittest.TestCase):
         for name, source in allowed.items():
             with self.subTest(name):
                 self.assertEqual([], copies(source))
+
+    def test_no_test_file_looks_a_tool_up_itself(self) -> None:
+        """Every lookup is hermetic.tool or hermetic.optional_tool (#1684)."""
+        offenders = [
+            f"{path}:{line}"
+            for path in listed_test_files()
+            if path not in EXCEPTED
+            for line in which_calls((CANON / path).read_text(encoding="utf-8"))
+        ]
+        self.assertEqual(list[str](), offenders)
+
+    def test_every_spelling_of_a_lookup_is_found(self) -> None:
+        """Planted: each way to call `shutil.which`, at its line."""
+        planted = {
+            "shutil.which": "import shutil\nX = shutil.which('git')\n",
+            "with a fallback": "import shutil\nX = shutil.which('git') or 'git'\n",
+            "from shutil import which": "from shutil import which\nX = which('git')\n",
+            "from shutil import which as w": (
+                "from shutil import which as w\nX = w('git')\n"
+            ),
+            "import shutil as s": "import shutil as s\nX = s.which('git')\n",
+            "in a row": (
+                "import shutil\nclass T:\n    def f(self):\n"
+                "        return shutil.which('git', path='/bin')\n"
+            ),
+            "in a decorator": (
+                "import shutil\nimport unittest\n"
+                "@unittest.skipUnless(shutil.which('dash'), 'no dash')\n"
+                "class T(unittest.TestCase):\n    pass\n"
+            ),
+        }
+        lines = {
+            "shutil.which": [2],
+            "with a fallback": [2],
+            "from shutil import which": [2],
+            "from shutil import which as w": [2],
+            "import shutil as s": [2],
+            "in a row": [4],
+            "in a decorator": [3],
+        }
+        for name, source in planted.items():
+            with self.subTest(name):
+                self.assertEqual(lines[name], which_calls(source))
+
+    def test_the_fixture_lookup_is_allowed(self) -> None:
+        """The fixture's lookups, a patched `which`, and another `which` pass."""
+        allowed = {
+            "tool": "import hermetic\nX = hermetic.tool('git')\n",
+            "optional_tool": "import hermetic\nX = hermetic.optional_tool('dash')\n",
+            "patched, not called": (
+                "import shutil\nfrom unittest import mock\n"
+                "with mock.patch.object(shutil, 'which', return_value=None):\n"
+                "    pass\n"
+            ),
+            "a local which": "def which(x):\n    return x\nX = which('git')\n",
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual(list[int](), which_calls(source))
 
     def test_no_test_file_lists_the_canons_tree_directly(self) -> None:
         """Every listing of the canon's own tree goes through tracked (#1618)."""

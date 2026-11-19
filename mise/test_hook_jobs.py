@@ -19,7 +19,6 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -30,8 +29,8 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 NAME = "lint:hook-jobs"
 HOOKS_PATH = "lefthook/org-hooks.yml"

@@ -40,7 +40,7 @@ from pathlib import Path
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 
 # Stands in for cargo. `metadata` succeeds when no refusal is planted and
 # otherwise prints the planted text on stderr and exits 101, as cargo

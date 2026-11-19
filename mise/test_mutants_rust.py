@@ -35,8 +35,8 @@ import mutants_rust as helper
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-rust.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 LABEL = "audit:mutants: rust"
 CONFIG = ".cargo/mutants.toml"
 
@@ -240,7 +240,7 @@ class Planted(unittest.TestCase):
             "".join(f"{m}\n" for m in shard or []), encoding="utf-8"
         )
 
-    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.
 
         Returns:

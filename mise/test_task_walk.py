@@ -15,13 +15,13 @@ import io
 import json
 import os
 import re
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import decoded
+import hermetic
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
@@ -290,7 +290,7 @@ class Mise(unittest.TestCase):
         stub = Path(tmp.name) / "mise"
         stub.write_text(MISE, encoding="utf-8")
         stub.chmod(0o755)
-        bash = shutil.which("bash") or "/bin/bash"
+        bash = hermetic.tool("bash")
         (Path(tmp.name) / "bash").symlink_to(bash)
         patcher = mock.patch.dict(os.environ, {"PATH": tmp.name})
         patcher.start()

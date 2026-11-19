@@ -20,7 +20,6 @@ gate as `mise run test`.
 """
 
 import ast
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -31,7 +30,7 @@ import hermetic
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 
 LOADERS = frozenset({
     "spec_from_file_location",

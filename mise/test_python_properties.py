@@ -23,7 +23,6 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -34,10 +33,9 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
-PYTHON = shutil.which("python3")
-HYPOTHESIS = shutil.which("hypothesis")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
+PYTHON = hermetic.tool("python3")
 
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 GATE = CONFIG["tasks"]["test:python-properties"]["run"]
@@ -140,7 +138,7 @@ def run(
     *,
     tool_dir: str | None,
     env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run a task body in a planted tree.
 
     Returns:
@@ -170,19 +168,14 @@ def run(
         )
 
 
-def real_tool_dir(test: unittest.TestCase) -> str:
+def real_tool_dir() -> str:
     """Name the directory holding the belt's `hypothesis` entry point.
 
     Returns:
         The directory, which the row puts on PATH.
 
     """
-    test.assertIsNotNone(
-        HYPOTHESIS,
-        "hypothesis is not on PATH: the belt pins pipx:hypothesis and"
-        " `mise run test` puts it there (run: mise install)",
-    )
-    return str(Path(HYPOTHESIS).parent)
+    return str(Path(hermetic.tool("hypothesis")).parent)
 
 
 class Refusals(unittest.TestCase):
@@ -268,7 +261,7 @@ class Properties(unittest.TestCase):
 
     def test_a_passing_file_holds(self) -> None:
         """One property that holds: exit 0, the test and the count."""
-        done = run(GATE, {"pkg/prop_ok.py": HOLDS}, tool_dir=real_tool_dir(self))
+        done = run(GATE, {"pkg/prop_ok.py": HOLDS}, tool_dir=real_tool_dir())
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
             done.stdout,
@@ -278,7 +271,7 @@ class Properties(unittest.TestCase):
 
     def test_a_failing_property_is_red_with_its_example(self) -> None:
         """A property that fails: red, the shrunk example printed."""
-        done = run(GATE, {"prop_bad.py": FAILS}, tool_dir=real_tool_dir(self))
+        done = run(GATE, {"prop_bad.py": FAILS}, tool_dir=real_tool_dir())
         self.assertEqual(done.returncode, 1)
         self.assertIn("prop_0_prop_bad.Fails.test_small ... FAIL\n", done.stdout)
         self.assertIn("AssertionError: 10 not less than 10", done.stderr)
@@ -287,7 +280,7 @@ class Properties(unittest.TestCase):
 
     def test_a_file_with_no_property_is_refused(self) -> None:
         """A prop_*.py holding no @given test: red, named."""
-        done = run(GATE, {"prop_none.py": NO_PROPERTY}, tool_dir=real_tool_dir(self))
+        done = run(GATE, {"prop_none.py": NO_PROPERTY}, tool_dir=real_tool_dir())
         self.assertEqual(done.returncode, 1)
         self.assertIn(
             "test:python-properties: prop_none.py:"
@@ -297,7 +290,7 @@ class Properties(unittest.TestCase):
 
     def test_a_test_restating_a_bound_is_refused(self) -> None:
         """@settings(max_examples=…) on a test: red, the bound named."""
-        done = run(GATE, {"prop_own.py": OWN_BOUNDS}, tool_dir=real_tool_dir(self))
+        done = run(GATE, {"prop_own.py": OWN_BOUNDS}, tool_dir=real_tool_dir())
         self.assertEqual(done.returncode, 1)
         self.assertIn(
             "prop_own.py: prop_0_prop_own.Bounded.test_few sets its own bounds"
@@ -310,7 +303,7 @@ class Properties(unittest.TestCase):
         done = run(
             AUDIT,
             {"prop_bad.py": FAILS},
-            tool_dir=real_tool_dir(self),
+            tool_dir=real_tool_dir(),
             env={"ORG_PROPERTY_SEED": "7"},
         )
         self.assertEqual(done.returncode, 1)

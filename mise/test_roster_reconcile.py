@@ -15,15 +15,16 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import json
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import hermetic
+
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "roster-reconcile.sh"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 
 ROSTER = ["alpha", "beta", "gamma"]
 CALLER = "probe"

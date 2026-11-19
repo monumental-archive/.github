@@ -20,7 +20,6 @@ gate as `mise run test`.
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -31,8 +30,8 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 METADATA = BELT.parent / "release" / "testdata" / "edtf-cargo-metadata.json"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 MEMBERS = [
     "edtf-core",
     "edtf-calendars",

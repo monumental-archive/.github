@@ -42,8 +42,8 @@ from pathlib import Path
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 CONFIG = BELT / "config.toml"
 MEASURE = BELT / "coverage-measure.sh"
 
@@ -230,7 +230,7 @@ class Selection(unittest.TestCase):
                 f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n', encoding="utf-8"
             )
 
-    def run_task(self, **env: str) -> subprocess.CompletedProcess:
+    def run_task(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Run audit:mutants' body against the stub legs.
 
         Returns:
@@ -366,7 +366,8 @@ class RunsTest(unittest.TestCase):
 class CiCollectsTest(unittest.TestCase):
     """The belt's real `ci`, planned by a real mise in planted trees."""
 
-    def plan(self, tree: Path, belt: Path | None) -> subprocess.CompletedProcess[str]:
+    @staticmethod
+    def plan(tree: Path, belt: Path | None) -> subprocess.CompletedProcess[str]:
         """Dry-run `ci` in `tree`, the belt delivered from `belt`.
 
         `belt` None loads the belt's config as the tree's own and leaves
@@ -377,8 +378,7 @@ class CiCollectsTest(unittest.TestCase):
             The finished plan.
 
         """
-        found = shutil.which("mise")
-        self.assertIsNotNone(found, "mise is not on PATH")
+        found = hermetic.tool("mise")
         config = tree.parent / f"{tree.name}-config"
         config.mkdir()
         env = hermetic.env(

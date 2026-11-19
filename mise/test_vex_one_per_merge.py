@@ -16,7 +16,6 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -28,8 +27,8 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 TASK = "lint:vex-one-per-merge"
 SENTENCE = (BELT / "vex-one-per-merge.txt").read_text(encoding="utf-8").strip()
 A = "security/vex/RUSTSEC-0000-0001.openvex.json"

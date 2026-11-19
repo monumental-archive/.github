@@ -28,7 +28,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 import json
 import os
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -39,8 +38,8 @@ from typing import override
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 
 def task_body(name: str) -> str:

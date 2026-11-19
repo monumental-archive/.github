@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
@@ -67,8 +66,9 @@ def step_script() -> str:
 class EveryPartPassed(unittest.TestCase):
     """Each row: the jobs' results, and the verdict printed."""
 
+    @staticmethod
     def verdict(
-        self, plan: str, gate: str, pgrx: str, majors: str = "[16, 17]"
+        plan: str, gate: str, pgrx: str, majors: str = "[16, 17]"
     ) -> subprocess.CompletedProcess[str]:
         """Run the lifted step on one set of job results.
 
@@ -76,9 +76,7 @@ class EveryPartPassed(unittest.TestCase):
             The run.
 
         """
-        bash = shutil.which("bash")
-        if bash is None:
-            self.fail("bash is not on PATH")
+        bash = hermetic.tool("bash")
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, "-c", step_script()],

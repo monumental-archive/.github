@@ -18,7 +18,6 @@ gate as `mise run test`.
 """
 
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
@@ -28,7 +27,7 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 PREPARE = BELT.parent / "release" / "prepare-release.sh"
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 
 
 def mapped_types() -> list[str]:

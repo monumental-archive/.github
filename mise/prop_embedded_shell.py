@@ -108,7 +108,7 @@ def formatter(*, change: bool) -> object:
 
     """
 
-    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         text = str(kwargs["input"])
         if change:
             text += "echo formatted\n"

@@ -23,7 +23,7 @@ from pathlib import Path
 import hermetic
 
 SCRIPT = Path(__file__).resolve().with_name("citation.sh")
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 
 LICENCE = '[[annotations]]\npath = "**"\nSPDX-License-Identifier = "0BSD"\n'
 SUPPLIER = 'SPDX-PackageSupplier = "A Maintainer <a@example.invalid>"\n'

@@ -20,7 +20,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import io
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -28,10 +27,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import exit_trap as et
+import hermetic
 
 BASH = Path("/bin/bash")
 SH = Path("/bin/sh")
-DASH = shutil.which("dash")
+DASH = hermetic.optional_tool("dash")
 GUARDED = et.GUARD.format(cleanup='rm -f "${tmp}"')
 BASH_GUARDED = et.BASH_GUARD.format(cleanup='rm -f "${tmp}"')
 BARE = "trap 'rm -f \"${tmp}\"' EXIT"
@@ -404,7 +404,7 @@ class Posix(unittest.TestCase):
         """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
         for body, _, as_dash in POSIX_ROWS:
             with self.subTest(body=body):
-                self.assertEqual(run_sh(str(DASH), body), as_dash)
+                self.assertEqual(run_sh(hermetic.tool("dash"), body), as_dash)
 
 
 class Shape(unittest.TestCase):

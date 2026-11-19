@@ -25,7 +25,6 @@ import base64
 import json
 import os
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -41,7 +40,7 @@ import hermetic
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
 SCRIPT = HERE / "repo-baseline.sh"
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 ORG = "monumental-archive"
 
 BASELINE = json.loads((HERE / "repo-baseline.json").read_text(encoding="utf-8"))

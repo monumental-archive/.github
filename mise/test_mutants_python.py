@@ -31,8 +31,8 @@ import mutants_python as helper
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-python.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 LABEL = "audit:mutants: python"
 
 
@@ -316,7 +316,7 @@ class Planted(unittest.TestCase):
         )
         (self.show / SURVIVOR).write_text(DIFF, encoding="utf-8")
 
-    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.
 
         Returns:
@@ -698,7 +698,7 @@ class ChildProcesses(Planted):
         mutmut and this row failed (self-mutants run 44619855559).
         """
         self.track("pkg/helper.py", TRAMPOLINE)
-        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [python3, "pkg/helper.py"],
@@ -784,14 +784,16 @@ class ChildConfiguration(Planted):
         where.mkdir()
         return where
 
-    def child(self, hook: Path, where: Path, **env: str) -> subprocess.CompletedProcess:
+    def child(
+        self, hook: Path, where: Path, **env: str
+    ) -> subprocess.CompletedProcess[str]:
         """Run the planted helper as `python3 helper.py` from WHERE.
 
         Returns:
             The finished child.
 
         """
-        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [python3, str(self.tree / "pkg" / "helper.py")],

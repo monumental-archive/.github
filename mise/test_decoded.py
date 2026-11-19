@@ -22,7 +22,6 @@ gate as `mise run test`.
 
 import ast
 import json
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from collections.abc import Callable, Iterator
@@ -34,7 +33,7 @@ import hermetic
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 DEEP = 100_000
 # A raising reader: a decoded value and where it came from.
 Reader = Callable[[object, str], object]

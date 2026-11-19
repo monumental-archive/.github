@@ -37,7 +37,7 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 PGRX = CANON / "release" / "pgrx"
 PREVIOUS = PGRX / "previous_release.py"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
@@ -237,7 +237,7 @@ case "${verb}" in
 esac
 """
 
-JQ = shutil.which("jq")
+JQ = hermetic.optional_tool("jq")
 TESTDATA = CANON / "release" / "testdata"
 DEMO_CELL = "demo_ext-1.1.0-pg18-linux-arm64.tar.gz"
 
@@ -857,10 +857,7 @@ class ContainerScripts(unittest.TestCase):
 # --------------------------------------------------------------------
 
 ELF_TOOLS = ("cc", "readelf", "objcopy", "strip")
-MISSING = [t for t in ELF_TOOLS if shutil.which(t) is None]
-CC = shutil.which("cc") or "cc"
-READELF = shutil.which("readelf") or "readelf"
-OBJCOPY = shutil.which("objcopy") or "objcopy"
+MISSING = [t for t in ELF_TOOLS if hermetic.optional_tool(t) is None]
 
 
 def elf_tools_present() -> bool:
@@ -879,7 +876,9 @@ def elf_tools_present() -> bool:
     if MISSING:
         return False
     # ruff: ignore[subprocess-without-shell-equals-true]
-    probe = subprocess.run([READELF, "--version"], capture_output=True, check=False)
+    probe = subprocess.run(
+        [hermetic.tool("readelf"), "--version"], capture_output=True, check=False
+    )
     return probe.returncode == 0
 
 
@@ -907,14 +906,19 @@ def build_library(
     src.write_text(source)
     flags = ["-g", "-O0", "-shared", "-fPIC"] + ([] if libc else ["-nostdlib"])
     # ruff: ignore[subprocess-without-shell-equals-true]
-    subprocess.run([CC, *flags, "-o", str(path), str(src)], check=True)
+    subprocess.run([hermetic.tool("cc"), *flags, "-o", str(path), str(src)], check=True)
     src.unlink()
     if dep:
         payload = path.with_suffix(".dep")
         payload.write_bytes(b"\x78\x9c\x03\x00\x00\x00\x00\x01")
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
-            [OBJCOPY, "--add-section", f".dep-v0={payload}", str(path)],
+            [
+                hermetic.tool("objcopy"),
+                "--add-section",
+                f".dep-v0={payload}",
+                str(path),
+            ],
             check=True,
         )
         payload.unlink()
@@ -985,7 +989,7 @@ class DebugSplit(unittest.TestCase):
         """
         env = {"SEEN": str(self.root / "seen")}
         for tool in ("objcopy", "strip", "readelf"):
-            env[f"REAL_{tool}"] = shutil.which(tool) or tool
+            env[f"REAL_{tool}"] = hermetic.tool(tool)
         if shim:
             bindir = self.root / "bin"
             bindir.mkdir(exist_ok=True)
@@ -1004,7 +1008,7 @@ class DebugSplit(unittest.TestCase):
         """
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
-            [READELF, "-S", "--wide", str(path)],
+            [hermetic.tool("readelf"), "-S", "--wide", str(path)],
             capture_output=True,
             text=True,
             check=True,
