@@ -620,14 +620,20 @@ class ChildProcesses(Planted):
     """
 
     def test_without_the_hook_the_child_cannot_import_mutmut(self) -> None:
-        """The failure the hook exists for, reproduced as it was measured."""
+        """The failure the hook exists for, reproduced as it was measured.
+
+        "Without the hook" is stated, never inherited: PYTHONPATH is in
+        hermetic.INHERITED, and in mutmut's own statistics pass it
+        carries the leg's hook, so a child that inherited it imported
+        mutmut and this row failed (self-mutants run 44619855559).
+        """
         self.track("pkg/helper.py", TRAMPOLINE)
         python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [python3, "pkg/helper.py"],
             cwd=self.tree,
-            env=self.env,
+            env=self.env | {"PYTHONPATH": ""},
             capture_output=True,
             text=True,
             check=False,

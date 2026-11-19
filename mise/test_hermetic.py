@@ -55,7 +55,7 @@ COPIES = re.compile(
 )
 
 
-def test_files() -> list[str]:
+def listed_test_files() -> list[str]:
     """Name every test file in the four discovery roots.
 
     Returns:
@@ -263,7 +263,7 @@ class TheLaw(unittest.TestCase):
 
     def test_no_test_file_copies_the_callers_environment(self) -> None:
         """Every fixture environment is built through hermetic.env."""
-        listed = test_files()
+        listed = listed_test_files()
         offenders = [
             path
             for path in listed
@@ -276,7 +276,7 @@ class TheLaw(unittest.TestCase):
         """Every listing of the canon's own tree goes through tracked (#1618)."""
         offenders = [
             path
-            for path in test_files()
+            for path in listed_test_files()
             if lists_the_tree((CANON / path).read_text(encoding="utf-8"))
         ]
         self.assertEqual([], offenders)
