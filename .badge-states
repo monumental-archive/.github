@@ -5,6 +5,9 @@
 # scaffold/README-badges.md for the catalogue and the vocabulary.
 # bestpractices: 'pending' until the form binds, then the BP_ID.
 # reuse: 'pending' until FSFE registration, then 'registered'.
+# licence: the project's own expression. REUSE.toml also names edtf's
+# MIT OR Apache-2.0 for the fixtures copied from it (#1589), so the
+# project's licence has to be said once here.
 #
 # There is deliberately no coverage line. The canon carried
 # `coverage exemplary` until #347: it rendered a codecov shield that
@@ -19,3 +22,4 @@
 # trigger, which is where it survives the shield's removal.
 bestpractices 14058
 reuse registered
+licence 0BSD
