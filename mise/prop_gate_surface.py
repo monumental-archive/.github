@@ -67,7 +67,7 @@ class Majors(unittest.TestCase):
         expected = sorted(
             int(f[2:]) for f in features if f[2:].isdigit() and f.startswith("pg")
         )
-        self.assertEqual(gs.majors(pkg), expected if pgrx else [])
+        self.assertEqual(gs.majors(gs.package(pkg)), expected if pgrx else [])
 
 
 @st.composite
@@ -123,10 +123,11 @@ class Stub(unittest.TestCase):
         self,
         data: st.DataObject,
         classes: list[str],
-        surface: list[dict],
+        records: list[dict[str, str]],
         excluded: list[str],
     ) -> None:
         """Order and spaces of the lists change nothing; exclusions hold."""
+        surface = [gs.Crate(r["name"], r["name"], (), r["dir"]) for r in records]
 
         def spell(items: list[str]) -> str:
             return ",".join(f" {i} " for i in data.draw(st.permutations(items)))

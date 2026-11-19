@@ -40,21 +40,21 @@ def obligations(draw: st.DrawFn) -> list[tuple[str, str]]:
     return list(zip(classes, prefixes, strict=True))
 
 
-def policy(pairs: list[tuple[str, str]]) -> dict:
+def policy(pairs: list[tuple[str, str]]) -> pp.Policy:
     """Write the assert policy declaring the pairs as planned.
 
     Returns:
         The decoded policy.
 
     """
-    return {
+    return pp.read_policy({
         "evidence": {
             "classes": {
                 klass: {"assetPrefixes": [{"prefix": prefix, "planned": True}]}
                 for klass, prefix in pairs
             }
         }
-    }
+    })
 
 
 def producer(draw: st.DrawFn, klass: str, prefix: str) -> str:

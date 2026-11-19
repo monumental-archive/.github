@@ -48,10 +48,13 @@ Deterministic: two sets of tracked files, no network, no runner.
 """
 
 import argparse
-import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+import decoded
+import typed_std
 
 NAME = "plan-producers"
 
@@ -84,25 +87,77 @@ PLAN_UPLOAD = re.compile(r"^\s*name:\s*sbom-plan-")
 MARKER_WORDS = 2
 
 
-def obligations(policy: dict) -> set[tuple[str, str]]:
+@dataclass(frozen=True)
+class Policy:
+    """The assert policy, as this check reads it."""
+
+    classes: frozenset[str]  # every evidence class it declares
+    planned: frozenset[tuple[str, str]]  # (class, prefix) planned obligations
+
+
+def _entry(value: object, where: str) -> tuple[str, bool]:
+    """Decode one `assetPrefixes` entry.
+
+    Returns:
+        Its prefix ("" when it states none) and whether it is planned.
+
+    Raises:
+        UndecodableError: the entry, its prefix or its flag is wrongly shaped.
+
+    """
+    entry = decoded.as_object(value, where)
+    prefix = entry.get("prefix", "")
+    planned = entry.get("planned", False)
+    if not isinstance(prefix, str):
+        msg = f"{where}.prefix is not a string"
+        raise decoded.UndecodableError(msg)
+    if not isinstance(planned, bool):
+        msg = f"{where}.planned is not a boolean"
+        raise decoded.UndecodableError(msg)
+    return prefix, planned
+
+
+def read_policy(value: object) -> Policy:
+    """Decode the assert policy into the classes and obligations it declares.
+
+    Args:
+        value: the decoded `slsa/assert-policy.json`.
+
+    Returns:
+        The policy. Only `planned` entries are obligations: an
+        `assetPrefixes` row without it is an asset some other leg
+        attaches, not a document a plan produces.
+
+    A field this check reads that has the wrong shape raises
+    `UndecodableError`, named by its path in the document.
+
+    """
+    doc = decoded.as_object(value, "the policy")
+    evidence = decoded.as_object(doc.get("evidence", {}), "evidence")
+    classes = decoded.as_object(evidence.get("classes", {}), "evidence.classes")
+    planned: set[tuple[str, str]] = set()
+    for name, raw in classes.items():
+        where = f"evidence.classes.{name}"
+        body = decoded.as_object(raw, where)
+        rows = decoded.as_array(body.get("assetPrefixes", []), f"{where}.assetPrefixes")
+        for i, row in enumerate(rows):
+            prefix, flag = _entry(row, f"{where}.assetPrefixes[{i}]")
+            if flag and prefix:
+                planned.add((name, prefix))
+    return Policy(frozenset(classes), frozenset(planned))
+
+
+def obligations(policy: Policy) -> set[tuple[str, str]]:
     """Read the planned obligations out of the assert policy.
 
     Args:
-        policy: the decoded `slsa/assert-policy.json`.
+        policy: the decoded assert policy.
 
     Returns:
-        Every (class, prefix) pair the policy declares as planned. Only
-        `planned` entries: an `assetPrefixes` row without it is an asset
-        some other leg attaches, not a document a plan produces.
+        Every (class, prefix) pair the policy declares as planned.
 
     """
-    out = set()
-    classes = policy.get("evidence", {}).get("classes", {})
-    for name, body in classes.items():
-        for entry in body.get("assetPrefixes", []):
-            if entry.get("planned") and entry.get("prefix"):
-                out.add((name, entry["prefix"]))
-    return out
+    return set(policy.planned)
 
 
 def markers(text: str) -> tuple[list[tuple[str, str]], list[str]]:
@@ -124,7 +179,7 @@ def markers(text: str) -> tuple[list[tuple[str, str]], list[str]]:
         found = MARKER.match(line)
         if not found:
             continue
-        words = found.group("rest").split()
+        words = (typed_std.group(found, "rest") or "").split()
         if len(words) != MARKER_WORDS:
             malformed.append(line.strip())
             continue
@@ -132,7 +187,7 @@ def markers(text: str) -> tuple[list[tuple[str, str]], list[str]]:
     return pairs, malformed
 
 
-def emitted(text: str, policy: dict | None = None) -> set[str]:
+def emitted(text: str, policy: Policy | None = None) -> set[str]:
     """Read the document prefixes one file's legs actually emit under.
 
     Args:
@@ -145,16 +200,17 @@ def emitted(text: str, policy: dict | None = None) -> set[str]:
         Every prefix named by the three emission idioms.
 
     """
-    lines = text.splitlines()
-    env = {
-        found.group("prefix").strip("\"'")
-        for found in (ENV_PREFIX.match(line) for line in lines)
-        if found
-    }
-    jq = {found.group("prefix") for line in lines for found in JQ_DOC.finditer(line)}
-    called = {
-        found.group("klass") for line in lines for found in STELE_PLAN.finditer(line)
-    }
+    env: set[str] = set()
+    jq: set[str] = set()
+    called: set[str] = set()
+    for line in text.splitlines():
+        found = ENV_PREFIX.match(line)
+        if found:
+            env.add((typed_std.group(found, "prefix") or "").strip("\"'"))
+        jq.update(typed_std.group(hit, "prefix") or "" for hit in JQ_DOC.finditer(line))
+        called.update(
+            typed_std.group(hit, "klass") or "" for hit in STELE_PLAN.finditer(line)
+        )
     planned = obligations(policy) if policy is not None else set()
     stele = {prefix for klass, prefix in planned if klass in called}
     return env | jq | stele
@@ -210,7 +266,7 @@ class Claims:
         self.prefixes.setdefault(prefix, path)
 
 
-def claims(policy: dict, files: dict[str, str]) -> tuple[Claims, list[str]]:
+def claims(policy: Policy, files: dict[str, str]) -> tuple[Claims, list[str]]:
     """Read the markers and hold each to the policy it names.
 
     Args:
@@ -225,7 +281,7 @@ def claims(policy: dict, files: dict[str, str]) -> tuple[Claims, list[str]]:
     """
     findings: list[str] = []
     declared = obligations(policy)
-    classes = policy.get("evidence", {}).get("classes", {})
+    classes = policy.classes
     claimed = Claims()
 
     for path in sorted(files):
@@ -259,7 +315,9 @@ def claims(policy: dict, files: dict[str, str]) -> tuple[Claims, list[str]]:
     return claimed, findings
 
 
-def production(policy: dict, files: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+def production(
+    policy: Policy, files: dict[str, str]
+) -> tuple[dict[str, str], list[str]]:
     """Read the prefixes the legs actually emit under.
 
     Args:
@@ -291,7 +349,7 @@ def production(policy: dict, files: dict[str, str]) -> tuple[dict[str, str], lis
     return produced, findings
 
 
-def judge(policy: dict, files: dict[str, str]) -> list[str]:
+def judge(policy: Policy, files: dict[str, str]) -> list[str]:
     """Join the policy's planned obligations to the workflows' producers.
 
     Args:
@@ -327,6 +385,13 @@ def judge(policy: dict, files: dict[str, str]) -> list[str]:
     return findings
 
 
+class Args(argparse.Namespace):
+    """The command line, typed where argparse writes it."""
+
+    policy: Path
+    workflows: list[Path]
+
+
 def main() -> int:
     """Run the check over the tracked policy and workflows.
 
@@ -338,16 +403,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", required=True, type=Path)
     parser.add_argument("workflows", nargs="*", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=Args())
 
     try:
-        policy = json.loads(args.policy.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as bad:
+        document = decoded.load_json(args.policy.read_bytes())
+    except (OSError, decoded.UndecodableError) as bad:
         print(f"{NAME}: {args.policy} does not read as JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)
         return 1
+    try:
+        policy = read_policy(document)
+    except decoded.UndecodableError as bad:
+        print(f"{NAME}: {args.policy}: {bad}", file=sys.stderr)
+        return 1
 
-    files = {}
+    files: dict[str, str] = {}
     for path in args.workflows:
         try:
             files[str(path)] = path.read_text(encoding="utf-8")

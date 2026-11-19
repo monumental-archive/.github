@@ -48,10 +48,13 @@ this cannot parse is a publish surface nobody checked.
 """
 
 import argparse
-import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+import decoded
+import typed_std
 
 NAME = "gate-surface"
 
@@ -72,48 +75,127 @@ CRATE_CLASSES = {
 WORKSPACE_CLASSES = {"rust-crate", "rust-binary"}
 
 
-def listed(value: object) -> list:
+def listed(value: object) -> list[object]:
     """Take a cargo metadata field as a list, or as empty when it is not one.
 
     Returns:
         The list, or an empty one.
 
     """
-    return value if isinstance(value, list) else []
+    return value if decoded.is_array(value) else []
 
 
-def mapped(value: object) -> dict:
+def mapped(value: object) -> dict[str, object]:
     """Take a cargo metadata field as an object, or as empty when it is not one.
 
     Returns:
         The object, or an empty one.
 
     """
-    return value if isinstance(value, dict) else {}
+    return value if decoded.is_object(value) else {}
 
 
-def members(metadata: dict) -> list[dict]:
+def string(value: object) -> str:
+    """Take a cargo metadata field as a string, or as empty when it is not one.
+
+    Returns:
+        The string, or an empty one.
+
+    """
+    return value if isinstance(value, str) else ""
+
+
+@dataclass(frozen=True)
+class Package:
+    """One package of cargo metadata, as this check reads it.
+
+    A field of the wrong type reads as absent (#1555): cargo prints these
+    shapes, and a document that does not is a package this check cannot
+    name, never a crash further down.
+    """
+
+    id: str
+    name: str
+    version: str
+    features: tuple[str, ...]  # the feature names
+    dependencies: tuple[str, ...]  # the dependency names
+    manifest_path: str
+
+
+def package(value: object) -> Package:
+    """Decode one package of cargo metadata.
+
+    Returns:
+        The package, its wrong-typed fields empty.
+
+    """
+    pkg = mapped(value)
+    return Package(
+        id=string(pkg.get("id")),
+        name=string(pkg.get("name")),
+        version=string(pkg.get("version")),
+        features=tuple(mapped(pkg.get("features"))),
+        dependencies=tuple(
+            string(mapped(dep).get("name")) for dep in listed(pkg.get("dependencies"))
+        ),
+        manifest_path=string(pkg.get("manifest_path")),
+    )
+
+
+@dataclass(frozen=True)
+class Metadata:
+    """Cargo's account of a workspace: its root, members and packages."""
+
+    root: str
+    member_ids: frozenset[str]
+    packages: tuple[Package, ...]
+
+
+def metadata(value: dict[str, object]) -> Metadata:
+    """Decode cargo metadata's top-level object.
+
+    Returns:
+        The workspace; a package that is not an object is no package.
+
+    """
+    return Metadata(
+        root=string(value.get("workspace_root")),
+        member_ids=frozenset(
+            i for i in listed(value.get("workspace_members")) if isinstance(i, str)
+        ),
+        packages=tuple(
+            package(pkg)
+            for pkg in listed(value.get("packages"))
+            if decoded.is_object(pkg)
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class Crate:
+    """One record of the gate's compile surface."""
+
+    name: str
+    spec: str
+    majors: tuple[int, ...]
+    dir: str
+
+
+def members(meta: Metadata) -> list[Package]:
     """Take cargo's own account of which packages are workspace members.
 
     Returns:
         The member packages, in the order cargo reported them.
 
     """
-    ids = {i for i in listed(metadata.get("workspace_members")) if isinstance(i, str)}
     return [
         pkg
-        for pkg in listed(metadata.get("packages"))
-        if isinstance(pkg, dict)
-        and isinstance(pkg.get("id"), str)
-        and pkg["id"] in ids
-        and isinstance(pkg.get("name"), str)
-        and isinstance(pkg.get("version"), str)
-        and pkg["name"]
-        and pkg["version"]
+        for pkg in meta.packages
+        if pkg.id and pkg.id in meta.member_ids and pkg.name and pkg.version
     ]
 
 
-def majors(pkg: dict) -> list[int]:
+def majors(pkg: Package) -> list[int]:
     """Read the Postgres majors a member declares, from its features.
 
     Returns:
@@ -122,21 +204,17 @@ def majors(pkg: dict) -> list[int]:
         because either alone is a guess.
 
     """
-    depends = any(
-        isinstance(dep, dict) and dep.get("name") == "pgrx"
-        for dep in listed(pkg.get("dependencies"))
-    )
-    if not depends:
+    if "pgrx" not in pkg.dependencies:
         return []
     found = [
-        int(hit.group(1))
-        for feature in mapped(pkg.get("features"))
+        int(typed_std.group(hit, 1) or "")
+        for feature in pkg.features
         if (hit := MAJOR.match(feature))
     ]
     return sorted(found)
 
 
-def directory(pkg: dict, root: str) -> str:
+def directory(pkg: Package, root: str) -> str:
     """Locate a member relative to the workspace root.
 
     Returns:
@@ -144,11 +222,10 @@ def directory(pkg: dict, root: str) -> str:
         empty string when cargo reported no manifest path.
 
     """
-    manifest = pkg.get("manifest_path")
-    if not isinstance(manifest, str) or not manifest or not root:
+    if not pkg.manifest_path or not root:
         return ""
     try:
-        return str(Path(manifest).parent.relative_to(root))
+        return str(Path(pkg.manifest_path).parent.relative_to(root))
     except ValueError:
         return ""
 
@@ -181,7 +258,8 @@ def stub_inputs(text: str) -> tuple[dict[str, str], list[str]]:
         hit = re.match(r"^\s+([a-z0-9-]+):\s*(.*)$", line)
         if not hit:
             continue
-        key, value = hit.group(1), hit.group(2).strip().strip("'\"")
+        key = typed_std.group(hit, 1) or ""
+        value = (typed_std.group(hit, 2) or "").strip().strip("'\"")
         if key not in wanted:
             continue
         if not value:
@@ -194,7 +272,7 @@ def stub_inputs(text: str) -> tuple[dict[str, str], list[str]]:
     return found, unreadable
 
 
-def published(inputs: dict[str, str], surface: list[dict]) -> set[str]:
+def published(inputs: dict[str, str], surface: list[Crate]) -> set[str]:
     """Work out which crates of this workspace the publish path builds.
 
     Returns:
@@ -207,13 +285,20 @@ def published(inputs: dict[str, str], surface: list[dict]) -> set[str]:
     excluded = {c.strip() for c in inputs.get("exclude", "").split(",") if c.strip()}
     built: set[str] = set()
     if classes & WORKSPACE_CLASSES:
-        built |= {pkg["name"] for pkg in surface} - excluded
+        built |= {crate.name for crate in surface} - excluded
     for klass, key in CRATE_CLASSES.items():
         if klass not in classes:
             continue
         want = inputs.get(key, "").strip("/")
-        built |= {pkg["name"] for pkg in surface if pkg["dir"] == want}
+        built |= {crate.name for crate in surface if crate.dir == want}
     return built
+
+
+class Args(argparse.Namespace):
+    """The command line, typed where argparse writes it."""
+
+    exclude: str
+    publish: Path | None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,31 +311,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="the gate's crate surface")
     parser.add_argument("--exclude", default="")
     parser.add_argument("--publish", type=Path)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
 
     try:
-        metadata = json.loads(sys.stdin.read())
-    except json.JSONDecodeError as bad:
+        document = decoded.load_json(typed_std.stdin_text())
+    except typed_std.NoStdinError as bad:
+        print(f"{NAME}: {bad}", file=sys.stderr)
+        return 1
+    except decoded.UndecodableError as bad:
         print(f"{NAME}: cargo metadata did not give JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)
         return 1
-    if not isinstance(metadata, dict):
+    if not decoded.is_object(document):
         # cargo prints an object; any other document names no workspace,
         # and must not read as one with no crates (#1555: it raised).
         print(f"{NAME}: cargo metadata is not a JSON object", file=sys.stderr)
         return 1
 
-    root = metadata.get("workspace_root")
-    root = root if isinstance(root, str) else ""
+    meta = metadata(document)
     held = set(args.exclude.split())
     surface = [
-        {
-            "name": pkg["name"],
-            "spec": f"{pkg['name']}@{pkg['version']}",
-            "majors": majors(pkg),
-            "dir": directory(pkg, root),
-        }
-        for pkg in members(metadata)
+        Crate(
+            name=pkg.name,
+            spec=f"{pkg.name}@{pkg.version}",
+            majors=tuple(majors(pkg)),
+            dir=directory(pkg, meta.root),
+        )
+        for pkg in members(meta)
     ]
 
     # The directory rides the record because `cargo pgrx test` runs in the
@@ -263,13 +350,13 @@ def main(argv: list[str] | None = None) -> int:
     # empty — it vanishes and every field after it shifts left by one.
     # Measured the hard way, on a plain crate whose empty major list made
     # its directory arrive as its majors.
-    records = []
+    records: list[str] = []
     for crate in surface:
-        kind = "pgrx" if crate["majors"] else "plain"
-        names = ",".join(str(m) for m in crate["majors"]) or "-"
-        head = "excluded" if crate["name"] in held else "crate"
+        kind = "pgrx" if crate.majors else "plain"
+        names = ",".join(str(m) for m in crate.majors) or "-"
+        head = "excluded" if crate.name in held else "crate"
         records.append(
-            f"{head}\t{crate['spec']}\t{kind}\t{names}\t{crate['dir'] or '-'}",
+            f"{head}\t{crate.spec}\t{kind}\t{names}\t{crate.dir or '-'}",
         )
 
     if args.publish is not None:
@@ -287,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def invariant(stub: Path, surface: list[dict], held: set[str]) -> list[str]:
+def invariant(stub: Path, surface: list[Crate], held: set[str]) -> list[str]:
     """Check that every crate the publish path builds is compiled by the gate.
 
     Returns:
@@ -305,20 +392,20 @@ def invariant(stub: Path, surface: list[dict], held: set[str]) -> list[str]:
         return [f"{stub}: {line}" for line in unreadable]
     built = published(inputs, surface)
     findings = [
-        f"{crate['spec']} is built by the publish path and held out of the "
+        f"{crate.spec} is built by the publish path and held out of the "
         "gate by CLIPPY_EXCLUDE — delete the exclusion; a crate the gate "
         "cannot compile is a crate the release finds out about"
         for crate in surface
-        if crate["name"] in built and crate["name"] in held
+        if crate.name in built and crate.name in held
     ]
     stated = inputs.get("pg-majors", "")
     for crate in surface:
-        if not crate["majors"] or crate["name"] not in built or not stated:
+        if not crate.majors or crate.name not in built or not stated:
             continue
-        want = ",".join(str(m) for m in crate["majors"])
+        want = ",".join(str(m) for m in crate.majors)
         if stated.replace(" ", "") != want:
             findings.append(
-                f"{crate['spec']} declares features for {want} and the stub "
+                f"{crate.spec} declares features for {want} and the stub "
                 f"publishes pg-majors: {stated} — the features are what "
                 "cargo compiles, so the stub is the one that is wrong",
             )
