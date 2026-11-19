@@ -250,6 +250,14 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("not an object", err)
 
+    def test_a_resolved_config_that_is_not_an_object_fails(self) -> None:
+        """The shrunk example, `[]`: a sentence, not AttributeError (#1555)."""
+        for resolved in ([], 1, "x"):
+            with self.subTest(resolved=resolved):
+                status, _out, err = self.invoke(resolved)
+                self.assertEqual(status, 1)
+                self.assertIn("did not resolve to an object", err)
+
     def test_unresolvable_json_fails(self) -> None:
         """Output from tsc that is not JSON must not pass."""
         status, _out, err = self.invoke(None)
