@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lock-arch.py's asset judge, on lock entries nobody wrote down.
+"""lock_arch.py's asset judge, on lock entries nobody wrote down.
 
 The properties of `test_lock_arch.py`'s fixed rows (#1548), over
 generated platform keys and release asset names:
@@ -18,20 +18,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import re
 import unittest
 from pathlib import Path
 
+import lock_arch as la
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "lock_arch",
-    Path(__file__).with_name("lock-arch.py"),
-)
-la = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(la)
 
 LOCK = Path("mise.lock")
 # A tool name carrying no architecture or OS token of its own.

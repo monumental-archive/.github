@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""hypothesis-imports.py's importer test, on modules nobody wrote down.
+"""hypothesis_imports.py's importer test, on modules nobody wrote down.
 
 The properties of `test_hypothesis_imports.py`'s fixed rows (#1548),
 over generated modules:
@@ -20,23 +20,16 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import ast
 import contextlib
-import importlib.util
 import io
 import tempfile
 import unittest
 from itertools import starmap
 from pathlib import Path
 
+import hypothesis_imports as hi
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "hypothesis_imports",
-    Path(__file__).with_name("hypothesis-imports.py"),
-)
-hi = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(hi)
 
 IMPORTERS = [
     "import hypothesis",

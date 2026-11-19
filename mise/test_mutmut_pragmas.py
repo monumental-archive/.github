@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for mutmut-pragmas.py's refusal of a file it cannot read (#1555).
+"""Tests for mutmut_pragmas.py's refusal of a file it cannot read (#1555).
 
 The regression row of the defect `prop_mutmut_pragmas.py` found: a file
 whose bytes are not UTF-8 past its encoding line raised
@@ -12,14 +12,13 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import runpy
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import mutmut_pragmas as mp
 
 HERE = Path(__file__).resolve().parent
-mp = SimpleNamespace(**runpy.run_path(str(HERE / "mutmut-pragmas.py")))
 
 
 class Unreadable(unittest.TestCase):

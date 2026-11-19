@@ -23,7 +23,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import tomllib
 import unittest
@@ -31,12 +30,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-_SPEC = importlib.util.spec_from_file_location(
-    "belt_shell",
-    Path(__file__).with_name("belt-shell.py"),
-)
-bs = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(bs)
+import belt_shell as bs
 
 # A body mise would run verbatim, already in the org's format.
 CLEAN = 'echo "hello"\n'

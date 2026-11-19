@@ -55,7 +55,7 @@
 # `plpgsql-branches <percent>`. The task is walked by task_walk.py
 # (#1608) and its steps run once for every leg that reads them, under
 # the union of those legs' variables; the reading and the refusals are
-# plpgsql-coverage.py's.
+# plpgsql_coverage.py's.
 #
 # Invoked directly, never through a nested `mise run`: a nested mise
 # inside a task races the parallel lint fan-out and fails to resolve its
@@ -204,7 +204,7 @@ tracked_js=$(git ls-files -- package.json pnpm-lock.yaml package-lock.json yarn.
 ts_runner=""
 if [[ -n ${tracked_js} ]]; then
   # shellcheck disable=SC2086  # one argument per tracked path; none has a space
-  ts_runner=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" ${tracked_js}) || exit 1
+  ts_runner=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" ${tracked_js}) || exit 1
 fi
 # The leg measures the repository's own `test` task (#1357 item 2), so a
 # vitest tree with no `test` task has no suite the gate runs: it skips
@@ -565,8 +565,8 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   # The vitest run the gate's `test` task makes, read from the steps
   # task_walk.py walks (#1357 item 2, #1608): one plain invocation, its
   # arguments and its task's dir, or a refusal by name. The reading of
-  # the scripts is coverage-js-runner.py's.
-  command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
+  # the scripts is coverage_js_runner.py's.
+  command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" \
     --vitest-command "${label}" test) || exit 1
   test_dir=$(jq -r '.dir' <<< "${command_json}")
   args_lines=$(jq -r '.args[]' <<< "${command_json}")
@@ -607,8 +607,8 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
 fi
 if [[ -n ${measure_pg} ]]; then
   # The report the test run's teardown wrote; the reading and every
-  # refusal are plpgsql-coverage.py's.
-  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql-coverage.py" \
+  # refusal are plpgsql_coverage.py's.
+  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql_coverage.py" \
     totals "${label}" "${work}/plpgsql-coverage.json" || exit 1
 fi
 org_done=1

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gate-cache-key.py's cache names, on inputs nobody wrote down.
+"""gate_cache_key.py's cache names, on inputs nobody wrote down.
 
 The properties of `test_gate_cache_key.py`'s fixed rows (#1548), over
 generated install lists, environments and pins:
@@ -18,20 +18,12 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import gate_cache_key as gk
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "gate_cache_key",
-    Path(__file__).with_name("gate-cache-key.py"),
-)
-gk = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gk)
 
 TOOL = st.from_regex(r"[a-z][a-z0-9:@.-]{0,10}", fullmatch=True)
 FLAG = st.sampled_from(["-y", "--locked", "-q"])

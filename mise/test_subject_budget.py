@@ -5,7 +5,7 @@ The defect class #364 named survives its closure: skip-clean guards are
 the least exercised code in the org, and a guard that skips when it
 should run looks exactly like success. Proving a branch once by hand is
 not a table test and does not catch the next regression, so every guard
-in `subject-budget.py` is driven here — both directions where there are
+in `subject_budget.py` is driven here — both directions where there are
 two, and the hard-error paths asserted as errors rather than fallbacks.
 
 stdlib `unittest`, deliberately. #364 refused a test framework on the
@@ -16,7 +16,6 @@ interpreter. Nothing is added to the belt to run this.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import json
 import os
@@ -29,12 +28,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-_SPEC = importlib.util.spec_from_file_location(
-    "subject_budget",
-    Path(__file__).with_name("subject-budget.py"),
-)
-sb = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(sb)
+import subject_budget as sb
 
 # What Renovate appends to an advisory subject, and what default.json
 # writes out explicitly since #667. Eleven columns.

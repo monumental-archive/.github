@@ -19,18 +19,14 @@ from __future__ import annotations
 
 import os
 import pathlib
-import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
 import unittest
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 CANON = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = CANON / ".github" / "actions" / "canon" / "python.sh"

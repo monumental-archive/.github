@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""package-crates.py's verified-then-unverified packaging, on any bytes.
+"""package_crates.py's verified-then-unverified packaging, on any bytes.
 
 The property of `test_build_rust_crate.py`'s fixed rows (#1556), over
 generated workspaces. `cargo` is replaced in-process: the verified run
@@ -18,22 +18,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import hashlib
-import importlib.util
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import package_crates as crates
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "package_crates",
-    Path(__file__).with_name("package-crates.py"),
-)
-crates = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(crates)
 
 MEMBER = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
 

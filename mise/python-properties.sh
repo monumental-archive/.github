@@ -45,10 +45,10 @@ if [[ ${profile} == gate ]]; then
   # belt's own runner and its typed `given` are the two other files
   # that may.
   others=$(git ls-files ':!vendor/**' '*.py' \
-    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python-properties.py" && $0 != "mise/typed_hypothesis.py"')
+    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python_properties.py" && $0 != "mise/typed_hypothesis.py"')
   leaks=""
   if [[ -n ${others} ]]; then
-    leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis-imports.py")
+    leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py")
   fi
   if [[ -n ${leaks} ]]; then
     echo "${label}: these import Hypothesis (or cannot be read) but are not prop_*.py files:" >&2
@@ -62,7 +62,7 @@ if [[ ${profile} == gate ]]; then
   # is typed `Callable[..., None]`, which the belt's mypy reds on every
   # property, and the typed one also refuses a strategy that does not
   # match its parameter.
-  untyped=$(tr '\n' '\0' <<< "${files}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis-imports.py" --given)
+  untyped=$(tr '\n' '\0' <<< "${files}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py" --given)
   if [[ -n ${untyped} ]]; then
     echo "${label}: these take given from hypothesis, not the belt's typed one:" >&2
     while IFS= read -r file; do
@@ -96,4 +96,4 @@ args=()
 while IFS= read -r f; do
   args+=("${f}")
 done <<< "${files}"
-"${venv_python}" "${belt}/python-properties.py" "${profile}" "${args[@]}"
+"${venv_python}" "${belt}/python_properties.py" "${profile}" "${args[@]}"

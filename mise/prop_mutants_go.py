@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mutants-go.py's readers and survivor classes, on inputs nobody wrote.
+"""mutants_go.py's readers and survivor classes, on inputs nobody wrote.
 
 The properties of `test_mutants_go.py`'s fixed rows (#1555), over
 generated `git grep` hits, coverage profiles and gomu results:
@@ -21,20 +21,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
+import mutants_go as mg
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "mutants_go",
-    Path(__file__).with_name("mutants-go.py"),
-)
-mg = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(mg)
 
 # A Go module's file paths: no `:` (module zips refuse one), no spaces.
 SEGMENT = st.from_regex(r"[a-z][a-z0-9_.-]{0,6}", fullmatch=True)

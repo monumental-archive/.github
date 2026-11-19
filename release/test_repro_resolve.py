@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run `release/repro-resolve.py` against a stub `gh` (#1386).
+"""Run `release/repro_resolve.py` against a stub `gh` (#1386).
 
 `repro-check.yml`'s "Read the latest release" step is now one call to
 the helper. These rows run it as the step does, with a stub `gh` first
@@ -20,7 +20,7 @@ import sys
 import tempfile
 import unittest
 
-HELPER = pathlib.Path(__file__).resolve().parent / "repro-resolve.py"
+HELPER = pathlib.Path(__file__).resolve().parent / "repro_resolve.py"
 STUB_GH = """#!/usr/bin/env bash
 case "$1 $2" in
   "release view") echo "${STUB_TAG}" ;;

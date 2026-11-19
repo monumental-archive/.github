@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adoption-population.py's obligations, on rosters nobody wrote down.
+"""adoption_population.py's obligations, on rosters nobody wrote down.
 
 The properties of `test_adoption_population.py`'s fixed rows (#1548),
 over generated population documents:
@@ -17,24 +17,16 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import operator
 import sys
 import unittest
-from pathlib import Path
 
+import adoption_population as ap
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "adoption_population",
-    Path(__file__).with_name("adoption-population.py"),
-)
-ap = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ap)
 
 MEMBER = st.fixed_dictionaries({
     "repo": st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True),

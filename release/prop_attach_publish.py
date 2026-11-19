@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""attach-publish.py's two readers, on any checksums list and manifest.
+"""attach_publish.py's two readers, on any checksums list and manifest.
 
 The properties of `test_attach_publish.py`'s fixed rows (#1556):
 
@@ -17,23 +17,16 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import attach_publish as attach
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "attach_publish",
-    Path(__file__).with_name("attach-publish.py"),
-)
-attach = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(attach)
 
 DIGEST = st.from_regex(r"[0-9a-f]{64}", fullmatch=True)
 NAME = st.from_regex(r"[A-Za-z0-9._+-]{1,24}", fullmatch=True)

@@ -12,7 +12,6 @@ cover it observed to fail — the counts are in the class docstrings, so a
 reader can repeat them rather than trust this line.
 """
 
-import importlib.util
 import io
 import json
 import tempfile
@@ -20,12 +19,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "pgrx_postgres",
-    Path(__file__).with_name("pgrx-postgres.py"),
-)
-pgrx_postgres = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pgrx_postgres)
+import pgrx_postgres
 
 
 def install(version: str, *, nested: bool = True, empty: bool = False) -> str:

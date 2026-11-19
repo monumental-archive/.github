@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""build-go-commands.py, the go-binary build, on any package graph.
+"""build_go_commands.py, the go-binary build, on any package graph.
 
 The properties of `test_build_go_commands.py`'s fixed rows (#1556),
 over generated `go list` output. `go` is replaced in-process: `list`
@@ -14,22 +14,15 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import build_go_commands as commands
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "build_go_commands",
-    Path(__file__).with_name("build-go-commands.py"),
-)
-commands = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(commands)
 
 # An import path as `go list` prints one; lowercase, as the shipped
 # names are on a case-sensitive runner.

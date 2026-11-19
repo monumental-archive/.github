@@ -40,19 +40,19 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 from unittest.mock import patch
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 RELEASE = CANON / "release"
@@ -1736,7 +1736,7 @@ esac
 @unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
 @unittest.skipUnless(JQ, "jq drives the forge stub")
 class TagReleaseUpgradePath(unittest.TestCase):
-    """The mint guard acts on previous-release.py's predecessor (#1592).
+    """The mint guard acts on previous_release.py's predecessor (#1592).
 
     edtf's captures: its release listing and its extension's `sql/`
     directory at a tag (testdata/edtf-*). The guard used GitHub's latest

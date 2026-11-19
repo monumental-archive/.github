@@ -4,7 +4,7 @@
 The bodies under test are the tasks' own `run` strings, read out of
 mise/config.toml with tomllib and run by bash in a planted git tree,
 and they call the real `mise/python-properties.sh` and
-`mise/python-properties.py`. The rows that run a property use the
+`mise/python_properties.py`. The rows that run a property use the
 belt's real Hypothesis tool venv, found on PATH as the gate finds it:
 a stub could not print Hypothesis's own falsifying example, which is
 what a failing row exists to assert. The rows about the shell's own
@@ -23,19 +23,14 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"

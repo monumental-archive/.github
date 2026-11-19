@@ -26,27 +26,19 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
 run through the gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import gate_tools
+import hermetic
 
 BELT = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate-tools.py")
-gate_tools = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gate_tools)
 BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 SHA = "0123456789abcdef0123456789abcdef01234567"

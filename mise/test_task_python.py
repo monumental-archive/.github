@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
@@ -30,11 +29,8 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 CANON = pathlib.Path(__file__).resolve().parent.parent
 BELT = CANON / "mise" / "config.toml"
@@ -183,7 +179,7 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
         """Not vacuous: the belt starts helpers the guarded way, many times."""
         text = BELT.read_text("utf-8")
         self.assertLessEqual(
-            {"gate-surface.py", "belt-shell.py", "coverage-floor.py"},
+            {"gate_surface.py", "belt_shell.py", "coverage_floor.py"},
             tracked_helpers(),
         )
         guarded = [b for b in bodies(text).values() if GUARDED in b]
@@ -193,66 +189,66 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
         """Planted: the shape every belt task had before #1582."""
         text = (
             "[tasks.\"lint:x\"]\nrun = '''\n"
-            'python3 "${ORG_BELT_DIR}/gate-surface.py" --exclude ""\n'
-            'plan=$(python3 "${ORG_BELT_DIR}/msrv-plan.py" \\\n  --x y)\n'
+            'python3 "${ORG_BELT_DIR}/gate_surface.py" --exclude ""\n'
+            'plan=$(python3 "${ORG_BELT_DIR}/msrv_plan.py" \\\n  --x y)\n'
             "'''\n"
         )
         self.assertEqual(
             [
                 (
-                    "mise/config.toml lint:x: starts gate-surface.py with the"
-                    f" repository's python3; run it as {GUARDED} gate-surface.py"
+                    "mise/config.toml lint:x: starts gate_surface.py with the"
+                    f" repository's python3; run it as {GUARDED} gate_surface.py"
                     " (#1582)"
                 ),
                 (
-                    "mise/config.toml lint:x: starts msrv-plan.py with the"
-                    f" repository's python3; run it as {GUARDED} msrv-plan.py"
+                    "mise/config.toml lint:x: starts msrv_plan.py with the"
+                    f" repository's python3; run it as {GUARDED} msrv_plan.py"
                     " (#1582)"
                 ),
             ],
-            findings({"mise/config.toml": text}, {"gate-surface.py", "msrv-plan.py"}),
+            findings({"mise/config.toml": text}, {"gate_surface.py", "msrv_plan.py"}),
         )
 
     def test_a_start_through_a_variable_is_named(self) -> None:
         """Planted: the helper's path is in a variable the body assigns."""
         text = (
             "[tasks.\"lint:deny\"]\nrun = '''\n"
-            'helper="${ORG_BELT_DIR}/deny-skips.py"\n'
+            'helper="${ORG_BELT_DIR}/deny_skips.py"\n'
             'variants=$(python3 "${helper}" deny.toml)\n'
             "'''\n"
         )
         self.assertEqual(
             [
                 (
-                    "mise/config.toml lint:deny: starts deny-skips.py with the"
-                    f" repository's python3; run it as {GUARDED} deny-skips.py"
+                    "mise/config.toml lint:deny: starts deny_skips.py with the"
+                    f" repository's python3; run it as {GUARDED} deny_skips.py"
                     " (#1582)"
                 )
             ],
-            findings({"mise/config.toml": text}, {"deny-skips.py"}),
+            findings({"mise/config.toml": text}, {"deny_skips.py"}),
         )
 
     def test_a_start_by_first_line_is_named(self) -> None:
         """Planted: a helper executed by its own `#!` line, in a pipe."""
         text = (
             '[tasks."lint:y"]\n'
-            "run = ['git ls-files | \"${ORG_BELT_DIR}/subject-budget.py\"']\n"
+            "run = ['git ls-files | \"${ORG_BELT_DIR}/subject_budget.py\"']\n"
         )
         self.assertEqual(
             [
                 (
-                    "mise/config.toml lint:y: starts subject-budget.py by its own"
-                    f" first line; run it as {GUARDED} subject-budget.py (#1582)"
+                    "mise/config.toml lint:y: starts subject_budget.py by its own"
+                    f" first line; run it as {GUARDED} subject_budget.py (#1582)"
                 )
             ],
-            findings({"mise/config.toml": text}, {"subject-budget.py"}),
+            findings({"mise/config.toml": text}, {"subject_budget.py"}),
         )
 
     def test_the_guarded_start_inline_code_and_arguments_pass(self) -> None:
         """Only an unguarded start of a tracked helper is red."""
         text = (
             "[tasks.\"lint:z\"]\nrun = '''\n"
-            f'{GUARDED} "${{ORG_BELT_DIR}}/gate-surface.py" --helper registry.py\n'
+            f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --helper registry.py\n'
             "actual=$(python3 -c 'import sys; print(sys.version)')\n"
             "python3 caller-build.py\n"
             "# python3 mise/registry.py\n"
@@ -260,7 +256,7 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
         )
         self.assertEqual(
             [],
-            findings({"mise/config.toml": text}, {"gate-surface.py", "registry.py"}),
+            findings({"mise/config.toml": text}, {"gate_surface.py", "registry.py"}),
         )
 
 
@@ -359,7 +355,7 @@ class AScratchRepositoryPinningItsOwnPython(unittest.TestCase):
         """The belt's stub answers, never the repository's."""
         done = self.run_task("lint:subject-budget")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertIn(f"belt {CANON / 'mise' / 'subject-budget.py'}\n", done.stdout)
+        self.assertIn(f"belt {CANON / 'mise' / 'subject_budget.py'}\n", done.stdout)
         self.assertNotIn("repo ", done.stdout)
 
     def test_the_own_task_keeps_the_pinned_python(self) -> None:

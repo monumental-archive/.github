@@ -50,7 +50,6 @@ import hashlib
 import json
 import os
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -58,12 +57,12 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
@@ -406,7 +405,7 @@ class SelectsThePredecessor(unittest.TestCase):
 
 
 class ReadsThePinsThroughTheOneReader(unittest.TestCase):
-    """The pins come from release/caller-pins.py, as the build leg's do (#1333)."""
+    """The pins come from release/caller_pins.py, as the build leg's do (#1333)."""
 
     def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(self) -> None:
         """The reader names the tool, the script keeps its own FAIL line."""
@@ -779,7 +778,7 @@ def captured_edges(tag: str) -> list[tuple[str, str]]:
 
 @unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
 class AsksTheOnePredecessor(unittest.TestCase):
-    """The derivation acts on previous-release.py's answer (#1592).
+    """The derivation acts on previous_release.py's answer (#1592).
 
     edtf on 2026-11-19: v1.3.5 published and carries its tarballs, the
     drafts v1.3.0 to v1.3.3 burned, and the graph at v1.3.5 reaches it.

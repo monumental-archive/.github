@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for lock-arch.py, the lock architecture-agreement check."""
+"""Tests for lock_arch.py, the lock architecture-agreement check."""
 
-import importlib.util
 import pathlib
 import re
-import sys
 import tempfile
 import unittest
 
-_SPEC = importlib.util.spec_from_file_location(
-    "lock_arch", pathlib.Path(__file__).with_name("lock-arch.py")
-)
-lock_arch = importlib.util.module_from_spec(_SPEC)
-sys.modules["lock_arch"] = lock_arch
-_SPEC.loader.exec_module(lock_arch)
+import lock_arch
 
 
 class TestAssetArch(unittest.TestCase):

@@ -164,13 +164,13 @@ jobs:
 
       # The image's one layout (#1298), the same on every major: /lib and
       # /share/extension from the Debian tree each verified tarball
-      # installs (release/pgrx-images.py, tested; #1381).
+      # installs (release/pgrx_images.py, tested; #1381).
       - name: Stage the per-arch trees from the verified tarballs
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
         run: |
-          "${ORG_PYTHON}" .org-canon/release/pgrx-images.py stage --pg "${PG}" \
+          "${ORG_PYTHON}" .org-canon/release/pgrx_images.py stage --pg "${PG}" \
             --version "${UNTRUSTED_VERSION}" --crate-dir "${UNTRUSTED_CRATE_DIR}"
       - name: Resolve the image name
         id: name

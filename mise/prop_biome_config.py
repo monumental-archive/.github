@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""biome-config.py's identity merge, on declarations nobody wrote down.
+"""biome_config.py's identity merge, on declarations nobody wrote down.
 
 The properties of `test_biome_config.py`'s fixed rows (#1548), over
 generated repository declarations, manifests and nursery tables:
@@ -19,21 +19,13 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import copy
-import importlib.util
 import json
 import unittest
-from pathlib import Path
 
+import biome_config as bc
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "biome_config",
-    Path(__file__).with_name("biome-config.py"),
-)
-bc = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(bc)
 
 DOMAINS = bc.Domains(
     identity={"react": ["react", "react-dom"], "vue": ["vue"], "qwik": []},

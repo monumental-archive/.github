@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""source-archive.py, the source-archive build, on any repository name.
+"""source_archive.py, the source-archive build, on any repository name.
 
 The property of `test_source_archive.py`'s fixed rows (#1556), over
 generated owners, repository names and versions. `git` is replaced
@@ -16,7 +16,6 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import io
 import os
 import tarfile
@@ -24,16 +23,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import source_archive as source
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "source_archive",
-    Path(__file__).with_name("source-archive.py"),
-)
-source = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(source)
 
 # GitHub's own alphabets: an owner is letters, digits and hyphens; a
 # repository name adds dots and underscores, and is never `.` or `..`.

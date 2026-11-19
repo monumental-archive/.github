@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/source-archive.py, the source-archive build, on a stub git.
+"""Run release/source_archive.py, the source-archive build, on a stub git.
 
 #1384 moved the step "Build the archive twice and prove determinism"
 out of build-source-archive.yml into the helper, refusals unchanged.
@@ -19,24 +19,25 @@ import gzip
 import hashlib
 import io
 import os
-import runpy
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
+import sys
 import tarfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
-HELPER = ".org-canon/release/source-archive.py"
+HELPER = ".org-canon/release/source_archive.py"
 VERSION = "1.3.4"
 
 GIT_STUB = """#!/usr/bin/env bash

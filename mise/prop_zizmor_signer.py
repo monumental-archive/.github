@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""zizmor-signer.py's exemption, on findings nobody wrote down.
+"""zizmor_signer.py's exemption, on findings nobody wrote down.
 
 The properties of `test_zizmor_signer.py`'s fixed rows (#1548), over
 generated zizmor findings:
@@ -18,23 +18,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import sys
 import unittest
-from pathlib import Path
 
+import zizmor_signer as zs
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "zizmor_signer",
-    Path(__file__).with_name("zizmor-signer.py"),
-)
-zs = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(zs)
 
 SIGNER = "Org/Signer"
 WORKFLOW = f"{SIGNER}/.github/workflows/sign.yml"

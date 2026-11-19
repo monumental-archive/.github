@@ -17,21 +17,16 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
+import mutants_python as helper
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-python.sh"
@@ -39,11 +34,6 @@ BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 LABEL = "audit:mutants: python"
 
-_SPEC = importlib.util.spec_from_file_location(
-    "mutants_python", BELT / "mutants-python.py"
-)
-helper = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(helper)
 
 # The stub is an installed console script the way pipx:mutmut's is: its
 # first line names a venv's interpreter, and that venv holds a `mutmut`
@@ -661,7 +651,7 @@ class ChildProcesses(Planted):
         hook = self.tmp / "hook"
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
-            [sys.executable, str(BELT / "mutants-python.py"), "hook", str(hook)],
+            [sys.executable, str(BELT / "mutants_python.py"), "hook", str(hook)],
             env=self.env,
             capture_output=True,
             text=True,
@@ -742,7 +732,7 @@ class ChildConfiguration(Planted):
         hook = self.tmp / "hook"
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
-            [sys.executable, str(BELT / "mutants-python.py"), "hook", str(hook)],
+            [sys.executable, str(BELT / "mutants_python.py"), "hook", str(hook)],
             cwd=where,
             env=self.env,
             capture_output=True,
@@ -826,7 +816,7 @@ class ChildConfiguration(Planted):
 
 
 class ConfigReader(unittest.TestCase):
-    """mutants-python.py's reader of the adoption config, on planted text (#1486)."""
+    """mutants_python.py's reader of the adoption config, on planted text (#1486)."""
 
     def test_a_toml_list_counts_reasoned_entries_and_names_the_rest(self) -> None:
         """Reason above: counted. None: named with its line."""

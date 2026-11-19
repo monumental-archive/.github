@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""embedded-shell.py's `run:` reader and writer, on files nobody wrote.
+"""embedded_shell.py's `run:` reader and writer, on files nobody wrote.
 
 The properties of `test_embedded_shell.py`'s fixed rows (#1555), over
 generated workflow steps and debt lines:
@@ -22,23 +22,16 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - only stubbed
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import embedded_shell as es
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "embedded_shell",
-    Path(__file__).with_name("embedded-shell.py"),
-)
-es = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(es)
 
 TEXT = st.from_regex(r"[a-z][a-z0-9 =$\"'_./-]{0,20}", fullmatch=True).map(str.rstrip)
 SCRIPT = st.lists(

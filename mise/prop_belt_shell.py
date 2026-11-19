@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""belt-shell.py's body parsers, on inputs nobody wrote down (#1332).
+"""belt_shell.py's body parsers, on inputs nobody wrote down (#1332).
 
 The properties of `test_belt_shell.py`'s fixed rows, stated over
 generated task bodies:
@@ -29,21 +29,14 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
+import belt_shell as bs
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "belt_shell",
-    Path(__file__).with_name("belt-shell.py"),
-)
-bs = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(bs)
 
 # Shell-shaped text: the characters scrub treats specially, plus ordinary
 # ones, so quotes, escapes and comments open and close at random.

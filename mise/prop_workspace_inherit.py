@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""workspace-inherit.py's verdict, on workspaces nobody wrote down.
+"""workspace_inherit.py's verdict, on workspaces nobody wrote down.
 
 The properties of `test_workspace_inherit.py`'s fixed rows (#1548),
 over generated `[workspace.package]` tables and cargo's per-member
@@ -15,20 +15,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import os
 import unittest
 from pathlib import Path
 
+import workspace_inherit as wi
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "workspace_inherit",
-    Path(__file__).with_name("workspace-inherit.py"),
-)
-wi = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(wi)
 
 ROOT = Path("/ws")
 VALUE_KEYS = sorted(set(wi.REPORTED) - set(wi.PATH_KEYS))

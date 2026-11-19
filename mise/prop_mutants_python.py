@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mutants-python.py's readers, on configs and listings nobody wrote.
+"""mutants_python.py's readers, on configs and listings nobody wrote.
 
 The properties of `test_mutants_python.py`'s fixed rows (#1555), over
 generated adoption configs, pragma records, results and diffs:
@@ -25,20 +25,12 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import mutants_python as mp
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "mutants_python",
-    Path(__file__).with_name("mutants-python.py"),
-)
-mp = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(mp)
 
 KEY = st.sampled_from(["do_not_mutate", "do_not_mutate_patterns", "only_mutate"])
 ENTRY = st.from_regex(r"[a-z_*./]{1,12}", fullmatch=True)

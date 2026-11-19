@@ -25,7 +25,7 @@
 #                        repository off that track; Scorecard and
 #                        dependency review drop for a private one.
 #                        If something that does not apply is being
-#                        demanded, fix mise/adoption-population.py.
+#                        demanded, fix mise/adoption_population.py.
 #
 #   "has not got it"  -> a row here, with the date it was written and
 #                        the condition for removing it.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tsconfig-dials.py's level check, on configs nobody wrote down.
+"""tsconfig_dials.py's level check, on configs nobody wrote down.
 
 The properties of `test_tsconfig_dials.py`'s fixed rows (#1548), over
 generated flag files and resolved configs:
@@ -19,7 +19,6 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import sys
@@ -27,16 +26,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import tsconfig_dials as td
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "tsconfig_dials",
-    Path(__file__).with_name("tsconfig-dials.py"),
-)
-td = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(td)
 
 KEY = st.from_regex(r"[a-z][A-Za-z]{0,15}", fullmatch=True)
 LEVEL = st.dictionaries(KEY, st.booleans(), min_size=1, max_size=8)

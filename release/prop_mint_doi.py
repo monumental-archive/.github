@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mint-doi.py's readers and renderer, on any CITATION.cff and value.
+"""mint_doi.py's readers and renderer, on any CITATION.cff and value.
 
 The properties of `test_mint_doi.py`'s fixed rows (#1556):
 
@@ -18,21 +18,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import unittest
-from pathlib import Path
 
+import mint_doi as mint
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "mint_doi",
-    Path(__file__).with_name("mint-doi.py"),
-)
-mint = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(mint)
 
 SPDX = st.from_regex(r"[A-Za-z0-9.+-]{1,12}", fullmatch=True)
 # An id-shaped word, or one of the words the expression may not hold.
@@ -59,6 +51,9 @@ def ids_or_refusal(licence: str) -> list[str] | None:
     Returns:
         The ids, or None when refused by name; a refusal that does not
         name the line is re-raised.
+
+    Raises:
+        RefusedError: a refusal that does not name the line.
 
     """
     try:

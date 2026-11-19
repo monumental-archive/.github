@@ -31,7 +31,6 @@ the gate as `mise run test`, which `ci` collects.
 """
 
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -39,12 +38,8 @@ import tomllib
 import unittest
 from fnmatch import fnmatchcase
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"

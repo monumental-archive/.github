@@ -15,7 +15,6 @@ exercised code in the org, where a check that admits what it should
 refuse looks precisely like success.
 """
 
-import importlib.util
 import io
 import json
 import tempfile
@@ -24,12 +23,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import ClassVar
 
-_SPEC = importlib.util.spec_from_file_location(
-    "biome_config",
-    Path(__file__).with_name("biome-config.py"),
-)
-biome_config = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(biome_config)
+import biome_config
 
 BELT = Path(__file__).parent
 DOMAINS_FILE = BELT / "biome-domains.tsv"

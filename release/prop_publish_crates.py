@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""publish-crates.py's index reading, on any sparse-index answer.
+"""publish_crates.py's index reading, on any sparse-index answer.
 
 The properties of `test_publish_rust_crate.py`'s fixed rows (#1556),
 over generated index files. The fetch is replaced in-process by the
@@ -17,21 +17,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import unittest
-from pathlib import Path
 
+import publish_crates as publish
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "publish_crates",
-    Path(__file__).with_name("publish-crates.py"),
-)
-publish = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(publish)
 
 NAME = "edtf"
 UA = "org-release (+https://example.invalid)"

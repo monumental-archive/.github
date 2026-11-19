@@ -13,7 +13,7 @@
 # SKIPS ONLY WHEN THERE IS NO EXTENSION. An extension that tracks no
 # snapshot is red (ruled on #896): a skip would let any extension leave
 # its surface unguarded by committing nothing. That judgment, the diff
-# and the write are pg-schema.py's, where they have table tests.
+# and the write are pg_schema.py's, where they have table tests.
 #
 # ONE MAJOR, THE HIGHEST DECLARED, `lint:pg-clippy`'s choice and reason:
 # the surface is one set of `#[pg_extern]`s, not one per major, and
@@ -60,14 +60,14 @@ done <<< "${records}"
 
 # An untracked snapshot is red before anything is built: the remedy is
 # the fixer, and making the reader wait for a compile to learn that
-# would be a cost with no information in it. pg-schema.py asks again
+# would be a cost with no information in it. pg_schema.py asks again
 # after generating, so this is a shortcut, never the only guard.
 if [[ ${mode} == check ]]; then
   missing=0
   for target in "${targets[@]}"; do
     snapshot="${target#*:*:*:}"
     git ls-files --error-unmatch -- "${snapshot}" > /dev/null 2>&1 || {
-      "${ORG_PYTHON}" "${belt}/pg-schema.py" check /dev/null "${snapshot}" || missing=1
+      "${ORG_PYTHON}" "${belt}/pg_schema.py" check /dev/null "${snapshot}" || missing=1
     }
   done
   [[ ${missing} -eq 0 ]] || exit 1
@@ -81,7 +81,7 @@ command -v cargo-pgrx > /dev/null || {
 . "${belt}/pgrx-env.sh"
 org_pgrx_darwin_flags
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-plan=$("${ORG_PYTHON}" "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}")
+plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}")
 org_pgrx_init <<< "${plan}" > /dev/null
 
 # The raw output lands under the target directory cargo already ignores,
@@ -101,7 +101,7 @@ for target in "${targets[@]}"; do
   cargo pgrx schema "pg${major}" --package "${name}" \
     --manifest-path "${dir}/Cargo.toml" \
     --no-default-features --features "pg${major}" --out "${raw}"
-  if "${ORG_PYTHON}" "${belt}/pg-schema.py" "${mode}" "${raw}" "${snapshot}"; then
+  if "${ORG_PYTHON}" "${belt}/pg_schema.py" "${mode}" "${raw}" "${snapshot}"; then
     done_list="${done_list} ${name}(pg${major})"
   else
     failed=1

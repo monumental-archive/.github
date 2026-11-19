@@ -10,7 +10,7 @@ name, with cargo's own exit status.
 The row runs the task's own `run` body, read from mise/config.toml, in
 a planted git tree. The workspace is edtf's, from the `cargo metadata`
 captured in release/testdata/edtf-cargo-metadata.json and read by the
-belt's real mise/gate-surface.py. cargo and rustup are stubs: clippy
+belt's real mise/gate_surface.py. cargo and rustup are stubs: clippy
 refuses the first member and passes the rest, and the stub records each
 crate it was asked to lint. clippy's verdict on a crate is clippy's to
 prove; the row is about which crates are asked.
@@ -20,19 +20,14 @@ gate as `mise run test`.
 """
 
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 METADATA = BELT.parent / "release" / "testdata" / "edtf-cargo-metadata.json"

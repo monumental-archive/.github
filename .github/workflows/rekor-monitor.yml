@@ -319,7 +319,7 @@ jobs:
           KEPT: ${{ needs.start.outputs.kept }}
           LEGS: ${{ needs.watch.result }}
         run: |
-          "${ORG_PYTHON}" .github/rekor-monitor/standing-issue.py --start run-start.json \
+          "${ORG_PYTHON}" .github/rekor-monitor/standing_issue.py --start run-start.json \
             --start-kept "${KEPT}" --checkpoint checkpoint.json --legs "${LEGS}" \
             --run-url "${RUN_URL}"
 ...

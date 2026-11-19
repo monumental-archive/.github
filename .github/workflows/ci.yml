@@ -83,7 +83,7 @@ env:
   # (src/config-hash.ts MISE_CONFIG_FILE_PATTERNS, in its order, at the
   # workspace root where the action runs). The workflow's hashFiles walks
   # and digests them exactly as the action's own glob.hashFiles does, so
-  # mise/gate-cache-key.py renders the key the action rendered, and then
+  # mise/gate_cache_key.py renders the key the action rendered, and then
   # adds the belt's lockfile, which these globs never reach (#1414).
   ORG_MISE_CONFIG_GLOBS: |-
     .config/mise/conf.d/*.toml
@@ -126,7 +126,7 @@ jobs:
   # WHICH POSTGRES MAJORS GET A LEG (#1148). A matrix has to exist before
   # its jobs do, so the list is made first, alone, and cheaply — the
   # runner's own cargo and python3, no toolchain install — by the same
-  # derivation every belt task uses (gate-surface.py over the crate's
+  # derivation every belt task uses (gate_surface.py over the crate's
   # `pgNN` features). It is a PLAN and is trusted as one: the `gate` job
   # below re-derives the list from the pinned toolchain and reds on any
   # difference, so an unpinned tool here can fail a gate and can never
@@ -209,7 +209,7 @@ jobs:
           ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
           ORG_QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           ORG_QUEUE_TOKEN: ${{ github.token }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/queue-head.py'
+        run: '"${ORG_PYTHON}" .org-canon/mise/queue_head.py'
 
       # The Rust toolchains live INSIDE the directory the tool cache
       # below restores (#1165). mise installs rust through rustup, and
@@ -239,11 +239,11 @@ jobs:
       # it pins is ever disabled. Local runs are unchanged: nothing sets
       # it there.
       - name: Leave out the belt tools this tree does not need
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate-tools.py disable'
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_tools.py disable'
 
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
-      # by mise/gate-cache-key.py and pinned by its test to a key the
+      # by mise/gate_cache_key.py and pinned by its test to a key the
       # action logged, then `-b` and the sha256 of the delivered belt's
       # mise.lock (#1414), so a belt tool bump names a new cache.
       # A tree that leaves belt tools out (#1410) ends it in `-off` and
@@ -266,7 +266,7 @@ jobs:
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate-cache-key.py mise-v2 .org-canon'
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py mise-v2 .org-canon'
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
@@ -292,7 +292,7 @@ jobs:
       # Staleness is not the exposure: mise installs what mise.lock
       # pins, and a restored directory only spares it the download, so
       # an older cache is a slower run, never a different one. The key
-      # names what is installed (mise/gate-cache-key.py): the mise
+      # names what is installed (mise/gate_cache_key.py): the mise
       # configs mise-action's globs find at the workspace root — on the
       # canon's own gate, mise/config.toml then mise.toml — and the
       # delivered belt's .org-canon/mise/mise.lock (#1414). #660
@@ -443,8 +443,8 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         # The composition, the title's own-reference refusal (#800) and
-        # the CRLF body (#880): mise/squash-message.py (#1386).
-        run: '"${ORG_PYTHON}" .org-canon/mise/squash-message.py'
+        # the CRLF body (#880): mise/squash_message.py (#1386).
+        run: '"${ORG_PYTHON}" .org-canon/mise/squash_message.py'
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       - name: Run the gate
@@ -567,7 +567,7 @@ jobs:
         env:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
             --input-of "every pgrx leg of the gate" \
             --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \
             rust cargo-pgrx >> "${GITHUB_OUTPUT}"
@@ -587,7 +587,7 @@ jobs:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
           ORG_TOOL_INSTALL: jq ${{ steps.pins.outputs.install }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/gate-cache-key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
+          "${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
             .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache

@@ -26,7 +26,6 @@ two `publish` rows are why publish gets no verdict at all.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import json
 import sys
@@ -36,12 +35,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-_SPEC = importlib.util.spec_from_file_location(
-    "workspace_inherit",
-    Path(__file__).with_name("workspace-inherit.py"),
-)
-wi = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(wi)
+import workspace_inherit as wi
 
 ROOT = Path("/ws")
 

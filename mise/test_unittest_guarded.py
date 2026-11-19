@@ -2,7 +2,7 @@
 """Planted rows for the canon's test runner (#1491, #1623).
 
 Each row writes a module into a scratch tree and runs it through
-`mise/unittest-guarded.py`, from a starting directory of its own, as the
+`mise/unittest_guarded.py`, from a starting directory of its own, as the
 canon's `test` task does. The leak rows assert the MESSAGE and the test
 it names; the clean rows assert that the runner is otherwise
 `python3 -m unittest`: the same output and the same exit status. The
@@ -15,17 +15,16 @@ under coverage the same figure.
 import json
 import pathlib
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
+
+import hermetic
 
 _HERE = pathlib.Path(__file__).resolve().parent
-hermetic = SimpleNamespace(**runpy.run_path(str(_HERE / "hermetic.py")))
-RUNNER = _HERE / "unittest-guarded.py"
+RUNNER = _HERE / "unittest_guarded.py"
 MEASURE = _HERE / "coverage-measure.sh"
 BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"

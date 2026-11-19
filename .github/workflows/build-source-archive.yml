@@ -74,10 +74,10 @@ jobs:
 
       - name: Build the archive twice and prove determinism
         # Refuses two builds that differ and an archive listing no more
-        # than half the tracked files. release/source-archive.py.
+        # than half the tracked files. release/source_archive.py.
         env:
           VERSION: ${{ inputs.version }}
-        run: '"${ORG_PYTHON}" .org-canon/release/source-archive.py'
+        run: '"${ORG_PYTHON}" .org-canon/release/source_archive.py'
       - name: Compute the subject manifest
         id: manifest
         run: |

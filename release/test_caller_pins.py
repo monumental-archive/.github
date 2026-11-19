@@ -7,19 +7,13 @@ whose message is asserted whole — a refusal that exits 1 with the wrong
 words sends a repository to the wrong remedy.
 """
 
-import importlib.util
 import io
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "caller_pins",
-    Path(__file__).with_name("caller-pins.py"),
-)
-caller_pins = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(caller_pins)
+import caller_pins
 
 INPUT_OF = "every class that ships a Rust binary"
 

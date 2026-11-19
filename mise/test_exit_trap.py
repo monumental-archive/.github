@@ -18,7 +18,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import re
 import shutil
@@ -28,12 +27,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-_SPEC = importlib.util.spec_from_file_location(
-    "exit_trap",
-    Path(__file__).with_name("exit-trap.py"),
-)
-et = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(et)
+import exit_trap as et
 
 BASH = Path("/bin/bash")
 SH = Path("/bin/sh")

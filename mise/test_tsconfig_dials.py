@@ -12,7 +12,6 @@ and observed to fail. A floor check that admits a weaker config looks
 exactly like a floor check that works.
 """
 
-import importlib.util
 import io
 import json
 import tempfile
@@ -20,12 +19,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "tsconfig_dials",
-    Path(__file__).with_name("tsconfig-dials.py"),
-)
-tsconfig_dials = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(tsconfig_dials)
+import tsconfig_dials
 
 FLAGS_FILE = Path(__file__).with_name("tsc-flags.txt")
 REQUIRED, UNREADABLE = tsconfig_dials.dials(FLAGS_FILE)

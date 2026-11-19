@@ -30,29 +30,21 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
+import mutants_go
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-go.sh"
 BASH = shutil.which("bash") or "bash"
 
-_SPEC = importlib.util.spec_from_file_location("mutants_go", BELT / "mutants-go.py")
-mutants_go = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(mutants_go)
 GIT = shutil.which("git") or "git"
 LABEL = "audit:mutants: go"
 MODULE = "example.com/p"

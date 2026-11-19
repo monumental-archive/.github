@@ -9,7 +9,7 @@ matched. The step now reads the compare step's outcome: `failure` is a
 verdict and keeps its title and body exactly; anything else is no
 verdict, and says so without the words of one.
 
-The code under test is `release/repro-issue.py`, which the step runs as
+The code under test is `release/repro_issue.py`, which the step runs as
 its one command (#1386), with a stub `gh` first on PATH that records
 its arguments. The three rows below were written against the step's
 `run:` block cut out of the YAML; they are carried over row for row and
@@ -27,7 +27,7 @@ import sys
 import tempfile
 import unittest
 
-HELPER = pathlib.Path(__file__).resolve().parent / "repro-issue.py"
+HELPER = pathlib.Path(__file__).resolve().parent / "repro_issue.py"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
 NO_VERDICT_BODY = (
     "The reproducibility audit set out to rebuild v0.28.1 with the"

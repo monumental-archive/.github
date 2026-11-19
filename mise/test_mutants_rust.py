@@ -10,7 +10,7 @@ the `--output` directory and exiting with the row's status. Every call
 is logged; each row asserts the exact calls and the exact messages, so
 a row cannot pass by stopping somewhere else.
 
-gate-surface.py and jq are the real ones. Postgres provisioning is the
+gate_surface.py and jq are the real ones. Postgres provisioning is the
 one thing replaced: `org_pgrx_provision` only logs, because
 provisioning is pgrx-env.sh's to prove and needs a Postgres.
 
@@ -22,21 +22,16 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
+import mutants_rust as helper
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-rust.sh"
@@ -45,9 +40,6 @@ GIT = shutil.which("git") or "git"
 LABEL = "audit:mutants: rust"
 CONFIG = ".cargo/mutants.toml"
 
-_SPEC = importlib.util.spec_from_file_location("mutants_rust", BELT / "mutants-rust.py")
-helper = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(helper)
 
 CARGO_STUB = """#!/usr/bin/env bash
 printf 'cargo %s\\n' "$*" >> "${PLANT_LOG}"
@@ -173,8 +165,8 @@ class Planted(unittest.TestCase):
             stub.chmod(0o755)
         belt = self.tmp / "belt"
         belt.mkdir()
-        (belt / "gate-surface.py").symlink_to(BELT / "gate-surface.py")
-        (belt / "mutants-rust.py").symlink_to(BELT / "mutants-rust.py")
+        (belt / "gate_surface.py").symlink_to(BELT / "gate_surface.py")
+        (belt / "mutants_rust.py").symlink_to(BELT / "mutants_rust.py")
         (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
         self.log = self.tmp / "log"
         self.log.touch()
@@ -690,7 +682,7 @@ class Shards(Planted):
 
 
 class ReasonRule(unittest.TestCase):
-    """mutants-rust.py's reader of `.cargo/mutants.toml`, on planted text (#1486)."""
+    """mutants_rust.py's reader of `.cargo/mutants.toml`, on planted text (#1486)."""
 
     def test_every_entry_under_its_reason_is_clean(self) -> None:
         """A `#` line above each entry, blank lines between allowed."""
@@ -730,7 +722,7 @@ class ReasonRule(unittest.TestCase):
 
 
 class Readers(unittest.TestCase):
-    """mutants-rust.py's other readers, directly (#1486)."""
+    """mutants_rust.py's other readers, directly (#1486)."""
 
     def test_default_major_is_the_one_pg_feature(self) -> None:
         """One pgNN in `default` is the major; none or two is no answer."""

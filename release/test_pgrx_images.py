@@ -3,7 +3,7 @@
 
 build-pgrx-images.yml staged the per-architecture trees and proved the
 pushed image in 82 lines of inline shell with no test. The staging is
-release/pgrx-images.py; the proof is release/pgrx-image-proof.sh running
+release/pgrx_images.py; the proof is release/pgrx-image-proof.sh running
 the tracked docker/pgrx-consumer*.Dockerfile and docker/pgrx-*-proof.sh.
 
 The staging rows plant real gzip tarballs and run the helper as the
@@ -17,7 +17,6 @@ stdlib `unittest`, matching the other release/test_*.py.
 
 import io
 import os
-import runpy
 import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -27,15 +26,16 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 RELEASE = Path(__file__).resolve().parent
 CANON = RELEASE.parent
-STAGE = RELEASE / "pgrx-images.py"
+STAGE = RELEASE / "pgrx_images.py"
 PROOF = RELEASE / "pgrx-image-proof.sh"
 TABLE = CANON / "docker" / "pgrx-base-images.toml"
 BASH = shutil.which("bash") or "bash"
@@ -97,7 +97,7 @@ def run(
 
 
 class Stage(unittest.TestCase):
-    """`pgrx-images.py stage`: every branch, messages asserted."""
+    """`pgrx_images.py stage`: every branch, messages asserted."""
 
     def setUp(self) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
@@ -215,7 +215,7 @@ class Stage(unittest.TestCase):
 
 
 class BaseImage(unittest.TestCase):
-    """`pgrx-images.py base-image`: the [build] row, or a refusal."""
+    """`pgrx_images.py base-image`: the [build] row, or a refusal."""
 
     def test_every_major_names_its_build_image(self) -> None:
         """Each [build] row is what the verb prints."""
@@ -329,7 +329,7 @@ def render(recipe: str, image: str, base: str, pg: str) -> subprocess.CompletedP
 
 
 class ConsumerDockerfile(unittest.TestCase):
-    """`pgrx-images.py consumer-dockerfile`: the recipes, pinned or refused."""
+    """`pgrx_images.py consumer-dockerfile`: the recipes, pinned or refused."""
 
     def test_the_copy_recipe(self) -> None:
         """The text the workflow's first heredoc wrote, byte for byte."""
@@ -565,7 +565,7 @@ def extension_name(tree: Path) -> subprocess.CompletedProcess:
 
 
 class ExtensionName(unittest.TestCase):
-    """`pgrx-images.py extension-name`: the one shipped extension (#1439)."""
+    """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
     def setUp(self) -> None:
         """Make an empty staged share/extension tree, removed after."""

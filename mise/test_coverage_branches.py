@@ -7,7 +7,7 @@
 dated nightly; `coverage:adopt` writes that line. The bodies under test
 are the tasks' own `run` strings, read out of mise/config.toml with
 tomllib and run by bash in a planted git tree, and they call the real
-measurement script, the real `coverage-floor.py` and the real
+measurement script, the real `coverage_floor.py` and the real
 `pgrx-env.sh`. Only `cargo` and `rustup` are stubs: cargo answers
 `metadata` with a workspace holding no extension and `llvm-cov` with
 the numbers the row planted, and logs every `llvm-cov` call with the
@@ -20,9 +20,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -30,12 +28,9 @@ import tomllib
 import unittest
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import coverage_floor as cf
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -44,12 +39,6 @@ GIT = shutil.which("git")
 
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 
-_SPEC = importlib.util.spec_from_file_location(
-    "coverage_floor",
-    BELT / "coverage-floor.py",
-)
-cf = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(cf)
 
 NIGHTLY = "nightly-2026-07-20"
 

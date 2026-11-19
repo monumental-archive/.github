@@ -2,7 +2,7 @@
 """Run the npm publisher against a stub `npm` (#1383).
 
 publish-wasm-npm.yml's Publish step had no test. Its body is now
-release/publish-npm.py, run here in-process through `run`, with a stub
+release/publish_npm.py, run here in-process through `run`, with a stub
 `npm` first on PATH: `--version` answers STUB_NPM_VERSION, `view` exits
 STUB_VIEW_RC, `config get logs-dir` answers STUB_LOGS_DIR, and `publish`
 logs its arguments, writes a debug log beside the real npm's, and exits
@@ -16,7 +16,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import os
 import unittest
@@ -26,11 +25,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-_SPEC = importlib.util.spec_from_file_location(
-    "publish_npm", Path(__file__).with_name("publish-npm.py")
-)
-publish_npm = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(publish_npm)
+import publish_npm
 
 PACKAGE = "@acme/widget@1.2.3"
 # ruff: ignore[hardcoded-password-string] - a planted fake, to prove it is redacted
@@ -269,7 +264,7 @@ class Main(unittest.TestCase):
                 with redirect_stdout(out):
                     self.assertEqual(2, publish_npm.main(argv))
                 self.assertEqual(
-                    "usage: publish-npm.py <name@version>\n", out.getvalue()
+                    "usage: publish_npm.py <name@version>\n", out.getvalue()
                 )
 
     def test_the_package_reaches_run_with_the_job_s_environment(self) -> None:

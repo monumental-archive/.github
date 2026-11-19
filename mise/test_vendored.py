@@ -17,18 +17,13 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import hashlib
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "vendored.sh"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for licence-texts.py, lint:licence's licence-text check (#1589).
+"""Tests for licence_texts.py, lint:licence's licence-text check (#1589).
 
 The canon's REUSE.toml labelled two fixtures copied from edtf as the
 canon's own 0BSD work. The relabel names `MIT OR Apache-2.0`, and a
@@ -13,16 +13,15 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import runpy
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import licence_texts as lt
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-lt = SimpleNamespace(**runpy.run_path(str(HERE / "licence-texts.py")))
 
 FIXTURE_ENTRY = """\
 version = 1
@@ -61,7 +60,7 @@ def run(files: dict[str, str]) -> tuple[int, str]:
         ):
             sys.stdin = io.StringIO("\0".join(files) + "\0")
             try:
-                status = lt.main(["licence-texts.py"])
+                status = lt.main(["licence_texts.py"])
             finally:
                 sys.stdin = stdin
         return status, err.getvalue()
@@ -222,8 +221,8 @@ class LicenceTexts(unittest.TestCase):
         """An argument is a usage error, not a pass."""
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            self.assertEqual(2, lt.main(["licence-texts.py", "extra"]))
-        self.assertEqual("usage: git ls-files -z | licence-texts.py\n", err.getvalue())
+            self.assertEqual(2, lt.main(["licence_texts.py", "extra"]))
+        self.assertEqual("usage: git ls-files -z | licence_texts.py\n", err.getvalue())
 
 
 if __name__ == "__main__":

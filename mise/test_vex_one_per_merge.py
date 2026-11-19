@@ -16,7 +16,6 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -24,11 +23,8 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
@@ -40,7 +36,7 @@ A = "security/vex/RUSTSEC-0000-0001.openvex.json"
 B = "security/vex/RUSTSEC-0000-0002.openvex.json"
 C = "security/vex/RUSTSEC-0000-0003.openvex.json"
 README = "security/vex/README.md"
-HELPER = BELT / "vex-one-per-merge.py"
+HELPER = BELT / "vex_one_per_merge.py"
 
 
 def body() -> str:
@@ -323,7 +319,7 @@ class Workflow(unittest.TestCase):
         start = workflow.index("        id: collect\n")
         step = workflow[start : workflow.index("\n  sign-vex:", start)]
         self.assertIn(
-            '"${ORG_PYTHON}" .org-canon/mise/vex-one-per-merge.py --list "${BEFORE}.."',
+            '"${ORG_PYTHON}" .org-canon/mise/vex_one_per_merge.py --list "${BEFORE}.."',
             step,
         )
         self.assertNotIn("git diff", step)

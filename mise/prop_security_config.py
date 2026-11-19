@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""security-config.py's record comparison, on configurations nobody wrote.
+"""security_config.py's record comparison, on configurations nobody wrote.
 
 The properties of `test_security_config.py`'s fixed rows (#1548), over
 generated records and live configurations:
@@ -14,20 +14,12 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import unittest
-from pathlib import Path
 
+import security_config as sc
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "security_config",
-    Path(__file__).with_name("security-config.py"),
-)
-sc = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(sc)
 
 JSON = st.recursive(
     st.none() | st.booleans() | st.integers() | st.text(max_size=8),

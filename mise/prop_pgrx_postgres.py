@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pgrx-postgres.py's plan, on listings nobody wrote down.
+"""pgrx_postgres.py's plan, on listings nobody wrote down.
 
 The properties of `test_pgrx_postgres.py`'s fixed rows (#1548), over
 generated `mise ls` listings and declared majors:
@@ -18,21 +18,14 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
+import pgrx_postgres as pp
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "pgrx_postgres",
-    Path(__file__).with_name("pgrx-postgres.py"),
-)
-pp = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pp)
 
 MAJOR = st.integers(13, 19)
 ENTRY = st.fixed_dictionaries({

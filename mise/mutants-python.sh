@@ -44,7 +44,7 @@
 # whole: a shard other than 0/1 is red, never a silent re-run of
 # everything.
 #
-# THIS FILE IS THE SEQUENCE; mutants-python.py READS AND JUDGES (#1486).
+# THIS FILE IS THE SEQUENCE; mutants_python.py READS AND JUDGES (#1486).
 # The config's exclusion lists, the pragma reason rule, the mapping of
 # mutmut's states and the line locator are calls to the helper, so they
 # come under the canon's coverage figure and its own mutation run.
@@ -98,10 +98,10 @@ candidates=$(git grep -l -E 'pragma:.*no mutate' -- ':!vendor/**' '*.py' || true
 if [[ -n ${candidates} ]]; then
   files=()
   while IFS= read -r f; do files+=("${f}"); done <<< "${candidates}"
-  "${ORG_PYTHON}" "${belt}/mutmut-pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
+  "${ORG_PYTHON}" "${belt}/mutmut_pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
 fi
 # Every exclusion carries its reason, or this is red before mutmut runs.
-excluded=$("${ORG_PYTHON}" "${belt}/mutants-python.py" exclusions "${config}" "${scratch}/pragmas.tsv")
+excluded=$("${ORG_PYTHON}" "${belt}/mutants_python.py" exclusions "${config}" "${scratch}/pragmas.tsv")
 
 command -v mutmut > /dev/null || {
   echo "${label}: mutmut missing — the belt pins it lazy; install it by name:" >&2
@@ -112,9 +112,9 @@ command -v mutmut > /dev/null || {
 # Children of the run can import mutmut (#1354 item 3): a test that
 # runs a helper as `python3 helper.py` runs its mutated copy, which
 # imports mutmut's trampoline. The hook APPENDS mutmut's site directory
-# to sys.path in every Python the run starts; mutants-python.py derives
+# to sys.path in every Python the run starts; mutants_python.py derives
 # the directory from the installed tool.
-"${ORG_PYTHON}" "${belt}/mutants-python.py" hook "${scratch}/hook"
+"${ORG_PYTHON}" "${belt}/mutants_python.py" hook "${scratch}/hook"
 status=0
 PYTHONPATH="${scratch}/hook${PYTHONPATH:+:${PYTHONPATH}}" mutmut run || status=$?
 if [[ ${status} -ne 0 ]]; then
@@ -125,13 +125,13 @@ fi
 mutmut results --all true > "${scratch}/results.txt"
 # Each survivor's diff, in the order the helper names them; the helper
 # finds the line in the file, since the diff counts from the function.
-"${ORG_PYTHON}" "${belt}/mutants-python.py" survivors "${scratch}/results.txt" > "${scratch}/survivors.txt"
+"${ORG_PYTHON}" "${belt}/mutants_python.py" survivors "${scratch}/results.txt" > "${scratch}/survivors.txt"
 mkdir "${scratch}/shows"
 i=0
 while IFS= read -r name; do
   i=$((i + 1))
   mutmut show "${name}" > "${scratch}/shows/${i}.diff"
 done < "${scratch}/survivors.txt"
-"${ORG_PYTHON}" "${belt}/mutants-python.py" verdict "${scratch}/results.txt" "${scratch}/shows" \
+"${ORG_PYTHON}" "${belt}/mutants_python.py" verdict "${scratch}/results.txt" "${scratch}/shows" \
   --excluded "${excluded}"
 org_done=1

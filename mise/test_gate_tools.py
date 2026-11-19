@@ -35,9 +35,7 @@ stdlib `unittest`, matching the other mise/test_*.py.
 """
 
 import functools
-import importlib.util
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -45,20 +43,14 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import gate_tools
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 GIT = shutil.which("git")
 
-_SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate-tools.py")
-gate_tools = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gate_tools)
 
 # What `ci` runs besides the `lint:*` wildcard (its `depends`), and the
 # task the gate job's squash-message step runs.
@@ -613,7 +605,7 @@ class Helper(unittest.TestCase):
                 result = subprocess.run(
                     [
                         sys.executable,
-                        str(BELT / "gate-tools.py"),
+                        str(BELT / "gate_tools.py"),
                         "--root",
                         str(root),
                         "disable",
@@ -645,7 +637,7 @@ class Helper(unittest.TestCase):
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(BELT / "gate-tools.py"),
+                    str(BELT / "gate_tools.py"),
                     "--table",
                     str(table),
                     "list",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run `release/attach-publish.py` against a stub `gh` (#1386).
+"""Run `release/attach_publish.py` against a stub `gh` (#1386).
 
 `attach-release.yml`'s "Attach and publish" step is now one call to the
 helper. These rows run it as the step does, from a working directory
@@ -26,7 +26,7 @@ import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
-HELPER = HERE / "attach-publish.py"
+HELPER = HERE / "attach_publish.py"
 TAG = "v1.2.3"
 REPO = "example/project"
 # Answers by subcommand; every call is logged one per line, its

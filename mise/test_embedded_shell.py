@@ -16,10 +16,8 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -29,20 +27,11 @@ import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import embedded_shell as es
+import hermetic
 
 _HERE = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location(
-    "embedded_shell",
-    _HERE / "embedded-shell.py",
-)
-es = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(es)
 
 ISSUE = "\t# canon helper: #1386"
 GIT = shutil.which("git") or "git"
@@ -1118,7 +1107,7 @@ class Cli(unittest.TestCase):
         """Red is exit 1 with the finding on stderr; green is exit 0."""
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
-            argv = [sys.executable, str(_HERE / "embedded-shell.py"), "--ceiling"]
+            argv = [sys.executable, str(_HERE / "embedded_shell.py"), "--ceiling"]
             red = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [*argv, str(t.debt), str(t.wf)],
                 capture_output=True,
@@ -1143,7 +1132,7 @@ class Cli(unittest.TestCase):
             cfg.write_text(config(lint_a=16), encoding="utf-8")
             argv = [
                 sys.executable,
-                str(_HERE / "embedded-shell.py"),
+                str(_HERE / "embedded_shell.py"),
                 "--task-ceiling",
                 str(debt),
                 str(cfg),

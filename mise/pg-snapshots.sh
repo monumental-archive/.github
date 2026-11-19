@@ -6,7 +6,7 @@
 # Two copies of the answer would let a task lint a file the other owns,
 # which is the defect: the belt wrote a snapshot and then linted it red.
 #
-# THE EXTENSIONS ARE DERIVED, never declared: gate-surface.py calls a
+# THE EXTENSIONS ARE DERIVED, never declared: gate_surface.py calls a
 # member a pgrx extension when it depends on pgrx AND carries pgNN
 # features. The snapshot is `schema.snapshot.sql` beside that
 # extension's Cargo.toml. Never a filename match: a hand-written
@@ -34,7 +34,7 @@ command -v cargo > /dev/null || {
 # workspace with no extension — an empty answer nobody could tell from
 # the real one.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
 while IFS=$'\t' read -r record spec kind majors dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   [[ ${dir} != "-" ]] || {

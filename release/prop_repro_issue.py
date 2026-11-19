@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""repro-issue.py's wording, on any run the step can describe.
+"""repro_issue.py's wording, on any run the step can describe.
 
 The properties of `test_repro_issue.py`'s fixed rows (#1556), over
 generated tags, classes, manifests and compare-step outcomes:
@@ -17,20 +17,12 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import repro_issue as repro
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "repro_issue",
-    Path(__file__).with_name("repro-issue.py"),
-)
-repro = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(repro)
 
 TAG = st.from_regex(
     r"v[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(-[a-z0-9.]{1,6})?", fullmatch=True

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/pgrx/inventory-plan.py, the pgrx-extension plan step.
+"""Run release/pgrx/inventory_plan.py, the pgrx-extension plan step.
 
 #1371 moved the step "Emit the inventory plan (what this cell built,
 from its own inputs)" out of build-pgrx-extension.yml into the helper.
@@ -16,24 +16,23 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import runpy
-
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
-HELPER = CANON / "release" / "pgrx" / "inventory-plan.py"
+HELPER = CANON / "release" / "pgrx" / "inventory_plan.py"
 STEP = "Emit the inventory plan (what this cell built, from its own inputs)"
 
 GOLDEN = """[
@@ -123,14 +122,14 @@ class PlanStepIsTheHelper(unittest.TestCase):
         body = step()
         self.assertIn(
             "        run: |\n"
-            '          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory-plan.py'
+            '          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory_plan.py'
             ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n',
             body,
         )
         self.assertNotIn("jq", body)
 
     def test_the_step_states_its_prefix_and_its_marker(self) -> None:
-        """mise/plan-producers.py joins the marker to PLAN_DOC_PREFIX."""
+        """mise/plan_producers.py joins the marker to PLAN_DOC_PREFIX."""
         body = step()
         self.assertIn("# plan-producer: pgrx-extension sbom-pgrx-\n", body)
         self.assertIn("          PLAN_DOC_PREFIX: sbom-pgrx-\n", body)
@@ -217,7 +216,7 @@ class Refuses(unittest.TestCase):
         """Two positional arguments, never fewer."""
         run = run_helper(args=("crate",))
         self.assertEqual(2, run.returncode)
-        self.assertEqual("usage: inventory-plan.py CRATE_DIR MAJOR\n", run.stderr)
+        self.assertEqual("usage: inventory_plan.py CRATE_DIR MAJOR\n", run.stderr)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@
 #     unparsable file is a warning and exit 0 under mypy's defaults;
 #   - a seam in a source file that lowers the org's level for itself
 #     (inline `# mypy:`, a bare `# type: ignore`, `no_type_check`),
-#     named by python-types-seams.py.
+#     named by python_types_seams.py.
 # A mypy that is not the belt's pin is red by name: a stale install
 # would check against another version's rules.
 #
@@ -70,7 +70,7 @@ while IFS= read -r f; do
 done <<< "${files}"
 
 red=0
-seams=$("${ORG_PYTHON}" "${belt}/python-types-seams.py" "${args[@]}") || red=1
+seams=$("${ORG_PYTHON}" "${belt}/python_types_seams.py" "${args[@]}") || red=1
 if [[ -n ${seams} ]]; then
   echo "${label}: these lower the org's level for their own file:" >&2
   while IFS= read -r line; do
@@ -79,11 +79,19 @@ if [[ -n ${seams} ]]; then
   echo "  suppress one line with '# type: ignore[<code>]', which names its rule" >&2
 fi
 
-# MYPYPATH is the belt: a property file's `from typed_hypothesis import
-# given` resolves to the belt's typed `given`, as the properties runner
-# puts the same directory on the path (#1604).
+# The import roots, derived from the tracked files (python_roots.py,
+# #1634): mypy follows neither a script's own directory nor the sibling
+# root a file names from its `__file__`, so it is handed both, and the
+# belt's own directory, where a property file's `from typed_hypothesis
+# import given` resolves as the properties runner resolves it (#1604).
+# Two files that would be one module are red by name, before mypy stops.
+roots=$("${ORG_PYTHON}" "${belt}/python_roots.py" "${belt}" "${args[@]}") || {
+  echo "${label}: rename one of each pair above so every module name is one file's" >&2
+  exit 1
+}
+
 status=0
-out=$(MYPYPATH="${belt}" mypy --config-file "${cfg}" --python-executable "${exe}" "${args[@]}" 2>&1) || status=$?
+out=$(MYPYPATH="${roots}" mypy --config-file "${cfg}" --python-executable "${exe}" "${args[@]}" 2>&1) || status=$?
 [[ -z ${out} ]] || printf '%s\n' "${out}"
 if grep -qF "${cfg}:" <<< "${out}"; then
   echo "${label}: mypy did not load ${cfg} cleanly (above) — its defaults would be in force" >&2

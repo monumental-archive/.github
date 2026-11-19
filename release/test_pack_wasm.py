@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/pack-wasm.py, the wasm-npm pack step, on a stub npm (#1384).
+"""Run release/pack_wasm.py, the wasm-npm pack step, on a stub npm (#1384).
 
 WHAT RUNS. The helper itself, as the job runs it, through a
 `.org-canon` link to this tree, from a workspace holding the crate's
@@ -18,23 +18,24 @@ as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
-import runpy
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
-HELPER = ".org-canon/release/pack-wasm.py"
+HELPER = ".org-canon/release/pack_wasm.py"
 REPO = "monumental-archive/edtf"
 WANT = f"https://github.com/{REPO}"
 VERSION = "1.3.4"

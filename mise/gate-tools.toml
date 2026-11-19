@@ -1,5 +1,5 @@
 # When the gate needs each belt tool (#1410). One row per key in
-# config.toml's [tools]; mise/gate-tools.py reads it against
+# config.toml's [tools]; mise/gate_tools.py reads it against
 # `git ls-files` and the gate job installs what it names.
 #
 #   tasks  the gate tasks that call the tool (`ci`'s lint:* wildcard,

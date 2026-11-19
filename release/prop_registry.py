@@ -21,22 +21,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import hashlib
-import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
+import registry
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "registry",
-    Path(__file__).with_name("registry.py"),
-)
-registry = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(registry)
 
 IMAGE = st.from_regex(r"ghcr\.io/[a-z0-9._/-]{1,24}", fullmatch=True)
 TAG = st.from_regex(r"[A-Za-z0-9._-]{1,16}", fullmatch=True)

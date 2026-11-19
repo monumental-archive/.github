@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for with-lock.py, the kernel-held command lock (#1481).
+"""Tests for with_lock.py, the kernel-held command lock (#1481).
 
 Every row runs the real helper as a separate process, because the lock
 is between processes: a second caller waits while a first holds it, a
@@ -17,7 +17,7 @@ import time
 import unittest
 from pathlib import Path
 
-HELPER = Path(__file__).resolve().with_name("with-lock.py")
+HELPER = Path(__file__).resolve().with_name("with_lock.py")
 
 
 class LockCase(unittest.TestCase):

@@ -37,7 +37,7 @@ shell = "bash -euo pipefail -c"
 # cargo-auditable in its prebuilt form: upstream's checksummed release
 # binary, installed in seconds where the cargo: backend compiled it from
 # source on every uncached job (#1334). The canon reads it by tool, under
-# any key (release/caller-pins.py).
+# any key (release/caller_pins.py).
 # "github:rust-secure-code/cargo-auditable" = "0.7.7"
 # Repos that FUZZ (a tracked fuzz/ directory) declare a second, DATED
 # nightly beside the stable one — mise holds and locks both — because

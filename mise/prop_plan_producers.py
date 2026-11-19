@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""plan-producers.py's join, on policies and workflows nobody wrote down.
+"""plan_producers.py's join, on policies and workflows nobody wrote down.
 
 The properties of `test_plan_producers.py`'s fixed rows (#1548), over
 generated planned obligations and the workflows that produce them:
@@ -15,19 +15,11 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import plan_producers as pp
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "plan_producers",
-    Path(__file__).with_name("plan-producers.py"),
-)
-pp = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pp)
 
 CLASS = st.from_regex(r"[a-z]{3,6}-[a-z]{3,6}", fullmatch=True)
 PREFIX = st.from_regex(r"sbom-[a-z]{2,6}-", fullmatch=True)

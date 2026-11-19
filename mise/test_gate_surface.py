@@ -15,7 +15,6 @@ the six mutations named in the class docstrings, so a reader can repeat
 them rather than trust this line.
 """
 
-import importlib.util
 import io
 import json
 import tempfile
@@ -23,12 +22,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "gate_surface",
-    Path(__file__).with_name("gate-surface.py"),
-)
-gate_surface = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gate_surface)
+import gate_surface
 
 ROOT = "/w"
 

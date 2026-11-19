@@ -20,23 +20,15 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import io
 import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
+import matrix
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "matrix",
-    Path(__file__).with_name("matrix.py"),
-)
-matrix = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(matrix)
 
 CLASS = st.sampled_from(sorted(matrix.TARGETS))
 MAJOR = st.integers(10, 99).map(str)

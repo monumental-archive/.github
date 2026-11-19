@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Table tests for the PL/pgSQL coverage leg (#1547).
 
-Two tables. The helper's rows run `mise/plpgsql-coverage.py collect`
+Two tables. The helper's rows run `mise/plpgsql_coverage.py collect`
 against a stub `psql` that answers with planted figures, then `totals`
 over the report it wrote, and assert the exact messages. The leg's rows
 run `coverage:check`'s own `run` string, read out of mise/config.toml,
@@ -19,7 +19,6 @@ gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -27,15 +26,13 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
+import test_coverage_tasks
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-HELPER = BELT / "plpgsql-coverage.py"
+HELPER = BELT / "plpgsql_coverage.py"
 BASH = shutil.which("bash")
 GIT = shutil.which("git")
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
@@ -351,7 +348,7 @@ class HelperRows(Collecting):
         self.assertEqual(1, read.returncode)
         self.assertEqual(
             "leg: plpgsql: the test task wrote no report — its teardown must"
-            " call plpgsql-coverage.py collect while ORG_PLPGSQL_COVERAGE is set\n",
+            " call plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set\n",
             read.stderr,
         )
 
@@ -581,7 +578,7 @@ class LegRows(unittest.TestCase):
             body = "CREATE TABLE t (id integer);\n"
         (tree / "schema.sql").write_text(body, encoding="utf-8")
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
-        teardown = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql-coverage.py"'
+        teardown = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py"'
         task = tmp / "task.json"
         task.write_text(
             json.dumps({
@@ -636,11 +633,7 @@ class LegRows(unittest.TestCase):
 
 
 # The coverage.py stub the python leg's rows use, read from its suite.
-COVERAGE = str(
-    runpy.run_path(str(Path(__file__).resolve().with_name("test_coverage_tasks.py")))[
-        "COVERAGE"
-    ]
-)
+COVERAGE = str(test_coverage_tasks.COVERAGE)
 
 # `mise tasks info <name> --json`, for any task planted in STUB_TASKS.
 MISE_TASKS = """\
@@ -720,7 +713,7 @@ class RunOnceRows(unittest.TestCase):
         script = str(BELT / "coverage-measure.sh")
         return run([BASH, script, "leg", selector], env, tree), tree
 
-    COLLECT = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql-coverage.py" collect stub'
+    COLLECT = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py" collect stub'
     COUNT = 'echo ran >> "${STUB_TASKS}/../counter"'
 
     def test_both_legs_read_one_run_under_all(self) -> None:

@@ -4,7 +4,7 @@
 The bodies under test are the tasks' own `run` strings, read out of
 mise/config.toml with tomllib and run by bash in a planted git tree,
 and they call the real `mise/typescript-properties.sh` and
-`mise/typescript-properties.py`. The runner is a STUB standing at
+`mise/typescript_properties.py`. The runner is a STUB standing at
 `node_modules/.bin/vitest`, where the leg looks for the repository's
 own: the belt pins neither vitest nor fast-check (#1357's rule), so
 there is no real one to run here. The stub records its arguments, the
@@ -23,7 +23,6 @@ gate as `mise run test`, which `ci` collects.
 import json
 import os
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -32,10 +31,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"

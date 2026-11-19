@@ -10,10 +10,10 @@ Every stub logs its arguments, and each row asserts the exact calls and
 the exact verdict lines, so a row cannot pass by stopping somewhere
 else.
 
-gate-surface.py is the real one: the helper's population is its
+gate_surface.py is the real one: the helper's population is its
 derivation and nothing here re-states it. The Postgres provisioning is
 the one thing replaced — the belt directory the helper reads holds the
-real gate-surface.py beside a `pgrx-env.sh` whose `org_pgrx_provision`
+real gate_surface.py beside a `pgrx-env.sh` whose `org_pgrx_provision`
 only logs — because provisioning is pgrx-env.sh's to prove and needs a
 Postgres; what is asserted here is that it runs once, before the first
 pgrx judgment, and that a failed one reds the majors without stopping
@@ -32,18 +32,13 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "semver-audit.sh"
@@ -174,9 +169,9 @@ class Planted(unittest.TestCase):
             stub.chmod(0o755)
         belt = self.tmp / "belt"
         belt.mkdir()
-        (belt / "gate-surface.py").symlink_to(BELT / "gate-surface.py")
+        (belt / "gate_surface.py").symlink_to(BELT / "gate_surface.py")
         # The one index rule, shared with the crates publisher (#1383).
-        (belt / "crates-index.py").symlink_to(BELT / "crates-index.py")
+        (belt / "crates_index.py").symlink_to(BELT / "crates_index.py")
         (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
         self.index = self.tmp / "index"
         self.index.mkdir()

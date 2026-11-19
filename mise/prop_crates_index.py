@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""crates-index.py's index paths, on crate names nobody wrote down.
+"""crates_index.py's index paths, on crate names nobody wrote down.
 
 The properties of `test_crates_index.py`'s fixed rows (#1548), over
 generated crate names:
@@ -16,21 +16,13 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import unittest
-from pathlib import Path
 
+import crates_index as ci
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "crates_index",
-    Path(__file__).with_name("crates-index.py"),
-)
-ci = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ci)
 
 # crates.io names: ASCII letters, digits, `-` and `_`, letter first.
 NAME = st.from_regex(r"[A-Za-z][A-Za-z0-9_-]{0,63}", fullmatch=True)
