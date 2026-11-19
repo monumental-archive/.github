@@ -45,10 +45,11 @@ judged. Exit 1 on any red.
 """
 
 import argparse
-import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import decoded
 
 KILLED = frozenset({"Killed", "Timeout"})
 NO_REASON = "Ignored using a comment"
@@ -79,47 +80,89 @@ class Verdict:
         return not (self.survived or self.not_covered or self.unjudged or self.red)
 
 
-def refusals(config: object) -> list[str]:
+@dataclass(frozen=True)
+class StrykerConfig:
+    """What the leg asks of stryker.config.json, each answer read once."""
+
+    # `mutate` is a non-empty list of non-empty paths.
+    names_mutate: bool
+    # `mutator.excludedMutations` is set.
+    excludes_mutations: bool
+    ignores_static: bool
+    sets_ignorers: bool
+    # `thresholds.break` is set.
+    sets_break: bool
+    incremental: bool
+
+
+def read_config(config: object) -> StrykerConfig | None:
+    """Read the settings the leg judges from a decoded config.
+
+    Returns:
+        The answers, or None when the config is not a JSON object.
+
+    """
+    if not decoded.is_object(config):
+        return None
+    mutate = config.get("mutate")
+    mutator = config.get("mutator")
+    thresholds = config.get("thresholds")
+    return StrykerConfig(
+        names_mutate=decoded.is_strings(mutate) and bool(mutate) and all(mutate),
+        excludes_mutations=decoded.is_object(mutator)
+        and bool(mutator.get("excludedMutations")),
+        ignores_static=config.get("ignoreStatic") is True,
+        sets_ignorers=bool(config.get("ignorers")),
+        sets_break=decoded.is_object(thresholds)
+        and thresholds.get("break") is not None,
+        incremental=config.get("incremental") is True,
+    )
+
+
+def findings(config: StrykerConfig | None) -> list[str]:
     """Name every setting that excludes mutants without a site's reason.
 
     Returns:
         One message per refused or missing setting; empty when sound.
 
     """
-    if not isinstance(config, dict):
+    if config is None:
         return ["is not a JSON object"]
     found: list[str] = []
-    mutate = config.get("mutate")
-    if (
-        not isinstance(mutate, list)
-        or not mutate
-        or not all(isinstance(m, str) and m for m in mutate)
-    ):
+    if not config.names_mutate:
         found.append(
             "names no `mutate` list — the paths to mutate are the repository's to state"
         )
-    mutator = config.get("mutator")
-    if isinstance(mutator, dict) and mutator.get("excludedMutations"):
+    if config.excludes_mutations:
         found.append(
             "sets `mutator.excludedMutations` — it drops a mutator everywhere, with no"
             " reason at any site"
         )
-    if config.get("ignoreStatic") is True:
+    if config.ignores_static:
         found.append(
             "sets `ignoreStatic` — it drops every static mutant,"
             " with no reason at any site"
         )
-    if config.get("ignorers"):
+    if config.sets_ignorers:
         found.append(
             "sets `ignorers` — they drop mutants by rule, with no reason at any site"
         )
-    thresholds = config.get("thresholds")
-    if isinstance(thresholds, dict) and thresholds.get("break") is not None:
+    if config.sets_break:
         found.append(
             "sets `thresholds.break` — the measure is no unexplained survivor,"
             " never a score"
         )
     return found
+
+
+def refusals(config: object) -> list[str]:
+    """Name every setting of a decoded config the leg refuses.
+
+    Returns:
+        One message per refused or missing setting; empty when sound.
+
+    """
+    return findings(read_config(config))
 
 
 def check_config(path: str, label: str) -> int:
@@ -130,11 +173,11 @@ def check_config(path: str, label: str) -> int:
 
     """
     try:
-        config = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as err:
+        config = read_config(decoded.load_json(Path(path).read_bytes()))
+    except (OSError, decoded.UndecodableError) as err:
         print(f"{label}: {path} is not readable JSON: {err}", file=sys.stderr)
         return 1
-    found = refusals(config)
+    found = findings(config)
     for line in found:
         print(f"{label}: {path} {line}", file=sys.stderr)
     if found:
@@ -142,7 +185,7 @@ def check_config(path: str, label: str) -> int:
             f"{label}: record each equivalent mutant at its site instead: {MARK}",
             file=sys.stderr,
         )
-    incremental = isinstance(config, dict) and config.get("incremental") is True
+    incremental = config is not None and config.incremental
     if incremental:
         print(
             f"{label}: {path} sets `incremental` — a runner has no earlier"
@@ -153,7 +196,89 @@ def check_config(path: str, label: str) -> int:
     return 1 if found or incremental else 0
 
 
-def site(path: str, mutant: dict) -> str:
+@dataclass(frozen=True)
+class Mutant:
+    """One mutant of StrykerJS's JSON report, as the verdict reads it."""
+
+    # Where it starts, as printed: "?" when the report leaves it out.
+    line: str
+    column: str
+    mutator: str
+    replacement: str
+    status: str
+    # Why it is ignored; "" when the report gives no reason.
+    reason: str
+
+
+def optional_object(value: object, where: str) -> dict[str, object]:
+    """Read an object the report may leave out.
+
+    Returns:
+        The object, or an empty one when it is absent or null.
+
+    """
+    return {} if value is None else decoded.as_object(value, where)
+
+
+def read_mutant(value: object, where: str) -> Mutant:
+    """Decode one mutant of the report.
+
+    Returns:
+        The mutant; a place, mutator or replacement left out reads as
+        `?`, `?` and "".
+
+    """
+    mutant = decoded.as_object(value, where)
+    location = optional_object(mutant.get("location"), f"{where}.location")
+    start = optional_object(location.get("start"), f"{where}.location.start")
+    line, column = start.get("line"), start.get("column")
+    mutator = mutant.get("mutatorName")
+    replacement = mutant.get("replacement")
+    reason = mutant.get("statusReason")
+    return Mutant(
+        line="?" if line is None else str(decoded.as_int(line, f"{where}.line")),
+        column="?"
+        if column is None
+        else str(decoded.as_int(column, f"{where}.column")),
+        mutator="?"
+        if mutator is None
+        else decoded.as_str(mutator, f"{where}.mutatorName"),
+        replacement=""
+        if replacement is None
+        else decoded.as_str(replacement, f"{where}.replacement"),
+        status=decoded.as_str(mutant.get("status"), f"{where}.status"),
+        reason=decoded.as_str(reason, f"{where}.statusReason") if reason else "",
+    )
+
+
+def read_report(report: object) -> dict[str, tuple[Mutant, ...]] | None:
+    """Decode StrykerJS's JSON report: each file's mutants.
+
+    A field of another shape is refused by name, through `decoded`'s
+    readers.
+
+    Returns:
+        Each file's mutants, by path; None when the report has no
+        `files` object.
+
+    """
+    files = report.get("files") if decoded.is_object(report) else None
+    if not decoded.is_object(files):
+        return None
+    out: dict[str, tuple[Mutant, ...]] = {}
+    for path, entry in files.items():
+        where = f'files["{path}"]'
+        mutants = optional_object(entry, where).get("mutants")
+        out[path] = tuple(
+            read_mutant(item, f"{where}.mutants[{index}]")
+            for index, item in enumerate(
+                [] if mutants is None else decoded.as_array(mutants, f"{where}.mutants")
+            )
+        )
+    return out
+
+
+def site(path: str, mutant: Mutant) -> str:
     """Spell a mutant's place and change for a reader.
 
     Returns:
@@ -161,17 +286,16 @@ def site(path: str, mutant: dict) -> str:
         first line only.
 
     """
-    start = mutant.get("location", {}).get("start", {})
-    replacement = str(mutant.get("replacement", "")).splitlines() or [""]
+    replacement = mutant.replacement.splitlines() or [""]
     return (
-        f"{path}:{start.get('line', '?')}:{start.get('column', '?')}:"
-        f" {mutant.get('mutatorName', '?')}: {replacement[0].strip()}"
+        f"{path}:{mutant.line}:{mutant.column}:"
+        f" {mutant.mutator}: {replacement[0].strip()}"
     )
 
 
-def class_mutant(verdict: Verdict, mutant: dict, where: str) -> None:
+def class_mutant(verdict: Verdict, mutant: Mutant, where: str) -> None:
     """Class one mutant by its status into the verdict."""
-    status = mutant.get("status")
+    status = mutant.status
     if status in KILLED:
         verdict.killed += 1
     elif status == "Survived":
@@ -179,7 +303,7 @@ def class_mutant(verdict: Verdict, mutant: dict, where: str) -> None:
     elif status == "NoCoverage":
         verdict.not_covered.append(where)
     elif status == "Ignored":
-        reason = str(mutant.get("statusReason") or "").strip()
+        reason = mutant.reason.strip()
         if reason and reason != NO_REASON:
             verdict.excluded += 1
         else:
@@ -190,7 +314,7 @@ def class_mutant(verdict: Verdict, mutant: dict, where: str) -> None:
         verdict.unjudged.append(f"{status}: {where}")
 
 
-def classify(report: dict) -> Verdict:
+def classify(files: dict[str, tuple[Mutant, ...]] | None) -> Verdict:
     """Class every mutant of every file in the report.
 
     Returns:
@@ -198,12 +322,11 @@ def classify(report: dict) -> Verdict:
 
     """
     verdict = Verdict()
-    files = report.get("files")
-    if not isinstance(files, dict):
+    if files is None:
         verdict.unjudged.append("the report has no `files` object")
         return verdict
     for path in sorted(files):
-        for mutant in files[path].get("mutants", []):
+        for mutant in files[path]:
             verdict.total += 1
             class_mutant(verdict, mutant, site(path, mutant))
     if verdict.total == 0:
@@ -219,11 +342,11 @@ def judge(path: str, label: str, summary_dir: str) -> int:
 
     """
     try:
-        report = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as err:
+        files = read_report(decoded.load_json(Path(path).read_bytes()))
+    except (OSError, decoded.UndecodableError) as err:
         print(f"{label}: no readable report at {path}: {err}", file=sys.stderr)
         return 1
-    verdict = classify(report if isinstance(report, dict) else {})
+    verdict = classify(files)
     for where in verdict.survived:
         print(f"{label}: survived: {where}")
     for where in verdict.not_covered:
@@ -254,6 +377,15 @@ def judge(path: str, label: str, summary_dir: str) -> int:
     return 0 if verdict.green else 1
 
 
+class Args(argparse.Namespace):
+    """The subcommand and its arguments, each a string."""
+
+    label: str
+    command: str
+    path: str
+    summary_dir: str
+
+
 def main() -> int:
     """Answer `config` or `verdict`.
 
@@ -269,7 +401,7 @@ def main() -> int:
     verdict = sub.add_parser("verdict")
     verdict.add_argument("path")
     verdict.add_argument("--summary-dir", default="")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=Args())
     if args.command == "config":
         return check_config(args.path, args.label)
     return judge(args.path, args.label, args.summary_dir)
