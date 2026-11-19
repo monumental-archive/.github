@@ -183,6 +183,41 @@ class Verdict(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(proc.stdout.strip(), "::error::stele exited 3")
 
+    def test_facts_not_stele_shape_is_red(self) -> None:
+        """Saved, a finding, facts that are not stele's: red, not green.
+
+        prop_verdict.py's example (#1557): the facts could not be read,
+        so the finding was not counted and exit 0 judged the leg green.
+        """
+        doc = load("report-pass.json")
+        doc["findings"] = [finding(448221200, "chain")]
+        doc["facts"] = [1]
+        proc = self.run_helper("0", doc)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(
+            proc.stdout.strip(),
+            "::error::stele exited 0 and its report could not be judged:"
+            " the report could not be read",
+        )
+
+    def test_report_nested_past_the_parser(self) -> None:
+        """JSON nested past the parser's depth: red by name, no traceback."""
+        self.report.write_bytes(b"[" * 100_000)
+        argv = [
+            sys.executable, str(HELPER), "--exit-code", "0",
+            "--report", str(self.report), "--saved", "true",
+        ]  # fmt: skip
+        proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
+            argv, capture_output=True, text=True, check=False
+        )
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(proc.stderr, "")
+        self.assertEqual(
+            proc.stdout.strip(),
+            "::error::stele exited 0 and its report could not be judged:"
+            " the report could not be read",
+        )
+
     def test_report_from_another_target(self) -> None:
         """Another verb's report: named, never read on."""
         doc = load("report-budget.json")

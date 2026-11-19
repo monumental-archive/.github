@@ -171,6 +171,25 @@ class Findings(unittest.TestCase):
         self.assertIn(filed, proc.stdout)
         self.assertIn("findings: 2 certificate(s) did not reconcile", proc.stdout)
 
+    def test_one_condition_twice_is_one_line(self) -> None:
+        """Two findings of one condition: one line, both reasons (#1557).
+
+        prop_findings.py's shrunk example was two findings with no
+        condition at all, written as two lines that each named "".
+        """
+        self.doc["findings"] = [
+            finding(448200001, "chain", "no candidate pins the signer"),
+            finding(448200001, "chain", "the digest is\nnot the release's"),
+        ]
+        proc = self.run_helper()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        calls = self.gh_calls()
+        self.assertEqual(calls[1][5], f"{PREFIX} 448200001 did not reconcile (chain)")
+        text = calls[1][7]
+        self.assertEqual(text.count("- **chain**: "), 1)
+        self.assertIn("- **chain**: no candidate pins the signer (CT index", text)
+        self.assertIn("; the digest is not the release's (CT index", text)
+
     def test_already_filed_is_not_filed_again(self) -> None:
         """An issue for the index, open or closed: no second one."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
@@ -238,6 +257,29 @@ class Findings(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         prefix = "findings: stele's report is not JSON: "
         self.assertTrue(proc.stderr.startswith(prefix))
+
+    def test_report_not_utf8(self) -> None:
+        """A report that is not UTF-8: exit 2 by name, never a traceback.
+
+        prop_findings.py's shrunk example (#1557): the one byte 0x80.
+        """
+        self.doc = None
+        self.report.write_bytes(b"\x80")
+        proc = self.run_helper()
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertTrue(
+            proc.stderr.startswith("findings: stele's report is not JSON: ")
+        )
+
+    def test_report_nested_past_the_parser(self) -> None:
+        """JSON nested past the parser's depth: exit 2 by name (#1557)."""
+        self.doc = None
+        self.report.write_bytes(b"[" * 100_000)
+        proc = self.run_helper()
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertTrue(
+            proc.stderr.startswith("findings: stele's report is not JSON: ")
+        )
 
     def test_report_from_another_target(self) -> None:
         """Another verb's report: exit 2 by name, nothing filed."""
