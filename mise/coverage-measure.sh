@@ -15,8 +15,12 @@
 # gate's, hung on main for a day (#1528).
 #
 # Every leg that runs writes the report Codecov parses beside its
-# number, in the working tree: coverage.txt (go), lcov.info (rust),
-# coverage.xml (python), lcov-typescript.info (typescript).
+# number: coverage.txt (go), lcov.info (rust), coverage.xml (python),
+# lcov-typescript.info (typescript). Never in the working tree (#1628):
+# a `.gitignore` is the repository's file, so a report left there is
+# one `git add -A` from a commit. They go into ORG_COVERAGE_REPORTS,
+# which the gate job names so its artifact step can keep them; unset,
+# into a scratch directory outside the repository, removed on exit.
 #
 # Prints `<leg> <percent>` on stdout, one line per language the tree
 # tracks and nothing else; every tool's own output goes to stderr, so a
@@ -66,8 +70,8 @@ label="${1:-coverage:measure}"
 # Which language legs to run. Default `all`: every caller that reads
 # the percentages wants them all, because the floor is a minimum every
 # leg must hold. A single leg's selector measures that leg alone.
-# `reports` measures nothing: it names the upload reports the last run
-# wrote, below.
+# `reports` measures every leg and then names the reports it wrote,
+# below.
 legs="${2:-all}"
 case "${legs}" in
   all | go | rust | rust-branches | python | typescript | plpgsql | probe | reports) ;;
@@ -79,13 +83,13 @@ case "${legs}" in
 esac
 
 # The upload reports, one per leg, in the order the badge job lists them
-# (#1528). `reports` reads an `all` run's leg lines on stdin and prints
-# `<label>: upload <files>`, the line the gate log carries, for the files
-# that run wrote. It refuses a run that measured nothing, and one that
-# wrote no report: a leg that ran and left none is refused where it
-# happened (#1386). An `all` run first removes any report an earlier
-# run left untracked, so the list is that run's; a tracked file of the
-# same name is the repository's and never touched.
+# (#1528). `reports` runs an `all` measurement into the same directory,
+# prints its leg lines, then `<label>: upload <paths>` last, the line
+# the gate log carries, naming the files that run wrote. It refuses a
+# run that measured nothing, and one that wrote no report: a leg that
+# ran and left none is refused where it happened (#1386). One process
+# owns the directory, so a scratch one outlives the measurement that
+# fills it and the listing that reads it, and no longer.
 #
 # Every leg is in exactly one of the two lists below. A leg in
 # `formatless` has no format Codecov reads (#1547: plpgsql_check numbers
@@ -95,15 +99,33 @@ esac
 # skips, as it does for a tree without a floor.
 reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
 formatless=(plpgsql plpgsql-branches)
+if [[ ${legs} != probe ]]; then
+  # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
+  # that dies on an unset variable would otherwise exit 0. One trap for
+  # every directory the run makes: the legs below only set theirs.
+  cleanup() { rm -rf "${work:-}" "${ts_work:-}" "${scratch:-}"; }
+  rc=0
+  trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
+  out=${ORG_COVERAGE_REPORTS:-}
+  if [[ -z ${out} ]]; then
+    scratch=$(mktemp -d)
+    out=${scratch}
+  fi
+  mkdir -p "${out}"
+  out=$(cd "${out}" && pwd)
+fi
 if [[ ${legs} == reports ]]; then
-  measured=$(cat)
+  # The directory is the belt's by definition, so a report an earlier
+  # run left in a named one is cleared: the list is this run's.
+  for f in "${reports[@]}"; do rm -f -- "${out:?}/${f}"; done
+  measured=$(ORG_COVERAGE_REPORTS="${out}" "${BASH}" "${BASH_SOURCE[0]}" "${label}" all) || exit 1
   if [[ -z ${measured} ]]; then
     echo "${label}: no leg was measured — a check that reads nothing must not pass" >&2
     exit 1
   fi
   files="" named="" writers=""
   for f in "${reports[@]}"; do
-    [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
+    [[ ! -f ${out}/${f} ]] || files="${files:+${files},}${out}/${f}"
   done
   while read -r leg _; do
     if [[ " ${formatless[*]} " == *" ${leg} "* ]]; then
@@ -114,14 +136,18 @@ if [[ ${legs} == reports ]]; then
   done <<< "${measured}"
   [[ -z ${named} ]] || echo "${label}: ${named}: no upload format, not counted as a report writer" >&2
   if [[ -z ${files} && -z ${writers} ]]; then
+    printf '%s\n' "${measured}"
     echo "${label}: upload none — every leg measured has no upload format (${named})"
+    org_done=1
     exit 0
   fi
   if [[ -z ${files} ]]; then
     echo "${label}: the legs measured wrote no report — nothing for the badge to upload" >&2
     exit 1
   fi
+  printf '%s\n' "${measured}"
   echo "${label}: upload ${files}"
+  org_done=1
   exit 0
 fi
 
@@ -183,14 +209,6 @@ if [[ ${legs} == probe ]]; then
   exit 0
 fi
 
-if [[ ${legs} == all ]]; then
-  for f in "${reports[@]}"; do
-    if [[ -f ${f} ]] && ! git ls-files --error-unmatch -- "${f}" > /dev/null 2>&1; then
-      rm -f -- "${f}"
-    fi
-  done
-fi
-
 # EVERY tracked language measures its own leg, because the floor is a
 # minimum and applying it per language is the only reading that means
 # anything: a mixed repository that measured Rust alone once reported
@@ -205,8 +223,8 @@ if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
   # number below what the tests prove — measured at 0.5 points and 51
   # statements on stele, which is a floor's worth of understatement in a
   # repository whose floor is the point.
-  go test ./... -coverpkg=./... -coverprofile=coverage.txt -covermode=atomic >&2
-  go_pct=$(go tool cover -func=coverage.txt | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
+  go test ./... -coverpkg=./... -coverprofile="${out}/coverage.txt" -covermode=atomic >&2
+  go_pct=$(go tool cover -func="${out}/coverage.txt" | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
   if [[ -z ${go_pct} ]]; then
     echo "${label}: could not read a total from the Go profile — a" >&2
     echo "  measurement that reads nothing must not become a floor" >&2
@@ -276,12 +294,12 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   #
   # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
   # which cargo must receive as separate arguments
-  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path lcov.info >&2
+  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path "${out}/lcov.info" >&2
   rust_pct=$(awk -F: '
     $1 == "LF" { found += $2 }
     $1 == "LH" { hit += $2 }
     END { if (found > 0) printf "%.16g\n", hit * 100 / found }
-  ' lcov.info 2> /dev/null) || rust_pct=""
+  ' "${out}/lcov.info" 2> /dev/null) || rust_pct=""
   if [[ -z ${rust_pct} ]]; then
     echo "${label}: could not read a total from the Rust report — a" >&2
     echo "  measurement that reads nothing must not become a floor" >&2
@@ -365,11 +383,8 @@ if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then measure_py=1; fi
 if [[ -n ${plpgsql_test} && ${legs} =~ ^(all|plpgsql)$ ]]; then measure_pg=1; fi
 
 if [[ -n ${measure_py}${measure_pg} ]]; then
+  # Removed by the EXIT trap above.
   work=$(mktemp -d)
-  # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
-  # that dies on an unset variable would otherwise exit 0.
-  rc=0
-  trap 'rc=$?; rm -rf "${work}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 fi
 
 if [[ -n ${measure_py} ]]; then
@@ -482,7 +497,7 @@ if [[ -n ${measure_py} ]]; then
   # The report Codecov receives is rendered from this measurement's own
   # data, so the badge and the floor read one run (#707's law), and
   # the gate's run is the one the badge job uploads (#1528).
-  py_report xml --rcfile="${work}/rc" --quiet -o coverage.xml
+  py_report xml --rcfile="${work}/rc" --quiet -o "${out}/coverage.xml"
   echo "python ${py_pct}"
   echo "python-branches ${br_pct}"
 fi
@@ -524,11 +539,8 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   while IFS= read -r arg; do
     test_args+=("${arg}")
   done <<< "${args_lines}"
+  # Removed by the EXIT trap above.
   ts_work=$(mktemp -d)
-  rc=0
-  # Completion-guarded (#1233), and clearing the python leg's directory
-  # too, since this trap replaces that one.
-  trap 'rc=$?; rm -rf "${work:-}" "${ts_work}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   # The repository's own vitest config decides what is in the suite and
   # in the report (`coverage.include`: vitest counts only files a test
   # loaded unless it is set). The leg sets only what makes the number
@@ -554,7 +566,7 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   fi
   # The upload is this run's own lcov (#707's law). A name of its own:
   # lcov.info is the Rust leg's.
-  cp "${ts_work}/lcov.info" lcov-typescript.info
+  cp "${ts_work}/lcov.info" "${out}/lcov-typescript.info"
   echo "typescript ${ts_pct}"
   echo "typescript-branches ${ts_br}"
 fi

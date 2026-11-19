@@ -170,6 +170,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_LINES": lines,
         "STUB_INSTALLED": installed or "",
         "COVERAGE_EXCLUDE": exclude,
+        # Outside the tree, as the gate job names it (#1628).
+        "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
     }
     if toolchain is not None:
         env["FUZZ_TOOLCHAIN"] = toolchain
@@ -191,6 +193,12 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     return done, tmp
 
 
+# The line leg's one call, its report in the row's reports directory.
+LINE_RUN = (
+    "stable llvm-cov --workspace --locked --lcov --output-path <reports>/lcov.info"
+)
+
+
 class BranchCase(unittest.TestCase):
     """Runs a task and removes the planted tree afterwards."""
 
@@ -201,12 +209,14 @@ class BranchCase(unittest.TestCase):
 
         Returns:
             The finished process, the planted tree, and one line per
-            `cargo llvm-cov` call: the toolchain, then its arguments.
+            `cargo llvm-cov` call: the toolchain, then its arguments,
+            the reports directory written as `<reports>`.
 
         """
         done, tmp = run_task(task, **plant)  # type: ignore[arg-type]
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        calls = (tmp / "llvm-cov.log").read_text(encoding="utf-8").splitlines()
+        log = (tmp / "llvm-cov.log").read_text(encoding="utf-8")
+        calls = log.replace(str(tmp / "reports"), "<reports>").splitlines()
         return done, tmp / "tree", calls
 
 
@@ -326,15 +336,15 @@ class GateRows(BranchCase):
 
     def test_check_measures_lines_on_stable_beside_a_branch_line(self) -> None:
         """A committed rust-branches line changes nothing the gate runs."""
-        done, _, calls = self.run_task("coverage:check")
+        done, tree, calls = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: rust leg holds the floor 80.0 (90%)\n"
-            "coverage:check: upload lcov.info\n",
+            f"coverage:check: upload {tree.parent / 'reports' / 'lcov.info'}\n",
             done.stdout,
         )
         self.assertEqual(
-            ["stable llvm-cov --workspace --locked --lcov --output-path lcov.info"],
+            [LINE_RUN],
             calls,
         )
 
@@ -362,7 +372,7 @@ class AdoptRows(BranchCase):
         )
         self.assertEqual(
             [
-                "stable llvm-cov --workspace --locked --lcov --output-path lcov.info",
+                LINE_RUN,
                 BRANCH_RUN,
             ],
             calls,
@@ -380,7 +390,7 @@ class AdoptRows(BranchCase):
         text = (tree / ".coverage-floor").read_text(encoding="utf-8")
         self.assertNotIn("rust-branches", text)
         self.assertEqual(
-            ["stable llvm-cov --workspace --locked --lcov --output-path lcov.info"],
+            [LINE_RUN],
             calls,
         )
 
