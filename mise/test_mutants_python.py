@@ -64,10 +64,8 @@ command = sys.argv[1]
 if command == "run":
     child = os.environ.get("PLANT_CHILD")
     where = os.environ.get("PLANT_CHILD_CWD")
-    under = os.environ | {"MUTANT_UNDER_TEST": "stats"}
-    if child and subprocess.run(
-        ["python3", child], cwd=where, env=under, check=False
-    ).returncode:
+    os.environ["MUTANT_UNDER_TEST"] = "stats"
+    if child and subprocess.run(["python3", child], cwd=where, check=False).returncode:
         sys.exit(1)
     sys.exit(int(os.environ.get("PLANT_RUN", "0")))
 if command == "results":
