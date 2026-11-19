@@ -53,12 +53,9 @@ LOADER = "mise/decoded.py"
 
 # Files that still parse a document themselves. Only shrinks.
 MOVING = frozenset({
-    ".github/rekor-monitor/findings.py",
-    ".github/rekor-monitor/standing_issue.py",
     ".github/rekor-monitor/test_findings.py",
     ".github/rekor-monitor/test_standing_issue.py",
     ".github/rekor-monitor/test_verdict.py",
-    ".github/rekor-monitor/verdict.py",
     "mise/biome_config.py",
     "mise/coverage_js_runner.py",
     "mise/deny_skips.py",

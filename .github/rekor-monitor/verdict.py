@@ -28,7 +28,6 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,14 +37,24 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import decoded
 import workflow_command
 
 TARGET = "assert signer-certificates"
 EXIT_RED = 1
+SAVED = ("true", "false")
 KILLED = (
     "stele did not finish: no exit status was recorded"
     " (a step before it failed, or the leg was cancelled or timed out)"
 )
+
+
+class Args(argparse.Namespace):
+    """The command line, typed."""
+
+    exit_code: str
+    report: Path
+    saved: str
 
 
 @dataclass(frozen=True)
@@ -66,16 +75,38 @@ def read_report(path: Path) -> Report:
     """
     if not path.is_file() or path.stat().st_size == 0:
         return Report({}, 0, "stele wrote no report")
+    # Every way the file is not stele's report shape is one refusal:
+    # not strict JSON (nested past the parser's depth was a traceback
+    # until prop_verdict.py, #1557), or a field of the wrong kind.
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = decoded.as_object(decoded.load_json(path.read_bytes()), "the report")
         if doc.get("target") != TARGET:
             return Report({}, 0, f"the report is not stele's {TARGET} report")
-        facts = {f["name"]: f["value"] for f in doc.get("facts") or []}
-        return Report(facts, len(doc.get("findings") or []), None)
-    # Recursion: JSON nested past the parser's depth, a traceback until
-    # prop_verdict.py (#1557).
-    except ValueError, TypeError, KeyError, AttributeError, RecursionError:
+        facts = read_facts(doc.get("facts"))
+        findings = doc.get("findings")
+        count = 0 if findings is None else len(decoded.as_array(findings, "findings"))
+    except decoded.UndecodableError:
         return Report({}, 0, "the report could not be read")
+    return Report(facts, count, None)
+
+
+def read_facts(value: object) -> dict[str, str]:
+    """Read stele's facts: name and value, both strings.
+
+    A fact that is not that shape is refused by decoded's readers.
+
+    Returns:
+        Each fact's value by its name; none when there are none.
+
+    """
+    if value is None:
+        return {}
+    facts: dict[str, str] = {}
+    for index, item in enumerate(decoded.as_array(value, "facts")):
+        fact = decoded.as_object(item, f"fact {index}")
+        name = decoded.as_str(fact.get("name"), f"fact {index}: name")
+        facts[name] = decoded.as_str(fact.get("value"), f"fact {index}: value")
+    return facts
 
 
 def judge(code: str, report: Report, *, saved: bool) -> tuple[bool, str]:
@@ -133,8 +164,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--exit-code", default="")
     parser.add_argument("--report", type=Path, required=True)
-    parser.add_argument("--saved", choices=["true", "false"], required=True)
-    args = parser.parse_args(argv)
+    parser.add_argument("--saved", choices=SAVED, required=True)
+    args = parser.parse_args(argv, namespace=Args())
     report = read_report(args.report)
     red, why = judge(args.exit_code, report, saved=args.saved == "true")
     if red:

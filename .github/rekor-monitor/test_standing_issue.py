@@ -424,5 +424,66 @@ class Gaining(Rows):
         )
 
 
+class Decoded(Rows):
+    """Each document standing_issue.py reads, decoded where it is read (#1683)."""
+
+    def test_a_checkpoint_field_that_is_not_an_integer(self) -> None:
+        """next, treeSize or timestamp of another kind: named unreadable."""
+        rows: dict[str, tuple[str, object]] = {
+            "next as text": ("next", "448196522"),
+            "next as a boolean": ("next", True),
+            "a tree size with a fraction": ("treeSize", 448222427.5),
+            "a timestamp as text": ("timestamp", "1794940328655"),
+        }
+        for why, (field, value) in rows.items():
+            with self.subTest(why=why):
+                doc = checkpoint()
+                if field == "next":
+                    doc["next"] = value
+                else:
+                    doc["treeHead"][field] = value
+                self.write(self.end, doc)
+                proc = self.run_helper([])
+                self.assertEqual(proc.returncode, 1, proc.stderr)
+                self.assertIn(
+                    "::error::the newest checkpoint:"
+                    " the checkpoint file could not be read",
+                    proc.stdout,
+                )
+
+    def test_a_listing_that_is_not_a_list_of_issues(self) -> None:
+        """Each wrong shape of gh's listing: exit 2 by name, nothing filed."""
+        title = json.dumps(TITLE)
+        rows = {
+            "{}": "the answer is not a list",
+            "[1]": "issue 0 is not an object",
+            f'[{{"title": {title}, "number": "7"}}]': (
+                "issue 0: number is not an integer"
+            ),
+            f'[{{"title": {title}, "number": 7, "body": 3}}]': (
+                "issue 0: body is not a string"
+            ),
+        }
+        for listing, why in rows.items():
+            with self.subTest(listing=listing):
+                proc = self.run_helper(STUB_LIST=listing)
+                self.assertEqual(proc.returncode, 2)
+                self.assertEqual(
+                    proc.stderr.strip(),
+                    "standing-issue: gh issue list answered something that is not"
+                    f" a list of issues: {why}; nothing was filed",
+                )
+
+    def test_a_listing_that_is_not_strict_json(self) -> None:
+        """A key twice in gh's listing: not JSON here, exit 2 by name."""
+        proc = self.run_helper(STUB_LIST='{"a": 1, "a": 2}')
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(
+            proc.stderr.strip(),
+            "standing-issue: gh issue list answered something that is not JSON:"
+            ' duplicate key "a"; nothing was filed',
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
