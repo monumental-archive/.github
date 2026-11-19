@@ -68,7 +68,7 @@ class Readers(unittest.TestCase):
             ({"scripts": "not a table"}, None),
         ):
             with self.subTest(manifest=manifest):
-                self.assertEqual(runner, cj.other_runner(manifest))
+                self.assertEqual(runner, cj.other_runner(cj.read_manifest(manifest)))
 
     def test_continued_lines_join_and_comments_drop(self) -> None:
         """A backslash joins the next line; a dangling one ends the script."""
