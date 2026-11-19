@@ -69,19 +69,19 @@ Silver now stands on one remaining MUST:
 - `regression_tests_added50` — **Unmet, re-answered 2026-11-19
   (#1360, #1545)**. Window 2026-05-17 to `9f1b3ec`: 213 bugs fixed —
   the 58 `fix` commits that arrived with a test, and 155 of the 176
-  that arrived without one (the other 21 were not bugs). 104 (48.8%)
-  are held by a test in this repository, and **76 (35.7%)** by one
+  that arrived without one (the other 21 were not bugs). 105 (49.3%)
+  are held by a test in this repository, and **77 (36.2%)** by one
   shown failing on its own assertion with the bug put back: 30 of the
   58 tests that arrived with their fix, every one revert-checked
   (#1335 sampled 30, #1360 checked the other 28), 20 tests backfilled
-  under #1360, and 26 under #1545 for fixes whose logic has left
+  under #1360, and 27 under #1545 for fixes whose logic has left
   workflow YAML. The other 28 are the unproven tests that arrived with
   their fix.
 
   11 more are held by named tests in stele, where their logic now
-  lives; they are not counted in the 104. Of the 109 held by no test
-  here: those 11; 69 still in workflow YAML or task bodies (#1360's
-  119 less the 50 #1545 took up, reconciled on #1545); 2 more #1545
+  lives; they are not counted in the 105. Of the 108 held by no test
+  here: those 11; 68 still in workflow YAML or task bodies (#1360's
+  119 less the 50 #1545 took up and #394, reconciled on #1545); 2 more #1545
   found still in YAML; 20 fixed code since removed; 6 that cannot run
   in the gate (a live Postgres, a container or macOS); and 1 whose
   stele test is missing (stele#486). The checklists on #1360 and
