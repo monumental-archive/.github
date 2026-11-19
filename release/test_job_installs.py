@@ -1699,6 +1699,24 @@ def mint_step(workflow: str, job_id: str) -> tuple[int, dict[str, str]]:
     return found[0] if found else (-1, {})
 
 
+VEX_GRANTS = {
+    "with.permission-contents": "read",
+    "with.permission-metadata": "read",
+    "with.permission-attestations": "read",
+}
+
+
+class PopulationGrants(unittest.TestCase):
+    """vex-attest's population read is granted three reads, no more (#1602)."""
+
+    def test_the_vex_attest_mint_names_three_reads(self) -> None:
+        """Contents, metadata and attestations: no review history."""
+        _, mint = mint_step("vex-attest.yml", "plan")
+        self.assertEqual(
+            VEX_GRANTS, {k: v for k, v in mint.items() if k.startswith("with.perm")}
+        )
+
+
 class VexAttestToken(unittest.TestCase):
     """vex-attest's plan job mints the audit App's read token (#1602)."""
 
@@ -1715,13 +1733,12 @@ class VexAttestToken(unittest.TestCase):
         )
 
     def test_the_mint_mirrors_the_audit_walks(self) -> None:
-        """Same pin, same client, same four read grants, owner scope."""
+        """Same pin, same client and key, owner scope as the audit's mint."""
         _, mint = mint_step("vex-attest.yml", "plan")
         _, audit = mint_step("audit.yml", "blast-radius")
-        shape = {k: v for k, v in audit.items() if k == "uses" or k.startswith("with.")}
+        keys = ("uses", "with.client-id", "with.private-key", "with.owner")
         self.assertEqual(
-            shape,
-            {k: v for k, v in mint.items() if k == "uses" or k.startswith("with.")},
+            {k: audit.get(k) for k in keys}, {k: mint.get(k) for k in keys}
         )
 
     def test_the_signing_jobs_never_see_the_token(self) -> None:
