@@ -179,13 +179,16 @@ when = []
 # Every belt helper; lint:subject-budget runs one with no guard.
 tasks = [
   "coverage:check",
+  "lint:badges",
   "lint:bash-portability",
   "lint:belt-shell",
   "lint:belt-tree",
   "lint:biome",
+  "lint:citation",
   "lint:coverage-exclusions",
   "lint:deny",
   "lint:fuzz-build",
+  "lint:licence",
   "lint:gate-surface",
   "lint:lock-platforms",
   "lint:msrv",

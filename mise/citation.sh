@@ -22,6 +22,9 @@
 # Output: CITATION_OUT names a file to write the render to (what
 # lint:citation wants); unset, it renders CITATION.cff in place.
 set -euo pipefail
+# Refused before any early exit, so a missing interpreter is never a
+# clean skip (#1565): project-licence.py runs under it below.
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 out="${CITATION_OUT:-CITATION.cff}"
 [[ -f REUSE.toml ]] || {
@@ -43,7 +46,6 @@ out="${CITATION_OUT:-CITATION.cff}"
 # The licence is the one the badge shield states, decided by ONE reader
 # both derivations call (#1589): REUSE.toml's single expression, or,
 # where it names several, the `licence` line of .badge-states.
-: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project-licence.py" fix:citation)
 if [[ -z ${lic} || ${lic} == "<SPDX expression>" ]]; then
   echo "fix:citation: REUSE.toml declares no licence expression — fill it first (lint:licence)" >&2
