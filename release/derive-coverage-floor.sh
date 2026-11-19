@@ -76,13 +76,13 @@ if [[ -z ${GH_TOKEN:-} || -z ${GITHUB_REPOSITORY:-} ]]; then
   echo "release:coverage-floor: not reading the gate's figures: no GH_TOKEN or GITHUB_REPOSITORY" >&2
 else
   api="repos/${GITHUB_REPOSITORY}/actions"
-  if choice=$(gh api "${api}/artifacts?name=coverage-figures-${sha}&per_page=100" |
-    "${ORG_PYTHON}" "${figures}" choose "${sha}"); then
+  if choice=$(gh api "${api}/artifacts?name=coverage-figures-${sha}&per_page=100" \
+    | "${ORG_PYTHON}" "${figures}" choose "${sha}"); then
     read -r artifact run <<< "${choice}"
     if where=$(gh api "${api}/runs/${run}" | "${ORG_PYTHON}" "${figures}" judge "${sha}"); then
       zip=$(mktemp)
-      if gh api "${api}/artifacts/${artifact}/zip" > "${zip}" &&
-        legs=$("${ORG_PYTHON}" "${figures}" figures "${sha}" < "${zip}"); then
+      if gh api "${api}/artifacts/${artifact}/zip" > "${zip}" \
+        && legs=$("${ORG_PYTHON}" "${figures}" figures "${sha}" < "${zip}"); then
         echo "release:coverage-floor: read the gate's figures for ${sha} from ${where}" >&2
       else
         legs=""
