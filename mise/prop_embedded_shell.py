@@ -189,12 +189,17 @@ class DebtLine(unittest.TestCase):
         st.integers(1, 200),
         st.integers(1, 9999),
     )
+    @example(".github/workflows/a.yml", "A", 16, 1352)
     def test_an_entry_reads_back(
         self, file: str, step: str, count: int, issue: int
     ) -> None:
         """Written as the file spells it, read back as written."""
-        got = es.parse_entry(f"{file}\t{step}\t{count}\t# #{issue}")
-        if count <= es.CEILING:
+        note = f"# #{issue}"
+        got = es.parse_entry(f"{file}\t{step}\t{count}\t{note}")
+        # The ceiling's own issue is no remover: a note naming it must say
+        # `unassigned` (the rule's own refusal, not a parse failure).
+        umbrella = es.WORKFLOW.umbrella.search(note) is not None
+        if count <= es.CEILING or umbrella:
             self.assertIsInstance(got, str)
         else:
             self.assertEqual(got, es.Entry(file, step, count, 0))
