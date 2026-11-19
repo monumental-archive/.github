@@ -589,6 +589,9 @@ depends = [
   # not a lint, and `test` is the repository's. Skips clean, by name,
   # where no `prop_*.py` is tracked.
   "test:python-properties",
+  # The TypeScript properties, named for the same reason (#1549).
+  # Skips clean, by name, where no tracked lockfile holds fast-check.
+  "test:typescript-properties",
 ]
 run = "echo 'ci: all gates green'"
 
@@ -3617,6 +3620,42 @@ dir = "{{cwd}}"
 # python pin. Named in `ci` explicitly, the `test:pgrx` precedent.
 run = '''
 "${ORG_BELT_DIR}/python-properties.sh" gate
+'''
+
+[tasks."test:typescript-properties"]
+description = "Every tracked *.prop.test.* under the repository's vitest at the belt's fixed fast-check seed"
+dir = "{{cwd}}"
+# Property 3 of the testing standard, "varies its inputs" (#1336), for
+# TypeScript (#1549): `test:python-properties`'s shape. fast-check picks
+# a fresh seed on every run unless told otherwise and reads no
+# environment variable, so a gate that runs it unseeded is not
+# deterministic. This leg runs exactly the tracked
+# `*.prop.test.{ts,tsx,mts,cts}` files with the repository's own vitest
+# and fast-check (both read from its lockfile, the #1357 rule: the belt
+# pins neither) at a fixed seed and a bounded run count, and prints a
+# digest of each property's examples, so two runs of one commit print
+# the same lines. How the seed gets in is typescript-properties.py's
+# header: vitest refuses a setup file on its command line, so a wrapper
+# config imports the repository's own and adds the belt's.
+#
+# Named in `ci` explicitly, the `test:pgrx` precedent; skips clean,
+# by name, where no tracked lockfile holds fast-check.
+run = '''
+"${ORG_BELT_DIR}/typescript-properties.sh" gate
+'''
+
+[tasks."lint:typescript-properties"]
+description = "fast-check is imported only by *.prop.test.* files, and no property restates the seed or run count"
+dir = "{{cwd}}"
+# The design conditions of #1549, read from the source: the gate leg
+# runs exactly the property files, so a property written in any other
+# test file would run unseeded under the repository's own `test`; and
+# a `seed`, `numRuns` or `configureGlobal(...)` in a property file
+# would override the belt's, as a restated bound is refused for Python
+# (#1332). Red by name, file and line. Skips clean where no tracked
+# lockfile holds fast-check.
+run = '''
+"${ORG_BELT_DIR}/typescript-properties.sh" lint
 '''
 
 [tasks."lint:gate-surface"]
@@ -8409,6 +8448,24 @@ dir = "{{cwd}}"
 # reruns the exact search. The cron never pushes.
 run = '''
 "${ORG_BELT_DIR}/python-properties.sh" audit
+'''
+
+[tasks."audit:typescript-properties"]
+description = "Every tracked *.prop.test.* at a random fast-check seed and a far larger run count (weekly cron, never the gate)"
+dir = "{{cwd}}"
+# The cron half of #1549, `audit:python-properties` in shape: the same
+# files as `test:typescript-properties`, a fresh seed and 10,000 runs
+# per property. Not the gate, because a random seed is not
+# deterministic.
+#
+# WHERE A FINDING LANDS: the seed prints first and a failure prints
+# fast-check's own report, the shrunk counterexample and its replay
+# path. The counterexample is committed as a fixed example of its
+# property (fast-check's `examples` parameter, which the lint does not
+# refuse), with its fix, and the gate replays it from then on.
+# ORG_PROPERTY_SEED reruns the exact search. The cron never pushes.
+run = '''
+"${ORG_BELT_DIR}/typescript-properties.sh" audit
 '''
 
 [tasks."audit:mutants"]

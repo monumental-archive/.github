@@ -62,7 +62,13 @@ _SPEC.loader.exec_module(gate_tools)
 
 # What `ci` runs besides the `lint:*` wildcard (its `depends`), and the
 # task the gate job's squash-message step runs.
-ROOTS = ("coverage:check", "test:pgrx", "test:python-properties", "commits:check")
+ROOTS = (
+    "coverage:check",
+    "test:pgrx",
+    "test:python-properties",
+    "test:typescript-properties",
+    "commits:check",
+)
 
 # Tasks that run other tasks by a name computed at run time, and the
 # prefixes they reach: lint:scaffold-assembly runs every fix:* and lint:*

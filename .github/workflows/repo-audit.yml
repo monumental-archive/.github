@@ -501,6 +501,51 @@ jobs:
       - name: Compare the published entry with .bestpractices.json
         run: mise run audit:bestpractices
 
+  typescript-properties:
+    name: audit / typescript properties at a random seed
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.7
+          cache: false
+
+      # The caller's own vitest and fast-check, from its own tracked
+      # lockfile: the belt pins neither (#1549, the #1357 rule). The
+      # coverage job's install step, for the same reason.
+      - name: Install the caller's JavaScript dependencies
+        if: ${{ hashFiles('pnpm-lock.yaml', 'package-lock.json') != '' }}
+        run: |
+          set -euo pipefail
+          if [[ -f pnpm-lock.yaml ]]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      # The cron half of #1549, the TypeScript mirror of the Python
+      # step above: every tracked *.prop.test.* at a fresh fast-check
+      # seed and 10,000 runs per property. Not the gate, because a
+      # random seed is not deterministic. The seed prints first and a
+      # failure prints fast-check's shrunk counterexample: commit it as
+      # a fixed example of its property with its fix and the gate
+      # replays it. Skips clean where no lockfile holds fast-check.
+      - name: Run every TypeScript property at a random seed
+        run: mise run audit:typescript-properties
+
   repo-audits:
     name: audit / this repository's own audit tasks
     runs-on: ubuntu-26.04
