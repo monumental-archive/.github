@@ -29,7 +29,9 @@ permissions: {}
 # (four of eleven, 2026-11-19 19:00Z-19:53Z, #1617). That is correct for
 # this workflow: every run regenerates the one Release PR from main's
 # tip, so only the newest push matters, and two at once would race the
-# same branch.
+# same branch. The forge's `queue: max` would keep every pending run;
+# it is recorded on the actionlint watch (#1116) as the key this group
+# takes once actionlint accepts it, which today it rejects.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Table tests for lint:gate-stub's concurrency requirement (#1195).
+"""Table tests for lint:gate-stub's concurrency requirement (#1195, #1617).
 
 An event on a pull request that has already merged has no merge ref, so
 its `github.ref` is the base branch. A stub grouping on the ref alone put
 that run in the same group as the push gate on main, and
 `cancel-in-progress: true` let it cancel the gate: main went red with
-nothing wrong in it (edtf, run 43620265494). The stub now groups by the
-pull request's number and cancels only `pull_request` runs, and the lint
+nothing wrong in it (edtf, run 43620265494). The stub then grouped by the
+pull request's number and cancelled only `pull_request` runs — but every
+push to the default branch still shared the ref's group, and the forge
+holds one pending run per group, a newer one replacing it as `cancelled`:
+27 of 28 push gates on main, 2026-11-19 19:00Z-19:53Z (#1617). Outside a
+pull request the group now names the ref and the commit, and the lint
 holds every gate caller to both lines.
 
 The body under test is the task's own `run` string, read out of
@@ -45,7 +49,12 @@ BASH = shutil.which("bash")
 STUB = (CANON / "workflow-templates" / "ci.yml").read_text(encoding="utf-8")
 GATE = (CANON / ".github" / "workflows" / "gate.yml").read_text(encoding="utf-8")
 
-GROUP = (
+WANT = (
+    "${{ github.event.pull_request.number"
+    " || format('{0}-{1}', github.ref, github.sha) }}"
+)
+GROUP = "  group: ${{ github.workflow }}-" + WANT + "\n"
+PRE_1617_GROUP = (
     "  group: ${{ github.workflow }}-"
     "${{ github.event.pull_request.number || github.ref }}\n"
 )
@@ -55,11 +64,10 @@ OLD_CANCEL = "  cancel-in-progress: true\n"
 
 # The message, line for line: the defect, then both wanted lines verbatim.
 MESSAGE = (
-    "lint:gate-stub: gate caller's concurrency group is shared with events\n"
-    "  on merged pull requests, which then cancel the push gate on the\n"
-    "  default branch (#1195). Under concurrency: set exactly\n"
-    "    group: ${{ github.workflow }}-"
-    "${{ github.event.pull_request.number || github.ref }}\n"
+    "lint:gate-stub: gate caller's concurrency group is shared: an event on a\n"
+    "  merged pull request cancels the push gate (#1195), and a push replaces\n"
+    "  the pending one before it (#1617). Under concurrency: set exactly\n"
+    "    group: ${{ github.workflow }}-" + WANT + "\n"
     "    cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "  in: .github/workflows/gate.yml\n"
 )
@@ -142,6 +150,15 @@ class Green(unittest.TestCase):
         """The canon's self-applied gate is clean."""
         self.assert_ok(GATE)
 
+    def test_the_canons_own_gate_groups_a_push_by_its_commit(self) -> None:
+        """A push to main cannot replace another push's pending gate (#1617).
+
+        Read on the file itself, not through the lint, so the row holds
+        even if the lint's wanted line were weakened with it.
+        """
+        self.assertIn(GROUP, GATE)
+        self.assertIn("github.sha", GROUP)
+
     def test_a_trailing_comment_on_cancel_passes(self) -> None:
         """A comment after the wanted line does not change it."""
         self.assert_ok(planted(CANCEL, CANCEL.rstrip("\n") + " # see #1195\n"))
@@ -168,6 +185,10 @@ class Red(unittest.TestCase):
     def test_the_pre_1195_stub_is_red(self) -> None:
         """The stub every repository carried before #1195."""
         self.assert_red(planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
+
+    def test_the_pre_1617_group_is_red(self) -> None:
+        """Every push to the default branch shares the ref's one group."""
+        self.assert_red(planted(GROUP, PRE_1617_GROUP))
 
     def test_a_group_on_the_ref_alone_is_red(self) -> None:
         """The shared group alone, cancel already right."""
