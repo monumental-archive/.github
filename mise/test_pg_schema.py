@@ -70,7 +70,7 @@ BASH = hermetic.tool("bash")
 # canon's own suite with only the badge job's five tools installed:
 # 8,364 self-execs in 1m33s on the first lint:sql row, and on main the
 # coverage upload job sat in it for its whole 30 minutes on every push.
-SQLFLUFF = hermetic.tool("sqlfluff")
+SQLFLUFF = hermetic.optional_tool("sqlfluff")
 SQLFLUFF_MISSING = (
     "sqlfluff is not on PATH: these rows run the belt's real sqlfluff behind"
     " a shim named sqlfluff, and cannot run without it — run: mise install"
@@ -542,9 +542,12 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
     def setUp(self) -> None:
         """Make a repository, the shims, and an empty member list.
 
-        The tool is asserted where it is looked up, as the belt's tasks
-        assert theirs: without it the file fails by name (#1528).
+        The tool is asserted first, as the belt's tasks assert theirs: a
+        row that needs sqlfluff fails by name without it (#1528), which
+        AbsentSqlfluffFailsByName plants.
         """
+        if SQLFLUFF is None:
+            self.fail(SQLFLUFF_MISSING)
         self.root = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         git(self.root, "init", "-q")
@@ -599,7 +602,7 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{self.shims}{os.pathsep}{os.environ['PATH']}",
             "PLANT_METADATA": str(self.metadata),
-            "PLANT_SQLFLUFF": SQLFLUFF,
+            "PLANT_SQLFLUFF": hermetic.tool("sqlfluff"),
             "PLANT_SQLFLUFF_LOG": str(self.log),
         }
         # ruff: ignore[subprocess-without-shell-equals-true]
@@ -624,7 +627,13 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         path.write_text(LAB_SNAPSHOT, encoding="utf-8")
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
-            [SQLFLUFF, "lint", "--config", str(BELT / "sqlfluff.cfg"), str(path)],
+            [
+                hermetic.tool("sqlfluff"),
+                "lint",
+                "--config",
+                str(BELT / "sqlfluff.cfg"),
+                str(path),
+            ],
             capture_output=True,
             text=True,
             check=False,
