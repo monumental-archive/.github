@@ -26,22 +26,15 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
+import findings
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "findings",
-    Path(__file__).with_name("findings.py"),
-)
-findings = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(findings)
 
 INDEX = st.integers(0, 10**12)
 CONDITIONS = st.lists(st.text(max_size=20), max_size=4)

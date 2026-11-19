@@ -15,20 +15,12 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import publish_npm as publish
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "publish_npm",
-    Path(__file__).with_name("publish_npm.py"),
-)
-publish = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(publish)
 
 PART = st.integers(0, 10**6)
 TRIPLE = st.tuples(PART, PART, PART)

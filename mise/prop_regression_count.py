@@ -16,19 +16,11 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import regression_count as rc
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "regression_count",
-    Path(__file__).with_name("regression_count.py"),
-)
-rc = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(rc)
 
 WORD = st.from_regex(r"[g-z_]{1,8}", fullmatch=True)  # never a hex run
 PINS = {

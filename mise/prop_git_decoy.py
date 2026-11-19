@@ -14,21 +14,14 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import os
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import git_decoy as gd
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "git_decoy",
-    Path(__file__).with_name("git_decoy.py"),
-)
-gd = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gd)
 
 ENV_NAME = st.one_of(
     st.from_regex(r"GIT_[A-Z_]{1,12}", fullmatch=True),

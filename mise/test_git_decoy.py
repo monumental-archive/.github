@@ -16,29 +16,20 @@ Every git call in this file passes a scrubbed `env=`: the rows run under
 the very hook they are about.
 """
 
-import importlib.util
 import os
 import pathlib
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import tomllib
 import unittest
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import git_decoy as gd
+import hermetic
 
 _HERE = pathlib.Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location("git_decoy", _HERE / "git_decoy.py")
-gd = importlib.util.module_from_spec(_SPEC)
-sys.modules["git_decoy"] = gd
-_SPEC.loader.exec_module(gd)
 
 GIT = shutil.which("git") or "git"
 BASH = shutil.which("bash") or "bash"

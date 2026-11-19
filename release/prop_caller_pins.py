@@ -18,7 +18,6 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import io
 import json
 import math
@@ -28,16 +27,10 @@ from contextlib import redirect_stderr, redirect_stdout
 from operator import itemgetter
 from pathlib import Path
 
+import caller_pins
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "caller_pins",
-    Path(__file__).with_name("caller_pins.py"),
-)
-caller_pins = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(caller_pins)
 
 INPUT_OF = "a generated job"
 NAME = st.from_regex(r"[a-z][a-z0-9-]{0,12}", fullmatch=True)

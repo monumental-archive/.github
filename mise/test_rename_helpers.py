@@ -10,19 +10,18 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`. Every git call passes a scrubbed environment.
 """
 
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import hermetic
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "rename_helpers.py"
 GIT = shutil.which("git") or "git"
-hermetic = SimpleNamespace(**runpy.run_path(str(HERE / "hermetic.py")))
 
 TASKS = """\
 [tasks."lint:caller-pins"]

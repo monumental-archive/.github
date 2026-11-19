@@ -16,23 +16,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import sys
 import unittest
-from pathlib import Path
 
+import bestpractices_owner as bo
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "bestpractices_owner",
-    Path(__file__).with_name("bestpractices_owner.py"),
-)
-bo = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(bo)
 
 # An owner or repository name as GitHub spells them: no dot at the end,
 # so a generated name never ends in `.git` itself.

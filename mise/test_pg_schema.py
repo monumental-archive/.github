@@ -39,12 +39,10 @@ the caller's real index when the suite runs from pre-push.
 stdlib `unittest`, matching the other mise/test_*.py.
 """
 
-import importlib.util
 import io
 import json
 import os
 import re
-import runpy
 import shutil
 import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -54,20 +52,11 @@ import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
+import pg_schema
 
-
-_SPEC = importlib.util.spec_from_file_location(
-    "pg_schema",
-    Path(__file__).with_name("pg_schema.py"),
-)
-pg_schema = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pg_schema)
 normalise = pg_schema.normalise
 
 GIT = shutil.which("git") or "git"

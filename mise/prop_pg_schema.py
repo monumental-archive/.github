@@ -16,22 +16,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import tempfile
 import unittest
 from pathlib import Path
 
+import pg_schema as ps
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "pg_schema",
-    Path(__file__).with_name("pg_schema.py"),
-)
-ps = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ps)
 
 WORD = st.from_regex(r"[A-Za-z0-9_(),'\"]{1,8}", fullmatch=True)
 STATEMENT = st.lists(WORD, min_size=1, max_size=5)

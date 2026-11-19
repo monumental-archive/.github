@@ -33,31 +33,28 @@ GATE_NONE holds it to measuring nothing.
 """
 
 import ast
-import importlib.util
 import io
 import re
-import runpy
 import shlex
+import sys
 import tempfile
 import tokenize
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+import caller_pins
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
 
-_SPEC = importlib.util.spec_from_file_location(
-    "caller_pins", Path(__file__).with_name("caller_pins.py")
-)
-caller_pins = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(caller_pins)
 
 # Item 4 of #1333: the scheduled audits and the level checks keep their
 # installs. Everything else uncached is on the release, publish or

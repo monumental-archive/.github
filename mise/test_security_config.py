@@ -30,19 +30,13 @@ stdlib `unittest`, the belt's one test idiom.
 """
 
 import copy
-import importlib.util
 import io
 import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "security_config",
-    Path(__file__).with_name("security_config.py"),
-)
-sc = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(sc)
+import security_config as sc
 
 HERE = Path(__file__).parent
 DATA = HERE / "testdata" / "security-config"

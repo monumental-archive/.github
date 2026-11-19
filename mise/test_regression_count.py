@@ -8,31 +8,18 @@ git never produces.
 """
 
 import contextlib
-import importlib.util
 import io
 import os
 import pathlib
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
 from typing import ClassVar
 from unittest import mock
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(pathlib.Path(__file__).resolve().with_name("hermetic.py")))
-)
-
-
-_SPEC = importlib.util.spec_from_file_location(
-    "regression_count", pathlib.Path(__file__).with_name("regression_count.py")
-)
-rc = importlib.util.module_from_spec(_SPEC)
-sys.modules["regression_count"] = rc
-_SPEC.loader.exec_module(rc)
+import hermetic
+import regression_count as rc
 
 # A git with no user or system config: no signing hook, no template,
 # no default branch preference leaks in from the machine running this.

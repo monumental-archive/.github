@@ -12,14 +12,13 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import runpy
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import mutmut_pragmas as mp
 
 HERE = Path(__file__).resolve().parent
-mp = SimpleNamespace(**runpy.run_path(str(HERE / "mutmut_pragmas.py")))
 
 
 class Unreadable(unittest.TestCase):

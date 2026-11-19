@@ -50,7 +50,6 @@ import hashlib
 import json
 import os
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -58,12 +57,12 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"

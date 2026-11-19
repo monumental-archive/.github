@@ -18,20 +18,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import re
 import unittest
 from pathlib import Path
 
+import lock_arch as la
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "lock_arch",
-    Path(__file__).with_name("lock_arch.py"),
-)
-la = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(la)
 
 LOCK = Path("mise.lock")
 # A tool name carrying no architecture or OS token of its own.

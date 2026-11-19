@@ -31,7 +31,6 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import os
 import posixpath
@@ -41,16 +40,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+import previous_release as previous
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "previous_release",
-    Path(__file__).with_name("previous_release.py"),
-)
-previous = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(previous)
 
 # A small pool, so graphs and listings meet: 1.0.10 beside 1.0.2 is the
 # order a string sort gets wrong.

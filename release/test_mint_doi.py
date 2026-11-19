@@ -96,27 +96,26 @@ from __future__ import annotations
 import base64
 import contextlib
 import copy
-import importlib.util
 import io
 import json
 import os
-import runpy
+import sys
 import threading
 import unittest
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Self
+from typing import Self
 from unittest import mock
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+import mint_doi
 
-if TYPE_CHECKING:
-    from types import ModuleType
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 HELPER = CANON / "release" / "mint_doi.py"
@@ -155,24 +154,6 @@ case "$2" in
   *) echo "gh stub: refusing $*" >&2; exit 1 ;;
 esac
 """
-
-
-def load_helper() -> ModuleType:
-    """Import the helper from its path (its name has a hyphen).
-
-    Returns:
-        The module.
-
-    """
-    spec = importlib.util.spec_from_file_location("mint_doi", HELPER)
-    assert spec  # ruff: ignore[assert] - the path is this repository's
-    assert spec.loader  # ruff: ignore[assert]
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-MINT = load_helper()
 
 
 def citation(licence: str, concept: str | None = None) -> str:
@@ -606,11 +587,11 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         )
         out = io.StringIO()
         with (
-            mock.patch.object(MINT, "pause", pauses.append),
+            mock.patch.object(mint_doi, "pause", pauses.append),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(out),
         ):
-            code = MINT.main(["--pipeline", PIPELINE], env)
+            code = mint_doi.main(["--pipeline", PIPELINE], env)
         text = summary.read_text() if summary.exists() else ""
     return Run(
         code,
@@ -1346,7 +1327,7 @@ class FirstMintGuards(unittest.TestCase):
         """Page 1 full of unsubmitted drafts, the minted title on page 2."""
         (draft,) = captured("drafts-during")
         z = first_mint_zenodo([])
-        z.title_pages = [[draft] * MINT.LISTING_PAGE, captured("drafts-before")]
+        z.title_pages = [[draft] * mint_doi.LISTING_PAGE, captured("drafts-before")]
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
@@ -1359,13 +1340,13 @@ class FirstMintGuards(unittest.TestCase):
         """Page 2 answers 503 on every try: refused, nothing created."""
         (draft,) = captured("drafts-during")
         z = first_mint_zenodo([])
-        z.title_pages = [[draft] * MINT.LISTING_PAGE, 503]
+        z.title_pages = [[draft] * mint_doi.LISTING_PAGE, 503]
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
             "::error::the deposition listing"
             " (q=title:%22monumental-archive%2F.github%22) could not be"
-            f" read to its end ({MINT.LISTING_PAGE} entries read) — a first mint"
+            f" read to its end ({mint_doi.LISTING_PAGE} entries read) — a first mint"
             " is never checked against part of it",
             run.stdout,
         )
@@ -1375,12 +1356,12 @@ class FirstMintGuards(unittest.TestCase):
         """Full pages to the bound: the bound refuses, never passes."""
         (draft,) = captured("drafts-during")
         z = first_mint_zenodo([])
-        z.title_pages = [[draft] * MINT.LISTING_PAGE] * 3
-        with mock.patch.object(MINT, "LISTING_MAX_PAGES", 3):
+        z.title_pages = [[draft] * mint_doi.LISTING_PAGE] * 3
+        with mock.patch.object(mint_doi, "LISTING_MAX_PAGES", 3):
             run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            f"could not be read to its end ({3 * MINT.LISTING_PAGE} entries read)",
+            f"could not be read to its end ({3 * mint_doi.LISTING_PAGE} entries read)",
             run.stdout,
         )
         self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 3)
@@ -1483,7 +1464,7 @@ class ReadCitation(unittest.TestCase):
 
     def test_the_canons_own_citation(self) -> None:
         """The canon's own CITATION.cff reads as itself."""
-        got = MINT.read_citation((CANON / "CITATION.cff").read_text())
+        got = mint_doi.read_citation((CANON / "CITATION.cff").read_text())
         self.assertEqual(got.creators, ["Allen, Carl"])
         self.assertEqual(got.licence, "0BSD")
         self.assertEqual(got.concept_doi, "10.5281/zenodo.21913604")
@@ -1513,7 +1494,7 @@ class ReadCitation(unittest.TestCase):
         ]  # fmt: skip
         for name, text, want in rows:
             with self.subTest(name):
-                got = MINT.read_citation(text)
+                got = mint_doi.read_citation(text)
                 self.assertEqual((got.creators, got.licence, got.concept_doi), want)
 
 
@@ -1529,7 +1510,7 @@ class LicenceIds(unittest.TestCase):
         ]
         for licence, want in rows:
             with self.subTest(licence):
-                self.assertEqual(MINT.licence_ids(licence), want)
+                self.assertEqual(mint_doi.licence_ids(licence), want)
 
     def test_refused(self) -> None:
         """Each refusal names its cause."""
@@ -1545,8 +1526,8 @@ class LicenceIds(unittest.TestCase):
         ]
         for licence, why in rows:
             with self.subTest(licence):
-                with self.assertRaises(MINT.RefusedError) as caught:
-                    MINT.licence_ids(licence)
+                with self.assertRaises(mint_doi.RefusedError) as caught:
+                    mint_doi.licence_ids(licence)
                 self.assertEqual(
                     str(caught.exception),
                     f"CITATION.cff license '{licence}' {why} — the record carries"

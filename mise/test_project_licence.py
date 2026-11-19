@@ -11,14 +11,13 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import runpy
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import project_licence as pl
 
 HERE = Path(__file__).resolve().parent
-pl = SimpleNamespace(**runpy.run_path(str(HERE / "project_licence.py")))
 
 
 def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str, str]:

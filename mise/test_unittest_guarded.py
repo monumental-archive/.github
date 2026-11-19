@@ -15,16 +15,15 @@ under coverage the same figure.
 import json
 import pathlib
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
+
+import hermetic
 
 _HERE = pathlib.Path(__file__).resolve().parent
-hermetic = SimpleNamespace(**runpy.run_path(str(_HERE / "hermetic.py")))
 RUNNER = _HERE / "unittest_guarded.py"
 MEASURE = _HERE / "coverage-measure.sh"
 BASH = shutil.which("bash") or "bash"

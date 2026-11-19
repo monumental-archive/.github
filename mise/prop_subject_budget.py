@@ -24,22 +24,15 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
+import subject_budget as sb
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "subject_budget",
-    Path(__file__).with_name("subject_budget.py"),
-)
-sb = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(sb)
 
 # A path segment: never empty, never a slash or a glob character, and
 # rich in what a regex would misread if the pattern were not escaped.

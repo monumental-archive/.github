@@ -18,20 +18,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
+import lock_platforms as lp
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "lock_platforms",
-    Path(__file__).with_name("lock_platforms.py"),
-)
-lp = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(lp)
 
 KEY = st.from_regex(r"[a-z][a-z-]{0,10}", fullmatch=True)
 VALUE = st.from_regex(r"[a-z0-9][a-z0-9_.,-]{0,20}", fullmatch=True)

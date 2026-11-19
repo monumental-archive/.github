@@ -16,16 +16,14 @@ gate as `mise run test`.
 import contextlib
 import io
 import json
-import runpy
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
+import coverage_js_runner as cj
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
-cj = SimpleNamespace(**runpy.run_path(str(HERE / "coverage_js_runner.py")))
 
 
 class TaskReferences(unittest.TestCase):

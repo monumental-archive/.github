@@ -23,22 +23,16 @@ gate as `mise run test`, which `ci` collects.
 import contextlib
 import io
 import json
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-drift = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("bestpractices_drift.py")))
-)
+import bestpractices_drift as drift
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"

@@ -14,21 +14,20 @@ gate as `mise run test`.
 
 import ast
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest import mock
+
+import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 HERE = Path(__file__).resolve().parent
-hermetic = SimpleNamespace(**runpy.run_path(str(HERE / "hermetic.py")))
 
 CANON = HERE.parent
 GIT = shutil.which("git") or "git"

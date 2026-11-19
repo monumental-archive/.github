@@ -27,29 +27,18 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
 run through the gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import json
 import os
 import re
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
-_SPEC = importlib.util.spec_from_file_location(
-    "belt_shell",
-    Path(__file__).with_name("belt_shell.py"),
-)
-bs = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(bs)
+import belt_shell as bs
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent

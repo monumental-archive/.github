@@ -55,9 +55,10 @@ Exits 0 when clean, 1 on a finding, 2 on a usage error.
 
 import json
 import re
-import runpy
 import sys
 from pathlib import Path
+
+import coverage_js_runner
 
 EXIT_USAGE = 2
 # stage takes a directory and, optionally, the config; verify a report
@@ -67,9 +68,8 @@ VERIFY_MIN_ARGS = 2
 
 # The lockfile reader is coverage_js_runner.py's, so the TypeScript
 # legs agree on what "the lockfile pins vitest" means (#1357).
-_RUNNER = runpy.run_path(str(Path(__file__).with_name("coverage_js_runner.py")))
-ENTRY: str = _RUNNER["ENTRY"]
-VITEST: re.Pattern[str] = _RUNNER["RUNNER"]
+ENTRY: str = coverage_js_runner.ENTRY
+VITEST: re.Pattern[str] = coverage_js_runner.RUNNER
 FAST_CHECK = re.compile(
     ENTRY.format(name=r"fast-check|@fast-check/[\w.-]+"), re.MULTILINE
 )

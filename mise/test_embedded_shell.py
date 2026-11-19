@@ -16,10 +16,8 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -29,20 +27,11 @@ import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import embedded_shell as es
+import hermetic
 
 _HERE = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location(
-    "embedded_shell",
-    _HERE / "embedded_shell.py",
-)
-es = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(es)
 
 ISSUE = "\t# canon helper: #1386"
 GIT = shutil.which("git") or "git"

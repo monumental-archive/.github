@@ -19,7 +19,6 @@ is written to catch.
 stdlib `unittest`, run through the gate as `mise run test`.
 """
 
-import importlib.util
 import io
 import json
 import unittest
@@ -27,12 +26,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-_SPEC = importlib.util.spec_from_file_location(
-    "plan_producers",
-    Path(__file__).with_name("plan_producers.py"),
-)
-pp = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pp)
+import plan_producers as pp
 
 REPO = Path(__file__).resolve().parent.parent
 POLICY = REPO / "slsa" / "assert-policy.json"

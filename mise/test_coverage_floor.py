@@ -19,7 +19,6 @@ fourth thing to port, and nothing is added to the belt to run this.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import sys
 import unittest
@@ -29,12 +28,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Self
 
-_SPEC = importlib.util.spec_from_file_location(
-    "coverage_floor",
-    Path(__file__).with_name("coverage_floor.py"),
-)
-cf = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(cf)
+import coverage_floor as cf
 
 
 def record(

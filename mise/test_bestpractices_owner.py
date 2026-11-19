@@ -16,20 +16,15 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import json
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import bestpractices_owner as owner
+
 HERE = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location(
-    "bestpractices_owner",
-    HERE / "bestpractices_owner.py",
-)
-owner = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(owner)
 
 DB = json.loads((HERE / "testdata" / "bestpractices-13998.json").read_text())
 CANON = json.loads((HERE / "testdata" / "bestpractices-14058.json").read_text())

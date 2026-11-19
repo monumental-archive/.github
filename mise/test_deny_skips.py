@@ -13,15 +13,14 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import runpy
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import deny_skips as ds
 
 HERE = Path(__file__).resolve().parent
-ds = SimpleNamespace(**runpy.run_path(str(HERE / "deny_skips.py")))
 
 TWO_VERSIONS = """\
 [bans]

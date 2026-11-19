@@ -42,7 +42,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -53,11 +52,10 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 from unittest import mock
 
-if TYPE_CHECKING:
-    from types import ModuleType
+import registry
 
 HERE = Path(__file__).resolve().parent
 TESTDATA = HERE / "testdata"
@@ -112,22 +110,6 @@ else:
     sys.stderr.write("stub docker: unexpected " + " ".join(args) + "\n")
     sys.exit(97)
 '''
-
-
-def load_helper() -> ModuleType:
-    """Import release/registry.py by path (its name is not a module's).
-
-    Returns:
-        The helper module.
-
-    """
-    spec = importlib.util.spec_from_file_location("registry", HERE / "registry.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-registry = load_helper()
 
 
 class Fake(BaseHTTPRequestHandler):

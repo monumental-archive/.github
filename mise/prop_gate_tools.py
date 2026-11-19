@@ -18,20 +18,12 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import gate_tools as gt
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "gate_tools",
-    Path(__file__).with_name("gate_tools.py"),
-)
-gt = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gt)
 
 SEGMENT = st.from_regex(r"[a-z0-9_.-]{1,6}", fullmatch=True).filter(
     lambda s: s not in {".", ".."}

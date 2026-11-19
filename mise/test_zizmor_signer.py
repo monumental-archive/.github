@@ -20,20 +20,15 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import copy
-import importlib.util
 import io
 import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import zizmor_signer as signer
+
 HERE = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location(
-    "zizmor_signer",
-    HERE / "zizmor_signer.py",
-)
-signer = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(signer)
 
 REAL = json.loads((HERE / "testdata" / "zizmor-1.32.0-canon.json").read_text())
 MISMATCH = json.loads(

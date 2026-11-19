@@ -11,7 +11,6 @@ with a scrubbed environment (#857). The last row is the canon itself.
 """
 
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -19,11 +18,8 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 _HERE = Path(__file__).resolve().parent
 HELPER = _HERE / "coverage_exclusions.py"

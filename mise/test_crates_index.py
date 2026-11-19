@@ -6,17 +6,11 @@ serves: `ed/tf/edtf-core` is release/testdata's captured record, and
 `3/s/syn`, `2/cc`, `1/a` are the host's own short-name buckets.
 """
 
-import importlib.util
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "crates_index", Path(__file__).resolve().parent / "crates_index.py"
-)
-crates_index = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(crates_index)
+import crates_index
 
 
 class IndexPath(unittest.TestCase):

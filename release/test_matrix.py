@@ -18,19 +18,13 @@ as those runs read it, so a Renovate roll of the live file moves nothing
 here.
 """
 
-import importlib.util
 import io
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "matrix",
-    Path(__file__).with_name("matrix.py"),
-)
-matrix = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(matrix)
+import matrix
 
 TESTDATA = Path(__file__).with_name("testdata") / "matrix"
 MAPPING = str(TESTDATA / "pgrx-base-images.toml")

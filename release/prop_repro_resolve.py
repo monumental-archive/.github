@@ -16,23 +16,16 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import repro_resolve as resolve
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "repro_resolve",
-    Path(__file__).with_name("repro_resolve.py"),
-)
-resolve = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(resolve)
 
 SCALAR = (
     st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text()

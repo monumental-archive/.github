@@ -54,23 +54,25 @@ as `mise run test`, which `ci` collects.
 """
 
 import hashlib
-import importlib.util
 import io
 import json
 import os
-import runpy
 import shutil
+import sys
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 from unittest import mock
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+import publish_crates
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 TESTDATA = CANON / "release" / "testdata"
@@ -78,11 +80,6 @@ INDEX = TESTDATA / "crates-index"
 CRATE = TESTDATA / "edtf-core-1.3.3.crate"
 METADATA = TESTDATA / "edtf-cargo-metadata.json"
 
-_SPEC = importlib.util.spec_from_file_location(
-    "publish_crates", CANON / "release" / "publish_crates.py"
-)
-publish_crates = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(publish_crates)
 
 CORE_CKSUM = "7001e4071709b45e67be9351b209b4465672b0ba633a143528b50f81805d428b"
 USER_AGENT = (

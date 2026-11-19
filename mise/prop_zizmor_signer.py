@@ -18,23 +18,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import sys
 import unittest
-from pathlib import Path
 
+import zizmor_signer as zs
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "zizmor_signer",
-    Path(__file__).with_name("zizmor_signer.py"),
-)
-zs = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(zs)
 
 SIGNER = "Org/Signer"
 WORKFLOW = f"{SIGNER}/.github/workflows/sign.yml"

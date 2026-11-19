@@ -19,7 +19,6 @@ gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -27,11 +26,9 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
+import test_coverage_tasks
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -636,11 +633,7 @@ class LegRows(unittest.TestCase):
 
 
 # The coverage.py stub the python leg's rows use, read from its suite.
-COVERAGE = str(
-    runpy.run_path(str(Path(__file__).resolve().with_name("test_coverage_tasks.py")))[
-        "COVERAGE"
-    ]
-)
+COVERAGE = str(test_coverage_tasks.COVERAGE)
 
 # `mise tasks info <name> --json`, for any task planted in STUB_TASKS.
 MISE_TASKS = """\

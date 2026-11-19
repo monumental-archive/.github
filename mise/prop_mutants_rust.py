@@ -17,19 +17,11 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import unittest
-from pathlib import Path
 
+import mutants_rust as mr
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "mutants_rust",
-    Path(__file__).with_name("mutants_rust.py"),
-)
-mr = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(mr)
 
 ENTRY = st.from_regex(r"[a-z_:]{1,12}", fullmatch=True)
 

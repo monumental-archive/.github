@@ -19,7 +19,6 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -27,16 +26,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pack_wasm as pack
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "pack_wasm",
-    Path(__file__).with_name("pack_wasm.py"),
-)
-pack = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(pack)
 
 # A GitHub owner and repository name (GitHub drops a `.git` ending
 # from a repository's name, so none is drawn).

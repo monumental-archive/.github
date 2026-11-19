@@ -53,7 +53,6 @@ import argparse
 import fnmatch
 import functools
 import hashlib
-import importlib.util
 import os
 import re
 import shutil
@@ -61,6 +60,13 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tomllib
 from pathlib import Path
+
+# The canon's one reader of a caller's pins, beside this tree in release/.
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
+
+import caller_pins
 
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "gate-tools.toml"
@@ -81,21 +87,6 @@ _LEAD = (
 )
 
 
-def _caller_pins() -> object:
-    """Load release/caller_pins.py, the canon's one reader of a caller's pins.
-
-    Returns:
-        The module.
-
-    """
-    path = HERE.parent / "release" / "caller_pins.py"
-    spec = importlib.util.spec_from_file_location("caller_pins", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-caller_pins = _caller_pins()
 tool_name = caller_pins.tool_name
 
 

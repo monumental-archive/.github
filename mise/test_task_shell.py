@@ -17,18 +17,13 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import runpy
 import shlex
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))

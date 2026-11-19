@@ -13,16 +13,15 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import runpy
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+
+import licence_texts as lt
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-lt = SimpleNamespace(**runpy.run_path(str(HERE / "licence_texts.py")))
 
 FIXTURE_ENTRY = """\
 version = 1

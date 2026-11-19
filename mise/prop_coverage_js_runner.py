@@ -25,22 +25,15 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import json
 import unittest
-from pathlib import Path
 
+import coverage_js_runner as cj
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
-_SPEC = importlib.util.spec_from_file_location(
-    "coverage_js_runner",
-    Path(__file__).with_name("coverage_js_runner.py"),
-)
-cj = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(cj)
 # The walk the runner reads (#1608), loaded beside it by the runner.
 tw = cj.task_walk
 

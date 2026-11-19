@@ -50,27 +50,23 @@ where the defect does not exist.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# A missing sibling is named, never a bare traceback (#1522).
+try:
+    import belt_shell
+except ModuleNotFoundError as missing:
+    if missing.name != "belt_shell":
+        raise
+    msg = "exit-trap: belt_shell.py did not arrive beside this file"
+    raise SystemExit(msg) from None
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-_SPEC = importlib.util.spec_from_file_location(
-    "belt_shell",
-    Path(__file__).resolve().with_name("belt_shell.py"),
-)
-_BELT_SHELL = importlib.util.module_from_spec(_SPEC)
-# A missing sibling fails here, in exec_module, never as a None spec: a
-# `.py` path always gets a spec and a loader (#1522).
-try:
-    _SPEC.loader.exec_module(_BELT_SHELL)
-except FileNotFoundError:
-    msg = "exit-trap: belt_shell.py did not arrive beside this file"
-    raise SystemExit(msg) from None
 
 # Any trap that names EXIT among its signals. `trap - EXIT` resets the
 # handler rather than setting one, and owes nothing.
@@ -184,7 +180,7 @@ def scripts(path: Path) -> Iterator[tuple[int, str, str, bool]]:
 
     """
     if path.suffix == ".toml":
-        for body in _BELT_SHELL.read(path).bodies:
+        for body in belt_shell.read(path).bodies:
             base = body.run_line if body.delim else body.run_line - 1
             yield base, f"task {body.name}: ", body.source, True
     else:

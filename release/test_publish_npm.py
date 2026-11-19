@@ -16,7 +16,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-import importlib.util
 import io
 import os
 import unittest
@@ -26,11 +25,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-_SPEC = importlib.util.spec_from_file_location(
-    "publish_npm", Path(__file__).with_name("publish_npm.py")
-)
-publish_npm = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(publish_npm)
+import publish_npm
 
 PACKAGE = "@acme/widget@1.2.3"
 # ruff: ignore[hardcoded-password-string] - a planted fake, to prove it is redacted

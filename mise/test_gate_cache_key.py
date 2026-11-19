@@ -11,7 +11,6 @@ lockfile's digest to that key; the rows hold both halves.
 """
 
 import hashlib
-import importlib.util
 import io
 import os
 import tempfile
@@ -20,11 +19,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-_SPEC = importlib.util.spec_from_file_location(
-    "gate_cache_key", Path(__file__).with_name("gate_cache_key.py")
-)
-gate_cache_key = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gate_cache_key)
+import gate_cache_key
 
 LOGGED = (
     "mise-v2-linux-x64-ubuntu26-2026.11.6-p692-"

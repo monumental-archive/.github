@@ -20,7 +20,6 @@ run through the gate as `mise run test`.
 """
 
 import os
-import runpy
 import shutil
 import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -28,12 +27,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
-
+import hermetic
 
 ENV_SH = Path(__file__).resolve().with_name("pgrx-env.sh")
 BASH = shutil.which("bash") or "bash"

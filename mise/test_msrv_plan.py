@@ -15,7 +15,6 @@ rather than trust this line. A check that admits the wrong toolchain looks
 exactly like a check that works.
 """
 
-import importlib.util
 import io
 import json
 import tempfile
@@ -23,12 +22,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "msrv_plan",
-    Path(__file__).with_name("msrv_plan.py"),
-)
-msrv_plan = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(msrv_plan)
+import msrv_plan
 
 
 def member(name: str, promise: str | None = None, version: str = "1.3.1") -> dict:

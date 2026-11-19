@@ -59,7 +59,6 @@ ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN.
 """
 
 import hashlib
-import importlib.util
 import json
 import os
 
@@ -72,6 +71,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# The belt's crates.io index reader, beside this tree in mise/. A
+# missing sibling is named, never a bare traceback (#1522).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+try:
+    import crates_index
+except ModuleNotFoundError as missing:
+    if missing.name != "crates_index":
+        raise
+    msg = "publish-crates: mise/crates_index.py did not arrive in the canon tree"
+    raise SystemExit(msg) from None
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
@@ -80,18 +92,6 @@ EXCHANGE = "https://crates.io/api/v1/trusted_publishing/tokens"
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
 TIMEOUT = 60
-
-_SPEC = importlib.util.spec_from_file_location(
-    "crates_index", HERE.parent / "mise" / "crates_index.py"
-)
-crates_index = importlib.util.module_from_spec(_SPEC)
-# A missing sibling fails here, in exec_module, never as a None spec: a
-# `.py` path always gets a spec and a loader (#1522).
-try:
-    _SPEC.loader.exec_module(crates_index)
-except FileNotFoundError:
-    msg = "publish-crates: mise/crates_index.py did not arrive in the canon tree"
-    raise SystemExit(msg) from None
 
 
 @dataclass

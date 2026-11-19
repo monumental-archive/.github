@@ -18,21 +18,13 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import tomllib
 import unittest
-from pathlib import Path
 
+import deny_skips as ds
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "deny_skips",
-    Path(__file__).with_name("deny_skips.py"),
-)
-ds = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ds)
 
 NAME = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
 VERSION = st.one_of(st.just(""), st.from_regex(r"@[0-9]\.[0-9]{1,2}", fullmatch=True))

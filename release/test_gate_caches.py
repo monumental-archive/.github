@@ -23,19 +23,15 @@ The planted rows each break one property on the real file and assert the
 message that names it.
 """
 
-import importlib.util
 import re
 import unittest
 from pathlib import Path
 
+import test_job_installs as job_installs
+
 CANON = Path(__file__).resolve().parent.parent
 CI = CANON / ".github" / "workflows" / "ci.yml"
 
-_SPEC = importlib.util.spec_from_file_location(
-    "job_installs", Path(__file__).with_name("test_job_installs.py")
-)
-job_installs = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(job_installs)
 
 # The jobs #1406 names, less the coverage upload, which installs and
 # builds nothing since #1528. A cache anywhere else is a new cache, and

@@ -17,7 +17,6 @@ stdlib `unittest`, matching the other release/test_*.py.
 
 import io
 import os
-import runpy
 import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -27,11 +26,12 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 RELEASE = Path(__file__).resolve().parent
 CANON = RELEASE.parent

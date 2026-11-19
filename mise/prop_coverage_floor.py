@@ -21,23 +21,16 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import contextlib
-import importlib.util
 import io
 import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
 
+import coverage_floor as cf
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "coverage_floor",
-    Path(__file__).with_name("coverage_floor.py"),
-)
-cf = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(cf)
 
 PERCENT = st.decimals(min_value=0, max_value=100, allow_nan=False, places=None)
 # A provenance is one line of text: no line breaks of any kind.

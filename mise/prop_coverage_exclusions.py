@@ -14,21 +14,14 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
+import coverage_exclusions as ce
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-_SPEC = importlib.util.spec_from_file_location(
-    "coverage_exclusions",
-    Path(__file__).with_name("coverage_exclusions.py"),
-)
-ce = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ce)
 
 
 @st.composite
