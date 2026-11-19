@@ -48,7 +48,6 @@ framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import unittest
@@ -64,7 +63,7 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
 TESTDATA = CANON / "release" / "testdata"
-PYTHON = shutil.which("python3")
+PYTHON = hermetic.optional_tool("python3")
 
 # The real capture, and the real thing the release path derived from it.
 REAL_PREV = (TESTDATA / "lab_pg--0.27.0.sql").read_text()
@@ -151,7 +150,7 @@ class Derivation:
         env = hermetic.env(EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v)
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
-            [PYTHON, str(self.source), *args],
+            [hermetic.tool("python3"), str(self.source), *args],
             env=env,
             capture_output=True,
             text=True,

@@ -35,8 +35,8 @@ import test_coverage_tasks
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 HELPER = BELT / "plpgsql_coverage.py"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 
 CLAUSE = "LANGUAGE plpgsql"
@@ -179,7 +179,7 @@ def stub_env(stubs: Path, answers: Path, **planted: str) -> dict[str, str]:
     )
 
 
-def run(argv: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess:
+def run(argv: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run a command and capture its output as text.
 
     Returns:
@@ -201,7 +201,7 @@ class Collecting(unittest.TestCase):
         unreadable: dict[str, str] | None = None,
         listing: str | None = None,
         **planted: str,
-    ) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess]:
+    ) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]]:
         """Collect a report from the planted database and read it.
 
         `listing` replaces the function listing psql prints, verbatim.
@@ -402,7 +402,7 @@ class HelperRows(Collecting):
 class RefusalRows(Collecting):
     """Every way a collection or a report file is refused, by name."""
 
-    def collection_failed(self, read: subprocess.CompletedProcess, why: str) -> None:
+    def collection_failed(self, read: subprocess.CompletedProcess[str], why: str) -> None:
         """Assert the leg refuses a failed collection, naming why."""
         self.assertEqual(1, read.returncode)
         self.assertEqual("", read.stdout)
@@ -457,7 +457,7 @@ class RefusalRows(Collecting):
         """The failure shape decodes, and the leg refuses with its reason."""
         self.collection_failed(self.read_planted({"error": "boom"}), "boom")
 
-    def read_planted(self, document: object) -> subprocess.CompletedProcess:
+    def read_planted(self, document: object) -> subprocess.CompletedProcess[str]:
         """Run `totals` over a planted report file.
 
         Returns:
@@ -577,7 +577,7 @@ class LegRows(unittest.TestCase):
         legs: str,
         files: dict[str, str],
         collects: bool = True,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         """Run coverage:check's body in a planted tree.
 
         `legs` is the floor's `legs:` record, `files` the tracked files
@@ -762,7 +762,7 @@ class RunOnceRows(unittest.TestCase):
         *,
         python: bool = True,
         no_xml: bool = False,
-    ) -> tuple[subprocess.CompletedProcess, Path]:
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
         """Run coverage-measure.sh over planted tasks, python and PL/pgSQL.
 
         Reports go to `reports` beside the tree (#1628); `no_xml` has the

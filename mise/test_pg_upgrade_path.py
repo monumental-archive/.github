@@ -49,7 +49,6 @@ test framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import textwrap
 import unittest
@@ -64,9 +63,9 @@ RECORD = ".pgrx-installable"
 
 # Absolute, resolved once: a partial path lets PATH decide which binary a
 # test ran.
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
-CARGO = shutil.which("cargo")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
+CARGO = hermetic.optional_tool("cargo")
 
 # The graph the defect was measured on. 1.3.1 is the target nothing was
 # derived from; 1.2.2 and 1.2.3 are `from` halves and always owe a path.
@@ -168,7 +167,7 @@ class Tree:
         env = clean_env()
         subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [
-                CARGO,
+                hermetic.tool("cargo"),
                 "generate-lockfile",
                 "--offline",
                 "--manifest-path",

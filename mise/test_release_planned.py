@@ -17,7 +17,6 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -28,8 +27,8 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.optional_tool("bash")
+GIT = hermetic.optional_tool("git")
 
 NAME = "lint:release-planned"
 
@@ -83,7 +82,7 @@ class History:
 
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, *args],
+            [hermetic.tool("git"), *args],
             cwd=self.root,
             env=self.env,
             check=True,
@@ -109,7 +108,7 @@ class History:
 
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [BASH, "-euo", "pipefail", "-c", BODY],
+            [hermetic.tool("bash"), "-euo", "pipefail", "-c", BODY],
             cwd=self.root,
             env=self.env,
             capture_output=True,

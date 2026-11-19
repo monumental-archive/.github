@@ -27,7 +27,7 @@ from pathlib import Path
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 OWN_AUDITS_STUB = "own_audit_tasks() { :; }\n"
 CONFIG = '[tasks."audit:fuzz"]\nrun = "x"\n\n[tasks."audit:mutants"]\nrun = "x"\n'
 
@@ -66,7 +66,7 @@ class Scheduled(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def run_lint(self) -> subprocess.CompletedProcess:
+    def run_lint(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
 
         Returns:

@@ -40,7 +40,6 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import unittest
@@ -57,10 +56,10 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 RELEASE = CANON / "release"
 TESTDATA = RELEASE / "testdata"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
-JQ = shutil.which("jq")
-STELE = shutil.which("stele")
+BASH = hermetic.tool("bash")
+GIT = hermetic.optional_tool("git")
+JQ = hermetic.optional_tool("jq")
+STELE = hermetic.optional_tool("stele")
 
 
 def _parses(script: str) -> bool:
@@ -1284,7 +1283,7 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         def git(*args: str) -> str:
             # ruff: ignore[subprocess-without-shell-equals-true]
             return subprocess.run(
-                [GIT, *args],
+                [hermetic.tool("git"), *args],
                 cwd=repo,
                 env=hermetic_env(home),
                 check=True,
@@ -1462,7 +1461,7 @@ class TagReleaseRefusals(unittest.TestCase):
         def git(*args: str) -> None:
             # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(
-                [GIT, *args],
+                [hermetic.tool("git"), *args],
                 cwd=repo,
                 env=hermetic_env(home),
                 check=True,
@@ -1540,7 +1539,7 @@ class TagReleaseRefusals(unittest.TestCase):
             self.assertTrue(tag, first.stderr)
             # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(
-                [GIT, "tag", "-a", tag, "-m", tag],
+                [hermetic.tool("git"), "tag", "-a", tag, "-m", tag],
                 cwd=repo,
                 env=hermetic_env(repo.parent / "home"),
                 check=True,
@@ -1608,7 +1607,7 @@ class TagReleasePush(unittest.TestCase):
         def git(cwd: Path, *args: str) -> str:
             # ruff: ignore[subprocess-without-shell-equals-true]
             return subprocess.run(
-                [GIT, *args],
+                [hermetic.tool("git"), *args],
                 cwd=cwd,
                 env=env,
                 check=True,
@@ -1766,7 +1765,7 @@ class TagReleaseUpgradePath(unittest.TestCase):
         def git(cwd: Path, *args: str) -> str:
             # ruff: ignore[subprocess-without-shell-equals-true]
             return subprocess.run(
-                [GIT, *args],
+                [hermetic.tool("git"), *args],
                 cwd=cwd,
                 env=env,
                 check=True,

@@ -42,8 +42,8 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "semver-audit.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 LABEL = "audit:semver"
 INDEX = "https://index.crates.io"
 
@@ -209,7 +209,7 @@ class Planted(unittest.TestCase):
         for name, code in (index or {}).items():
             (self.index / name).write_text(code, encoding="utf-8")
 
-    def run_helper(self, **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run_helper(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the helper in the planted tree.
 
         Returns:
@@ -237,7 +237,7 @@ class Planted(unittest.TestCase):
         return [line for line in log if line.startswith("cargo-semver-checks ")]
 
     @staticmethod
-    def verdicts(done: subprocess.CompletedProcess) -> list[str]:
+    def verdicts(done: subprocess.CompletedProcess[str]) -> list[str]:
         """Keep only the closing verdict lines from stdout.
 
         Returns:

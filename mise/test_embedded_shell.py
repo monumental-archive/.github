@@ -18,7 +18,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import io
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tomllib
@@ -34,8 +33,8 @@ import hermetic
 _HERE = Path(__file__).resolve().parent
 
 ISSUE = "\t# canon helper: #1386"
-GIT = shutil.which("git") or "git"
-BASH = shutil.which("bash") or "bash"
+GIT = hermetic.tool("git")
+BASH = hermetic.tool("bash")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and `git ls-files` would list the canon's own workflows.

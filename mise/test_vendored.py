@@ -17,7 +17,6 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import hashlib
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from pathlib import Path
@@ -28,8 +27,8 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "vendored.sh"
 
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 COMMIT = "90dacfc6c25f151fc3d48fdba150c677e9dddf1d"
 SKILL = b"# upstream skill\n"

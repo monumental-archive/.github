@@ -36,8 +36,8 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 ANSWERS = json.loads((CANON / ".bestpractices.json").read_text(encoding="utf-8"))
 REPO = "monumental-archive/example"
 ID = "14058"

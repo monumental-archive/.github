@@ -18,7 +18,6 @@ gate as `mise run test`.
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -28,8 +27,8 @@ from pathlib import Path
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 # Records the files under the directory trivy was asked to scan.
 TRIVY = """\

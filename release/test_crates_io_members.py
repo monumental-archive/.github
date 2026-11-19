@@ -19,7 +19,6 @@ as `mise run test`, which `ci` collects.
 
 import json
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import unittest
@@ -34,7 +33,7 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 HELPER = CANON / "release" / "crates-io-members.sh"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 
 CARGO_STUB = """#!/usr/bin/env bash
 # Stub `cargo`: logs its arguments, answers `metadata` from STUB_METADATA.

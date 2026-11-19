@@ -18,16 +18,17 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
+
 BELT = Path(__file__).resolve().parent
 CONFIG = BELT / "typos.toml"
 CHANGELOG_LINE = BELT / "testdata" / "typos" / "changelog-v1.67.1.txt"
-TYPOS = shutil.which("typos")
+TYPOS = hermetic.tool("typos")
 
 # The run typos found inside the SHA, and what it asked for.
 RUN = "e" + "de"
@@ -81,18 +82,6 @@ def typos(text: str, *, belt: bool = True) -> subprocess.CompletedProcess[str]:
 
 class TyposShaTest(unittest.TestCase):
     """A short SHA is skipped; words around and like it are not."""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Refuse to run without the pinned binary: a skip is fail-open.
-
-        Raises:
-            RuntimeError: typos is not on PATH.
-
-        """
-        if TYPOS is None:
-            msg = "typos is not on PATH; run through `mise run test`"
-            raise RuntimeError(msg)
 
     def assert_green(self, text: str) -> None:
         """Red under typos' defaults, green under the belt config."""

@@ -29,8 +29,8 @@ from pathlib import Path
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 LABEL = "audit:python-types"
 BELT_FILES = (
     "python-types.sh",
@@ -107,7 +107,7 @@ def real_mypy() -> str | None:
         Its path when `mypy --version` names the pin, else None.
 
     """
-    found = shutil.which("mypy")
+    found = hermetic.optional_tool("mypy")
     if found is None:
         return None
     # ruff: ignore[subprocess-without-shell-equals-true]
@@ -378,7 +378,7 @@ class Holds(unittest.TestCase):
 
 @unittest.skipUnless(real_mypy(), "the belt's pinned mypy is not installed here")
 @unittest.skipUnless(
-    shutil.which("hypothesis"), "the belt's Hypothesis is not installed here"
+    hermetic.optional_tool("hypothesis"), "the belt's Hypothesis is not installed here"
 )
 class TheTypedGiven(unittest.TestCase):
     """The belt's `given` under the unmodified config (#1604)."""

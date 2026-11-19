@@ -52,17 +52,10 @@ def git() -> str:
     """Find git.
 
     Returns:
-        Its path.
-
-    Raises:
-        RuntimeError: git is not on PATH.
+        Its path; a missing git is red by name (hermetic.tool).
 
     """
-    found = shutil.which("git")
-    if found is None:
-        msg = "git is not on PATH"
-        raise RuntimeError(msg)
-    return found
+    return hermetic.tool("git")
 
 
 def tracked_helpers() -> set[str]:
@@ -264,17 +257,10 @@ def mise() -> str:
     """Find mise.
 
     Returns:
-        Its path.
-
-    Raises:
-        RuntimeError: mise is not on PATH.
+        Its path; a missing mise is red by name (hermetic.tool).
 
     """
-    found = shutil.which("mise")
-    if found is None:
-        msg = "mise is not on PATH"
-        raise RuntimeError(msg)
-    return found
+    return hermetic.tool("mise")
 
 
 def belt_version() -> str:

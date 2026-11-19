@@ -36,8 +36,8 @@ from pathlib import Path
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and the planted go.mod would be staged into the canon's index.
@@ -133,9 +133,7 @@ class GoFuzzSeeds(unittest.TestCase):
         self.tools = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tools, ignore_errors=True)
         for tool in TOOLS:
-            found = shutil.which(tool)
-            self.assertIsNotNone(found, tool)
-            (self.tools / tool).symlink_to(found)
+            (self.tools / tool).symlink_to(hermetic.tool(tool))
         self.stubs = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.stubs, ignore_errors=True)
         stub = self.stubs / "go"

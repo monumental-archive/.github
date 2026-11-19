@@ -59,10 +59,10 @@ import pg_schema
 
 normalise = pg_schema.normalise
 
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 SNAPSHOT = "crates/ext/schema.snapshot.sql"
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 # The belt's real sqlfluff, or None. Never a bare-name fallback (#1528):
 # the rows below put a shim NAMED sqlfluff first on PATH and exec this
 # from it, so with no real one installed a bare name resolved to the
@@ -70,7 +70,7 @@ BASH = shutil.which("bash") or "bash"
 # canon's own suite with only the badge job's five tools installed:
 # 8,364 self-execs in 1m33s on the first lint:sql row, and on main the
 # coverage upload job sat in it for its whole 30 minutes on every push.
-SQLFLUFF = shutil.which("sqlfluff")
+SQLFLUFF = hermetic.tool("sqlfluff")
 SQLFLUFF_MISSING = (
     "sqlfluff is not on PATH: these rows run the belt's real sqlfluff behind"
     " a shim named sqlfluff, and cannot run without it — run: mise install"
@@ -542,11 +542,9 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
     def setUp(self) -> None:
         """Make a repository, the shims, and an empty member list.
 
-        The tool is asserted first, as the belt's tasks assert theirs: a
-        row that needs sqlfluff fails by name without it (#1528).
+        The tool is asserted where it is looked up, as the belt's tasks
+        assert theirs: without it the file fails by name (#1528).
         """
-        if SQLFLUFF is None:
-            self.fail(SQLFLUFF_MISSING)
         self.root = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         git(self.root, "init", "-q")

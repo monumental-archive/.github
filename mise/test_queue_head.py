@@ -37,7 +37,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "queue_head.py"
 BUNDLE = HERE / "testdata" / "queue-head" / "edtf-265.bundle.gz"
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 # An empty HOME for every fixture, made once for the module.
 HOME_DIR = tempfile.mkdtemp()
 

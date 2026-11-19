@@ -28,7 +28,6 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -40,7 +39,7 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 
 STUB = (CANON / "workflow-templates" / "ci.yml").read_text(encoding="utf-8")
 GATE = (CANON / ".github" / "workflows" / "gate.yml").read_text(encoding="utf-8")
