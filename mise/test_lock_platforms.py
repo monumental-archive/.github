@@ -336,8 +336,14 @@ class Unreadable(Case):
         """Not TOML, or `tools` / an entry not a table: named, exit 2."""
         for files, said in (
             (tree(config="[tools\n"), "cannot read mise.toml — "),
-            (tree(config="tools = 1\n"), "cannot read mise.toml — tools is not an object"),
-            (tree(lock="tools = 1\n"), "cannot read mise.lock — tools is not an object"),
+            (
+                tree(config="tools = 1\n"),
+                "cannot read mise.toml — tools is not an object",
+            ),
+            (
+                tree(lock="tools = 1\n"),
+                "cannot read mise.lock — tools is not an object",
+            ),
             (
                 tree(lock='[tools]\nnode = ["26.5.1"]\n'),
                 "cannot read mise.lock — tools.node[0] is not an object",
