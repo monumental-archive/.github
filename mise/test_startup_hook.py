@@ -12,12 +12,15 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
+import io
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
+from unittest import mock
 
 import hermetic
 import startup_hook
@@ -40,6 +43,7 @@ def logs(name: str) -> str:
 class Chain(unittest.TestCase):
     """Every hook on the path runs, whatever the order and depth."""
 
+    @override
     def setUp(self) -> None:
         """Make the row's scratch and its log."""
         self.tmp = Path(tempfile.mkdtemp()).resolve()
@@ -89,18 +93,24 @@ class Chain(unittest.TestCase):
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         return self.log.read_text(encoding="utf-8").split() if self.log.exists() else []
 
+    def assert_ran(self, expected: list[str], *path: Path) -> None:
+        """Assert which hooks ran, in order, for this PYTHONPATH."""
+        self.assertEqual(expected, self.ran(*path))
+
     def test_coverage_first_then_the_leg_both_run(self) -> None:
         """The nested measurement: coverage's hook ahead of the leg's."""
-        self.assertEqual(
+        self.assert_ran(
             ["coverage", "mutation"],
-            self.ran(self.belt("coverage"), self.belt("mutation")),
+            self.belt("coverage"),
+            self.belt("mutation"),
         )
 
     def test_the_reverse_order_both_run(self) -> None:
         """The leg's hook ahead of coverage's."""
-        self.assertEqual(
+        self.assert_ran(
             ["mutation", "coverage"],
-            self.ran(self.belt("mutation"), self.belt("coverage")),
+            self.belt("mutation"),
+            self.belt("coverage"),
         )
 
     def test_a_repository_hook_runs_behind_either(self) -> None:
@@ -111,19 +121,19 @@ class Chain(unittest.TestCase):
                 hook = self.tmp / first
                 shutil.rmtree(hook, ignore_errors=True)
                 shutil.rmtree(self.tmp / "own", ignore_errors=True)
-                self.assertEqual(
-                    [first, "own"], self.ran(self.belt(first), self.own("own"))
-                )
+                self.assert_ran([first, "own"], self.belt(first), self.own("own"))
 
     def test_none_behind_is_nothing(self) -> None:
         """One hook alone: its work, and no error."""
-        self.assertEqual(["coverage"], self.ran(self.belt("coverage")))
+        self.assert_ran(["coverage"], self.belt("coverage"))
 
     def test_three_deep_all_run(self) -> None:
         """Two belt hooks and a repository's own: all three, in order."""
-        self.assertEqual(
+        self.assert_ran(
             ["coverage", "mutation", "own"],
-            self.ran(self.belt("coverage"), self.belt("mutation"), self.own("own")),
+            self.belt("coverage"),
+            self.belt("mutation"),
+            self.own("own"),
         )
 
     def test_an_error_in_the_next_hook_is_reported_as_if_it_were_first(self) -> None:
@@ -157,8 +167,17 @@ class Chain(unittest.TestCase):
             check=False,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(["cli"], self.ran(directory))
-        self.assertEqual(2, startup_hook.main([]))
+        self.assert_ran(["cli"], directory)
+
+    def test_main_writes_the_hook_in_process(self) -> None:
+        """`main([dir])` with the work on stdin; no directory is a usage error."""
+        directory = self.tmp / "main"
+        with mock.patch("sys.stdin", io.StringIO(logs("main"))):
+            self.assertEqual(0, startup_hook.main([str(directory)]))
+        self.assert_ran(["main"], directory)
+        with mock.patch("sys.stderr", io.StringIO()) as err:
+            self.assertEqual(2, startup_hook.main([]))
+        self.assertEqual("usage: startup_hook.py DIR < WORK\n", err.getvalue())
 
 
 if __name__ == "__main__":
