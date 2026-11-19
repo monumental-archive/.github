@@ -1066,9 +1066,13 @@ class CoverageFigures(unittest.TestCase):
         """Merge group and default-branch push only, named for the commit."""
         kept = step(load("ci.yml")["gate"], "Keep the coverage figures for the release")
         self.assertIn("github.event_name == 'merge_group'", kept)
+        self.assertIn("github.event_name == 'push'", kept)
         self.assertIn(
-            "github.event_name == 'push' && github.ref == 'refs/heads/main'", kept
+            "github.ref == format('refs/heads/{0}',"
+            " github.event.repository.default_branch)",
+            kept,
         )
+        self.assertNotIn("refs/heads/main", kept)
         self.assertNotIn("pull_request", kept)
         self.assertIn("name: coverage-figures-${{ github.sha }}", kept)
         self.assertIn(

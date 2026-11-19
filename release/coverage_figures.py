@@ -26,16 +26,28 @@ a slower release, never a floor derived from another commit's figure.
 The ratchet law is not here; `coverage_floor.py` judges the figure
 whichever way it arrived.
 
-stdlib only.
+stdlib and the belt's decoded.py only.
 """
 
 import io
-import json
 import re
 import sys
 import zipfile
 from dataclasses import dataclass
-from typing import TypeIs
+from pathlib import Path
+
+# The canon's one JSON loader and its readers, beside this tree in
+# mise/ (#1676). A missing sibling is named, never a bare traceback.
+# Appended, so this file's own directory and the standard library come
+# first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+try:
+    import decoded
+except ModuleNotFoundError as missing:
+    if missing.name != "decoded":
+        raise
+    msg = "coverage_figures: mise/decoded.py did not arrive in the canon tree"
+    raise SystemExit(msg) from None
 
 LABEL = "release:coverage-floor"
 FILE = "coverage-figures.txt"
@@ -71,27 +83,17 @@ def name(sha: str) -> str:
     return f"coverage-figures-{sha}"
 
 
-def field(record: object, key: str) -> object:
-    """Read one key of a decoded JSON object.
+def ident(value: object) -> int | None:
+    """Read a decoded id: an integer, never a boolean (`as_int`'s rule).
 
     Returns:
-        The value, or None when the record is not an object or lacks it.
+        The id, or None when the value is not one.
 
     """
-    if not isinstance(record, dict):
+    try:
+        return decoded.as_int(value, "id")
+    except decoded.UndecodableError:
         return None
-    value: object = record.get(key)
-    return value
-
-
-def number(value: object) -> TypeIs[int]:
-    """Say whether a decoded value is an id: an integer, never a boolean.
-
-    Returns:
-        True for an int that is not a bool (JSON `true` decodes to one).
-
-    """
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def choose(listing: object, sha: str) -> Choice:
@@ -105,34 +107,41 @@ def choose(listing: object, sha: str) -> Choice:
         RefusedError: no such artifact, or only ones for another commit.
 
     """
-    entries = field(listing, "artifacts")
-    if not isinstance(entries, list):
+    entries = listing.get("artifacts") if decoded.is_object(listing) else None
+    if not decoded.is_array(entries):
         msg = "the artifacts listing is not one GitHub writes"
         raise RefusedError(msg)
     named: list[tuple[int, int, str]] = []
-    entry: object
     for entry in entries:
-        ident, run = field(entry, "id"), field(field(entry, "workflow_run"), "id")
-        head = field(field(entry, "workflow_run"), "head_sha")
+        if not decoded.is_object(entry):
+            continue
+        kept = entry.get("workflow_run")
+        if not decoded.is_object(kept):
+            continue
+        artifact, run, head = (
+            ident(entry.get("id")),
+            ident(kept.get("id")),
+            kept.get("head_sha"),
+        )
         if (
-            field(entry, "name") != name(sha)
-            or field(entry, "expired") is not False
-            or not number(ident)
-            or not number(run)
+            entry.get("name") != name(sha)
+            or entry.get("expired") is not False
+            or artifact is None
+            or run is None
             or not isinstance(head, str)
         ):
             continue
-        named.append((ident, run, head))
+        named.append((artifact, run, head))
     if not named:
         msg = f"no unexpired gate artifact {name(sha)}"
         raise RefusedError(msg)
-    ours = [(ident, run) for ident, run, head in named if head == sha]
+    ours = [(artifact, run) for artifact, run, head in named if head == sha]
     if not ours:
         others = ", ".join(sorted({head for _, _, head in named}))
         msg = f"the artifact {name(sha)} was kept by a run of {others}, not {sha}"
         raise RefusedError(msg)
-    ident, run = max(ours)
-    return Choice(ident, run)
+    artifact, run = max(ours)
+    return Choice(artifact, run)
 
 
 def judge(run: object, sha: str) -> str:
@@ -146,20 +155,23 @@ def judge(run: object, sha: str) -> str:
             complete successfully.
 
     """
-    ident = field(run, "id")
-    head, event = field(run, "head_sha"), field(run, "event")
-    status, conclusion = field(run, "status"), field(run, "conclusion")
+    if not decoded.is_object(run):
+        msg = "the run is not one GitHub writes"
+        raise RefusedError(msg)
+    number = run.get("id")
+    head, event = run.get("head_sha"), run.get("event")
+    status, conclusion = run.get("status"), run.get("conclusion")
     if head != sha:
-        msg = f"run {ident} is for {head}, not {sha}"
+        msg = f"run {number} is for {head}, not {sha}"
         raise RefusedError(msg)
     if event not in EVENTS:
-        msg = f"run {ident} is a {event} run, not merge_group or push"
+        msg = f"run {number} is a {event} run, not merge_group or push"
         raise RefusedError(msg)
     if status != "completed" or conclusion != "success":
-        msg = f"run {ident} is {status}/{conclusion}, not completed/success"
+        msg = f"run {number} is {status}/{conclusion}, not completed/success"
         raise RefusedError(msg)
-    url = field(run, "html_url")
-    return url if isinstance(url, str) else f"run {ident}"
+    url = run.get("html_url")
+    return url if isinstance(url, str) else f"run {number}"
 
 
 def figures(text: str) -> str:
@@ -201,22 +213,22 @@ def unpack(data: bytes) -> str:
         raise RefusedError(msg) from error
 
 
-def decoded(data: bytes) -> object:
-    """Decode a JSON response.
+def parse(data: bytes) -> object:
+    """Decode a JSON response through the canon's one loader.
 
     Returns:
-        The document, as an object to be checked.
+        The document, to be narrowed by the decision that reads it.
 
     Raises:
-        RefusedError: the response is not JSON.
+        RefusedError: the response is not strict JSON; decoded.py says
+            why.
 
     """
     try:
-        document: object = json.loads(data)
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        return decoded.load_json(data)
+    except decoded.UndecodableError as error:
         msg = f"the forge answered with something that is not JSON ({error})"
-        raise RefusedError(msg) from error
-    return document
+        raise RefusedError(msg) from None
 
 
 def answer(command: str, sha: str, data: bytes) -> str:
@@ -229,10 +241,10 @@ def answer(command: str, sha: str, data: bytes) -> str:
 
     """
     if command == "choose":
-        choice = choose(decoded(data), sha)
+        choice = choose(parse(data), sha)
         return f"{choice.artifact} {choice.run}\n"
     if command == "judge":
-        return judge(decoded(data), sha) + "\n"
+        return judge(parse(data), sha) + "\n"
     return figures(unpack(data))
 
 

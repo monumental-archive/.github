@@ -292,6 +292,7 @@ class Derive(unittest.TestCase):
             "release/derive-coverage-floor.sh",
             "release/coverage_figures.py",
             "mise/coverage_floor.py",
+            "mise/decoded.py",
         ):
             shutil.copy(CANON / rel, canon / rel)
         self.stubs = self.base / "stubs"

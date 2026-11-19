@@ -21,6 +21,7 @@ import unittest
 from typing import TYPE_CHECKING
 
 import coverage_figures as figures
+import decoded
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
@@ -65,13 +66,16 @@ def ours(entry: object) -> bool:
         kept by a run of SHA.
 
     """
-    run = figures.field(entry, "workflow_run")
+    if not decoded.is_object(entry):
+        return False
+    run = entry.get("workflow_run")
     return (
-        figures.field(entry, "name") == figures.name(SHA)
-        and figures.field(entry, "expired") is False
-        and figures.number(figures.field(entry, "id"))
-        and figures.number(figures.field(run, "id"))
-        and figures.field(run, "head_sha") == SHA
+        decoded.is_object(run)
+        and entry.get("name") == figures.name(SHA)
+        and entry.get("expired") is False
+        and figures.ident(entry.get("id")) is not None
+        and figures.ident(run.get("id")) is not None
+        and run.get("head_sha") == SHA
     )
 
 
@@ -83,9 +87,9 @@ class TheChoiceIsThisCommits(unittest.TestCase):
         """The pick is the newest eligible entry, or a refusal when none is."""
         ids: list[int] = []
         for entry in entries:
-            ident = figures.field(entry, "id")
-            if ours(entry) and figures.number(ident):
-                ids.append(ident)
+            got = figures.ident(entry.get("id")) if decoded.is_object(entry) else None
+            if ours(entry) and got is not None:
+                ids.append(got)
         try:
             choice = figures.choose({"artifacts": list(entries)}, SHA)
         except figures.RefusedError:
