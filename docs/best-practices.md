@@ -21,13 +21,17 @@ Standing at the last re-score: **passing 100% (earned), silver 96%, gold
 95%.** Treat those as the high-water mark to check against, never as the
 current reading — fetch `projects/14058.json` before asserting a number.
 
-**The entry drifts, and nothing watches it.** It was answered at 08:58Z
-and was wrong by five criteria at 10:10Z, when a single pull request
-shipped `GOVERNANCE.md`, two new `SECURITY.md` sections and
-`CONTRIBUTING.md` item 3. `audit:badges` watches `badge_percentage_0`
-and `lost_*` — it cannot see a document that turns an Unmet criterion
-Met. Until something diffs `.bestpractices.json` against the live entry,
-re-score by hand whenever a change lands that a criterion would notice.
+**The entry drifts, and `audit:bestpractices` watches it.** It was
+answered at 08:58Z and was wrong by five criteria at 10:10Z, when a
+single pull request shipped `GOVERNANCE.md`, two new `SECURITY.md`
+sections and `CONTRIBUTING.md` item 3. `audit:badges` watches
+`badge_percentage_0` and `lost_*` — it cannot see a document that turns
+an Unmet criterion Met. `audit:bestpractices` (#1536), a Monday leg of
+`audit.yml` here and of `repo-audit.yml` in every caller, compares each
+`_status` and `_justification` in the repository's `.bestpractices.json`
+with the entry its README's shield names, and is red by criterion on
+any difference. Re-score into the file whenever a change lands that a
+criterion would notice; the audit's red is what says the form is owed.
 
 ## Passing
 
@@ -247,8 +251,19 @@ Two supported mechanisms, both better than the form:
   the badge app reads it from whichever repo the entry's `repo_url`
   names. Copying is deliberate, per repo. It only ever *proposes*: the
   app runs automations when you first edit a section, or when you click
-  **Save (and continue) 🤖** to re-trigger after changing the file, and
-  a human still submits.
+  **Save (and continue) 🤖** to re-trigger after changing the file. The
+  site has no write API for answers, so a session submits, from the
+  file, in the owner's signed-in browser, and `audit:bestpractices` is
+  what checks it landed.
+
+  **The step when `audit:bestpractices` is red.** The file is the
+  source, so the fix is never editing the file to match the site. Open
+  the entry's edit form, and in each section holding a criterion the
+  red names click **Save (and continue) 🤖**. That fills only blank or
+  unknown fields (above), so a criterion already answered on the site
+  is set by hand to the file's status and justification. Check every
+  value against the file, submit, and dispatch the audit: green is the
+  proof the entry caught up.
 
   Check it landed rather than assuming, because every failure mode above
   is silent — after the first edit, the Baseline sections should show
