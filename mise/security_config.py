@@ -48,6 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+import decoded
+
 GH = shutil.which("gh") or "gh"
 
 TAG = "audit:security-config"
@@ -108,11 +110,45 @@ class Fetch(Protocol):
 
 @dataclass(frozen=True)
 class Records:
-    """The two records and the roster, as read from the tree."""
+    """The two records and the roster's names, as read from the tree.
 
-    public: dict
-    private: dict
-    roster: dict
+    A record is the settings object as written; its values are compared
+    with live as JSON, never read, so they stay decoded values.
+    """
+
+    public: dict[str, object]
+    private: dict[str, object]
+    roster: tuple[str, ...]
+
+
+def read_records(public: object, private: object, roster: object) -> Records:
+    """Decode the two records and the roster.
+
+    A record that is not an object, or a roster without its names,
+    raises `UndecodableError` naming the field.
+
+    Returns:
+        The records.
+
+    """
+    return Records(
+        public=decoded.as_object(public, "org-default.json"),
+        private=decoded.as_object(private, "org-private.json"),
+        roster=roster_names(roster),
+    )
+
+
+def pages(endpoint: str, body: object) -> list[object]:
+    """Flatten a paginated read's pages into one list.
+
+    Returns:
+        Every item of every page, in order.
+
+    """
+    out: list[object] = []
+    for page in decoded.as_array(body, f"{endpoint}: the pages"):
+        out.extend(decoded.as_array(page, f"{endpoint}: a page"))
+    return out
 
 
 def gh_fetch(endpoint: str, *, paginate: bool = False) -> tuple[int, object]:
@@ -124,6 +160,10 @@ def gh_fetch(endpoint: str, *, paginate: bool = False) -> tuple[int, object]:
         is empty; failure is the HTTP status gh reports, or 0 when it
         reports none, with None for the body.
 
+    Raises:
+        UndecodableError: the body is not strict JSON, or a page of a
+            paginated read is not a list; the text names the endpoint.
+
     """
     args = [GH, "api", endpoint]
     if paginate:
@@ -132,13 +172,16 @@ def gh_fetch(endpoint: str, *, paginate: bool = False) -> tuple[int, object]:
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         match = re.search(r"\(HTTP (\d{3})\)", result.stderr)
-        return (int(match.group(1)) if match else 0, None)
+        code: str = match.group(1) if match else "0"
+        return (int(code), None)
     if not result.stdout.strip():
         return (HTTP_NO_CONTENT, None)
-    body = json.loads(result.stdout)
-    if paginate:
-        body = [item for page in body for item in page]
-    return (HTTP_OK, body)
+    try:
+        body = decoded.load_json(result.stdout)
+    except decoded.UndecodableError as err:
+        msg = f"{endpoint}: {err}"
+        raise decoded.UndecodableError(msg) from None
+    return (HTTP_OK, pages(endpoint, body) if paginate else body)
 
 
 class Verdict:
@@ -166,14 +209,16 @@ def describe(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def compare_record(record: dict, live: dict, cid: object) -> list[str]:
+def compare_record(
+    record: dict[str, object], live: dict[str, object], cid: object
+) -> list[str]:
     """Compare the public record with the live configuration both ways.
 
     Returns:
         One finding per disagreeing field; empty when they agree.
 
     """
-    found = []
+    found: list[str] = []
     stated = {k: v for k, v in record.items() if k not in OWN_FIELDS}
     for key, want in sorted(stated.items()):
         if key not in live:
@@ -195,32 +240,44 @@ def compare_record(record: dict, live: dict, cid: object) -> list[str]:
     return found
 
 
-def roster_names(roster: dict) -> list[str]:
+def roster_names(roster: object) -> tuple[str, ...]:
     """Read the population's names from the roster.
 
     Returns:
         The repository names, in roster order.
 
     Raises:
-        ValueError: when the roster has no population list.
+        UndecodableError: the roster, its population or an entry is
+            wrongly shaped, or the population list is absent or empty.
 
     """
-    repos = roster.get("population", {}).get("repositories")
-    if not isinstance(repos, list) or not repos:
+    doc = decoded.as_object(roster, "the roster")
+    population = decoded.as_object(doc.get("population", {}), "population")
+    repos = population.get("repositories")
+    if not decoded.is_array(repos) or not repos:
         msg = "population.repositories is absent or empty"
-        raise ValueError(msg)
-    return [r["repo"] for r in repos]
+        raise decoded.UndecodableError(msg)
+    names: list[str] = []
+    for i, raw in enumerate(repos):
+        where = f"population.repositories[{i}]"
+        entry = decoded.as_object(raw, where)
+        names.append(decoded.as_str(entry.get("repo"), f"{where}.repo"))
+    return tuple(names)
 
 
-def repo_status(sa: dict, key: str) -> str | None:
+def repo_status(sa: dict[str, object], key: str) -> str | None:
     """Read one product's status from `security_and_analysis`.
+
+    A status that is not a string raises `UndecodableError`.
 
     Returns:
         The status, or None when the repository reports no such key.
 
     """
     entry = sa.get(key)
-    return entry.get("status") if isinstance(entry, dict) else None
+    if not decoded.is_object(entry) or "status" not in entry:
+        return None
+    return decoded.as_str(entry["status"], f"security_and_analysis.{key}.status")
 
 
 class Audit:
@@ -242,15 +299,27 @@ class Audit:
         Returns:
             Repository name -> private, or None when the read was blind.
 
+        Raises:
+            UndecodableError: a listed repository is wrongly shaped.
+
         """
         endpoint = f"orgs/{self.owner}/repos?per_page=100"
         status, listing = self.fetch(endpoint, paginate=True)
-        if status != HTTP_OK or not isinstance(listing, list):
+        if status != HTTP_OK or not decoded.is_array(listing):
             self.verdict.cannot(endpoint, status, LISTING_GRANT)
             return None
-        return {r["name"]: bool(r.get("private")) for r in listing}
+        out: dict[str, bool] = {}
+        for i, raw in enumerate(listing):
+            where = f"{endpoint}: [{i}]"
+            row = decoded.as_object(raw, where)
+            private = row.get("private", False)
+            if not isinstance(private, bool):
+                msg = f"{where}.private is not a boolean"
+                raise decoded.UndecodableError(msg)
+            out[decoded.as_str(row.get("name"), f"{where}.name")] = private
+        return out
 
-    def public_configuration(self) -> dict | None:
+    def public_configuration(self) -> dict[str, object] | None:
         """Derive the configuration the org gives new public repositories.
 
         Returns:
@@ -259,21 +328,25 @@ class Audit:
         """
         endpoint = f"orgs/{self.owner}/code-security/configurations/defaults"
         status, defaults = self.fetch(endpoint)
-        if status != HTTP_OK or not isinstance(defaults, list):
+        if status != HTTP_OK or not decoded.is_array(defaults):
             self.verdict.cannot(endpoint, status, ORG_GRANT)
             return None
+        rows = [
+            decoded.as_object(d, f"{endpoint}: [{i}]") for i, d in enumerate(defaults)
+        ]
         hits = [
             d.get("configuration")
-            for d in defaults
+            for d in rows
             if d.get("default_for_new_repos") in {"all", "public"}
         ]
-        if len(hits) != 1 or not isinstance(hits[0], dict):
+        hit = hits[0] if len(hits) == 1 else None
+        if not decoded.is_object(hit):
             self.verdict.red.append(
                 f"{len(hits)} configurations are the default for new public "
                 "repositories; org-default.json describes exactly one"
             )
             return None
-        return hits[0]
+        return hit
 
     def judge_configuration(self) -> None:
         """Compare the record with the derived configuration; read its repos."""
@@ -294,10 +367,17 @@ class Audit:
             "/repositories?per_page=100"
         )
         status, rows = self.fetch(endpoint, paginate=True)
-        if status != HTTP_OK or not isinstance(rows, list):
+        if status != HTTP_OK or not decoded.is_array(rows):
             self.verdict.cannot(endpoint, status, ORG_GRANT)
             return
-        self.attached = {r["repository"]["name"]: r.get("status", "?") for r in rows}
+        attached: dict[str, str] = {}
+        for i, raw in enumerate(rows):
+            where = f"{endpoint}: [{i}]"
+            row = decoded.as_object(raw, where)
+            repo = decoded.as_object(row.get("repository"), f"{where}.repository")
+            name = decoded.as_str(repo.get("name"), f"{where}.repository.name")
+            attached[name] = decoded.as_str(row.get("status", "?"), f"{where}.status")
+        self.attached = attached
 
     def judge_public(self, repo: str) -> None:
         """Judge a public member: attached to the configuration, enforced."""
@@ -329,14 +409,14 @@ class Audit:
         record = self.records.private
         endpoint = f"repos/{self.owner}/{repo}"
         status, body = self.fetch(endpoint)
-        sa = body.get("security_and_analysis") if isinstance(body, dict) else None
-        if status != HTTP_OK or not isinstance(sa, dict):
+        sa = body.get("security_and_analysis") if decoded.is_object(body) else None
+        if status != HTTP_OK or not decoded.is_object(sa):
             # GitHub omits the block, rather than refusing the read, when
             # the token lacks admin on the repository.
             why = status if status != HTTP_OK else 0
             self.verdict.cannot(f"{endpoint} security_and_analysis", why, REPO_GRANT)
             return None
-        found = []
+        found: list[str] = []
         for field, key in REPO_KEYS.items():
             if field not in record:
                 continue
@@ -396,7 +476,7 @@ class Audit:
             The collected verdict.
 
         """
-        names = roster_names(self.records.roster)
+        names = self.records.roster
         private = self.visibility()
         if private is None:
             return self.verdict
@@ -440,6 +520,15 @@ def report(verdict: Verdict) -> int:
     return 1 if verdict.red or verdict.blind else 0
 
 
+class Args(argparse.Namespace):
+    """The command line, typed where argparse writes it."""
+
+    owner: str
+    record: Path
+    private_record: Path
+    roster: Path
+
+
 def main(argv: list[str] | None = None, fetch: Fetch = gh_fetch) -> int:
     """Load the records and the roster, then judge them against live.
 
@@ -452,15 +541,15 @@ def main(argv: list[str] | None = None, fetch: Fetch = gh_fetch) -> int:
     parser.add_argument("--record", type=Path, required=True)
     parser.add_argument("--private-record", type=Path, required=True)
     parser.add_argument("--roster", type=Path, required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     try:
-        records = Records(
-            public=json.loads(args.record.read_text(encoding="utf-8")),
-            private=json.loads(args.private_record.read_text(encoding="utf-8")),
-            roster=json.loads(args.roster.read_text(encoding="utf-8")),
+        records = read_records(
+            public=decoded.load_json(args.record.read_bytes()),
+            private=decoded.load_json(args.private_record.read_bytes()),
+            roster=decoded.load_json(args.roster.read_bytes()),
         )
         verdict = Audit(args.owner, records, fetch).run()
-    except (OSError, ValueError, KeyError, AttributeError, TypeError) as err:
+    except (OSError, ValueError) as err:
         print(f"{TAG}: cannot read an input: {err}", file=sys.stderr)
         return 1
     return report(verdict)

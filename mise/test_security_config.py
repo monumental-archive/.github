@@ -32,9 +32,12 @@ stdlib `unittest`, the belt's one test idiom.
 import copy
 import io
 import json
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import security_config as sc
 
@@ -97,7 +100,7 @@ def records(*, agreeing_private: bool = True) -> sc.Records:
         # The live repository has security updates on; see the module
         # docstring. Every other field is the tree's own record.
         private["dependabot_security_updates"] = "enabled"
-    return sc.Records(
+    return sc.read_records(
         public=load(TREE / "security" / "org-default.json"),
         private=private,
         roster=load(TREE / "slsa" / "assert-policy.json"),
@@ -319,6 +322,137 @@ class SecurityConfigTest(unittest.TestCase):
         rc, _, err = run(live, records())
         self.assertEqual(rc, 1)
         self.assertIn("signer: in the roster and not in the org listing", err)
+
+
+class ShapeTest(unittest.TestCase):
+    """An input or a live answer of the wrong shape is refused by name."""
+
+    def test_records_and_roster(self) -> None:
+        """Each input field the audit reads, wrongly shaped in turn."""
+        roster = load(TREE / "slsa" / "assert-policy.json")
+        names = sc.roster_names
+        repos = "population.repositories"
+        rows = [
+            (sc.read_records, ([], {}, roster), "org-default.json is not an object"),
+            (sc.read_records, ({}, 1, roster), "org-private.json is not an object"),
+            (names, ([],), "the roster is not an object"),
+            (names, ({"population": []},), "population is not an object"),
+            (names, ({"population": {}},), f"{repos} is absent or empty"),
+            (
+                names,
+                ({"population": {"repositories": []}},),
+                f"{repos} is absent or empty",
+            ),
+            (
+                names,
+                ({"population": {"repositories": ["x"]}},),
+                f"{repos}[0] is not an object",
+            ),
+            (
+                names,
+                ({"population": {"repositories": [{"r": 1}]}},),
+                f"{repos}[0].repo is not a string",
+            ),
+            (
+                sc.repo_status,
+                ({"k": {"status": 1}}, "k"),
+                "security_and_analysis.k.status is not a string",
+            ),
+            (sc.pages, ("e", {}), "e: the pages is not a list"),
+            (sc.pages, ("e", [[1], 2]), "e: a page is not a list"),
+        ]
+        for call, args, message in rows:
+            with (
+                self.subTest(message=message),
+                self.assertRaises(sc.decoded.UndecodableError) as cm,
+            ):
+                call(*args)
+            self.assertEqual(str(cm.exception), message)
+
+    def test_status_readings(self) -> None:
+        """A status is read; an absent block or status is no reading."""
+        self.assertEqual(sc.repo_status({"k": {"status": "on"}}, "k"), "on")
+        self.assertIsNone(sc.repo_status({"k": {}}, "k"))
+        self.assertIsNone(sc.repo_status({"k": "on"}, "k"))
+        self.assertEqual(sc.pages("e", [[1], [], [2, 3]]), [1, 2, 3])
+
+    def test_live_answers(self) -> None:
+        """Each live field the audit reads, wrongly shaped in turn."""
+        cases: list[tuple[str, object, str]] = [
+            (LISTING, [1], f"{LISTING}: [0] is not an object"),
+            (
+                LISTING,
+                [{"name": "x", "private": "no"}],
+                f"{LISTING}: [0].private is not a boolean",
+            ),
+            (LISTING, [{"private": True}], f"{LISTING}: [0].name is not a string"),
+            (DEFAULTS, ["x"], f"{DEFAULTS}: [0] is not an object"),
+            (
+                ATTACHED,
+                [{"status": "enforced"}],
+                f"{ATTACHED}: [0].repository is not an object",
+            ),
+            (
+                ATTACHED,
+                [{"repository": {"name": 1}}],
+                f"{ATTACHED}: [0].repository.name is not a string",
+            ),
+            (
+                ATTACHED,
+                [{"repository": {"name": "x"}, "status": 2}],
+                f"{ATTACHED}: [0].status is not a string",
+            ),
+        ]
+        for endpoint, body, message in cases:
+            live = Live()
+            live.answers[endpoint] = (200, body)
+            audit = sc.Audit(OWNER, records(), live)
+            with (
+                self.subTest(message=message),
+                self.assertRaises(sc.decoded.UndecodableError) as cm,
+            ):
+                audit.run()
+            self.assertEqual(str(cm.exception), message)
+
+    def test_gh_reads_strictly_and_names_the_endpoint(self) -> None:
+        """A duplicate key in gh's output is refused with the endpoint."""
+        done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
+        with (
+            mock.patch.object(sc.subprocess, "run", return_value=done),
+            self.assertRaises(sc.decoded.UndecodableError) as cm,
+        ):
+            sc.gh_fetch("x/y")
+        self.assertEqual(str(cm.exception), 'x/y: duplicate key "a"')
+        pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
+        with mock.patch.object(sc.subprocess, "run", return_value=pages):
+            self.assertEqual(sc.gh_fetch("x/y", paginate=True), (200, [1, 2]))
+
+    def test_main_reports_a_refusal_as_an_unreadable_input(self) -> None:
+        """The refusal exits as the audit's other input errors exit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "roster.json"
+            bad.write_text('{"population": {"repositories": [{}]}}', encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = sc.main(
+                    [
+                        "--owner",
+                        OWNER,
+                        "--record",
+                        str(TREE / "security" / "org-default.json"),
+                        "--private-record",
+                        str(TREE / "security" / "org-private.json"),
+                        "--roster",
+                        str(bad),
+                    ],
+                    Live(),
+                )
+        self.assertEqual(rc, 1)
+        self.assertEqual(
+            err.getvalue(),
+            "audit:security-config: cannot read an input: "
+            "population.repositories[0].repo is not a string\n",
+        )
 
 
 if __name__ == "__main__":

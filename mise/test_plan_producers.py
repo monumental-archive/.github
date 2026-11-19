@@ -21,6 +21,7 @@ stdlib `unittest`, run through the gate as `mise run test`.
 
 import io
 import json
+import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -34,7 +35,7 @@ WORKFLOWS = REPO / ".github" / "workflows"
 
 # The smallest policy carrying the shape under test: one class owing one
 # planned document, one owing an unplanned asset, one owing nothing.
-POLICY_UNDER_TEST = {
+POLICY_DOC = {
     "evidence": {
         "classes": {
             "rust-crate": {
@@ -54,6 +55,8 @@ POLICY_UNDER_TEST = {
         },
     },
 }
+
+POLICY_UNDER_TEST = pp.read_policy(POLICY_DOC)
 
 CRATE_LEG = """\
 name: build-rust-crate
@@ -108,14 +111,14 @@ def crate(leg: str) -> dict[str, str]:
     return tree(**{"build-rust-crate": leg, "build-pgrx-extension": PGRX_LEG})
 
 
-def delivered() -> tuple[dict, dict[str, str]]:
+def delivered() -> tuple[pp.Policy, dict[str, str]]:
     """Read the canon's real policy and its real producer surface.
 
     Returns:
         The decoded policy and the workflow files the check reads.
 
     """
-    policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    policy = pp.read_policy(json.loads(POLICY.read_text(encoding="utf-8")))
     paths = [*sorted(WORKFLOWS.glob("build-*.yml")), WORKFLOWS / "publish.yml"]
     return policy, {
         str(p.relative_to(REPO)): p.read_text(encoding="utf-8") for p in paths
@@ -234,10 +237,10 @@ class JoinTest(unittest.TestCase):
 
     def test_a_rename_on_the_policy_side_only_is_refused(self) -> None:
         """The same drift, arrived at from the other file."""
-        policy = json.loads(json.dumps(POLICY_UNDER_TEST))
+        policy = json.loads(json.dumps(POLICY_DOC))
         entry = policy["evidence"]["classes"]["rust-crate"]["assetPrefixes"][0]
         entry["prefix"] = "sbom-crates-"
-        findings = pp.judge(policy, WHOLE)
+        findings = pp.judge(pp.read_policy(policy), WHOLE)
         self.assertTrue(any("no such planned obligation" in f for f in findings))
         self.assertTrue(any("sbom-crates-" in f for f in findings))
 
@@ -342,7 +345,7 @@ class MainTest(unittest.TestCase):
     def test_a_policy_with_no_planned_obligations_is_nothing_to_join(self) -> None:
         """An adopter's policy that plans nothing is not a defect."""
         empty = {"evidence": {"classes": {"source-archive": {"bundles": ["a"]}}}}
-        self.assertEqual(pp.obligations(empty), set())
+        self.assertEqual(pp.obligations(pp.read_policy(empty)), set())
 
     def test_an_unreadable_policy_is_this_checks_own_input(self) -> None:
         """A policy that will not decode stops the check, loudly."""
@@ -354,6 +357,95 @@ class MainTest(unittest.TestCase):
         ):
             self.assertEqual(pp.main(), 1)
         self.assertIn("does not read as JSON", err.getvalue())
+
+
+class PolicyShapeTest(unittest.TestCase):
+    """A policy field of the wrong shape is refused by its path."""
+
+    def test_each_wrong_shape_names_its_field(self) -> None:
+        """Every field the check reads, wrongly shaped in turn."""
+        rows = [
+            ([], "the policy is not an object"),
+            ({"evidence": []}, "evidence is not an object"),
+            ({"evidence": {"classes": 1}}, "evidence.classes is not an object"),
+            (
+                {"evidence": {"classes": {"x": []}}},
+                "evidence.classes.x is not an object",
+            ),
+            (
+                {"evidence": {"classes": {"x": {"assetPrefixes": {}}}}},
+                "evidence.classes.x.assetPrefixes is not a list",
+            ),
+            (
+                {"evidence": {"classes": {"x": {"assetPrefixes": ["p"]}}}},
+                "evidence.classes.x.assetPrefixes[0] is not an object",
+            ),
+            (
+                {"evidence": {"classes": {"x": {"assetPrefixes": [{"prefix": 1}]}}}},
+                "evidence.classes.x.assetPrefixes[0].prefix is not a string",
+            ),
+            (
+                {
+                    "evidence": {
+                        "classes": {
+                            "x": {"assetPrefixes": [{"prefix": "p", "planned": 1}]}
+                        }
+                    }
+                },
+                "evidence.classes.x.assetPrefixes[0].planned is not a boolean",
+            ),
+        ]
+        for doc, message in rows:
+            refused = pp.decoded.UndecodableError
+            with self.subTest(doc=doc), self.assertRaises(refused) as cm:
+                pp.read_policy(doc)
+            self.assertEqual(str(cm.exception), message)
+
+    def test_the_fixture_decodes(self) -> None:
+        """Classes are every declared class; obligations only the planned."""
+        self.assertEqual(
+            POLICY_UNDER_TEST,
+            pp.Policy(
+                frozenset({"rust-crate", "pgrx-extension", "source-archive"}),
+                frozenset({
+                    ("rust-crate", "sbom-cargo-"),
+                    ("pgrx-extension", "sbom-pgrx-"),
+                }),
+            ),
+        )
+
+    def test_main_refuses_a_wrongly_shaped_policy(self) -> None:
+        """The refusal reaches the exit, by file and field."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "policy.json"
+            bad.write_text('{"evidence": {"classes": []}}', encoding="utf-8")
+            err = io.StringIO()
+            with (
+                redirect_stderr(err),
+                mock.patch("sys.argv", ["plan_producers.py", "--policy", str(bad)]),
+            ):
+                self.assertEqual(pp.main(), 1)
+        self.assertEqual(
+            err.getvalue(),
+            f"plan-producers: {bad}: evidence.classes is not an object\n",
+        )
+
+    def test_main_refuses_a_duplicate_key_as_json(self) -> None:
+        """The strict loader's refusal keeps the check's own words."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "policy.json"
+            bad.write_text('{"evidence": {}, "evidence": {}}', encoding="utf-8")
+            err = io.StringIO()
+            with (
+                redirect_stderr(err),
+                mock.patch("sys.argv", ["plan_producers.py", "--policy", str(bad)]),
+            ):
+                self.assertEqual(pp.main(), 1)
+        self.assertEqual(
+            err.getvalue(),
+            f"plan-producers: {bad} does not read as JSON\n"
+            '  duplicate key "evidence"\n',
+        )
 
 
 if __name__ == "__main__":
