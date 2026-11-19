@@ -70,6 +70,16 @@ def pin(version: str, *, active: bool = True, installed: bool = True) -> dict:
     return {"version": version, "active": active, "installed": installed}
 
 
+def typed(packages: list[dict]) -> list[msrv_plan.Package]:
+    """Decode packages the way the check decodes cargo metadata.
+
+    Returns:
+        The packages.
+
+    """
+    return [msrv_plan.package(p, p["name"]) for p in packages]
+
+
 class ParseVersionTest(unittest.TestCase):
     """Reading a bare version. Mutation: accept any length of parts."""
 
@@ -128,7 +138,7 @@ class MembersTest(unittest.TestCase):
                 "rust_version": "1.31",
             },
         )
-        self.assertEqual([pkg["name"] for pkg in msrv_plan.members(doc)], ["edtf-core"])
+        self.assertEqual([pkg.name for pkg in msrv_plan.members(doc)], ["edtf-core"])
 
     def test_an_empty_workspace_has_no_members(self) -> None:
         """A manifest cargo reports nothing for is not a silent pass."""
@@ -141,7 +151,7 @@ class PromisesTest(unittest.TestCase):
     def test_members_sharing_a_minimum_are_one_group(self) -> None:
         """The org shape: one rust-version in [workspace.package]."""
         groups, unreachable, unreadable = msrv_plan.promises(
-            [member("edtf-core", "1.82"), member("edtf-cli", "1.82")],
+            typed([member("edtf-core", "1.82"), member("edtf-cli", "1.82")]),
             set(),
         )
         self.assertEqual(unreachable, [])
@@ -154,7 +164,7 @@ class PromisesTest(unittest.TestCase):
     def test_the_two_written_forms_land_in_one_group(self) -> None:
         """A member writing 1.82.0 promises what one writing 1.82 does."""
         groups, _unreachable, _unreadable = msrv_plan.promises(
-            [member("a", "1.82"), member("b", "1.82.0")],
+            typed([member("a", "1.82"), member("b", "1.82.0")]),
             set(),
         )
         self.assertEqual(list(groups), [(1, 82, 0)])
@@ -162,7 +172,7 @@ class PromisesTest(unittest.TestCase):
     def test_differing_minimums_are_separate_groups(self) -> None:
         """Each promise is verified at its own toolchain, never the other's."""
         groups, _unreachable, _unreadable = msrv_plan.promises(
-            [member("a", "1.82"), member("b", "1.90")],
+            typed([member("a", "1.82"), member("b", "1.90")]),
             set(),
         )
         self.assertEqual(sorted(groups), [(1, 82, 0), (1, 90, 0)])
@@ -170,7 +180,7 @@ class PromisesTest(unittest.TestCase):
     def test_a_member_declaring_nothing_is_not_checked(self) -> None:
         """No promise, nothing to keep — and no toolchain to demand."""
         groups, unreachable, _unreadable = msrv_plan.promises(
-            [member("a"), member("b", None)],
+            typed([member("a"), member("b", None)]),
             set(),
         )
         self.assertEqual(groups, {})
@@ -179,7 +189,7 @@ class PromisesTest(unittest.TestCase):
     def test_an_excluded_member_is_reported_and_not_checked(self) -> None:
         """edtf-postgres exactly: promises 1.82, gate cannot compile it."""
         groups, unreachable, _unreadable = msrv_plan.promises(
-            [member("edtf-core", "1.82"), member("edtf-postgres", "1.82")],
+            typed([member("edtf-core", "1.82"), member("edtf-postgres", "1.82")]),
             {"edtf-postgres"},
         )
         self.assertEqual(groups, {(1, 82, 0): ["edtf-core@1.3.1"]})
@@ -190,7 +200,7 @@ class PromisesTest(unittest.TestCase):
     def test_an_excluded_member_declaring_nothing_says_nothing(self) -> None:
         """The note exists to name an unkept promise, not every exclusion."""
         _groups, unreachable, _unreadable = msrv_plan.promises(
-            [member("lab-pg")],
+            typed([member("lab-pg")]),
             {"lab-pg"},
         )
         self.assertEqual(unreachable, [])
@@ -198,7 +208,7 @@ class PromisesTest(unittest.TestCase):
     def test_a_declaration_this_cannot_compare_is_refused(self) -> None:
         """Guessing would verify a promise the check never read."""
         _groups, _unreachable, unreadable = msrv_plan.promises(
-            [member("a", "stable")],
+            typed([member("a", "stable")]),
             set(),
         )
         self.assertEqual(len(unreadable), 1)
@@ -210,30 +220,38 @@ class PinsTest(unittest.TestCase):
 
     def test_an_active_installed_pin_counts(self) -> None:
         """The ordinary state after `mise install`."""
-        pinned, absent = msrv_plan.pins([pin("1.82.0")])
+        pinned, absent = msrv_plan.pins(msrv_plan.toolchains([pin("1.82.0")]))
         self.assertEqual(pinned, {(1, 82, 0): "1.82.0"})
         self.assertEqual(absent, [])
 
     def test_a_toolchain_installed_by_hand_is_not_a_pin(self) -> None:
         """It would pass on this laptop and be absent in CI."""
-        pinned, absent = msrv_plan.pins([pin("1.82.0", active=False)])
+        pinned, absent = msrv_plan.pins(
+            msrv_plan.toolchains([pin("1.82.0", active=False)])
+        )
         self.assertEqual(pinned, {})
         self.assertEqual(absent, [])
 
     def test_a_declared_pin_that_is_not_installed_is_held_apart(self) -> None:
         """`cargo +1.82.0` would fail; the remedy is install, not edit."""
-        pinned, absent = msrv_plan.pins([pin("1.82.0", installed=False)])
+        pinned, absent = msrv_plan.pins(
+            msrv_plan.toolchains([pin("1.82.0", installed=False)])
+        )
         self.assertEqual(pinned, {})
         self.assertEqual(absent, ["1.82.0"])
 
     def test_a_nightly_pin_is_not_an_msrv_candidate(self) -> None:
         """Every org Rust repo pins one; none of them verifies a minimum."""
-        pinned, _absent = msrv_plan.pins([pin("nightly-2026-07-20")])
+        pinned, _absent = msrv_plan.pins(
+            msrv_plan.toolchains([pin("nightly-2026-07-20")])
+        )
         self.assertEqual(pinned, {})
 
     def test_the_stable_pin_can_be_the_msrv_pin(self) -> None:
         """A repo whose minimum IS its build toolchain owes no second entry."""
-        pinned, _absent = msrv_plan.pins([pin("1.97.1"), pin("nightly-2026-07-20")])
+        pinned, _absent = msrv_plan.pins(
+            msrv_plan.toolchains([pin("1.97.1"), pin("nightly-2026-07-20")])
+        )
         self.assertEqual(pinned, {(1, 97, 1): "1.97.1"})
 
 
@@ -424,6 +442,33 @@ class MainTest(unittest.TestCase):
         )
         self.assertEqual(status, 1)
         self.assertIn("cannot compare", err)
+
+    def test_a_document_of_the_wrong_shape_is_red_by_where(self) -> None:
+        """A wrong-shaped account or listing is named, never a crash."""
+        good = metadata(member("a", "1.82"))
+        for doc, listing, said in (
+            ([], [pin("1.82.0")], "cargo metadata: cargo metadata is not an object"),
+            (
+                {"workspace_members": [1]},
+                [pin("1.82.0")],
+                "cargo metadata: workspace_members is not a list of strings",
+            ),
+            (
+                {"workspace_members": ["x"], "packages": [1]},
+                [pin("1.82.0")],
+                "cargo metadata: packages[0] is not an object",
+            ),
+            (
+                metadata(member("a", "1.82") | {"rust_version": 1.82}),
+                [pin("1.82.0")],
+                "cargo metadata: packages[0].rust_version is not a string",
+            ),
+            (good, {}, "`mise ls rust`: the listing is not a list"),
+            (good, ["1.82.0"], "`mise ls rust`: listing[0] is not an object"),
+        ):
+            with self.subTest(said=said):
+                status, out, err = self.invoke(doc, listing)
+                self.assertEqual((1, "", f"msrv-plan: {said}\n"), (status, out, err))
 
     def test_metadata_that_is_not_json_is_red(self) -> None:
         """A broken cargo must not read as a workspace with no promises."""

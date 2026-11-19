@@ -311,7 +311,10 @@ class TestMain(unittest.TestCase):
                 "workspace_members is not a list of strings",
             ),
             ({"workspace_root": "/ws", "packages": {}}, "packages is not a list"),
-            ({"workspace_root": "/ws", "packages": [1]}, "packages[0] is not an object"),
+            (
+                {"workspace_root": "/ws", "packages": [1]},
+                "packages[0] is not an object",
+            ),
             (
                 {
                     "workspace_root": "/ws",

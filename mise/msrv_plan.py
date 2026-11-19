@@ -43,9 +43,19 @@ publish path's, this check widens with it and no edit here is needed.
 """
 
 import argparse
-import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
+
+from decoded import (
+    UndecodableError,
+    as_array,
+    as_object,
+    as_str,
+    is_strings,
+    load_json,
+)
 
 NAME = "msrv-plan"
 
@@ -54,6 +64,72 @@ NAME = "msrv-plan"
 # third shape reaching here means cargo grew one, and a check that guessed
 # at it would be verifying a promise it had not read.
 VERSION_PARTS = (2, 3)
+
+
+class Args(argparse.Namespace):
+    """The parsed command line, typed."""
+
+    toolchains: Path
+    exclude: str
+    pgrx: str
+
+
+@dataclass(frozen=True)
+class Package:
+    """One workspace member, as cargo metadata reports it."""
+
+    name: str
+    version: str
+    # The declared minimum, "" where the member declares none.
+    rust_version: str
+
+
+@dataclass(frozen=True)
+class Toolchain:
+    """One entry of `mise ls rust --json`, as this check reads it."""
+
+    version: str
+    active: bool
+    installed: bool
+
+
+def package(raw: object, where: str) -> Package:
+    """Decode one package of cargo metadata.
+
+    Returns:
+        The package; a null or empty `rust_version` reads as none.
+
+    """
+    obj = as_object(raw, where)
+    promise = obj.get("rust_version")
+    return Package(
+        name=as_str(obj.get("name"), f"{where}.name"),
+        version=as_str(obj.get("version"), f"{where}.version"),
+        rust_version=as_str(promise, f"{where}.rust_version") if promise else "",
+    )
+
+
+def toolchains(listing: object) -> list[Toolchain]:
+    """Decode `mise ls rust --json` into its entries.
+
+    The fields are read as the check always read them: `active` and
+    `installed` by truth, `version` as text.
+
+    Returns:
+        The entries, in listing order.
+
+    """
+    out: list[Toolchain] = []
+    for index, item in enumerate(as_array(listing, "the listing")):
+        raw = as_object(item, f"listing[{index}]")
+        out.append(
+            Toolchain(
+                version=str(raw.get("version", "")),
+                active=bool(raw.get("active")),
+                installed=bool(raw.get("installed")),
+            )
+        )
+    return out
 
 
 def digits(text: str) -> bool:
@@ -94,23 +170,37 @@ def show(version: tuple[int, int, int]) -> str:
     return ".".join(str(part) for part in version)
 
 
-def members(metadata: dict) -> list[dict]:
+def members(metadata: object) -> list[Package]:
     """Take cargo's own account of which packages are workspace members.
 
     Returns:
-        The member packages, in the order cargo reported them.
+        The member packages that carry a name and a version, in the
+        order cargo reported them.
+
+    Raises:
+        UndecodableError: the document is not that shape, naming where.
 
     """
-    ids = set(metadata.get("workspace_members") or [])
-    return [
-        pkg
-        for pkg in metadata.get("packages") or []
-        if pkg.get("id") in ids and pkg.get("name") and pkg.get("version")
-    ]
+    doc = as_object(metadata, "cargo metadata")
+    listed = doc.get("workspace_members") or []
+    if not is_strings(listed):
+        msg = "workspace_members is not a list of strings"
+        raise UndecodableError(msg)
+    ids = set(listed)
+    found: list[Package] = []
+    for index, raw in enumerate(as_array(doc.get("packages") or [], "packages")):
+        where = f"packages[{index}]"
+        pkg = as_object(raw, where)
+        package_id = pkg.get("id")
+        if not isinstance(package_id, str) or package_id not in ids:
+            continue
+        if pkg.get("name") and pkg.get("version"):
+            found.append(package(pkg, where))
+    return found
 
 
 def promises(
-    packages: list[dict],
+    packages: list[Package],
     exclude: set[str],
 ) -> tuple[dict[tuple[int, int, int], list[str]], list[str], list[str]]:
     """Group the gate's compile surface by the minimum each member promises.
@@ -125,11 +215,11 @@ def promises(
     unreachable: list[str] = []
     unreadable: list[str] = []
     for pkg in packages:
-        promise = pkg.get("rust_version")
-        spec = f"{pkg['name']}@{pkg['version']}"
+        promise = pkg.rust_version
+        spec = f"{pkg.name}@{pkg.version}"
         if not promise:
             continue
-        if pkg["name"] in exclude:
+        if pkg.name in exclude:
             unreachable.append(
                 f"{spec} promises rust-version {promise} and is excluded from "
                 "the gate's compile surface by CLIPPY_EXCLUDE — unverified",
@@ -146,7 +236,9 @@ def promises(
     return groups, unreachable, unreadable
 
 
-def pins(listing: list[dict]) -> tuple[dict[tuple[int, int, int], str], list[str]]:
+def pins(
+    listing: list[Toolchain],
+) -> tuple[dict[tuple[int, int, int], str], list[str]]:
     """Read the rust toolchains this repository's config actually pins.
 
     Only ACTIVE entries count. `mise ls` reports every version installed on
@@ -162,13 +254,13 @@ def pins(listing: list[dict]) -> tuple[dict[tuple[int, int, int], str], list[str
     pinned: dict[tuple[int, int, int], str] = {}
     absent: list[str] = []
     for entry in listing:
-        if not entry.get("active"):
+        if not entry.active:
             continue
-        raw = str(entry.get("version", ""))
+        raw = entry.version
         version = parse_version(raw)
         if version is None:
             continue
-        if entry.get("installed"):
+        if entry.installed:
             pinned[version] = raw
         else:
             absent.append(raw)
@@ -217,6 +309,37 @@ def features(declared: str) -> dict[str, str]:
     return chosen
 
 
+def read_inputs(listing_file: Path) -> tuple[list[Package], list[Toolchain]] | None:
+    """Decode cargo metadata on stdin and `mise ls rust` from its file.
+
+    Returns:
+        The workspace's members and the toolchain entries, or None
+        having said on stderr which document was refused and why.
+
+    """
+    stdin: TextIO = sys.stdin
+    try:
+        metadata = load_json(stdin.read())
+        listing = load_json(listing_file.read_text(encoding="utf-8"))
+    except UndecodableError as bad:
+        print(
+            f"{NAME}: cargo metadata or `mise ls rust` did not give JSON",
+            file=sys.stderr,
+        )
+        print(f"  {bad}", file=sys.stderr)
+        return None
+    try:
+        workspace = members(metadata)
+    except UndecodableError as bad:
+        print(f"{NAME}: cargo metadata: {bad}", file=sys.stderr)
+        return None
+    try:
+        return workspace, toolchains(listing)
+    except UndecodableError as bad:
+        print(f"{NAME}: `mise ls rust`: {bad}", file=sys.stderr)
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Emit the check plan for one workspace, or the disagreement.
 
@@ -228,21 +351,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--toolchains", type=Path, required=True)
     parser.add_argument("--exclude", default="")
     parser.add_argument("--pgrx", default="")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
 
-    try:
-        metadata = json.loads(sys.stdin.read())
-        listing = json.loads(args.toolchains.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as bad:
-        print(
-            f"{NAME}: cargo metadata or `mise ls rust` did not give JSON",
-            file=sys.stderr,
-        )
-        print(f"  {bad}", file=sys.stderr)
+    inputs = read_inputs(args.toolchains)
+    if inputs is None:
         return 1
+    workspace, pinned_toolchains = inputs
 
     groups, unreachable, unreadable = promises(
-        members(metadata),
+        workspace,
         set(args.exclude.split()),
     )
     if unreadable:
@@ -251,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {line}", file=sys.stderr)
         return 1
 
-    pinned, absent = pins(listing)
+    pinned, absent = pins(pinned_toolchains)
     extensions = features(args.pgrx)
     records = [f"note\t{line}" for line in unreachable]
     findings: list[str] = []

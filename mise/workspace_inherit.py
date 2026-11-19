@@ -132,11 +132,9 @@ def read_member(package: object, where: str) -> Member:
     """Decode one package of cargo metadata into a member.
 
     Returns:
-        The member.
-
-    Raises:
-        UndecodableError: the package is not an object, or its name or
-            manifest_path not a string, naming where.
+        The member. A package that is not an object, or whose name or
+        manifest_path is not a string, is refused by `decoded`'s
+        readers, naming where.
 
     """
     raw = as_object(package, where)
