@@ -314,6 +314,31 @@ class PgrxExtension(Rows):
         self.assertTrue(out.endswith("floor=null\n"))
 
 
+class MappingShape(Rows):
+    """A mapping that is not TOML, or not the mapping's shape (#1682)."""
+
+    NAME = "docker/pgrx-base-images.toml"
+
+    def test_a_mapping_that_is_not_toml_is_refused(self) -> None:
+        """Named as not TOML, with the parser's reason."""
+        code, out, err = run("pgrx-extension", self.mapping("[build\n"), "16")
+        self.assertEqual((code, out), (1, ""))
+        self.assertTrue(err.startswith(f"::error::{self.NAME} is not TOML: "), err)
+
+    def test_each_wrong_shape_is_refused_by_name(self) -> None:
+        """A role or the floor that is not a table, a pin that is not a string."""
+        for text, said in (
+            ('build = "x16"\n', f"[build] in {self.NAME} is not a table of majors"),
+            ('[smoke]\n"16" = 16\n', f"smoke.16 in {self.NAME} is not a reference"),
+            ("floor = false\n", f"[floor] in {self.NAME} is not a table"),
+        ):
+            for argv in (("pgrx-extension", "16"), ("base-images",)):
+                with self.subTest(text=text, mode=argv[0]):
+                    self.refused(
+                        (argv[0], self.mapping(text), *argv[1:]), f"::error::{said}"
+                    )
+
+
 class PgrxImages(Rows):
     """pgrx-images: the build-pgrx-images.yml plan step."""
 
