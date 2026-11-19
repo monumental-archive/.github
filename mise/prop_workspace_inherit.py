@@ -20,8 +20,8 @@ import os
 import unittest
 from pathlib import Path
 
-from hypothesis import given
 from hypothesis import strategies as st
+from org_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "workspace_inherit",
@@ -37,7 +37,9 @@ DIR = st.lists(st.from_regex(r"[a-z]{1,5}", fullmatch=True), max_size=2).map("/"
 
 
 @st.composite
-def workspace(draw: st.DrawFn) -> tuple[dict, list[dict], set[str]]:
+def workspace(
+    draw: st.DrawFn,
+) -> tuple[dict[str, str | list[str]], list[dict[str, str]], set[str]]:
     """Draw a declaration, members, and which keys some member takes.
 
     Returns:
