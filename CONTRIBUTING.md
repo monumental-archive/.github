@@ -94,7 +94,7 @@ own work and adds the task that runs it to its row.
 | # | Property | What breaks without it | Mechanism | Issue |
 |---|---|---|---|---|
 | 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (mutmut; adopt with `[tool.mutmut]` in `pyproject.toml`) [#1354], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
-| 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357], Go: `audit:coverage-go-branches` (gobco's condition coverage, the `go-branches` floor; [tooling verdict][go-branches]) [#1546] |
+| 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357], PL/pgSQL (`plpgsql-branches`, plpgsql_check in the repository's test stack; adopt with one teardown call) [#1547], Go: `audit:coverage-go-branches` (gobco's condition coverage, the `go-branches` floor; [tooling verdict][go-branches]) [#1546] |
 | 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust, Go and Python exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`; Hypothesis in `prop_*.py` files, `test:python-properties` and `audit:python-properties`, [#1332]); TypeScript in `*.prop.test.*` files (fast-check, the repository's own; `test:typescript-properties` and `audit:typescript-properties`, [#1549]) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
 | 5 | Runs on real artifacts, on both platforms | the fixture's imagined world | a written rule: a recorded real artifact outranks a hand-written fixture; the gate already runs on Linux and the Mac | this section |
@@ -111,6 +111,7 @@ own work and adds the task that runs it to its row.
 [#1359]: https://github.com/monumental-archive/.github/issues/1359
 [#1360]: https://github.com/monumental-archive/.github/issues/1360
 [#1546]: https://github.com/monumental-archive/.github/issues/1546
+[#1547]: https://github.com/monumental-archive/.github/issues/1547
 [#1549]: https://github.com/monumental-archive/.github/issues/1549
 [go-branches]: docs/tooling-verdicts.md
 [signer#86]: https://github.com/monumental-archive/signer/issues/86
