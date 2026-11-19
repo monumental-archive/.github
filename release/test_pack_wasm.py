@@ -223,6 +223,17 @@ class Refuses(unittest.TestCase):
             run, f"::error::package.json says null, tag says {VERSION}\n"
         )
 
+    def test_a_repository_spanning_lines_stays_one_error(self) -> None:
+        """A newline in the caller's text is escaped (#1556's audit seed).
+
+        A repository of one newline split the `::error::` line in two,
+        and the second line was the caller's, free to be a workflow
+        command.
+        """
+        injected = "x\n::warning::injected\r%"
+        run = run_helper(package(repository={"type": "git", "url": injected}))
+        self.assert_refused(run, refusal("x%0A::warning::injected%0D%25"))
+
     def test_a_package_json_that_is_not_an_object_is_refused(self) -> None:
         """`0` and `[]` refuse by name (#1556's shrunk examples).
 
