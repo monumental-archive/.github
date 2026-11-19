@@ -8366,7 +8366,7 @@ run = '''
   echo "audit:coverage-go-branches: no go.mod, skipped"
   exit 0
 }
-floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg go-branches) || exit 1
+floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read --leg go-branches) || exit 1
 [[ -n ${floor} ]] || {
   echo "audit:coverage-go-branches: no go-branches line in .coverage-floor, skipped"
   exit 0
