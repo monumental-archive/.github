@@ -429,6 +429,7 @@ class AuditRows(GoBranchCase):
         status = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [GIT, "ls-files", "--others", "--modified", "--exclude-standard"],
             cwd=tmp / "tree",
+            env=hermetic.env(),
             capture_output=True,
             text=True,
             check=True,
