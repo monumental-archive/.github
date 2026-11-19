@@ -106,12 +106,16 @@ it and never will; see the entry below.
   with the reason — decided in the repo, like every other exception
   (#694).
 - `renovate.json` — extends the org preset
-- `lefthook.yml` — pulls the org git hooks by remote
+- `lefthook.yml` — pulls the org git hooks by remote. Once per clone:
+  `lefthook install`, then `lefthook run post-checkout`, which links
+  `.config/mise/` to the belt the gate stub pins (#1686); the hooks keep
+  that link current on every checkout, merge and rebase after
 - no `committed.toml`: the commit canon is delivered (#576). A repo that
   restricts its commit SCOPES declares them as `ORG_COMMIT_SCOPES` in
   `mise.toml` `[env]` and the belt composes the two — the rules have one
   definition, the scope list stays repo identity
-- `mise.toml` — repo-specific tools/tasks; the belt arrives globally
+- `mise.toml` — repo-specific tools/tasks; the belt arrives through the
+  `.config/mise/` link, so a repository tracks nothing there
 - `.golangci.yml` — the Go canon (#392): golangci-lint v2 at
   `default: all` with per-rule written disables, gofumpt (extra rules)
   and gci as formatters, and the depguard ban on `encoding/json`

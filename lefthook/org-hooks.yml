@@ -9,7 +9,7 @@
 #       refetch_frequency: 24h
 #       configs:
 #         - lefthook/org-hooks.yml
-# Then once per clone: lefthook install
+# Then once per clone: lefthook install && lefthook run post-checkout
 #
 # Every job that runs mise sets MISE_CEILING_PATHS to the parent of the
 # tree's top level first (#1232). mise walks up from the working
@@ -86,4 +86,82 @@ pre-push:
         : {files};
         MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
         mise run ci
+
+# THE BELT OF THIS CLONE'S PIN (#1686). A clone loads the belt its gate
+# stub pins, as a project config, so a laptop judges each repository
+# with the tools CI judges it with, whatever else the machine holds.
+#
+# The pin is the tracked gate stub's
+# `uses: <owner>/<repo>/.github/workflows/ci.yml@<40-hex sha>`, the line
+# lint:belt-current reads; there is no second pin. The tree is cached
+# once per sha, shared by every clone and worktree on the machine, and
+# never written again once it exists: it is fetched into
+# org-belt/.trees/<sha>.<random> under ${XDG_CACHE_HOME:-~/.cache}, its
+# HEAD checked against the sha (the sha is the integrity check), and
+# published as org-belt/<sha>, a symbolic link made by `ln -sn` with no
+# -f: it creates the name or fails, atomically, and -n keeps ln from
+# following an existing link into the tree. The loser of a race removes
+# its own tree and uses the winner's, so two hooks at once leave one
+# link to one whole tree. The network is touched only when the cache has
+# no tree for the pin.
+#
+# Two links: `.config/mise/conf.d/belt.toml` (mise loads it as a
+# project config) and `.config/mise/mise.lock` (mise locks a project
+# conf.d file with its config directory's lock, one level up, and with
+# nothing else: measured on #1686). They are machine state, never
+# tracked: the job adds `.config/mise/` to the clone's info/exclude,
+# under the common git directory every worktree shares, when the line
+# is absent, so no repository carries an ignore line for them. A line
+# is printed only when a link changes. No pin (the canon, whose tree is
+# its belt) does nothing.
+#
+# git exports its own variables to a hook (GIT_DIR among them); they are
+# unset before the fetch, so the cache repository is never the clone's.
+# Git runs post-checkout on `git worktree add`, so a new worktree links
+# itself. Once per clone, after `lefthook install`:
+#   lefthook run post-checkout
+post-checkout:
+  jobs:
+    - name: belt
+      run: &belt >-
+        top="$(git rev-parse --show-toplevel)" || exit 1;
+        common="$(git rev-parse --git-common-dir)" || exit 1; common="$(cd "${common}" && pwd)" || exit 1;
+        pin="$(cat "${top}"/.github/workflows/*.y*ml 2>/dev/null
+        | sed -nE 's|.*uses:[[:space:]]*([^[:space:]/]+/[^[:space:]/]+)/\.github/workflows/ci\.ya?ml@([0-9a-f]+).*|\1 \2|p'
+        | sed -n '1p')";
+        [ -n "${pin}" ] || exit 0;
+        repo="${pin% *}"; sha="${pin#* }";
+        [ "${#sha}" -eq 40 ] || { echo "org-belt: the gate stub pins ${sha}, not a 40-hex sha; nothing linked" >&2; exit 1; };
+        cache="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt"; tree="${cache}/${sha}";
+        vars="$(git rev-parse --local-env-vars)" || exit 1; for v in ${vars}; do unset "${v}"; done;
+        if [ ! -d "${tree}" ]; then
+        mkdir -p "${cache}/.trees" && tmp="$(mktemp -d "${cache}/.trees/${sha}.XXXXXX")" || exit 1;
+        if ! { git -C "${tmp}" init -q && git -C "${tmp}" fetch -q --depth 1 "https://github.com/${repo}" "${sha}"
+        && git -C "${tmp}" -c advice.detachedHead=false checkout -q FETCH_HEAD; }; then
+        rm -rf "${tmp}"; echo "org-belt: could not fetch ${repo}@${sha}; nothing linked" >&2; exit 1; fi;
+        got="$(git -C "${tmp}" rev-parse HEAD)";
+        if [ "${got}" != "${sha}" ]; then
+        rm -rf "${tmp}"; echo "org-belt: fetched ${got}, not the pinned ${sha}; nothing linked" >&2; exit 1; fi;
+        ln -sn "${tmp}" "${tree}" 2>/dev/null || rm -rf "${tmp}"; fi;
+        if [ ! -f "${tree}/mise/config.toml" ] || [ ! -f "${tree}/mise/mise.lock" ]; then
+        echo "org-belt: ${tree} holds no mise/config.toml and mise.lock; nothing linked" >&2; exit 1; fi;
+        dir="${top}/.config/mise"; mkdir -p "${dir}/conf.d" || exit 1; changed=0;
+        for pair in "conf.d/belt.toml:config.toml" "mise.lock:mise.lock"; do
+        link="${dir}/${pair%%:*}"; want="${tree}/mise/${pair#*:}";
+        cur="$(readlink "${link}" 2>/dev/null)" || cur="";
+        if [ "${cur}" != "${want}" ]; then
+        ln -sfn "${want}" "${link}" || exit 1; changed=1; fi; done;
+        exclude="${common}/info/exclude"; mkdir -p "${common}/info" || exit 1;
+        grep -qxF '.config/mise/' "${exclude}" 2>/dev/null || printf '%s\n' '.config/mise/' >> "${exclude}" || exit 1;
+        [ "${changed}" -eq 0 ] || echo "org-belt: .config/mise links the belt of ${repo}@${sha}"
+
+post-merge:
+  jobs:
+    - name: belt
+      run: *belt
+
+post-rewrite:
+  jobs:
+    - name: belt
+      run: *belt
 ...

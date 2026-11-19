@@ -131,11 +131,25 @@ unix_default_inline_shell_args = "bash -euo pipefail -c"
 # had begun carrying their own resolution blocks. Six of them, at the
 # point this replaced them.
 #
-# Both carriers, one expression: CI sets MISE_GLOBAL_CONFIG_FILE to the
-# canon tree that `$/.github/actions/canon` linked; locally the belt is a
-# ~/.config/mise/conf.d symlink into a checkout. The symlink's NAME is not
-# assumed — the belt is identified by a file only the belt has, so a
-# machine that named it something else still works. Empty when the belt
+# Four carriers, one expression, first found wins (#1686):
+#   1. MISE_GLOBAL_CONFIG_FILE: CI, the canon tree that
+#      `$/.github/actions/canon` linked.
+#   2. The working tree's own mise/config.toml with clippy.toml beside
+#      it: the canon and its worktrees, where the tree is the belt.
+#   3. The working tree's `.config/mise/conf.d/belt.toml` link, which the
+#      org hooks point at the cache tree of the gate stub's pinned sha:
+#      mise loads that link as a project config, and this follows it,
+#      so the tasks and ORG_BELT_DIR name one tree.
+#   4. A ~/.config/mise/conf.d symlink into a checkout: the machine belt,
+#      kept so a machine not yet moved to the link still works.
+# mise runs this exec in the directory of the config file that defines
+# it, whatever the shell's or the task's working directory (measured on
+# #1686, mise 2026.11.7): `<clone>/.config/mise/conf.d` for the link,
+# `<canon>/mise` for the canon's own file. So `git rev-parse` in 2 and 3
+# names the clone the config belongs to; the machine's copy runs in its
+# own conf.d, outside any clone, and finds only 4.
+# The belt is identified by a file only the belt has (clippy.toml), so no
+# link's NAME in the machine's conf.d is assumed. Empty when the belt
 # did not arrive — which is not a quiet state: `ci` is itself
 # belt-defined, so a tree with no belt dies at `mise run ci` as an
 # unknown command, before any lint task exists to skip (measured
@@ -149,8 +163,9 @@ unix_default_inline_shell_args = "bash -euo pipefail -c"
 # invocation of this config — including Renovate's `mise lock`, which runs
 # in a container with neither carrier present (#569, measured on #567). The
 # not-found branches are therefore `if`-guarded, never bare AND-lists whose
-# failure errexit promotes to a crash.
-ORG_BELT_DIR = "{{ exec(command='d=\"${MISE_GLOBAL_CONFIG_FILE:-}\"; if [ -z \"$d\" ]; then for f in \"${XDG_CONFIG_HOME:-$HOME/.config}\"/mise/conf.d/*.toml; do t=$(readlink \"$f\" 2>/dev/null || echo \"$f\"); if [ -f \"$(dirname \"$t\")/clippy.toml\" ]; then d=\"$t\"; break; fi; done; fi; if [ -n \"$d\" ]; then cd \"$(dirname \"$d\")\" && pwd; fi') }}"
+# failure errexit promotes to a crash, and `git` and `readlink`, which may
+# be absent or find nothing, end in `|| true`.
+ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d" ]; then t=$(git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && [ -f "$t/mise/config.toml" ] && [ -f "$t/mise/clippy.toml" ]; then d="$t/mise/config.toml"; elif [ -n "$t" ] && [ -L "$t/.config/mise/conf.d/belt.toml" ]; then l=$(readlink "$t/.config/mise/conf.d/belt.toml" || true); case "$l" in /*) ;; *) l="$t/.config/mise/conf.d/$l" ;; esac; if [ -f "$(dirname "$l")/clippy.toml" ]; then d="$l"; fi; fi; fi; if [ -z "$d" ]; then for f in "${XDG_CONFIG_HOME:-$HOME/.config}"/mise/conf.d/*.toml; do t=$(readlink "$f" 2>/dev/null || echo "$f"); if [ -f "$(dirname "$t")/clippy.toml" ]; then d="$t"; break; fi; done; fi; if [ -n "$d" ] && [ -d "$(dirname "$d")" ]; then cd "$(dirname "$d")" && pwd; fi`) }}'''
 # WHERE THE CANON TREE IS, derived from the belt and never resolved a
 # second time. The belt is one directory inside the canon; the tasks
 # that need the canon proper need what sits BESIDE it — slsa/ policies,
@@ -2263,7 +2278,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 '''
 
 [tasks."lint:belt-current"]
-description = "This machine's mise and belt are as current as CI's"
+description = "This machine's mise is as current as CI's, and its belt is the one the gate stub pins (#1686)"
 dir = "{{cwd}}"
 # The belt keeps every TOOL at the pinned version on every machine, and
 # says nothing about two things that sit underneath it. Both were found
@@ -2275,22 +2290,27 @@ dir = "{{cwd}}"
 # asset) and silently rewrote mise.lock on `mise install`, dropping a
 # field the newer version writes. Nothing was red.
 #
-# The belt checkout: every repository on a machine reads ONE canon
-# checkout through the conf.d symlink. That checkout was 215 commits
-# behind, so every repository was being linted locally with August's
-# tools while its gate ran November's.
+# The belt: every repository on a machine read ONE canon checkout
+# through the conf.d symlink. That checkout was 215 commits behind, so
+# every repository was being linted locally with August's tools while
+# its gate ran November's; and one checkout sits on one commit while the
+# org's repositories pin several. Now each clone loads the belt of its
+# own pin (#1686): the org hooks link `.config/mise/conf.d/belt.toml` to
+# the machine's cache tree of exactly the gate stub's sha. So the check
+# is exact: the belt answering (ORG_CANON_DIR) is that tree, or it is
+# red, naming both and `lefthook run post-checkout`; older and newer are
+# one red. In the canon, which has no pin, the belt is the tree.
 #
 # Both comparisons are derived — the mise version from the canon's own
-# ci.yml, the canon version from the gate stub's pin comment — so no
+# ci.yml, the pinned sha from the gate stub's `uses:` line — so no
 # second literal exists to drift and Renovate has nothing extra to bump.
-# Older is red; a NEWER local mise is a note, since refusing to push
-# from a machine that is ahead helps nobody.
+# An older mise is red; a NEWER local mise is a note, since refusing to
+# push from a machine that is ahead helps nobody.
 #
-# Always green in CI by construction (the canon action delivers mise
-# and the tree at one resolution), so like lint:belt-tree this is a
-# LOCAL control. It cannot see a checkout that is behind its own remote
-# while the repository under test pins something older still; that
-# needs the network, and the gate has none.
+# A belt that arrived by MISE_GLOBAL_CONFIG_FILE (CI's canon action,
+# which delivers the tree at the pin's own resolution, or a person who
+# named one on purpose) is said in one line and passes: the carrier
+# decides, never a variable such as GITHUB_ACTIONS that anyone can set.
 run = '''
 "${ORG_BELT_DIR}/belt-current.sh"
 '''
@@ -5709,6 +5729,31 @@ canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub_fix.py" "${canon}" .github/workflows/*.y*ml
+'''
+
+[tasks."lint:belt-link"]
+description = "Nothing is tracked under .config/mise/: the belt's link and lock live there (#1686)"
+dir = "{{cwd}}"
+# The org hooks link a clone to the belt its gate stub pins (#1686):
+# `.config/mise/conf.d/belt.toml`, which mise loads as a project config,
+# and `.config/mise/mise.lock` beside conf.d, because mise locks a
+# project conf.d file with its config directory's own lock and with
+# nothing else (measured on #1686). mise reads one lock per directory, so
+# a repository that tracked its own config under `.config/mise/` would
+# need that same lock for its own tools. The belt claims the directory:
+# a tracked file there is red by name. Every org repository keeps its own
+# config as `mise.toml` at its root.
+run = '''
+found=$(git ls-files -- .config/mise/)
+if [[ -n ${found} ]]; then
+  {
+    echo "lint:belt-link: the belt's link and lock live in .config/mise/; a repository's"
+    echo "  own config is mise.toml at its root. Tracked there:"
+    while IFS= read -r f; do echo "  ${f}"; done <<< "${found}"
+  } >&2
+  exit 1
+fi
+echo "lint:belt-link: nothing tracked under .config/mise/"
 '''
 
 [tasks."lint:capability-boundary"]

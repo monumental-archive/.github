@@ -43,8 +43,10 @@ shared lives here and nowhere else. Five layers:
    `.golangci.yml`'s module path. The belt delivers a config; it cannot
    invent a repo's identity. The universal tool
    layer every repo and every machine consumes — exact pins, per-platform
-   checksums, GitHub attestations. Consumed locally via a
-   `~/.config/mise/conf.d` symlink and in CI via `MISE_GLOBAL_CONFIG_FILE`.
+   checksums, GitHub attestations. Consumed locally through each clone's
+   own link — `.config/mise/conf.d/belt.toml` and `.config/mise/mise.lock`
+   into the machine's cache tree of the sha the gate stub pins, made by
+   the org hooks (#1686) — and in CI via `MISE_GLOBAL_CONFIG_FILE`.
    The filename is load-bearing: both mise and Renovate's mise manager
    recognise `mise/config.toml` natively — do not rename.
 3. **The task contract**: the global `ci` task wildcard-collects `lint:*`
