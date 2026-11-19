@@ -499,6 +499,52 @@ class Verdicts(Planted):
             " version is set for shim: go\n" + RED_TAIL,
         )
 
+    def test_a_report_of_the_wrong_shape_is_not_judged(self) -> None:
+        """Each field the verdict reads is refused by name, never a crash."""
+        mutant = '"filePath": "/x", "line": 4, "column": 9, "type": "t"'
+        rows = (
+            ("[]", "the report is not an object"),
+            ('{"results": "x"}', "results is not a list"),
+            ('{"totalMutants": "1"}', "totalMutants is not an integer"),
+            ('{"results": [5]}', "results[0] is not an object"),
+            ('{"results": [{"mutant": 3}]}', "results[0].mutant is not an object"),
+            (
+                '{"results": [{"mutant": {"line": 4}}]}',
+                "results[0].mutant.filePath is not a string",
+            ),
+            (
+                '{"results": [{"mutant": {"filePath": "/x", "line": true}}]}',
+                "results[0].mutant.line is not an integer",
+            ),
+            (
+                '{"results": [{"mutant": {"filePath": "/x", "line": 4}}]}',
+                "results[0].mutant.column is not an integer",
+            ),
+            (
+                '{"results": [{"mutant": {"filePath": "/x", "line": 4, "column": 9}}]}',
+                "results[0].mutant.type is not a string",
+            ),
+            (
+                f'{{"results": [{{"mutant": {{{mutant}}}}}]}}',
+                "results[0].status is not a string",
+            ),
+            (
+                f'{{"results": [{{"mutant": {{{mutant}}},"status": "","error": 1}}]}}',
+                "results[0].error is not a string",
+            ),
+            ('{"results": [], "results": []}', 'duplicate key "results"'),
+        )
+        self.adopt()
+        self.report("b", ("KILLED", 4, "arithmetic"))
+        for text, why in rows:
+            with self.subTest(text=text):
+                (self.reports / "a.json").write_text(text, encoding="utf-8")
+                got = self.run_leg()
+                self.assertEqual(got.returncode, 1)
+                self.assertEqual(
+                    got.stderr, f"{LABEL}: not judged: 1.json: {why}\n" + RED_TAIL
+                )
+
     def test_a_red_baseline_is_red_before_any_mutant(self) -> None:
         """A suite that already fails cannot judge a mutant."""
         self.adopt()

@@ -43,14 +43,19 @@ be run, 2 on a usage error.
 """
 
 import importlib.util
+import inspect
 import os
 import random
 import sys
 import traceback
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, seed, settings
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 GATE_EXAMPLES = 200
 AUDIT_EXAMPLES = 10_000
@@ -61,6 +66,8 @@ MIN_ARGS = 2
 # The belt: typed_hypothesis.py sits beside this runner.
 BELT = Path(__file__).resolve().parent
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
+# Typed here: register_profile takes its settings as `**kwargs: Any`.
+SUPPRESSED: list[HealthCheck] = [HealthCheck.too_slow]
 
 settings.register_profile(
     "gate",
@@ -68,7 +75,7 @@ settings.register_profile(
     max_examples=GATE_EXAMPLES,
     database=None,
     deadline=None,
-    suppress_health_check=[HealthCheck.too_slow],
+    suppress_health_check=SUPPRESSED,
 )
 settings.register_profile(
     "audit",
@@ -76,15 +83,18 @@ settings.register_profile(
     max_examples=AUDIT_EXAMPLES,
     database=None,
     deadline=None,
-    suppress_health_check=[HealthCheck.too_slow],
+    suppress_health_check=SUPPRESSED,
 )
 
 
-def load(path: Path, index: int) -> object:
+def load(path: Path, index: int) -> ModuleType:
     """Import one property file from its own directory.
 
     Returns:
         The module.
+
+    Raises:
+        ImportError: Python finds no way to import the path.
 
     """
     for directory in (str(BELT), str(path.resolve().parent)):
@@ -92,6 +102,9 @@ def load(path: Path, index: int) -> object:
             sys.path.insert(0, directory)
     name = f"prop_{index}_{path.stem}"
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        msg = f"no loader for {path}"
+        raise ImportError(msg)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -111,7 +124,7 @@ def flatten(suite: unittest.TestSuite) -> list[unittest.TestCase]:
             out += flatten(item)
         else:
             out.append(item)
-    return sorted(out, key=lambda t: t.id())
+    return sorted(out, key=unittest.TestCase.id)
 
 
 def method(test: unittest.TestCase) -> object:
@@ -122,7 +135,8 @@ def method(test: unittest.TestCase) -> object:
 
     """
     name = test._testMethodName  # ruff: ignore[private-member-access] - unittest names the method only here
-    return getattr(type(test), name, None)
+    found: object = getattr(type(test), name, None)
+    return found
 
 
 def is_property(func: object) -> bool:
@@ -132,7 +146,8 @@ def is_property(func: object) -> bool:
         True for a function `@given` wrapped.
 
     """
-    return bool(getattr(func, "is_hypothesis_test", False))
+    flag: object = getattr(func, "is_hypothesis_test", False)
+    return bool(flag)
 
 
 def own_bounds(func: object, profile: settings) -> list[str]:
@@ -142,14 +157,28 @@ def own_bounds(func: object, profile: settings) -> list[str]:
         `field=value` for each bound that differs from the profile.
 
     """
-    mine = getattr(func, "_hypothesis_internal_use_settings", None)
-    if mine is None:
+    mine: object = getattr(func, "_hypothesis_internal_use_settings", None)
+    if not isinstance(mine, settings):
         return []
+    have, want = bounds(mine), bounds(profile)
     return [
-        f"{field}={getattr(mine, field)!r}"
-        for field in BOUNDS
-        if getattr(mine, field) != getattr(profile, field)
+        f"{field}={have[field]!r}" for field in BOUNDS if have[field] != want[field]
     ]
+
+
+def bounds(chosen: settings) -> dict[str, object]:
+    """Read the bounds the belt's profile owns from one settings object.
+
+    Returns:
+        Each bound in BOUNDS, by name.
+
+    """
+    return {
+        "max_examples": chosen.max_examples,
+        "derandomize": chosen.derandomize,
+        "database": chosen.database,
+        "deadline": chosen.deadline,
+    }
 
 
 def outcome(test: unittest.TestCase) -> tuple[str, str]:
@@ -204,7 +233,7 @@ def run_file(
                 " the belt's profile owns them",
             )
             continue
-        if chosen is not None and is_property(func):
+        if chosen is not None and is_property(func) and inspect.isfunction(func):
             name = test._testMethodName  # ruff: ignore[private-member-access] - unittest names the method only here
             setattr(type(test), name, seed(chosen)(func))
         status, text = outcome(test)
@@ -231,7 +260,7 @@ def run(profile_name: str, files: list[Path]) -> int:
         print(f"{label}: seed {chosen} (reproduce: ORG_PROPERTY_SEED={chosen})")
     report = Report()
     for index, path in enumerate(files):
-        run_file(path, index, settings.default, chosen, report)
+        run_file(path, index, settings.get_profile(profile_name), chosen, report)
     for line in report.lines:
         print(line)
     for text in report.failures:

@@ -20,6 +20,8 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -31,6 +33,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import hermetic
+import typescript_properties as tp
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -530,6 +533,60 @@ class Lint(unittest.TestCase):
             "lint:typescript-properties: no TypeScript or JavaScript tracked,"
             " skipped\n",
         )
+
+
+class Documents(unittest.TestCase):
+    """vitest's report and file list, each refused by name when misshapen."""
+
+    def answer(self, command: str, text: str) -> str:
+        """Run verify or collected on one document; return its one line.
+
+        Returns:
+            What the subcommand printed, after asserting it was red.
+
+        """
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch, "doc.json")
+            path.write_text(text, encoding="utf-8")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                status = tp.main([command, str(path), "a.prop.test.ts"])
+        self.assertEqual(status, 1)
+        return out.getvalue().replace(str(path), "DOC")
+
+    def test_a_report_of_the_wrong_shape(self) -> None:
+        """Each field the leg reads, by name."""
+        rows = (
+            ("[]", "the report is not an object"),
+            ('{"testResults": "x"}', "testResults is not a list"),
+            ('{"testResults": [5]}', "testResults[0] is not an object"),
+            ('{"testResults": [{"name": 3}]}', "testResults[0].name is not a string"),
+            (
+                '{"testResults": [{"name": "a", "assertionResults": "x"}]}',
+                "testResults[0].assertionResults is not a list",
+            ),
+            ('{"a": 1, "a": 2}', 'duplicate key "a"'),
+        )
+        for text, why in rows:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    self.answer("verify", text),
+                    f"no vitest JSON report at DOC ({why})\n",
+                )
+
+    def test_a_listing_of_the_wrong_shape(self) -> None:
+        """The list itself, an entry, and its file."""
+        rows = (
+            ("{}", "the listing is not a list"),
+            ("[3]", "listing[0] is not an object"),
+            ("[{}]", "listing[0].file is not a string"),
+        )
+        for text, why in rows:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    self.answer("collected", text),
+                    f"no readable vitest file list at DOC ({why})\n",
+                )
 
 
 if __name__ == "__main__":

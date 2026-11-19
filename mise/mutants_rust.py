@@ -37,12 +37,18 @@ byte for byte: test_mutants_rust.py's stub rows hold them.
 """
 
 import argparse
-import json
 import os
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import decoded
+import typed_std
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 LABEL = "audit:mutants: rust"
 CONFIG = ".cargo/mutants.toml"
@@ -106,7 +112,7 @@ def unexplained(text: str) -> list[tuple[int, str, str]]:
     for number, line in enumerate(lines_of(text), start=1):
         match = KEY_LINE.match(line)
         if match:
-            key = match.group(1)
+            key = typed_std.group(match, 1) or ""
             rest = OPENING.sub("", line, count=1)
             if QUOTED.match(rest):
                 found.append((number, key, "an entry on the opening line"))
@@ -153,18 +159,64 @@ def reasons(config: Path) -> int:
     return 0
 
 
-def default_major(metadata: dict, name: str) -> str:
+@dataclass(frozen=True)
+class Package:
+    """A package of `cargo metadata`, as far as its default major goes."""
+
+    name: str
+    # The features its `default` feature names.
+    default: tuple[str, ...]
+
+
+def read_package(item: object, where: str) -> Package:
+    """Decode one entry of `cargo metadata`'s `packages`.
+
+    Returns:
+        The package; no `features`, or no `default` in them, is none.
+
+    """
+    package = decoded.as_object(item, where)
+    features = package.get("features")
+    table = decoded.as_object(features, f"{where}.features") if features else {}
+    default = table.get("default")
+    named = decoded.as_array(default, f"{where}.features.default") if default else []
+    return Package(
+        name=decoded.as_str(package.get("name"), f"{where}.name"),
+        default=tuple(
+            decoded.as_str(feature, f"{where}.features.default[{index}]")
+            for index, feature in enumerate(named)
+        ),
+    )
+
+
+def read_metadata(value: object) -> tuple[Package, ...]:
+    """Decode `cargo metadata --format-version 1` for the packages' defaults.
+
+    A field of another shape is refused by name, through `decoded`'s
+    readers.
+
+    Returns:
+        Every package, in cargo's order; none when `packages` is absent.
+
+    """
+    packages = decoded.as_object(value, "the metadata").get("packages", [])
+    return tuple(
+        read_package(item, f"packages[{index}]")
+        for index, item in enumerate(decoded.as_array(packages, "packages"))
+    )
+
+
+def default_major(packages: Sequence[Package], name: str) -> str:
     """Name the one Postgres major a crate's `default` feature selects.
 
     Returns:
         The `pgNN` feature, or "" when the default names none or several.
 
     """
-    for package in metadata.get("packages", []):
-        if package.get("name") != name:
+    for package in packages:
+        if package.name != name:
             continue
-        default = (package.get("features") or {}).get("default") or []
-        majors = [f for f in default if MAJOR.match(f)]
+        majors = [f for f in package.default if MAJOR.match(f)]
         return majors[0] if len(majors) == 1 else ""
     return ""
 
@@ -193,7 +245,22 @@ class Plan:
         return self.every - self.listed
 
 
-def plan(args: argparse.Namespace) -> int:
+class Args(argparse.Namespace):
+    """One step's arguments, each typed as parsed."""
+
+    command: str
+    config: Path
+    name: str
+    where: str
+    dir: str
+    all: str
+    listed: str
+    here: str
+    scratch: str
+    shard: str
+
+
+def plan(args: Args) -> int:
     """Count one run's listings, say what it mutates, record the counts.
 
     EXCLUDED IS THE WHOLE POPULATION'S, never a shard's: a shard is cut
@@ -246,27 +313,40 @@ class Verdict:
 COUNTS = ("total_mutants", "caught", "timeout", "missed")
 
 
-def missing_counts(outcomes: object) -> list[str]:
-    """Name the counts outcomes.json does not state.
+def stated(outcomes: object) -> dict[str, int]:
+    """Read the counts outcomes.json states.
 
     A count that is absent, null or not a whole number is not stated:
     reading one as zero would pass a check on nothing (#1486).
+
+    Returns:
+        Each of COUNTS the document states, by name; none when it is not
+        an object.
+
+    """
+    found: dict[str, int] = {}
+    if not decoded.is_object(outcomes):
+        return found
+    for key in COUNTS:
+        value = outcomes.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            found[key] = value
+    return found
+
+
+def missing_counts(outcomes: object) -> list[str]:
+    """Name the counts outcomes.json does not state.
 
     Returns:
         The missing fields, in COUNTS order; all of them when the
         document is not an object.
 
     """
-    if not isinstance(outcomes, dict):
-        return list(COUNTS)
-    return [
-        key
-        for key in COUNTS
-        if not isinstance(outcomes.get(key), int) or isinstance(outcomes.get(key), bool)
-    ]
+    counts = stated(outcomes)
+    return [key for key in COUNTS if key not in counts]
 
 
-def tally(outcomes: dict) -> tuple[int, int, int]:
+def tally(outcomes: dict[str, int]) -> tuple[int, int, int]:
     """Read cargo-mutants' counts, every one of which is stated.
 
     A timeout counts as killed: the suite noticed, by hanging, and
@@ -300,12 +380,16 @@ def judge_run(verdict: Verdict, name: str, run: Path) -> None:
     if not outcomes.is_file():
         verdict.runs.append(f"{name}: cargo mutants wrote no outcomes.json")
         return
-    document = json.loads(outcomes.read_text(encoding="utf-8"))
+    try:
+        document = decoded.load_json(outcomes.read_bytes())
+    except decoded.UndecodableError as err:
+        verdict.runs.append(f"{name}: outcomes.json: {err}")
+        return
     missing = missing_counts(document)
     if missing:
         verdict.runs.extend(f"{name}: outcomes.json states no {key}" for key in missing)
         return
-    total, killed, missed = tally(document)
+    total, killed, missed = tally(stated(document))
     verdict.total += total
     verdict.killed += killed
     verdict.survived += missed
@@ -344,7 +428,7 @@ def red(verdict: Verdict) -> bool:
     return bool(verdict.survived or verdict.runs)
 
 
-def report(args: argparse.Namespace) -> int:
+def report(args: Args) -> int:
     """Print the survivors, the runs that judged nothing and the summary.
 
     Only a shard that judged everything it was given writes `rust.tsv`:
@@ -389,7 +473,7 @@ def report(args: argparse.Namespace) -> int:
     return 0
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None) -> Args:
     """Read the subcommand and its arguments.
 
     Returns:
@@ -408,7 +492,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     judged.add_argument("scratch")
     judged.add_argument("--where", required=True)
     judged.add_argument("--shard", required=True)
-    return parser.parse_args(argv)
+    return parser.parse_args(argv, namespace=Args())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -422,7 +506,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "reasons":
         return reasons(args.config)
     if args.command == "default-major":
-        print(default_major(json.loads(sys.stdin.read()), args.name))
+        try:
+            packages = read_metadata(decoded.load_json(typed_std.stdin_text()))
+        except decoded.UndecodableError as err:
+            print(f"{LABEL}: cargo metadata: {err}", file=sys.stderr)
+            return EXIT_RED
+        print(default_major(packages, args.name))
         return 0
     if args.command == "plan":
         return plan(args)

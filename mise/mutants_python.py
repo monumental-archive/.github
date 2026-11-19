@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import startup_hook
+import typed_std
 
 LABEL = "audit:mutants: python"
 EXIT_RED = 1
@@ -201,7 +202,7 @@ def scan(text: str, section: str) -> Scan:
         elif REFUSED_LINE.match(line):
             found.findings.append((number, "refused", REFUSED))
         elif match := KEY_LINE.match(line):
-            key_line(found, number, match.group(1), line)
+            key_line(found, number, typed_std.group(match, 1) or "", line)
         elif found.mode == TOML_LIST:
             toml_line(found, number, line)
         elif found.mode == CFG_LIST:
@@ -314,7 +315,8 @@ def read_results(text: str) -> Results:
         match = RESULT.match(line)
         if not match:
             continue
-        name, state = match.groups()
+        name = typed_std.group(match, 1) or ""
+        state = typed_std.group(match, 2) or ""
         results.total += 1
         if state in KILLED:
             results.killed += 1
@@ -443,7 +445,7 @@ def tool_interpreter(script: str) -> str:
         second = handle.readline().strip()
     if first.startswith("#!/bin/sh"):
         found = SH_REEXEC.match(second)
-        return found.group(1) if found else ""
+        return (typed_std.group(found, 1) or "") if found else ""
     named = first[2:].split()[0] if first.startswith("#!") and first[2:] else ""
     return named if "python" in Path(named).name else ""
 
@@ -572,7 +574,19 @@ def verdict(results_file: Path, shows: Path, excluded: int) -> int:
     return 0
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
+class Args(argparse.Namespace):
+    """The subcommand and its arguments, each typed as parsed."""
+
+    command: str
+    config: Path
+    pragmas: Path
+    directory: Path
+    results: Path
+    shows: Path
+    excluded: int
+
+
+def parse_args(argv: list[str] | None) -> Args:
     """Read the subcommand and its arguments.
 
     Returns:
@@ -590,7 +604,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     judged.add_argument("results", type=Path)
     judged.add_argument("shows", type=Path)
     judged.add_argument("--excluded", type=int, required=True)
-    return parser.parse_args(argv)
+    return parser.parse_args(argv, namespace=Args())
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -53,7 +53,9 @@ import re
 import sys
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
-from typing import NamedTuple, TextIO
+from typing import NamedTuple
+
+import typed_std
 
 NAME = "coverage-floor"
 DEFAULT_PATH = Path(".coverage-floor")
@@ -838,6 +840,17 @@ def hold(path: Path, label: str, source: str) -> int:
     return status
 
 
+class Args(argparse.Namespace):
+    """One subcommand's arguments, each typed as parsed."""
+
+    path: Path
+    command: str
+    leg: str | None
+    provenance: str
+    label: str
+    adopt: bool
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one subcommand over the repository's floor file.
 
@@ -870,24 +883,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="write a floor this repository has none of, or migrate a recordless one",
     )
-    args = parser.parse_args(argv)
-
-    # argparse answers in Any; each value is typed once, where it is read.
-    command: str = args.command
-    path: Path = args.path
-    if command == "read":
-        leg: str | None = args.leg
-        return read(path, leg)
-    if command == "legs":
-        return recorded_legs(path)
-    # typeshed types sys.stdin as possibly Any; it is a text stream here.
-    stdin: TextIO = sys.stdin
-    if command == "hold":
-        label: str = args.label
-        return hold(path, label, stdin.read())
-    provenance: str = args.provenance
-    adopt: bool = args.adopt
-    return derive(path, stdin.read(), provenance, adopt=adopt)
+    args = parser.parse_args(argv, namespace=Args())
+    if args.command == "read":
+        return read(args.path, args.leg)
+    if args.command == "legs":
+        return recorded_legs(args.path)
+    if args.command == "hold":
+        return hold(args.path, args.label, typed_std.stdin_text())
+    return derive(args.path, typed_std.stdin_text(), args.provenance, adopt=args.adopt)
 
 
 if __name__ == "__main__":

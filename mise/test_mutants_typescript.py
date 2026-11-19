@@ -20,6 +20,8 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
+import contextlib
+import io
 import json
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -619,6 +621,65 @@ class Run(Planted):
             ],
         )
         self.assertEqual(log, [])
+
+
+class Shapes(unittest.TestCase):
+    """A report field of another shape is refused by name, never a crash."""
+
+    def test_each_field_the_verdict_reads(self) -> None:
+        """The refusal names the field, where it is, in the report."""
+        file = 'files["a.ts"]'
+        rows: tuple[tuple[object, str], ...] = (
+            ({"files": {"a.ts": 3}}, f"{file} is not an object"),
+            ({"files": {"a.ts": {"mutants": {}}}}, f"{file}.mutants is not a list"),
+            (
+                {"files": {"a.ts": {"mutants": [1]}}},
+                f"{file}.mutants[0] is not an object",
+            ),
+            (
+                {"files": {"a.ts": {"mutants": [{}]}}},
+                f"{file}.mutants[0].status is not a string",
+            ),
+            (
+                {"files": {"a.ts": {"mutants": [{"status": "Killed", "location": 1}]}}},
+                f"{file}.mutants[0].location is not an object",
+            ),
+            (
+                {
+                    "files": {
+                        "a.ts": {"mutants": [{"location": {"start": {"line": "1"}}}]}
+                    }
+                },
+                f"{file}.mutants[0].line is not an integer",
+            ),
+            (
+                {"files": {"a.ts": {"mutants": [{"replacement": 1}]}}},
+                f"{file}.mutants[0].replacement is not a string",
+            ),
+            (
+                {"files": {"a.ts": {"mutants": [{"mutatorName": 1}]}}},
+                f"{file}.mutants[0].mutatorName is not a string",
+            ),
+            (
+                {
+                    "files": {
+                        "a.ts": {"mutants": [{"status": "Ignored", "statusReason": 1}]}
+                    }
+                },
+                f"{file}.mutants[0].statusReason is not a string",
+            ),
+        )
+        for value, why in rows:
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp, "mutation.json")
+                path.write_text(json.dumps(value), encoding="utf-8")
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    status = mutants_typescript.judge(str(path), LABEL, "")
+                self.assertEqual(status, 1)
+                self.assertEqual(
+                    err.getvalue(), f"{LABEL}: no readable report at {path}: {why}\n"
+                )
 
 
 if __name__ == "__main__":

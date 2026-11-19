@@ -59,6 +59,8 @@ import sys
 from pathlib import Path
 
 import coverage_js_runner
+import decoded
+import typed_std
 
 EXIT_USAGE = 2
 # stage takes a directory and, optionally, the config; verify a report
@@ -206,13 +208,13 @@ def lint(files: list[str]) -> int:
         for number, line in enumerate(text.splitlines(), 1):
             if not PROPERTY.search(name):
                 findings.extend(
-                    f"{name}:{number}: imports {match.group(1)} but is not a"
+                    f"{name}:{number}: imports {typed_std.group(match, 1)} but is not a"
                     " *.prop.test.{ts,tsx,mts,cts} file"
                     for match in IMPORT.finditer(line)
                 )
                 continue
             for match in RESTATED.finditer(line):
-                what = match.group(1) or f"{match.group(2)}()"
+                what = typed_std.group(match, 1) or f"{typed_std.group(match, 2)}()"
                 findings.append(
                     f"{name}:{number}: restates {what}; the belt's seed and run"
                     " count own every property"
@@ -252,6 +254,52 @@ def stage(scratch: str, config: str | None, files: list[str]) -> int:
     return 0
 
 
+def report_runs(data: object) -> dict[str, int]:
+    """Read vitest's JSON report: how many tests each file ran.
+
+    A missing or empty `testResults`, `name` or `assertionResults`
+    reads as none, as vitest leaves them out; a field of another shape
+    is refused by name, through `decoded`'s readers.
+
+    Returns:
+        Each test file's resolved path, and its test count.
+
+    """
+    out: dict[str, int] = {}
+    results = decoded.as_object(data, "the report").get("testResults")
+    for index, item in enumerate(
+        decoded.as_array(results, "testResults") if results else []
+    ):
+        where = f"testResults[{index}]"
+        result = decoded.as_object(item, where)
+        name = decoded.as_str(result.get("name", ""), f"{where}.name")
+        tests = result.get("assertionResults")
+        count = (
+            len(decoded.as_array(tests, f"{where}.assertionResults")) if tests else 0
+        )
+        out[str(Path(name).resolve())] = count
+    return out
+
+
+def listed_files(data: object) -> set[str]:
+    """Read `vitest list --filesOnly --json`: the files it collects.
+
+    An entry of another shape is refused by name, through `decoded`'s
+    readers.
+
+    Returns:
+        Each file's resolved path.
+
+    """
+    out: set[str] = set()
+    for index, item in enumerate(decoded.as_array(data, "the listing")):
+        where = f"listing[{index}]"
+        entry = decoded.as_object(item, where)
+        file = decoded.as_str(entry.get("file"), f"{where}.file")
+        out.add(str(Path(file).resolve()))
+    return out
+
+
 def verify(report: str, files: list[str]) -> int:
     """Prove every property file ran, with at least one test.
 
@@ -260,16 +308,13 @@ def verify(report: str, files: list[str]) -> int:
 
     """
     try:
-        data = json.loads(Path(report).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as err:
+        ran = report_runs(decoded.load_json(Path(report).read_bytes()))
+    except OSError as err:
         print(f"no vitest JSON report at {report} ({err.__class__.__name__})")
         return 1
-    ran = {
-        str(Path(result.get("name", "")).resolve()): len(
-            result.get("assertionResults") or []
-        )
-        for result in data.get("testResults") or []
-    }
+    except decoded.UndecodableError as err:
+        print(f"no vitest JSON report at {report} ({err})")
+        return 1
     missing = [f for f in files if ran.get(str(Path(f).resolve()), 0) == 0]
     for name in missing:
         print(f"{name}: did not run, or ran no test")
@@ -284,10 +329,12 @@ def collected(listing: str, files: list[str]) -> int:
 
     """
     try:
-        data = json.loads(Path(listing).read_text(encoding="utf-8"))
-        found = {str(Path(entry["file"]).resolve()) for entry in data}
-    except (OSError, ValueError, TypeError, KeyError) as err:
+        found = listed_files(decoded.load_json(Path(listing).read_bytes()))
+    except OSError as err:
         print(f"no readable vitest file list at {listing} ({err.__class__.__name__})")
+        return 1
+    except decoded.UndecodableError as err:
+        print(f"no readable vitest file list at {listing} ({err})")
         return 1
     leaked = [f for f in files if str(Path(f).resolve()) in found]
     for name in leaked:
@@ -308,7 +355,7 @@ def main(argv: list[str]) -> int:
     if command == "lint":
         return lint(args)
     if command == "stage" and len(args) in STAGE_ARGS:
-        files = [line for line in sys.stdin.read().splitlines() if line]
+        files = [line for line in typed_std.stdin_text().splitlines() if line]
         return stage(args[0], args[1] if len(args) > 1 else None, files)
     if command == "verify" and len(args) >= VERIFY_MIN_ARGS:
         return verify(args[0], args[1:])
