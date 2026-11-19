@@ -215,6 +215,8 @@ DYNAMIC = {
     "mise/mutants-python.py": "asks mutmut's own interpreter, read from its"
     " installed script, where mutmut lives",
     "mise/with-lock.py": "runs its caller's command under the lock",
+    "mise/unittest-guarded.py": "starts itself as a worker under the"
+    " interpreter it runs on (#1623)",
     "mise/security-config.py": "builds its gh argv in a variable",
 }
 
