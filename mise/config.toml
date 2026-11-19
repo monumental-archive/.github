@@ -2589,6 +2589,41 @@ count=$(wc -l <<< "${files}" | tr -d " ")
 echo "lint:exec-bits: ${count} scripts executable"
 '''
 
+[tasks."lint:codecov-yml"]
+description = "No repository tracks a Codecov config: the org's Global YAML is the one rule, and a repository file overrides it"
+dir = "{{cwd}}"
+# Codecov is the badge feed and nothing else (#1532): the gate's
+# coverage:check is the one coverage threshold. Codecov's defaults post
+# codecov/project and codecov/patch statuses against a target it
+# computes itself, so the org turns them off once, in Codecov's
+# organisation Global YAML (docs/runbook.md records the text). A
+# repository file REPLACES that default rather than layering on it, so
+# any tracked file Codecov would read is red by name. No allow-list.
+#
+# The locations are Codecov's own (libs/shared/shared/yaml/fetcher.py
+# in codecov/umbrella, read 2026-11-19): four exact names, at the root
+# or directly under dev/ or .github/.
+run = '''
+found=""
+for dir in "" dev/ .github/; do
+  for name in codecov.yml .codecov.yml codecov.yaml .codecov.yaml; do
+    if git ls-files --error-unmatch -- "${dir}${name}" > /dev/null 2>&1; then
+      found="${found}  ${dir}${name}"$'\n'
+    fi
+  done
+done
+if [[ -n ${found} ]]; then
+  {
+    echo "lint:codecov-yml: tracked Codecov config overrides the org's Global YAML:"
+    printf "%s" "${found}"
+    echo "  the org turns Codecov's statuses off once, org-wide (#1532);"
+    echo "  remove the file; docs/runbook.md's Codecov entry holds the rule"
+  } >&2
+  exit 1
+fi
+echo "lint:codecov-yml: no Codecov config tracked; the org's Global YAML applies"
+'''
+
 [tasks."lint:deny"]
 description = "Dependency policy: bans + licenses + sources (cargo-deny, deterministic over the lock)"
 dir = "{{cwd}}"
