@@ -79,7 +79,6 @@ mise/config.toml	audit:signer-surface	65	# #1544 unassigned
 mise/config.toml	audit:fuzz	46	# #1544 unassigned
 mise/config.toml	audit:coverage-branches	20	# #1544 unassigned
 mise/config.toml	audit:go-fuzz	41	# #1544 unassigned
-mise/config.toml	audit:mutants	18	# #1544 unassigned
 mise/config.toml	lint:licence	17	# #1544 unassigned
 mise/config.toml	lint:citation	25	# #1544 unassigned
 mise/config.toml	lint:bestpractices	54	# #1544 unassigned

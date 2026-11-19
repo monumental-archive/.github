@@ -8424,7 +8424,8 @@ dir = "{{cwd}}"
 # Coverage counts a line as covered when a test runs it, whether or not
 # any test would notice a change to it; a mutation run changes it and
 # asks. One task, one leg per language, each leg its own delivered file
-# (mise/mutants-<language>.sh), so a language is ONE added line below.
+# (mise/mutants-<language>.sh), so a language is ONE added `leg` line in
+# mise/mutants.sh, the delivered body (#1544's ceiling).
 #
 # NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
 # suite once per mutant. repo-mutants.yml runs it weekly: per language a
@@ -8442,27 +8443,7 @@ dir = "{{cwd}}"
 # shard count, timeout and tick, so a red names its language at the job
 # level — and each job selects its one leg with MUTANTS_LEG=<language>.
 # A MUTANTS_LEG naming no leg is red, never a run of nothing.
-run = '''
-red=""
-ran=""
-leg() {
-  [[ -z ${MUTANTS_LEG:-} || ${MUTANTS_LEG} == "$1" ]] || return 0
-  ran+=" $1"
-  bash "${ORG_BELT_DIR}/mutants-$1.sh" || red+=" $1"
-}
-leg go
-leg python
-leg rust
-leg typescript
-if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
-  echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2
-  exit 1
-fi
-if [[ -n ${red} ]]; then
-  echo "audit:mutants: red leg(s):${red}" >&2
-  exit 1
-fi
-'''
+run = '"${ORG_BELT_DIR}/mutants.sh"'
 
 [tasks."lint:licence"]
 description = "The repo carries its licence: tracked LICENSE or LICENSES/, and REUSE.toml's expression filled"
