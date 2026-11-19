@@ -834,7 +834,8 @@ class MeasureSelectors(unittest.TestCase):
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
-                "STUB_RUST": "61.5",
+                "STUB_LF": "200",
+                "STUB_LH": "123",
                 "STUB_GO": "93.0",
             }
             done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
