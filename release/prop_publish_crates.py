@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""publish-crates.py's index reading, on any sparse-index answer.
+
+The properties of `test_publish_rust_crate.py`'s fixed rows (#1556),
+over generated index files. The fetch is replaced in-process by the
+row's answer:
+
+- V: a version present in the crate's index file is published, with
+  the checksum its record names; a version absent from it is not;
+  where the record sits among the others, and what else they hold,
+  moves neither.
+- R: on any 200 body at all — any bytes — the reader answers or
+  refuses by name (`RefusalError`); an index it cannot read is never
+  "not published", and it never dies with anything else.
+
+Run by `test:python-properties` under the belt's Hypothesis profile;
+the ordinary suite (`mise run test`) never imports this file.
+"""
+
+import importlib.util
+import json
+import unittest
+from pathlib import Path
+
+from hypothesis import example, given
+from hypothesis import strategies as st
+
+_SPEC = importlib.util.spec_from_file_location(
+    "publish_crates",
+    Path(__file__).with_name("publish-crates.py"),
+)
+publish = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(publish)
+
+NAME = "edtf"
+UA = "org-release (+https://example.invalid)"
+VERSION = st.from_regex(
+    r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}(-[a-z0-9.]{1,5})?", fullmatch=True
+)
+CKSUM = st.from_regex(r"[0-9a-f]{64}", fullmatch=True)
+# A record as the index writes one: the fields the reader uses, and
+# others it must step over.
+EXTRA = st.dictionaries(
+    st.sampled_from(["name", "deps", "features", "yanked", "v", "rust_version"]),
+    st.none() | st.booleans() | st.integers() | st.text(max_size=8),
+    max_size=3,
+)
+
+
+def answer(status: int | None, body: bytes) -> object:
+    """Make a fetch that answers every request alike.
+
+    Returns:
+        The fetch.
+
+    """
+    return lambda *_: publish.Response(status, body)
+
+
+def read(body: bytes, version: str) -> str | None:
+    """Ask for one version against an index file.
+
+    Returns:
+        The checksum, or None when not published.
+
+    """
+    return publish.published_checksum(NAME, version, UA, answer(200, body))
+
+
+class PresentIsPublished(unittest.TestCase):
+    """V: present means published with its checksum; absent means not."""
+
+    @given(
+        st.dictionaries(VERSION, st.tuples(CKSUM, EXTRA), min_size=1, max_size=6),
+        VERSION,
+        st.randoms(),
+    )
+    def test_present_and_absent(
+        self, records: dict[str, tuple[str, dict]], probe: str, shuffle: object
+    ) -> None:
+        """Every recorded version reads its checksum; another reads None."""
+        lines = [
+            json.dumps({**extra, "vers": v, "cksum": c})
+            for v, (c, extra) in records.items()
+        ]
+        shuffle.shuffle(lines)
+        body = ("\n".join(lines) + "\n").encode()
+        for version, (cksum, _) in records.items():
+            self.assertEqual(read(body, version), cksum)
+        if probe not in records:
+            self.assertIsNone(read(body, probe))
+
+
+class AnyIndexText(unittest.TestCase):
+    """R: any body is answered or refused by name."""
+
+    @given(st.binary() | st.text().map(str.encode), VERSION)
+    @example(b"\xff", "1.0.0")
+    @example(b"{", "1.0.0")
+    @example(b"[]", "1.0.0")
+    @example(b'{"vers": "1.0.0"}', "1.0.0")
+    def test_answers_or_refuses(self, body: bytes, version: str) -> None:
+        """A checksum, None, or the step's own refusal naming the crate."""
+        try:
+            got = read(body, version)
+        except publish.RefusalError as refused:
+            self.assertTrue(str(refused).startswith("::error::"), refused)
+            self.assertIn(NAME, str(refused))
+        else:
+            self.assertTrue(got is None or isinstance(got, str))
+
+
+if __name__ == "__main__":
+    unittest.main()
