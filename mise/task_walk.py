@@ -157,9 +157,15 @@ def reference(entry: object, task: str, field: str) -> Reference:
         return Reference((entry[0],), "arguments" if entry[1:] else "", optional=False)
     if is_object(entry) and set(entry) <= {"task", "tasks", "args", "env", "optional"}:
         one, many = entry.get("task"), entry.get("tasks")
-        names = ([one] if isinstance(one, str) else []) + (many if is_strings(many) else [])
+        names = ([one] if isinstance(one, str) else []) + (
+            many if is_strings(many) else []
+        )
         args, env, optional = entry.get("args"), entry.get("env"), entry.get("optional")
-        if names and (one is None or isinstance(one, str)) and (many is None or is_strings(many)):
+        if (
+            names
+            and (one is None or isinstance(one, str))
+            and (many is None or is_strings(many))
+        ):
             passes = "arguments" if args else ("environment" if env else "")
             return Reference(tuple(names), passes, optional=optional is True)
     msg = f"task '{task}': a {field} entry the walk does not read, {json.dumps(entry)}"
@@ -317,11 +323,11 @@ def walk(
     `info` answers `mise tasks info <name> --json` (None when mise
     cannot), `names` every task's name, for patterns.
 
+    A task on the way that cannot be run as written raises RefusedError
+    from the walker, naming it.
+
     Returns:
         The tasks reached in order, and the steps.
-
-    Raises:
-        RefusedError: a task on the way cannot be run as written.
 
     """
     walker = Walker(info, names)
@@ -412,8 +418,22 @@ def steps_command(label: str, root: str) -> int:
     return 0
 
 
+def main(argv: list[str]) -> int:
+    """Run the command line.
+
+    Returns:
+        The exit status.
+
+    """
+    match argv:
+        case ["steps", label]:
+            return steps_command(label, "test")
+        case ["steps", label, root]:
+            return steps_command(label, root)
+        case _:
+            print("usage: task_walk.py steps <label> [<task>]", file=sys.stderr)
+            return 2
+
+
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["steps"] and len(sys.argv) in {3, 4}:
-        sys.exit(steps_command(sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else "test"))
-    print("usage: task_walk.py steps <label> [<task>]", file=sys.stderr)
-    sys.exit(2)
+    sys.exit(main(sys.argv[1:]))

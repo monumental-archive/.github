@@ -145,7 +145,7 @@ class Order(unittest.TestCase):
                 self.expect_steps(root, [(root, "echo test"), UNIT])
 
     def test_extends_is_already_resolved(self) -> None:
-        """mise reports a template's `run` as the task's own."""
+        """A template's `run` is reported as the task's own."""
         self.expect_steps("extends", [UNIT])
 
     def test_wait_for_is_not_a_run(self) -> None:
@@ -174,7 +174,9 @@ class Patterns(unittest.TestCase):
 
     def test_a_depends_pattern_runs_every_match(self) -> None:
         """`depends = ["unit:*"]`: `*` stays within one group."""
-        self.assertEqual(walk("depends-pattern").tasks, ("depends-pattern", "unit:extra"))
+        self.assertEqual(
+            walk("depends-pattern").tasks, ("depends-pattern", "unit:extra")
+        )
 
     def test_a_run_pattern_runs_every_match(self) -> None:
         """`run = [{ task = "unit:**" }]`: `**` crosses groups."""
@@ -184,12 +186,14 @@ class Patterns(unittest.TestCase):
         )
 
     def test_a_pattern_matching_nothing_is_refused(self) -> None:
-        """mise fails such a run; the walk says so by name."""
-        with self.assertRaisesRegex(tw.RefusedError, "'run-task-pattern' runs the pattern"):
+        """Such a run fails in mise; the walk says so by name."""
+        with self.assertRaisesRegex(
+            tw.RefusedError, "'run-task-pattern' runs the pattern"
+        ):
             tw.walk("run-task-pattern", INFO.get, lambda: ["unit"])
 
     def test_each_wildcard(self) -> None:
-        """mise's wildcards, as docs/tasks/running-tasks.md lists them."""
+        """The wildcards docs/tasks/running-tasks.md lists."""
         rows = (
             ("lint:*", "lint:a", True),
             ("lint:*", "lint:a:b", False),
