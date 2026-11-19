@@ -793,7 +793,7 @@ class AbsentSqlfluffFailsByName(unittest.TestCase):
         child = subprocess.Popen(
             [sys.executable, "-m", "unittest", row],
             cwd=BELT,
-            env=os.environ | {"PATH": without_sqlfluff()},
+            env=hermetic.env(PATH=without_sqlfluff()),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
