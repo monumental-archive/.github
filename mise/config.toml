@@ -162,6 +162,19 @@ ORG_BELT_DIR = "{{ exec(command='d=\"${MISE_GLOBAL_CONFIG_FILE:-}\"; if [ -z \"$
 # in play. Empty when the belt did not arrive, for the same #569 reason
 # stated above — `dirname` of empty is empty, not an error.
 ORG_CANON_DIR = "{{ env.ORG_BELT_DIR | dirname }}"
+# THE BELT'S PYTHON, as an absolute path: every helper a belt script
+# starts runs as `"${ORG_PYTHON}" <helper.py>` (#1543), the same
+# interpreter CI's `$/.github/actions/canon` installs and exports under
+# this name. It is the belt's own `[tools]` pin, read from the belt's
+# file, at the place mise installs it — not `python3` on PATH, which a
+# repository pinning its own Python would answer. Where that install is
+# absent (a job whose list did not install it into this data directory),
+# the value the canon action exported stands. Otherwise empty, exit 0,
+# for the #569 reason above; a script that starts a helper refuses an
+# empty one by name. Asking `mise where` here instead hangs (the
+# template re-enters mise, which evaluates this template again; measured
+# on 2026.11.6), and the command holds no backslash: Tera refuses one.
+ORG_PYTHON = '''{{ exec(command=`b="${ORG_BELT_DIR:-}"; v=""; if [ -n "$b" ] && [ -f "$b/config.toml" ]; then v=$(awk -F'"' '/^python = "/ { print $2 }' "$b/config.toml"); fi; d="${XDG_DATA_HOME:-$HOME/.local/share}/mise"; d="${MISE_DATA_DIR:-$d}"; p="$d/installs/python/$v/bin/python3"; if [ -n "$v" ] && [ -x "$p" ]; then echo "$p"; elif [ -n "${ORG_PYTHON:-}" ]; then echo "$ORG_PYTHON"; fi`) }}'''
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
