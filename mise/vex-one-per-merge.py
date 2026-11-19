@@ -25,12 +25,21 @@ the second for obeying the rule. Nothing is lost: the pull-request run
 judged the same head, and the gate's queue-head step (#1422) refuses a
 group not built from that head. Network-free, so deterministic.
 
-Usage:
-  vex-one-per-merge.py      (in the repository, from its root)
+One reader for both sides (#1615): `vex-attest.yml`'s push branch
+asks `--list BEFORE..HEAD` for the decisions a merge changed, through
+the same function this count uses, so the gate's count and the
+workflow's signing list cannot differ. With renames on, a decision a
+merge renamed and edited was an `R`, dropped, and never signed.
 
-Exits 0 at most one changed, 1 more than one.
+Usage:
+  vex-one-per-merge.py              (in the repository, from its root)
+  vex-one-per-merge.py --list RANGE (print RANGE's changed decisions)
+
+The count exits 0 at most one changed, 1 more than one. The listing
+prints one decision per line and exits 0.
 """
 
+import argparse
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -69,6 +78,27 @@ def message() -> str:
     return home.read_text(encoding="utf-8").strip()
 
 
+def changed(revisions: str) -> list[str]:
+    """Name the decisions a revision range adds or modifies.
+
+    Renames are off, so a decision at a new name is listed there; a
+    deletion is not listed, since it leaves nothing to sign.
+
+    Returns:
+        The decision paths, in git's order.
+
+    """
+    return git(
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "--diff-filter=AM",
+        revisions,
+        "--",
+        DECISIONS,
+    ).split()
+
+
 def tip() -> str:
     """Name the pull request's head: HEAD, or a merge commit's second parent.
 
@@ -80,7 +110,7 @@ def tip() -> str:
     return "HEAD^2" if len(parents) >= MERGE_WORDS else "HEAD"
 
 
-def main() -> int:
+def count() -> int:
     """Count the changed decisions and judge them.
 
     Returns:
@@ -109,21 +139,30 @@ def main() -> int:
     if not git("rev-list", f"{BASE}..{head}").strip():
         print(f"{NAME}: nothing ahead of {BASE} (the default branch itself), skipped")
         return 0
-    changed = git(
-        "diff",
-        "--name-only",
-        "--no-renames",
-        "--diff-filter=AM",
-        f"{BASE}...{head}",
-        "--",
-        DECISIONS,
-    ).split()
-    if len(changed) > 1:
+    names = changed(f"{BASE}...{head}")
+    if len(names) > 1:
         print(f"{NAME}: {message()}:", file=sys.stderr)
-        for name in changed:
+        for name in names:
             print(f"  {name}", file=sys.stderr)
         return 1
-    print(f"{NAME}: {len(changed)} VEX decision(s) changed ahead of {BASE}")
+    print(f"{NAME}: {len(names)} VEX decision(s) changed ahead of {BASE}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Count for the gate, or list a range's decisions for the workflow.
+
+    Returns:
+        The count's status, or 0 after a listing.
+
+    """
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--list", metavar="RANGE", dest="revisions")
+    args = parser.parse_args(argv)
+    if args.revisions is None:
+        return count()
+    for name in changed(args.revisions):
+        print(name)
     return 0
 
 
