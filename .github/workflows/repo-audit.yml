@@ -1,9 +1,11 @@
 # The repo-side Monday audit: the scheduled, network-touching checks the
 # deterministic gate deliberately excludes — the dependency advisory
 # feed (audit:deny), bounded fuzz runs (audit:fuzz, #316; skips clean
-# in repos with no fuzz/, so the stub stays universal) and the Rust
+# in repos with no fuzz/, so the stub stays universal), the Rust
 # branch-coverage floor, which needs a nightly (audit:coverage-branches,
-# #1359). Callers pin by full SHA, ci.yml-style:
+# #1359), and the Go condition-coverage floor, which costs six times
+# the suite (audit:coverage-go-branches, #1546). Callers pin by full
+# SHA, ci.yml-style:
 #
 #   jobs:
 #     audit:
@@ -190,6 +192,44 @@ jobs:
       # token. Skips clean with no Cargo.toml or no such line.
       - name: Hold the Rust branch-coverage floor
         run: mise run audit:coverage-branches
+
+  coverage-go-branches:
+    name: audit / go condition coverage floor
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.7
+          cache: false
+
+      # The belt pins gobco `lazy`, so the bare install above skips it.
+      # This job is the one place it is installed: built from source by
+      # the repository's own go pin, installed above, as gomu is
+      # (repo-mutants.yml). Only where there is Go to build it with.
+      - name: Install gobco, by name
+        if: hashFiles('go.mod') != ''
+        run: mise install go:github.com/rillig/gobco
+
+      # gobco's condition coverage, one package per call, held to the
+      # `go-branches` line of .coverage-floor (#1546). Here and never in
+      # the gate: it re-runs the suite instrumented at six times its
+      # cost. Local only, so no token. Skips clean with no go.mod or no
+      # such line.
+      - name: Hold the Go condition-coverage floor
+        run: mise run audit:coverage-go-branches
 
   go-vulns:
     name: audit / go vulnerabilities

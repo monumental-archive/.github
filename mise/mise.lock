@@ -875,6 +875,10 @@ checksum_source = "mise-versions"
 url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.51.0/cargo-semver-checks-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/608677294"
 
+[[tools."go:github.com/rillig/gobco"]]
+version = "1.3.4"
+backend = "go:github.com/rillig/gobco"
+
 [[tools."go:github.com/sivchari/gomu/cmd/gomu"]]
 version = "0.3.0"
 backend = "go:github.com/sivchari/gomu/cmd/gomu"

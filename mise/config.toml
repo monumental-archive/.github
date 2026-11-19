@@ -482,6 +482,18 @@ python = "3.15.2"
 "go:github.com/sivchari/gomu/cmd/gomu" = { version = "0.3.0", lazy = true, lazy_bins = [
   "gomu",
 ] }
+# Go condition coverage (#1546): coverage-measure.sh's `go-branches`
+# leg, held by audit:coverage-go-branches on the Monday cron, never the
+# gate (6.15 times `go test` on stele, measured per package). Chosen
+# over gocoverageplus on a measured comparison (docs/tooling-verdicts.md):
+# the only one that reported a half-taken `a && b`. Built from source by
+# the repository's own go, gomu's route: gobco parses the source with the
+# go/parser it was built with, so a build older than the running Go is
+# refused by the leg. LAZY, so only the audit job that names it installs
+# it; repo-audit.yml's `coverage-go-branches` installs it by name.
+"go:github.com/rillig/gobco" = { version = "1.3.4", lazy = true, lazy_bins = [
+  "gobco",
+] }
 # Unused Rust dependencies (#403): every dependency in Cargo.toml must
 # be imported somewhere, or carry a written ignored entry under
 # [package.metadata.cargo-machete] with a reason. Static analysis, no
@@ -7182,6 +7194,12 @@ dir = "{{cwd}}"
 # audit:coverage-branches to hold on the Monday cron. Without the nightly
 # the line is not written and the audit skips clean; a line already
 # committed is carried through, never dropped.
+#
+# A Go repository gets its `go-branches` line the same way (#1546):
+# gobco's condition coverage, measured here and held by
+# audit:coverage-go-branches. Go needs no second toolchain, so the line
+# is measured whenever go.mod is; a missing gobco is refused with its
+# install line, never skipped.
 run = '''
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
@@ -7195,6 +7213,7 @@ if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
 elif [[ -f Cargo.toml ]]; then
   echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
 fi
+[[ ! -f go.mod ]] || legs+=$'\n'"$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt go-branches)" || exit 1
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
 '''
@@ -8329,6 +8348,35 @@ if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
   exit 1
 fi
 echo "audit:coverage-branches: rust-branches holds the floor ${floor} (${pct}%)"
+'''
+
+[tasks."audit:coverage-go-branches"]
+description = "Hold the Go condition-coverage floor (.coverage-floor's go-branches line) with gobco (never the gate)"
+dir = "{{cwd}}"
+# The Go half of #1336's property 2 (#1546), beside the Rust half above.
+# Go's own coverage counts statements, so the figure is gobco's condition
+# coverage: coverage-measure.sh's `go-branches` leg, one package per
+# call. Held here, on the Monday cron, because it costs 6.15 times
+# `go test` (measured on stele) where the gate's budget is a fifth. The
+# floor is the `go-branches` line coverage:adopt derived, read through
+# coverage-floor.py, so a hand-typed line is refused as drift. Reopen:
+# Go gaining branch coverage of its own (docs/tooling-verdicts.md).
+run = '''
+[[ -f go.mod ]] || {
+  echo "audit:coverage-go-branches: no go.mod, skipped"
+  exit 0
+}
+floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg go-branches) || exit 1
+[[ -n ${floor} ]] || {
+  echo "audit:coverage-go-branches: no go-branches line in .coverage-floor, skipped"
+  exit 0
+}
+pct=$("${ORG_BELT_DIR}/coverage-measure.sh" audit:coverage-go-branches go-branches) || exit 1
+if [[ ${pct} != "go-branches "* ]] || awk -v p="${pct#go-branches }" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
+  echo "audit:coverage-go-branches: go-branches: ${pct#go-branches }% is below the derived floor ${floor}%" >&2
+  exit 1
+fi
+echo "audit:coverage-go-branches: go-branches holds the floor ${floor} (${pct#go-branches }%)"
 '''
 
 [tasks."audit:go-fuzz"]
