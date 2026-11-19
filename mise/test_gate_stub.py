@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Table tests for lint:gate-stub's concurrency requirement (#1195).
+"""Table tests for lint:gate-stub's concurrency requirement (#1195, #1617).
 
 An event on a pull request that has already merged has no merge ref, so
 its `github.ref` is the base branch. A stub grouping on the ref alone put
 that run in the same group as the push gate on main, and
 `cancel-in-progress: true` let it cancel the gate: main went red with
-nothing wrong in it (edtf, run 43620265494). The stub now groups by the
-pull request's number and cancels only `pull_request` runs, and the lint
+nothing wrong in it (edtf, run 43620265494). The stub then grouped by the
+pull request's number and cancelled only `pull_request` runs — but every
+push to the default branch still shared the ref's group, and the forge
+holds one pending run per group, a newer one replacing it as `cancelled`:
+27 of 28 push gates on main, 2026-11-19 19:00Z-19:53Z (#1617). Outside a
+pull request the group now names the ref and the commit, and the lint
 holds every gate caller to both lines.
 
 The body under test is the task's own `run` string, read out of
@@ -27,6 +31,7 @@ gate as `mise run test`, which `ci` collects.
 import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -45,7 +50,12 @@ BASH = shutil.which("bash")
 STUB = (CANON / "workflow-templates" / "ci.yml").read_text(encoding="utf-8")
 GATE = (CANON / ".github" / "workflows" / "gate.yml").read_text(encoding="utf-8")
 
-GROUP = (
+WANT = (
+    "${{ github.event.pull_request.number"
+    " || format('{0}-{1}', github.ref, github.sha) }}"
+)
+GROUP = "  group: ${{ github.workflow }}-" + WANT + "\n"
+PRE_1617_GROUP = (
     "  group: ${{ github.workflow }}-"
     "${{ github.event.pull_request.number || github.ref }}\n"
 )
@@ -55,25 +65,24 @@ OLD_CANCEL = "  cancel-in-progress: true\n"
 
 # The message, line for line: the defect, then both wanted lines verbatim.
 MESSAGE = (
-    "lint:gate-stub: gate caller's concurrency group is shared with events\n"
-    "  on merged pull requests, which then cancel the push gate on the\n"
-    "  default branch (#1195). Under concurrency: set exactly\n"
-    "    group: ${{ github.workflow }}-"
-    "${{ github.event.pull_request.number || github.ref }}\n"
+    "lint:gate-stub: gate caller's concurrency group is shared: a merged pull\n"
+    "  request's event cancels the push gate (#1195), a push replaces the one\n"
+    "  pending (#1617). Run mise run fix:gate-stub, or set under concurrency:\n"
+    "    group: ${{ github.workflow }}-" + WANT + "\n"
     "    cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n"
     "  in: .github/workflows/gate.yml\n"
 )
 
 
-def body() -> str:
-    """Read the lint's run string as mise would render it.
+def body(task: str = "lint:gate-stub") -> str:
+    """Read a task's run string as mise would render it.
 
     Returns:
         The task body with the `{% raw %}` / `{% endraw %}` lines removed.
 
     """
     config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"]["lint:gate-stub"]["run"]
+    run = config["tasks"][task]["run"]
     return "".join(
         line
         for line in run.splitlines(keepends=True)
@@ -82,6 +91,31 @@ def body() -> str:
 
 
 BODY = body()
+FIX_BODY = body("fix:gate-stub")
+
+
+def run(script: str, tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run one task body in a planted tree.
+
+    Returns:
+        The finished process, stdout and stderr captured as text.
+
+    """
+    env = hermetic.env()
+    env |= {
+        "ORG_BELT_DIR": str(BELT),
+        "ORG_CANON_DIR": str(CANON),
+        "ORG_PYTHON": sys.executable,
+        "ORG_PYTHON_UNSET": "unset",
+    }
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [BASH, "-euo", "pipefail", "-c", script],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def lint(workflow: str) -> subprocess.CompletedProcess[str]:
@@ -95,16 +129,23 @@ def lint(workflow: str) -> subprocess.CompletedProcess[str]:
         flows = Path(tmp) / ".github" / "workflows"
         flows.mkdir(parents=True)
         (flows / "gate.yml").write_text(workflow, encoding="utf-8")
-        env = hermetic.env()
-        env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [BASH, "-euo", "pipefail", "-c", BODY],
-            cwd=tmp,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        return run(BODY, Path(tmp))
+
+
+def fixed(workflow: str) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run fix:gate-stub against one planted gate caller.
+
+    Returns:
+        The finished process and the caller's text after it ran.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        flows = Path(tmp) / ".github" / "workflows"
+        flows.mkdir(parents=True)
+        caller = flows / "gate.yml"
+        caller.write_text(workflow, encoding="utf-8")
+        done = run(FIX_BODY, Path(tmp))
+        return done, caller.read_text(encoding="utf-8")
 
 
 def planted(old: str, new: str) -> str:
@@ -142,6 +183,15 @@ class Green(unittest.TestCase):
         """The canon's self-applied gate is clean."""
         self.assert_ok(GATE)
 
+    def test_the_canons_own_gate_groups_a_push_by_its_commit(self) -> None:
+        """A push to main cannot replace another push's pending gate (#1617).
+
+        Read on the file itself, not through the lint, so the row holds
+        even if the lint's wanted line were weakened with it.
+        """
+        self.assertIn(GROUP, GATE)
+        self.assertIn("github.sha", GROUP)
+
     def test_a_trailing_comment_on_cancel_passes(self) -> None:
         """A comment after the wanted line does not change it."""
         self.assert_ok(planted(CANCEL, CANCEL.rstrip("\n") + " # see #1195\n"))
@@ -168,6 +218,10 @@ class Red(unittest.TestCase):
     def test_the_pre_1195_stub_is_red(self) -> None:
         """The stub every repository carried before #1195."""
         self.assert_red(planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
+
+    def test_the_pre_1617_group_is_red(self) -> None:
+        """Every push to the default branch shares the ref's one group."""
+        self.assert_red(planted(GROUP, PRE_1617_GROUP))
 
     def test_a_group_on_the_ref_alone_is_red(self) -> None:
         """The shared group alone, cancel already right."""
@@ -202,6 +256,76 @@ class Red(unittest.TestCase):
                 "    uses: monumental-archive",
             ),
         )
+
+
+class Fix(unittest.TestCase):
+    """fix:gate-stub, the lint's write-mode sibling (#1617)."""
+
+    def assert_rewritten(self, workflow: str) -> None:
+        """Assert the fixer makes the stub the canon's, which the lint passes."""
+        done, after = fixed(workflow)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "fix:gate-stub: rewrote the concurrency lines in"
+            " .github/workflows/gate.yml\nfix:gate-stub: ok\n",
+        )
+        self.assertEqual(after, STUB)
+        self.assertEqual(lint(after).returncode, 0)
+
+    def test_the_pre_1617_stub_is_rewritten_and_then_passes(self) -> None:
+        """The stub every repository carries today becomes the canon's."""
+        self.assert_rewritten(planted(GROUP, PRE_1617_GROUP))
+
+    def test_the_pre_1195_stub_is_rewritten_and_then_passes(self) -> None:
+        """Both lines wrong: both rewritten, nothing else touched."""
+        self.assert_rewritten(planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
+
+    def test_a_missing_cancel_line_is_written(self) -> None:
+        """A block without the cancel line gets it at the block's end."""
+        self.assert_rewritten(planted(CANCEL, ""))
+
+    def test_a_trailing_comment_is_kept(self) -> None:
+        """The rewrite keeps a comment on the line it rewrites."""
+        done, after = fixed(planted(GROUP, PRE_1617_GROUP.rstrip("\n") + " # x\n"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(after, STUB.replace(GROUP, GROUP.rstrip("\n") + " # x\n"))
+
+    def test_a_conforming_stub_is_left_byte_for_byte(self) -> None:
+        """The canon's stub and gate are no-ops."""
+        for workflow in (STUB, GATE):
+            done, after = fixed(workflow)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(done.stdout, "fix:gate-stub: ok\n")
+            self.assertEqual(after, workflow)
+
+    def test_a_stub_with_no_concurrency_block_is_refused_by_name(self) -> None:
+        """No block is never given one silently."""
+        workflow = planted("concurrency:\n" + GROUP + CANCEL, "")
+        done, after = fixed(workflow)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertEqual(after, workflow)
+        self.assertEqual(done.stdout, "")
+        self.assertTrue(
+            done.stderr.startswith(
+                "fix:gate-stub: no top-level concurrency block to rewrite",
+            ),
+            done.stderr,
+        )
+        self.assertTrue(
+            done.stderr.endswith("  in: .github/workflows/gate.yml\n"),
+            done.stderr,
+        )
+
+    def test_a_workflow_that_is_not_a_gate_caller_is_not_touched(self) -> None:
+        """Only a caller of ci.yml is the fixer's."""
+        other = planted(
+            "uses: monumental-archive/.github/.github/workflows/ci.yml@",
+            "uses: monumental-archive/.github/.github/workflows/audit.yml@",
+        ).replace(GROUP, OLD_GROUP)
+        done, after = fixed(other)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(after, other)
 
 
 if __name__ == "__main__":

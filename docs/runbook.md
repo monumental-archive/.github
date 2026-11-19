@@ -663,3 +663,13 @@ number and no consumer — spend them as freely as lab patch numbers
 (`.github@v1.24.0` published with its verdict leg red;
 `.github@v1.24.1` fixed it, #367). The canon proves the machinery runs;
 the lab, publishing four classes across PG 14–18, proves it works.
+
+The `audit` workflow runs one at a time, and the forge holds a single
+pending run behind it: a second dispatch while one waits cancels the
+waiting one with no job run (three were lost that way on 2026-11-19
+— issue 1617). That is deliberate — it bounds the API budget an
+audit spends — so when an audit is already running or pending, read that
+run (`gh run list --workflow audit.yml --repo <repo>`) instead of
+dispatching again. The forge's `queue: max` would keep every pending
+dispatch; it is recorded on the actionlint watch (issue 1116) as the
+key `audit` takes once actionlint accepts it, which today it rejects.

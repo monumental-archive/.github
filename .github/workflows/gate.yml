@@ -42,13 +42,19 @@ permissions:
   contents: read
 
 # A pull request's runs group by its number, so they can only cancel
-# each other. Everything else groups by ref and is never cancelled: an
-# event on a pull request that has already merged has no merge ref, so
-# its github.ref is the base branch, and the shared group let it cancel
-# main's push gate — measured on edtf, run 43620265494 (#1195). Each
-# commit on main and each merge-queue entry keeps its own verdict.
+# each other. Everything else groups by ref AND commit and is never
+# cancelled. By ref alone, two defects: an event on a pull request that
+# has already merged has no merge ref, so its github.ref is the base
+# branch and it cancelled main's push gate (edtf run 43620265494,
+# #1195); and the forge holds ONE pending run per group, a newer one
+# replacing it as `cancelled`, so a burst of merges judged only its
+# first and last commit — 27 of 28 push runs cancelled with no job,
+# 2026-11-19 19:00Z-19:53Z (#1617). Grouped by commit, each commit on
+# main and each merge-queue entry keeps its own verdict. `queue: max`
+# would also keep them, serialised, but actionlint rejects the key
+# (#1116); it would not be wanted here, where runs do not conflict.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
