@@ -8550,7 +8550,7 @@ if [[ -z ${lic} ]]; then
   echo "  with no licence the default is all rights reserved, the opposite of the intent" >&2
   exit 1
 fi
-git ls-files -z ':!vendor/**' | python3 "${ORG_BELT_DIR}/licence-texts.py" || exit 1
+git ls-files -z ':!vendor/**' | "${ORG_PYTHON}" "${ORG_BELT_DIR}/licence-texts.py" || exit 1
 echo "lint:licence: ok"
 '''
 
