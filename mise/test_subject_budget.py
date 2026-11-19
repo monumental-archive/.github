@@ -1536,5 +1536,45 @@ class TestScaffoldKeysFitTheBudget(unittest.TestCase):
         )
 
 
+class WrongShapedManifests(unittest.TestCase):
+    """A manifest of the wrong shape is unmodelled, never a traceback (#1555).
+
+    The regression rows of what `prop_subject_budget.py`'s refusal
+    property found: each reader raised on a table of the wrong type, or
+    a file that is not UTF-8, before any tool had refused the manifest.
+    """
+
+    ROWS = (
+        ("package.json", b"[]", "not a JSON object"),
+        ("package.json", b'{"dependencies": []}', "`dependencies` is not a table"),
+        ("Cargo.toml", b"dependencies = 1\n", "`dependencies` is not a table"),
+        ("Cargo.toml", b"target = 1\n", "`target` is not a table"),
+        ("Cargo.toml", b"[target]\nx = 1\n", "`target.x` is not a table"),
+        ("Cargo.toml", b"workspace = 1\n", "`workspace` is not a table"),
+        ("Cargo.toml", b"\xff\n", "unreadable"),
+        ("go.mod", b"\xff\n", "unreadable"),
+        ("mise.toml", b"tools = 1\n", "`tools` is not a table"),
+        ("mise.toml", b'tools = { "" = false }\n', "declares no readable version"),
+    )
+
+    def test_each_is_recorded(self) -> None:
+        """No dependency, and one report line naming the file."""
+        readers = {
+            "package.json": sb.from_npm,
+            "Cargo.toml": sb.from_cargo,
+            "go.mod": sb.from_gomod,
+            "mise.toml": sb.from_mise,
+        }
+        for name, data, said in self.ROWS:
+            with self.subTest(name=name, data=data), TemporaryDirectory() as scratch:
+                path = Path(scratch) / name
+                path.write_bytes(data)
+                report: list[str] = []
+                self.assertEqual(readers[name]([path], report), [])
+                self.assertEqual(len(report), 1, report)
+                self.assertIn(said, report[0])
+                self.assertTrue(report[0].startswith(str(path)))
+
+
 if __name__ == "__main__":
     sys.exit(not unittest.main(exit=False).result.wasSuccessful())

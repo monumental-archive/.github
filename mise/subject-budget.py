@@ -218,7 +218,7 @@ def read_text(path: Path, report: list[str]) -> str | None:
     """
     try:
         return path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         report.append(f"{path}: unreadable ({exc})")
         return None
 
@@ -251,10 +251,32 @@ def load_json(path: Path, report: list[str]) -> dict:
     if text is None:
         return {}
     try:
-        return json.loads(text)
+        doc = json.loads(text)
     except json.JSONDecodeError as exc:
         report.append(f"{path}: unreadable as JSON ({exc})")
         return {}
+    if not isinstance(doc, dict):
+        report.append(f"{path}: not a JSON object")
+        return {}
+    return doc
+
+
+def table(doc: dict, key: str, path: Path, report: list[str]) -> dict:
+    """Read one table of a manifest, recording rather than raising.
+
+    A manifest's tool would refuse a table of the wrong type, but this
+    reads the file before any tool has, so the shape is checked here
+    (#1555): a wrong one is recorded as unmodelled, never a traceback.
+
+    Returns:
+        The table, or an empty one when it is absent or not a table.
+
+    """
+    value = doc.get(key, {})
+    if isinstance(value, dict):
+        return value
+    report.append(f"{path}: `{key}` is not a table")
+    return {}
 
 
 # ---------------------------------------------------------------------
@@ -617,7 +639,12 @@ def widest_version(spec: object) -> str:
     entries = spec if isinstance(spec, list) else [spec]
     widest = ""
     for entry in entries:
-        value = entry if isinstance(entry, str) else entry.get("version", "")
+        if isinstance(entry, str):
+            value = entry
+        elif isinstance(entry, dict):
+            value = entry.get("version", "")
+        else:
+            continue
         if isinstance(value, str) and len(value) > len(widest):
             widest = value
     return widest
@@ -634,7 +661,7 @@ def from_mise(files: list[Path], report: list[str]) -> list[Dep]:
     for path in files:
         if not is_mise_config(path):
             continue
-        for tool, spec in load_toml(path, report).get("tools", {}).items():
+        for tool, spec in table(load_toml(path, report), "tools", path, report).items():
             version = widest_version(spec)
             if not version:
                 report.append(f"{path}: [tools] {tool} declares no readable version")
@@ -716,17 +743,21 @@ def registry_deps(table: dict) -> list[tuple[str, str]]:
     return found
 
 
-def cargo_tables(data: dict) -> list[dict]:
+def cargo_tables(data: dict, path: Path, report: list[str]) -> list[dict]:
     """Gather every manifest table Renovate's cargo manager reads.
 
     Returns:
         The dependency tables, including workspace and target-specific.
 
     """
-    tables = [data.get(key, {}) for key in CARGO_TABLES]
-    tables += [data.get("workspace", {}).get(key, {}) for key in CARGO_TABLES]
-    for triple in data.get("target", {}).values():
-        tables += [triple.get(key, {}) for key in CARGO_TABLES]
+    workspace = table(data, "workspace", path, report)
+    tables = [table(data, key, path, report) for key in CARGO_TABLES]
+    tables += [table(workspace, key, path, report) for key in CARGO_TABLES]
+    for triple, spec in table(data, "target", path, report).items():
+        if not isinstance(spec, dict):
+            report.append(f"{path}: `target.{triple}` is not a table")
+            continue
+        tables += [table(spec, key, path, report) for key in CARGO_TABLES]
     return tables
 
 
@@ -741,8 +772,8 @@ def from_cargo(files: list[Path], report: list[str]) -> list[Dep]:
     for path in files:
         if path.name != "Cargo.toml":
             continue
-        for table in cargo_tables(load_toml(path, report)):
-            deps += [Dep(n, v, "cargo", str(path)) for n, v in registry_deps(table)]
+        for found in cargo_tables(load_toml(path, report), path, report):
+            deps += [Dep(n, v, "cargo", str(path)) for n, v in registry_deps(found)]
     return deps
 
 
@@ -761,7 +792,7 @@ def from_npm(files: list[Path], report: list[str]) -> list[Dep]:
         for key in NPM_TABLES:
             deps += [
                 Dep(name, spec, "npm", str(path))
-                for name, spec in data.get(key, {}).items()
+                for name, spec in table(data, key, path, report).items()
                 if isinstance(spec, str)
             ]
     return deps
