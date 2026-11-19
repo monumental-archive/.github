@@ -77,14 +77,16 @@ esac
 """
 
 # curl as the task calls it: the URL is the last argument, `-f` fails a
-# non-2xx answer with no output, `-w '\\n%{http_code}'` appends the code.
+# non-2xx answer with no output, `-w '\\n%{http_code}'` appends the code,
+# and `-D <file>` writes the status line and the planted `<name>.headers`.
 CURL_STUB = """#!/usr/bin/env bash
-url="" fail="" write="" ua=""
+url="" fail="" write="" ua="" dump=""
 while (($#)); do
   case "$1" in
     -f | -sf) fail=1 ;;
     -w) write=1 && shift ;;
     -H) ua="$2" && shift ;;
+    -D) dump="$2" && shift ;;
     --retry | --retry-delay | --max-time) shift ;;
     -*) ;;
     *) url="$1" ;;
@@ -94,6 +96,11 @@ done
 echo "${url} ${ua}" >> "${STUBS}/curl.log"
 name="${url##*/}"
 code=$(cat "${STUBS}/${name}.code")
+if [[ -n ${dump} ]]; then
+  printf 'HTTP/2 %s\\r\\n' "${code}" > "${dump}"
+  [[ ! -f ${STUBS}/${name}.headers ]] || cat "${STUBS}/${name}.headers" >> "${dump}"
+  printf '\\r\\n' >> "${dump}"
+fi
 if [[ -n ${fail} && ${code} -ge 400 ]]; then
   exit 22
 fi
@@ -204,7 +211,14 @@ class Planted(unittest.TestCase):
             check=False,
         )
 
-    def verdict(self, code: int, stdout: list[str], first_red: str = "") -> None:
+    def headers(self, name: str, *lines: str) -> None:
+        """Plant the response headers the issuer sends about one name."""
+        text = "".join(f"{line}\r\n" for line in lines)
+        (self.stubs / f"{name}.headers").write_text(text, encoding="utf-8")
+
+    def verdict(
+        self, code: int, stdout: list[str], first_red: str = "", asks: int = 2
+    ) -> None:
         """Run the audit; assert its exit, its notes and its first red line."""
         done = self.run_audit()
         self.assertEqual(done.returncode, code, done.stderr)
@@ -215,7 +229,7 @@ class Planted(unittest.TestCase):
         # Asked through `ask`: each issuer was asked, and by the
         # identified client, never a bare curl.
         log = (self.stubs / "curl.log").read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(log), 2)
+        self.assertEqual(len(log), asks)
         for line in log:
             self.assertIn(UA, line)
 
@@ -425,6 +439,158 @@ class LevelShieldRead(Planted):
                 "audit:badges: beta: level shield slsa L3 published and live",
             ],
         )
+
+
+STALE = ("age: 43302", "cache-control: public, max-age=600")
+PAST = "answered from a cache 42702 seconds past its lifetime"
+
+
+class StaleAnswer(Planted):
+    """A cached answer past its own lifetime is unanswered (#1649).
+
+    The headers are the ones measured on 2026-11-19: Scorecard served
+    stele a 404 with `age: 43302` against `max-age=600`.
+    """
+
+    def test_a_stale_404_is_a_question_unanswered(self) -> None:
+        """The measured stale 404 names the cache, never an absence."""
+        self.org((404, ""), (200, '{"score": 5.1}'))
+        self.headers("alpha", *STALE)
+        self.verdict(
+            1,
+            ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
+            f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did not"
+            f" answer — HTTP 404, {PAST}, a question unanswered, not an absence)",
+        )
+
+    def test_a_stale_200_is_not_a_pass(self) -> None:
+        """A score from an expired cache is not what the issuer says now."""
+        self.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
+        self.headers("alpha", *STALE)
+        self.verdict(
+            1,
+            ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
+            f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did not"
+            f" answer — HTTP 200, {PAST}, a question unanswered, not an absence)",
+        )
+
+    def test_fresh_or_headerless_answers_read_as_today(self) -> None:
+        """Within its lifetime, or with no claim either way: read as today."""
+        absent = (
+            f"{DEFECTS}alpha(scorecard: issuer returned no score"
+            " — a shield over nothing)"
+        )
+        beta = "audit:badges: beta: scorecard 5.1 (floor 5.0)"
+        for lines in (
+            ("age: 100", "cache-control: max-age=600"),
+            # s-maxage is the shared cache's lifetime and wins over max-age.
+            ("age: 700", "cache-control: max-age=600, s-maxage=1000"),
+            ("age: 43302",),
+            ("cache-control: max-age=600",),
+            (),
+        ):
+            with self.subTest(headers=lines):
+                (self.stubs / "curl.log").unlink(missing_ok=True)
+                self.org((404, ""), (200, '{"score": 5.1}'))
+                self.headers("alpha", *lines)
+                self.headers("beta", *lines)
+                self.verdict(1, [beta], absent)
+
+    def test_every_leg_reads_ask_stale(self) -> None:
+        """Each leg that asks an issuer sends a stale 200 to `unanswered`."""
+        legs = (
+            (
+                "scorecard",
+                f"{PROJECT}/@REPO@/badge",
+                "",
+                "api.scorecard.dev, about alpha,",
+                '{"score": 9.0}',
+            ),
+            (
+                "bestpractices",
+                "https://www.bestpractices.dev/projects/@REPO@/badge",
+                ".json",
+                "bestpractices.dev, about project alpha,",
+                entry("alpha", badge_percentage_0=100),
+            ),
+            (
+                "baseline",
+                "https://www.bestpractices.dev/projects/@REPO@/baseline",
+                ".json",
+                "bestpractices.dev, about project alpha,",
+                entry("alpha", achieved_baseline_1_at="2026-01-01"),
+            ),
+            (
+                "level-shield",
+                "https://img.shields.io/endpoint?url=https%3A%2F%2Fpages.example%2F@REPO@.json",
+                ".json",
+                f"{PAGES}/alpha.json",
+                '{"schemaVersion": 1, "label": "slsa", "message": "L3"}',
+            ),
+            (
+                "reuse",
+                "https://api.reuse.software/badge/@REPO@",
+                "",
+                "api.reuse.software",
+                '{"status": "compliant"}',
+            ),
+            (
+                "doi",
+                "https://zenodo.org/badge/DOI/10.5281/@REPO@.svg",
+                "",
+                "doi.org, about 10.5281/alpha,",
+                "",
+            ),
+            (
+                "crates",
+                "https://img.shields.io/crates/v/@REPO@",
+                "",
+                "crates.io, about alpha,",
+                "{}",
+            ),
+            (
+                "npm",
+                "https://img.shields.io/npm/v/@REPO@",
+                "",
+                "the npm registry",
+                "{}",
+            ),
+            (
+                "codecov",
+                f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg",
+                "",
+                "Codecov, about alpha,",
+                '{"branch": "main"}',
+            ),
+        )
+        for leg, shield, suffix, who, text in legs:
+            with self.subTest(leg=leg):
+                (self.stubs / "curl.log").unlink(missing_ok=True)
+                self.env["SHIELD"] = shield
+                self.org((200, text), (200, text), suffix)
+                self.headers(f"alpha{suffix}", *STALE)
+                self.headers(f"beta{suffix}", *STALE)
+                said = (
+                    f"({leg}: {who} did not answer — HTTP 200,"
+                    f" {PAST}, a question unanswered, not an absence)"
+                )
+                beta = said.replace("alpha", "beta")
+                self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
+
+    def test_codecov_commits_read_reads_ask_stale(self) -> None:
+        """The leg's second question, the branch head, is held the same."""
+        self.env["SHIELD"] = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
+        self.org((200, '{"branch": "main"}'), (200, '{"branch": "main"}'))
+        commits = "commits?branch=main"
+        (self.stubs / f"{commits}.code").write_text("200", encoding="utf-8")
+        (self.stubs / f"{commits}.body").write_text("{}", encoding="utf-8")
+        self.headers(commits, *STALE)
+        said = (
+            "(codecov: Codecov, about alpha's commits, did not answer"
+            f" — HTTP 200, {PAST}, a question unanswered, not an absence)"
+        )
+        beta = said.replace("alpha", "beta")
+        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}", asks=4)
 
 
 class BareCurl(unittest.TestCase):
