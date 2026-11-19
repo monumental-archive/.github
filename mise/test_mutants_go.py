@@ -67,7 +67,11 @@ printf 'go %s\\n' "$*" >> "${PLANT_LOG}"
 case "$*" in
   "env GOROOT") printf '%s\\n' "${PLANT_GOROOT}" ;;
   "env GOVERSION") printf '%s\\n' "${PLANT_GO:-go1.27.4}" ;;
-  "version -m "*) printf '%s: %s\\n' "$3" "${PLANT_GOMU_GO:-go1.27.4}" ;;
+  "version -m "*)
+    printf '%s: %s\\n' "$3" "${PLANT_GOMU_GO:-go1.27.4}"
+    [[ -z ${PLANT_GOMU_TAIL:-} ]] \\
+      || head -c "${PLANT_GOMU_TAIL}" /dev/zero | tr '\\0' '\\n'
+    ;;
   list*) cat "${PLANT_LIST}" ;;
   test*)
     for a in "$@"; do
@@ -705,6 +709,21 @@ class Toolchain(Planted):
         self.env |= {"PLANT_GOMU_GO": "go1.27.4", "PLANT_GO": "go1.27.4"}
         got = self.run_leg()
         self.assertEqual(got.returncode, 0, got.stderr)
+
+    def test_a_long_build_report_is_read_to_the_end(self) -> None:
+        """A `version -m` past a pipe buffer cannot kill the leg (#1637).
+
+        The check reads only the first line; a reader that stopped
+        there closed the pipe on a go still writing its dependency
+        list, and pipefail turned the SIGPIPE into a silent 141.
+        """
+        self.adopt()
+        self.clean_reports()
+        self.env["PLANT_GOMU_TAIL"] = "200000"
+        got = self.run_leg()
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stderr, "")
+        self.assertEqual(len(self.calls("gomu run")), 2)
 
     def test_nothing_gomu_writes_lands_in_the_tree(self) -> None:
         """History and report go to a scratch directory, never the tree."""

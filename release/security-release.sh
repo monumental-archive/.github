@@ -197,7 +197,7 @@ fact() {
 }
 # One repo@tag out of a space-separated fact, by repository.
 of_this_repo() {
-  tr ' ' '\n' <<< "$1" | grep -E "^${name}@" | head -n 1 || true
+  tr ' ' '\n' <<< "$1" | awk -v name="${name}" 'index($0, name "@") == 1 && !seen++'
 }
 all_supported=$(fact supportedReleases)
 supported=$(of_this_repo "${all_supported}")

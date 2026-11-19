@@ -149,7 +149,7 @@ fi
 # cache restored across a Go bump is refused here, by name, before it can
 # panic or quietly lose its type information. The comparison and the
 # refusal are mutants-go.py's (`build-go`); the go calls stay here.
-built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2; exit }')
+built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2 }')
 running=$(go env GOVERSION)
 "${ORG_PYTHON}" "${belt}/mutants-go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
   --built "${built}" --running "${running}"

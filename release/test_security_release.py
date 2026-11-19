@@ -394,6 +394,26 @@ class TheSupportedReleaseIsNotAffected(DecisionCase):
             " the policy declares no support window"
         )
 
+    def test_a_name_with_a_dot_matches_only_itself(self) -> None:
+        """`a.b` is not a pattern: `axb@` is another repository (#1637).
+
+        No release of this repository is in the fact, so the reader
+        prints nothing and succeeds, and the run says no window.
+        """
+        decoy = json.loads(AFFECTED)
+        decoy["facts"] = [
+            {"name": "supportedReleases", "value": "axb@v0.20.0"},
+            {"name": "supportedReleasesAffected", "value": "axb@v0.20.0"},
+        ]
+        self.repo.report(json.dumps(decoy), 1)
+        done = self.repo.run(GITHUB_REPOSITORY="monumental-archive/a.b")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            self.repo.outputs().get("reason"),
+            "no supported release could be named for a.b:"
+            " the policy declares no support window",
+        )
+
     def test_a_withheld_window_is_said_in_the_engines_words(self) -> None:
         """A newest release not read whole: stele's reason is passed on."""
         withheld = json.loads(AFFECTED)

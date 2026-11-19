@@ -101,8 +101,13 @@ def run(
     code: str = "200",
     readme: str | None = README,
     answers: bool = True,
+    bulk: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the leg in a planted tree.
+
+    `bulk` tracks that many more (empty) files, sorted after the
+    README, then a second, empty `readme.md` after them: the probe's
+    second match, written long after its first.
 
     Returns:
         The finished process and the stub's log of URLs asked.
@@ -147,6 +152,26 @@ def run(
         subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [GIT, "add", "-A"], cwd=tree, env=env, check=True
         )
+        if bulk:
+            blob = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [GIT, "hash-object", "-w", "--stdin"],
+                cwd=tree,
+                env=env,
+                input="",
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            names = [*(f"p/{n:0>72}.txt" for n in range(bulk)), "readme.md"]
+            index = "".join(f"100644 {blob}\t{name}\n" for name in names)
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [GIT, "update-index", "--index-info"],
+                cwd=tree,
+                env=env,
+                input=index,
+                text=True,
+                check=True,
+            )
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", BODY],
             cwd=tree,
@@ -171,6 +196,41 @@ class Green(unittest.TestCase):
             f"{LABEL}: the published entry matches .bestpractices.json\n",
         )
         self.assertEqual(log, f"curl {URL}\n")
+
+    def test_a_readme_ahead_of_a_long_listing_is_found(self) -> None:
+        """A second README a pipe buffer later cannot unname the first (#1637).
+
+        A probe that stopped at its first match closed the pipe; the
+        grep still reading `git ls-files` died writing its second
+        match, and `|| true` read the killed pipeline as "no README":
+        a skip where a comparison was owed. The first match is the one
+        read, `README.md`, which wears the shield.
+        """
+        done, log = run(bulk=3000)
+        self.assertEqual(done.stderr, "")
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(
+            done.stdout,
+            f"{LABEL}: the published entry matches .bestpractices.json\n",
+        )
+        self.assertEqual(log, f"curl {URL}\n")
+
+    def test_the_readme_probe_reads_to_the_end_and_masks_nothing(self) -> None:
+        """No early-exit reader and no `|| true` on the probe (#1637).
+
+        The row above passes with the old probe too: its `grep`
+        block-buffers into the pipe and reads `git ls-files` to the
+        end, and whatever dies after the first match, `head` has
+        already printed it (measured with 16,384 case variants of a
+        README behind a 237 kB listing). So the form is what is held:
+        the one reader that matches, keeps the first and reads on.
+        """
+        probe = next(line for line in BODY.splitlines() if line.startswith("readme="))
+        self.assertEqual(
+            probe,
+            "readme=$(git ls-files | awk"
+            " 'tolower($0) ~ /^readme(\\.md|\\.markdown)?$/ && !seen++')",
+        )
 
     def test_a_null_justification_equals_an_empty_one(self) -> None:
         """The site's null and the file's empty string are one answer."""
