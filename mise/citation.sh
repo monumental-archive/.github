@@ -22,13 +22,16 @@
 # Output: CITATION_OUT names a file to write the render to (what
 # lint:citation wants); unset, it renders CITATION.cff in place.
 set -euo pipefail
+# Refused before any early exit, so a missing interpreter is never a
+# clean skip (#1565): project-licence.py runs under it below.
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 out="${CITATION_OUT:-CITATION.cff}"
 [[ -f REUSE.toml ]] || {
   echo "fix:citation: no REUSE.toml, nothing to derive from"
   exit 0
 }
-# `|| true` on all three REUSE.toml reads below (#911, the same defect
+# `|| true` on the REUSE.toml reads below (#911, the same defect
 # #905 fixed next door in derive-badges.sh). `grep` exits 1 when nothing
 # matches — which is exactly the "this field is absent" answer each guard
 # here was written to report — and under the `set -euo pipefail` above,
@@ -39,15 +42,13 @@ out="${CITATION_OUT:-CITATION.cff}"
 # `fix:citation` and from `mise run fix`. Measured 2026-08-24, one absent
 # field at a time. The status is discarded; emptiness is judged below,
 # which is where it was always meant to be judged.
-lic=$(grep -h "SPDX-License-Identifier" REUSE.toml | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | sort -u || true)
+#
+# The licence is the one the badge shield states, decided by ONE reader
+# both derivations call (#1589): REUSE.toml's single expression, or,
+# where it names several, the `licence` line of .badge-states.
+lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project-licence.py" fix:citation)
 if [[ -z ${lic} || ${lic} == "<SPDX expression>" ]]; then
   echo "fix:citation: REUSE.toml declares no licence expression — fill it first (lint:licence)" >&2
-  exit 1
-fi
-count=$(wc -l <<< "${lic}" | tr -d " ")
-if [[ ${count} != "1" ]]; then
-  echo "fix:citation: REUSE.toml carries more than one licence expression — one citation cannot state two:" >&2
-  echo "${lic}" >&2
   exit 1
 fi
 supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
