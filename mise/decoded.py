@@ -24,16 +24,15 @@ appending the `mise` root to `sys.path` from its own `__file__`.
 
 import json
 import math
-import re
 import tomllib
-from typing import TypeIs
+from typing import TYPE_CHECKING, TypeIs
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # The deepest JSON nesting load_json reads. The deepest document the
 # canon reads today, a CycloneDX SBOM's nested components, is under 40.
 MAX_DEPTH = 512
-
-# A whole JSON string (its escapes honoured), or one bracket outside one.
-_SCANNED = re.compile(r'"(?:[^"\\]|\\.)*"|[\[\]{}]', re.DOTALL)
 
 
 class UndecodableError(ValueError):
@@ -106,22 +105,38 @@ def _finite(text: str) -> float:
     return value
 
 
-def _within_depth(text: str) -> None:
+def within_depth(chars: Iterable[str]) -> None:
     """Refuse JSON nested deeper than MAX_DEPTH, counted outside strings.
+
+    It reads the text's characters in order, once; any iterable of them
+    will do, which is how a row counts that it read each once.
+
+    One pass over the characters, holding two bits of state (inside a
+    string; just after a backslash in one), so it is linear in the text
+    whatever the text holds: a scan that looked for a whole string at
+    each quote started over at every quote of an unterminated one.
 
     Raises:
         UndecodableError: an array or object opens past the bound.
 
     """
     depth = 0
-    for match in _SCANNED.finditer(text):
-        found = match.group(0)
-        if found in "[{":
+    in_string = False
+    escaped = False
+    for char in chars:
+        if escaped:
+            escaped = False
+        elif in_string:
+            escaped = char == "\\"
+            in_string = char != '"'
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
             depth += 1
             if depth > MAX_DEPTH:
                 msg = f"nested deeper than {MAX_DEPTH} levels"
                 raise UndecodableError(msg)
-        elif found in "]}":
+        elif char in "]}":
             depth -= 1
 
 
@@ -136,7 +151,7 @@ def load_json(source: str | bytes) -> object:
 
     """
     text = _text(source)
-    _within_depth(text)
+    within_depth(text)
     try:
         value: object = json.loads(
             text,
