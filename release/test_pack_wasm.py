@@ -200,7 +200,7 @@ class Refuses(unittest.TestCase):
         self.assert_refused(run, refusal(other))
 
     def test_no_repository_is_refused_with_the_remedy(self) -> None:
-        """Cargo.toml without `repository` leaves package.json without one."""
+        """Cargo.toml without `repository` leaves none in package.json (#96)."""
         self.assert_refused(run_helper(package(repository=None)), refusal(""))
 
     def test_a_repository_without_a_url_is_refused(self) -> None:

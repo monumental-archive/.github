@@ -164,7 +164,7 @@ class AttachAndPublish(unittest.TestCase):
         self.assertNotIn("release edit", subcommands(calls))
 
     def test_untyped_release_with_identical_checksums_converges(self) -> None:
-        """A schema-1 release keeps the whole-set comparison, and passes."""
+        """A schema-1 release converges on its whole set, uploading nothing (#330)."""
         done, calls = self.publish("false", manifest={"schema": 1})
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("converging", done.stdout)
