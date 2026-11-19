@@ -1837,5 +1837,132 @@ class GateCoverageReports(unittest.TestCase):
         self.assertNotIn("with.path", fetch[0])
 
 
+# A default-branch test compares the ref with the event's own name for
+# it, `format('refs/heads/{0}', github.event.repository.default_branch)`,
+# never with a literal: a repository whose default branch is not `main`
+# would run the gate and silently skip what those steps keep (#1693).
+# A literal tag or pull ref is not a branch and is not matched.
+REF = r"github\.ref(?:_name)?"
+LITERAL_BRANCH = re.compile(
+    rf"(?P<ref>{REF})\s*[!=]=\s*'(?P<a>[^']*)'"
+    rf"|'(?P<b>[^']*)'\s*[!=]=\s*(?P<fer>{REF})"
+)
+IF_KEY = re.compile(r"^(?P<lead>\s*(?:-\s+)?)if:")
+
+
+def is_branch(ref: str, literal: str) -> bool:
+    """Say whether a literal compared with a ref names a branch.
+
+    Returns:
+        True for `refs/heads/...` against github.ref, or any literal
+        against github.ref_name.
+
+    """
+    if ref == "github.ref_name":
+        return True
+    return literal.startswith("refs/heads/")
+
+
+def literal_branches(label: str, text: str) -> list[str]:
+    """Name each `if:` line comparing the ref with a literal branch name.
+
+    An `if:` runs on from its key through every following line indented
+    deeper than the key, so a folded condition is read whole and the
+    line named is the one carrying the literal.
+
+    Returns:
+        One `<label>:<line>` entry per offending line, in file order.
+
+    """
+    found: list[str] = []
+    depth = -1
+    for number, line in enumerate(text.splitlines(), start=1):
+        indent = len(line) - len(line.lstrip())
+        key = IF_KEY.match(line)
+        if key:
+            depth = len(key["lead"])
+        elif line.strip() and indent <= depth:
+            depth = -1
+        if depth < 0:
+            continue
+        for match in LITERAL_BRANCH.finditer(line):
+            ref = match["ref"] or match["fer"]
+            literal = match["a"] if match["ref"] else match["b"]
+            if is_branch(ref, literal):
+                found.append(f"{label}:{number}")
+                break
+    return found
+
+
+class DefaultBranchByName(unittest.TestCase):
+    """No `if:` tests for the default branch by a literal name (#1693)."""
+
+    PUSH = "      - name: x\n        if: ${{ github.event_name == 'push' && %s }}\n"
+
+    def test_no_workflow_or_template_names_the_branch(self) -> None:
+        """Every workflow and workflow template, read whole."""
+        paths = sorted(
+            path
+            for home in (WORKFLOWS, CANON / "workflow-templates")
+            for pattern in ("*.yml", "*.yaml")
+            for path in home.glob(pattern)
+        )
+        found = [
+            hit
+            for path in paths
+            for hit in literal_branches(
+                str(path.relative_to(CANON)), path.read_text("utf-8")
+            )
+        ]
+        self.assertEqual([], found)
+
+    def test_a_literal_ref_is_refused_by_line(self) -> None:
+        """The form ci.yml carried at three sites before #1693."""
+        text = "jobs:\n" + self.PUSH % "github.ref == 'refs/heads/main'"
+        self.assertEqual(["x.yml:3"], literal_branches("x.yml", text))
+
+    def test_a_literal_ref_name_is_refused(self) -> None:
+        """The short name is the same test."""
+        text = "jobs:\n" + self.PUSH % "github.ref_name == 'main'"
+        self.assertEqual(["x.yml:3"], literal_branches("x.yml", text))
+
+    def test_the_literal_first_and_not_equal_are_refused(self) -> None:
+        """Operand order and the operator do not change what is named."""
+        text = "jobs:\n" + self.PUSH % "'refs/heads/trunk' != github.ref"
+        self.assertEqual(["x.yml:3"], literal_branches("x.yml", text))
+
+    def test_a_folded_condition_names_the_literal_line(self) -> None:
+        """The coverage-upload job's shape: the literal three lines down."""
+        text = (
+            "jobs:\n  up:\n    if: >-\n      ${{ !cancelled()\n"
+            "      && github.event_name == 'push'\n"
+            "      && github.ref == 'refs/heads/main' }}\n"
+            "    runs-on: ubuntu-26.04\n"
+        )
+        self.assertEqual(["x.yml:6"], literal_branches("x.yml", text))
+
+    def test_the_default_branch_form_is_allowed(self) -> None:
+        """The event's own name for the branch."""
+        text = "jobs:\n" + self.PUSH % (
+            "github.ref == format('refs/heads/{0}',"
+            " github.event.repository.default_branch)"
+        )
+        self.assertEqual([], literal_branches("x.yml", text))
+
+    def test_a_tag_literal_is_not_a_branch(self) -> None:
+        """A tag ref is not a default-branch test."""
+        text = "jobs:\n" + self.PUSH % "github.ref != 'refs/tags/v1'"
+        self.assertEqual([], literal_branches("x.yml", text))
+
+    def test_an_identity_string_outside_an_if_is_not_matched(self) -> None:
+        """The source-attest identity is a signed name, not a condition."""
+        text = (
+            "env:\n  ID: x.yml@refs/heads/main\n"
+            "  REF: ${{ github.ref == 'refs/heads/main' }}\n"
+            "jobs:\n" + self.PUSH % "true"
+        )
+        self.assertEqual([], literal_branches("x.yml", text))
+
+
 if __name__ == "__main__":
     unittest.main()
