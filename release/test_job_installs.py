@@ -1568,5 +1568,188 @@ class BeltPython(unittest.TestCase):
         )
 
 
+JOB_TOKENS = ("github.token", "secrets.GITHUB_TOKEN")
+STELE_VERB = re.compile(r"(?<![\w/.:-])stele\s+[a-z]")
+ORG_FLAG = re.compile(r"(?<![\w-])--org\b")
+
+
+def env_token(lines: list[str], indent: int) -> str | None:
+    """Read `GH_TOKEN` from the `env:` block at an indent, if any.
+
+    Returns:
+        The value, or None where the block or the key is absent.
+
+    """
+    pad, inside = " " * indent, False
+    for line in lines:
+        if line.startswith(pad + "env:"):
+            inside = True
+        elif inside and line.startswith(pad + "  GH_TOKEN:"):
+            return line.partition(":")[2].strip()
+        elif inside and line.strip() and not line.startswith(pad + "  "):
+            inside = False
+    return None
+
+
+def population_reads_on_job_token(texts: dict[str, str]) -> list[str]:
+    """Name each stele `--org` step whose GH_TOKEN is the job token (#1602).
+
+    A population read reconciles the declared population against the org
+    listing; a job token lists only what its own repository sees, so the
+    private member is never in it and the read refuses. The token a step
+    holds is its own `env`, else its job's, else the workflow's.
+
+    Returns:
+        `workflow: job / step` per finding.
+
+    """
+    found = []
+    for rel, text in sorted(texts.items()):
+        top = text.splitlines()
+        top = top[: top.index("jobs:")]
+        for job_id, job in jobs(text).items():
+            for step in steps(job):
+                body = step.get("run", "").splitlines()
+                run = "\n".join(ln for ln in body if not ln.startswith("#"))
+                if not (STELE_VERB.search(run) and ORG_FLAG.search(run)):
+                    continue
+                token = (
+                    step.get("env.GH_TOKEN") or env_token(job, 4) or env_token(top, 0)
+                )
+                if token and any(t in token for t in JOB_TOKENS):
+                    found.append(f"{rel}: {job_id} / {step.get('name', '?')}")
+    return found
+
+
+class PopulationToken(unittest.TestCase):
+    """A population read holds a token that sees the population (#1602)."""
+
+    def test_no_stele_org_step_reads_on_the_job_token(self) -> None:
+        """The tree: every `stele ... --org` step holds a minted token."""
+        texts = {
+            str(p.relative_to(CANON)): p.read_text("utf-8")
+            for p in sorted(WORKFLOWS.glob("*.yml"))
+        }
+        self.assertEqual([], population_reads_on_job_token(texts))
+
+    def test_the_scan_reaches_the_population_reads(self) -> None:
+        """Not vacuous: the tree's population reads are all in view."""
+        texts = {
+            str(p.relative_to(CANON)): p.read_text("utf-8")
+            for p in sorted(WORKFLOWS.glob("*.yml"))
+        }
+        planted = {
+            rel: text.replace("steps.token.outputs.token", "github.token")
+            for rel, text in texts.items()
+        }
+        reads = population_reads_on_job_token(planted)
+        self.assertIn(
+            ".github/workflows/vex-attest.yml: plan / "
+            "Resolve subjects from the products the statements name",
+            reads,
+        )
+        self.assertGreaterEqual(len(reads), 4)
+
+    def test_the_job_token_is_named_at_every_level(self) -> None:
+        """Planted: step, job and workflow env, and the secrets spelling."""
+        run = (
+            "        run: |\n"
+            '          args=(--org "${OWNER}")\n'
+            '          stele derive vex-subjects "${args[@]}"\n'
+        )
+        step = "    steps:\n      - name: Read\n"
+        texts = {
+            "a.yml": "jobs:\n  a:\n"
+            + step
+            + "        env:\n          GH_TOKEN: ${{ github.token }}\n"
+            + run,
+            "b.yml": "jobs:\n  b:\n    env:\n      GH_TOKEN: "
+            "${{ secrets.GITHUB_TOKEN }}\n" + step + run,
+            "c.yml": "env:\n  GH_TOKEN: ${{ github.token }}\njobs:\n  c:\n"
+            + step
+            + run,
+            "d.yml": "env:\n  GH_TOKEN: ${{ github.token }}\njobs:\n  d:\n"
+            + step
+            + "        env:\n          GH_TOKEN: ${{ steps.token.outputs.token }}\n"
+            + run,
+            "e.yml": "jobs:\n  e:\n"
+            + step
+            + "        env:\n          GH_TOKEN: ${{ github.token }}\n"
+            "        run: |\n          # stele level --org x\n"
+            "          gh release list --org-less\n",
+        }
+        self.assertEqual(
+            ["a.yml: a / Read", "b.yml: b / Read", "c.yml: c / Read"],
+            population_reads_on_job_token(texts),
+        )
+
+
+def mint_step(workflow: str, job_id: str) -> tuple[int, dict[str, str]]:
+    """Find a job's audit App mint step.
+
+    Returns:
+        The step's index in the job and the step.
+
+    """
+    found = [
+        (i, s)
+        for i, s in enumerate(steps(load(workflow)[job_id]))
+        if "actions/create-github-app-token" in s.get("uses", "")
+    ]
+    return found[0] if found else (-1, {})
+
+
+VEX_GRANTS = {
+    "with.permission-contents": "read",
+    "with.permission-metadata": "read",
+    "with.permission-attestations": "read",
+}
+
+
+class PopulationGrants(unittest.TestCase):
+    """vex-attest's population read is granted three reads, no more (#1602)."""
+
+    def test_the_vex_attest_mint_names_three_reads(self) -> None:
+        """Contents, metadata and attestations: no review history."""
+        _, mint = mint_step("vex-attest.yml", "plan")
+        self.assertEqual(
+            VEX_GRANTS, {k: v for k, v in mint.items() if k.startswith("with.perm")}
+        )
+
+
+class VexAttestToken(unittest.TestCase):
+    """vex-attest's plan job mints the audit App's read token (#1602)."""
+
+    def test_the_plan_mints_before_the_step_that_reads(self) -> None:
+        """The mint precedes the derivation, which holds its output."""
+        at, mint = mint_step("vex-attest.yml", "plan")
+        plan = steps(load("vex-attest.yml")["plan"])
+        reads = [i for i, s in enumerate(plan) if s.get("id") == "collect"]
+        self.assertEqual(1, len(reads))
+        self.assertEqual("token", mint.get("id"))
+        self.assertLess(at, reads[0])
+        self.assertEqual(
+            "${{ steps.token.outputs.token }}", plan[reads[0]]["env.GH_TOKEN"]
+        )
+
+    def test_the_mint_mirrors_the_audit_walks(self) -> None:
+        """Same pin, same client and key, owner scope as the audit's mint."""
+        _, mint = mint_step("vex-attest.yml", "plan")
+        _, audit = mint_step("audit.yml", "blast-radius")
+        keys = ("uses", "with.client-id", "with.private-key", "with.owner")
+        self.assertEqual(
+            {k: audit.get(k) for k in keys}, {k: mint.get(k) for k in keys}
+        )
+
+    def test_the_signing_jobs_never_see_the_token(self) -> None:
+        """Only the plan job names the App or its token."""
+        for job_id, job in load("vex-attest.yml").items():
+            if job_id == "plan":
+                continue
+            text = "\n".join(job)
+            self.assertNotIn("AUDIT_APP", text, job_id)
+            self.assertNotIn("steps.token", text, job_id)
+
+
 if __name__ == "__main__":
     unittest.main()
