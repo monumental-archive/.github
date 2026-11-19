@@ -28,10 +28,13 @@ run through the gate as `mise run test`, which `ci` collects.
 """
 
 import importlib.util
+import json
+import os
 import re
 import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,15 +61,16 @@ PROJECT = f"https://api.scorecard.dev/projects/github.com/{OWNER}"
 UA = f"User-Agent: {OWNER}/.github audit:badges"
 
 # The org's repository list and each README: the two markers around one
-# Scorecard shield naming the repository asked for, as fix:badges renders
-# it. Anything else (.badge-states) is absent.
+# shield, as fix:badges renders it. The shield is the row's SHIELD with
+# @REPO@ standing for the repository asked about. Anything else
+# (.badge-states) is absent.
 GH_STUB = """#!/usr/bin/env bash
 case "$2" in
   orgs/*/repos) printf 'alpha\\nbeta\\n' ;;
   repos/*/readme)
     r="${2%/readme}"
-    printf '<!-- badges:begin -->\\n[![s](%s/%s/badge)](x)\\n<!-- badges:end -->\\n' \\
-      "${PROJECT}" "${r##*/}" | base64 | tr -d '\\n'
+    printf '<!-- badges:begin -->\\n[![s](%s)](x)\\n<!-- badges:end -->\\n' \\
+      "${SHIELD//@REPO@/${r##*/}}" | base64 | tr -d '\\n'
     ;;
   *) exit 1 ;;
 esac
@@ -115,34 +119,32 @@ def body() -> str:
     raise LookupError(msg)
 
 
-def piped_curls(source: str) -> list[str]:
-    """Name each command substitution that pipes a bare `curl` onward.
+def bare_curls(source: str) -> list[str]:
+    """Name each `curl` outside the body of `ask`.
 
-    Read through belt-shell's scrub, so quoted spans and comments are
-    blank and a `(` or `|` inside a string or a jq program cannot count.
-    `||` is an or-list, not a pipe.
+    Read through belt-shell's scrub, so a `curl` in a comment or a
+    quoted string does not count; `ask` is the function from its
+    `ask() {` line to the first line that is a lone `}`.
 
     Returns:
-        The source text of each such substitution.
+        `<line>: <text>` for each such `curl`.
 
     """
-    clean = bs.scrub(source)
-    found = []
-    for start in (m.start() for m in re.finditer(r"\$\(", clean)):
-        depth, end = 0, start + 1
-        while end < len(clean):
-            depth += {"(": 1, ")": -1}.get(clean[end], 0)
-            if depth == 0:
-                break
-            end += 1
-        inner = clean[start + 2 : end].replace("||", "  ")
-        if re.search(r"\bcurl\b[^|]*\|", inner):
-            found.append(" ".join(source[start : end + 1].split()))
+    clean = bs.scrub(source).splitlines()
+    lines = source.splitlines()
+    found, inside = [], False
+    for number, line in enumerate(clean, start=1):
+        if line.startswith("ask() {"):
+            inside = True
+        elif inside and line.rstrip() == "}":
+            inside = False
+        elif not inside and re.search(r"\bcurl\b", line):
+            found.append(f"{number}: {lines[number - 1].strip()}")
     return found
 
 
-class ScorecardRead(unittest.TestCase):
-    """A planted canon and org; the task's verdict on the Scorecard leg."""
+class Planted(unittest.TestCase):
+    """A planted canon and org, alpha then beta, each wearing one shield."""
 
     def setUp(self) -> None:
         """Plant the canon tree, the floors and the stub tools."""
@@ -160,7 +162,9 @@ class ScorecardRead(unittest.TestCase):
             ORG_CANON_DIR=str(self.tree),
             GITHUB_REPOSITORY_OWNER=OWNER,
             STUBS=str(tmp / "stubs"),
-            PROJECT=PROJECT,
+            SHIELD=f"{PROJECT}/@REPO@/badge",
+            # The bestpractices legs start the belt's owner helper.
+            ORG_PYTHON=os.environ.get("ORG_PYTHON") or sys.executable,
         )
         for argv in (["init", "-q"], ["add", "security/identity.toml"]):
             subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
@@ -175,11 +179,14 @@ class ScorecardRead(unittest.TestCase):
             (bindir / name).chmod(0o755)
         self.env["PATH"] = f"{bindir}:{self.env['PATH']}"
 
-    def org(self, alpha: tuple[int, str], beta: tuple[int, str]) -> None:
-        """Plant what the Scorecard API answers for each repository."""
+    def org(
+        self, alpha: tuple[int, str], beta: tuple[int, str], suffix: str = ""
+    ) -> None:
+        """Plant what the issuer answers about each repository."""
         for name, (code, text) in (("alpha", alpha), ("beta", beta)):
-            (self.stubs / f"{name}.code").write_text(str(code), encoding="utf-8")
-            (self.stubs / f"{name}.body").write_text(text, encoding="utf-8")
+            stub = self.stubs / f"{name}{suffix}"
+            stub.with_name(f"{stub.name}.code").write_text(str(code), encoding="utf-8")
+            stub.with_name(f"{stub.name}.body").write_text(text, encoding="utf-8")
 
     def run_audit(self) -> subprocess.CompletedProcess:
         """Run the task body in the planted tree.
@@ -196,6 +203,25 @@ class ScorecardRead(unittest.TestCase):
             text=True,
             check=False,
         )
+
+    def verdict(self, code: int, stdout: list[str], first_red: str = "") -> None:
+        """Run the audit; assert its exit, its notes and its first red line."""
+        done = self.run_audit()
+        self.assertEqual(done.returncode, code, done.stderr)
+        for line in stdout:
+            self.assertIn(line, done.stdout.splitlines())
+        if first_red:
+            self.assertEqual(done.stderr.splitlines()[0], first_red)
+        # Asked through `ask`: each issuer was asked, and by the
+        # identified client, never a bare curl.
+        log = (self.stubs / "curl.log").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(log), 2)
+        for line in log:
+            self.assertIn(UA, line)
+
+
+class ScorecardRead(Planted):
+    """The Scorecard leg (#1621)."""
 
     def asked_identified(self) -> None:
         """Assert every Scorecard request carried the identifying client."""
@@ -260,23 +286,166 @@ class ScorecardRead(unittest.TestCase):
         self.asked_identified()
 
 
+DEFECTS = "audit:badges: shield defects: "
+UNANSWERED = "did not answer — HTTP 503, a question unanswered, not an absence)"
+PAGES = "https://pages.example"
+
+
+def entry(repo: str, **fields: object) -> str:
+    """Write the Best Practices entry for one repository, as the API serves it.
+
+    Returns:
+        The project JSON, its repo_url naming the repository.
+
+    """
+    bound = {"id": 1, "repo_url": f"https://github.com/{OWNER}/{repo}"}
+    return json.dumps(bound | fields)
+
+
+class BestPracticesRead(Planted):
+    """The Best Practices badge leg, asked through `ask` (#1633)."""
+
+    def setUp(self) -> None:
+        """Wear the passing badge, whose id the stub reads as the repo."""
+        super().setUp()
+        self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/badge"
+        self.ok = (200, entry("beta", badge_percentage_0=100))
+
+    def test_404_names_the_missing_project(self) -> None:
+        """No entry: the finding the leg already words; beta still read."""
+        self.org((404, ""), self.ok, ".json")
+        self.verdict(
+            1,
+            ["audit:badges: beta: bestpractices beta passing"],
+            f"{DEFECTS}alpha(bestpractices: issuer returned nothing for project alpha)",
+        )
+
+    def test_503_is_a_question_unanswered(self) -> None:
+        """An outage is never reported as a missing project."""
+        self.org((503, "down"), self.ok, ".json")
+        self.verdict(
+            1,
+            ["audit:badges: beta: bestpractices beta passing"],
+            f"{DEFECTS}alpha(bestpractices: bestpractices.dev, about project alpha,"
+            f" {UNANSWERED}",
+        )
+
+    def test_200_is_read_for_its_verdict(self) -> None:
+        """Passing entries bound to their wearers read clean."""
+        self.org((200, entry("alpha", badge_percentage_0=100)), self.ok, ".json")
+        self.verdict(
+            0,
+            [
+                "audit:badges: alpha: bestpractices alpha passing",
+                "audit:badges: beta: bestpractices beta passing",
+            ],
+        )
+
+
+class BaselineRead(Planted):
+    """The OSPS Baseline leg, asked through `ask` (#1633)."""
+
+    def setUp(self) -> None:
+        """Wear the Baseline shield on the same entry."""
+        super().setUp()
+        self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/baseline"
+        self.ok = (200, entry("beta", achieved_baseline_1_at="2026-01-01"))
+
+    def test_404_names_the_missing_project(self) -> None:
+        """No entry: the finding the leg already words; beta still read."""
+        self.org((404, ""), self.ok, ".json")
+        self.verdict(
+            1,
+            ["audit:badges: beta: OSPS Baseline level 1 achieved"],
+            f"{DEFECTS}alpha(baseline: issuer returned nothing for project alpha)",
+        )
+
+    def test_503_is_a_question_unanswered(self) -> None:
+        """An outage is never reported as a missing project."""
+        self.org((503, "down"), self.ok, ".json")
+        self.verdict(
+            1,
+            ["audit:badges: beta: OSPS Baseline level 1 achieved"],
+            f"{DEFECTS}alpha(baseline: bestpractices.dev, about project alpha,"
+            f" {UNANSWERED}",
+        )
+
+    def test_200_is_read_for_its_level(self) -> None:
+        """Achieved levels read clean, each by its own number."""
+        alpha = entry(
+            "alpha", achieved_baseline_1_at="2026-01-01", achieved_baseline_2_at="x"
+        )
+        self.org((200, alpha), self.ok, ".json")
+        self.verdict(
+            0,
+            [
+                "audit:badges: alpha: OSPS Baseline level 2 achieved",
+                "audit:badges: beta: OSPS Baseline level 1 achieved",
+            ],
+        )
+
+
+class LevelShieldRead(Planted):
+    """The level shield's published document, asked through `ask` (#1633)."""
+
+    def setUp(self) -> None:
+        """Wear a shields endpoint over a document named for the repo."""
+        super().setUp()
+        self.env["SHIELD"] = (
+            "https://img.shields.io/endpoint?url=https%3A%2F%2Fpages.example%2F@REPO@.json"
+        )
+        self.ok = (200, '{"schemaVersion": 1, "label": "slsa", "message": "L3"}')
+
+    def test_404_is_a_shield_over_nothing(self) -> None:
+        """No document: the finding the leg already words; beta still read."""
+        self.org((404, ""), self.ok, ".json")
+        self.verdict(
+            1,
+            ["audit:badges: beta: level shield slsa L3 published and live"],
+            f"{DEFECTS}alpha(level-shield: published judgment {PAGES}/alpha.json"
+            " unreadable — the badge renders nothing)",
+        )
+
+    def test_503_is_a_question_unanswered(self) -> None:
+        """An outage is never reported as an unpublished judgment."""
+        self.org((503, "down"), self.ok, ".json")
+        self.verdict(
+            1,
+            ["audit:badges: beta: level shield slsa L3 published and live"],
+            f"{DEFECTS}alpha(level-shield: {PAGES}/alpha.json {UNANSWERED}",
+        )
+
+    def test_200_is_read_for_its_shield(self) -> None:
+        """A live endpoint document reads clean, by its label and message."""
+        self.org(self.ok, self.ok, ".json")
+        self.verdict(
+            0,
+            [
+                "audit:badges: alpha: level shield slsa L3 published and live",
+                "audit:badges: beta: level shield slsa L3 published and live",
+            ],
+        )
+
+
 class BareCurl(unittest.TestCase):
-    """No command substitution in the walk pipes a bare curl onward."""
+    """`ask` is the walk's one curl (#1633)."""
 
-    def test_script_pipes_no_bare_curl(self) -> None:
-        """Every issuer read the script pipes goes through `ask` instead."""
-        self.assertEqual(piped_curls(SCRIPT.read_text(encoding="utf-8")), [])
+    def test_script_curls_only_inside_ask(self) -> None:
+        """Every issuer read in the script goes through `ask`."""
+        self.assertEqual(bare_curls(SCRIPT.read_text(encoding="utf-8")), [])
 
-    def test_the_read_this_replaced_is_found(self) -> None:
-        """The planted #1621 line is named; `|| true` and ask's own are not."""
+    def test_a_bare_read_is_found(self) -> None:
+        """A planted bare read is named; ask's own curl and comments are not."""
         planted = (
-            'out=$(curl -s -w "%{http_code}" "$@" || true)\n'
-            "score=$(curl -sf \"https://x/${proj}\" | jq -r '.score // empty')\n"
+            "# a bare `curl -sf` in prose\n"
+            "ask() {\n"
+            '  out=$(curl -s -w "%{http_code}" "$@" || true)\n'
+            "}\n"
             'bp=$(curl -sf "https://y/${id}.json" || true)\n'
         )
         self.assertEqual(
-            piped_curls(planted),
-            ["$(curl -sf \"https://x/${proj}\" | jq -r '.score // empty')"],
+            bare_curls(planted),
+            ['5: bp=$(curl -sf "https://y/${id}.json" || true)'],
         )
 
 

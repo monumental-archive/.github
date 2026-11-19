@@ -54,7 +54,10 @@ command -v gh > /dev/null || {
 # July, was reported "not on crates.io" on the first run that reached
 # the leg. `ask` identifies the client and keeps the status, so a leg
 # says "absent" only on a 404; `unanswered` names everything else as a
-# question nobody answered — still red, never an accusation.
+# question nobody answered — still red, never an accusation. Since
+# #1633 it is the only `curl` in this file, which test_audit_badges.py
+# holds: Scorecard (#1621), Best Practices and the level shield had
+# kept a bare read each.
 ua="${GITHUB_REPOSITORY_OWNER}/.github audit:badges (https://github.com/${GITHUB_REPOSITORY_OWNER}/.github)"
 ask_code=""
 ask_body=""
@@ -170,8 +173,11 @@ while read -r repo; do
       https://www.bestpractices.dev/projects/*/badge | https://bestpractices.dev/projects/*/badge)
         id="${url##*/projects/}"
         id="${id%/badge}"
-        bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
-        if [[ -z ${bp} ]]; then
+        ask "https://www.bestpractices.dev/projects/${id}.json"
+        bp="${ask_body}"
+        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+          unanswered bestpractices "bestpractices.dev, about project ${id},"
+        elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
         elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-owner.py" \
           "${wearer}" <<< "${bp}"); then
@@ -192,8 +198,11 @@ while read -r repo; do
         # since withdrawn, is the drift #168 watches for.
         id="${url##*/projects/}"
         id="${id%/baseline}"
-        bp=$(curl -sf "https://www.bestpractices.dev/projects/${id}.json" || true)
-        if [[ -z ${bp} ]]; then
+        ask "https://www.bestpractices.dev/projects/${id}.json"
+        bp="${ask_body}"
+        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+          unanswered baseline "bestpractices.dev, about project ${id},"
+        elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
         elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-owner.py" \
           "${wearer}" <<< "${bp}"); then
@@ -240,8 +249,11 @@ while read -r repo; do
         doc="${url#https://img.shields.io/endpoint?url=}"
         doc="${doc//%3A/:}"
         doc="${doc//%2F//}"
-        sj=$(curl -sf "${doc}" || true)
-        if [[ -z ${sj} ]]; then
+        ask "${doc}"
+        sj="${ask_body}"
+        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+          unanswered level-shield "${doc}"
+        elif [[ ${ask_code} == 404 || -z ${sj} ]]; then
           failed="${failed} ${repo}(level-shield: published judgment ${doc} unreadable — the badge renders nothing)"
         elif ! jq -e '.schemaVersion == 1 and .label and .message' > /dev/null 2>&1 <<< "${sj}"; then
           failed="${failed} ${repo}(level-shield: ${doc} is not a shields endpoint document)"
