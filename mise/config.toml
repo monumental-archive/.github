@@ -6069,9 +6069,9 @@ if [[ -n ${unqueued} ]]; then
   status=1
 fi
 if [[ -n ${ungrouped} ]]; then
-  echo "lint:gate-stub: gate caller's concurrency group is shared: an event on a" >&2
-  echo "  merged pull request cancels the push gate (#1195), and a push replaces" >&2
-  echo "  the pending one before it (#1617). Under concurrency: set exactly" >&2
+  echo "lint:gate-stub: gate caller's concurrency group is shared: a merged pull" >&2
+  echo "  request's event cancels the push gate (#1195), a push replaces the one" >&2
+  echo "  pending (#1617). Run mise run fix:gate-stub, or set under concurrency:" >&2
   echo "    group: \${{ github.workflow }}-\${{ ${want_group} }}" >&2
   echo "    cancel-in-progress: ${want_cancel}" >&2
   echo "  in:${ungrouped}" >&2
@@ -6080,6 +6080,28 @@ fi
 [[ ${status} -eq 0 ]] || exit 1
 echo "lint:gate-stub: ok"
 {% endraw %}
+'''
+
+[tasks."fix:gate-stub"]
+description = "Rewrite a gate stub's concurrency group and cancel lines to the wanted ones (#1617)"
+dir = "{{cwd}}"
+# The write-mode sibling of lint:gate-stub. The stub's concurrency block
+# is in each repository's own workflow, out of reach of the shared
+# workflow and of Renovate, so a change to the wanted group reds every
+# repository on its pin bump; this makes the bump `mise run fix`. It
+# rewrites only the top-level block's group and cancel-in-progress lines
+# in the callers the lint judges, leaves a conforming stub byte for byte,
+# and refuses by name a caller with no block rather than invent one.
+run = '''
+compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+  echo "fix:gate-stub: no workflows, skipped"
+  exit 0
+}
+. "${ORG_BELT_DIR}/identity.sh"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+canon="${canon_owner}/${canon_repo}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate-stub-fix.py" "${canon}" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:capability-boundary"]
