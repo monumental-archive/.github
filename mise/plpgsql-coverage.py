@@ -72,7 +72,6 @@ figures beside the totals, so the totals can be checked by hand.
 
 import json
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -129,7 +128,7 @@ class ReadError(Exception):
     """A read failed (psql, or mise for a task); the message names it."""
 
 
-def psql(psql_bin: str, conninfo: str, sql: str) -> list[list[str]]:
+def psql(conninfo: str, sql: str) -> list[list[str]]:
     """Run one statement and return its rows, tab-split.
 
     Returns:
@@ -139,10 +138,11 @@ def psql(psql_bin: str, conninfo: str, sql: str) -> list[list[str]]:
         ReadError: psql exited non-zero.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
+    # The repository's own psql, by name on PATH: the belt pins no client.
+    # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
     done = subprocess.run(
         [
-            psql_bin,
+            "psql",
             "-X",
             "-q",
             "-A",
@@ -165,7 +165,7 @@ def psql(psql_bin: str, conninfo: str, sql: str) -> list[list[str]]:
     return [line.split("\t") for line in done.stdout.splitlines() if line]
 
 
-def read_function(psql_bin: str, conninfo: str, oid: str, signature: str) -> dict:
+def read_function(conninfo: str, oid: str, signature: str) -> dict:
     """Read one function's figures, or the reason they cannot be read.
 
     Returns:
@@ -174,7 +174,7 @@ def read_function(psql_bin: str, conninfo: str, oid: str, signature: str) -> dic
     """
     entry: dict = {"function": signature}
     try:
-        rows = psql(psql_bin, conninfo, READ_SQL.format(oid=oid))
+        rows = psql(conninfo, READ_SQL.format(oid=oid))
         statements, branches, count, executed, branching = rows[0]
         entry |= {
             "statements": float(statements),
@@ -205,23 +205,20 @@ def collect(conninfo: str) -> int:
         )
         return 1
     report: dict = {}
-    psql_bin = shutil.which("psql")
-    if psql_bin is None:
+    try:
+        profiler, preload = psql(conninfo, META_SQL)[0]
+        report |= {"profiler": profiler, "preload": preload}
+        psql(conninfo, CREATE_SQL)
+        listed = psql(conninfo, LIST_SQL)
+        report["functions"] = [
+            read_function(conninfo, oid, signature) for oid, signature in listed
+        ]
+    except FileNotFoundError:
         report["error"] = "psql is not on PATH (the repository's own client)"
-    else:
-        try:
-            profiler, preload = psql(psql_bin, conninfo, META_SQL)[0]
-            report |= {"profiler": profiler, "preload": preload}
-            psql(psql_bin, conninfo, CREATE_SQL)
-            listed = psql(psql_bin, conninfo, LIST_SQL)
-            report["functions"] = [
-                read_function(psql_bin, conninfo, oid, signature)
-                for oid, signature in listed
-            ]
-        except ReadError as exc:
-            report["error"] = str(exc)
-        except ValueError:
-            report["error"] = "unreadable settings from the database"
+    except ReadError as exc:
+        report["error"] = str(exc)
+    except ValueError:
+        report["error"] = "unreadable settings from the database"
     Path(target).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return 0
 
@@ -383,10 +380,9 @@ def task_info(name: str) -> dict:
         ReadError: mise could not answer for the task (named).
 
     """
-    mise = shutil.which("mise") or "mise"
-    # ruff: ignore[subprocess-without-shell-equals-true]
+    # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
     done = subprocess.run(
-        [mise, "tasks", "info", name, "--json"],
+        ["mise", "tasks", "info", name, "--json"],
         capture_output=True,
         text=True,
         check=False,
@@ -443,14 +439,13 @@ def measure(label: str) -> int:
             file=sys.stderr,
         )
         return 1
-    bash = shutil.which("bash") or "bash"
     with tempfile.TemporaryDirectory() as work:
         report = str(Path(work) / "plpgsql-coverage.json")
         env = os.environ | {ENV: report}
         for directory, script in steps:
-            # ruff: ignore[subprocess-without-shell-equals-true]
+            # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
             done = subprocess.run(
-                [bash, "-euo", "pipefail", "-c", script],
+                ["bash", "-euo", "pipefail", "-c", script],
                 cwd=directory,
                 env=env,
                 stdout=sys.stderr,
