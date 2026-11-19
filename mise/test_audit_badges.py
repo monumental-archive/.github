@@ -18,8 +18,10 @@ repository after stele unchecked.
 The rows: a 404 is the "shield over nothing" finding and the walk goes
 on to `beta`; a 503 is a question unanswered; a 200 below its floor and
 a 200 above it read as before, asked by the identified client. And the
-class row: over the body, as `lint:belt-shell` reads it, no command
-substitution pipes a bare `curl` into a reader.
+class row: no command substitution pipes a bare `curl` into a reader.
+Since #1633 the walk is the delivered `audit-badges.sh` and the task is
+its guard and call, so the behaviour rows run the task body as before
+and the class row reads the script, through belt-shell's scrub.
 
 GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
 run through the gate as `mise run test`, which `ci` collects.
@@ -48,6 +50,7 @@ _SPEC.loader.exec_module(bs)
 
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
+SCRIPT = BELT / "audit-badges.sh"
 BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 OWNER = "monumental-archive"
@@ -258,11 +261,11 @@ class ScorecardRead(unittest.TestCase):
 
 
 class BareCurl(unittest.TestCase):
-    """No command substitution in the body pipes a bare curl onward."""
+    """No command substitution in the walk pipes a bare curl onward."""
 
-    def test_body_pipes_no_bare_curl(self) -> None:
-        """Every issuer read the body pipes goes through `ask` instead."""
-        self.assertEqual(piped_curls(body()), [])
+    def test_script_pipes_no_bare_curl(self) -> None:
+        """Every issuer read the script pipes goes through `ask` instead."""
+        self.assertEqual(piped_curls(SCRIPT.read_text(encoding="utf-8")), [])
 
     def test_the_read_this_replaced_is_found(self) -> None:
         """The planted #1621 line is named; `|| true` and ask's own are not."""
