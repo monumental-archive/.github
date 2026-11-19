@@ -4820,7 +4820,7 @@ git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
   exit 0
 }
 top=$(git rev-parse --show-toplevel)
-readme=$(git ls-files | grep -iE '^readme(\.md|\.markdown)?$' | head -n 1 || true)
+readme=$(git ls-files | awk 'tolower($0) ~ /^readme(\.md|\.markdown)?$/ && !seen++')
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
 '''
 
