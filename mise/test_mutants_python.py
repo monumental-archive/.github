@@ -784,7 +784,9 @@ class ChildConfiguration(Planted):
         where.mkdir()
         return where
 
-    def child(self, hook: Path, where: Path, **env: str) -> subprocess.CompletedProcess[str]:
+    def child(
+        self, hook: Path, where: Path, **env: str
+    ) -> subprocess.CompletedProcess[str]:
         """Run the planted helper as `python3 helper.py` from WHERE.
 
         Returns:

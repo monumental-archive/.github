@@ -209,7 +209,9 @@ class Planted(unittest.TestCase):
         for name, code in (index or {}).items():
             (self.index / name).write_text(code, encoding="utf-8")
 
-    def run_helper(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    def run_helper(
+        self, **env: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the helper in the planted tree.
 
         Returns:

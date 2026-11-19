@@ -303,7 +303,9 @@ IMAGE = "ghcr.io/example/edtf-postgres"
 PINNED = IMAGE + "@sha256:" + "a" * 64
 
 
-def render(recipe: str, image: str, base: str, pg: str) -> subprocess.CompletedProcess[str]:
+def render(
+    recipe: str, image: str, base: str, pg: str
+) -> subprocess.CompletedProcess[str]:
     """Run the consumer-dockerfile verb.
 
     Returns:

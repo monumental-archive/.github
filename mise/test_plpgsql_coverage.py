@@ -179,7 +179,9 @@ def stub_env(stubs: Path, answers: Path, **planted: str) -> dict[str, str]:
     )
 
 
-def run(argv: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    argv: list[str], env: dict[str, str], cwd: Path
+) -> subprocess.CompletedProcess[str]:
     """Run a command and capture its output as text.
 
     Returns:
@@ -402,7 +404,9 @@ class HelperRows(Collecting):
 class RefusalRows(Collecting):
     """Every way a collection or a report file is refused, by name."""
 
-    def collection_failed(self, read: subprocess.CompletedProcess[str], why: str) -> None:
+    def collection_failed(
+        self, read: subprocess.CompletedProcess[str], why: str
+    ) -> None:
         """Assert the leg refuses a failed collection, naming why."""
         self.assertEqual(1, read.returncode)
         self.assertEqual("", read.stdout)
