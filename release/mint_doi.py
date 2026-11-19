@@ -47,6 +47,7 @@ from urllib.parse import quote
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import typed_std
 import workflow_command
 
 if TYPE_CHECKING:
@@ -409,6 +410,7 @@ class Zenodo:
 
         Raises:
             HttpError: no answer at all.
+            RefusedError: what answered is not an HTTP response.
 
         """
         h = {"User-Agent": self.agent, **(headers or {})}
@@ -417,8 +419,10 @@ class Zenodo:
         req = urllib.request.Request(url, data=body, headers=h, method=method)  # ruff: ignore[suspicious-url-open-usage] - BASE_URL is the step's input
         opener = self._authed if auth else self._public
         try:
-            with opener.open(req, timeout=TIMEOUT) as resp:
+            with typed_std.urlopen(req, timeout=TIMEOUT, opener=opener) as resp:
                 return resp.status, resp.read()
+        except typed_std.NotAResponseError as e:
+            raise RefusedError(str(e)) from None
         except urllib.error.HTTPError as e:
             return e.code, e.read()
         except (urllib.error.URLError, OSError) as e:

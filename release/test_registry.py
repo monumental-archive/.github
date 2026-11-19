@@ -925,7 +925,7 @@ class Environment(Harness):
 
         out = io.StringIO()
         with (
-            mock.patch.object(registry.urllib.request, "urlopen", refuse),
+            mock.patch.object(registry.typed_std.urllib.request, "urlopen", refuse),
             contextlib.redirect_stdout(out),
         ):
             code = registry.main(["tag"], self.env)
@@ -935,6 +935,20 @@ class Environment(Harness):
             ["https://ghcr.io/token?scope=repository:a/b:pull,push&service=ghcr.io"],
         )
         self.assertNotIn("attacker", out.getvalue())
+
+    def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
+        """What answered is not an HTTP response: refused by name (#1682)."""
+        url = "https://ghcr.io/v2/a/b/manifests/1"
+        with (
+            mock.patch.object(
+                registry.typed_std.urllib.request, "urlopen", return_value=None
+            ),
+            self.assertRaises(registry.RefusedError) as caught,
+        ):
+            registry.Registry.request("GET", url, {})
+        self.assertEqual(
+            f"{url} answered NoneType, not an HTTP response", str(caught.exception)
+        )
 
     def test_an_unset_input_is_named(self) -> None:
         """No UNTRUSTED_IMAGES: the variable is named, exit 1."""

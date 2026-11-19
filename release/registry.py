@@ -202,15 +202,17 @@ class Registry:
             The body and the response's Content-Type.
 
         Raises:
-            RefusedError: no answer, or an answer that is not 2xx.
+            RefusedError: no answer, an answer that is not 2xx, or one that
+                is not an HTTP response.
 
         """
         # ruff: ignore[suspicious-url-open-usage] - https, or the tests' fake
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
-            # ruff: ignore[suspicious-url-open-usage]
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                return resp.read(), resp.headers.get("Content-Type", "")
+            with typed_std.urlopen(req, timeout=60) as resp:
+                return resp.read(), resp.getheader("Content-Type", "") or ""
+        except typed_std.NotAResponseError as e:
+            raise RefusedError(str(e)) from None
         except urllib.error.HTTPError as e:
             e.close()
             msg = f"{method} {url} answered {e.code}"

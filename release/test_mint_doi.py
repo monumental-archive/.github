@@ -1548,6 +1548,19 @@ class AnswerShapes(unittest.TestCase):
             call()
         self.assertEqual(message, str(caught.exception))
 
+    def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
+        """What the opener answered is not an HTTP response: refused by name."""
+        url = "https://zenodo.invalid/api/records/1"
+        z = mint_doi.Zenodo("https://zenodo.invalid", "t", "a")
+        with (
+            mock.patch.object(z._public, "open", return_value=None),  # ruff: ignore[private-member-access] - the opener the row stubs
+            self.assertRaises(mint_doi.RefusedError) as caught,
+        ):
+            z.public(url)
+        self.assertEqual(
+            f"{url} answered NoneType, not an HTTP response", str(caught.exception)
+        )
+
     def test_an_answer_that_is_not_json_is_refused(self) -> None:
         """Named with the decoder's reason."""
         with self.assertRaises(mint_doi.RefusedError) as caught:

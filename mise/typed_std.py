@@ -12,6 +12,12 @@ with no cast, so no helper writes its own reader.
   iterates `finditer` and calls `group`.
 - `stdin_text()`: all of standard input, refusing by name a process
   started without one.
+- `urlopen(request, timeout=, opener=)`: one HTTP answer, typed as a
+  `Response` (#1682). typeshed types what `urllib.request.urlopen` and
+  `OpenerDirector.open` return as `Any`; this is the one place the
+  canon calls either. Redirects, proxies and `HTTPError` stay urllib's,
+  and a caller that needs its own opener (one that never redirects)
+  hands it in.
 
 stdlib only; a sibling root reaches it the way #1634 settled, by
 appending the `mise` root to `sys.path` from its own `__file__`.
@@ -19,7 +25,8 @@ appending the `mise` root to `sys.path` from its own `__file__`.
 
 import io
 import sys
-from typing import TYPE_CHECKING
+import urllib.request
+from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
 if TYPE_CHECKING:
     import re
@@ -27,6 +34,62 @@ if TYPE_CHECKING:
 
 class NoStdinError(RuntimeError):
     """The process was started with no standard input to read."""
+
+
+class NotAResponseError(TypeError):
+    """An opener answered something that is not an HTTP response."""
+
+
+@runtime_checkable
+class Response(Protocol):
+    """What the canon reads of an HTTP answer: no more."""
+
+    status: int
+
+    def read(self) -> bytes:
+        """Read the body."""
+        ...
+
+    def getheader(self, name: str, default: str | None = None) -> str | None:
+        """Read one header."""
+        ...
+
+    def __enter__(self) -> Self:
+        """Enter the answer's context, which closes it on leaving."""
+        ...
+
+    def __exit__(self, *exc: object) -> None:
+        """Close the answer."""
+        ...
+
+
+def urlopen(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> Response:
+    """Make one request through urllib, or through the opener handed in.
+
+    Returns:
+        The answer.
+
+    Raises:
+        NotAResponseError: what came back is not an HTTP response.
+
+    """
+    answer: object = (
+        # ruff: ignore[suspicious-url-open-usage] - each caller builds its Request from a URL it names
+        urllib.request.urlopen(request, timeout=timeout)
+        if opener is None
+        else opener.open(request, timeout=timeout)
+    )
+    if not isinstance(answer, Response):
+        msg = (
+            f"{request.full_url} answered {type(answer).__name__}, not an HTTP response"
+        )
+        raise NotAResponseError(msg)
+    return answer
 
 
 def group(match: re.Match[str], group: int | str = 0) -> str | None:

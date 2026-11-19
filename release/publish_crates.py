@@ -79,6 +79,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 try:
     import crates_index
     import decoded
+    import typed_std
     import workflow_command
 except ModuleNotFoundError as missing:
     if missing.name != "crates_index":
@@ -112,13 +113,17 @@ def http(
     Returns:
         The status and body, or a None status when the host never answered.
 
+    Raises:
+        RefusalError: what answered is not an HTTP response.
+
     """
     # ruff: ignore[suspicious-url-open-usage] - https URLs this file names
     req = urllib.request.Request(url, data=data, headers=dict(headers), method=method)
     try:
-        # ruff: ignore[suspicious-url-open-usage] - https URLs this file names
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with typed_std.urlopen(req, timeout=TIMEOUT) as resp:
             return Response(resp.status, resp.read())
+    except typed_std.NotAResponseError as e:
+        raise RefusalError(str(e)) from None
     except urllib.error.HTTPError as e:
         return Response(e.code, e.read())
     except urllib.error.URLError, TimeoutError:

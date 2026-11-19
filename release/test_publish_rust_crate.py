@@ -506,6 +506,20 @@ class PublishMintsItsOwnToken(unittest.TestCase):
             "cargo metadata's target_directory is not a string", str(refused.exception)
         )
 
+    def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
+        """What answered is not an HTTP response: refused by name (#1682)."""
+        url = "https://index.crates.io/ed/tf/edtf-core"
+        with (
+            mock.patch.object(
+                publish_crates.typed_std.urllib.request, "urlopen", return_value=None
+            ),
+            self.assertRaises(publish_crates.RefusalError) as caught,
+        ):
+            publish_crates.http("GET", url, {})
+        self.assertEqual(
+            f"{url} answered NoneType, not an HTTP response", str(caught.exception)
+        )
+
     def test_an_index_that_never_answered_is_named(self) -> None:
         """No answer at all is "nothing", never "not published"."""
         run = run_publish({"ed/tf/edtf-core": "000"} | WASM)
