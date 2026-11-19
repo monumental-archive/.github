@@ -34,6 +34,7 @@ import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -492,6 +493,18 @@ UMBRELLA_RE = re.compile(r"(?<!\d)#1352(?!\d)")
 SETTLE = "mise run fix:workflow-shell"
 
 
+class Kind(NamedTuple):
+    """Which shell surface a debt file lists: its key, its thing, its umbrella."""
+
+    noun: str  # what an entry's second field names: `step` or `task`
+    thing: str  # what the shell is: `block` or `body`
+    umbrella: re.Pattern[str]  # the ceiling's own issue, in a note
+    umbrella_ref: str  # the same, as a message names it
+
+
+WORKFLOW = Kind("step", "block", UMBRELLA_RE, "#1352")
+
+
 def weight(source: str) -> int:
     """Count a block's lines that are neither blank nor a comment.
 
@@ -511,39 +524,44 @@ class Entry(NamedTuple):
     lineno: int
 
 
-def parse_entry(raw: str) -> Entry | str:
+def parse_entry(raw: str, kind: Kind | None = None) -> Entry | str:
     """Read one debt line.
 
     Returns:
         The entry (line number 0, filled by the caller), or what is wrong.
 
     """
+    kind = kind or WORKFLOW
     fields = raw.split("\t")
     if len(fields) != DEBT_FIELDS or not all(fields):
         return (
-            "an entry is <file>, <step name>, <lines>, `# <issue>`, tab-separated "
-            f"— this line has {len(fields)} field(s)"
+            f"an entry is <file>, <{kind.noun} name>, <lines>, `# <issue>`, "
+            f"tab-separated — this line has {len(fields)} field(s)"
         )
     file, step, count, note = fields
     if not count.isdigit() or int(count) <= CEILING:
         return f"'{count}' is not a line count over the {CEILING}-line ceiling"
     if not note.startswith("#") or not ISSUE_RE.search(note):
-        return "the note is a `#` comment naming the issue that will remove the block"
-    if UMBRELLA_RE.search(note) and "unassigned" not in note:
         return (
-            "a note naming #1352 says `unassigned`: name the issue that removes "
-            "the block, or mark it unassigned"
+            "the note is a `#` comment naming the issue that will remove the "
+            f"{kind.thing}"
+        )
+    if kind.umbrella.search(note) and "unassigned" not in note:
+        return (
+            f"a note naming {kind.umbrella_ref} says `unassigned`: name the issue "
+            f"that removes the {kind.thing}, or mark it unassigned"
         )
     return Entry(file, step, int(count), 0)
 
 
-def read_debt(path: Path) -> tuple[list[Entry], list[str]]:
+def read_debt(path: Path, kind: Kind | None = None) -> tuple[list[Entry], list[str]]:
     """Parse the debt file; a missing file is an empty debt.
 
     Returns:
         The entries, and one finding per line that is not a valid entry.
 
     """
+    kind = kind or WORKFLOW
     if not path.is_file():
         return [], []
     entries: list[Entry] = []
@@ -552,12 +570,13 @@ def read_debt(path: Path) -> tuple[list[Entry], list[str]]:
     for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not raw.strip() or raw.startswith("#"):
             continue
-        entry = parse_entry(raw)
+        entry = parse_entry(raw, kind)
         if isinstance(entry, str):
             errors.append(f"{path}:{n}: {entry}")
         elif (entry.file, entry.step) in seen:
             errors.append(
-                f"{path}:{n}: step '{entry.step}' in {entry.file} is listed twice"
+                f"{path}:{n}: {kind.noun} '{entry.step}' in {entry.file} "
+                "is listed twice"
             )
         else:
             seen.add((entry.file, entry.step))
@@ -714,6 +733,167 @@ def ceiling(files: list[str], debt: Path, *, write: bool) -> int:
     return 0
 
 
+# The same ceiling on the second place shell lives (#1544): a mise task's
+# `run` body. One number for shell, wherever it lives, counted by the same
+# `weight`. The debt file keys on the task's name, which TOML makes unique
+# within a config, so no body is ever unkeyed.
+TASKS = Kind("task", "body", re.compile(r"(?<!\d)#1544(?!\d)"), "#1544")
+TASK_SETTLE = "mise run fix:task-shell"
+TASK_HEADER = """\
+# Task shell debt (#1544): every mise task `run` body over the 15-line
+# ceiling that lint:task-shell holds, as the tree had it when the ceiling
+# landed. The list only shrinks. lint:task-shell is red on a body over
+# the ceiling that is not listed, on a listed body that grew past its
+# number, and on an entry whose body is gone or now fits;
+# fix:task-shell lowers a number that shrank and removes a stale entry.
+# It writes entries only when this file does not exist: new logic goes
+# to a helper (CONTRIBUTING.md, "Workflow shell").
+#
+# One entry per line, four tab-separated fields: the config file, the
+# task's name, the body's non-blank non-comment lines, and a `#` note
+# naming the issue that removes it. The issue that extracts a body
+# deletes its entry in the same pull request. A body no issue names yet
+# carries `#1544 unassigned`.
+#
+# Generated from the tree by the lint's own counter
+# (mise/embedded-shell.py), never typed.
+"""
+
+
+def task_bodies(path: Path) -> Iterator[tuple[str, int]]:
+    """Weigh every task's `run` body in one mise config.
+
+    A `run` given as a list of commands is one body: mise runs the
+    commands in turn, as one task, so its lines are counted together.
+
+    Yields:
+        (task name, weight) per task carrying a body, in file order.
+
+    """
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    for name, task in (data.get("tasks") or {}).items():
+        if not isinstance(task, dict):
+            continue
+        run = task.get("run")
+        commands = run if isinstance(run, list) else [run]
+        source = "\n".join(c for c in commands if isinstance(c, str))
+        if source.strip():
+            yield name, weight(source)
+
+
+def judge_tasks(files: list[str], debt: Path) -> tuple[Verdict, list[Entry]]:
+    """Hold every task body in files to the ceiling, net of the debt.
+
+    Returns:
+        The verdict, and the bodies over the ceiling as entries.
+
+    """
+    entries, findings = read_debt(debt, TASKS)
+    listed = {(e.file, e.step): e for e in entries}
+    weighed = {(f, name): n for f in files for name, n in task_bodies(Path(f))}
+    over = [Entry(f, name, n, 0) for (f, name), n in weighed.items() if n > CEILING]
+    for body in over:
+        at = f"{body.file}: task '{body.step}'"
+        e = listed.get((body.file, body.step))
+        if e is None:
+            findings.append(
+                f"{at} holds a body of {body.lines} lines, over the {CEILING}-line "
+                f"ceiling, and {debt} does not list it — move the logic out "
+                "(CONTRIBUTING.md)"
+            )
+        elif body.lines > e.lines:
+            findings.append(
+                f"{at} holds {body.lines} lines, more than its debt entry's "
+                f"{e.lines} ({debt}:{e.lineno}) — the debt only shrinks"
+            )
+    lowered: dict[int, int] = {}
+    stale: set[int] = set()
+    for e in entries:
+        at = f"{debt}:{e.lineno}: task '{e.step}' in {e.file}"
+        n = weighed.get((e.file, e.step))
+        if n is not None and n > CEILING:
+            if n < e.lines:
+                lowered[e.lineno] = n
+            continue
+        stale.add(e.lineno)
+        if n is None:
+            findings.append(f"{at} names no task body — remove the entry ({TASK_SETTLE})")
+        else:
+            findings.append(
+                f"{at} now fits the ceiling ({n} lines) — remove the entry "
+                f"({TASK_SETTLE})"
+            )
+    return Verdict(findings, lowered, stale), over
+
+
+def generated(over: list[Entry]) -> str:
+    """Write a new debt file listing every body over the ceiling.
+
+    Returns:
+        The file's text: the header, then one entry per body.
+
+    """
+    rows = "".join(
+        f"{e.file}\t{e.step}\t{e.lines}\t# #1544 unassigned\n" for e in over
+    )
+    return TASK_HEADER + rows
+
+
+def task_ceiling(files: list[str], debt: Path, *, write: bool) -> int:
+    """Run the task-body ceiling in lint or fix mode.
+
+    Fix mode settles an existing debt file down and never adds to it. A
+    repository with no debt file gets one generated, listing every body
+    over the ceiling: that is how the file is first written (the canon's
+    when the ceiling landed, a consumer's in the pull request that takes
+    the pin), and the lint holds it from then on.
+
+    Returns:
+        The process exit status.
+
+    """
+    verdict, over = judge_tasks(files, debt)
+    if write:
+        if not debt.is_file():
+            if over:
+                debt.write_text(generated(over), encoding="utf-8")
+            print(
+                f"fix:task-shell: no debt file; generated {debt} with "
+                f"{len(over)} entry(ies)"
+                if over
+                else "fix:task-shell: every task body fits; no debt file needed"
+            )
+            return 0
+        if verdict.lowered or verdict.stale:
+            debt.write_text(
+                settled(debt.read_text(encoding="utf-8"), verdict), encoding="utf-8"
+            )
+        print(
+            f"fix:task-shell: {len(verdict.lowered)} entry(ies) lowered, "
+            f"{len(verdict.stale)} removed; it never adds one to an existing file",
+        )
+        return 0
+    for n, count in sorted(verdict.lowered.items()):
+        print(
+            f"{debt}:{n}: the body now holds {count} lines — {TASK_SETTLE} "
+            "lowers the entry"
+        )
+    for line in verdict.findings:
+        print(line, file=sys.stderr)
+    if verdict.findings:
+        print(
+            f"task-shell: {len(verdict.findings)} finding(s) — a task body holds "
+            f"at most {CEILING} lines, and the debt file only shrinks",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"task-shell: every task body fits {CEILING} lines or its debt entry "
+        f"({len(over)} over the ceiling, all listed)"
+    )
+    return 0
+
+
 def main() -> None:
     """Entry point: check every file named on the command line."""
     ap = argparse.ArgumentParser(description=__doc__)
@@ -726,10 +906,17 @@ def main() -> None:
         metavar="DEBT",
         help="hold blocks to the line ceiling, net of this debt file (#1352)",
     )
+    ap.add_argument(
+        "--task-ceiling",
+        metavar="DEBT",
+        help="hold mise task bodies to the line ceiling, net of this debt file",
+    )
     args = ap.parse_args()
 
     if args.ceiling:
         sys.exit(ceiling(args.files, Path(args.ceiling), write=args.write))
+    if args.task_ceiling:
+        sys.exit(task_ceiling(args.files, Path(args.task_ceiling), write=args.write))
 
     # shellcheck only WARNS on an unreadable --rcfile and then lints at its
     # own defaults, exit 0 — so a belt that did not arrive would read as a
