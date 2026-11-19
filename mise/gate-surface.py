@@ -72,6 +72,26 @@ CRATE_CLASSES = {
 WORKSPACE_CLASSES = {"rust-crate", "rust-binary"}
 
 
+def listed(value: object) -> list:
+    """Take a cargo metadata field as a list, or as empty when it is not one.
+
+    Returns:
+        The list, or an empty one.
+
+    """
+    return value if isinstance(value, list) else []
+
+
+def mapped(value: object) -> dict:
+    """Take a cargo metadata field as an object, or as empty when it is not one.
+
+    Returns:
+        The object, or an empty one.
+
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def members(metadata: dict) -> list[dict]:
     """Take cargo's own account of which packages are workspace members.
 
@@ -79,11 +99,17 @@ def members(metadata: dict) -> list[dict]:
         The member packages, in the order cargo reported them.
 
     """
-    ids = set(metadata.get("workspace_members") or [])
+    ids = {i for i in listed(metadata.get("workspace_members")) if isinstance(i, str)}
     return [
         pkg
-        for pkg in metadata.get("packages") or []
-        if pkg.get("id") in ids and pkg.get("name") and pkg.get("version")
+        for pkg in listed(metadata.get("packages"))
+        if isinstance(pkg, dict)
+        and isinstance(pkg.get("id"), str)
+        and pkg["id"] in ids
+        and isinstance(pkg.get("name"), str)
+        and isinstance(pkg.get("version"), str)
+        and pkg["name"]
+        and pkg["version"]
     ]
 
 
@@ -96,12 +122,15 @@ def majors(pkg: dict) -> list[int]:
         because either alone is a guess.
 
     """
-    depends = any(dep.get("name") == "pgrx" for dep in pkg.get("dependencies") or [])
+    depends = any(
+        isinstance(dep, dict) and dep.get("name") == "pgrx"
+        for dep in listed(pkg.get("dependencies"))
+    )
     if not depends:
         return []
     found = [
         int(hit.group(1))
-        for feature in pkg.get("features") or {}
+        for feature in mapped(pkg.get("features"))
         if (hit := MAJOR.match(feature))
     ]
     return sorted(found)
@@ -116,7 +145,7 @@ def directory(pkg: dict, root: str) -> str:
 
     """
     manifest = pkg.get("manifest_path")
-    if not manifest or not root:
+    if not isinstance(manifest, str) or not manifest or not root:
         return ""
     try:
         return str(Path(manifest).parent.relative_to(root))
@@ -205,8 +234,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{NAME}: cargo metadata did not give JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)
         return 1
+    if not isinstance(metadata, dict):
+        # cargo prints an object; any other document names no workspace,
+        # and must not read as one with no crates (#1555: it raised).
+        print(f"{NAME}: cargo metadata is not a JSON object", file=sys.stderr)
+        return 1
 
-    root = metadata.get("workspace_root") or ""
+    root = metadata.get("workspace_root")
+    root = root if isinstance(root, str) else ""
     held = set(args.exclude.split())
     surface = [
         {
