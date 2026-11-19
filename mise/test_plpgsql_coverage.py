@@ -52,7 +52,17 @@ PSQL = """\
 sql="${*: -1}"
 case "${sql}" in
   *"CREATE EXTENSION"*) exit 0 ;;
-  *current_setting*) printf '%s\\t%s\\n' "${STUB_PROFILER}" "${STUB_PRELOAD}" ;;
+  *current_setting*)
+    if [[ -n ${STUB_META_FAIL:-} ]]; then
+      echo "${STUB_META_FAIL}" >&2
+      exit 2
+    fi
+    if [[ -n ${STUB_META:-} ]]; then
+      echo "${STUB_META}"
+    else
+      printf '%s\\t%s\\n' "${STUB_PROFILER}" "${STUB_PRELOAD}"
+    fi
+    ;;
   *lanname*)
     cat "${STUB_DIR}/functions"
     # An extension's own functions answer any listing that keeps them.
@@ -184,16 +194,19 @@ def run(argv: list[str], env: dict[str, str], cwd: Path) -> subprocess.Completed
     )
 
 
-class HelperRows(unittest.TestCase):
-    """`collect` against a stub psql, then `totals` over its report."""
+class Collecting(unittest.TestCase):
+    """Collects from a planted database and reads the report."""
 
     def measure(
         self,
         functions: dict[str, tuple[str, str]],
         unreadable: dict[str, str] | None = None,
+        listing: str | None = None,
         **planted: str,
     ) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess]:
         """Collect a report from the planted database and read it.
+
+        `listing` replaces the function listing psql prints, verbatim.
 
         Returns:
             The collect and the totals processes.
@@ -202,12 +215,18 @@ class HelperRows(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, functions, unreadable)
+        if listing is not None:
+            (answers / "functions").write_text(listing, encoding="utf-8")
         report = tmp / "report.json"
         env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(report), **planted)
         py = sys.executable
         collected = run([py, str(HELPER), "collect", "postgres://stub"], env, tmp)
         read = run([py, str(HELPER), "totals", "leg", str(report)], env, tmp)
         return collected, read
+
+
+class HelperRows(Collecting):
+    """`collect` against a stub psql, then `totals` over its report."""
 
     def test_two_functions_weighted_into_the_totals(self) -> None:
         """Each figure is weighted by its function's statement count."""
@@ -380,6 +399,161 @@ class HelperRows(unittest.TestCase):
             " it; call collect only then\n",
             done.stderr,
         )
+
+
+class RefusalRows(Collecting):
+    """Every way a collection or a report file is refused, by name."""
+
+    def collection_failed(self, read: subprocess.CompletedProcess, why: str) -> None:
+        """Assert the leg refuses a failed collection, naming why."""
+        self.assertEqual(1, read.returncode)
+        self.assertEqual("", read.stdout)
+        self.assertEqual(
+            f"leg: plpgsql: the teardown's collection failed: {why}\n", read.stderr
+        )
+
+    def test_no_psql_on_path_fails_the_collection_by_name(self) -> None:
+        """The client is the repository's; without it nothing is read."""
+        empty = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        collected, read = self.measure(TWO, PATH=str(empty))
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.collection_failed(
+            read, "psql is not on PATH (the repository's own client)"
+        )
+
+    def test_a_database_psql_cannot_reach_fails_by_its_error(self) -> None:
+        """The message psql printed is the reason, verbatim."""
+        why = 'FATAL:  database "stub" does not exist'
+        collected, read = self.measure(TWO, STUB_META_FAIL=why)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.collection_failed(read, why)
+
+    def test_unreadable_settings_fail_the_collection(self) -> None:
+        """Two settings or nothing: one field is not the profiler and preload."""
+        collected, read = self.measure(TWO, STUB_META="on")
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.collection_failed(read, "unreadable settings from the database: [['on']]")
+
+    def test_an_unreadable_listing_row_fails_the_collection(self) -> None:
+        """A listing row without its signature is not guessed at."""
+        collected, read = self.measure(TWO, listing="101\n")
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.collection_failed(read, "unreadable function listing: ['101']")
+
+    def test_figures_that_are_not_numbers_are_unreadable(self) -> None:
+        """A reading psql printed in the wrong shape is listed, red."""
+        odd = {"101": ("public.guard()", "x\ty")}
+        collected, read = self.measure(odd)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: plpgsql_check cannot read public.guard():"
+            " unreadable figures: [['x', 'y']]\n"
+            "leg: plpgsql: 1 function(s) unreadable — a function the extension"
+            " cannot read is never dropped from the total\n",
+            read.stderr,
+        )
+
+    def test_a_failed_collection_in_the_file_is_refused(self) -> None:
+        """The failure shape decodes, and the leg refuses with its reason."""
+        self.collection_failed(self.read_planted({"error": "boom"}), "boom")
+
+    def read_planted(self, document: object) -> subprocess.CompletedProcess:
+        """Run `totals` over a planted report file.
+
+        Returns:
+            The finished process.
+
+        """
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        planted = tmp / "report.json"
+        text = document if isinstance(document, str) else json.dumps(document)
+        planted.write_text(text, encoding="utf-8")
+        return run(
+            [sys.executable, str(HELPER), "totals", "leg", str(planted)],
+            hermetic.env(),
+            tmp,
+        )
+
+    def test_the_decoder_names_what_is_not_a_report(self) -> None:
+        """Every shape the one decoder refuses, by what is wrong with it."""
+        good = {
+            "function": "public.guard()",
+            "statements": "0.8",
+            "branches": "1",
+            "statement_count": 5,
+            "executed": 4,
+            "branch_free": False,
+        }
+
+        def report(*entries: object) -> dict[str, object]:
+            return {"profiler": "on", "preload": PRELOAD, "functions": list(entries)}
+
+        rows: list[tuple[object, str]] = [
+            ("[", "not JSON (Expecting value: line 1 column 2 (char 1))"),
+            ([], "the document is not an object"),
+            ({"error": 3}, "the document: 'error' is not a string"),
+            (
+                {"profiler": "on", "preload": PRELOAD, "functions": {}},
+                "the document: 'functions' is not a list",
+            ),
+            (
+                {"preload": PRELOAD, "functions": []},
+                "the document: 'profiler' is not a string",
+            ),
+            (report(1), "function 0 is not an object"),
+            (
+                report(good | {"branch_free": "no"}),
+                "function 0: 'branch_free' is not a boolean",
+            ),
+            (
+                report(good | {"statement_count": -1}),
+                "function 0: 'statement_count' is not a count",
+            ),
+            (
+                report(good | {"executed": True}),
+                "function 0: 'executed' is not a count",
+            ),
+            (
+                report(good | {"statements": "1.5"}),
+                "function 0: 'statements' is not a fraction from 0 to 1",
+            ),
+            (
+                report(good | {"branches": "abc"}),
+                "function 0: 'branches' is not a fraction from 0 to 1",
+            ),
+            (
+                report(good, good | {"statements": "NaN"}),
+                "function 1: 'statements' is not a fraction from 0 to 1",
+            ),
+            (
+                report({"function": "public.guard()", "error": 7}),
+                "function 0: 'error' is not a string",
+            ),
+        ]
+        for document, what in rows:
+            with self.subTest(what=what):
+                read = self.read_planted(document)
+                self.assertEqual(1, read.returncode)
+                self.assertEqual("", read.stdout)
+                self.assertEqual(
+                    f"leg: plpgsql: the report is not a coverage report: {what}\n",
+                    read.stderr,
+                )
+
+    def test_a_usage_error_names_both_subcommands(self) -> None:
+        """No subcommand, or an unknown one, is exit 2 with the usage."""
+        for argv in ([], ["measure", "leg"]):
+            with self.subTest(argv=argv):
+                done = run([sys.executable, str(HELPER), *argv], hermetic.env(), CANON)
+                self.assertEqual(2, done.returncode)
+                self.assertEqual(
+                    "usage: plpgsql-coverage collect <conninfo>"
+                    " | totals <label> <report>\n",
+                    done.stderr,
+                )
 
 
 class LegRows(unittest.TestCase):

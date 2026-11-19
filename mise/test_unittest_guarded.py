@@ -12,6 +12,7 @@ same failures in full, the same summary and status as one process, and
 under coverage the same figure.
 """
 
+import json
 import pathlib
 import re
 import runpy
@@ -461,6 +462,141 @@ class Runner(unittest.TestCase):
                 self.assertEqual(
                     r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
                 )
+
+
+# A worker outcome every field of which reads; the rows below spoil one.
+GOOD_OUTCOME = {
+    "run": 1,
+    "errors": [],
+    "failures": [],
+    "expectedFailures": [],
+    "skipped": [],
+    "unexpectedSuccesses": [],
+    "durations": [],
+}
+
+
+def write_spec(start: pathlib.Path, **fields: object) -> pathlib.Path:
+    """Write a worker spec for test_clean, with the fields replaced.
+
+    The search path is the suite's root ahead of this interpreter's own,
+    as the parent hands it: a worker replaces sys.path with it.
+
+    Returns:
+        The spec file.
+
+    """
+    document: dict[str, object] = {
+        "module": "test_clean",
+        "path": [str(start / "suite"), *sys.path],
+        "patterns": None,
+        "verbosity": 1,
+        "buffer": False,
+        "tb_locals": False,
+        "warnings": None,
+    }
+    spec = start.parent / "spec.json"
+    spec.write_text(json.dumps(document | fields), encoding="utf-8")
+    return spec
+
+
+def run_worker(
+    start: pathlib.Path, spec: pathlib.Path
+) -> subprocess.CompletedProcess[str]:
+    """Run one worker over a spec, as the parent would.
+
+    Returns:
+        The finished worker.
+
+    """
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
+        [sys.executable, str(RUNNER), "--worker", str(spec)],
+        cwd=start,
+        env=hermetic.env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+class Shapes(unittest.TestCase):
+    """Every wrong shape the outcome and spec readers refuse (#1659)."""
+
+    tree = Runner.tree
+    run_with = staticmethod(Runner.run_with)
+    guarded = Runner.guarded
+
+    def test_each_wrong_outcome_field_is_an_error_on_its_file(self) -> None:
+        """One field of the wrong shape reds the file, whichever it is."""
+        for field, value in (
+            ("errors", {}),
+            ("failures", [["a test"]]),
+            ("skipped", [["a test", 1]]),
+            ("unexpectedSuccesses", {}),
+            ("unexpectedSuccesses", [1]),
+            ("durations", {}),
+            ("durations", [["a test"]]),
+            ("durations", [["a test", True]]),
+            ("durations", [[1, 0.5]]),
+        ):
+            body = json.dumps(GOOD_OUTCOME | {field: value})
+            with self.subTest(outcome=body):
+                start, _ = self.tree(
+                    test_spoiled=SPOILS.format(body=body), test_clean=CLEAN
+                )
+                r = self.guarded(start)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn(
+                    "the worker for test_spoiled exited 0 with an unreadable result",
+                    r.stderr,
+                )
+                self.assertIn("FAILED (errors=1)", r.stderr)
+
+    def test_each_wrong_spec_field_stops_the_worker(self) -> None:
+        """Any field of the wrong shape is the one refusal, naming the file."""
+        start, _ = self.tree(test_clean=CLEAN)
+        for field, value in (
+            ("path", [1]),
+            ("patterns", "test_one"),
+            ("verbosity", "1"),
+            ("buffer", 1),
+            ("tb_locals", "no"),
+            ("warnings", "loudly"),
+        ):
+            with self.subTest(field=field):
+                spec = write_spec(start, **{field: value})
+                r = run_worker(start, spec)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertEqual(
+                    r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
+                )
+
+    def test_a_file_with_no_tests_is_planned_as_nothing(self) -> None:
+        """A discovered module with no tests gets no worker; the rest run."""
+        start, _ = self.tree(test_empty="import unittest\n", test_clean=CLEAN)
+        r = self.guarded(start)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Ran 2 tests in", r.stderr)
+        self.assertTrue(r.stderr.rstrip().endswith("OK"), r.stderr)
+
+    def test_no_worker_count_takes_the_cores_up_to_the_cap(self) -> None:
+        """Unset, the count is the machine's, and the suite runs as usual."""
+        start, _ = self.tree(test_clean=CLEAN, test_more=CLEAN)
+        r = self.guarded(start, workers="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Ran 4 tests in", r.stderr)
+        self.assertTrue(r.stderr.rstrip().endswith("OK"), r.stderr)
+
+    def test_a_spec_with_no_warnings_action_runs_its_module(self) -> None:
+        """An absent action is valid: the worker runs and writes its outcome."""
+        start, _ = self.tree(test_clean=CLEAN)
+        spec = write_spec(start, patterns=["*one"])
+        r = run_worker(start, spec)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        outcome = json.loads(spec.with_suffix(".out").read_text(encoding="utf-8"))
+        self.assertEqual(1, outcome["run"])
+        self.assertEqual([], outcome["errors"] + outcome["failures"])
 
 
 class Measured(unittest.TestCase):
