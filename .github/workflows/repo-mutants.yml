@@ -373,14 +373,27 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
-      # The repository's node and package manager, and its own install
-      # hook: StrykerJS is the repository's, from its lockfile, so the
-      # belt installs nothing by name here (#1358).
+      # The repository's node and package manager. StrykerJS is the
+      # repository's, from its lockfile, so the belt installs nothing by
+      # name here (#1358).
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.7
           cache: false
+
+      # The caller's own dependencies, StrykerJS among them, from its own
+      # tracked lockfile: the gate's coverage job's step (#1357), so the
+      # leg never depends on a repository's own install hook.
+      - name: Install the caller's JavaScript dependencies
+        if: ${{ hashFiles('pnpm-lock.yaml', 'package-lock.json') != '' }}
+        run: |
+          set -euo pipefail
+          if [[ -f pnpm-lock.yaml ]]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
 
       # The leg writes its counts for the totals job into the summary
       # directory (it creates it) as typescript.tsv.
