@@ -98,7 +98,7 @@ jobs:
       - name: Install the tools the tag step runs, and nothing else
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           # No tool cache in a job that tags a release (cache poisoning):
           # everything downstream of this tag gets signed.
           cache: false
@@ -192,7 +192,7 @@ jobs:
         # the coverage floor below runs the caller's own test suite.
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Prepare the release

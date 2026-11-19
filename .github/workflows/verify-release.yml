@@ -258,7 +258,7 @@ jobs:
           MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
           MISE_LOCKED: "1"
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
           install_args: github:monumental-archive/stele jq aqua:sigstore/cosign
 
