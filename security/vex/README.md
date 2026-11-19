@@ -69,8 +69,10 @@ toil and the drift hazard this keying removes.
   signed wrong `not_affected` suppresses consumers' scanner findings on
   our word.
 - Every `deny.toml` advisory `ignore` cites its statement here.
-- One decision per document, one document per merge (enforced by
-  `vex-attest.yml`).
+- One decision per document, one document per merge: enforced before
+  the merge by `lint:vex-one-per-merge` in the gate, and on the push to
+  main by `vex-attest.yml` as the backstop. Both print one sentence,
+  from `mise/vex-one-per-merge.txt`.
 
 Authoring a statement:
 

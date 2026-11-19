@@ -138,7 +138,8 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}
           DECISIONS: security/vex/*.openvex.json
-          ONE_PER_MERGE: more than one VEX document changed — one decision per merge, like one release per PR
+          # The sentence lint:vex-one-per-merge prints too, from its one home.
+          ONE_PER_MERGE: .org-canon/mise/vex-one-per-merge.txt
           UNREADABLE: the attestation store could not be read — refusing to read that as unsigned
           OUTPUTS: >-
             "matrix=\({include: [.cells[] | {decision, slug, subjects, predicate}]} | tojson)",
@@ -155,7 +156,7 @@ jobs:
           # Nothing to sign ends here: no output is `any` unset, which
           # every consumer reads as false.
           [[ ${#files[@]} -gt 0 ]] || exec echo "::notice::${none}"
-          [[ ${#mode[@]} -gt 0 || ${#files[@]} -eq 1 ]] || (echo "::error::${ONE_PER_MERGE}" && exit 1)
+          [[ ${#mode[@]} -gt 0 || ${#files[@]} -eq 1 ]] || (echo "::error::$(< "${ONE_PER_MERGE}")" && exit 1)
           rc=0
           stele derive vex-subjects "${mode[@]}" "${files[@]/#/--decision=}" \
             --policy slsa/assert-policy.json --org "${OWNER}" --out plan.json || rc=$?

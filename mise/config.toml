@@ -2608,6 +2608,18 @@ files=$(action_files)
 xargs zizmor --offline --persona=pedantic <<< "${files}"
 '''
 
+[tasks."lint:vex-one-per-merge"]
+description = "A pull request changes at most one VEX decision (#1603)"
+dir = "{{cwd}}"
+# One decision per document, one document per merge
+# (security/vex/README.md). vex-attest.yml refuses two only on the push
+# to main, after the merge (#1551); this refuses them on the pull
+# request, from the range lint:commits reads, with the workflow's own
+# sentence (mise/vex-one-per-merge.txt) and the files named. Skips
+# clean, by name, where no decision is tracked and on the default
+# branch itself.
+run = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/vex-one-per-merge.py"'
+
 [tasks."lint:dco"]
 description = "Every commit carries a Developer Certificate of Origin sign-off"
 dir = "{{cwd}}"
