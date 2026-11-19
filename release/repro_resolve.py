@@ -38,6 +38,10 @@ import re
 import subprocess
 import sys
 
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 CHECKSUMS = pathlib.Path("checksums.txt")
 MANIFEST = pathlib.Path("evidence-manifest.json")
 RELEASE_TAG = re.compile(r"^v[0-9]")
@@ -146,14 +150,13 @@ def resolve(repo: str) -> tuple[str, str]:
     manifest = ""
     if first_entry_name(MANIFEST):
         manifest = MANIFEST.read_text(encoding="utf-8").rstrip("\n")
-        print(
-            f"::notice::{tag} types its entries — the rebuilt class scopes the"
-            " population"
+        workflow_command.notice(
+            f"{tag} types its entries — the rebuilt class scopes the population"
         )
     else:
-        print(
-            f"::notice::{tag} carries no per-class typing — judging every build"
-            " subject it published"
+        workflow_command.notice(
+            f"{tag} carries no per-class typing — judging every build subject"
+            " it published"
         )
     checksums = CHECKSUMS.read_text(encoding="utf-8")
     return tag, (
@@ -174,11 +177,11 @@ def main() -> int:
     try:
         tag, outputs = resolve(os.environ["GITHUB_REPOSITORY"])
     except StepError as err:
-        print(f"::error::{err}")
+        workflow_command.error(str(err))
         return 1
     with pathlib.Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as out:
         out.write(outputs)
-    print(f"::notice::proving {tag} reproduces")
+    workflow_command.notice(f"proving {tag} reproduces")
     return 0
 
 

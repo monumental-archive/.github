@@ -32,6 +32,13 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 
 class RefusedError(Exception):
     """The pack is refused; the message says why."""
@@ -183,21 +190,6 @@ def pack(env: Mapping[str, str]) -> list[str]:
     ]
 
 
-def command_data(text: str) -> str:
-    """Escape a workflow command's message as the runner reads it back.
-
-    A refusal quotes package.json, which is the caller's text: a newline
-    in it ended the `::error::` line and began a line of the caller's
-    choosing, a workflow command among them (#1556: the audit's shrunk
-    example was a repository of one newline).
-
-    Returns:
-        The text with `%`, CR and LF as `%25`, `%0D` and `%0A`.
-
-    """
-    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-
-
 def main(env: Mapping[str, str] | None = None) -> int:
     """Run the pack step.
 
@@ -209,7 +201,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
     try:
         outputs = pack(env)
     except RefusedError as e:
-        print(f"::error::{command_data(str(e))}", flush=True)
+        workflow_command.error(str(e))
         return 1
     except NpmFailedError as e:
         return e.status

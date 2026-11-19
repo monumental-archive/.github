@@ -134,7 +134,7 @@ class AnyDifferenceRefused(unittest.TestCase):
         _, first, second, moved = drawn
         refused = run_package(drawn)
         want = [
-            f"::error::{name} changed when packaged again without verifying:"
+            f"{name} changed when packaged again without verifying:"
             f" {digest(first[name])} verified, {digest(second[name])} now"
             for name in sorted(moved)
         ]

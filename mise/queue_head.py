@@ -54,6 +54,8 @@ import shutil
 import subprocess
 import sys
 
+import workflow_command
+
 GIT = shutil.which("git") or "git"
 
 # The queue's branch for one entry. The base branch may hold slashes;
@@ -214,7 +216,7 @@ def main() -> int:
         head = fetch_head(number, env.get("ORG_QUEUE_TOKEN", ""))
         tree = check(base, group, number, head)
     except StepError as err:
-        print(f"::error::queue-head: {err}", flush=True)
+        workflow_command.error(f"queue-head: {err}")
         return 1
     print(
         f"queue-head: merge group {group} is pull request #{number}'s current"

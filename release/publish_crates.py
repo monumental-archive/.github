@@ -78,6 +78,7 @@ from typing import TYPE_CHECKING
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 try:
     import crates_index
+    import workflow_command
 except ModuleNotFoundError as missing:
     if missing.name != "crates_index":
         raise
@@ -200,7 +201,7 @@ def published_checksum(
     if answer.status != HTTP_OK:
         said = answer.status if answer.status is not None else "nothing"
         msg = (
-            f"::error::the crates.io index answered {said} for {name} ({url});"
+            f"the crates.io index answered {said} for {name} ({url});"
             ' an unread index is not "not published"'
         )
         raise RefusalError(msg)
@@ -214,7 +215,7 @@ def published_checksum(
             break
     if records is None:
         msg = (
-            f"::error::the crates.io index for {name} ({url}) is not one JSON"
+            f"the crates.io index for {name} ({url}) is not one JSON"
             ' record per line with a cksum; an unread index is not "not published"'
         )
         raise RefusalError(msg)
@@ -238,7 +239,7 @@ def exchange_token(env: Mapping[str, str], fetch: Callable[..., Response]) -> st
     )
     if oidc.status != HTTP_OK:
         said = oidc.status or "nothing"
-        msg = f"::error::the runner's OIDC token endpoint answered {said}"
+        msg = f"the runner's OIDC token endpoint answered {said}"
         raise RefusalError(msg)
     jwt = json.loads(oidc.body)["value"]
     exchanged = fetch(
@@ -250,7 +251,7 @@ def exchange_token(env: Mapping[str, str], fetch: Callable[..., Response]) -> st
     if exchanged.status != HTTP_OK:
         said = exchanged.status or "nothing"
         msg = (
-            f"::error::the crates.io token exchange answered {said}"
+            f"the crates.io token exchange answered {said}"
             " — if 403, check the User-Agent before the publisher config (#907)"
         )
         raise RefusalError(msg)
@@ -312,8 +313,8 @@ def run(
             crate = target_dir / "package" / f"{name}-{version}.crate"
             local = hashlib.sha256(crate.read_bytes()).hexdigest()
             if local != cksum:
-                say(
-                    f"::error::{name} {version} is on crates.io with checksum"
+                workflow_command.error(
+                    f"{name} {version} is on crates.io with checksum"
                     f" {cksum}, but this tree packages {local}"
                 )
                 mismatched = True
@@ -331,7 +332,7 @@ def run(
         return 0
 
     token = exchange_token(env, fetch)
-    say(f"::add-mask::{token}")
+    workflow_command.mask(token)
     publish = ["cargo", "publish", "--workspace", "--locked", "--no-verify", *excludes]
     # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
@@ -349,10 +350,10 @@ def main() -> int:
     try:
         return run(os.environ, Path.cwd())
     except RefusalError as e:
-        say(e)
+        workflow_command.error(str(e))
         return 1
     except subprocess.CalledProcessError as e:
-        say(f"::error::{' '.join(map(str, e.cmd))} exited {e.returncode}")
+        workflow_command.error(f"{' '.join(map(str, e.cmd))} exited {e.returncode}")
         return e.returncode
 
 

@@ -1344,8 +1344,9 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
+            # The query's own `%` is escaped as the runner reads it (#1660).
             "::error::the deposition listing"
-            " (q=title:%22monumental-archive%2F.github%22) could not be"
+            " (q=title:%2522monumental-archive%252F.github%2522) could not be"
             f" read to its end ({mint_doi.LISTING_PAGE} entries read) — a first mint"
             " is never checked against part of it",
             run.stdout,

@@ -33,6 +33,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import workflow_command
+
 TARGET = "assert signer-certificates"
 EXIT_RED = 1
 KILLED = (
@@ -131,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     report = read_report(args.report)
     red, why = judge(args.exit_code, report, saved=args.saved == "true")
     if red:
-        print(f"::error::{why}")
+        workflow_command.error(why)
         return EXIT_RED
     print(f"verdict: green: {why}")
     return 0

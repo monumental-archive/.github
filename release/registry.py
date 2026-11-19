@@ -49,6 +49,13 @@ import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -96,7 +103,7 @@ OUTPUT = (
 
 
 class RefusedError(Exception):
-    """A refusal: printed as one `::error::` line, exit 1."""
+    """A refusal: printed as one error workflow command, exit 1."""
 
 
 class Registry:
@@ -379,11 +386,11 @@ def push(reg: Registry, args: argparse.Namespace) -> int:
         (digests / f"pg{args.pg}.json").write_text(
             json.dumps(record, indent=2) + "\n", "utf-8"
         )
-        print(f"::notice::pg{args.pg} index {digest}")
+        workflow_command.notice(f"pg{args.pg} index {digest}")
     else:
         digest = read_metadata_digest(meta, "no digest from the push")
         (digests / args.arch).write_text(digest, "utf-8")
-        print(f"::notice::{args.arch} pushed as {digest}")
+        workflow_command.notice(f"{args.arch} pushed as {digest}")
     return 0
 
 
@@ -510,7 +517,7 @@ def assemble(reg: Registry, args: argparse.Namespace) -> int:
             "images": json.dumps(images, separators=(",", ":"), ensure_ascii=False),
         },
     )
-    print(f"::notice::index {index}")
+    workflow_command.notice(f"index {index}")
     return 0
 
 
@@ -597,7 +604,7 @@ def tag(reg: Registry, _args: argparse.Namespace) -> int:
         if resolved != digest:
             msg = f"{image}:{name_tag} resolves to {resolved}, gated {digest}"
             raise RefusedError(msg)
-        print(f"::notice::{image}:{name_tag} -> {digest}")
+        workflow_command.notice(f"{image}:{name_tag} -> {digest}")
     return 0
 
 
@@ -658,9 +665,9 @@ def main(
     try:
         return args.run(reg, args)
     except RefusedError as e:
-        print(f"::error::{e}")
+        workflow_command.error(str(e))
     except KeyError as e:
-        print(f"::error::{e.args[0]} is not set")
+        workflow_command.error(f"{e.args[0]} is not set")
     return 1
 
 

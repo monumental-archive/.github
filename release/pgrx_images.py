@@ -24,7 +24,7 @@ For each of amd64 and arm64 it extracts
 cargo-pgrx names the extension. It reads `pkgroot/` only: the tarball's
 second copy is going away (#1274).
 
-Refusals, each on stderr as a workflow `::error::` and exit 1:
+Refusals, each on stderr as an error workflow command and exit 1:
 
 - a missing tarball: the extension build did not produce that cell;
 - a tarball without its `lib` or `extension` directory.
@@ -68,6 +68,13 @@ import tarfile
 import tomllib
 from pathlib import Path
 from typing import NamedTuple
+
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
 
 ARCHES = ("amd64", "arm64")
 
@@ -250,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.write(run(args))
     except RefusalError as refusal:
-        print(f"::error::{refusal}", file=sys.stderr)
+        workflow_command.error(str(refusal), stream=sys.stderr)
         return 1
     return 0
 

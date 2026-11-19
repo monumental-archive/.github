@@ -48,6 +48,10 @@ import pathlib
 import subprocess
 import sys
 
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 HERE = pathlib.Path(__file__).resolve().parent
 DIST = pathlib.Path("dist")
 PUBLISHED_CHECKSUMS = "published-checksums.txt"
@@ -195,9 +199,8 @@ def converge(tag: str, repo: str) -> None:
                 f" from the published bytes:{differing} — this is not a resume"
             )
             raise StepError(msg)
-    print(
-        f"::notice::{tag} already published; build subjects verified identical,"
-        " converging"
+    workflow_command.notice(
+        f"{tag} already published; build subjects verified identical, converging"
     )
 
 
@@ -223,13 +226,13 @@ def publish(tag: str, repo: str, *, dry_run: bool) -> None:
         recorded = subprocess.run([str(HERE / "record-draft.sh")], env=env, check=False)
         if recorded.returncode != 0:
             raise SystemExit(recorded.returncode)
-        print(f"::warning::rehearsal: {tag} left as a draft, nothing published")
+        workflow_command.warning(f"rehearsal: {tag} left as a draft, nothing published")
         return
     # Publishing is the commitment point. Immutable releases apply at
     # publish, and GitHub mints its own release attestation binding tag,
     # commit and asset digests at the same moment.
     gh("release", "edit", tag, "--draft=false", "--repo", repo)
-    print(f"::notice::published {tag}")
+    workflow_command.notice(f"published {tag}")
 
 
 def main() -> int:
@@ -250,7 +253,7 @@ def main() -> int:
         else:
             publish(tag, repo, dry_run=os.environ.get("DRY_RUN") == "true")
     except StepError as err:
-        print(f"::error::{err}")
+        workflow_command.error(str(err))
         return 1
     return 0
 

@@ -33,6 +33,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 
 class RefusedError(Exception):
     """The archive is refused; the message says why."""
@@ -111,7 +118,7 @@ def build(env: Mapping[str, str]) -> str:
     if count <= tracked // 2:
         msg = f"archive lists {count} entries for {tracked} tracked files"
         raise RefusedError(msg)
-    return f"::notice::{base}.tar.gz: {count} entries, digest {a}"
+    return f"{base}.tar.gz: {count} entries, digest {a}"
 
 
 def main(env: Mapping[str, str] | None = None) -> int:
@@ -123,9 +130,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
     """
     env = os.environ if env is None else env
     try:
-        print(build(env), flush=True)
+        workflow_command.notice(build(env))
     except RefusedError as e:
-        print(f"::error::{e}", flush=True)
+        workflow_command.error(str(e))
         return 1
     except GitFailedError as e:
         return e.status
