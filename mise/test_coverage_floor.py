@@ -752,7 +752,8 @@ TS_NEEDS = (
     "vitest and a coverage provider, and a `test` task that runs vitest"
 )
 PG_NEEDS = (
-    "the plpgsql leg needs the suite's teardown to call "
+    "the plpgsql leg needs a test command run through "
+    '"${ORG_BELT_DIR}/measured" and its teardown to call '
     "plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set"
 )
 

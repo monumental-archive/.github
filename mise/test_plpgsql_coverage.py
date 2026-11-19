@@ -263,6 +263,32 @@ def call(argv: list[str], env: dict[str, str], cwd: Path) -> Done:
     return Done(status, out.getvalue(), err.getvalue())
 
 
+def measured_run(
+    run_dir: Path, env: dict[str, str], tree: Path, *, python: bool, collects: bool
+) -> None:
+    """Leave a run's directory as a suite run through `measured` does (#1667).
+
+    `python` plants the rc file and coverage.py's data the stub
+    `coverage` reads; `collects` runs the suite's teardown, the helper
+    called in-process (#1711), with the ORG_PLPGSQL_COVERAGE `measured`
+    names in the run.
+
+    Raises:
+        AssertionError: the teardown failed; its output is the message.
+
+    """
+    run_dir.mkdir(parents=True)
+    if python:
+        (run_dir / "python").mkdir()
+        (run_dir / "coverage.rc").write_text("[run]\n", encoding="utf-8")
+        (run_dir / "python" / ".coverage.stub").write_text("", encoding="utf-8")
+    if collects:
+        report = {"ORG_PLPGSQL_COVERAGE": str(run_dir / "plpgsql-coverage.json")}
+        done = call(["collect", "postgres://stub"], env | report, tree)
+        if done.returncode != 0:
+            raise AssertionError(done.stderr)
+
+
 class Collecting(unittest.TestCase):
     """Collects from a planted database and reads the report."""
 
@@ -897,14 +923,12 @@ class LegRows(unittest.TestCase):
             (tree / name).write_text(text, encoding="utf-8")
         floor = FLOOR.replace("80.0\n", f"# legs: {legs}\n80.0\n")
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
-        run_ = ["echo suite ran >&2"]
-        if collects:
-            run_.append(
-                '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py"'
-                " collect postgres://stub"
-            )
+        # The test task, for the read of it the python leg makes; the
+        # check never runs it.
         task = tmp / "task.json"
-        task.write_text(json.dumps({"dir": str(tree), "run": run_}), "utf-8")
+        task.write_text(
+            json.dumps({"dir": str(tree), "run": ["echo suite ran >&2"]}), "utf-8"
+        )
         env = stub_env(
             stubs,
             answers,
@@ -912,9 +936,17 @@ class LegRows(unittest.TestCase):
             STUB_PYTHON=sys.executable,
             STUB_PY="90.0",
             STUB_BR="85.0",
+            ORG_COVERAGE_RUN=str(tmp / "run"),
         )
         run([GIT, "init", "-q"], env, tree)
         run([GIT, "add", *files, ".coverage-floor"], env, tree)
+        measured_run(
+            tmp / "run",
+            env,
+            tree,
+            python=any(name.endswith(".py") for name in files),
+            collects=collects,
+        )
         script = CONFIG["tasks"]["coverage:check"]["run"]
         return run([BASH, "-euo", "pipefail", "-c", script], env, tree)
 
@@ -981,7 +1013,8 @@ class LegRows(unittest.TestCase):
         )
         self.assertEqual(1, done.returncode)
         remedy = (
-            "  the python leg needs tracked *.py and a `test` task; or record"
+            "  the python leg needs tracked *.py and a `test` task whose test"
+            ' command runs through "${{ORG_BELT_DIR}}/measured"; or record'
             " the leg's removal on purpose: `# dropped: {leg} <reason>` in"
             " .coverage-floor\n"
         )
@@ -1006,7 +1039,8 @@ class LegRows(unittest.TestCase):
         )
         self.assertEqual(1, done.returncode)
         remedy = (
-            "  the plpgsql leg needs the suite's teardown to call"
+            "  the plpgsql leg needs a test command run through"
+            ' "${{ORG_BELT_DIR}}/measured" and its teardown to call'
             " plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set;"
             " or record the leg's removal on purpose:"
             " `# dropped: {leg} <reason>` in .coverage-floor\n"
@@ -1048,18 +1082,17 @@ def counter(tree: Path) -> int:
     return len((tree.parent / "counter").read_text("utf-8").splitlines())
 
 
-class RunOnceRows(unittest.TestCase):
-    """The test task and its depends run once, for every leg that reads it."""
+class ReadsTheRunRows(unittest.TestCase):
+    """Both legs read the one run `measured` left, and run no suite (#1667)."""
 
     def measure(
         self,
-        tasks: dict[str, dict[str, object]],
         selector: str = "all",
         *,
         python: bool = True,
         no_xml: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
-        """Run coverage-measure.sh over planted tasks, python and PL/pgSQL.
+        """Run coverage-measure.sh over a planted run, python and PL/pgSQL.
 
         Reports go to `reports` beside the tree (#1628); `no_xml` has the
         python leg write none.
@@ -1076,19 +1109,17 @@ class RunOnceRows(unittest.TestCase):
             (stubs / name).chmod(0o755)
         (stubs / "python3").symlink_to(sys.executable)
         tree = tmp / "tree"
-        (tree / "sub").mkdir(parents=True)
+        tree.mkdir()
         defs = tmp / "tasks"
         defs.mkdir()
+        (defs / "test.json").write_text(
+            json.dumps({"dir": str(tree), "run": ["echo suite ran >&2"]}), "utf-8"
+        )
         tracked = ["schema.sql"]
         (tree / "schema.sql").write_text(f"CREATE FUNCTION f() {CLAUSE};\n", "utf-8")
         if python:
             (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
             tracked.append("helper.py")
-        for name, task in tasks.items():
-            planted = {"dir": str(tree)} | task
-            if task.get("dir") == "sub":
-                planted["dir"] = str(tree / "sub")
-            (defs / f"{name}.json").write_text(json.dumps(planted), "utf-8")
         env = stub_env(
             stubs,
             answers,
@@ -1099,101 +1130,34 @@ class RunOnceRows(unittest.TestCase):
             STUB_BR="85.0",
             STUB_NO_XML="1" if no_xml else "",
             ORG_COVERAGE_REPORTS=str(tmp / "reports"),
+            ORG_COVERAGE_RUN=str(tmp / "run"),
         )
         run([GIT, "init", "-q"], env, tree)
         run([GIT, "add", *tracked], env, tree)
+        measured_run(tmp / "run", env, tree, python=python, collects=True)
         script = str(BELT / "coverage-measure.sh")
         return run([BASH, script, "leg", selector], env, tree), tree
 
-    COLLECT = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py" collect stub'
-    COUNT = 'echo ran >> "${STUB_TASKS}/../counter"'
-
     def test_both_legs_read_one_run_under_all(self) -> None:
-        """Python and PL/pgSQL print their figures; the suite ran once."""
-        done, tree = self.measure({
-            "test": {"run": [self.COLLECT], "depends": ["test:unit"]},
-            "test:unit": {"run": [self.COUNT]},
-        })
+        """Python and PL/pgSQL print their figures, and no suite runs."""
+        done, _ = self.measure()
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "python 90.0\npython-branches 85.0\n"
             "plpgsql 60.00\nplpgsql-branches 66.66\n",
             done.stdout,
         )
-        self.assertEqual(1, counter(tree))
+        self.assertNotIn("suite ran", done.stderr)
 
-    def test_plpgsql_alone_runs_once_without_python(self) -> None:
-        """The plpgsql selector sets only its own variable."""
-        marker = 'echo "${COVERAGE_PROCESS_START:-unset}" > "${STUB_TASKS}/../py"'
-        done, tree = self.measure(
-            {
-                "test": {"run": [self.COLLECT], "depends": ["test:unit"]},
-                "test:unit": {"run": [self.COUNT, marker]},
-            },
-            "plpgsql",
-        )
+    def test_plpgsql_alone_reads_only_its_report(self) -> None:
+        """The plpgsql selector prints its own figures and no python one."""
+        done, _ = self.measure("plpgsql")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", done.stdout)
-        self.assertEqual(1, counter(tree))
-        # Whatever the row inherited (the canon's own coverage:check
-        # measures this suite with the variable set): the plpgsql
-        # selector leaves it as it found it.
-        inherited = os.environ.get("COVERAGE_PROCESS_START", "unset")
-        self.assertEqual(f"{inherited}\n", (tree.parent / "py").read_text("utf-8"))
-
-    def test_python_measures_what_only_a_depend_runs(self) -> None:
-        """The depend's script runs under the python leg's measurement."""
-        marker = 'echo "${COVERAGE_PROCESS_START:-unset}" > "${STUB_TASKS}/../py"'
-        done, tree = self.measure(
-            {
-                "test": {"run": ["echo suite in a depend"], "depends": ["test:unit"]},
-                "test:unit": {"run": [marker]},
-            },
-            "python",
-        )
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("python 90.0\npython-branches 85.0\n", done.stdout)
-        recorded = (tree.parent / "py").read_text("utf-8").strip()
-        self.assertTrue(recorded.endswith("/rc"), recorded)
-        # The leg's own rc, never one the row inherited.
-        self.assertNotEqual(os.environ.get("COVERAGE_PROCESS_START"), recorded)
-
-    def test_a_shared_depend_runs_once(self) -> None:
-        """Two tasks depending on one run it once, before both."""
-        done, tree = self.measure(
-            {
-                "test": {"run": [self.COLLECT], "depends": ["a", "b"]},
-                "a": {"run": ["echo a >> ${STUB_TASKS}/../order"], "depends": ["c"]},
-                "b": {"run": ["echo b >> ${STUB_TASKS}/../order"], "depends": ["c"]},
-                "c": {"run": [self.COUNT, "echo c >> ${STUB_TASKS}/../order"]},
-            },
-            python=False,
-        )
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(1, counter(tree))
-        self.assertEqual("c\na\nb\n", (tree.parent / "order").read_text("utf-8"))
-
-    def test_a_script_runs_from_its_own_tasks_dir(self) -> None:
-        """A depend with a `dir` of its own runs there, not in the root."""
-        where = 'pwd -P > "${STUB_TASKS}/../where"'
-        done, tree = self.measure(
-            {
-                "test": {"run": [self.COLLECT], "depends": ["test:unit"]},
-                "test:unit": {"run": [where], "dir": "sub"},
-            },
-            python=False,
-        )
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            str((tree / "sub").resolve()) + "\n",
-            (tree.parent / "where").read_text("utf-8"),
-        )
 
     def test_only_formatless_legs_pass_by_name(self) -> None:
         """No report is owed where no leg measured has a format."""
-        done, _ = self.measure(
-            {"test": {"run": [self.COLLECT]}}, "reports", python=False
-        )
+        done, _ = self.measure("reports", python=False)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "plpgsql 60.00\nplpgsql-branches 66.66\n"
@@ -1209,9 +1173,7 @@ class RunOnceRows(unittest.TestCase):
 
     def test_a_leg_with_a_format_that_wrote_nothing_is_refused(self) -> None:
         """A formatless leg beside it does not excuse the missing report."""
-        done, _ = self.measure(
-            {"test": {"run": [self.COLLECT]}}, "reports", no_xml=True
-        )
+        done, _ = self.measure("reports", no_xml=True)
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
         self.assertIn(
@@ -1222,7 +1184,7 @@ class RunOnceRows(unittest.TestCase):
 
     def test_a_formatless_leg_beside_a_written_report(self) -> None:
         """The written report uploads; the formatless legs are named."""
-        done, tree = self.measure({"test": {"run": [self.COLLECT]}}, "reports")
+        done, tree = self.measure("reports")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertTrue(
             done.stdout.endswith(
@@ -1233,20 +1195,6 @@ class RunOnceRows(unittest.TestCase):
         self.assertIn(
             "leg: plpgsql, plpgsql-branches: no upload format,"
             " not counted as a report writer\n",
-            done.stderr,
-        )
-
-    def test_a_suite_that_runs_nothing_is_refused(self) -> None:
-        """Neither the task nor its depends carries a script."""
-        done, _ = self.measure(
-            {"test": {"run": [], "depends": ["x"]}, "x": {}}, python=False
-        )
-        self.assertEqual(1, done.returncode)
-        self.assertEqual("", done.stdout)
-        self.assertEqual(
-            "leg: the test task and its depends run nothing — the legs measure\n"
-            "  the repository's own suite and cannot measure a task that runs"
-            " nothing\n",
             done.stderr,
         )
 

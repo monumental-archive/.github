@@ -16,15 +16,17 @@ file nobody runs cannot exist and a language is one added line (#1336's
 shared shape); MUTANTS_LEG selects one leg for that language's own jobs
 in repo-mutants.yml, and unset runs them all.
 
-`test` once per gate (#1623 item 3): `ci` collects the repository's
-`test` unless the coverage measurement already runs the whole task,
-which `coverage-measure.sh runs-test` answers from the tree. The rows
-run the selector, then the belt's real `ci` under a real mise in
-planted trees (`mise run --dry-run`, which plans every task and runs
-none): a python tree with a floor plans no `test`; a Go-shaped and a
-Rust-shaped tree with a floor, and a python tree without one, plan
-it; and an unreadable script or an absent belt keeps it, never an
-error (#569).
+`test` once per gate (#1667): `ci` depends on the repository's `test`
+plainly, and coverage:check depends on the same `test` and reads what
+its run measured. The suite says it is measured by running its test
+command through the belt's `measured`. The rows run the belt's real
+`ci` and `coverage:*` tasks under a real mise in a planted python
+repository whose suite runs from a `depends` with a `PYTHONPATH` of its
+own and starts a bare `python3` child: one suite run, the task's path
+kept, the child measured, the figures printed; the same tree with no
+floor measures nothing; coverage:check alone runs `test` once; a suite
+not run through `measured` is red by the floor's own record (#1666);
+and `measured` reaches a file task.
 
 stdlib `unittest` and `tomllib`, the belt's one test idiom. Run through
 the gate as `mise run test`, which `ci` collects.
@@ -45,11 +47,6 @@ BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 CONFIG = BELT / "config.toml"
-MEASURE = BELT / "coverage-measure.sh"
-
-
-# The step line mise prints for a planned `test` in a dry run.
-TEST_STEP = re.compile(r"^\[test\] \$ ", re.MULTILINE)
 
 
 def tasks() -> dict[str, dict]:
@@ -280,22 +277,93 @@ class Selection(unittest.TestCase):
         )
 
 
-def plant(base: Path, name: str, *files: str, floor: bool = True) -> Path:
-    """Plant a git tree holding `files`, a `test` task and maybe a floor.
+# The planted repository's code: `half` takes one branch in the unittest
+# process and the other in a bare `python3` child, which alone calls
+# `child_only`, so 100% of statements and branches means the child was
+# measured. The child imports `pkg` through the task's own
+# PYTHONPATH=src, so it runs at all only where that entry was kept.
+LIB = """\
+def half(x):
+    if x > 0:
+        return x / 2
+    return 0
+
+
+def child_only():
+    return "child"
+"""
+HELPER = """\
+import sys
+
+from pkg.lib import child_only, half
+
+print(half(int(sys.argv[1])), child_only())
+"""
+SUITE = """\
+import subprocess
+import unittest
+
+from pkg.lib import half
+
+
+class Lib(unittest.TestCase):
+    def test_in_process(self):
+        self.assertEqual(2, half(4))
+
+    def test_bare_child(self):
+        out = subprocess.run(
+            ["python3", "src/pkg/helper.py", "-1"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual("0 child\\n", out.stdout)
+"""
+# A floor the derived-state law accepts, recording the python legs.
+FLOOR = (
+    "# band: 2\n# measured: 52.0\n# derived: v1.0.0\n"
+    "# legs: python python-branches\n50.0\n"
+)
+SUITE_COMMAND = "python3 -m unittest discover -s tests -t ."
+
+
+def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -> Path:
+    """Plant a python repository whose suite runs from a `depends`.
+
+    `test` depends on `test:unit`, which sets PYTHONPATH=src of its own,
+    counts its runs beside the tree, and runs the suite, through
+    `measured` unless `measured` is False. Every belt `lint:*` and
+    `test:*` task is overridden by a no-op of the repository's own, so
+    the belt's `ci` runs here with nothing but `test` and coverage:check
+    doing work.
 
     Returns:
         The tree.
 
     """
     tree = base / name
-    tree.mkdir(parents=True)
-    (tree / "mise.toml").write_text(
-        '[tasks.test]\nrun = "echo planted test ran"\n', encoding="utf-8"
+    (tree / "src" / "pkg").mkdir(parents=True)
+    (tree / "tests").mkdir()
+    (tree / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tree / "src" / "pkg" / "lib.py").write_text(LIB, encoding="utf-8")
+    (tree / "src" / "pkg" / "helper.py").write_text(HELPER, encoding="utf-8")
+    (tree / "tests" / "__init__.py").write_text("", encoding="utf-8")
+    (tree / "tests" / "test_lib.py").write_text(SUITE, encoding="utf-8")
+    command = (
+        f'"${{ORG_BELT_DIR}}/measured" {SUITE_COMMAND}' if measured else SUITE_COMMAND
     )
-    for rel in files:
-        (tree / rel).write_text("", encoding="utf-8")
+    stubs = "".join(
+        f'[tasks."{n}"]\nrun = "true"\n'
+        for n in sorted(tasks())
+        if n.startswith(("lint:", "test:"))
+    )
+    (tree / "mise.toml").write_text(
+        '[task_config]\nshell = "bash -euo pipefail -c"\n'
+        '[tasks.test]\ndepends = ["test:unit"]\nrun = "echo suite done"\n'
+        '[tasks."test:unit"]\nenv = { PYTHONPATH = "src" }\n'
+        f"run = '''\necho ran >> ../{name}.counter\n{command}\n'''\n" + stubs,
+        encoding="utf-8",
+    )
     if floor:
-        (tree / ".coverage-floor").write_text("80.0\n", encoding="utf-8")
+        (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
     env = hermetic.env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
         # ruff: ignore[subprocess-without-shell-equals-true]
@@ -303,79 +371,26 @@ def plant(base: Path, name: str, *files: str, floor: bool = True) -> Path:
     return tree
 
 
-class RunsTest(unittest.TestCase):
-    """The selector: which legs run the whole `test` task (#1623 item 3)."""
+def runs(tree: Path) -> int:
+    """Count the planted suite's runs.
+
+    Returns:
+        How many times `test:unit` ran.
+
+    """
+    counter = tree.parent / f"{tree.name}.counter"
+    return len(counter.read_text("utf-8").splitlines()) if counter.exists() else 0
+
+
+class OneRun(unittest.TestCase):
+    """The belt's real tasks, run by a real mise in planted trees (#1667)."""
 
     @staticmethod
-    def answer(tree: Path) -> subprocess.CompletedProcess[str]:
-        """Ask the selector in `tree`, with no belt Python and no mise.
+    def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
+        """Run `task` in `tree` with the belt as the global config.
 
         Returns:
-            The finished selector.
-
-        """
-        # A `mise` on PATH that fails loudly: the selector must never ask
-        # it (it runs while mise loads its config, and would recurse).
-        stubs = tree.parent / f"{tree.name}-stubs"
-        stubs.mkdir()
-        (stubs / "mise").write_text("#!/bin/sh\necho asked mise >&2\nexit 9\n")
-        (stubs / "mise").chmod(0o755)
-        env = hermetic.env(ORG_PYTHON="")
-        env.pop("ORG_PYTHON")
-        env["PATH"] = f"{stubs}:{env['PATH']}"
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(
-            [BASH, str(MEASURE), "ci", "runs-test"],
-            cwd=tree,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    def test_each_tree_gets_its_answer(self) -> None:
-        """Python, or a leg the floor records; never a searched clause (#1666)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            clause = plant(base, "clause", "schema.sql")
-            (clause / "schema.sql").write_text(
-                "CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql"
-                " AS $$ BEGIN RETURN 1; END $$;\n",
-                encoding="utf-8",
-            )
-            recorded = plant(base, "recorded", "README.md")
-            (recorded / ".coverage-floor").write_text(
-                "# legs: typescript plpgsql plpgsql-branches\n80.0\n", encoding="utf-8"
-            )
-            for tree, want in (
-                (plant(base, "py", "a.py"), "python\n"),
-                (clause, ""),
-                (recorded, "plpgsql\n"),
-                (plant(base, "go", "go.mod"), ""),
-                (plant(base, "rust", "Cargo.toml"), ""),
-                (plant(base, "ts", "package.json"), ""),
-                (plant(base, "py-no-floor", "a.py", floor=False), ""),
-            ):
-                with self.subTest(tree=tree.name):
-                    done = self.answer(tree)
-                    self.assertEqual(done.returncode, 0, done.stderr)
-                    self.assertEqual(done.stdout, want)
-                    self.assertNotIn("asked mise", done.stderr)
-
-
-class CiCollectsTest(unittest.TestCase):
-    """The belt's real `ci`, planned by a real mise in planted trees."""
-
-    @staticmethod
-    def plan(tree: Path, belt: Path | None) -> subprocess.CompletedProcess[str]:
-        """Dry-run `ci` in `tree`, the belt delivered from `belt`.
-
-        `belt` None loads the belt's config as the tree's own and leaves
-        no carrier, so ORG_BELT_DIR is empty: mise in a container without
-        the belt (#569).
-
-        Returns:
-            The finished plan.
+            The finished run, its output in `stdout` and `stderr`.
 
         """
         found = hermetic.tool("mise")
@@ -384,72 +399,100 @@ class CiCollectsTest(unittest.TestCase):
         env = hermetic.env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
+            MISE_GLOBAL_CONFIG_FILE=str(CONFIG),
             MISE_TRUSTED_CONFIG_PATHS=f"{tree.parent}:{CONFIG.parent.parent}",
             MISE_OFFLINE="1",
             MISE_YES="1",
             MISE_AUTO_INSTALL="0",
             MISE_TASK_RUN_AUTO_INSTALL="0",
         )
-        if belt is None:
-            text = CONFIG.read_text(encoding="utf-8")
-            own = (tree / "mise.toml").read_text(encoding="utf-8")
-            (tree / "mise.toml").write_text(text + "\n" + own, encoding="utf-8")
-        else:
-            env["MISE_GLOBAL_CONFIG_FILE"] = str(belt / "config.toml")
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
-            [str(found), "run", "--dry-run", "ci"],
+            [str(found), "run", task],
             cwd=tree,
             env=env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
-            timeout=180,
+            timeout=600,
         )
 
-    def planned(self, tree: Path, belt: Path | None = BELT) -> int:
-        """Count the `test` steps `ci` plans in `tree`, asserting no error.
+    HELD = (
+        "coverage:check: python leg holds the floor 50.0 (100.0%)",
+        "coverage:check: python-branches leg holds the floor 50.0 (100.0%)",
+    )
 
-        Returns:
-            How many times `ci` would run the planted `test`.
-
-        """
-        done = self.plan(tree, belt)
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertNotIn("mise ERROR", done.stdout + done.stderr)
-        return len(TEST_STEP.findall(done.stdout + done.stderr))
-
-    def test_a_python_tree_with_a_floor_runs_test_once(self) -> None:
-        """`ci` plans no plain `test`: coverage:check's run is the one."""
+    def test_ci_runs_the_suite_once_and_measures_the_bare_child(self) -> None:
+        """One run: the depend's own path kept, the child measured, the figures."""
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            self.assertEqual(self.planned(plant(base, "py", "a.py")), 0)
-            # A path with a quote in it is interpolated into the exec's
-            # shell: still answered, never a broken command.
-            self.assertEqual(self.planned(plant(base, "it's py", "a.py")), 0)
+            tree = plant(Path(tmp), "py")
+            done = self.run_mise(tree, "ci")
+            out = done.stdout + done.stderr
+            self.assertEqual(0, done.returncode, out)
+            self.assertEqual(1, runs(tree), out)
+            for line in self.HELD:
+                self.assertIn(line, out)
+            self.assertIn("ci: all gates green", out)
 
-    def test_go_rust_and_floorless_trees_keep_test(self) -> None:
-        """Their measurement is not the repository's `test`, or there is none."""
+    def test_no_floor_runs_test_once_and_measures_nothing(self) -> None:
+        """Without a floor `measured` is plain exec and coverage:check skips."""
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            for tree in (
-                plant(base, "go", "go.mod"),
-                plant(base, "rust", "Cargo.toml"),
-                plant(base, "py-no-floor", "a.py", floor=False),
-            ):
-                with self.subTest(tree=tree.name):
-                    self.assertEqual(self.planned(tree), 1)
+            tree = plant(Path(tmp), "py", floor=False)
+            done = self.run_mise(tree, "ci")
+            out = done.stdout + done.stderr
+            self.assertEqual(0, done.returncode, out)
+            self.assertEqual(1, runs(tree), out)
+            self.assertIn("coverage:check: no .coverage-floor, skipped", out)
+            self.assertNotIn("leg holds the floor", out)
 
-    def test_an_unreadable_or_absent_belt_keeps_test(self) -> None:
-        """The selector unreadable, or no belt at all: `test`, never an error."""
+    def test_coverage_check_alone_runs_test_once(self) -> None:
+        """Run on its own, coverage:check runs `test` and holds the floor."""
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            belt = base / "belt"
-            shutil.copytree(BELT, belt)
-            (belt / "coverage-measure.sh").chmod(0)
-            self.assertEqual(self.planned(plant(base, "py", "a.py"), belt), 1)
-            self.assertEqual(self.planned(plant(base, "beltless", "a.py"), None), 1)
+            tree = plant(Path(tmp), "py")
+            done = self.run_mise(tree, "coverage:check")
+            out = done.stdout + done.stderr
+            self.assertEqual(0, done.returncode, out)
+            self.assertEqual(1, runs(tree), out)
+            for line in self.HELD:
+                self.assertIn(line, out)
+
+    def test_a_suite_outside_measured_is_red_by_the_record(self) -> None:
+        """Not through `measured`: the recorded legs are named, with the remedy."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = plant(Path(tmp), "py", measured=False)
+            done = self.run_mise(tree, "coverage:check")
+            out = done.stdout + done.stderr
+            self.assertEqual(1, done.returncode, out)
+            self.assertEqual(1, runs(tree), out)
+            for leg in ("python", "python-branches"):
+                self.assertIn(
+                    f"coverage:check: the floor was derived with {leg} and this"
+                    " run measured none\n"
+                    "  the python leg needs tracked *.py and a `test` task whose"
+                    ' test command runs through "${ORG_BELT_DIR}/measured"; or'
+                    " record the leg's removal on purpose:"
+                    f" `# dropped: {leg} <reason>` in .coverage-floor\n",
+                    done.stderr,
+                )
+
+    def test_measured_reaches_a_file_task(self) -> None:
+        """A file task with a `#!/bin/sh` shebang runs through `measured` too."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = plant(Path(tmp), "py")
+            tasks_dir = tree / "mise-tasks"
+            tasks_dir.mkdir()
+            probe = tasks_dir / "probe"
+            probe.write_text(
+                '#!/bin/sh\nexec "$ORG_BELT_DIR/measured" sh -c'
+                ' \'printf "%s\\n" "$COVERAGE_PROCESS_START"\'\n',
+                encoding="utf-8",
+            )
+            probe.chmod(0o755)
+            done = self.run_mise(tree, "probe")
+            out = done.stdout + done.stderr
+            self.assertEqual(0, done.returncode, out)
+            self.assertRegex(done.stdout, r"/org-coverage-[0-9]+/coverage\.rc\n")
 
 
 if __name__ == "__main__":

@@ -145,8 +145,10 @@ class Task(unittest.TestCase):
         for root in ROOT_RE.findall(body()):
             (tree / root).mkdir(parents=True, exist_ok=True)
             (tree / root / "test_ok.py").write_text(PASSING, encoding="utf-8")
-        # The runner and the module it reads its workers' outcomes through.
-        for helper in ("git_decoy.py", "unittest_guarded.py", "decoded.py"):
+        # The runner, the module it reads its workers' outcomes through, and
+        # `measured`, which every command of the body runs through (#1667):
+        # with no floor in the tree it is a plain exec.
+        for helper in ("git_decoy.py", "unittest_guarded.py", "decoded.py", "measured"):
             shutil.copy(_HERE / helper, tree / "mise" / helper)
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
         (tree / "mise" / "test_leaky.py").write_text(leaky, encoding="utf-8")

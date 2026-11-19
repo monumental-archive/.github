@@ -202,6 +202,24 @@ red on any identifier a `REUSE.toml` names without its
 - A regression test counts only if it fails with its fix reverted, and
   that failure is shown.
 
+### Coverage comes from the one test run
+
+The suite runs once per gate, and coverage is measured in that run
+(#1667). A repository's `test` task runs its test command through the
+belt's `measured`:
+
+```toml
+[tasks.test]
+run = '"${ORG_BELT_DIR}/measured" python3 -m unittest discover'
+```
+
+With a `.coverage-floor` in the tree, `measured` adds the measurement
+to the command's own environment, merging and never replacing, and
+`coverage:check` reads what the run measured after it ends. Without a
+floor it runs the command unchanged. A suite that does not run through
+`measured` measures nothing, and a floor whose record names that leg
+is red by name.
+
 ### What a pull request pays
 
 The gate stays fast and deterministic. A mechanism enters `ci` only

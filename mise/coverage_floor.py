@@ -128,13 +128,17 @@ TEMPLATE = """\
 NEEDS = {
     "go": "the go leg needs go.mod",
     "rust": "the rust leg needs Cargo.toml and llvm-tools",
-    "python": "the python leg needs tracked *.py and a `test` task",
+    "python": (
+        "the python leg needs tracked *.py and a `test` task whose test "
+        'command runs through "${ORG_BELT_DIR}/measured"'
+    ),
     "typescript": (
         "the typescript leg needs a root package.json whose lockfile pins "
         "vitest and a coverage provider, and a `test` task that runs vitest"
     ),
     "plpgsql": (
-        "the plpgsql leg needs the suite's teardown to call "
+        "the plpgsql leg needs a test command run through "
+        '"${ORG_BELT_DIR}/measured" and its teardown to call '
         "plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set"
     ),
 }

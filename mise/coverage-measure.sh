@@ -47,16 +47,21 @@
 # leg — one function below, not a copy — and prints
 # `rust-branches <percent>` for the Monday audit and `coverage:adopt`.
 #
+# The python and plpgsql legs run no suite (#1667). The repository's own
+# `test` task runs once, through mise, and its test command runs through
+# `"${ORG_BELT_DIR}/measured"`, which measures where the suite runs and
+# writes into the run's directory, ORG_COVERAGE_RUN (coverage-run.sh).
+# These legs read that directory after `test` has ended, which the
+# `coverage:*` tasks order by depending on `test`.
+#
 # `plpgsql` (#1547) measures PL/pgSQL through plpgsql_check, in a
 # database only the repository's suite has. It makes no search of the
-# tree (#1666): whenever the measurement runs the `test` task it sets
-# ORG_PLPGSQL_COVERAGE, naming a report the suite's teardown writes, and
-# a report written means the leg reported: `plpgsql <percent>` and
+# tree (#1666): `measured` sets ORG_PLPGSQL_COVERAGE, naming a report
+# in the run's directory that the suite's teardown writes, and a report
+# written means the leg reported: `plpgsql <percent>` and
 # `plpgsql-branches <percent>`. Which legs a floor holds is the floor's
 # own record (`legs:`), and coverage:check reds a recorded leg that
-# reported nothing. The task is walked by task_walk.py
-# (#1608) and its steps run once for every leg that reads them, under
-# the union of those legs' variables; the reading and the refusals are
+# reported nothing. The reading and the refusals are
 # plpgsql_coverage.py's.
 #
 # `pgrx` (#1656) is not part of `all` either. A pgrx extension's code
@@ -73,42 +78,6 @@
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
 set -euo pipefail
-
-# `runs-test` (#1623 item 3) answers whether this measurement runs the
-# repository's WHOLE `test` task, depends first (the shared walk below):
-# it prints the first leg that does, or nothing. One is the whole
-# answer `ci` needs. It searches no file (#1666): the python leg is
-# tracked `*.py`, and a leg that runs the task otherwise is one the
-# floor's `legs:` record names, read straight from the file because the
-# belt's Python is not reachable here (below). `ci` reads it to collect
-# its plain `test` only where nothing else runs it, so a suite with a
-# floor runs once per gate. The legs that run the task are python and
-# plpgsql; go and rust run commands of their own (`go test -coverpkg`,
-# `cargo llvm-cov`) that are not the repository's `test` (its -race,
-# --all-features, doctests), and typescript runs one vitest invocation.
-#
-# Answered from the tree alone, before anything below asks mise or
-# needs the belt's Python (a template's exec sees neither ORG_PYTHON
-# nor ORG_BELT_DIR from the belt's [env], measured): `ci`'s
-# depends call this while mise is loading its config, and a selector
-# that asked `mise tasks info` there would reload the config, call
-# itself, and recurse without end (measured: 493 nested calls in 60 s).
-# A `test` task that does not exist needs no answer here: `ci` collects
-# it as optional. A floor file that does not parse reds coverage:check,
-# so reading its presence is reading the floor for every green gate.
-if [[ ${2:-} == runs-test ]]; then
-  [[ -f .coverage-floor ]] || exit 0
-  # Captured, never piped into `grep -q`: under pipefail the writer
-  # dies of SIGPIPE when grep leaves early, and the answer flips.
-  tracked_py=$(git ls-files -- '*.py' 2> /dev/null) || tracked_py=""
-  recorded=$(sed -n 's/^#[[:space:]]*legs:[[:space:]]*//p' .coverage-floor 2> /dev/null) || recorded=""
-  if [[ -n ${tracked_py} ]]; then
-    echo python
-  elif [[ " ${recorded} " =~ \ (python|plpgsql)(-branches)?\  ]]; then
-    echo "${BASH_REMATCH[1]}"
-  fi
-  exit 0
-fi
 
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
@@ -127,7 +96,7 @@ case "${legs}" in
   all | go | rust | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | probe | reports) ;;
   *)
     echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
-      "rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, probe, reports or runs-test" >&2
+      "rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, probe or reports" >&2
     exit 1
     ;;
 esac
@@ -156,7 +125,7 @@ if [[ ${legs} != probe && ${legs} != pgrx-majors ]]; then
   # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
   # that dies on an unset variable would otherwise exit 0. One trap for
   # every directory the run makes: the legs below only set theirs.
-  cleanup() { rm -rf "${work:-}" "${ts_work:-}" "${scratch:-}"; }
+  cleanup() { rm -rf "${ts_work:-}" "${scratch:-}"; }
   rc=0
   trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   out=${ORG_COVERAGE_REPORTS:-}
@@ -171,6 +140,10 @@ if [[ ${legs} == reports ]]; then
   # The directory is the belt's by definition, so a report an earlier
   # run left in a named one is cleared: the list is this run's.
   for f in "${reports[@]}" "${figures}"; do rm -f -- "${out:?}/${f}"; done
+  # A reader sweeps the run directories earlier runs left (coverage-run.sh).
+  # shellcheck source=mise/coverage-run.sh
+  . "${belt_dir}/coverage-run.sh"
+  org_coverage_sweep "${ORG_COVERAGE_RUN:-}"
   measured=$(ORG_COVERAGE_REPORTS="${out}" "${BASH}" "${BASH_SOURCE[0]}" "${label}" all) || exit 1
   if [[ -z ${measured} ]]; then
     # A floor that records its legs names each one this run lost (#1666),
@@ -241,15 +214,13 @@ if [[ ${ts_runner} == vitest\ * ]]; then
   [[ -n ${ts_test} ]] || ts_test=$(mise tasks info test --json 2> /dev/null) || ts_test=""
 fi
 
-# The legs the floor's record names (#1666), and the `test` task. The
-# measurement runs the task when the python leg applies, when the record
-# names a leg that reads the task, when the plpgsql leg is asked for, and
-# always to discover (ORG_COVERAGE_DISCOVER, coverage:adopt): that run is
-# how a PL/pgSQL leg is first found and recorded.
+# The legs the floor's record names (#1666). Discovery
+# (ORG_COVERAGE_DISCOVER, coverage:adopt) probes plpgsql wherever a
+# `test` task exists: the suite's run is how a PL/pgSQL leg is first
+# found and recorded.
 recorded=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_floor.py" legs 2> /dev/null) || recorded=""
-test_task=${python_test} reads_task=""
-if [[ ${recorded} =~ (^|$'\n')(python|plpgsql) || ${legs} == plpgsql ]]; then reads_task=1; fi
-if [[ -z ${test_task} && -n ${reads_task}${ORG_COVERAGE_DISCOVER:-} ]]; then
+test_task=${python_test}
+if [[ -z ${test_task} && -n ${ORG_COVERAGE_DISCOVER:-} ]]; then
   test_task=$(mise tasks info test --json 2> /dev/null) || test_task=""
 fi
 
@@ -495,134 +466,54 @@ py_report() {
   exit 1
 }
 
-# The legs that read the one run of the test task: the python leg its
-# coverage data, the plpgsql leg the report its teardown writes. Each
-# selected leg adds its own variables to that run, and nothing else.
-measure_py="" measure_pg=""
-if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then measure_py=1; fi
-if [[ -n ${test_task} && ${legs} =~ ^(all|plpgsql)$ ]]; then measure_pg=1; fi
+# The run's directory, where `measured` wrote what the suite measured.
+run=${ORG_COVERAGE_RUN:-}
 
-if [[ -n ${measure_py}${measure_pg} ]]; then
-  # Removed by the EXIT trap above.
-  work=$(mktemp -d)
-fi
-
-if [[ -n ${measure_py} ]]; then
-  # coverage.py, measuring the repository's own `test` task (#1331). The
-  # discovery roots stay where the repository wrote them; the belt never
-  # restates them, so the suite measured is the suite the gate runs.
+if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
+  # coverage.py's data from the repository's own `test` run (#1331,
+  # #1667): every python3 the suite started under `measured` loaded the
+  # belt's start-up hook and wrote here. The discovery roots stay where
+  # the repository wrote them; the belt never restates them.
   if ! command -v coverage > /dev/null; then
     echo "${label}: tracked Python and a test task, but coverage is missing —" >&2
     echo "  the belt pins pipx:coverage; run: mise install" >&2
     exit 1
   fi
-  # The tool venv's interpreter must BE the one the suite runs on: the
-  # tracer is a compiled extension, and the child processes below import
-  # it from the venv into the repository's `python3`. The belt's UV_*
-  # env makes uv build the venv on the `python` pin; this asserts it,
-  # because a venv uv built on an interpreter of its own (the hidden-
-  # Python trap the UV_* env exists for) would measure nothing in every
-  # child, silently.
-  cov_sys=$(coverage debug sys 2> /dev/null) || cov_sys=""
-  cov_python=$(awk '$1 == "executable:" { print $2 }' <<< "${cov_sys}")
-  cov_module=$(awk '$1 == "coverage_module:" { print $2 }' <<< "${cov_sys}")
-  cov_version=$("${cov_python:-false}" -c 'import sys; print(sys.version)' 2> /dev/null) || cov_version=""
-  run_version=$(python3 -c 'import sys; print(sys.version)' 2> /dev/null) || run_version=""
-  if [[ -z ${cov_module} || -z ${cov_version} || ${cov_version} != "${run_version}" ]]; then
-    echo "${label}: coverage runs on '${cov_version:-no interpreter}'" >&2
-    echo "  but the suite's python3 is '${run_version:-missing}' — the tool venv" >&2
-    echo "  must be built on the belt's python pin (reinstall: mise install -f pipx:coverage)" >&2
-    exit 1
-  fi
-  # The directory holding the `coverage` package: coverage/__init__.py,
-  # two levels up.
-  cov_site=$(dirname "$(dirname "${cov_module}")")
-
-  mkdir "${work}/hook" "${work}/data"
-  # Child processes are measured, not only the runner (#1331): suites
-  # exec their helper as `python3 helper.py`, and a leg that measured
-  # the unittest process alone reports the in-process half of the code.
-  # `patch = subprocess` cannot reach them — its .pth lives in the tool
-  # venv, which the repository's python3 never reads — so every python3
-  # the task starts loads this sitecustomize, which hands start-up to
-  # coverage's own process_startup under COVERAGE_PROCESS_START.
-  # Appended to sys.path, never prepended: the suite's imports resolve
-  # exactly as they do unmeasured.
-  site_literal=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "${cov_site}")
-  # Written by the belt's one hook writer, which runs the next
-  # sitecustomize on the path after this one's work (#1542): the
-  # mutation leg's, a repository's own.
-  printf 'import sys\nsys.path.append(%s)\nimport coverage\ncoverage.process_startup()\n' \
-    "${site_literal}" | "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/startup_hook.py" "${work}/hook"
-  # Branches from the start (#1336 property 2). Test files are omitted:
-  # a suite executes itself completely by construction, and counting it
-  # would raise the number without one more line of the code under test
-  # being run. relative_files, so the report's paths are the repository's
-  # own and Codecov maps them without a fix-up.
-  cat > "${work}/rc" << EOF
-[run]
-branch = true
-parallel = true
-source = ${PWD}
-data_file = ${work}/data/.coverage
-relative_files = true
-omit = */test_*.py
-disable_warnings = no-data-collected, module-not-measured
-
-[report]
-precision = 2
-EOF
-fi
-
-if [[ -n ${measure_py}${measure_pg} ]]; then
-  # The test task's steps, walked ONCE by task_walk.py (#1547, #1608):
-  # the order `mise run test` runs them, each script from its own task's
-  # `dir`, every one read before anything runs. A task the walk cannot
-  # run as written is refused by name, never measured as empty. One
-  # record per line, base64 per field: a script is multi-line.
-  steps=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/task_walk.py" steps "${label}") || exit 1
-  while read -r dir_b64 script_b64; do
-    dir=${PWD}
-    [[ ${dir_b64} == - ]] || dir=$(base64 --decode <<< "${dir_b64}")
-    script=$(base64 --decode <<< "${script_b64}")
-    if ! (
-      cd "${dir}"
-      if [[ -n ${measure_py} ]]; then
-        export COVERAGE_PROCESS_START="${work}/rc"
-        export PYTHONPATH="${work}/hook${PYTHONPATH:+:${PYTHONPATH}}"
-      fi
-      if [[ -n ${measure_pg} ]]; then
-        export ORG_PLPGSQL_COVERAGE="${work}/plpgsql-coverage.json"
-      fi
-      bash -euo pipefail -c "${script}"
-    ) >&2; then
-      echo "${label}: the test task failed under measurement — a suite that" >&2
-      echo "  does not pass cannot measure a floor" >&2
+  data=("${run:-/nonexistent}"/python/.coverage*)
+  if [[ -z ${run} || ! -f ${run}/coverage.rc || ! -e ${data[0]} ]]; then
+    # No figure, and the floor's record decides whether that is red
+    # (#1666): its remedy names `measured`.
+    echo "${label}: python: the test run measured no Python — its test command runs" >&2
+    cat >&2 << 'REMEDY'
+  through "${ORG_BELT_DIR}/measured" (#1667), or no suite ran under mise
+REMEDY
+  else
+    # The rc file `measured` wrote for this run: its data file, its
+    # source, its branch and omit settings are the ones the suite ran
+    # under.
+    rc_file="${run}/coverage.rc"
+    # --keep: the run's data stays for any other reader in the same run.
+    if ! coverage combine --keep --rcfile="${rc_file}" --quiet >&2; then
+      echo "${label}: the test task ran no measured Python — a measurement" >&2
+      echo "  that reads nothing must not become a floor" >&2
       exit 1
     fi
-  done <<< "${steps}"
-fi
-
-if [[ -n ${measure_py} ]]; then
-  if ! coverage combine --rcfile="${work}/rc" --quiet >&2; then
-    echo "${label}: the test task ran no measured Python — a measurement" >&2
-    echo "  that reads nothing must not become a floor" >&2
-    exit 1
+    py_report json --rcfile="${rc_file}" --quiet -o "${out}/coverage.json"
+    py_pct=$(jq -r '.totals.percent_statements_covered // empty' "${out}/coverage.json")
+    br_pct=$(jq -r '.totals.percent_branches_covered // empty' "${out}/coverage.json")
+    rm -f -- "${out}/coverage.json"
+    if [[ -z ${py_pct} || -z ${br_pct} ]]; then
+      echo "${label}: could not read a total from the Python report — a" >&2
+      echo "  measurement that reads nothing must not become a floor" >&2
+      exit 1
+    fi
+    # The report Codecov receives is rendered from this measurement's own
+    # data, so the badge and the floor read one run (#707's law), and
+    # the gate's run is the one the badge job uploads (#1528).
+    py_report xml --rcfile="${rc_file}" --quiet -o "${out}/coverage.xml"
+    echo "python ${py_pct}"
+    echo "python-branches ${br_pct}"
   fi
-  py_report json --rcfile="${work}/rc" --quiet -o "${work}/coverage.json"
-  py_pct=$(jq -r '.totals.percent_statements_covered // empty' "${work}/coverage.json")
-  br_pct=$(jq -r '.totals.percent_branches_covered // empty' "${work}/coverage.json")
-  if [[ -z ${py_pct} || -z ${br_pct} ]]; then
-    echo "${label}: could not read a total from the Python report — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
-    exit 1
-  fi
-  # The report Codecov receives is rendered from this measurement's own
-  # data, so the badge and the floor read one run (#707's law), and
-  # the gate's run is the one the badge job uploads (#1528).
-  py_report xml --rcfile="${work}/rc" --quiet -o "${out}/coverage.xml"
-  echo "python ${py_pct}"
-  echo "python-branches ${br_pct}"
 fi
 
 if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
@@ -693,11 +584,11 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   echo "typescript ${ts_pct}"
   echo "typescript-branches ${ts_br}"
 fi
-if [[ -n ${measure_pg} && -f ${work}/plpgsql-coverage.json ]]; then
+if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -f ${run}/plpgsql-coverage.json ]]; then
   # The report the test run's teardown wrote; the reading and every
   # refusal are plpgsql_coverage.py's. No report is no plpgsql figure,
   # and the floor's record decides whether that is red.
   "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql_coverage.py" \
-    totals "${label}" "${work}/plpgsql-coverage.json" || exit 1
+    totals "${label}" "${run}/plpgsql-coverage.json" || exit 1
 fi
 org_done=1
