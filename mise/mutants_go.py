@@ -64,6 +64,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import decoded
+import typed_std
 
 MARK = "//mutants:equivalent"
 KILLED = frozenset({"KILLED", "TIMED_OUT"})
@@ -481,8 +482,9 @@ def release(spelled: str) -> tuple[int, int, int] | None:
     found = GO_RELEASE.fullmatch(spelled) or GO_RELEASE.match(spelled)
     if not found:
         return None
-    major, minor, patch = found.groups()
-    return int(major), int(minor), int(patch or 0)
+    major, minor = typed_std.group(found, 1), typed_std.group(found, 2)
+    patch = typed_std.group(found, 3)
+    return int(major or 0), int(minor or 0), int(patch or 0)
 
 
 def older(built: str, running: str) -> bool:

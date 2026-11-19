@@ -37,6 +37,8 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from typing import TYPE_CHECKING
 
+import typed_std
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
@@ -388,7 +390,7 @@ def classify(repo: pathlib.Path, sha: str, base: str, subject: str) -> tuple[str
 
     """
     match = FIX_SUBJECT.match(subject)
-    scope = (match.group("scope") if match else None) or ""
+    scope = (typed_std.group(match, "scope") if match else None) or ""
     if scope in RENOVATE_SCOPES:
         return NOT_CODE, f"Renovate scope fix({scope})"
     changed = changes(repo, base, sha)
