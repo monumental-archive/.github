@@ -765,6 +765,57 @@ class TagHistoryShapes(unittest.TestCase):
         )
 
 
+def captured_edges(tag: str) -> list[tuple[str, str]]:
+    """Read edtf's upgrade graph at `tag` from its captured `sql/` names.
+
+    Returns:
+        The `(from, to)` of every `edtf_postgres--<from>--<to>.sql`.
+
+    """
+    edge = re.compile(r"^edtf_postgres--(\d+\.\d+\.\d+)--(\d+\.\d+\.\d+)\.sql$")
+    names = (TESTDATA / f"edtf-sql-{tag}.txt").read_text().split()
+    return [m.groups() for m in map(edge.match, names) if m]
+
+
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
+class AsksTheOnePredecessor(unittest.TestCase):
+    """The derivation acts on previous-release.py's answer (#1592).
+
+    edtf on 2026-11-19: v1.3.5 published and carries its tarballs, the
+    drafts v1.3.0 to v1.3.3 burned, and the graph at v1.3.5 reaches it.
+    The derivation already answered from the graph, so this row is the
+    same on main by construction; what it holds is that the derivation,
+    its record and the guards' rows in test_pgrx_build.py now read one
+    function over the same captures.
+    """
+
+    def test_the_next_release_derives_from_the_newest_installable(self) -> None:
+        """Release 1.3.6 derives from 1.3.5 on `v1.3.5`, and records it."""
+        with TemporaryDirectory() as d:
+            edges = captured_edges("v1.3.5")
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.6", edges)
+            result = repo.derive("1.3.6", "1.3.5", "edtf-releases-v1.3.5.json")
+            written = written_record(repo.root)
+        self.assertIn("deriving edtf_postgres: 1.3.5 -> 1.3.6", result.stdout)
+        self.assertIn("release download v1.3.5", result.stderr)
+        self.assertNotIn("NOTE:", result.stdout)
+        self.assertEqual(
+            ["edtf_postgres 1.3.5 1.3.4 1.2.3 1.1.2 1.1.0"], entries(written)
+        )
+
+    def test_the_captures_carry_the_shapes_they_are_named_for(self) -> None:
+        """Guard the guard: v1.3.5 carries tarballs, its burned drafts none."""
+        data = json.loads((TESTDATA / "edtf-releases-v1.3.5.json").read_text())
+        by_tag = {r["tag_name"]: r for r in data}
+        for burned in ("v1.3.0", "v1.3.1", "v1.3.2", "v1.3.3"):
+            self.assertTrue(by_tag[burned]["draft"], burned)
+            self.assertEqual([], by_tag[burned]["assets"], burned)
+        names = [a["name"] for a in by_tag["v1.3.5"]["assets"]]
+        self.assertIn("edtf_postgres-1.3.5-pg18-linux-amd64.tar.gz", names)
+        self.assertIn(("1.2.3", "1.3.0"), captured_edges("v1.3.1"))
+        self.assertNotIn(("1.2.3", "1.3.0"), captured_edges("v1.2.3"))
+
+
 def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
     """Pack a predecessor tarball with these files under `top`.
 
