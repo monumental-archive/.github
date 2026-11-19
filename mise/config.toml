@@ -1942,6 +1942,31 @@ fi
 echo "lint:python-target: ${target} <= ${actual}, ok"
 '''
 
+[tasks."lint:python-module-names"]
+description = "Every tracked Python file is named as a module: no hyphen, so it can be imported"
+dir = "{{cwd}}"
+# A file named `caller-pins.py` is not a module name: nothing can import
+# it, so every test loaded it by path and a type checker saw the result
+# as untyped (#1634: 2,439 of mypy's findings were that one pattern).
+# The canon's 59 were renamed; this keeps a new one from arriving. By
+# name, every one; ruff's N999 does not fire on a file outside a
+# package (measured on 0.17.5), which is every belt helper.
+run = '''
+files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
+[[ -n ${files} ]] || {
+  echo "lint:python-module-names: no Python tracked, skipped"
+  exit 0
+}
+bad=$(awk -F/ '$NF ~ /-/' <<< "${files}")
+if [[ -n ${bad} ]]; then
+  echo "lint:python-module-names: not a module name, so nothing can import it (#1634):" >&2
+  awk '{ print "  " $0 }' <<< "${bad}" >&2
+  echo "  name it with underscores in place of the hyphens" >&2
+  exit 1
+fi
+echo "lint:python-module-names: ok"
+'''
+
 [tasks."lint:action-pins"]
 description = "Every `uses:` carries a version comment beside its SHA (pinact, offline)"
 dir = "{{cwd}}"
