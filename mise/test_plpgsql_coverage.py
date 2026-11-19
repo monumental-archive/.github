@@ -19,6 +19,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import base64
 import json
 import os
 import shutil
@@ -49,7 +50,12 @@ PSQL = """\
 #!/usr/bin/env bash
 sql="${*: -1}"
 case "${sql}" in
-  *"CREATE EXTENSION"*) exit 0 ;;
+  *"CREATE EXTENSION"*)
+    if [[ -n ${STUB_NO_EXTENSION:-} ]]; then
+      echo "${STUB_NO_EXTENSION}" >&2
+      exit 3
+    fi
+    ;;
   *current_setting*)
     if [[ -n ${STUB_META_FAIL:-} ]]; then
       echo "${STUB_META_FAIL}" >&2
@@ -65,6 +71,21 @@ case "${sql}" in
     cat "${STUB_DIR}/functions"
     # An extension's own functions answer any listing that keeps them.
     [[ ${sql} == *"d.deptype = 'e'"* ]] || cat "${STUB_DIR}/extension"
+    ;;
+  *plpgsql_check_function_tb*)
+    # The static check: the findings planted for this oid and table, or
+    # none (a clean function); every call is logged for the rows.
+    oid=${sql#*plpgsql_check_function_tb(}
+    oid=${oid%%::*}
+    relid=${sql#*::regprocedure, }
+    relid=${relid%%::*}
+    echo "${oid} ${relid}" >> "${STUB_DIR}/linted"
+    if [[ -f ${STUB_DIR}/lint.${oid}.err ]]; then
+      cat "${STUB_DIR}/lint.${oid}.err" >&2
+      exit 3
+    fi
+    planted="${STUB_DIR}/lint.${oid}.${relid}"
+    [[ ! -f ${planted} ]] || cat "${planted}"
     ;;
   *plpgsql_coverage_statements*)
     oid=${sql#*plpgsql_coverage_statements(}
@@ -143,11 +164,11 @@ def plant_stubs(
     for name, text in (("psql", PSQL), ("mise", MISE)):
         (stubs / name).write_text(text, encoding="utf-8")
         (stubs / name).chmod(0o755)
-    listing = "".join(f"{oid}\t{sig}\n" for oid, (sig, _) in functions.items())
+    listing = "".join(f"{oid}\t{sig}\t\n" for oid, (sig, _) in functions.items())
     (answers / "functions").write_text(listing, encoding="utf-8")
     # postgis owns PL/pgSQL functions in a non-system schema; uncovered.
     (answers / "extension").write_text(
-        "900\tpublic.postgis_owned()\n", encoding="utf-8"
+        "900\tpublic.postgis_owned()\t\n", encoding="utf-8"
     )
     (answers / "read.900").write_text("0\t0\t40\t0\t3\n", encoding="utf-8")
     for oid, (_, figures) in functions.items():
@@ -200,11 +221,15 @@ class Collecting(unittest.TestCase):
         functions: dict[str, tuple[str, str]],
         unreadable: dict[str, str] | None = None,
         listing: str | None = None,
+        lint: dict[str, str] | None = None,
         **planted: str,
     ) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess]:
         """Collect a report from the planted database and read it.
 
-        `listing` replaces the function listing psql prints, verbatim.
+        `listing` replaces the function listing psql prints, verbatim;
+        `lint` plants the static check's rows, keyed `<oid>.<relid>`.
+        The answers directory and the report stay on the row as
+        `self.answers` and `self.report`.
 
         Returns:
             The collect and the totals processes.
@@ -215,7 +240,10 @@ class Collecting(unittest.TestCase):
         stubs, answers = plant_stubs(tmp, functions, unreadable)
         if listing is not None:
             (answers / "functions").write_text(listing, encoding="utf-8")
+        for key, rows in (lint or {}).items():
+            (answers / f"lint.{key}").write_text(rows, encoding="utf-8")
         report = tmp / "report.json"
+        self.answers, self.report = answers, report
         env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(report), **planted)
         py = sys.executable
         collected = run([py, str(HELPER), "collect", "postgres://stub"], env, tmp)
@@ -365,6 +393,7 @@ class HelperRows(Collecting):
             "statement_count": 5,
             "executed": 4,
             "branch_free": False,
+            "findings": [],
         }
         document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
         planted.write_text(json.dumps(document), encoding="utf-8")
@@ -396,6 +425,152 @@ class HelperRows(Collecting):
             "plpgsql-coverage: ORG_PLPGSQL_COVERAGE is not set — the leg sets"
             " it; call collect only then\n",
             done.stderr,
+        )
+
+
+def finding(line: str, level: str, message: str) -> str:
+    """Write one static-check row as psql prints it.
+
+    Returns:
+        The tab-separated row, the message base64 as the helper asks.
+
+    """
+    encoded = base64.b64encode(message.encode("utf-8")).decode("ascii")
+    return f"{line}\t{level}\t{encoded}\n"
+
+
+LINT_RED = (
+    "leg: plpgsql: {function}: line {line}: {level}: {message}\n"
+    "leg: plpgsql: {count} static-check finding(s) — plpgsql_check reads each"
+    " as a body that cannot do what it says\n"
+)
+
+
+class LintRows(Collecting):
+    """plpgsql_check's static check, in the same report (#1605)."""
+
+    def test_a_report_with_no_findings_is_green(self) -> None:
+        """Every function asked, none reported: the totals print."""
+        collected, read = self.measure(TWO)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", read.stdout)
+        document = json.loads(self.report.read_text(encoding="utf-8"))
+        self.assertEqual([[], []], [f["findings"] for f in document["functions"]])
+        self.assertEqual("101 0\n102 0\n", (self.answers / "linted").read_text("utf-8"))
+
+    def test_an_error_is_red_by_function_and_line(self) -> None:
+        """A column that does not exist: the leg is red before the floor."""
+        message = 'column "no_such_column" does not exist'
+        _, read = self.measure(TWO, lint={"102.0": finding("2", "error", message)})
+        self.assertEqual(1, read.returncode)
+        self.assertEqual("", read.stdout)
+        self.assertEqual(
+            LINT_RED.format(
+                function="public.stamp(integer)",
+                line=2,
+                level="error",
+                message=message,
+                count=1,
+            ),
+            read.stderr,
+        )
+
+    def test_a_warning_is_red(self) -> None:
+        """Unreachable code, an extra warning, is red like an error."""
+        _, read = self.measure(
+            TWO, lint={"101.0": finding("14", "warning extra", "unreachable code")}
+        )
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            LINT_RED.format(
+                function="public.guard()",
+                line=14,
+                level="warning extra",
+                message="unreachable code",
+                count=1,
+            ),
+            read.stderr,
+        )
+
+    def test_a_finding_with_no_line_is_named_without_one(self) -> None:
+        """A routine-wide finding (volatility) has no line."""
+        message = "routine is marked as VOLATILE, should be IMMUTABLE"
+        _, read = self.measure(TWO, lint={"101.0": finding("", "performance", message)})
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            LINT_RED.format(
+                function="public.guard()",
+                line="-",
+                level="performance",
+                message=message,
+                count=1,
+            ),
+            read.stderr,
+        )
+
+    def test_a_trigger_function_is_checked_against_each_table(self) -> None:
+        """Its NEW and OLD are each table's rows; a shared finding is one."""
+        listing = "101\tpublic.guard()\t5001 5002\n102\tpublic.stamp(integer)\t\n"
+        row = finding("14", "warning extra", "unreachable code")
+        _, read = self.measure(
+            TWO, listing=listing, lint={"101.5001": row, "101.5002": row}
+        )
+        self.assertEqual(
+            "101 5001\n101 5002\n102 0\n",
+            (self.answers / "linted").read_text("utf-8"),
+        )
+        self.assertEqual(
+            LINT_RED.format(
+                function="public.guard()",
+                line=14,
+                level="warning extra",
+                message="unreachable code",
+                count=1,
+            ),
+            read.stderr,
+        )
+
+    def test_an_extension_member_is_never_asked(self) -> None:
+        """An extension's PL/pgSQL (postgis's) is not the repository's to check."""
+        self.measure(TWO)
+        self.assertNotIn("900", (self.answers / "linted").read_text("utf-8"))
+
+    def test_the_extension_absent_is_refused_by_name(self) -> None:
+        """No plpgsql_check in the test stack: the collection fails, named."""
+        why = 'ERROR:  extension "plpgsql_check" is not available'
+        collected, read = self.measure(TWO, STUB_NO_EXTENSION=why)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            f"leg: plpgsql: the teardown's collection failed: {why}\n", read.stderr
+        )
+
+    def test_a_reading_without_its_lint_answer_is_refused(self) -> None:
+        """A report from a helper that did not ask is not a clean result."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        entry = {
+            "function": "public.guard()",
+            "statements": "0.8",
+            "branches": "1",
+            "statement_count": 5,
+            "executed": 4,
+            "branch_free": False,
+        }
+        planted = tmp / "report.json"
+        document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
+        planted.write_text(json.dumps(document), encoding="utf-8")
+        read = run(
+            [sys.executable, str(HELPER), "totals", "leg", str(planted)],
+            hermetic.env(),
+            tmp,
+        )
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: the report is not a coverage report: function 0:"
+            " 'findings' is not a list\n",
+            read.stderr,
         )
 
 
@@ -484,6 +659,7 @@ class RefusalRows(Collecting):
             "statement_count": 5,
             "executed": 4,
             "branch_free": False,
+            "findings": [],
         }
 
         def report(*entries: object) -> dict[str, object]:

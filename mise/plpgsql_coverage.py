@@ -31,6 +31,15 @@ subcommands:
                          name. A report with no PL/pgSQL function prints
                          no totals and exits 0.
 
+The same call asks plpgsql_check's static check about every listed
+function (#1605): `plpgsql_check_function_tb` with every optional check
+on and fatal errors reported rather than stopping at the first, a
+trigger function once per table its triggers sit on. Each reading
+carries its findings (line, level, message); `totals` reds every
+finding, whatever its level, by function and line, before it judges the
+floor, and the decoder refuses a reading with no findings answer: a
+report from a helper that did not ask is not a clean result.
+
 The run is not this helper's: `coverage-measure.sh` walks the `test`
 task and its depends once, for every leg that reads that run, and sets
 ORG_PLPGSQL_COVERAGE in it when the plpgsql leg is selected; the leg
@@ -72,6 +81,7 @@ would be a second PL/pgSQL parser. The report lists every function's
 figures beside the totals, so the totals can be checked by hand.
 """
 
+import base64
 import json
 import os
 import re
@@ -97,7 +107,10 @@ CREATE_SQL = "CREATE EXTENSION IF NOT EXISTS plpgsql_check"
 # Every PL/pgSQL function the repository wrote: outside the system
 # schemas, and owned by no extension (pg_depend deptype 'e').
 LIST_SQL = """\
-SELECT p.oid, p.oid::regprocedure
+SELECT p.oid, p.oid::regprocedure,
+       coalesce((SELECT string_agg(DISTINCT t.tgrelid::text, ' ')
+                   FROM pg_trigger t
+                  WHERE t.tgfoid = p.oid AND NOT t.tgisinternal), '')
   FROM pg_proc p
   JOIN pg_language l ON l.oid = p.prolang
   JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -125,11 +138,38 @@ SELECT plpgsql_coverage_statements({oid}::regprocedure),
                                    OR stmtname LIKE 'FOR%') AS branching
           FROM plpgsql_profiler_function_statements_tb({oid}::regprocedure)) s"""
 
+# One function's static check (#1605): plpgsql_check_function_tb with
+# every optional check on, and fatal errors reported rather than ending
+# the check at the first. A trigger function is checked against each
+# table a trigger attaches it to, since its NEW and OLD are that
+# table's rows; relid 0 checks any other function. The message is base64
+# so a newline in it cannot split the row psql prints.
+LINT_SQL = """\
+SELECT coalesce(lineno::text, ''), level,
+       replace(encode(convert_to(message, 'UTF8'), 'base64'), E'\\n', '')
+  FROM plpgsql_check_function_tb({oid}::regprocedure, {relid}::regclass,
+                                 fatal_errors => false,
+                                 other_warnings => true,
+                                 performance_warnings => true,
+                                 extra_warnings => true,
+                                 security_warnings => true,
+                                 compatibility_warnings => true)"""
+
 OID = re.compile(r"[0-9]+")
 SETTINGS = 2  # the profiler and the preload list
-LISTING = 2  # an oid and a signature
+LISTING = 3  # an oid, a signature, and the tables its triggers sit on
+FINDING = 3  # a line, a level, a message
 PLACES = Decimal("0.01")
 HUNDRED = Decimal(100)
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One static-check finding: where, how severe, and what."""
+
+    line: int | None
+    level: str
+    message: str
 
 
 @dataclass(frozen=True)
@@ -147,6 +187,8 @@ class Reading:
     statement_count: int
     executed: int
     branch_free: bool
+    # What plpgsql_check's static check reported (#1605); empty is clean.
+    findings: tuple[Finding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -218,7 +260,41 @@ def psql(conninfo: str, sql: str) -> list[list[str]]:
     return [line.split("\t") for line in done.stdout.splitlines() if line]
 
 
-def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadable:
+def lint_function(conninfo: str, oid: str, relids: list[str]) -> tuple[Finding, ...]:
+    """Ask plpgsql_check's static check about one function.
+
+    Returns:
+        Every distinct finding, across each table the function's
+        triggers sit on (or none).
+
+    Raises:
+        ReadError: psql failed, or printed a row of the wrong shape.
+
+    """
+    found: list[Finding] = []
+    for relid in relids or ["0"]:
+        if not OID.fullmatch(relid):
+            msg = f"its trigger table oid '{relid}' is not a number"
+            raise ReadError(msg)
+        for row in psql(conninfo, LINT_SQL.format(oid=oid, relid=relid)):
+            if len(row) != FINDING:
+                msg = f"unreadable finding: {row!r}"
+                raise ReadError(msg)
+            line, level, encoded = row
+            try:
+                message = base64.b64decode(encoded, validate=True).decode("utf-8")
+            except ValueError as exc:
+                msg = f"unreadable finding: {row!r}"
+                raise ReadError(msg) from exc
+            finding = Finding(int(line) if line.isdecimal() else None, level, message)
+            if finding not in found:
+                found.append(finding)
+    return tuple(found)
+
+
+def read_function(
+    conninfo: str, oid: str, signature: str, relids: list[str]
+) -> Reading | Unreadable:
     """Read one function's figures, or the reason they cannot be read.
 
     Returns:
@@ -229,6 +305,7 @@ def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadab
         return Unreadable(signature, f"its oid '{oid}' is not a number")
     try:
         rows = psql(conninfo, READ_SQL.format(oid=oid))
+        findings = lint_function(conninfo, oid, relids)
     except ReadError as exc:
         return Unreadable(signature, str(exc))
     try:
@@ -240,6 +317,7 @@ def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadab
             statement_count=int(count),
             executed=int(executed),
             branch_free=Decimal(branches) == 1 and int(branching) == 0,
+            findings=findings,
         )
     except IndexError, ValueError, InvalidOperation:
         return Unreadable(signature, f"unreadable figures: {rows!r}")
@@ -266,7 +344,7 @@ def gather(conninfo: str) -> Report | Failed:
     for row in listed:
         if len(row) != LISTING:
             return Failed(f"unreadable function listing: {row!r}")
-        functions.append(read_function(conninfo, row[0], row[1]))
+        functions.append(read_function(conninfo, row[0], row[1], row[2].split()))
     return Report(settings[0][0], settings[0][1], tuple(functions))
 
 
@@ -292,6 +370,10 @@ def encode(report: Report | Failed) -> str:
                     "statement_count": f.statement_count,
                     "executed": f.executed,
                     "branch_free": f.branch_free,
+                    "findings": [
+                        {"line": g.line, "level": g.level, "message": g.message}
+                        for g in f.findings
+                    ],
                 })
         document = {
             "profiler": report.profiler,
@@ -374,6 +456,26 @@ def fraction_field(document: dict[str, object], key: str, where: str) -> Decimal
     return value
 
 
+def decode_finding(value: object, where: str) -> Finding:
+    """Decode one static-check finding.
+
+    Returns:
+        The finding.
+
+    Raises:
+        NotAReportError: the entry is not a finding.
+
+    """
+    entry = as_object(value, where)
+    line = entry.get("line")
+    if line is not None and (isinstance(line, bool) or not isinstance(line, int)):
+        msg = f"{where}: 'line' is not a line number"
+        raise NotAReportError(msg)
+    return Finding(
+        line, text_field(entry, "level", where), text_field(entry, "message", where)
+    )
+
+
 def decode_function(value: object, where: str) -> Reading | Unreadable:
     """Decode one function entry, in one of its two shapes.
 
@@ -392,6 +494,9 @@ def decode_function(value: object, where: str) -> Reading | Unreadable:
     if not isinstance(branch_free, bool):
         msg = f"{where}: 'branch_free' is not a boolean"
         raise NotAReportError(msg)
+    # A reading without the static check's answer is not a clean result:
+    # the helper that wrote it did not ask (#1605).
+    findings = as_array(entry.get("findings"), f"{where}: 'findings'")
     return Reading(
         function=function,
         statements=fraction_field(entry, "statements", where),
@@ -399,6 +504,10 @@ def decode_function(value: object, where: str) -> Reading | Unreadable:
         statement_count=count_field(entry, "statement_count", where),
         executed=count_field(entry, "executed", where),
         branch_free=branch_free,
+        findings=tuple(
+            decode_finding(item, f"{where} finding {index}")
+            for index, item in enumerate(findings)
+        ),
     )
 
 
@@ -500,6 +609,25 @@ def refusals(label: str, report: Report | Failed) -> list[str]:
         lines.append(
             f"{head} {len(unread)} function(s) unreadable — a function the"
             " extension cannot read is never dropped from the total"
+        )
+    # The static check (#1605), judged before the floor: every optional
+    # check is on so that what it reports is held, so every finding is
+    # red, whatever its level.
+    found = [
+        (f.function, g)
+        for f in report.functions
+        if isinstance(f, Reading)
+        for g in f.findings
+    ]
+    lines.extend(
+        f"{head} {function}: line {'-' if g.line is None else g.line}:"
+        f" {g.level}: {g.message}"
+        for function, g in found
+    )
+    if found:
+        lines.append(
+            f"{head} {len(found)} static-check finding(s) — plpgsql_check"
+            " reads each as a body that cannot do what it says"
         )
     return lines
 

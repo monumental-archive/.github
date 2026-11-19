@@ -3361,6 +3361,38 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   suite sits in a depend now has that depend measured for Python too,
   where it used to run the task's own `run` alone.
   *Reopen the weighting:* plpgsql_check exposing its branch counts.
+  **The static check (#1605) rides the same report.** In the same
+  teardown call and session, the helper asks
+  `plpgsql_check_function_tb` about every listed function (a trigger
+  function against each table its triggers sit on, since its `NEW` and
+  `OLD` are that table's rows) and writes the findings beside the
+  coverage reading; the reader reds every finding by function and line
+  before it judges the floor, and refuses a reading with no findings
+  answer. There is no second variable, report or record line. Measured
+  2026-11-20 at 2.10.16 on the proving repository's runner gate: the
+  checks and their defaults are `fatal_errors` (on), `other_warnings`
+  (on), `extra_warnings` (on), `performance_warnings` (off),
+  `security_warnings` (off) and `compatibility_warnings` (off), with
+  `all_warnings`, `without_warnings`, `use_incomment_options` (on),
+  `incomment_options_usage_warning` (off) and `constant_tracing` (on)
+  beside them. The belt turns every check on and fatal errors off, so
+  every error is reported rather than the first. Observed, by check:
+  fatal errors, a missing column (level `error`, SQLSTATE 42703);
+  other warnings, an unused variable (level `warning`); extra warnings,
+  unreachable code (level `warning extra`); performance warnings, a
+  routine marked `VOLATILE` that could be `IMMUTABLE` (level
+  `performance`, no line); security and compatibility warnings
+  reported nothing on the probes or the proving repository. Every
+  level is red: a check is on so that what it reports is held. The
+  proving repository: 78 checks (six trigger functions across their
+  tables), one finding, an extra warning; its detail is that
+  repository's own issue. Suppression: an in-comment option in the
+  function body, `-- @plpgsql_check_options: <check> = false`, turns
+  that check off for that function, and holds with every check asked
+  for (measured); it is the only suppression, written with its reason
+  in the same comment. The positional pragma
+  `plpgsql_check_pragma('disable:<check>')` did not suppress a finding
+  in a declaration before it (measured), and is not the mechanism.
   **Rejected, so it is not re-proposed:** adding the extension to the
   published database image (a test tool in a production image); a
   report the repository computes itself (the number would be the
