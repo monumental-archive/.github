@@ -21,6 +21,8 @@ import shutil
 import subprocess
 import unittest
 
+import hermetic
+
 WORKFLOW = pathlib.Path(__file__).resolve().parent.parent / ".github/workflows/ci.yml"
 STEP = "- name: Every part of the gate passed"
 
@@ -80,13 +82,9 @@ class EveryPartPassed(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, "-c", step_script()],
-            env={
-                "PATH": os.environ["PATH"],
-                "PLAN": plan,
-                "GATE": gate,
-                "PGRX": pgrx,
-                "MAJORS": majors,
-            },
+            env=hermetic.env(
+                PATH=os.environ["PATH"], PLAN=plan, GATE=gate, PGRX=pgrx, MAJORS=majors
+            ),
             capture_output=True,
             text=True,
             check=False,

@@ -19,6 +19,13 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_resolve.py"
 STUB_GH = """#!/usr/bin/env bash
@@ -86,14 +93,14 @@ class ReadTheLatestRelease(unittest.TestCase):
             )
         output = self.tmp / "github-output"
         output.write_text("", encoding="utf-8")
-        env = {
-            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
-            "HOME": str(self.tmp),
-            "STUB_TAG": tag,
-            "STUB_FIXTURES": str(self.fixtures),
-            "GITHUB_REPOSITORY": "example/project",
-            "GITHUB_OUTPUT": str(output),
-        }
+        env = hermetic.env(
+            PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            HOME=str(self.tmp),
+            STUB_TAG=tag,
+            STUB_FIXTURES=str(self.fixtures),
+            GITHUB_REPOSITORY="example/project",
+            GITHUB_OUTPUT=str(output),
+        )
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [sys.executable, str(HELPER)],
             cwd=self.work,

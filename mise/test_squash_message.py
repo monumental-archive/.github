@@ -21,6 +21,8 @@ import sys
 import tempfile
 import unittest
 
+import hermetic
+
 HELPER = pathlib.Path(__file__).resolve().parent / "squash_message.py"
 STUB_MISE = """#!/usr/bin/env bash
 printf '%s\\n' "$*" > "${STUB_DIR}/mise-args"
@@ -64,15 +66,15 @@ class SquashMessage(unittest.TestCase):
             The run.
 
         """
-        env = {
-            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
-            "HOME": str(self.tmp),
-            "STUB_DIR": str(self.tmp),
-            "STUB_EXIT": str(verdict),
-            "RUNNER_TEMP": str(self.tmp),
-            "PR_TITLE": title,
-            "PR_NUMBER": "812",
-        }
+        env = hermetic.env(
+            PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            HOME=str(self.tmp),
+            STUB_DIR=str(self.tmp),
+            STUB_EXIT=str(verdict),
+            RUNNER_TEMP=str(self.tmp),
+            PR_TITLE=title,
+            PR_NUMBER="812",
+        )
         if body is not None:
             env["PR_BODY"] = body
         # ruff: ignore[subprocess-without-shell-equals-true]

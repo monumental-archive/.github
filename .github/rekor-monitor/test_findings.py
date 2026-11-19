@@ -23,6 +23,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import hermetic
+
 HERE = Path(__file__).resolve().parent
 HELPER = HERE / "findings.py"
 DATA = HERE / "testdata"
@@ -89,12 +95,12 @@ class Findings(unittest.TestCase):
         self.calls = self.dir / "calls.jsonl"
         self.report = self.dir / "report.json"
         self.doc = json.loads((DATA / "report-budget.json").read_text(encoding="utf-8"))
-        self.env = {
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "GITHUB_REPOSITORY": REPO,
-            "STUB_CALLS": str(self.calls),
-            "STUB_LIST": "[]",
-        }
+        self.env = hermetic.env(
+            PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            GITHUB_REPOSITORY=REPO,
+            STUB_CALLS=str(self.calls),
+            STUB_LIST="[]",
+        )
 
     def run_helper(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Write the report and run the helper as the workflow does.

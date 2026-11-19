@@ -22,6 +22,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import hermetic
+
 HERE = Path(__file__).resolve().parent
 HELPER = HERE / "standing_issue.py"
 DATA = HERE / "testdata"
@@ -105,12 +111,12 @@ class Rows(unittest.TestCase):
         self.end = self.dir / "checkpoint.json"
         self.write(self.start, checkpoint())
         self.write(self.end, checkpoint())
-        self.env = {
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "GITHUB_REPOSITORY": REPO,
-            "STUB_CALLS": str(self.calls),
-            "STUB_LIST": "[]",
-        }
+        self.env = hermetic.env(
+            PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            GITHUB_REPOSITORY=REPO,
+            STUB_CALLS=str(self.calls),
+            STUB_LIST="[]",
+        )
 
     @staticmethod
     def write(path: Path, doc: dict) -> None:

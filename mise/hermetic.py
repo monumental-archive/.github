@@ -67,6 +67,16 @@ INHERITED: dict[str, str] = {
     # under and refuses to run without (#1543): the canon action exports
     # it in CI, the belt's [env] locally.
     "ORG_PYTHON": "the interpreter a script starts its helpers under",
+    # Mutation reaches a child process through the environment and
+    # nothing else (#1542): mutmut 3.8.1's trampoline selects the mutant
+    # from MUTANT_UNDER_TEST (mutation/trampoline.py:54) and bounds its
+    # statistics by MUTMUT_DEPENDENCY_DEPTH (trampoline.py:95), and the
+    # leg's start-up hook loads mutmut's configuration only under
+    # MUTANT_UNDER_TEST (mutants_python.py's CHILD_CONFIG). Its path
+    # rides on PYTHONPATH, above. Dropped, a child runs the ORIGINAL
+    # function for every mutant, and the mutant survives untested.
+    "MUTANT_UNDER_TEST": "the mutant a child process runs",
+    "MUTMUT_DEPENDENCY_DEPTH": "how deep the statistics pass records calls",
 }
 
 # What a tool needs beyond INHERITED, per tool, each with why. A row

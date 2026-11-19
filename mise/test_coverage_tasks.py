@@ -800,11 +800,11 @@ def run_upload_step(
         for name in reports:
             (Path(tmp) / name).write_text("report\n", encoding="utf-8")
         out = Path(tmp) / "outputs"
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "HAS_TOKEN": "true" if has_token else "false",
-            "GITHUB_OUTPUT": str(out),
-        }
+        env = hermetic.env(
+            PATH=os.environ.get("PATH", ""),
+            HAS_TOKEN="true" if has_token else "false",
+            GITHUB_OUTPUT=str(out),
+        )
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-e", "-c", upload_step()],

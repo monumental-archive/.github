@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import call_names
 import hermetic
 
 if TYPE_CHECKING:
@@ -159,6 +160,262 @@ def reads_whole(node: ast.AST, env: Callable[[ast.AST | None], bool]) -> bool:
     if isinstance(node, (ast.comprehension, ast.For, ast.AsyncFor)):
         return env(node.iter)
     return False
+
+
+# What starts a process, by module: `subprocess.run(...)`, `os.execv(...)`.
+# What starts a process, by its module's own dotted name, however the
+# file imported it (call_names.qualifier): exact names, and the `os`
+# families by prefix (`os.execve`, `os.spawnlpe`, `os.posix_spawnp`).
+STARTS = frozenset({
+    "subprocess.run",
+    "subprocess.Popen",
+    "subprocess.check_output",
+    "subprocess.check_call",
+    "subprocess.call",
+    "asyncio.create_subprocess_exec",
+    "asyncio.create_subprocess_shell",
+})
+STARTS_BY_PREFIX = ("os.exec", "os.spawn", "os.posix_spawn")
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def dotted(node: ast.AST) -> str | None:
+    """Spell a name or one attribute of a name: `env`, `self.env`.
+
+    Returns:
+        The spelling, or None for anything else.
+
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return f"{node.value.id}.{node.attr}"
+    return None
+
+
+def starts_process(spelled: str | None) -> bool:
+    """Say whether a call, by its dotted name, starts a process.
+
+    Returns:
+        True for a name in STARTS or under a STARTS_BY_PREFIX family.
+
+    """
+    return spelled in STARTS or (spelled or "").startswith(STARTS_BY_PREFIX)
+
+
+def given_environment(call: ast.Call, spelled: str) -> list[ast.AST]:
+    """Find the environment a process-starting call is handed.
+
+    Returns:
+        Its `env=` argument; for `os.posix_spawn` and `os.posix_spawnp`,
+        the third by place; for `os.execve` and the other `os.exec*` and
+        `os.spawn*` names ending in `e`, the last by place.
+
+    """
+    given = [k.value for k in call.keywords if k.arg == "env"]
+    if spelled.startswith("os.posix_spawn"):
+        given += call.args[2:3]
+    elif spelled.startswith(("os.exec", "os.spawn")) and spelled.endswith("e"):
+        given += call.args[-1:]
+    return given
+
+
+class Environments:
+    """Where each child environment in one test file comes from (#1542)."""
+
+    def __init__(self, source: str) -> None:
+        """Read the file's assignments, returns and parameters by scope."""
+        self.module = ast.parse(source)
+        self.qualify = call_names.qualifier(self.module)
+        self.parent: dict[ast.AST, ast.AST] = {}
+        # (scope, name) -> values; scope is a function or the module.
+        self.assigned: dict[tuple[ast.AST, str], list[ast.AST]] = {}
+        self.returns: dict[str, list[ast.AST]] = {}
+        self.params: dict[str, list[str]] = {}
+        for node in ast.walk(self.module):
+            for child in ast.iter_child_nodes(node):
+                self.parent[child] = node
+        for node in ast.walk(self.module):
+            if isinstance(node, FUNCTIONS):
+                a = node.args
+                self.params[node.name] = [
+                    x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs)
+                ]
+                self.returns[node.name] = [
+                    n.value
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Return) and n.value
+                ]
+            elif (
+                isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+            ):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                for target in targets:
+                    name = dotted(target)
+                    if name is not None:
+                        scope = self.module if "." in name else self.scope(node)
+                        self.assigned.setdefault((scope, name), []).append(node.value)
+
+    def scope(self, node: ast.AST) -> ast.AST:
+        """Name the function a node is in, or the module.
+
+        Returns:
+            The innermost enclosing function, else the module.
+
+        """
+        while node in self.parent:
+            node = self.parent[node]
+            if isinstance(node, FUNCTIONS):
+                return node
+        return self.module
+
+    def values(self, name: str, at: ast.AST) -> list[ast.AST] | None:
+        """Find what a name holds where it is read.
+
+        Returns:
+            Its assigned values in the nearest scope that assigns it, or
+            None when no scope does (a parameter, or a global import).
+
+        """
+        scope = self.module if "." in name else self.scope(at)
+        while True:
+            found = self.assigned.get((scope, name))
+            if found is not None:
+                return found
+            if scope is self.module:
+                return None
+            scope = self.scope(scope)
+
+    def hermetic(self, node: ast.AST, seen: frozenset[str]) -> bool | None:
+        """Say whether an environment starts from hermetic.env.
+
+        Returns:
+            True when it does, False when it is built otherwise, None
+            when it is a parameter, judged where it is passed.
+
+        """
+        if isinstance(node, ast.Call):
+            return self.called(node, seen)
+        start = self.start(node)
+        if start is not None:
+            return start is not False and bool(self.hermetic(start, seen))
+        name = dotted(node)
+        if name is None:
+            return False
+        if name in seen:
+            return True
+        found = self.values(name, node)
+        if found is None:
+            return None if "." not in name else False
+        return all(self.hermetic(v, seen | {name}) for v in found)
+
+    @staticmethod
+    def start(node: ast.AST) -> ast.AST | bool | None:
+        """Find the environment a composite expression starts from.
+
+        Returns:
+            The left of `|`, the first `**` of a display, or the mapping
+            a comprehension filters; False for a display or comprehension
+            that starts from nothing; None for any other node, which
+            `hermetic` then judges itself (a conditional expression is
+            not followed, so it is refused).
+
+        """
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return node.left
+        if isinstance(node, ast.Dict):
+            first = node.keys[0] is None if node.keys else False
+            return node.values[0] if first else False
+        if isinstance(node, ast.DictComp):
+            source = node.generators[0].iter
+            called = isinstance(source, ast.Call) and isinstance(
+                source.func, ast.Attribute
+            )
+            return source.func.value if called else False
+        return None
+
+    def called(self, call: ast.Call, seen: frozenset[str]) -> bool:
+        """Say whether a call returns an environment from hermetic.env.
+
+        Returns:
+            True for `hermetic.env(...)`, an alias of it, `dict()` of
+            one, or a function of this file whose every return is one.
+
+        """
+        name = dotted(call.func) or ""
+        if name == "hermetic.env":
+            return True
+        if name == "dict":
+            return bool(call.args) and bool(self.hermetic(call.args[0], seen))
+        function = name.rpartition(".")[2]
+        if function in self.returns and function not in seen:
+            found = self.returns[function]
+            return bool(found) and all(
+                self.hermetic(r, seen | {function}) for r in found
+            )
+        aliases = self.values(name, call) if name else None
+        return bool(aliases) and all(dotted(a) == "hermetic.env" for a in aliases)
+
+    def built_by_hand(self) -> list[int]:
+        """Find every child environment not taken from hermetic.env.
+
+        Returns:
+            The line of each, sorted.
+
+        """
+        refused: set[int] = set()
+        pending: list[tuple[str, str]] = []
+        done: set[tuple[str, str]] = set()
+
+        def judge(value: ast.AST, at: ast.AST) -> None:
+            verdict = self.hermetic(value, frozenset())
+            function = self.scope(at)
+            if verdict is None and isinstance(function, FUNCTIONS):
+                pending.append((function.name, dotted(value) or ""))
+            elif not verdict:
+                refused.add(value.lineno)
+
+        calls = [n for n in ast.walk(self.module) if isinstance(n, ast.Call)]
+        for call in calls:
+            spelled = self.qualify(call.func)
+            if not starts_process(spelled):
+                continue
+            for value in given_environment(call, spelled or ""):
+                judge(value, call)
+        while pending:
+            forwarded = pending.pop()
+            if forwarded in done:
+                continue
+            done.add(forwarded)
+            for value, call in self.passed(*forwarded, calls):
+                judge(value, call)
+        return sorted(refused)
+
+    def passed(
+        self, function: str, param: str, calls: list[ast.Call]
+    ) -> list[tuple[ast.AST, ast.Call]]:
+        """Find what each call of a file's own function passes a parameter.
+
+        Returns:
+            Each passed value with its call.
+
+        """
+        names = self.params[function]
+        bound = 1 if names[:1] in (["self"], ["cls"]) else 0
+        out = []
+        for call in calls:
+            if (dotted(call.func) or "").rpartition(".")[2] != function:
+                continue
+            given = [k.value for k in call.keywords if k.arg == param]
+            index = names.index(param) - (
+                bound if isinstance(call.func, ast.Attribute) else 0
+            )
+            if not given and 0 <= index < len(call.args):
+                given = [call.args[index]]
+            out += [(value, call) for value in given]
+        return out
 
 
 def listed_test_files() -> list[str]:
@@ -376,6 +633,106 @@ class TheLaw(unittest.TestCase):
             for line in copies((CANON / path).read_text(encoding="utf-8"))
         ]
         self.assertEqual([], offenders)
+
+    def test_no_test_builds_a_child_environment_by_hand(self) -> None:
+        """Every child environment starts from hermetic.env (#1542)."""
+        offenders = [
+            f"{path}:{line}"
+            for path in listed_test_files()
+            if path not in EXCEPTED
+            for line in Environments(
+                (CANON / path).read_text(encoding="utf-8")
+            ).built_by_hand()
+        ]
+        self.assertEqual([], offenders)
+
+    def test_each_way_to_build_an_environment_is_judged(self) -> None:
+        """Planted: hand-built environments refused by line; derived ones pass."""
+        head = "import subprocess\n"
+        refused = {
+            "display": head + 'subprocess.run(a, env={"PATH": p})\n',
+            "dict()": head + "subprocess.run(a, env=dict(PATH=p))\n",
+            "a name": head + 'e = {"PATH": p}\nsubprocess.run(a, env=e)\n',
+            "an attribute": head
+            + 'self.env = {"A": "1"}\nsubprocess.run(a, env=self.env)\n',
+            "a wrapper's parameter": head
+            + "def run(env):\n    subprocess.run(a, env=env)\n"
+            + 'run({"PATH": p})\n',
+            "os.exec": (
+                "import os\nos.execve(p, a, {'PATH': p})\nos.execvpe(p, a, env={})\n"
+            ),
+        }
+        lines = {
+            "display": [2],
+            "dict()": [2],
+            "a name": [3],
+            "an attribute": [3],
+            "a wrapper's parameter": [4],
+            "os.exec": [2, 3],
+        }
+        for name, source in refused.items():
+            with self.subTest(name):
+                self.assertEqual(lines[name], Environments(source).built_by_hand())
+
+        allowed = {
+            "the call": head + "subprocess.run(a, env=hermetic.env(A='1'))\n",
+            "extended": head + "subprocess.run(a, env=hermetic.env() | {'A': '1'})\n",
+            "spread": head + "subprocess.run(a, env={**hermetic.env(), 'A': '1'})\n",
+            "a name, then edited": head
+            + "e = hermetic.env()\ne.pop('A', None)\nsubprocess.run(a, env=e)\n",
+            "a wrapper": head
+            + "def clean():\n    return hermetic.env(A='1')\n"
+            + "subprocess.run(a, env=clean())\n",
+            "an alias": head + "h = hermetic.env\nsubprocess.run(a, env=h())\n",
+            "a filter": head
+            + "e = {k: v for k, v in hermetic.env().items() if k}\n"
+            + "subprocess.run(a, env=e)\n",
+            "a wrapper's parameter": head
+            + "def run(env):\n    subprocess.run(a, env=env)\n"
+            + "run(hermetic.env())\n",
+            "no env": head + "subprocess.run(a)\n",
+            "not a process": "f(env={'A': '1'})\n",
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual([], Environments(source).built_by_hand())
+
+    def test_every_spelling_of_a_process_start_is_judged(self) -> None:
+        """Planted: each import form and each starter, refused at its line."""
+        hand = "{'PATH': p}"
+        refused = {
+            "import as": f"import subprocess as sp\nsp.run(a, env={hand})\n",
+            "from import": f"from subprocess import run\nrun(a, env={hand})\n",
+            "from import as": (
+                f"from subprocess import Popen as Spawn\nSpawn(a, env={hand})\n"
+            ),
+            "os as": f"import os as o\no.execve(p, a, {hand})\n",
+            "from os": f"from os import execve\nexecve(p, a, {hand})\n",
+            "posix_spawn": f"import os\nos.posix_spawn(p, a, {hand})\n",
+            "posix_spawnp env=": f"import os\nos.posix_spawnp(p, a, env={hand})\n",
+            "asyncio exec": (
+                f"import asyncio\nasyncio.create_subprocess_exec(p, env={hand})\n"
+            ),
+            "asyncio shell": (
+                "from asyncio import create_subprocess_shell as sh\n"
+                f"sh(p, env={hand})\n"
+            ),
+            "conditional": (
+                "import subprocess\n"
+                f"subprocess.run(a, env=hermetic.env() if c else {hand})\n"
+            ),
+        }
+        for name, source in refused.items():
+            with self.subTest(name):
+                self.assertEqual([2], Environments(source).built_by_hand())
+        allowed = {
+            "import as": "import subprocess as sp\nsp.run(a, env=hermetic.env())\n",
+            "posix_spawn": "import os\nos.posix_spawn(p, a, hermetic.env())\n",
+            "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual([], Environments(source).built_by_hand())
 
     def test_every_spelling_of_a_copy_is_found(self) -> None:
         """Planted: each way to read the environment whole, at its line."""

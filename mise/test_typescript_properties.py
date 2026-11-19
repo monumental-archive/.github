@@ -157,13 +157,13 @@ def run(
         out.mkdir()
         plant(root, files, runner=runner)
         path = [str(Path(PYTHON).parent), str(Path(GIT).parent), "/usr/bin", "/bin"]
-        environ = {
-            "PATH": os.pathsep.join(path),
-            "HOME": scratch,
-            "ORG_BELT_DIR": str(BELT),
-            "STUB_OUT": str(out),
-            **(env or {}),
-        }
+        environ = hermetic.env(
+            PATH=os.pathsep.join(path),
+            HOME=scratch,
+            ORG_BELT_DIR=str(BELT),
+            STUB_OUT=str(out),
+            **env or {},
+        )
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", body],
             cwd=root,

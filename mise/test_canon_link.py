@@ -21,6 +21,8 @@ import subprocess
 import tempfile
 import unittest
 
+import hermetic
+
 SCRIPT = (
     pathlib.Path(__file__).resolve().parent.parent
     / ".github"
@@ -76,14 +78,14 @@ class LinkTheCanonTree(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, str(script)],
-            env={
-                "PATH": os.environ["PATH"],
-                **({"CANON_REPOSITORY": canon} if canon is not None else {}),
-                "GITHUB_REPOSITORY": repository,
-                "GITHUB_SHA": SHA,
-                "GITHUB_WORKSPACE": str(self.workspace),
-                "GITHUB_OUTPUT": str(self.output),
-            },
+            env=hermetic.env(
+                PATH=os.environ["PATH"],
+                **{"CANON_REPOSITORY": canon} if canon is not None else {},
+                GITHUB_REPOSITORY=repository,
+                GITHUB_SHA=SHA,
+                GITHUB_WORKSPACE=str(self.workspace),
+                GITHUB_OUTPUT=str(self.output),
+            ),
             capture_output=True,
             text=True,
             check=False,

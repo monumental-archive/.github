@@ -37,10 +37,17 @@ import os
 import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "security-release.sh"
@@ -228,16 +235,16 @@ class Repo:
         # The stand-ins, then the linked real tools, and nothing else:
         # whether `go` exists is a row's decision, never the machine's.
         path = os.pathsep.join([str(self.bin), str(self.tools)])
-        env = {
-            "PATH": path,
-            "HOME": str(self.root),
-            "FAKE": str(self.fake),
-            "PLAN": str(self.root / "plan.json"),
-            "GITHUB_REPOSITORY": "monumental-archive/stele",
-            "GITHUB_OUTPUT": str(out),
-            "GH_TOKEN": "not-a-token",
-            "ORG_CANON_DIR": str(self.canon),
-        }
+        env = hermetic.env(
+            PATH=path,
+            HOME=str(self.root),
+            FAKE=str(self.fake),
+            PLAN=str(self.root / "plan.json"),
+            GITHUB_REPOSITORY="monumental-archive/stele",
+            GITHUB_OUTPUT=str(out),
+            GH_TOKEN="not-a-token",  # ruff: ignore[hardcoded-password-func-arg]
+            ORG_CANON_DIR=str(self.canon),
+        )
         env.update(overrides)
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
