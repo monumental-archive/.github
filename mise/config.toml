@@ -2604,18 +2604,12 @@ dir = "{{cwd}}"
 # in codecov/umbrella, read 2026-11-19): four exact names, at the root
 # or directly under dev/ or .github/.
 run = '''
-found=""
-for dir in "" dev/ .github/; do
-  for name in codecov.yml .codecov.yml codecov.yaml .codecov.yaml; do
-    if git ls-files --error-unmatch -- "${dir}${name}" > /dev/null 2>&1; then
-      found="${found}  ${dir}${name}"$'\n'
-    fi
-  done
-done
+# Brace expansion names all twelve; git ls-files prints the tracked ones.
+found=$(git ls-files -- {,dev/,.github/}{codecov,.codecov}.{yml,yaml})
 if [[ -n ${found} ]]; then
   {
     echo "lint:codecov-yml: tracked Codecov config overrides the org's Global YAML:"
-    printf "%s" "${found}"
+    while IFS= read -r f; do echo "  ${f}"; done <<< "${found}"
     echo "  the org turns Codecov's statuses off once, org-wide (#1532);"
     echo "  remove the file; docs/runbook.md's Codecov entry holds the rule"
   } >&2
