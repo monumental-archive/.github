@@ -172,13 +172,13 @@ def fetch(url: str, repo: str) -> tuple[str, str]:
         FileNotFoundError: curl is not on PATH.
 
     """
-    curl = shutil.which("curl")
-    if curl is None:
+    if shutil.which("curl") is None:
         message = "curl missing"
         raise FileNotFoundError(message)
     done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        # ruff: ignore[start-process-with-partial-path] - curl is resolved on PATH, as audit:badges runs it
         [
-            curl,
+            "curl",
             "-s",
             "--retry",
             "3",
