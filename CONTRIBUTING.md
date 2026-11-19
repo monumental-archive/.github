@@ -110,8 +110,8 @@ own work and adds the task that runs it to its row.
 [#1358]: https://github.com/monumental-archive/.github/issues/1358
 [#1359]: https://github.com/monumental-archive/.github/issues/1359
 [#1360]: https://github.com/monumental-archive/.github/issues/1360
-[#1549]: https://github.com/monumental-archive/.github/issues/1549
 [#1546]: https://github.com/monumental-archive/.github/issues/1546
+[#1549]: https://github.com/monumental-archive/.github/issues/1549
 [go-branches]: docs/tooling-verdicts.md
 [signer#86]: https://github.com/monumental-archive/signer/issues/86
 [iiif-server#212]: https://github.com/monumental-archive/iiif-server/issues/212
