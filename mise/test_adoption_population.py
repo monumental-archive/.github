@@ -161,7 +161,7 @@ class TestObligations(unittest.TestCase):
         self.assertNotIn("source-attest", self.names(member(tracks=["build"])))
 
     def test_tags_add_the_release_machinery_whatever_the_tracks(self) -> None:
-        """A tag is an act, not a claim: an excluded repo that released owes it."""
+        """A tag is an act, not a claim: a released repo owes it (#510)."""
         owed = self.names(member(tracks=[], visibility="private", tagged=True))
         self.assertIn("release", owed)
         self.assertIn("publish", owed)
