@@ -69,10 +69,26 @@ test("one", () => {
 
 # The repository's runner: records what it was handed, then writes the
 # report vitest's JSON reporter would. STUB_SKIP leaves one file out of
-# the report; STUB_EXIT is its exit status.
+# the report; STUB_EXIT is its exit status. Asked to `list`, it answers
+# with STUB_COLLECTS, the repository's own collection.
 STUB = """\
 #!/usr/bin/env bash
 out="${STUB_OUT:?}"
+if [[ $1 == list ]]; then
+  # The files the repository's own config collects: STUB_COLLECTS,
+  # space-separated, as `vitest list --filesOnly --json=<path>` writes.
+  printf '%s\\n' "$@" > "${out}/list-argv"
+  for arg in "$@"; do
+    [[ ${arg} == --json=* ]] && listing="${arg#--json=}"
+  done
+  entries=""
+  for f in ${STUB_COLLECTS:-}; do
+    entries+="${entries:+,}{\\"file\\": \\"${PWD}/${f}\\"}"
+  done
+  echo "[${entries}]" > "${listing:?}"
+  echo "listed"
+  exit "${STUB_LIST_EXIT:-0}"
+fi
 printf '%s\\n' "$@" > "${out}/argv"
 echo "${ORG_PROPERTY_SEED} ${ORG_PROPERTY_RUNS}" > "${out}/env"
 config=""
@@ -345,6 +361,48 @@ class Gate(unittest.TestCase):
         files = {**GATE_FILES, "vite.config.ts": "export default {};\n"}
         done = run(GATE, files)
         self.assertIn("200 runs per property, vitest.config.ts\n", done.stdout)
+
+    def test_a_config_excluding_the_properties_passes(self) -> None:
+        """The repo's own run collects only ordinary tests: green."""
+        done = run(GATE, GATE_FILES, env={"STUB_COLLECTS": "src/c.test.ts"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIsNotNone(done.argv)
+
+    def test_a_config_collecting_a_property_is_red_by_name(self) -> None:
+        """The repo's own run would run a property unseeded: red, the fix."""
+        done = run(
+            GATE,
+            GATE_FILES,
+            env={"STUB_COLLECTS": "src/c.test.ts src/b.prop.test.tsx"},
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            "test:typescript-properties: the repository's own vitest run collects"
+            " these property files,\n"
+            "  so its test task runs them a second time with no seed:\n"
+            "    src/b.prop.test.tsx\n"
+            "  add the property pattern to test.exclude in vitest.config.ts,"
+            " beside vitest's\n"
+            "  defaults (configDefaults from vitest/config):\n"
+            '    exclude: [...configDefaults.exclude, "**/*.prop.test.*"],\n',
+        )
+        self.assertIsNone(done.argv, "nothing may run before the refusal")
+
+    def test_a_listing_that_fails_is_red(self) -> None:
+        """Refuse when vitest cannot resolve the repo's config: red, its output kept."""
+        done = run(GATE, GATE_FILES, env={"STUB_LIST_EXIT": "1"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(
+            "test:typescript-properties: vitest could not list the files the"
+            " repository's own config collects:\n  listed\n",
+            done.stderr,
+        )
+
+    def test_the_audit_does_not_ask(self) -> None:
+        """The refusal is the gate's: the audit runs regardless."""
+        done = run(AUDIT, AUDIT_FILES, env={"STUB_COLLECTS": "a.prop.test.ts"})
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_a_failing_property_is_red(self) -> None:
         """The runner's red is the leg's red, its status kept."""

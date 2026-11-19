@@ -2717,6 +2717,19 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
     generated example) and two gate runs of one commit print the same
     lines. A failing property still throws fast-check's own report:
     counterexample `[10]` for `n < 10`, shrunk, with its replay path.
+  - A `*.prop.test.ts` file also matches vitest's default
+    `*.test.ts` include, so a repository's own `vitest run` would
+    run its properties a second time, unseeded, in the same gate.
+    Ruled 2026-11-19 (on #1549): the gate leg asks vitest which files
+    the repository's own config collects (`vitest list --filesOnly
+    --json`, which evaluates the config and, measured on
+    monumental-archive's, runs no `globalSetup`) and is red by name on
+    any property file in that set, with the line to add:
+    `exclude: [...configDefaults.exclude, "**/*.prop.test.*"]`. With
+    that line the probe tree's leg held; without it the leg was red
+    before running anything. Renaming properties outside the default
+    include (`*.prop.ts`) and a lint reading the config as text are
+    refused in the ruling.
   The gate's seed is fixed (1336) at 200 runs; the cron's is fresh,
   printed first and taken from `ORG_PROPERTY_SEED` when set, at
   10,000. A property restating `seed`, `numRuns` or

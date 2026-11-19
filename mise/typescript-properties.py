@@ -46,6 +46,9 @@ Subcommands, run from the repository root:
                              DIR; the property files come on stdin
   verify REPORT FILE...      exits 1 unless every FILE ran, with at
                              least one test, in vitest's JSON report
+  collected LIST FILE...     exits 1, printing each, when a FILE is in
+                             `vitest list --filesOnly --json`'s LIST:
+                             the repository's own run collects it
 
 Exits 0 when clean, 1 on a finding, 2 on a usage error.
 """
@@ -273,6 +276,25 @@ def verify(report: str, files: list[str]) -> int:
     return 1 if missing else 0
 
 
+def collected(listing: str, files: list[str]) -> int:
+    """Name each property file the repository's own vitest run collects.
+
+    Returns:
+        0 when none is, 1 when one is or the listing cannot be read.
+
+    """
+    try:
+        data = json.loads(Path(listing).read_text(encoding="utf-8"))
+        found = {str(Path(entry["file"]).resolve()) for entry in data}
+    except (OSError, ValueError, TypeError, KeyError) as err:
+        print(f"no readable vitest file list at {listing} ({err.__class__.__name__})")
+        return 1
+    leaked = [f for f in files if str(Path(f).resolve()) in found]
+    for name in leaked:
+        print(name)
+    return 1 if leaked else 0
+
+
 def main(argv: list[str]) -> int:
     """Dispatch a subcommand.
 
@@ -290,6 +312,8 @@ def main(argv: list[str]) -> int:
         return stage(args[0], args[1] if len(args) > 1 else None, files)
     if command == "verify" and len(args) >= VERIFY_MIN_ARGS:
         return verify(args[0], args[1:])
+    if command == "collected" and len(args) >= VERIFY_MIN_ARGS:
+        return collected(args[0], args[1:])
     print(__doc__.split("Subcommands", 1)[0].strip(), file=sys.stderr)
     return EXIT_USAGE
 

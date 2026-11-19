@@ -113,6 +113,33 @@ while IFS= read -r f; do
   args+=("${f}")
 done <<< "${files}"
 
+# The repository's OWN run must not collect a property file (#1549,
+# ruling of 2026-11-19): its `test` task would run the properties a
+# second time, unseeded, inside the same gate. vitest answers which
+# files it collects from the repository's config as vitest resolves
+# it (`list --filesOnly` loads the config and runs no globalSetup), so
+# this reads the evaluated include/exclude, never the config's text.
+# The gate's question only: the audit is not a gate.
+if [[ ${profile} == gate ]]; then
+  "${vitest}" list --filesOnly --json="${scratch}/collected.json" --root "${PWD}" \
+    > "${scratch}/list.log" 2>&1 || {
+    echo "${label}: vitest could not list the files the repository's own config collects:" >&2
+    sed 's/^/  /' "${scratch}/list.log" >&2
+    exit 1
+  }
+  leaked=$(python3 "${belt}/typescript-properties.py" collected "${scratch}/collected.json" "${args[@]}") || {
+    echo "${label}: the repository's own vitest run collects these property files," >&2
+    echo "  so its test task runs them a second time with no seed:" >&2
+    while IFS= read -r line; do
+      echo "    ${line}" >&2
+    done <<< "${leaked}"
+    echo "  add the property pattern to test.exclude in ${config:-a vitest.config.ts}, beside vitest's" >&2
+    echo "  defaults (configDefaults from vitest/config):" >&2
+    echo '    exclude: [...configDefaults.exclude, "**/*.prop.test.*"],' >&2
+    exit 1
+  }
+fi
+
 if [[ ${profile} == audit ]]; then
   echo "${label}: seed ${seed} (reproduce: ORG_PROPERTY_SEED=${seed})"
 fi

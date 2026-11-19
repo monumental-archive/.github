@@ -3638,6 +3638,10 @@ dir = "{{cwd}}"
 # header: vitest refuses a setup file on its command line, so a wrapper
 # config imports the repository's own and adds the belt's.
 #
+# A repository whose own vitest run would also collect a property
+# file is red by name first (the 2026-11-19 ruling on #1549): its
+# `test` would run them again, unseeded, in this same gate.
+#
 # Named in `ci` explicitly, the `test:pgrx` precedent; skips clean,
 # by name, where no tracked lockfile holds fast-check.
 run = '''
