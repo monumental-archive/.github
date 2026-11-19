@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-"""previous-release.py's guard and fetch, on any tag `gh` answers.
+"""previous-release.py's one predecessor, on any graph and any listing.
 
-The properties of `test_pgrx_build.py`'s PreviousRelease rows (#1556),
-over generated tags, versions, crate directories and asset listings.
-`gh` and `tar` are replaced in-process by the row's answers.
+The properties of `test_pgrx_build.py`'s PreviousRelease and
+OnePredecessor rows (#1556, #1592), over generated upgrade graphs,
+release listings, versions and crate directories. `gh` and `tar` are
+replaced in-process by the row's answers.
 
-The issue's line for this helper read "`latest_tag` is the greatest
-version whatever the order"; read in full, the helper keeps no listing
-to order: `latest_tag` is GitHub's own latest release, as `gh release
-view` names it. The properties are sharpened to what it decides:
+The predecessor is no longer GitHub's latest release (#1592): it is the
+newest version the extension's upgrade graph upgrades TO, other than the
+version under release, that a non-draft release carries tarballs for,
+and that release's tag whatever it is named. So:
 
-- V: the guard refuses exactly when the latest tag is `v<prev>`, prev is
-  not this version, that release shipped this extension, and the
-  upgrade script `<crate>/sql/<name>--<prev>--<version>.sql` is absent;
-  the refusal names that path. Every other path exits 0, and a failed
-  asset read exits with gh's own status.
+- V: `predecessor` is the numerically greatest graph target other than
+  the version, among those the listing carries, whatever order the
+  listing and the directory come in, with the first release in listing
+  order that carries it; nothing when no target is carried.
+- V: the guard refuses exactly when the listing was read, this version
+  is not already carried, a predecessor exists, and the upgrade script
+  `<crate>/sql/<name>--<prev>--<version>.sql` is absent; the refusal
+  names that path and the predecessor's release. Every other path
+  exits 0, and a failed listing read exits with gh's own status.
 - V: the extension's name is what `basename DIR | tr - _` prints, for
   any crate directory below the checkout, trailing slashes or not.
-- R: on any tag text and any `gh` answer, guard and fetch exit with
+- R: on any listing text and any `gh` answer, guard and fetch exit with
   0, 1 or the tool's own status; neither dies with anything else.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
@@ -35,7 +40,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from hypothesis import assume, example, given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -45,19 +50,74 @@ _SPEC = importlib.util.spec_from_file_location(
 previous = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(previous)
 
-VERSION = st.from_regex(
-    r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}(-rc\.[0-9])?", fullmatch=True
+# A small pool, so graphs and listings meet: 1.0.10 beside 1.0.2 is the
+# order a string sort gets wrong.
+VERSION = st.sampled_from(["0.2.0", "1.0.2", "1.0.10", "1.2.3", "1.3.0", "10.0.0"])
+NAME = st.sampled_from(["demo", "demo_ext"])
+TAG = st.one_of(
+    VERSION.map("v{}".format),
+    st.from_regex(r"[a-z-]{1,8}v[0-9.]{1,6}", fullmatch=True),
 )
 SEGMENT = st.from_regex(r"[A-Za-z0-9_.][A-Za-z0-9_.-]{0,8}", fullmatch=True).filter(
     lambda s: s not in {".", ".."}
 )
 CRATE = st.lists(SEGMENT, min_size=1, max_size=3).map("/".join)
-# Whatever `gh` may print for the latest tag: a release tag, this
-# version's own, or any text.
-TAG = st.one_of(VERSION.map("v{}".format), st.text(max_size=12))
+# Numerically 1.0.10 is newer; as text it sorts first.
+CARRIES_1_0_10 = "demo-1.0.10-pg18-linux-amd64.tar.gz"
+CARRIES_1_0_2 = "demo-1.0.2-pg18-linux-amd64.tar.gz"
+EDGES = st.lists(st.tuples(VERSION, VERSION), max_size=5)
 
 
-def fake(tag: str, tag_rc: int, count: str, assets_rc: int, tar_rc: int = 0) -> object:
+@st.composite
+def rows(draw: st.DrawFn, name: str) -> list[tuple[str, str]]:
+    """Draw a listing: this extension's tarballs, another's, and noise.
+
+    Returns:
+        `(tag, asset)` per asset, in listing order.
+
+    """
+    asset = st.one_of(
+        VERSION.map(lambda v: f"{name}-{v}-pg18-linux-amd64.tar.gz"),
+        VERSION.map(lambda v: f"other-{v}-pg18-linux-amd64.tar.gz"),
+        st.sampled_from(["checksums.txt", f"{name}.cdx.json"]),
+    )
+    return draw(st.lists(st.tuples(TAG, asset), max_size=8))
+
+
+def model(
+    listing: list[tuple[str, str]],
+    edges: list[tuple[str, str]],
+    name: str,
+    version: str,
+) -> tuple[str, str] | None:
+    """Answer the predecessor from its definition, independently.
+
+    Returns:
+        `(version, tag)`, or None.
+
+    """
+    carried = {}
+    for tag, asset in listing:
+        for _, to in edges:
+            if asset.startswith(f"{name}-{to}-pg"):
+                carried.setdefault(to, tag)
+    carried.pop(version, None)
+    if not carried:
+        return None
+    newest = max(carried, key=lambda v: [int(p) for p in v.split(".")])
+    return newest, carried[newest]
+
+
+def lay(sql: Path, name: str, edges: list[tuple[str, str]]) -> None:
+    """Write the graph's scripts, empty, beside a README and a stranger's."""
+    sql.mkdir(parents=True, exist_ok=True)
+    (sql / "README.md").write_text("", encoding="utf-8")
+    (sql / "other--0.2.0--10.0.0.sql").write_text("", encoding="utf-8")
+    for frm, to in edges:
+        (sql / f"{name}--{frm}--{to}.sql").write_text("", encoding="utf-8")
+
+
+def fake(listing: str, list_rc: int, tar_rc: int = 0, dl_rc: int = 0) -> object:
     """Answer gh and tar as the row says.
 
     Returns:
@@ -68,13 +128,21 @@ def fake(tag: str, tag_rc: int, count: str, assets_rc: int, tar_rc: int = 0) -> 
     def run(argv: list[str], **_: object) -> SimpleNamespace:
         if argv[0] == previous.TAR:
             return SimpleNamespace(returncode=tar_rc, stdout="")
-        if "tagName" in argv:
-            return SimpleNamespace(returncode=tag_rc, stdout=f"{tag}\n")
-        if "assets" in argv:
-            return SimpleNamespace(returncode=assets_rc, stdout=f"{count}\n")
-        return SimpleNamespace(returncode=assets_rc, stdout="")
+        if "api" in argv:
+            return SimpleNamespace(returncode=list_rc, stdout=listing)
+        return SimpleNamespace(returncode=dl_rc, stdout="")
 
     return SimpleNamespace(run=run, PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL)
+
+
+def served(listing: list[tuple[str, str]]) -> str:
+    """Print a listing as the helper's jq does, a line per asset.
+
+    Returns:
+        The lines.
+
+    """
+    return "".join(f"{tag}\t{asset}\n" for tag, asset in listing)
 
 
 def quietly(call: object, *args: object) -> tuple[int, str]:
@@ -90,93 +158,76 @@ def quietly(call: object, *args: object) -> tuple[int, str]:
     return code, out.getvalue()
 
 
-@st.composite
-def guard_cases(draw: st.DrawFn) -> SimpleNamespace:
-    """Draw what the guard reads: gh's two answers and the tree.
+class OneAnswer(unittest.TestCase):
+    """V: the predecessor is the definition's, in any order."""
 
-    Returns:
-        The case.
-
-    """
-    return SimpleNamespace(
-        tag=draw(TAG),
-        tag_rc=draw(st.sampled_from([0, 1])),
-        version=draw(VERSION),
-        crate=draw(CRATE),
-        count=draw(st.sampled_from(["0", "1", "3"])),
-        assets_rc=draw(st.sampled_from([0, 4])),
-        scripted=draw(st.sampled_from(["script", "none"])) == "script",
+    @given(rows("demo"), EDGES, VERSION, st.booleans())
+    @example(
+        listing=[("v1.0.10", CARRIES_1_0_10), ("v1.0.2", CARRIES_1_0_2)],
+        edges=[("0.2.0", "1.0.2"), ("1.0.2", "1.0.10")],
+        version="1.2.3",
+        backwards=False,
     )
-
-
-def stranded(tag: str, version: str, crate: str) -> SimpleNamespace:
-    """Write a case whose previous release shipped and has no script.
-
-    Returns:
-        The case.
-
-    """
-    return SimpleNamespace(
-        tag=tag,
-        tag_rc=0,
-        version=version,
-        crate=crate,
-        count="2",
-        assets_rc=0,
-        scripted=False,
-    )
-
-
-def plant(script: str) -> bool:
-    """Write the upgrade script, where this filesystem can hold its name.
-
-    Returns:
-        Whether it was written (macOS refuses some code points; the
-        runner's filesystem does not, so such a name is no example).
-
-    """
-    try:
-        Path(script).parent.mkdir(parents=True, exist_ok=True)
-        Path(script).write_text("", "utf-8")
-    except OSError:
-        return False
-    return True
+    def test_the_greatest_carried_target(
+        self,
+        listing: list[tuple[str, str]],
+        edges: list[tuple[str, str]],
+        version: str,
+        backwards: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
+    ) -> None:
+        """The newest installable target, its first carrier, never `version`."""
+        want = model(listing, edges, "demo", version)
+        with tempfile.TemporaryDirectory() as tmp:
+            sql = Path(tmp) / "sql"
+            lay(sql, "demo", edges[::-1] if backwards else edges)
+            got = previous.predecessor(listing, sql, "demo", version)
+        self.assertEqual(want, None if got is None else tuple(got))
 
 
 class GuardRefusesExactly(unittest.TestCase):
     """V: a stranded installation, and only that, is refused."""
 
-    @given(guard_cases())
-    @example(stranded("v1.0.0", "1.1.0", "crates/edtf-pg"))
-    @example(stranded("v1.1.0", "1.1.0", "crates/edtf-pg"))
-    def test_refused_exactly_when_stranded(self, case: SimpleNamespace) -> None:
+    @given(st.data(), CRATE, EDGES, VERSION, st.sampled_from([0, 4]), st.booleans())
+    def test_refused_exactly_when_stranded(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per drawn input
+        self,
+        data: st.DataObject,
+        crate: str,
+        edges: list[tuple[str, str]],
+        version: str,
+        list_rc: int,
+        scripted: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
+    ) -> None:
         """The model's verdict is the guard's."""
-        previous.subprocess = fake(case.tag, case.tag_rc, case.count, case.assets_rc)
-        name = posixpath.basename(case.crate).replace("-", "_")
-        latest = case.tag.strip() if case.tag_rc == 0 else ""
-        prev = latest.removeprefix("v")
-        script = f"{case.crate}/sql/{name}--{prev}--{case.version}.sql"
+        name = posixpath.basename(crate).replace("-", "_")
+        listing = data.draw(rows(name))
+        previous.subprocess = fake(served(listing), list_rc)
+        rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
+        prev = model(listing, edges, name, version)
         here = Path.cwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                if case.scripted:
-                    assume(plant(script))
-                code, out = quietly(previous.guard, "o/r", case.version, case.crate)
+                lay(Path(crate) / "sql", name, edges)
+                script = ""
+                if prev is not None:
+                    script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
+                    if scripted:
+                        Path(script).write_text("", encoding="utf-8")
+                code, out = quietly(previous.guard, "o/r", version, crate)
             finally:
                 os.chdir(here)
-        if not latest.startswith("v") or prev == case.version:
-            want = 0
-        elif case.assets_rc:
-            want = case.assets_rc
-        elif case.count == "0" or case.scripted:
+        if list_rc:
+            want = list_rc
+        elif rerun or prev is None or scripted or (prev[0], version) in edges:
             want = 0
         else:
             want = 1
         self.assertEqual(code, want, out)
         if want == 1:
             self.assertIn(
-                f"::error::no upgrade path {script} from published {prev}", out
+                f"::error::no upgrade path {script} from published {prev[0]}"
+                f" ({prev[1]})",
+                out,
             )
 
 
@@ -192,26 +243,26 @@ class ExtensionName(unittest.TestCase):
         )
 
 
-class AnyTag(unittest.TestCase):
-    """R: any tag text and any gh answer are answered by a status."""
+class AnyListing(unittest.TestCase):
+    """R: any listing text and any gh answer are answered by a status."""
 
     @given(
-        st.text(max_size=16),
+        st.text(max_size=40),
         st.sampled_from([0, 1, 4]),
-        st.text(max_size=4),
-        st.sampled_from([0, 1, 4]),
+        st.sampled_from([0, 1]),
         st.sampled_from([0, 2]),
         VERSION,
     )
-    def test_guard_and_fetch_answer(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per gh answer
-        self, tag: str, tag_rc: int, count: str, rc: int, tar_rc: int, version: str
+    def test_guard_and_fetch_answer(
+        self, listing: str, rc: int, dl_rc: int, tar_rc: int, version: str
     ) -> None:
         """A status, never a raise."""
-        previous.subprocess = fake(tag, tag_rc, count, rc, tar_rc)
+        previous.subprocess = fake(listing, rc, tar_rc, dl_rc)
         here = Path.cwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
+                lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
                 code, _ = quietly(previous.guard, "o/r", version, "crate")
                 self.assertIn(code, {0, 1, rc})
                 args = SimpleNamespace(
@@ -224,7 +275,7 @@ class AnyTag(unittest.TestCase):
                     dest="prev",
                 )
                 code, _ = quietly(previous.fetch, args)
-                self.assertIn(code, {0, tar_rc})
+                self.assertIn(code, {0, rc, tar_rc})
             finally:
                 os.chdir(here)
 
