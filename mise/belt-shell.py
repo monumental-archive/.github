@@ -220,6 +220,37 @@ def locate(text: str) -> dict[str, tuple[int, str]]:
     return found
 
 
+def env_names(value: object) -> set[str]:
+    """Name the variables an `env` value sets, private `_` keys apart.
+
+    mise takes `[env]` as one table or `[[env]]` as an array of them,
+    applied in order (#1555: the array raised AttributeError here). Any
+    other shape sets nothing this check can name.
+
+    Returns:
+        The variable names.
+
+    """
+    tables = value if isinstance(value, list) else [value]
+    return {
+        key
+        for table in tables
+        if isinstance(table, dict)
+        for key in table
+        if not key.startswith("_")
+    }
+
+
+def table_of(value: object) -> dict:
+    """Take a TOML value as a table, or as nothing when it is not one.
+
+    Returns:
+        The table, or an empty one.
+
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def read(path: Path) -> Config:
     """Read one mise config: its task bodies, `[env]` names and shell.
 
@@ -230,12 +261,12 @@ def read(path: Path) -> Config:
     text = path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     at = locate(text)
-    env = {k for k in (data.get("env") or {}) if not k.startswith("_")}
+    env = env_names(data.get("env"))
     bodies: list[Body] = []
-    for name, task in (data.get("tasks") or {}).items():
+    for name, task in table_of(data.get("tasks")).items():
         if not isinstance(task, dict):
             continue
-        env |= {k for k in (task.get("env") or {}) if not k.startswith("_")}
+        env |= env_names(task.get("env"))
         run = task.get("run")
         # mise also takes a list of commands, and `file =` instead of a
         # body. Every command of a list is CHECKED; none is rewritten,
@@ -249,7 +280,7 @@ def read(path: Path) -> Config:
             bodies.append(
                 Body(name, source, line, "" if listed else delim, not listed),
             )
-    shell = (data.get("task_config") or {}).get("shell")
+    shell = table_of(data.get("task_config")).get("shell")
     return Config(bodies, env, shell if isinstance(shell, str) else None)
 
 
