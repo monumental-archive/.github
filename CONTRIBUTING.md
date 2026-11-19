@@ -56,7 +56,17 @@ executable form:
    already over the ceiling are listed by file and step name in
    `security/workflow-shell-debt.txt`, which only shrinks:
    `fix:workflow-shell` lowers a number or removes an entry, and nothing
-   adds one. There is no per-block ignore. Where the logic goes:
+   adds one. There is no per-block ignore.
+
+   **Task bodies** are held to the same ceiling by `lint:task-shell`:
+   a mise task's `run` body, in any tracked mise config, holds at most
+   **15** lines counted the same way, a `run` list of commands being
+   one body. The bodies already over it are listed by config file and
+   task name in `security/task-shell-debt.txt`, which only shrinks the
+   same way. `fix:task-shell` generates that file where none exists,
+   in the pull request that takes the pin, and from then on only
+   lowers a number or removes an entry. Where the logic goes, for a
+   block or a body:
    - a block that **judges or emits SLSA evidence** moves to stele,
      one stele issue per capability;
    - **anything else** moves to a helper under the repository's own

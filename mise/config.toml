@@ -2125,6 +2125,57 @@ python3 "${ORG_BELT_DIR}/embedded-shell.py" \
   --ceiling security/workflow-shell-debt.txt --write ${files}
 '''
 
+[tasks."lint:task-shell"]
+description = "A mise task `run` body holds at most 15 lines; the bodies over it are a debt file that only shrinks"
+dir = "{{cwd}}"
+# lint:workflow-shell's ceiling on the second place shell lives (#1544).
+# Task bodies are the largest body of logic in the org that no coverage
+# or mutation figure can reach. Measured 2026-11-19: 136 bodies, 4,483
+# lines, 85 of them over 15 lines holding 4,167. One number for shell,
+# wherever it lives, counted by the same reader: non-blank, non-comment
+# lines, and a `run` given as a list of commands is one body.
+#
+# The bodies over it today are listed in security/task-shell-debt.txt by
+# config file and task name, each with the issue that extracts it. Red on
+# a body over the ceiling and not listed, on a listed body that grew, and
+# on an entry whose body is gone or now fits. No per-task ignore: the debt
+# file is the one exception. Where the logic goes is CONTRIBUTING.md's
+# rule. The selection is lint:belt-shell's, every mise config by name,
+# tracked only. Universal: a repository with a body over the ceiling
+# carries its own debt file, and one with no mise config skips clean.
+run = '''
+files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml")
+[[ -n ${files} ]] || {
+  echo "lint:task-shell: no mise config tracked, skipped"
+  exit 0
+}
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
+python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+  --task-ceiling security/task-shell-debt.txt ${files}
+'''
+
+[tasks."fix:task-shell"]
+description = "Generate the task-shell debt file, or lower shrunk entries and remove stale ones"
+dir = "{{cwd}}"
+# The write-mode sibling of lint:task-shell (#1544). With no debt file it
+# generates one listing every body over the ceiling: that is how the file
+# is written, in the pull request that takes the pin, and never by hand.
+# With a debt file it only settles it down, as fix:workflow-shell does: a
+# listed body that shrank gets its new number, an entry whose body is gone
+# or now fits is removed, and nothing is added.
+run = '''
+files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml")
+[[ -n ${files} ]] || {
+  echo "fix:task-shell: no mise config tracked, nothing to fix"
+  exit 0
+}
+# shellcheck disable=SC2086  # the file list is newline-separated on purpose
+python3 "${ORG_BELT_DIR}/embedded-shell.py" \
+  --task-ceiling security/task-shell-debt.txt --write ${files}
+'''
+
 [tasks."lint:belt-current"]
 description = "This machine's mise and belt are as current as CI's"
 dir = "{{cwd}}"

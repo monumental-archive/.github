@@ -1,0 +1,102 @@
+# Task shell debt (#1544): every mise task `run` body over the 15-line
+# ceiling that lint:task-shell holds, as the tree had it when the ceiling
+# landed. The list only shrinks. lint:task-shell is red on a body over
+# the ceiling that is not listed, on a listed body that grew past its
+# number, and on an entry whose body is gone or now fits;
+# fix:task-shell lowers a number that shrank and removes a stale entry.
+# It writes entries only when this file does not exist: new logic goes
+# to a helper (CONTRIBUTING.md, "Workflow shell").
+#
+# One entry per line, four tab-separated fields: the config file, the
+# task's name, the body's non-blank non-comment lines, and a `#` note
+# naming the issue that removes it. The issue that extracts a body
+# deletes its entry in the same pull request. A body no issue names yet
+# carries `#1544 unassigned`.
+#
+# Generated from the tree by the lint's own counter
+# (mise/embedded-shell.py), never typed.
+mise/config.toml	audit	19	# #1544 unassigned
+mise/config.toml	lint:toml	28	# #1544 unassigned
+mise/config.toml	lint:sql	26	# #1544 unassigned
+mise/config.toml	fix:sql	20	# #1544 unassigned
+mise/config.toml	lint:yaml	21	# #1544 unassigned
+mise/config.toml	lint:biome	51	# #1544 unassigned
+mise/config.toml	fix:biome	32	# #1544 unassigned
+mise/config.toml	lint:biome-domains	79	# #1544 unassigned
+mise/config.toml	lint:python-target	28	# #1544 unassigned
+mise/config.toml	lint:shell	28	# #1544 unassigned
+mise/config.toml	lint:belt-tree	63	# #1544 unassigned
+mise/config.toml	lint:commits	24	# #1544 unassigned
+mise/config.toml	lint:dco	25	# #1544 unassigned
+mise/config.toml	lint:exec-bits	19	# #1544 unassigned
+mise/config.toml	lint:deny	30	# #1544 unassigned
+mise/config.toml	lint:rust	148	# #1544 unassigned
+mise/config.toml	fix:rust	63	# #1544 unassigned
+mise/config.toml	lint:msrv	78	# #1544 unassigned
+mise/config.toml	lint:pg-clippy	50	# #1544 unassigned
+mise/config.toml	lint:gate-surface	23	# #1544 unassigned
+mise/config.toml	lint:go	31	# #1544 unassigned
+mise/config.toml	lint:tsc-flags	25	# #1544 unassigned
+mise/config.toml	lint:types	77	# #1544 unassigned
+mise/config.toml	lint:tsconfig-dials	32	# #1544 unassigned
+mise/config.toml	lint:scaffold-assembly	155	# #1544 unassigned
+mise/config.toml	lint:go-tidy	21	# #1544 unassigned
+mise/config.toml	lint:go-fuzz-seeds	39	# #1544 unassigned
+mise/config.toml	fix:go	16	# #1544 unassigned
+mise/config.toml	audit:go-vulns	45	# #1544 unassigned
+mise/config.toml	audit:blast-radius	26	# #1544 unassigned
+mise/config.toml	audit:attestations	27	# #1544 unassigned
+mise/config.toml	audit:source-vsa	22	# #1544 unassigned
+mise/config.toml	audit:badges	334	# #1544 unassigned
+mise/config.toml	audit:actions	37	# #1544 unassigned
+mise/config.toml	audit:template-pins	45	# #1544 unassigned
+mise/config.toml	audit:canon-pins	83	# #1544 unassigned
+mise/config.toml	audit:org-pins	127	# #1544 unassigned
+mise/config.toml	audit:biome-rules	40	# #1544 unassigned
+mise/config.toml	lint:gate-stub	57	# #1544 unassigned
+mise/config.toml	lint:capability-boundary	17	# #1544 unassigned
+mise/config.toml	lint:release-phases	113	# #1544 unassigned
+mise/config.toml	lint:signer-pin	44	# #1544 unassigned
+mise/config.toml	fix:input-forwarding	30	# #1544 unassigned
+mise/config.toml	lint:source-attest	75	# #1544 unassigned
+mise/config.toml	lint:actions-allowed	42	# #1544 unassigned
+mise/config.toml	audit:actions-allowlist	43	# #1544 unassigned
+mise/config.toml	audit:security-config	25	# #1544 unassigned
+mise/config.toml	lint:from-digests	20	# #1544 unassigned
+mise/config.toml	lint:installer-pinned	20	# #1544 unassigned
+mise/config.toml	lint:cold-attested	100	# #1544 unassigned
+mise/config.toml	coverage:check	27	# #1544 unassigned
+mise/config.toml	coverage:report	40	# #1544 unassigned
+mise/config.toml	lint:fuzz-build	41	# #1544 unassigned
+mise/config.toml	audit:caller-permissions	23	# #1544 unassigned
+mise/config.toml	audit:spec-drift	65	# #1544 unassigned
+mise/config.toml	lint:tracks	31	# #1544 unassigned
+mise/config.toml	audit:release-tags	22	# #1544 unassigned
+mise/config.toml	audit:drafts	131	# #1544 unassigned
+mise/config.toml	audit:citations	79	# #1544 unassigned
+mise/config.toml	audit:adoption	110	# #1544 unassigned
+mise/config.toml	audit:signer-surface	65	# #1544 unassigned
+mise/config.toml	audit:fuzz	46	# #1544 unassigned
+mise/config.toml	audit:coverage-branches	20	# #1544 unassigned
+mise/config.toml	audit:go-fuzz	41	# #1544 unassigned
+mise/config.toml	audit:mutants	18	# #1544 unassigned
+mise/config.toml	lint:licence	17	# #1544 unassigned
+mise/config.toml	lint:citation	25	# #1544 unassigned
+mise/config.toml	lint:bestpractices	54	# #1544 unassigned
+mise/config.toml	lint:badges	28	# #1544 unassigned
+mise/config.toml	lint:release-stub	33	# #1544 unassigned
+mise/config.toml	lint:toolbelt-lock	35	# #1544 unassigned
+mise/config.toml	lint:lock-platforms	21	# #1544 unassigned
+mise/config.toml	audit:lock-arch	63	# #1544 unassigned
+mise/config.toml	audit:lock-idempotent	103	# #1544 unassigned
+mise/config.toml	lint:nested-permissions	30	# #1544 unassigned
+mise/config.toml	lint:audit-scheduled	70	# #1544 unassigned
+mise/config.toml	lint:canon-policy	19	# #1544 unassigned
+mise/config.toml	lint:policy-load	45	# #1544 unassigned
+mise/config.toml	lint:caller-permissions	18	# #1544 unassigned
+mise/config.toml	lint:template-pins	54	# #1544 unassigned
+mise/config.toml	lint:runner-pin	28	# #1544 unassigned
+mise/config.toml	lint:canon-pins	55	# #1544 unassigned
+mise/config.toml	lint:hook-jobs	20	# #1544 unassigned
+mise/config.toml	lint:release-planned	37	# #1544 unassigned
+mise/config.toml	lint:bash-portability	30	# #1544 unassigned
