@@ -28,6 +28,8 @@ import tokenize
 from pathlib import Path
 from typing import NamedTuple, override
 
+import typed_std
+
 PYTHON = frozenset({".py", ".pyi"})
 RUST = frozenset({".rs"})
 SCRIPT = frozenset({".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"})
@@ -168,8 +170,7 @@ def scan(path: str) -> list[Finding]:
 
 def main() -> None:
     """Scan the paths on stdin and report."""
-    listed: str = sys.stdin.read()
-    paths = [p for p in listed.splitlines() if p]
+    paths = [p for p in typed_std.stdin_text().splitlines() if p]
     found = [f for p in paths for f in scan(p)]
     for finding in found:
         print(finding, file=sys.stderr)
