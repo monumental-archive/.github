@@ -35,6 +35,18 @@ comes under the canon's coverage figure and its own mutation run
   test started in a scratch directory found no configuration and died
   in the statistics pass (self-mutants run 44298570855). A hook that
   cannot load it fails the child by name, never silently.
+
+  WHAT A CHILD CAN AND CANNOT DO UNDER MUTATION (#1673), measured on
+  mutmut 3.8.1: a child that IMPORTS a helper's module runs the active
+  mutant; a child that runs the helper AS A SCRIPT never does, because
+  mutmut runs a mutant only when the function's `__module__` equals the
+  module in the mutant's name (`trampoline.py:109`) and a script's
+  functions are in `__main__`. And mutmut records which tests reach a
+  function only in the test process, so a function reached only in a
+  child is "no tests" either way. A "no tests" survivor in a function
+  `security/helper-import-debt.txt` lists is that debt, not a judged
+  mutant: lint:in-process holds the list, and its conversion issue
+  tests the function in-process.
 - `survivors RESULTS`: the mutants `mutmut results --all true` calls
   survived or "no tests", one name per line, for the shell to `show`.
 - `verdict RESULTS SHOWS`: maps every result state to killed, survived
