@@ -56,6 +56,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import startup_hook
+
 LABEL = "audit:mutants: python"
 EXIT_RED = 1
 KILLED = frozenset({"killed", "timeout", "caught by type check", "segfault"})
@@ -491,11 +493,13 @@ def hook(directory: Path) -> int:
         f"{LABEL}: a child's start-up hook cannot load mutmut's configuration"
         f" in {run}: "
     )
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "sitecustomize.py").write_text(
+    # One writer for every belt hook, which then runs the next one on the
+    # path (#1542): a coverage measurement nested inside the mutated suite
+    # puts its own hook first, and Python imports only the first.
+    startup_hook.write(
+        directory,
         f"import sys\nsys.path.append({site!r})\n"
         + CHILD_CONFIG.replace("RUN", repr(run)).replace("REFUSED", repr(refused)),
-        encoding="utf-8",
     )
     return 0
 

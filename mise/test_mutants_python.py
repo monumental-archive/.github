@@ -71,8 +71,9 @@ sys.exit(99)
 # the import a child `python3` without mutmut cannot satisfy.
 TRAMPOLINE = (
     "from mutmut.mutation.trampoline import wrap_in_trampoline\n"
-    "import sys\n"
-    "print(sys.path[-1])\n"
+    "import os\n"
+    "import mutmut\n"
+    "print(os.path.dirname(os.path.dirname(mutmut.__file__)))\n"
 )
 # What every mutated function does first in the statistics pass (mutmut
 # 3.8.1, stats.record_trampoline_hit): read the run's configuration.
@@ -738,11 +739,14 @@ class ChildProcesses(Planted):
             check=False,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertTrue(
-            (hook / "sitecustomize.py")
-            .read_text(encoding="utf-8")
-            .startswith(f"import sys\nsys.path.append({str(VENV['site'])!r})\n"),
+        child = subprocess.run(
+            [sys.executable, "-c", "import sys; print(sys.path[-1])"],
+            env=self.env | {"PYTHONPATH": str(hook)},
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        self.assertEqual((child.returncode, child.stdout), (0, f"{VENV['site']}\n"))
 
     def test_a_tool_with_no_readable_interpreter_is_red(self) -> None:
         """A `mutmut` whose first line names no Python is refused by name."""
