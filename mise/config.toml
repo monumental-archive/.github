@@ -7089,11 +7089,10 @@ dir = "{{cwd}}"
 # default branch the gate job keeps them as an artifact and the badge
 # job uploads that, measuring nothing. It used to re-measure with a
 # toolset of its own in a second task, coverage:report, and hung on
-# main for a day in a test the gate passes. A report left untracked
-# by an earlier run is removed before measuring, so the list is this
-# run's; a tracked file of the same name is the repository's, never
-# touched. A leg that ran and wrote no report is refused here, where
-# it happened (#1386).
+# main for a day in a test the gate passes. Which files, and the
+# refusals of a run that measured or wrote nothing, are the measurement
+# script's `reports` answer, asked before the floor is held so a refusal
+# is never preceded by a hold line. The line is printed last.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
 tracked_py=$(git ls-files -- '*.py') || tracked_py=""
@@ -7110,17 +7109,8 @@ if [[ -z ${applies} ]]; then
   echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), skipped"
   exit 0
 fi
-reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
-for f in "${reports[@]}"; do
-  if [[ -f ${f} ]] && ! git ls-files --error-unmatch -- "${f}" > /dev/null 2>&1; then
-    rm -f -- "${f}"
-  fi
-done
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
-if [[ -z ${legs} ]]; then
-  echo "coverage:check: no leg was measured — a check that reads nothing must not pass" >&2
-  exit 1
-fi
+upload=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports <<< "${legs}") || exit 1
 while read -r leg pct; do
   if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
     echo "coverage:check: ${leg}: ${pct}% is below the derived floor ${floor}%" >&2
@@ -7128,15 +7118,7 @@ while read -r leg pct; do
   fi
   echo "coverage:check: ${leg} leg holds the floor ${floor} (${pct}%)"
 done <<< "${legs}"
-files=""
-for f in "${reports[@]}"; do
-  [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
-done
-if [[ -z ${files} ]]; then
-  echo "coverage:check: the legs above wrote no report — nothing for the badge to upload" >&2
-  exit 1
-fi
-echo "coverage:check: upload ${files}"
+echo "${upload}"
 '''
 
 [tasks."coverage:adopt"]

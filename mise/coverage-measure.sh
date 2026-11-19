@@ -56,14 +56,43 @@ label="${1:-coverage:measure}"
 # Which language legs to run. Default `all`: every caller that reads
 # the percentages wants them all, because the floor is a minimum every
 # leg must hold. A single leg's selector measures that leg alone.
+# `reports` measures nothing: it names the upload reports the last run
+# wrote, below.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | rust-branches | python | typescript | probe) ;;
+  all | go | rust | rust-branches | python | typescript | probe | reports) ;;
   *)
-    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, rust-branches, python, typescript or probe" >&2
+    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust, rust-branches, python, typescript, probe or reports" >&2
     exit 1
     ;;
 esac
+
+# The upload reports, one per leg, in the order the badge job lists them
+# (#1528). `reports` reads an `all` run's leg lines on stdin and prints
+# `<label>: upload <files>`, the line the gate log carries, for the files
+# that run wrote. It refuses a run that measured nothing, and one that
+# wrote no report: a leg that ran and left none is refused where it
+# happened (#1386). An `all` run first removes any report an earlier
+# run left untracked, so the list is that run's; a tracked file of the
+# same name is the repository's and never touched.
+reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
+if [[ ${legs} == reports ]]; then
+  measured=$(cat)
+  if [[ -z ${measured} ]]; then
+    echo "${label}: no leg was measured — a check that reads nothing must not pass" >&2
+    exit 1
+  fi
+  files=""
+  for f in "${reports[@]}"; do
+    [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
+  done
+  if [[ -z ${files} ]]; then
+    echo "${label}: the legs measured wrote no report — nothing for the badge to upload" >&2
+    exit 1
+  fi
+  echo "${label}: upload ${files}"
+  exit 0
+fi
 
 # The repository's own `test` task, as mise resolved it, or nothing. Read
 # with `mise tasks info --json`, the read-only query other belt tasks
@@ -106,6 +135,14 @@ if [[ ${legs} == probe ]]; then
     *) ;;
   esac
   exit 0
+fi
+
+if [[ ${legs} == all ]]; then
+  for f in "${reports[@]}"; do
+    if [[ -f ${f} ]] && ! git ls-files --error-unmatch -- "${f}" > /dev/null 2>&1; then
+      rm -f -- "${f}"
+    fi
+  done
 fi
 
 # EVERY tracked language measures its own leg, because the floor is a

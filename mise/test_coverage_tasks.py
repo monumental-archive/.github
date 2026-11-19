@@ -736,8 +736,8 @@ class CheckUploadLine(CoverageTaskCase):
         )
         self.assertEqual(1, done.returncode, done.stdout)
         self.assertIn(
-            "coverage:check: the legs above wrote no report — nothing for the"
-            " badge to upload",
+            "coverage:check: the legs measured wrote no report — nothing for"
+            " the badge to upload",
             done.stderr,
         )
         self.assertNotIn("upload ", done.stdout)
@@ -847,6 +847,50 @@ class MeasureSelectors(unittest.TestCase):
             )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("go 93.0\nrust 61.5\n", done.stdout)
+
+
+def run_reports(legs: str, files: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run the `reports` selector beside planted reports, legs on stdin.
+
+    Returns:
+        The finished process.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in files:
+            (Path(tmp) / name).write_text("report\n", encoding="utf-8")
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "reports"],
+            cwd=tmp,
+            env=hermetic.env(),
+            input=legs,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
+class ReportsSelector(unittest.TestCase):
+    """`reports` names what a run wrote, and refuses a run of nothing (#1528)."""
+
+    def test_the_line_names_each_report_in_order(self) -> None:
+        """The order the badge job lists them in, whatever exists."""
+        done = run_reports("go 90.0\npython 80.0\n", ["coverage.xml", "coverage.txt"])
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "coverage:test: upload coverage.txt,coverage.xml\n", done.stdout
+        )
+
+    def test_a_run_that_measured_nothing_is_refused(self) -> None:
+        """No leg lines: refused before any report is read."""
+        done = run_reports("", ["coverage.xml"])
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        self.assertIn(
+            "coverage:test: no leg was measured — a check that reads nothing"
+            " must not pass",
+            done.stderr,
+        )
 
 
 if __name__ == "__main__":
