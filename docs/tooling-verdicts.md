@@ -3290,12 +3290,28 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   adds the distribution's package, preloads it
   (`shared_preload_libraries` gains `plpgsql,plpgsql_check`) and starts
   with `plpgsql_check.profiler=on`. The database lives only for the
-  suite, so the reading is taken inside it: the `plpgsql` leg of
-  `mise/coverage-measure.sh` applies where a tracked file declares a
-  PL/pgSQL function and a `test` task exists, runs that task and the
-  tasks it depends on with `ORG_PLPGSQL_COVERAGE` naming a report, and
-  the repository's teardown calls `mise/plpgsql_coverage.py collect
-  <conninfo>` before it stops the database. The helper lists every
+  suite, so the reading is taken inside it: whenever
+  `mise/coverage-measure.sh` runs the `test` task (and its depends) it
+  sets `ORG_PLPGSQL_COVERAGE` naming a report, and the repository's
+  teardown calls `mise/plpgsql_coverage.py collect <conninfo>` before
+  it stops the database. A report written is the leg's answer; the
+  leg searches no file. **Amended 2026-11-20 (#1666):** the first
+  build switched the leg on wherever any tracked file carried the
+  `LANGUAGE` clause, so a README or a fixture reddened a gate, and
+  narrowing that search to `*.sql` would have missed functions declared
+  inside another language's source or created at run time. Instead the
+  floor records the legs it holds (`# legs:` in `.coverage-floor`,
+  written by every derivation): a recorded leg that reports nothing is
+  red by name, a measured leg not yet recorded is held and joins at the
+  next derivation, and a leg leaves the record only through
+  `# dropped: <leg> <reason>`. `coverage:adopt` always runs the `test`
+  task, which is how a repository's PL/pgSQL leg is first found and
+  recorded; a floor with no `legs:` line demands nothing until its
+  next derivation writes one. Rejected, so it is not re-proposed: a
+  `*.sql` search or a deny-list of prose, a search for the teardown's
+  call, "no report means not applicable" with no record, a leg list in
+  each repository's own configuration, and parsing SQL out of other
+  languages' source. The helper lists every
   PL/pgSQL function outside the system schemas that no extension owns,
   asks `plpgsql_coverage_statements` and `plpgsql_coverage_branches`
   for each, and the leg prints `plpgsql <percent>` and

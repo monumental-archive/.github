@@ -620,7 +620,8 @@ depends = [
   "lint:*",
   # `test` once per gate (#1623 item 3): collected unless the coverage
   # measurement already runs the whole task, which coverage-measure.sh's
-  # `runs-test` answers (python and plpgsql legs, with a floor). The
+  # `runs-test` answers (the python leg, or a leg the floor's record
+  # names that runs the task, #1666). The
   # belt's directory reaches the exec through Tera's `env`, never the
   # shell's (the exec's shell does not see the belt's [env]), and the
   # exec moves to `cwd`, the tree `ci` runs in (it starts in the

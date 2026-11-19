@@ -108,7 +108,9 @@ TEMPLATE = """\
 # tests, or a conscious reset recorded in place of the derivation below
 # (replace the `measured` and `derived` lines with `reset: <reason>`).
 # `coverage:check` refuses a floor that disagrees with this record as
-# drift, and never repairs it.
+# drift, and never repairs it. `legs` names the legs the floor holds
+# (#1666): a leg it names that a run measures nothing of is red, and a
+# leg leaves it only through a line `dropped: <leg> <why>`.
 #
 # band: {band}
 # measured: {measured}

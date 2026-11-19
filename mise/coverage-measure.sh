@@ -77,9 +77,10 @@ set -euo pipefail
 # `runs-test` (#1623 item 3) answers whether this measurement runs the
 # repository's WHOLE `test` task, depends first (the shared walk below):
 # it prints the first leg that does, or nothing. One is the whole
-# answer `ci` needs, and stopping there spares the plpgsql `git grep`
-# of the whole tree, which `ci`'s template pays on every mise command
-# (measured on a 30,000-file tree with a floor: 1.26 s against 0.15 s). `ci` reads it to collect
+# answer `ci` needs. It searches no file (#1666): the python leg is
+# tracked `*.py`, and a leg that runs the task otherwise is one the
+# floor's `legs:` record names, read straight from the file because the
+# belt's Python is not reachable here (below). `ci` reads it to collect
 # its plain `test` only where nothing else runs it, so a suite with a
 # floor runs once per gate. The legs that run the task are python and
 # plpgsql; go and rust run commands of their own (`go test -coverpkg`,
@@ -100,10 +101,11 @@ if [[ ${2:-} == runs-test ]]; then
   # Captured, never piped into `grep -q`: under pipefail the writer
   # dies of SIGPIPE when grep leaves early, and the answer flips.
   tracked_py=$(git ls-files -- '*.py' 2> /dev/null) || tracked_py=""
+  recorded=$(sed -n 's/^#[[:space:]]*legs:[[:space:]]*//p' .coverage-floor 2> /dev/null) || recorded=""
   if [[ -n ${tracked_py} ]]; then
     echo python
-  elif git grep -qiIE "language[[:space:]]+'?plpgsql" 2> /dev/null; then
-    echo plpgsql
+  elif [[ " ${recorded} " =~ \ (python|plpgsql)(-branches)?\  ]]; then
+    echo "${BASH_REMATCH[1]}"
   fi
   exit 0
 fi

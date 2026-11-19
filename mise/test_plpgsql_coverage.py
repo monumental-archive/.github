@@ -627,6 +627,16 @@ class LegRows(unittest.TestCase):
         "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
     )
 
+    def assert_held(self, held: str, stdout: str) -> None:
+        """Assert the hold lines, then the one upload: the Python report (#1628).
+
+        The reports are written outside the tree, so the path is the
+        measurement's scratch directory; its file name is the leg's.
+        """
+        head, _, upload = stdout.rstrip("\n").rpartition("\n")
+        self.assertEqual(held, head + "\n")
+        self.assertRegex(upload, r"^coverage:check: upload /\S+/coverage\.xml$")
+
     def test_the_clause_in_files_switches_nothing_on(self) -> None:
         """No search: a README, a .py and a .sql naming the clause (#1666)."""
         done = self.check(
@@ -636,9 +646,7 @@ class LegRows(unittest.TestCase):
             collects=False,
         )
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            self.PYTHON_HELD + "coverage:check: upload coverage.xml\n", done.stdout
-        )
+        self.assert_held(self.PYTHON_HELD, done.stdout)
         self.assertNotIn("plpgsql", done.stdout + done.stderr)
 
     def test_a_recorded_leg_is_held_with_no_sql_tracked(self) -> None:
@@ -649,11 +657,10 @@ class LegRows(unittest.TestCase):
             files={"helper.py": "print('hi')\n"},
         )
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
+        self.assert_held(
             self.PYTHON_HELD
             + "coverage:check: plpgsql leg holds the floor 80.0 (95.00%)\n"
-            "coverage:check: plpgsql-branches leg holds the floor 80.0 (90.00%)\n"
-            "coverage:check: upload coverage.xml\n",
+            "coverage:check: plpgsql-branches leg holds the floor 80.0 (90.00%)\n",
             done.stdout,
         )
 
