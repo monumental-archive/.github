@@ -60,6 +60,7 @@ from typing import TYPE_CHECKING
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decoded
 import task_walk
+import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -106,7 +107,8 @@ def providers(lock: str) -> set[str]:
     """
     found: set[str] = set()
     for match in PROVIDER.finditer(lock):
-        package: str = match.group(1) or match.group(2)
+        # PROVIDER takes one of its two groups in every match.
+        package = typed_std.group(match, 1) or typed_std.group(match, 2) or ""
         found.add(package.rsplit("-", 1)[-1])
     return found
 

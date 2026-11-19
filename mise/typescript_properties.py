@@ -60,6 +60,7 @@ from pathlib import Path
 
 import coverage_js_runner
 import decoded
+import typed_std
 
 EXIT_USAGE = 2
 # stage takes a directory and, optionally, the config; verify a report
@@ -354,8 +355,7 @@ def main(argv: list[str]) -> int:
     if command == "lint":
         return lint(args)
     if command == "stage" and len(args) in STAGE_ARGS:
-        listed: str = sys.stdin.read()
-        files = [line for line in listed.splitlines() if line]
+        files = [line for line in typed_std.stdin_text().splitlines() if line]
         return stage(args[0], args[1] if len(args) > 1 else None, files)
     if command == "verify" and len(args) >= VERIFY_MIN_ARGS:
         return verify(args[0], args[1:])

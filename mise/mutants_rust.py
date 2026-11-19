@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decoded
+import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -505,9 +506,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "reasons":
         return reasons(args.config)
     if args.command == "default-major":
-        metadata: str = sys.stdin.read()
         try:
-            packages = read_metadata(decoded.load_json(metadata))
+            packages = read_metadata(decoded.load_json(typed_std.stdin_text()))
         except decoded.UndecodableError as err:
             print(f"{LABEL}: cargo metadata: {err}", file=sys.stderr)
             return EXIT_RED
