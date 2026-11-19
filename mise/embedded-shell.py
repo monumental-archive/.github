@@ -58,7 +58,7 @@ FOLDED_NOTE = (
 )
 # A `shell:` key on the same step selects the interpreter. Only bash-family
 # blocks are shell at all — `shell: python` is a different language.
-SHELL_RE = re.compile(r"^\s*shell:\s*([a-z0-9 {}$.-]+)\s*$")
+SHELL_RE = re.compile(r"^(\s*)(- )?shell:\s*([a-z0-9 {}$.-]+)\s*$")
 # A step's `name:`, on its own line or as the list item's first key.
 NAME_RE = re.compile(r"^(\s*)(- )?name:\s*(.*?)\s*$")
 
@@ -95,23 +95,30 @@ GCC_FIELDS = 4
 SHELLCHECK_EXCLUDE = "SC1091,SC2194,SC2050,SC2153,SC2154,SC2157,SC2043"
 
 
-def step_shell(lines: list[str], run_idx: int, indent: int) -> str:
-    """Return the `shell:` this block runs under, or 'bash' by default.
+def step_shell(lines: list[str], run_idx: int, key_indent: int) -> str:
+    """Return the `shell:` of the step whose `run:` key sits at run_idx.
+
+    Read from the whole step, as `step_name` reads its name: GitHub
+    takes a step's keys in any order, so `shell:` may come first on the
+    `- ` line or after the block (#1555: both were read as bash, and a
+    `shell: python` block went to shfmt and shellcheck).
 
     Returns:
-        The interpreter name, lowercased, with expressions left intact.
+        The interpreter name, lowercased, with expressions left intact,
+        or 'bash' by default.
 
     """
-    for j in range(run_idx, max(-1, run_idx - 40), -1):
-        line = lines[j]
-        if not line.strip():
-            continue
-        cur = len(line) - len(line.lstrip())
-        if cur < indent and line.lstrip().startswith("- "):
+    start = step_start(lines, run_idx, key_indent)
+    first = run_idx if start is None else start
+    for j in range(first, len(lines)):
+        cur = depth(lines[j])
+        if j > first and cur is not None and cur < key_indent:
             break
-        m = SHELL_RE.match(line)
-        if m and cur == indent:
-            return m.group(1).strip().lower()
+        m = SHELL_RE.match(lines[j])
+        if m and len(m.group(1)) + (2 if m.group(2) else 0) == key_indent:
+            return m.group(3).strip().lower()
+        if start is None and j > run_idx:
+            break
     return "bash"
 
 
@@ -260,7 +267,7 @@ def runs_in(lines: list[str]) -> Iterator[Run]:
         yield Run(
             line=start + 2,
             source="\n".join(x[pad:] if x.strip() else "" for x in text) + "\n",
-            shell=step_shell(lines, start, indent),
+            shell=step_shell(lines, start, key_indent),
             header=m.group(3),
             commented=m.group(4) is not None,
             name=step_name(lines, start, key_indent),
@@ -539,7 +546,8 @@ def parse_entry(raw: str, kind: Kind | None = None) -> Entry | str:
             f"tab-separated — this line has {len(fields)} field(s)"
         )
     file, step, count, note = fields
-    if not count.isdigit() or int(count) <= CEILING:
+    # ASCII only: str.isdigit takes `²`, which int() refuses (#1555).
+    if not (count.isascii() and count.isdigit()) or int(count) <= CEILING:
         return f"'{count}' is not a line count over the {CEILING}-line ceiling"
     if not note.startswith("#") or not ISSUE_RE.search(note):
         return (
