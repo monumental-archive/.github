@@ -8,12 +8,13 @@ end the command and begin a line of the text's author's choosing,
 itself a workflow command if they liked (found by the random-seed audit:
 a package.json repository of one newline split pack-wasm's refusal).
 
-So every command goes out through here, escaped by construction, as the
-runner unescapes it: the message's `%`, CR and LF as `%25`, `%0D` and
-`%0A`; a property's value (`file`, `line`, `title`) also its `:` and `,`
-as `%3A` and `%2C`. One line, flushed. Nothing else in the canon's
-Python prints one; mise/test_workflow_command.py holds that law over the
-tracked helpers.
+So every command goes out through here (the three annotations, the
+mask, and a log group's start and end), escaped by construction, as
+the runner unescapes it: the message's `%`, CR and LF as `%25`, `%0D`
+and `%0A`; a property's value (`file`, `line`, `title`) also its `:`
+and `,` as `%3A` and `%2C`. One line, flushed. Nothing else in the
+canon's Python prints any workflow command;
+mise/test_workflow_command.py holds that law over the tracked helpers.
 
 A helper in another directory reaches this one the way #1643 set out:
 `sys.path.append` of the sibling root, then `import workflow_command`.
@@ -114,3 +115,22 @@ def notice(
 ) -> None:
     """Print `::notice::message`, escaped."""
     _emit(render("notice", message, file=file, line=line, title=title), stream)
+
+
+def mask(value: str, *, stream: TextIO | None = None) -> None:
+    """Print `::add-mask::value`, escaped.
+
+    Unescaped, a value with a newline was masked only up to it, and the
+    rest went to the log in the clear.
+    """
+    _emit(render("add-mask", value), stream)
+
+
+def group(title: str, *, stream: TextIO | None = None) -> None:
+    """Print `::group::title`, escaped: the start of a folded log group."""
+    _emit(render("group", title), stream)
+
+
+def endgroup(*, stream: TextIO | None = None) -> None:
+    """Print `::endgroup::`: the end of the open log group."""
+    _emit(render("endgroup", ""), stream)

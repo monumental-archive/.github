@@ -332,7 +332,7 @@ def run(
         return 0
 
     token = exchange_token(env, fetch)
-    say(f"::add-mask::{token}")
+    workflow_command.mask(token)
     publish = ["cargo", "publish", "--workspace", "--locked", "--no-verify", *excludes]
     # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(

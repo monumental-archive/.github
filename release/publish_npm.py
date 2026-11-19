@@ -132,10 +132,10 @@ def show_debug_log(env: Mapping[str, str], cwd: Path) -> None:
     if not logs:
         workflow_command.warning(f"npm left no debug log under {logdir}")
         return
-    say(f"::group::npm debug log (masked) — {logs[-1]}")
+    workflow_command.group(f"npm debug log (masked) — {logs[-1]}")
     for line in masked(Path(logs[-1]).read_text(encoding="utf-8", errors="replace")):
         say(line)
-    say("::endgroup::")
+    workflow_command.endgroup()
 
 
 def run(package: str, env: Mapping[str, str], cwd: Path) -> int:

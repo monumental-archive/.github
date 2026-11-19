@@ -7,9 +7,10 @@ carries a newline, a CR or a `%`, and for each property; and the row
 it as ONE line.
 
 The law: read from each file's syntax tree, no Python file in the canon
-other than the module holds a string that begins `::error`,
-`::warning` or `::notice` (a plain literal, or the literal head of an
-f-string). Test and property files are exempt: they hold the commands
+other than the module holds a string that begins any workflow command:
+`::`, a command name, then `::` or a space (a plain literal, or the
+literal head of an f-string). No list of names: the next one is
+refused too. Test and property files are exempt: they hold the commands
 they expect to read. The walk is the tree on disk, not `git ls-files`:
 this suite runs with git aimed at a decoy repository.
 
@@ -19,6 +20,7 @@ stdlib `unittest`, matching the rest of mise/.
 import ast
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -38,7 +40,9 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
 import pgrx_images
 
 CANON = Path(__file__).resolve().parents[1]
-COMMANDS = ("::error", "::warning", "::notice")
+# Any workflow command: `::` and a command name, then `::` or the space
+# before properties. A name not yet used is refused without a list.
+COMMAND = re.compile(r"::[A-Za-z][A-Za-z0-9_-]*(::| )")
 MODULE = Path("mise/workflow_command.py")
 # Directories the walk never enters: tool state, vendored trees, caches.
 SKIP = {".git", "node_modules", "target", "vendor", "__pycache__", ".venv"}
@@ -62,7 +66,7 @@ def command_strings(source: str) -> list[int]:
 
     Returns:
         The line of each plain literal, or f-string whose literal head,
-        that begins `::error`, `::warning` or `::notice`.
+        that begins a workflow command.
 
     """
     tree = ast.parse(source)
@@ -77,14 +81,14 @@ def command_strings(source: str) -> list[int]:
     lines: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and id(node) not in inner:
-            if isinstance(node.value, str) and node.value.startswith(COMMANDS):
+            if isinstance(node.value, str) and COMMAND.match(node.value):
                 lines.add(node.lineno)
         elif isinstance(node, ast.JoinedStr) and node.values:
             first = node.values[0]
             if (
                 isinstance(first, ast.Constant)
                 and isinstance(first.value, str)
-                and first.value.startswith(COMMANDS)
+                and COMMAND.match(first.value)
             ):
                 lines.add(node.lineno)
     return sorted(lines)
@@ -161,6 +165,30 @@ class Escapes(unittest.TestCase):
             "::error file=a%3Ab%2Cc,line=3,title=t%0A%25::m\n",
         )
 
+    def test_a_masked_value_with_a_newline_is_one_line(self) -> None:
+        """The whole value is masked: one line, read back whole.
+
+        Unescaped, the runner masked only up to the newline.
+        """
+        out = written(lambda: workflow_command.mask("abc\ndef%"))
+        self.assertEqual(out, "::add-mask::abc%0Adef%25\n")
+        self.assertEqual(
+            out
+            .removeprefix("::add-mask::")
+            .removesuffix("\n")
+            .replace("%0A", "\n")
+            .replace("%25", "%"),
+            "abc\ndef%",
+        )
+
+    def test_a_group_title_is_escaped_and_closed(self) -> None:
+        """The group title is escaped, and endgroup is the bare command."""
+        self.assertEqual(
+            written(lambda: workflow_command.group("log\n::error::x")),
+            "::group::log%0A::error::x\n",
+        )
+        self.assertEqual(written(workflow_command.endgroup), "::endgroup::\n")
+
     def test_the_stream_is_the_callers(self) -> None:
         """stream= takes the line, and stdout gets nothing."""
         err = io.StringIO()
@@ -212,6 +240,28 @@ class TheLaw(unittest.TestCase):
             'o = f"{z}::error::"\n'
         )
         self.assertEqual(command_strings(source), list[int]([1, 2, 3]))
+
+    def test_any_command_name_is_refused_by_line(self) -> None:
+        """add-mask, group, debug and set-output, each on its own line."""
+        source = (
+            'say(f"::add-mask::{token}")\n'
+            'say("::group::log")\n'
+            'print("::debug::x")\n'
+            'print(f"::set-output name=x::{v}")\n'
+            'say("::endgroup::")\n'
+        )
+        self.assertEqual(command_strings(source), list[int]([1, 2, 3, 4, 5]))
+
+    def test_double_colons_mid_text_are_allowed(self) -> None:
+        """`::` that does not begin a command name is no command."""
+        source = (
+            'a = "std::vec::Vec"\n'
+            'b = "a ::error:: x"\n'
+            'c = ":: spaced"\n'
+            'd = "::9digit::x"\n'
+            'e = f"{x}::group::"\n'
+        )
+        self.assertEqual(command_strings(source), list[int]())
 
 
 if __name__ == "__main__":
