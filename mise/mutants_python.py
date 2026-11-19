@@ -568,7 +568,19 @@ def verdict(results_file: Path, shows: Path, excluded: int) -> int:
     return 0
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
+class Args(argparse.Namespace):
+    """The subcommand and its arguments, each typed as parsed."""
+
+    command: str
+    config: Path
+    pragmas: Path
+    directory: Path
+    results: Path
+    shows: Path
+    excluded: int
+
+
+def parse_args(argv: list[str] | None) -> Args:
     """Read the subcommand and its arguments.
 
     Returns:
@@ -586,7 +598,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     judged.add_argument("results", type=Path)
     judged.add_argument("shows", type=Path)
     judged.add_argument("--excluded", type=int, required=True)
-    return parser.parse_args(argv)
+    return parser.parse_args(argv, namespace=Args())
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -516,6 +516,17 @@ def summary_report(
     return "\n".join(out) + "\n"
 
 
+class Args(argparse.Namespace):
+    """The command line, each option typed as parsed."""
+
+    repo: pathlib.Path
+    rev: str
+    since: str | None
+    until: str | None
+    recent: str | None
+    summary: pathlib.Path | None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Classify, print, and optionally write the job summary.
 
@@ -531,7 +542,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--until", help="window end, any git date")
     parser.add_argument("--recent", help="the summary lists fixes since this")
     parser.add_argument("--summary", type=pathlib.Path, help="append markdown here")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     window = f"since {args.since}" if args.since else "all history"
     try:
         if git(args.repo, "rev-parse", "--is-shallow-repository").strip() == "true":
