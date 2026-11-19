@@ -11,7 +11,16 @@ The properties of `test_findings.py`'s fixed rows (#1332):
   workflow's contract is a refusal by name and exit 2. When it reads,
   the grouping holds every finding exactly once, under the index its
   subject names. A finding that was not an object raised AttributeError
-  until this file found it.
+  until this file found it. The file is read as bytes, not only as the
+  JSON a test wrote: bytes that are not UTF-8, a number past the
+  parser's digit limit and JSON nested past its depth each raised a
+  traceback until #1557.
+- V (#1557): a certificate's body names every condition its findings
+  failed, once each, in the order the title names them: one line per
+  condition, whatever its findings' text holds, so two findings of one
+  condition never read as two conditions and a finding's text never
+  adds a line of its own. Adding a finding of a new condition adds its
+  line; a finding of a condition already named adds none.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -52,6 +61,29 @@ FINDING = st.one_of(
     st.fixed_dictionaries({"subject": SUBJECT}, optional={"assertion": JSON}),
     JSON,
 )
+# A finding of one certificate, as by_certificate grouped it.
+FILED = st.fixed_dictionaries(
+    {},
+    optional={"assertion": st.text(max_size=12) | JSON, "detail": JSON},
+)
+# Past the JSON parser's depth: a RecursionError, not a ValueError.
+DEEP = b"[" * 100_000
+HEAD = "Failed, with stele's reason and the claims it read:"
+
+
+def condition_lines(index: int, group: list, log: str) -> list[str]:
+    """Read back a body's condition section, line by line.
+
+    Returns:
+        The lines between the section's head and the blank line after it.
+
+    """
+    text = findings.body(index, group, log, "https://example.invalid/run")
+    lines = text.split("\n")
+    head = lines.index(HEAD)
+    return lines[head + 1 : lines.index("", head)]
+
+
 REPORT = st.one_of(
     st.fixed_dictionaries(
         {"target": st.just(findings.TARGET)},
@@ -110,6 +142,43 @@ class ReportReading(unittest.TestCase):
                 subject = finding["subject"]
                 self.assertTrue(subject.startswith("CT index "))
                 self.assertEqual(int(subject.removeprefix("CT index ")), index)
+
+    @given(st.binary(max_size=64))
+    @example(DEEP)
+    @example(b"\xff")
+    @example(b"1" * 5000)
+    def test_any_bytes_refused_by_name(self, content: bytes) -> None:
+        """Whatever bytes the file holds: a report, or FindingsError."""
+        self.path.write_bytes(content)
+        try:
+            findings.read_report(self.path)
+        except findings.FindingsError:
+            return
+
+
+class BodyConditions(unittest.TestCase):
+    """V: the body names each failed condition once, on its own line."""
+
+    @given(INDEX, st.lists(FILED, min_size=1, max_size=6), st.text(max_size=12))
+    @example(7, [{"assertion": "chain", "detail": "a"}] * 2, "log")
+    @example(7, [{"assertion": "chain", "detail": "a\n- **run**: b"}], "log")
+    def test_each_condition_once(self, index: int, group: list, log: str) -> None:
+        """One line per condition, in the title's order; more findings add none."""
+        conditions = list(dict.fromkeys(str(f.get("assertion", "")) for f in group))
+        self.assert_names(condition_lines(index, group, log), conditions)
+        again = condition_lines(index, [*group, group[0]], log)
+        self.assert_names(again, conditions)
+        fresh = "".join(conditions) + "+"
+        added = condition_lines(index, [*group, {"assertion": fresh}], log)
+        self.assert_names(added, [*conditions, fresh])
+
+    def assert_names(self, lines: list[str], conditions: list[str]) -> None:
+        """Line i names condition i, and there is no other line."""
+        self.assertEqual(len(lines), len(conditions), lines)
+        for line, condition in zip(lines, conditions, strict=True):
+            self.assertTrue(
+                line.startswith(f"- **{findings.one_line(condition)}**: "), line
+            )
 
 
 if __name__ == "__main__":

@@ -86,7 +86,9 @@ def read_report(path: Path) -> dict:
         raise FindingsError(msg)
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as err:
+    # Not UTF-8, past the parser's digit limit or its depth: each was a
+    # traceback, exit 1, until prop_findings.py read bytes (#1557).
+    except (ValueError, RecursionError) as err:
         msg = f"stele's report is not JSON: {err}"
         raise FindingsError(msg) from err
     if not isinstance(report, dict) or report.get("target") != TARGET:
@@ -126,11 +128,39 @@ def by_certificate(report: dict) -> dict[int, list[dict]]:
     return grouped
 
 
+def one_line(text: str) -> str:
+    """Fold text onto one line, so it cannot add a line of the body.
+
+    Returns:
+        The text, each line break a space.
+
+    """
+    return " ".join(text.splitlines())
+
+
+def reasons(findings: list[dict]) -> list[str]:
+    """Write one line per failed condition, its findings' reasons joined.
+
+    Returns:
+        A line per distinct condition, in the order the title names them:
+        two findings of one condition never read as two conditions (#1557).
+
+    """
+    grouped: dict[str, list[str]] = {}
+    for f in findings:
+        condition = str(f.get("assertion", ""))
+        grouped.setdefault(condition, []).append(one_line(str(f.get("detail", ""))))
+    return [
+        f"- **{one_line(condition)}**: {'; '.join(details)}"
+        for condition, details in grouped.items()
+    ]
+
+
 def body(index: int, findings: list[dict], log: str, run_url: str) -> str:
     """Write a certificate's issue body.
 
     Returns:
-        The body: the log, each failed condition with stele's reason.
+        The body: the log, each failed condition once with stele's reasons.
 
     """
     return "\n".join([
@@ -141,7 +171,7 @@ def body(index: int, findings: list[dict], log: str, run_url: str) -> str:
         f"- Found by: {run_url}",
         "",
         "Failed, with stele's reason and the claims it read:",
-        *[f"- **{f.get('assertion', '')}**: {f.get('detail', '')}" for f in findings],
+        *reasons(findings),
         "",
         'Runbook: docs/runbook.md, "rekor-monitor: a certificate did not reconcile".',
         "",
