@@ -73,7 +73,9 @@ rust-branches 70.0
 # provisioning returns after one call; `llvm-cov` logs its argv and the
 # toolchain it ran under, and prints the planted totals. With `--branch`
 # it reports branches; without, branches read as an uninstrumented run
-# does (count 0, measured on stable 1.97.1).
+# does (count 0, measured on stable 1.97.1). With `--lcov` (the line leg
+# since #1528) it writes the report to `--output-path` instead, the
+# planted line figure as lines hit of 100 found.
 CARGO = """\
 #!/usr/bin/env bash
 case "$1" in
@@ -82,6 +84,15 @@ case "$1" in
     ;;
   llvm-cov)
     echo "${RUSTUP_TOOLCHAIN:-stable} $*" >> "${STUB_LOG}"
+    if [[ " $* " == *" --lcov "* ]]; then
+      out=""
+      while [[ $# -gt 0 ]]; do
+        [[ $1 == --output-path ]] && out=$2
+        shift
+      done
+      printf 'SF:a.rs\\nLF:100\\nLH:%s\\nend_of_record\\n' "${STUB_LINES%.*}" > "${out}"
+      exit 0
+    fi
     if [[ " $* " == *" --branch "* ]]; then
       count=${STUB_BR_COUNT} pct=${STUB_BR}
     else
@@ -318,10 +329,13 @@ class GateRows(BranchCase):
         done, _, calls = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: rust leg holds the floor 80.0 (90.0%)\n", done.stdout
+            "coverage:check: rust leg holds the floor 80.0 (90%)\n"
+            "coverage:check: upload lcov.info\n",
+            done.stdout,
         )
         self.assertEqual(
-            ["stable llvm-cov --workspace --locked --json --summary-only"], calls
+            ["stable llvm-cov --workspace --locked --lcov --output-path lcov.info"],
+            calls,
         )
 
 
@@ -348,7 +362,7 @@ class AdoptRows(BranchCase):
         )
         self.assertEqual(
             [
-                "stable llvm-cov --workspace --locked --json --summary-only",
+                "stable llvm-cov --workspace --locked --lcov --output-path lcov.info",
                 BRANCH_RUN,
             ],
             calls,
@@ -366,7 +380,8 @@ class AdoptRows(BranchCase):
         text = (tree / ".coverage-floor").read_text(encoding="utf-8")
         self.assertNotIn("rust-branches", text)
         self.assertEqual(
-            ["stable llvm-cov --workspace --locked --json --summary-only"], calls
+            ["stable llvm-cov --workspace --locked --lcov --output-path lcov.info"],
+            calls,
         )
 
     def test_adopt_cannot_lower_the_branch_line(self) -> None:

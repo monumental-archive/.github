@@ -37,9 +37,11 @@ _SPEC = importlib.util.spec_from_file_location(
 job_installs = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(job_installs)
 
-# The jobs #1406 names. A cache anywhere else is a new cache, and the
-# design conditions say no release, publish or continuous job gains one.
-CACHE_JOBS = {"gate", "pgrx", "coverage-upload"}
+# The jobs #1406 names, less the coverage upload, which installs and
+# builds nothing since #1528. A cache anywhere else is a new cache, and
+# the design conditions say no release, publish or continuous job gains
+# one.
+CACHE_JOBS = {"gate", "pgrx"}
 
 DEFAULT_REF = "format('refs/heads/{0}', github.event.repository.default_branch)"
 SAVE = f"${{{{ github.event_name == 'push' && github.ref == {DEFAULT_REF} }}}}"
@@ -257,7 +259,7 @@ class Real(unittest.TestCase):
         self.assertEqual([], findings(real()))
 
     def test_every_job_has_its_caches(self) -> None:
-        """The three jobs each restore and save their tool cache."""
+        """The two jobs each restore and save their tool cache."""
         for job_id in CACHE_JOBS:
             job = job_installs.jobs(real())[job_id]
             names = [s.get("name") for s in job_installs.steps(job)]
@@ -304,7 +306,7 @@ class Planted(unittest.TestCase):
         self.assert_named(
             plant(notice, notice + save),
             "plan: 'Save the plan cache (default branch only)' is a cache outside"
-            " ['coverage-upload', 'gate', 'pgrx']",
+            " ['gate', 'pgrx']",
         )
 
     def test_a_fallback_on_the_default_branch(self) -> None:
@@ -409,13 +411,13 @@ class InstallKeys(unittest.TestCase):
     """A listed job's cache key digests what it installs (#1408)."""
 
     def test_the_real_jobs_agree(self) -> None:
-        """The legs and the upload key by their own install lists."""
+        """The legs key by their own install list."""
         self.assertEqual([], install_key_findings(real()))
 
     def test_the_listed_jobs_pass_their_list(self) -> None:
-        """Both listed jobs name a list; the gate names none."""
+        """The listed job names a list; the gate names none."""
         jobs = job_installs.jobs(real())
-        for job_id, wanted in (("pgrx", True), ("coverage-upload", True)):
+        for job_id, wanted in (("pgrx", True),):
             (named,) = [
                 s for s in job_installs.steps(jobs[job_id]) if s.get("id") == "tool-key"
             ]

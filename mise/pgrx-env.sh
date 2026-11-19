@@ -5,8 +5,8 @@
 #
 # Four tasks compile a pgrx extension — `lint:pg-clippy`, `test:pgrx`,
 # `fix:rust`'s extension pass and the coverage measurement
-# (`coverage:check`, `coverage:adopt` and `coverage:report` share it,
-# #917) — and each needs the same two things first: a `pg_config` per
+# (`coverage:check` and `coverage:adopt` share it, #917) — and each
+# needs the same two things first: a `pg_config` per
 # declared major registered with pgrx, and, on macOS, a correction to
 # flags the prebuilt Postgres recorded on somebody else's machine.
 # Written four times they would drift; written here they cannot.

@@ -24,10 +24,12 @@ binary build legs), a belt tool's name is the runner's copy and is not
 counted; a caller build input always is.
 
 The gate's own jobs are held the same way where they run one thing
-(#1408): the `pgrx` legs run one major's suite and the coverage upload
-renders one report, and each installed the caller's whole config to do
-it. They are cached, so the uncached scope above never reached them;
-GATE_LISTS names them, and GATE_WHOLE the job that keeps everything.
+(#1408): the `pgrx` legs run one major's suite, and installed the
+caller's whole config to do it. They are cached, so the uncached scope
+above never reached them; GATE_LISTS names them, and GATE_WHOLE the job
+that keeps everything. The coverage upload installs nothing at all
+(#1528): it uploads the reports the gate's coverage:check wrote, and
+GATE_NONE holds it to measuring nothing.
 """
 
 import ast
@@ -134,11 +136,21 @@ WHOLE_CONFIG = {
 # The gate's jobs (ci.yml) that install a named list (#1408), and the one
 # that installs the whole config, with why. Every mise-action job in
 # ci.yml is one or the other.
-GATE_LISTS = [("ci.yml", "pgrx"), ("ci.yml", "coverage-upload")]
+GATE_LISTS = [("ci.yml", "pgrx")]
 GATE_WHOLE = {
     ("ci.yml", "gate"): (
         "it runs every lint, so it needs the whole belt and every tool the"
         " caller's config pins"
+    ),
+}
+
+# The gate's jobs that install no tool and run none (#1528), with why.
+# The coverage upload re-measured every leg with a list of its own, five
+# tools where the gate has the belt, and hung on main in a test the gate
+# passes; it now uploads the gate's own reports.
+GATE_NONE = {
+    ("ci.yml", "coverage-upload"): (
+        "it uploads the reports the gate's coverage:check wrote, and measures nothing"
     ),
 }
 
@@ -800,7 +812,7 @@ class Coverage(unittest.TestCase):
         self.assertEqual(sorted([*GATE_LISTS, *GATE_WHOLE]), found)
 
     def test_the_gate_lists_are_lists(self) -> None:
-        """The legs and the upload name their tools; the gate does not."""
+        """The legs name their tools; the gate does not."""
         for workflow, job_id in GATE_LISTS:
             job = load(workflow)[job_id]
             with self.subTest(job=job_id):
@@ -916,10 +928,10 @@ class JobInstalls(unittest.TestCase):
 
 
 class GateInstalls(unittest.TestCase):
-    """The gate's pgrx legs and coverage upload install what they call (#1408)."""
+    """The gate's pgrx legs install what they call (#1408)."""
 
     def test_every_gate_list_installs_what_it_calls(self) -> None:
-        """The real jobs against pgrx-test.sh, pgrx-env.sh, coverage:report."""
+        """The real jobs against pgrx-test.sh and pgrx-env.sh."""
         for workflow, job_id in GATE_LISTS:
             with self.subTest(job=job_id):
                 self.assertEqual(
@@ -995,22 +1007,6 @@ class GateInstalls(unittest.TestCase):
             uninstalled("ci.yml", "pgrx", job),
         )
 
-    def test_an_upload_that_drops_cargo_llvm_cov_is_named(self) -> None:
-        """Planted: the report's `cargo llvm-cov` with nothing to run it."""
-        job = [
-            ln.replace("jq aqua:taiki-e/cargo-llvm-cov ", "jq ")
-            for ln in load("ci.yml")["coverage-upload"]
-        ]
-        self.assertEqual(
-            [
-                (
-                    "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov and"
-                    " does not install it"
-                )
-            ],
-            uninstalled("ci.yml", "coverage-upload", job),
-        )
-
     def test_a_new_call_in_a_leg_is_named(self) -> None:
         """Planted: a leg starts building the fuzz targets."""
         job = [
@@ -1034,6 +1030,82 @@ class GateInstalls(unittest.TestCase):
             ["ci.yml pgrx: calls typos and does not install it"],
             uninstalled("ci.yml", "pgrx", job),
         )
+
+
+def measures(workflow: str, job_id: str, job: list[str]) -> list[str]:
+    """Name every way a job that must measure nothing installs or runs a tool.
+
+    Returns:
+        One line per mise-action step, caller-pins install, `mise run`,
+        and tool the job's steps call; none for a job that only moves
+        files.
+
+    """
+    found = [
+        f"{workflow} {job_id}: installs tools with jdx/mise-action"
+        for _ in mise_steps(job)
+    ]
+    text = code("\n".join(job))
+    if "caller-pins.py" in text:
+        found.append(f"{workflow} {job_id}: installs the caller's build inputs")
+    if re.search(r"(?<![\w-])mise\s+run\b", text):
+        found.append(f"{workflow} {job_id}: runs a mise task")
+    keys, caller = calls(job, carries=True)
+    found += [f"{workflow} {job_id}: calls {t}" for t in sorted(keys | caller)]
+    return found
+
+
+class GateUploadMeasuresNothing(unittest.TestCase):
+    """The coverage upload installs no measurement tool (#1528)."""
+
+    def test_the_upload_installs_and_runs_nothing(self) -> None:
+        """The real job: download, list, hand to Codecov."""
+        for (workflow, job_id), why in GATE_NONE.items():
+            with self.subTest(job=job_id, why=why):
+                self.assertEqual([], measures(workflow, job_id, load(workflow)[job_id]))
+
+    def test_the_upload_that_hung_on_main_is_named(self) -> None:
+        """Planted: the job as it was, re-measuring with five tools."""
+        job = [
+            *load("ci.yml")["coverage-upload"],
+            "      - name: Install mise and the report's tools",
+            "        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b",
+            "        with:",
+            "          install_args: >-",
+            "            jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv",
+            "      - name: Generate the report",
+            "        run: report=$(mise run coverage:check)",
+        ]
+        found = measures("ci.yml", "coverage-upload", job)
+        self.assertEqual(
+            [
+                "ci.yml coverage-upload: installs tools with jdx/mise-action",
+                "ci.yml coverage-upload: runs a mise task",
+            ],
+            found[:2],
+        )
+        # Followed into coverage:check and the measurement it runs.
+        for tool in ("aqua:taiki-e/cargo-llvm-cov", "pipx:coverage", "go"):
+            self.assertIn(f"ci.yml coverage-upload: calls {tool}", found)
+
+    def test_a_measuring_call_in_the_upload_is_named(self) -> None:
+        """Planted: the upload starts rendering a report itself."""
+        job = [
+            *load("ci.yml")["coverage-upload"],
+            "      - name: Planted",
+            "        run: cargo llvm-cov --workspace --lcov --output-path lcov.info",
+        ]
+        self.assertEqual(
+            [
+                "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov",
+                "ci.yml coverage-upload: calls rust",
+            ],
+            measures("ci.yml", "coverage-upload", job),
+        )
+
+    def test_no_gate_job_is_both_listed_and_measureless(self) -> None:
+        """A job is a list, the whole config, or nothing: one of them."""
+        self.assertEqual(set(), set(GATE_NONE) & {*GATE_LISTS, *GATE_WHOLE})
 
 
 # The line a named-list job carries at job level (#1412). mise's
