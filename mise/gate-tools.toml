@@ -197,6 +197,7 @@ tasks = [
   "lint:shell-embedded",
   "lint:sql",
   "lint:subject-budget",
+  "lint:task-shell",
   "lint:tsconfig-dials",
   "lint:workflow-shell",
   "lint:workspace-inherit",
