@@ -17,7 +17,6 @@ gate as `mise run test`.
 """
 
 import os
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -26,11 +25,8 @@ import tomllib
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
@@ -39,6 +35,7 @@ LABEL = "audit:python-types"
 BELT_FILES = (
     "python-types.sh",
     "python_types_seams.py",
+    "python_roots.py",
     "mypy.ini",
     "config.toml",
     "typed_hypothesis.py",
@@ -275,6 +272,15 @@ class TheWiring(unittest.TestCase):
         done = run({"a.py": text}, stub={})
         self.assertEqual(0, done.returncode, done.stderr)
 
+    def test_two_files_that_are_one_module_are_red_by_name(self) -> None:
+        """Two roots each holding helper.py: named, and mypy never asked."""
+        files = {"a/helper.py": "X = 1\n", "b/helper.py": "X = 2\n"}
+        done = run(files, stub={})
+        self.assertEqual(1, done.returncode)
+        self.assertIn("  helper: a/helper, b/helper\n", done.stderr)
+        self.assertIn(f"{LABEL}: rename one of each pair above", done.stderr)
+        self.assertEqual([], done.args)
+
     def test_a_coded_ignore_is_not_a_seam(self) -> None:
         """`# type: ignore[<code>]` names its rule and passes the helper."""
         done = run({"a.py": "X: int = 1  # type: ignore[misc]\n"}, stub={})
@@ -304,6 +310,40 @@ class TheConfig(unittest.TestCase):
         """The one escape: a coded ignore that suppresses its finding."""
         done = run({"a.py": 'X: int = "s"  # type: ignore[assignment]\n'})
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+
+    def test_a_neighbour_and_a_sibling_root_are_imported_typed(self) -> None:
+        """Both imports are read from the derived roots (#1634).
+
+        `test_x.py` imports a helper beside it, and one in a sibling root
+        named from its own `__file__`; each is typed, so a wrong use of
+        either is a finding, not an untyped `Any`.
+        """
+        files = {
+            "lib/helper.py": "NAME: str = 'x'\n",
+            "tools/shared.py": "COUNT: int = 1\n",
+            "lib/test_x.py": (
+                "import sys\n"
+                "from pathlib import Path\n\n"
+                "import helper\n\n"
+                "sys.path.insert(0, str(Path(__file__).resolve().parents[1]"
+                ' / "tools"))\n\n'
+                "import shared\n\n"
+                "A: int = helper.NAME\n"
+                "B: str = shared.COUNT\n"
+            ),
+        }
+        done = run(files)
+        self.assertEqual(1, done.returncode)
+        self.assertNotIn("import-not-found", done.stdout)
+        wrong = "error: Incompatible types in assignment (expression has type"
+        self.assertIn(
+            f'lib/test_x.py:10: {wrong} "str", variable has type "int")',
+            done.stdout,
+        )
+        self.assertIn(
+            f'lib/test_x.py:11: {wrong} "int", variable has type "str")',
+            done.stdout,
+        )
 
     def test_a_repository_config_does_not_outrank_the_belt(self) -> None:
         """mypy.ini and pyproject.toml saying ignore_errors change nothing."""
