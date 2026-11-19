@@ -649,19 +649,22 @@ jobs:
       - name: Run the extension's suite at this major
         env:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
+          # Where a measured run writes its report: outside the working
+          # tree (#1628), the directory the next step keeps.
+          ORG_COVERAGE_REPORTS: ${{ runner.temp }}/coverage-reports
         run: mise run test:pgrx
 
       # The leg's own coverage report (#1656): where the repository holds
       # a floor, test:pgrx measured this major's run and wrote
-      # lcov-pgrx-pgNN.info beside its figure. Kept for the badge job on
-      # a push to the default branch only, like the gate's reports; a
-      # tree with no floor writes none.
+      # lcov-pgrx-pgNN.info into ORG_COVERAGE_REPORTS. Kept for the badge
+      # job on a push to the default branch only, like the gate's
+      # reports; a tree with no floor writes none.
       - name: Keep the leg's coverage report for the badge (default branch only)
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-reports-pgrx-pg${{ matrix.major }}
-          path: lcov-pgrx-pg${{ matrix.major }}.info
+          path: ${{ runner.temp }}/coverage-reports
           if-no-files-found: ignore
           retention-days: 1
 

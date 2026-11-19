@@ -24,8 +24,9 @@
 # This suite is the only thing that executes that code. Where the
 # repository holds a `.coverage-floor`, each major's run is built
 # instrumented, renders the extension crate's own report as
-# `lcov-pgrx-pgNN.info`, prints `pgrx-pgNN <percent>` and holds that
-# major to the floor by itself: a major's figure is over the lines its
+# `lcov-pgrx-pgNN.info` (outside the tree, #1628), prints
+# `pgrx-pgNN <percent>` and holds that major to the floor by itself: a
+# major's figure is over the lines its
 # own build compiled, so per-major code counts in exactly the majors
 # that build it. No floor: the plain run, untouched. The suite's exit
 # status gates the figure, and a run that passed and wrote no profile is
@@ -149,6 +150,27 @@ done
 runs="${runs# }"
 root=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])' <<< "${metadata}")
 
+# Where a measured run's report goes: never the working tree, where it
+# is one `git add -A` from a commit (#1628). ORG_COVERAGE_REPORTS where
+# the gate names it, whose artifact step keeps that directory; otherwise
+# a scratch directory removed on exit, after the figure is read. One
+# EXIT trap for this and the side-by-side logs below, completion-guarded
+# (#1233).
+reports=""
+scratch=""
+logs=""
+if [[ -n ${measured} ]]; then
+  reports=${ORG_COVERAGE_REPORTS:-}
+  if [[ -z ${reports} ]]; then
+    scratch=$(mktemp -d)
+    reports=${scratch}
+  fi
+  mkdir -p "${reports}"
+fi
+rc=0
+trap 'rc=$?; [[ -z ${logs} ]] || rm -rf "${logs}"; [[ -z ${scratch} ]] || rm -rf "${scratch}"
+[[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
+
 # One major's suite, instrumented, then its report. Prints only the leg
 # line on stdout; the suite's own output goes to stderr. In a subshell,
 # so the instrumentation never leaks into the next run.
@@ -181,12 +203,12 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
       echo "  that measured nothing must not read as held (#1656)" >&2
       exit 1
     fi
-    cargo llvm-cov report -p "${crate}" --lcov --output-path "${PWD}/lcov-${leg}.info" >&2 || exit 1
+    cargo llvm-cov report -p "${crate}" --lcov --output-path "${reports}/lcov-${leg}.info" >&2 || exit 1
     pct=$(awk -F: '
       $1 == "LF" { found += $2 }
       $1 == "LH" { hit += $2 }
       END { if (found > 0) printf "%.16g\n", hit * 100 / found }
-    ' "lcov-${leg}.info" 2> /dev/null) || pct=""
+    ' "${reports}/lcov-${leg}.info" 2> /dev/null) || pct=""
     if [[ -z ${pct} ]]; then
       echo "${label}: ${leg}: could not read a total from the report — a" >&2
       echo "  measurement that reads nothing must not become a floor" >&2
@@ -229,6 +251,7 @@ if [[ ${runs} != *" "* ]]; then
     (cd "${dir}" && cargo pgrx test "pg${one}")
   fi
   echo "${label}: 1 suite run: ${dir}(pg${one})"
+  org_done=1
   exit 0
 fi
 
@@ -237,8 +260,6 @@ fi
 # builds sharing one would simply queue. Their Postgres is already
 # separate — a data directory and a port per major.
 logs=$(mktemp -d)
-rc=0
-trap 'rc=$?; rm -rf "${logs}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 pids=""
 for run in ${runs}; do
   dir="${run%%:*}"

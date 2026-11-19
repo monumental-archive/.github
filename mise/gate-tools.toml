@@ -141,9 +141,11 @@ run = ["tsc"]
 # coverage:check's guard is a committed floor AND a root Cargo.toml,
 # go.mod, tracked *.py (#1331) or a root package.json (#1357); the row
 # takes the wider half, and the guard cannot say which leg a tree's
-# language needs.
-tasks = ["coverage:check"]
-when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
+# language needs. test:pgrx measures a pgrx extension with it where a
+# floor is committed (#1656); an extension can sit in a member, so the
+# row also installs it for a tracked member manifest.
+tasks = ["coverage:check", "test:pgrx"]
+when = ["*.py", "*/Cargo.toml", "Cargo.toml", "go.mod", "package.json"]
 
 [tools."aqua:EmbarkStudios/cargo-deny"]
 tasks = ["lint:deny", "lint:scaffold-assembly"]

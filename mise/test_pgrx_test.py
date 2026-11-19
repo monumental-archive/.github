@@ -42,6 +42,7 @@ BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 
+
 def task_body(name: str) -> str:
     """Read one task's `run` body out of the belt's own config.
 
@@ -277,7 +278,8 @@ class MeasuredRun(Planted):
         On main the run took no instrumentation and printed no leg line.
         """
         self.floor()
-        done, log = self.run_pgrx(PLANT_LH="17")
+        reports = self.tmp / "reports"
+        done, log = self.run_pgrx(PLANT_LH="17", ORG_COVERAGE_REPORTS=str(reports))
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn("pgrx-pg18 94.44444444444444", done.stdout.splitlines())
         (suite,) = self.suites(log)
@@ -289,11 +291,37 @@ class MeasuredRun(Planted):
         self.assertTrue(
             report.startswith(
                 "cargo llvm-cov report -p lab-pg --lcov --output-path "
-                f"{self.tree}/lcov-pgrx-pg18.info|"
+                f"{reports}/lcov-pgrx-pg18.info|"
             ),
             report,
         )
-        self.assertTrue((self.tree / "lcov-pgrx-pg18.info").is_file())
+        self.assertTrue((reports / "lcov-pgrx-pg18.info").is_file())
+
+    def test_a_measured_run_leaves_the_tree_clean(self) -> None:
+        """No report in the tree, named directory or not (#1628).
+
+        A report in the working tree is one `git add -A` from a commit.
+        Without ORG_COVERAGE_REPORTS it goes to a scratch directory the
+        script removes on exit, after the figure is read.
+        """
+        self.floor()
+        (self.tree / ".gitignore").write_text("target/\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "planted")
+        for named in ({"ORG_COVERAGE_REPORTS": str(self.tmp / "reports")}, {}):
+            with self.subTest(named=bool(named)):
+                done, _ = self.run_pgrx(PLANT_LH="17", **named)
+                self.assertEqual(0, done.returncode, done.stderr)
+                self.assertIn("pgrx-pg18 94.44444444444444", done.stdout.splitlines())
+                status = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                    [GIT, "status", "--porcelain"],
+                    cwd=self.tree,
+                    env=hermetic.env(),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                self.assertEqual("", status.stdout)
 
     def test_a_major_below_the_floor_is_red_by_name(self) -> None:
         """14 of 18 is 77.8%, under the planted floor of 80.0."""
