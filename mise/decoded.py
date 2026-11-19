@@ -4,9 +4,14 @@
 Every input is a typed value or one named refusal, `UndecodableError`.
 JSON is read strictly (RFC 8259, with I-JSON's unique keys, RFC 7493):
 bytes that are not UTF-8, a syntax error, a duplicate key, `NaN` or
-`Infinity`, a number that does not fit a finite float, and nesting too
-deep to decode are each refused. TOML refuses the same bytes, its own
-errors and the same depth; its `nan` and `inf` are TOML and stay.
+`Infinity`, a number that does not fit a finite float, and nesting
+deeper than MAX_DEPTH are each refused. The depth is this module's own
+bound, counted before decoding: the interpreter's stack is not the same
+on every machine (100,000 open brackets overflow it on macOS and not on
+the runner), and a document must read the same everywhere. TOML
+refuses the same bytes, its own errors and nesting too deep for its
+pure-Python reader, whose limit is the same everywhere; its `nan` and
+`inf` are TOML and stay.
 
 A decoded value is `object`, never `Any`: a caller narrows it with the
 readers here (`is_object`, `as_object`, ...) into its own dataclass, so
@@ -19,8 +24,16 @@ appending the `mise` root to `sys.path` from its own `__file__`.
 
 import json
 import math
+import re
 import tomllib
 from typing import TypeIs
+
+# The deepest JSON nesting load_json reads. The deepest document the
+# canon reads today, a CycloneDX SBOM's nested components, is under 40.
+MAX_DEPTH = 512
+
+# A whole JSON string (its escapes honoured), or one bracket outside one.
+_SCANNED = re.compile(r'"(?:[^"\\]|\\.)*"|[\[\]{}]', re.DOTALL)
 
 
 class UndecodableError(ValueError):
@@ -93,6 +106,25 @@ def _finite(text: str) -> float:
     return value
 
 
+def _within_depth(text: str) -> None:
+    """Refuse JSON nested deeper than MAX_DEPTH, counted outside strings.
+
+    Raises:
+        UndecodableError: an array or object opens past the bound.
+
+    """
+    depth = 0
+    for match in _SCANNED.finditer(text):
+        found = match.group(0)
+        if found in "[{":
+            depth += 1
+            if depth > MAX_DEPTH:
+                msg = f"nested deeper than {MAX_DEPTH} levels"
+                raise UndecodableError(msg)
+        elif found in "]}":
+            depth -= 1
+
+
 def load_json(source: str | bytes) -> object:
     """Decode one strict JSON document.
 
@@ -104,6 +136,7 @@ def load_json(source: str | bytes) -> object:
 
     """
     text = _text(source)
+    _within_depth(text)
     try:
         value: object = json.loads(
             text,
@@ -114,6 +147,7 @@ def load_json(source: str | bytes) -> object:
     except UndecodableError:
         raise
     except RecursionError:
+        # The backstop: a stack smaller than MAX_DEPTH needs.
         msg = "nested too deep to decode"
         raise UndecodableError(msg) from None
     except ValueError as exc:

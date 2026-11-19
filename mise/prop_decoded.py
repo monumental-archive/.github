@@ -7,6 +7,8 @@ The properties of `test_decoded.py`'s rows:
   return a value or raise `UndecodableError`, and nothing else.
 - Round trip (R): `load_json(json.dumps(v))` is `v` for any finite JSON
   value with unique keys, which is everything the canon writes.
+- Depth (D): nesting up to MAX_DEPTH decodes and deeper is refused by
+  the bound, whatever the interpreter's stack, arrays and objects alike.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -100,6 +102,28 @@ class RoundTrip(unittest.TestCase):
         """Every finite value with unique keys survives the trip."""
         self.assertEqual(value, decoded.load_json(json.dumps(value)))
         self.assertEqual(value, decoded.load_json(json.dumps(value).encode()))
+
+
+class Depth(unittest.TestCase):
+    """D: the bound, not the stack, decides how deep a document may go."""
+
+    @given(st.integers(1, 2 * decoded.MAX_DEPTH), st.sampled_from(["[", "{"]))
+    @example(decoded.MAX_DEPTH, "[")
+    @example(decoded.MAX_DEPTH + 1, "{")
+    def test_either_side_of_the_bound(self, depth: int, opener: str) -> None:
+        """At or under the bound, a value; past it, the bound's refusal."""
+        if opener == "[":
+            text = "[" * depth + "]" * depth
+        else:
+            text = '{"k":' * depth + "0" + "}" * depth
+        if depth <= decoded.MAX_DEPTH:
+            self.assertIsNotNone(decoded.load_json(text))
+            return
+        with self.assertRaises(decoded.UndecodableError) as caught:
+            decoded.load_json(text)
+        self.assertEqual(
+            f"nested deeper than {decoded.MAX_DEPTH} levels", str(caught.exception)
+        )
 
 
 if __name__ == "__main__":

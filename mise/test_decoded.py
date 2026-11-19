@@ -27,6 +27,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 import decoded
 import hermetic
@@ -295,9 +296,31 @@ class LoadJson(unittest.TestCase):
         """1e999 would decode to inf; it is refused instead."""
         self.assertEqual("1e999 does not fit a finite number", self.refused("[1e999]"))
 
-    def test_nesting_too_deep_is_refused(self) -> None:
-        """A depth the decoder cannot reach is a refusal, not a crash."""
-        self.assertEqual("nested too deep to decode", self.refused("[" * DEEP))
+    def test_nesting_past_the_bound_is_refused(self) -> None:
+        """MAX_DEPTH decodes and one more is refused, on every machine."""
+        bound = decoded.MAX_DEPTH
+        self.assertEqual(bound, 512)
+        deepest = "[" * bound + "]" * bound
+        self.assertIsNotNone(decoded.load_json(deepest))
+        message = f"nested deeper than {bound} levels"
+        self.assertEqual(message, self.refused("[" * (bound + 1) + "]" * (bound + 1)))
+        objects = '{"a":' * (bound + 1) + "1" + "}" * (bound + 1)
+        self.assertEqual(message, self.refused(objects))
+        self.assertEqual(message, self.refused("[" * DEEP))
+
+    def test_a_bracket_inside_a_string_is_not_nesting(self) -> None:
+        """Brackets in a string, past an escaped quote, do not count."""
+        inside = "[" * (decoded.MAX_DEPTH + 1)
+        plain: list[object] = [inside]
+        self.assertEqual(plain, decoded.load_json(f'["{inside}"]'))
+        quoted = '"' + inside
+        escaped: list[object] = [quoted]
+        self.assertEqual(escaped, decoded.load_json(f'["\\{quoted}"]'))
+
+    def test_a_stack_too_small_for_the_bound_is_refused(self) -> None:
+        """The backstop: RecursionError under the bound is still a refusal."""
+        with mock.patch("json.loads", side_effect=RecursionError):
+            self.assertEqual("nested too deep to decode", self.refused("[]"))
 
     def test_bytes_that_are_not_utf8_are_refused(self) -> None:
         """Only UTF-8; json's own UTF-16 and UTF-32 detection is not used."""
