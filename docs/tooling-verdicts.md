@@ -32,6 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
+| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql-coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
@@ -2863,6 +2864,18 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
 
 ## Skipped, with rationale and reopen trigger
 
+- **Mutation testing of PL/pgSQL** (#1547) — no installable tool.
+  Searched 2026-11-19, the web and GitHub: what exists is a tool for
+  Oracle's PL/SQL (muPLSQL, a 2022 paper), a patent, and a SELECT-query
+  mutator that is not published. PL/pgSQL is held by its coverage
+  floor alone. *Reopen:* a maintained tool that mutates PL/pgSQL
+  function bodies.
+- **A property-testing tool inside the database** (#1547) — searched
+  the same day: SqlProof is an early alpha that says not to rely on
+  it, and pgTAP is example-based. A repository's PL/pgSQL is varied
+  through its own language's property tests against the real
+  database, which is that repository's work. *Reopen:* a maintained
+  in-database property-testing tool past alpha.
 - **Allstar / Minder** — continuous org-policy enforcement services.
   The org enforces settings as code (`settings/repo-baseline.sh`,
   org rulesets) and audits drift on Mondays with zero standing
@@ -3260,6 +3273,57 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   `node_modules/.bin` at the head of PATH, so the repository's binary
   runs and the shim never does, and vitest reads no environment variable
   that enables coverage.
+- **PL/pgSQL coverage (#1547)** — measured with plpgsql_check, which
+  the repository's test stack carries and the belt does not. The org's
+  published database image ships a deliberately small set of
+  extensions, and a coverage extension is a test tool, so the
+  repository's tests run against a layer built from that image which
+  adds the distribution's package, preloads it
+  (`shared_preload_libraries` gains `plpgsql,plpgsql_check`) and starts
+  with `plpgsql_check.profiler=on`. The database lives only for the
+  suite, so the reading is taken inside it: the `plpgsql` leg of
+  `mise/coverage-measure.sh` applies where a tracked file declares a
+  PL/pgSQL function and a `test` task exists, runs that task and the
+  tasks it depends on with `ORG_PLPGSQL_COVERAGE` naming a report, and
+  the repository's teardown calls `mise/plpgsql-coverage.py collect
+  <conninfo>` before it stops the database. The helper lists every
+  PL/pgSQL function outside the system schemas that no extension owns,
+  asks `plpgsql_coverage_statements` and `plpgsql_coverage_branches`
+  for each, and the leg prints `plpgsql <percent>` and
+  `plpgsql-branches <percent>`; the floor holds both. Adoption is that
+  one teardown call plus the floor. The belt pins no client: `psql` is
+  the repository's own, already needed to run its tests.
+  Measured 2026-11-19 on the proving repository's runner gate, two
+  runs per setting (monumental-archive/monumental-archive#373):
+  the layer builds from PGDG's `postgresql-18-plpgsql-check`
+  2.10.16-1.pgdg13+2 for the image's Postgres 18 (amd64 and arm64
+  both carry it), uncached in 38–53 s; a probe function never called
+  reads statements 0 and branches 0, and the same body driven down
+  both arms of its `IF` reads 1 and 1; the suite read 43.7 s and
+  45.6 s with the profiler on against 33.7 s and 37.9 s with it off,
+  about +9 s or +25%. The package is 2.10.16 where upstream is at
+  2.11.0; both coverage functions and the profiler exist at 2.10.16,
+  and the installed extension reports `extversion` 2.10. Three
+  readings set the refusals. The functions return a fraction, not a
+  percentage. With the profiler off every function reads 0 called or
+  not, and one with no branches reads branches 1, so an off profiler
+  is refused by reading the setting, never measured as 0%; a profiler
+  missing from `shared_preload_libraries` is refused too, because its
+  profile is per session and the teardown's session sees none of the
+  suite's. postgis owns 22 PL/pgSQL functions in a non-system schema,
+  which is why extension members (`pg_depend` `deptype 'e'`) are
+  excluded. A function the extension cannot read is listed with its
+  error and reds the leg; it is never dropped from the total. The
+  totals are weighted by statement count, which is exact for
+  statements (the visible statements are the rows of
+  `plpgsql_profiler_function_statements_tb`); the extension returns
+  its branch fraction without the branch count behind it, so the
+  branch total takes the same statement weight. **Rejected, so it is
+  not re-proposed:** adding the extension to the published database
+  image (a test tool in a production image); a report the repository
+  computes itself (the number would be the repository's claim, not
+  the belt's measurement); pgTAP (a test framework, where this is a
+  measurement of the tests a repository already has).
 - **Rust branch coverage in the gate** — skipped, for now
   (#1359, 2026-11-17). `cargo llvm-cov --branch` needs a nightly
   toolchain: measured 2026-11-17 on a one-function crate, the dated
