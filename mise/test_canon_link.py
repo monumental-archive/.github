@@ -14,19 +14,14 @@ from __future__ import annotations
 
 import os
 import pathlib
-import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
 import unittest
-from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 SCRIPT = (
     pathlib.Path(__file__).resolve().parent.parent

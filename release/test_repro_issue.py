@@ -21,18 +21,18 @@ as `mise run test`, which `ci` collects.
 
 import os
 import pathlib
-import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
-)
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import hermetic
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_issue.py"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"

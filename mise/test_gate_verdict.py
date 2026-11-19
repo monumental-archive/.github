@@ -15,18 +15,13 @@ from __future__ import annotations
 
 import os
 import pathlib
-import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import unittest
-from pathlib import Path
-from types import SimpleNamespace
 
-hermetic = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
-)
+import hermetic
 
 WORKFLOW = pathlib.Path(__file__).resolve().parent.parent / ".github/workflows/ci.yml"
 STEP = "- name: Every part of the gate passed"
