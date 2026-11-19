@@ -43,6 +43,7 @@
 # next one. It ends with one line per verdict and exits 1 if any is red.
 # No crate, major or feature name is written here.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:semver"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
@@ -60,7 +61,7 @@ command -v cargo > /dev/null || {
 # Assigned one step each: an empty here-string from a failed derivation
 # would read as a workspace with nothing to judge.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}")
 # Per member: where it may be published, as cargo resolved it (`null` is
 # anywhere, `[]` is `publish = false`, a list names registries, crates.io
 # as `crates-io`), and whether it has a target the tool can judge (the
@@ -105,7 +106,7 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
 
   # The record's URL is the belt's one index rule, shared with the
   # crates publisher (#1383), so the two can never read different paths.
-  url=$(python3 "${belt}/crates-index.py" url "${crate}")
+  url=$("${ORG_PYTHON}" "${belt}/crates-index.py" url "${crate}")
   # curl's own exit is not the verdict: the status is. No answer at all
   # writes 000, which is red like every status but 200 and 404.
   code=$(curl --silent --output /dev/null --write-out '%{http_code}' \

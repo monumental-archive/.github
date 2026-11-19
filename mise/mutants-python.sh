@@ -52,6 +52,7 @@
 # Prints each survivor (file:line, the mutant, the changed line) and one
 # summary line: mutants, killed, survived, excluded.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: python"
 
@@ -97,10 +98,10 @@ candidates=$(git grep -l -E 'pragma:.*no mutate' -- ':!vendor/**' '*.py' || true
 if [[ -n ${candidates} ]]; then
   files=()
   while IFS= read -r f; do files+=("${f}"); done <<< "${candidates}"
-  python3 "${belt}/mutmut-pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
+  "${ORG_PYTHON}" "${belt}/mutmut-pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
 fi
 # Every exclusion carries its reason, or this is red before mutmut runs.
-excluded=$(python3 "${belt}/mutants-python.py" exclusions "${config}" "${scratch}/pragmas.tsv")
+excluded=$("${ORG_PYTHON}" "${belt}/mutants-python.py" exclusions "${config}" "${scratch}/pragmas.tsv")
 
 command -v mutmut > /dev/null || {
   echo "${label}: mutmut missing — the belt pins it lazy; install it by name:" >&2
@@ -113,7 +114,7 @@ command -v mutmut > /dev/null || {
 # imports mutmut's trampoline. The hook APPENDS mutmut's site directory
 # to sys.path in every Python the run starts; mutants-python.py derives
 # the directory from the installed tool.
-python3 "${belt}/mutants-python.py" hook "${scratch}/hook"
+"${ORG_PYTHON}" "${belt}/mutants-python.py" hook "${scratch}/hook"
 status=0
 PYTHONPATH="${scratch}/hook${PYTHONPATH:+:${PYTHONPATH}}" mutmut run || status=$?
 if [[ ${status} -ne 0 ]]; then
@@ -124,13 +125,13 @@ fi
 mutmut results --all true > "${scratch}/results.txt"
 # Each survivor's diff, in the order the helper names them; the helper
 # finds the line in the file, since the diff counts from the function.
-python3 "${belt}/mutants-python.py" survivors "${scratch}/results.txt" > "${scratch}/survivors.txt"
+"${ORG_PYTHON}" "${belt}/mutants-python.py" survivors "${scratch}/results.txt" > "${scratch}/survivors.txt"
 mkdir "${scratch}/shows"
 i=0
 while IFS= read -r name; do
   i=$((i + 1))
   mutmut show "${name}" > "${scratch}/shows/${i}.diff"
 done < "${scratch}/survivors.txt"
-python3 "${belt}/mutants-python.py" verdict "${scratch}/results.txt" "${scratch}/shows" \
+"${ORG_PYTHON}" "${belt}/mutants-python.py" verdict "${scratch}/results.txt" "${scratch}/shows" \
   --excluded "${excluded}"
 org_done=1

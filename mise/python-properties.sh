@@ -17,6 +17,7 @@
 # of its own (the hidden-Python trap the belt's UV_* env exists for)
 # would test them on a different Python, silently.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 profile="${1:-}"
 case "${profile}" in
@@ -46,7 +47,7 @@ if [[ ${profile} == gate ]]; then
     | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python-properties.py"')
   leaks=""
   if [[ -n ${others} ]]; then
-    leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 python3 "${belt}/hypothesis-imports.py")
+    leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis-imports.py")
   fi
   if [[ -n ${leaks} ]]; then
     echo "${label}: these import Hypothesis (or cannot be read) but are not prop_*.py files:" >&2

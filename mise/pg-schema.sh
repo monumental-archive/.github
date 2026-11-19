@@ -19,6 +19,7 @@
 # the surface is one set of `#[pg_extern]`s, not one per major, and
 # `test:pgrx` compiles every major anyway.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 mode="${1:-}"
 case "${mode}" in
@@ -66,7 +67,7 @@ if [[ ${mode} == check ]]; then
   for target in "${targets[@]}"; do
     snapshot="${target#*:*:*:}"
     git ls-files --error-unmatch -- "${snapshot}" > /dev/null 2>&1 || {
-      python3 "${belt}/pg-schema.py" check /dev/null "${snapshot}" || missing=1
+      "${ORG_PYTHON}" "${belt}/pg-schema.py" check /dev/null "${snapshot}" || missing=1
     }
   done
   [[ ${missing} -eq 0 ]] || exit 1
@@ -80,7 +81,7 @@ command -v cargo-pgrx > /dev/null || {
 . "${belt}/pgrx-env.sh"
 org_pgrx_darwin_flags
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-plan=$(python3 "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}")
+plan=$("${ORG_PYTHON}" "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}")
 org_pgrx_init <<< "${plan}" > /dev/null
 
 # The raw output lands under the target directory cargo already ignores,
@@ -100,7 +101,7 @@ for target in "${targets[@]}"; do
   cargo pgrx schema "pg${major}" --package "${name}" \
     --manifest-path "${dir}/Cargo.toml" \
     --no-default-features --features "pg${major}" --out "${raw}"
-  if python3 "${belt}/pg-schema.py" "${mode}" "${raw}" "${snapshot}"; then
+  if "${ORG_PYTHON}" "${belt}/pg-schema.py" "${mode}" "${raw}" "${snapshot}"; then
     done_list="${done_list} ${name}(pg${major})"
   else
     failed=1

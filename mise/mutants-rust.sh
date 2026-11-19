@@ -41,6 +41,7 @@
 # alone and, given MUTANTS_SUMMARY_DIR, writes its counts to rust.tsv
 # there for the job that states the totals across shards.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: rust"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
@@ -71,7 +72,7 @@ fi
 
 # Reasons first: cheap, and a malformed exclusion is red whatever the run
 # would have found.
-python3 "${belt}/mutants-rust.py" reasons "${config}"
+"${ORG_PYTHON}" "${belt}/mutants-rust.py" reasons "${config}"
 
 skips=$(git grep -n -e 'mutants::skip' -- ':!vendor/**' '*.rs' || true)
 if [[ -n ${skips} ]]; then
@@ -94,7 +95,7 @@ command -v cargo-mutants > /dev/null || {
 # Assigned one step each: an empty here-string from a failed derivation
 # would read as a workspace with nothing to mutate.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}")
 
 plain=()
 pgrx=()
@@ -109,7 +110,7 @@ done <<< "${surface}"
 
 # The crate's default major: the one `pgNN` its `default` feature names.
 default_major() {
-  python3 "${belt}/mutants-rust.py" default-major "$1" <<< "${metadata}"
+  "${ORG_PYTHON}" "${belt}/mutants-rust.py" default-major "$1" <<< "${metadata}"
 }
 
 # The status survives the cleanup, and a run that died before its last
@@ -138,7 +139,7 @@ mutate() {
     cargo mutants --list --shard "${shard}" "$@" > "${out}/here.txt"
     here="${out}/here.txt"
   fi
-  python3 "${belt}/mutants-rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
+  "${ORG_PYTHON}" "${belt}/mutants-rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
     --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
@@ -183,5 +184,5 @@ if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then
   exit 1
 fi
 
-python3 "${belt}/mutants-rust.py" verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
+"${ORG_PYTHON}" "${belt}/mutants-rust.py" verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
 org_done=1

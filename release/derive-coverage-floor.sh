@@ -22,6 +22,7 @@
 # Leaves the working tree modified; open-release-pr.sh commits it via the
 # API, as EXTRA_FILES.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 : "${VERSION:?VERSION must be set (the version being released)}"
 
@@ -61,6 +62,6 @@ fi
 # number this prints and this derives the floor from it, so the flags
 # cannot drift apart (#316's shape, #652's fix).
 legs=$("${belt}/coverage-measure.sh" "release:coverage-floor")
-python3 "${belt}/coverage-floor.py" write --provenance "v${VERSION}" <<< "${legs}"
+"${ORG_PYTHON}" "${belt}/coverage-floor.py" write --provenance "v${VERSION}" <<< "${legs}"
 
 emit "files=.coverage-floor"

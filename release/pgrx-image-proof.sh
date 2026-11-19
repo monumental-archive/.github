@@ -24,6 +24,7 @@
 # prove on the second recipe and it says so. The digest is the record
 # the push step wrote ({pg, image, tag, digest}).
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 image="${1:?image}"
 record="${2:?digest record}"
 pg="${3:?pg major}"
@@ -31,15 +32,15 @@ canon="${4:?canon dir}"
 staged="${5:?staged extension dir}"
 docker_dir=$(cd "${canon}/docker" && pwd -P)
 digest=$(jq -r .digest "${record}")
-ext=$(python3 "${canon}/release/pgrx-images.py" extension-name --tree "${staged}")
-base=$(python3 "${canon}/release/pgrx-images.py" base-image --pg "${pg}" \
+ext=$("${ORG_PYTHON}" "${canon}/release/pgrx-images.py" extension-name --tree "${staged}")
+base=$("${ORG_PYTHON}" "${canon}/release/pgrx-images.py" base-image --pg "${pg}" \
   --table "${canon}/docker/pgrx-base-images.toml")
 context=$(mktemp -d)
 rc=0
 trap 'rc=$?; rm -rf "${context}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 # Called directly, never in $(…), so a refused reference stops the proof.
 render() { # recipe -> <context>/<recipe>.Dockerfile
-  python3 "${canon}/release/pgrx-images.py" consumer-dockerfile --recipe "$1" \
+  "${ORG_PYTHON}" "${canon}/release/pgrx-images.py" consumer-dockerfile --recipe "$1" \
     --image "${image}@${digest}" --base "${base}" --pg "${pg}" > "${context}/$1.Dockerfile"
 }
 render copy

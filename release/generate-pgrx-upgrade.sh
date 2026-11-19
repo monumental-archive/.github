@@ -39,6 +39,7 @@
 #          GH_TOKEN, GITHUB_REPOSITORY.
 # Writes GITHUB_OUTPUT key `files`: paths to add to the release commit.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 : "${VERSION:?VERSION must be set (the bumped version, no leading v)}"
 : "${PREV_MANIFEST:=}"
@@ -255,7 +256,7 @@ fi
 # under whichever backend key pins them, and for a LIST of rust versions
 # (a repo that fuzzes declares a nightly beside the stable one, .github#445)
 # the first entry, the one mise puts on PATH and this build must use.
-pins=$("${canon}/release/caller-pins.py" env --input-of "the pgrx-extension class" \
+pins=$("${ORG_PYTHON}" "${canon}/release/caller-pins.py" env --input-of "the pgrx-extension class" \
   RUST_VERSION=rust PGRX_VERSION=cargo-pgrx) || {
   echo "FAIL: rust and cargo:cargo-pgrx must be pinned in this repository's mise config" >&2
   exit 1

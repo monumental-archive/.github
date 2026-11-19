@@ -41,6 +41,7 @@
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 # The caller's name, so a remedy printed here names the task the session
 # actually ran.
@@ -79,7 +80,7 @@ tracked_js=$(git ls-files -- package.json pnpm-lock.yaml package-lock.json yarn.
 ts_runner=""
 if [[ -n ${tracked_js} ]]; then
   # shellcheck disable=SC2086  # one argument per tracked path; none has a space
-  ts_runner=$(python3 "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" ${tracked_js}) || exit 1
+  ts_runner=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" ${tracked_js}) || exit 1
 fi
 # The leg measures the repository's own `test` task (#1357 item 2), so a
 # vitest tree with no `test` task has no suite the gate runs: it skips
@@ -390,7 +391,7 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
     deps=$(jq -r '(.depends // [])[] | if type == "string" then . else (.task // empty) end' <<< "${info}")
     queue="${queue} ${deps//$'\n'/ }"
   done
-  command_json=$(python3 "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
+  command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
     --vitest-command "${label}" <<< "${tasks_json}") || exit 1
   test_dir=$(jq -r '.dir' <<< "${command_json}")
   args_lines=$(jq -r '.args[]' <<< "${command_json}")

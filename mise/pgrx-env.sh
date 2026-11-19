@@ -169,7 +169,8 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
   local home="${PGRX_HOME:-${HOME}/.pgrx}"
   local lock="${home}.init.flock"
   mkdir -p "$(dirname "${home}")"
-  python3 "$(dirname "${BASH_SOURCE[0]}")/with-lock.py" --timeout 600 \
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/with-lock.py" --timeout 600 \
     --message "pgrx-env: waited ten minutes for another task's Postgres init (${lock})" \
     "${lock}" -- bash -euo pipefail -c \
     "$(declare -f org_pgrx_init_locked); org_pgrx_init_locked \"\$@\"" \
@@ -249,7 +250,8 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   # a failed derivation that arrived as an empty surface would read as a
   # workspace with no extension — the skip #813 exists to end.
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
-  surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}") || return 1
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}") || return 1
   while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     for member in ${held}; do
@@ -268,6 +270,6 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   [[ -n ${majors} ]] || return 0
   org_pgrx_darwin_flags || return 1
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  plan=$(python3 "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}") || return 1
+  plan=$("${ORG_PYTHON}" "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}") || return 1
   org_pgrx_init <<< "${plan}" > /dev/null
 }
