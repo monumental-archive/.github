@@ -97,13 +97,13 @@ class Invariance(unittest.TestCase):
     def test_a_fold_of_the_wearer_belongs(self, drawn: tuple[str, str]) -> None:
         """Case, whitespace, one slash and one `.git` change nothing."""
         wearer, named = drawn
-        self.assertIsNone(bo.finding({"id": 1, "repo_url": named}, wearer))
+        self.assertIsNone(bo.finding(bo.Entry.of({"id": 1, "repo_url": named}), wearer))
 
     @given(stranger())
     def test_another_repository_does_not(self, drawn: tuple[str, str]) -> None:
         """A different owner or name, however spelt, is a finding."""
         wearer, named = drawn
-        found = bo.finding({"id": 7, "repo_url": named}, wearer)
+        found = bo.finding(bo.Entry.of({"id": 7, "repo_url": named}), wearer)
         self.assertIsNotNone(found)
         self.assertIn("project 7", found)
 

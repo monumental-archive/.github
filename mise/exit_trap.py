@@ -189,6 +189,12 @@ def scripts(path: Path) -> Iterator[tuple[int, str, str, bool]]:
         yield 0, "", source, bool(BASH_SHEBANG_RE.match(first))
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    files: list[str]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Check every shell file and mise config named.
 
@@ -198,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description="hold EXIT traps to the guard")
     parser.add_argument("files", nargs="*")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
 
     found: list[str] = []
     checked = 0

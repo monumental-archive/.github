@@ -55,6 +55,14 @@ def acquire(path: str, timeout: float) -> int | None:
             return fd
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    timeout: float
+    message: str
+    lockfile: str
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command under the lock.
 
@@ -73,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--message", default="")
     parser.add_argument("lockfile")
-    args = parser.parse_args(argv[:split])
+    args = parser.parse_args(argv[:split], namespace=Args())
     command = argv[split + 1 :]
     if not command:
         print("with-lock: no command after --", file=sys.stderr)

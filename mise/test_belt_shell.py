@@ -387,6 +387,22 @@ class Main(unittest.TestCase):
                 self.assertEqual(bs.main([str(path)]), 0)
         self.assertIn("1 task body(ies)", out.getvalue())
 
+    def test_a_config_that_is_not_toml_is_refused_by_name(self) -> None:
+        """Checked or written, an undecodable config is named (#1681)."""
+        try:
+            tomllib.loads("[tasks.t\n")
+        except tomllib.TOMLDecodeError as exc:
+            why = str(exc)
+        with TemporaryDirectory() as tmp:
+            path = write(tmp, "[tasks.t\n")
+            for extra in ([], ["--write"]):
+                err = io.StringIO()
+                with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                    self.assertEqual(bs.main([str(path), *extra]), 1)
+                self.assertEqual(
+                    err.getvalue(), f"belt-shell: {path}: not TOML: {why}\n"
+                )
+
     def test_a_finding_exits_one(self) -> None:
         """The gate's whole point."""
         with TemporaryDirectory() as tmp:

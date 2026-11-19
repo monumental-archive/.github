@@ -102,7 +102,7 @@ class TestObligations(unittest.TestCase):
             The owed artifact names, in derivation order.
 
         """
-        return [name for name, _ in ap.obligations(m)]
+        return [name for name, _ in ap.obligations(ap.Member.of(m, "m"))]
 
     def test_public_full_member_owes_everything(self) -> None:
         """A public, tagged member on every track owes the whole set."""
@@ -167,7 +167,7 @@ class TestObligations(unittest.TestCase):
 
     def test_alternate_names_are_offered(self) -> None:
         """The canon's self-* variants and gate.yml satisfy the same obligations."""
-        owed = dict(ap.obligations(member(tagged=True)))
+        owed = dict(ap.obligations(ap.Member.of(member(tagged=True), "m")))
         self.assertIn("gate.yml", owed["ci"])
         self.assertIn("self-release.yml", owed["release"])
         self.assertIn("self-dependency-review.yml", owed["dependency-review"])

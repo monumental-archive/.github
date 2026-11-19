@@ -231,10 +231,11 @@ class Green(unittest.TestCase):
         key = next(k for k in ANSWERS if k.endswith("_justification"))
         answers = dict(ANSWERS)
         answers[key] = ""
-        self.assertEqual(drift.drift(answers, published({key: None})), [])
+        site = drift.published(published({key: None}), list(ANSWERS))
+        self.assertEqual(drift.drift(answers, site), [])
         # And only then: against the file's real words, null is a drift.
         self.assertEqual(
-            drift.drift(ANSWERS, published({key: None})),
+            drift.drift(ANSWERS, site),
             [f"{key.removesuffix('_justification')}: justification differs"],
         )
 
@@ -365,6 +366,21 @@ class Red(unittest.TestCase):
             f"{LABEL}: the site's answer is not a JSON object\n", entry="[]"
         )
 
+    def test_a_site_answer_that_is_not_a_string_is_refused(self) -> None:
+        """A number where a status belongs is no answer to compare (#1681)."""
+        self.assert_red(
+            f"{LABEL}: the site's answer: test_most_status is not a string or null\n",
+            entry=published({"test_most_status": 3}),
+        )
+
+    def test_a_baseline_answer_is_refused_under_its_display_name(self) -> None:
+        """The refusal names the key the site carries (#1681)."""
+        self.assert_red(
+            f"{LABEL}: the site's answer: OSPS-AC-01.01_justification is not"
+            " a string or null\n",
+            entry=published({"osps_ac_01_01_justification": ["x"]}),
+        )
+
     def test_two_entries_on_one_readme_are_red(self) -> None:
         """Which entry the file answers for cannot be guessed."""
         other = README.replace(ID, "16735")
@@ -394,7 +410,9 @@ class Helper(unittest.TestCase):
 
     def test_keys_that_are_not_answers_are_ignored(self) -> None:
         """Only `_status` and `_justification` keys are compared."""
-        self.assertEqual(drift.drift({"name": "x"}, {"name": "y"}), [])
+        self.assertEqual(
+            drift.answers({"name": "x", "a_status": "Met"}, "f"), {"a_status": "Met"}
+        )
 
     def test_an_empty_readme_names_no_entry(self) -> None:
         """No README text, no shield."""
@@ -412,6 +430,20 @@ class Helper(unittest.TestCase):
                 status = drift.main([".bestpractices.json", REPO, str(readme)])
         self.assertEqual(status, 1)
         self.assertEqual(err.getvalue(), "audit:bestpractices: curl missing\n")
+
+    def test_a_file_answer_that_is_not_a_string_is_refused(self) -> None:
+        """The file's answers are strings or null, read once (#1681)."""
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", encoding="utf-8"
+        ) as handle:
+            handle.write('{"name": 1, "test_most_status": true}')
+            handle.flush()
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(drift.compare(handle.name, REPO, ID, "{}"), 1)
+        self.assertEqual(
+            err.getvalue(),
+            f"{LABEL}: {handle.name}: test_most_status is not a string or null\n",
+        )
 
     def test_an_unreadable_file_is_red(self) -> None:
         """A file that is not JSON is a finding, not a crash."""

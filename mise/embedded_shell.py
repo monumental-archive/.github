@@ -34,9 +34,11 @@ import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
+
+import decoded
+from typed_std import group
 
 # Every block-scalar header of `run:`, at any indent, list item or not:
 # literal (`|`) or folded (`>`), any chomping or indentation indicator,
@@ -115,8 +117,8 @@ def step_shell(lines: list[str], run_idx: int, key_indent: int) -> str:
         if j > first and cur is not None and cur < key_indent:
             break
         m = SHELL_RE.match(lines[j])
-        if m and len(m.group(1)) + (2 if m.group(2) else 0) == key_indent:
-            return m.group(3).strip().lower()
+        if m and len(group(m, 1) or "") + (2 if group(m, 2) else 0) == key_indent:
+            return (group(m, 3) or "").strip().lower()
         if start is None and j > run_idx:
             break
     return "bash"
@@ -777,13 +779,25 @@ def task_bodies(path: Path) -> Iterator[tuple[str, int]]:
     Yields:
         (task name, weight) per task carrying a body, in file order.
 
+    Raises:
+        UndecodableError: the file is not TOML, or its `tasks` is not a
+            table; the text names the file.
+
     """
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    for name, task in (data.get("tasks") or {}).items():
-        if not isinstance(task, dict):
+    try:
+        data = decoded.load_toml(path.read_bytes())
+    except decoded.UndecodableError as err:
+        msg = f"{path}: not TOML: {err}"
+        raise decoded.UndecodableError(msg) from None
+    tasks = data.get("tasks") or {}
+    if not decoded.is_object(tasks):
+        msg = f"{path}: tasks is not a table"
+        raise decoded.UndecodableError(msg)
+    for name, task in tasks.items():
+        if not decoded.is_object(task):
             continue
         run = task.get("run")
-        commands = run if isinstance(run, list) else [run]
+        commands = run if decoded.is_array(run) else [run]
         source = "\n".join(c for c in commands if isinstance(c, str))
         if source.strip():
             yield name, weight(source)
@@ -860,7 +874,11 @@ def task_ceiling(files: list[str], debt: Path, *, write: bool) -> int:
         The process exit status.
 
     """
-    verdict, over = judge_tasks(files, debt)
+    try:
+        verdict, over = judge_tasks(files, debt)
+    except decoded.UndecodableError as err:
+        print(f"{'fix:' if write else ''}task-shell: {err}", file=sys.stderr)
+        return 1
     if write:
         if not debt.is_file():
             if over:
@@ -902,6 +920,17 @@ def task_ceiling(files: list[str], debt: Path, *, write: bool) -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    files: list[str]
+    no_format: bool
+    no_lint: bool
+    write: bool
+    ceiling: str | None
+    task_ceiling: str | None
+
+
 def main() -> None:
     """Entry point: check every file named on the command line."""
     ap = argparse.ArgumentParser(description=__doc__)
@@ -919,7 +948,7 @@ def main() -> None:
         metavar="DEBT",
         help="hold mise task bodies to the line ceiling, net of this debt file",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(namespace=Args())
 
     if args.ceiling:
         sys.exit(ceiling(args.files, Path(args.ceiling), write=args.write))
