@@ -483,12 +483,11 @@ def mise_json(*args: str) -> object:
         The decoded answer, or None when mise cannot give one.
 
     """
-    mise = shutil.which("mise")
-    if mise is None:
+    if shutil.which("mise") is None:
         return None
-    # ruff: ignore[subprocess-without-shell-equals-true]
+    # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
     r = subprocess.run(
-        [mise, *args, "--json"], capture_output=True, text=True, check=False
+        ["mise", *args, "--json"], capture_output=True, text=True, check=False
     )
     try:
         return json.loads(r.stdout) if r.returncode == 0 else None
