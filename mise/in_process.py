@@ -59,6 +59,7 @@ from pathlib import Path, PurePosixPath
 
 import call_names
 
+GIT = shutil.which("git") or "git"
 DEBT = "security/helper-import-debt.txt"
 NOTE = "# #1673 unassigned"
 LABEL = "lint:in-process"
@@ -404,21 +405,14 @@ def tracked(root: Path) -> list[str]:
     Returns:
         Their paths, relative to root; empty when none is tracked.
 
-    Raises:
-        RuntimeError: git is not on PATH.
-
     """
-    git = shutil.which("git")
-    if git is None:
-        msg = f"{LABEL}: git is not on PATH"
-        raise RuntimeError(msg)
     # git's own variables are not inherited: under a hook or a test run git
     # exports GIT_DIR or GIT_INDEX_FILE, and a listing of root under them
     # names another tree's files, or none (#857, measured on #1705's gate).
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     # ruff: ignore[subprocess-without-shell-equals-true]
     listed = subprocess.run(
-        [git, "ls-files", "-z", "--", "*.py", ":!vendor/**"],
+        [GIT, "ls-files", "-z", "--", "*.py", ":!vendor/**"],
         cwd=root,
         env=env,
         capture_output=True,
