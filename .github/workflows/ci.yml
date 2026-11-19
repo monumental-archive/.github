@@ -190,6 +190,23 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # A MERGE GROUP IS ITS PULL REQUEST'S CURRENT HEAD (#1422). On
+      # edtf#265 a push landed in the second the pull request was queued,
+      # the queue built the group from the old head, and the gate passed
+      # it under the new title. The group's tree must equal the pull
+      # request's current head merged onto the group's base; anything
+      # else, or anything unverifiable, is red by name. The token is the
+      # job's own `contents: read`, for one git fetch of
+      # refs/pull/<n>/head: the checkout keeps no credentials.
+      - name: A merge group is the pull request's current head
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          ORG_QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
+          ORG_QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+          ORG_QUEUE_TOKEN: ${{ github.token }}
+        run: python3 .org-canon/mise/queue-head.py
+
       # The Rust toolchains live INSIDE the directory the tool cache
       # below restores (#1165). mise installs rust through rustup, and
       # rustup's home is ~/.rustup — outside mise's data directory, which
