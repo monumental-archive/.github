@@ -42,8 +42,8 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
 IDENTITY = CANON / "security" / "identity.toml"
-LEFTHOOK = shutil.which("lefthook")
-GIT = shutil.which("git")
+LEFTHOOK = hermetic.optional_tool("lefthook")
+GIT = hermetic.optional_tool("git")
 
 # What the stub records for one gate run: the job's `mise run ci`.
 GATE_RAN = "run ci\n"
@@ -114,7 +114,11 @@ class PrePushGate(unittest.TestCase):
         (stubs / "mise").chmod(0o755)
 
         env = hermetic.env()
-        tools = [str(stubs), str(Path(LEFTHOOK).parent), str(Path(GIT).parent)]
+        tools = [
+            str(stubs),
+            str(Path(hermetic.tool("lefthook")).parent),
+            str(Path(hermetic.tool("git")).parent),
+        ]
         env |= {
             "PATH": os.pathsep.join([*tools, env.get("PATH", "")]),
             "HOME": str(self.root),
@@ -159,7 +163,7 @@ class PrePushGate(unittest.TestCase):
 
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [str(GIT), *args],
+            [hermetic.tool("git"), *args],
             cwd=cwd,
             env=self.env,
             capture_output=True,
@@ -201,7 +205,7 @@ class PrePushGate(unittest.TestCase):
     def install(self, clone: Path) -> None:
         """Install the hooks; lefthook fetches the canon remote here."""
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [str(LEFTHOOK), "install"],
+            [hermetic.tool("lefthook"), "install"],
             cwd=clone,
             env=self.env,
             capture_output=True,

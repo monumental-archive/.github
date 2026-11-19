@@ -63,10 +63,11 @@ see"). The table tests in test_adoption_population.py reach shapes the
 live org does not contain.
 """
 
-import json
-import operator
 import sys
-from typing import TextIO
+from dataclasses import dataclass
+from typing import Self, TextIO
+
+import decoded
 
 # The population document's epoch this reader was written against
 # (stele docs/population.md). A different one is refused, never read
@@ -88,45 +89,57 @@ class RefusalError(Exception):
     """A population document this tool will not derive obligations from."""
 
 
-def _member(item: object, where: str) -> dict:
-    """Check one member carries every field an obligation reads.
+@dataclass(frozen=True)
+class Member:
+    """The four fields of a member every obligation reads."""
 
-    Returns:
-        The member, unchanged.
+    repo: str
+    tracks: tuple[str, ...]  # resolved, as stele prints them
+    visibility: str  # the forge's word: `public`, `private`, ...
+    release_tags: bool  # whether it carries a release tag
 
-    Raises:
-        RefusalError: a field is absent or of the wrong type, named.
+    @classmethod
+    def of(cls, item: object, where: str) -> Self:
+        """Check one member carries every field an obligation reads.
 
-    """
-    if not isinstance(item, dict):
-        msg = f"{where} is not an object"
-        raise RefusalError(msg)
-    repo = item.get("repo")
-    if not isinstance(repo, str) or not repo:
-        msg = f"{where}.repo is absent or not a non-empty string"
-        raise RefusalError(msg)
-    tracks = item.get("tracks")
-    if not isinstance(tracks, list) or not all(isinstance(t, str) for t in tracks):
-        msg = f"{where} ({repo}).tracks is not a list of strings"
-        raise RefusalError(msg)
-    # Visibility decides what is structurally possible, so an absent one
-    # is refused rather than assumed either way.
-    if not isinstance(item.get("visibility"), str):
-        msg = (
-            f"{where} ({repo}).visibility is absent — the forge listing was"
-            " not read, so whether scorecard can run there is unknown"
-        )
-        raise RefusalError(msg)
-    if not isinstance(item.get("releaseTags"), bool):
-        msg = (
-            f"{where} ({repo}).releaseTags is absent — the policy declares no"
-            " tags section, so whether it has released is unknown"
-        )
-        raise RefusalError(msg)
-    return item
+        Returns:
+            The member.
+
+        Raises:
+            RefusalError: a field is absent or of the wrong type, named.
+
+        """
+        if not decoded.is_object(item):
+            msg = f"{where} is not an object"
+            raise RefusalError(msg)
+        repo = item.get("repo")
+        if not isinstance(repo, str) or not repo:
+            msg = f"{where}.repo is absent or not a non-empty string"
+            raise RefusalError(msg)
+        tracks = item.get("tracks")
+        if not decoded.is_strings(tracks):
+            msg = f"{where} ({repo}).tracks is not a list of strings"
+            raise RefusalError(msg)
+        # Visibility decides what is structurally possible, so an absent
+        # one is refused rather than assumed either way.
+        visibility = item.get("visibility")
+        if not isinstance(visibility, str):
+            msg = (
+                f"{where} ({repo}).visibility is absent — the forge listing was"
+                " not read, so whether scorecard can run there is unknown"
+            )
+            raise RefusalError(msg)
+        tagged = item.get("releaseTags")
+        if not isinstance(tagged, bool):
+            msg = (
+                f"{where} ({repo}).releaseTags is absent — the policy declares no"
+                " tags section, so whether it has released is unknown"
+            )
+            raise RefusalError(msg)
+        return cls(repo, tuple(tracks), visibility, tagged)
 
 
-def load_members(stream: TextIO) -> list[dict]:
+def load_members(stream: TextIO) -> list[Member]:
     """Read stele's population document and return its members.
 
     Returns:
@@ -138,11 +151,11 @@ def load_members(stream: TextIO) -> list[dict]:
 
     """
     try:
-        doc = json.load(stream)
-    except json.JSONDecodeError as exc:
+        doc = decoded.load_json(stream.read())
+    except decoded.UndecodableError as exc:
         msg = f"population document is not JSON — {exc}"
         raise RefusalError(msg) from exc
-    if not isinstance(doc, dict):
+    if not decoded.is_object(doc):
         msg = "population document is not a JSON object"
         raise RefusalError(msg)
     if doc.get("schema") != SCHEMA:
@@ -152,7 +165,7 @@ def load_members(stream: TextIO) -> list[dict]:
         )
         raise RefusalError(msg)
     members = doc.get("members")
-    if not isinstance(members, list):
+    if not decoded.is_array(members):
         msg = "population document members is absent or not a list"
         raise RefusalError(msg)
     if not members:
@@ -161,10 +174,20 @@ def load_members(stream: TextIO) -> list[dict]:
             " by covering nothing (#290 f7)"
         )
         raise RefusalError(msg)
-    return [_member(item, f"members[{i}]") for i, item in enumerate(members)]
+    return [Member.of(item, f"members[{i}]") for i, item in enumerate(members)]
 
 
-def obligations(member: dict) -> list[tuple[str, tuple[str, ...]]]:
+def by_repo(member: Member) -> str:
+    """Key a member by its repository.
+
+    Returns:
+        The repository.
+
+    """
+    return member.repo
+
+
+def obligations(member: Member) -> list[tuple[str, tuple[str, ...]]]:
     """Derive what one member owes from what its membership makes apply.
 
     Returns:
@@ -172,13 +195,13 @@ def obligations(member: dict) -> list[tuple[str, tuple[str, ...]]]:
 
     """
     owed: list[tuple[str, tuple[str, ...]]] = [("ci", CI), ("audit", AUDIT)]
-    if member["visibility"] != "private":
+    if member.visibility != "private":
         owed.extend(
             (("scorecard", SCORECARD), ("dependency-review", DEPENDENCY_REVIEW)),
         )
-    if "source" in member["tracks"]:
+    if "source" in member.tracks:
         owed.append(("source-attest", SOURCE_ATTEST))
-    if member["releaseTags"]:
+    if member.release_tags:
         owed.extend((("release", RELEASE), ("publish", PUBLISH)))
     return owed
 
@@ -198,9 +221,9 @@ def main(argv: list[str] | None = None) -> int:
     except RefusalError as exc:
         print(f"adoption-population: {exc}", file=sys.stderr)
         return 2
-    for member in sorted(members, key=operator.itemgetter("repo")):
+    for member in sorted(members, key=by_repo):
         for artifact, names in obligations(member):
-            print(f"OWES\t{member['repo']}\t{artifact}\t{'|'.join(names)}")
+            print(f"OWES\t{member.repo}\t{artifact}\t{'|'.join(names)}")
     return 0
 
 

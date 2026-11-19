@@ -36,9 +36,13 @@ array.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
+from dataclasses import dataclass
+from typing import Self
+
+import decoded
+from typed_std import NoStdinError, group, stdin_text
 
 # Each exempt audit, the location kind that carries its reference, and
 # why the finding is true but not a defect on the signer.
@@ -70,10 +74,11 @@ def location_references(feature: str) -> list[str]:
     text = feature.strip()
     if "@" in text and not any(c.isspace() for c in text):
         return [text]
-    return [ref for ref in USES.findall(feature) if "@" in ref]
+    found = (group(m, 1) or "" for m in USES.finditer(feature))
+    return [ref for ref in found if "@" in ref]
 
 
-def references(finding: dict) -> list[str]:
+def references(finding: dict[str, object]) -> list[str]:
     """Return the references a finding names, read where its audit puts them.
 
     Returns:
@@ -87,22 +92,45 @@ def references(finding: dict) -> list[str]:
     if audit is None:
         return []
     kind = audit[0]
-    refs = []
+    refs: list[str] = []
     # Every level is checked for its type: a field of the wrong one
     # carries no reference, so the finding is kept and reported, never
     # exempted (#1555: one raised a traceback here).
     locations = finding.get("locations")
-    for location in locations if isinstance(locations, list) else []:
-        if not isinstance(location, dict):
+    for location in locations if decoded.is_array(locations) else []:
+        if not decoded.is_object(location):
             continue
         symbolic = location.get("symbolic")
-        if not isinstance(symbolic, dict) or symbolic.get("kind") != kind:
+        if not decoded.is_object(symbolic) or symbolic.get("kind") != kind:
             continue
         concrete = location.get("concrete")
-        feature = concrete.get("feature") if isinstance(concrete, dict) else None
+        feature = concrete.get("feature") if decoded.is_object(concrete) else None
         if isinstance(feature, str):
             refs.extend(location_references(feature))
     return refs
+
+
+@dataclass(frozen=True)
+class Finding:
+    """What the filter reads of one zizmor finding, decoded once."""
+
+    ident: str  # the audit's name as the report writes it
+    ignored: bool  # zizmor's own `ignored: true`
+    refs: tuple[str, ...]  # the references its audit carries
+
+    @classmethod
+    def of(cls, finding: dict[str, object]) -> Self:
+        """Read one decoded finding object.
+
+        Returns:
+            The finding.
+
+        """
+        return cls(
+            ident=str(finding.get("ident")),
+            ignored=finding.get("ignored") is True,
+            refs=tuple(references(finding)),
+        )
 
 
 def repository(reference: str) -> str | None:
@@ -122,7 +150,7 @@ def repository(reference: str) -> str | None:
     return f"{parts[0]}/{parts[1]}".lower()
 
 
-def on_signer(finding: dict, signer: str) -> bool:
+def on_signer(finding: Finding, signer: str) -> bool:
     """Report whether a finding is an exempt audit on the signer.
 
     Returns:
@@ -130,7 +158,7 @@ def on_signer(finding: dict, signer: str) -> bool:
         the finding names is in the signer's repository.
 
     """
-    refs = references(finding)
+    refs = finding.refs
     if not refs:
         return False
     return all(repository(ref) == signer for ref in refs)
@@ -153,6 +181,29 @@ def signer_repository(workflow: str) -> str:
     return repo
 
 
+def array(value: object) -> list[Finding] | None:
+    """Read zizmor's array: every item a finding object.
+
+    Returns:
+        The findings, or None when the value is not that array.
+
+    """
+    if not decoded.is_array(value):
+        return None
+    findings: list[Finding] = []
+    for item in value:
+        if not decoded.is_object(item):
+            return None
+        findings.append(Finding.of(item))
+    return findings
+
+
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    signer_workflow: str
+
+
 def main(argv: list[str] | None = None) -> int:
     """Filter zizmor's findings read from stdin.
 
@@ -167,28 +218,28 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the signer's workflow ref, from security/identity.toml",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     try:
         signer = signer_repository(args.signer_workflow)
-        findings = json.load(sys.stdin)
-    except (ValueError, json.JSONDecodeError) as err:
+        findings = array(decoded.load_json(stdin_text()))
+    except (ValueError, NoStdinError) as err:  # UndecodableError is a ValueError
         print(f"zizmor-signer: {err}", file=sys.stderr)
         return 2
-    if not isinstance(findings, list) or not all(isinstance(f, dict) for f in findings):
+    if findings is None:
         print("zizmor-signer: input is not zizmor's finding array", file=sys.stderr)
         return 2
 
-    live = [f for f in findings if f.get("ignored") is not True]
+    live = [f for f in findings if not f.ignored]
     dropped = [f for f in live if on_signer(f, signer)]
     kept = [f for f in live if not on_signer(f, signer)]
     for audit, (_, why) in AUDITS.items():
-        count = sum(1 for f in dropped if f.get("ident") == audit)
+        count = sum(1 for f in dropped if f.ident == audit)
         print(
             f"audit:actions: {count} {audit} finding(s) on the signer dropped"
             f" ({signer} {why})",
         )
     if kept:
-        idents = sorted({str(f.get("ident")) for f in kept})
+        idents = sorted({f.ident for f in kept})
         print(
             f"audit:actions: {len(kept)} finding(s) remain: {', '.join(idents)}",
             file=sys.stderr,

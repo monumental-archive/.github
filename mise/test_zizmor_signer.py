@@ -296,6 +296,22 @@ class Refusals(unittest.TestCase):
                 self.assertEqual(1, status)
                 self.assertIn("1 finding(s) remain", err)
 
+    def test_a_process_with_no_stdin_is_refused_by_name(self) -> None:
+        """No standard input is a refusal, never a traceback (#1681)."""
+        err = io.StringIO()
+        real = signer.sys.stdin
+        signer.sys.stdin = None
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
+        finally:
+            signer.sys.stdin = real
+        self.assertEqual(2, status)
+        self.assertEqual(
+            err.getvalue(),
+            "zizmor-signer: no standard input: the process was started without one\n",
+        )
+
     def test_input_that_is_not_the_finding_array_is_refused(self) -> None:
         """A SARIF document or an error object is not silently empty."""
         self.assertEqual(2, run({"runs": []})[0])

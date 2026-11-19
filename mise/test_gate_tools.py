@@ -49,7 +49,7 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-GIT = shutil.which("git")
+GIT = hermetic.tool("git")
 
 
 # What `ci` runs besides the `lint:*` wildcard (its `depends`), and the

@@ -43,9 +43,9 @@ import mutants_go
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-go.sh"
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 LABEL = "audit:mutants: go"
 MODULE = "example.com/p"
 RED_TAIL = (
@@ -294,7 +294,7 @@ class Planted(unittest.TestCase):
         self.report("a", ("KILLED", 4, "arithmetic"), ("KILLED", 8, "conditional"))
         self.report("b", ("KILLED", 4, "arithmetic"))
 
-    def run_leg(self) -> subprocess.CompletedProcess:
+    def run_leg(self) -> subprocess.CompletedProcess[str]:
         """Run the leg in the planted tree.
 
         Returns:

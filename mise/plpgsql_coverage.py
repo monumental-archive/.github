@@ -31,6 +31,21 @@ subcommands:
                          name. A report with no PL/pgSQL function prints
                          no totals and exits 0.
 
+The same call asks plpgsql_check's static check about every listed
+function (#1605): `plpgsql_check_function_tb` with every optional check
+on and fatal errors reported rather than stopping at the first, a
+trigger function once per table its triggers sit on. Each reading
+carries its findings (line, level, message); `totals` reds every
+finding, whatever its level, by function and line, before it judges the
+floor, and the decoder refuses a reading with no findings answer: a
+report from a helper that did not ask is not a clean result. The one
+suppression is the extension's own per-function option,
+`-- @plpgsql_check_options: <check> = false`: the helper reads each
+function's source as the database holds it (`pg_proc.prosrc`) and
+records every options line that turns a check off; `totals` names every
+one on every run and reds one with no comment line directly above it
+saying why.
+
 The run is not this helper's: `coverage-measure.sh` walks the `test`
 task and its depends once, for every leg that reads that run, and sets
 ORG_PLPGSQL_COVERAGE in it when the plpgsql leg is selected; the leg
@@ -72,6 +87,7 @@ would be a second PL/pgSQL parser. The report lists every function's
 figures beside the totals, so the totals can be checked by hand.
 """
 
+import base64
 import json
 import os
 import re
@@ -82,6 +98,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 
 from decoded import UndecodableError, as_array, as_object, load_json
+from typed_std import group
 
 NAME = "plpgsql-coverage"
 ENV = "ORG_PLPGSQL_COVERAGE"
@@ -97,7 +114,10 @@ CREATE_SQL = "CREATE EXTENSION IF NOT EXISTS plpgsql_check"
 # Every PL/pgSQL function the repository wrote: outside the system
 # schemas, and owned by no extension (pg_depend deptype 'e').
 LIST_SQL = """\
-SELECT p.oid, p.oid::regprocedure
+SELECT p.oid, p.oid::regprocedure,
+       coalesce((SELECT string_agg(DISTINCT t.tgrelid::text, ' ')
+                   FROM pg_trigger t
+                  WHERE t.tgfoid = p.oid AND NOT t.tgisinternal), '')
   FROM pg_proc p
   JOIN pg_language l ON l.oid = p.prolang
   JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -125,11 +145,62 @@ SELECT plpgsql_coverage_statements({oid}::regprocedure),
                                    OR stmtname LIKE 'FOR%') AS branching
           FROM plpgsql_profiler_function_statements_tb({oid}::regprocedure)) s"""
 
+# One function's static check (#1605): plpgsql_check_function_tb with
+# every optional check on, and fatal errors reported rather than ending
+# the check at the first. A trigger function is checked against each
+# table a trigger attaches it to, since its NEW and OLD are that
+# table's rows; relid 0 checks any other function. The message is base64
+# so a newline in it cannot split the row psql prints.
+LINT_SQL = """\
+SELECT coalesce(lineno::text, ''), level,
+       replace(encode(convert_to(message, 'UTF8'), 'base64'), E'\\n', '')
+  FROM plpgsql_check_function_tb({oid}::regprocedure, {relid}::regclass,
+                                 fatal_errors => false,
+                                 other_warnings => true,
+                                 performance_warnings => true,
+                                 extra_warnings => true,
+                                 security_warnings => true,
+                                 compatibility_warnings => true)"""
+
+# One function's source, base64 so its newlines survive psql's rows.
+SOURCE_SQL = (
+    "SELECT replace(encode(convert_to(prosrc, 'UTF8'), 'base64'), E'\\n', '')"
+    " FROM pg_proc WHERE oid = {oid}"
+)
+
+# The extension's own per-function option (#1605): the one suppression
+# allowed, read from the function's source as the database holds it.
+OPTIONS = re.compile(r"--\s*@plpgsql_check_options:\s*(?P<options>.*)")
+SETTING = re.compile(r"(?P<name>\w+)\s*=\s*(?P<value>\w+)")
+
 OID = re.compile(r"[0-9]+")
 SETTINGS = 2  # the profiler and the preload list
-LISTING = 2  # an oid and a signature
+LISTING = 3  # an oid, a signature, and the tables its triggers sit on
+FINDING = 3  # a line, a level, a message
 PLACES = Decimal("0.01")
 HUNDRED = Decimal(100)
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One static-check finding: where, how severe, and what."""
+
+    line: int | None
+    level: str
+    message: str
+
+
+@dataclass(frozen=True)
+class Suppression:
+    """One `@plpgsql_check_options` line that turns a check off.
+
+    `reason` is the comment line directly above it, or None when there
+    is none: a suppression without its reason is red.
+    """
+
+    line: int
+    options: str
+    reason: str | None
 
 
 @dataclass(frozen=True)
@@ -147,6 +218,10 @@ class Reading:
     statement_count: int
     executed: int
     branch_free: bool
+    # What plpgsql_check's static check reported (#1605); empty is clean.
+    findings: tuple[Finding, ...] = ()
+    # The function's own options that turn a check off (#1605).
+    suppressions: tuple[Suppression, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -218,7 +293,98 @@ def psql(conninfo: str, sql: str) -> list[list[str]]:
     return [line.split("\t") for line in done.stdout.splitlines() if line]
 
 
-def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadable:
+def lint_function(conninfo: str, oid: str, relids: list[str]) -> tuple[Finding, ...]:
+    """Ask plpgsql_check's static check about one function.
+
+    Returns:
+        Every distinct finding, across each table the function's
+        triggers sit on (or none).
+
+    Raises:
+        ReadError: psql failed, or printed a row of the wrong shape.
+
+    """
+    found: list[Finding] = []
+    for relid in relids or ["0"]:
+        if not OID.fullmatch(relid):
+            msg = f"its trigger table oid '{relid}' is not a number"
+            raise ReadError(msg)
+        for row in psql(conninfo, LINT_SQL.format(oid=oid, relid=relid)):
+            if len(row) != FINDING:
+                msg = f"unreadable finding: {row!r}"
+                raise ReadError(msg)
+            line, level, encoded = row
+            try:
+                message = base64.b64decode(encoded, validate=True).decode("utf-8")
+            except ValueError as exc:
+                msg = f"unreadable finding: {row!r}"
+                raise ReadError(msg) from exc
+            finding = Finding(int(line) if line.isdecimal() else None, level, message)
+            if finding not in found:
+                found.append(finding)
+    return tuple(found)
+
+
+def suppresses(options: str) -> bool:
+    """Say whether an options line turns any check off.
+
+    Returns:
+        True when it sets a check false, or `without_warnings` true; a
+        line that only turns checks on suppresses nothing.
+
+    """
+    for setting in SETTING.finditer(options):
+        name, value = group(setting, "name") or "", group(setting, "value") or ""
+        on = value.lower() in {"true", "on", "yes", "1"}
+        if on == (name.lower() == "without_warnings"):
+            return True
+    return False
+
+
+def suppressions_in(source: str) -> tuple[Suppression, ...]:
+    """Find every options line in a function's source that suppresses.
+
+    Returns:
+        Each with its line (as plpgsql_check numbers the source) and the
+        reason the comment line directly above it gives, if any.
+
+    """
+    lines = source.splitlines()
+    found: list[Suppression] = []
+    for index, raw in enumerate(lines):
+        found_options = OPTIONS.search(raw)
+        options = group(found_options, "options") if found_options else None
+        if options is None or not suppresses(options):
+            continue
+        above = lines[index - 1].strip() if index else ""
+        said = above.removeprefix("--").strip() if above.startswith("--") else ""
+        reason = said if said and OPTIONS.search(above) is None else None
+        found.append(Suppression(index + 1, options.strip(), reason))
+    return tuple(found)
+
+
+def read_source(conninfo: str, oid: str) -> str:
+    """Read one function's source as the database holds it.
+
+    Returns:
+        The source text.
+
+    Raises:
+        ReadError: psql failed, or printed something not one source.
+
+    """
+    rows = psql(conninfo, SOURCE_SQL.format(oid=oid))
+    try:
+        (encoded,) = rows[0]
+        return base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (IndexError, ValueError) as exc:
+        msg = f"unreadable source: {rows!r}"
+        raise ReadError(msg) from exc
+
+
+def read_function(
+    conninfo: str, oid: str, signature: str, relids: list[str]
+) -> Reading | Unreadable:
     """Read one function's figures, or the reason they cannot be read.
 
     Returns:
@@ -229,6 +395,8 @@ def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadab
         return Unreadable(signature, f"its oid '{oid}' is not a number")
     try:
         rows = psql(conninfo, READ_SQL.format(oid=oid))
+        findings = lint_function(conninfo, oid, relids)
+        suppressed = suppressions_in(read_source(conninfo, oid))
     except ReadError as exc:
         return Unreadable(signature, str(exc))
     try:
@@ -240,6 +408,8 @@ def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadab
             statement_count=int(count),
             executed=int(executed),
             branch_free=Decimal(branches) == 1 and int(branching) == 0,
+            findings=findings,
+            suppressions=suppressed,
         )
     except IndexError, ValueError, InvalidOperation:
         return Unreadable(signature, f"unreadable figures: {rows!r}")
@@ -266,7 +436,7 @@ def gather(conninfo: str) -> Report | Failed:
     for row in listed:
         if len(row) != LISTING:
             return Failed(f"unreadable function listing: {row!r}")
-        functions.append(read_function(conninfo, row[0], row[1]))
+        functions.append(read_function(conninfo, row[0], row[1], row[2].split()))
     return Report(settings[0][0], settings[0][1], tuple(functions))
 
 
@@ -292,6 +462,14 @@ def encode(report: Report | Failed) -> str:
                     "statement_count": f.statement_count,
                     "executed": f.executed,
                     "branch_free": f.branch_free,
+                    "findings": [
+                        {"line": g.line, "level": g.level, "message": g.message}
+                        for g in f.findings
+                    ],
+                    "suppressions": [
+                        {"line": u.line, "options": u.options, "reason": u.reason}
+                        for u in f.suppressions
+                    ],
                 })
         document = {
             "profiler": report.profiler,
@@ -374,6 +552,48 @@ def fraction_field(document: dict[str, object], key: str, where: str) -> Decimal
     return value
 
 
+def decode_suppression(value: object, where: str) -> Suppression:
+    """Decode one recorded suppression.
+
+    Returns:
+        The suppression.
+
+    Raises:
+        NotAReportError: the entry is not one.
+
+    """
+    entry = as_object(value, where)
+    line = entry.get("line")
+    if isinstance(line, bool) or not isinstance(line, int) or line < 1:
+        msg = f"{where}: 'line' is not a line number"
+        raise NotAReportError(msg)
+    reason = entry.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        msg = f"{where}: 'reason' is not a string"
+        raise NotAReportError(msg)
+    return Suppression(line, text_field(entry, "options", where), reason)
+
+
+def decode_finding(value: object, where: str) -> Finding:
+    """Decode one static-check finding.
+
+    Returns:
+        The finding.
+
+    Raises:
+        NotAReportError: the entry is not a finding.
+
+    """
+    entry = as_object(value, where)
+    line = entry.get("line")
+    if line is not None and (isinstance(line, bool) or not isinstance(line, int)):
+        msg = f"{where}: 'line' is not a line number"
+        raise NotAReportError(msg)
+    return Finding(
+        line, text_field(entry, "level", where), text_field(entry, "message", where)
+    )
+
+
 def decode_function(value: object, where: str) -> Reading | Unreadable:
     """Decode one function entry, in one of its two shapes.
 
@@ -392,6 +612,10 @@ def decode_function(value: object, where: str) -> Reading | Unreadable:
     if not isinstance(branch_free, bool):
         msg = f"{where}: 'branch_free' is not a boolean"
         raise NotAReportError(msg)
+    # A reading without the static check's answer is not a clean result:
+    # the helper that wrote it did not ask (#1605).
+    findings = as_array(entry.get("findings"), f"{where}: 'findings'")
+    suppressed = as_array(entry.get("suppressions"), f"{where}: 'suppressions'")
     return Reading(
         function=function,
         statements=fraction_field(entry, "statements", where),
@@ -399,6 +623,14 @@ def decode_function(value: object, where: str) -> Reading | Unreadable:
         statement_count=count_field(entry, "statement_count", where),
         executed=count_field(entry, "executed", where),
         branch_free=branch_free,
+        findings=tuple(
+            decode_finding(item, f"{where} finding {index}")
+            for index, item in enumerate(findings)
+        ),
+        suppressions=tuple(
+            decode_suppression(item, f"{where} suppression {index}")
+            for index, item in enumerate(suppressed)
+        ),
     )
 
 
@@ -501,7 +733,53 @@ def refusals(label: str, report: Report | Failed) -> list[str]:
             f"{head} {len(unread)} function(s) unreadable — a function the"
             " extension cannot read is never dropped from the total"
         )
+    # The static check (#1605), judged before the floor: every optional
+    # check is on so that what it reports is held, so every finding is
+    # red, whatever its level.
+    found = [
+        (f.function, g)
+        for f in report.functions
+        if isinstance(f, Reading)
+        for g in f.findings
+    ]
+    lines.extend(
+        f"{head} {function}: line {'-' if g.line is None else g.line}:"
+        f" {g.level}: {g.message}"
+        for function, g in found
+    )
+    if found:
+        lines.append(
+            f"{head} {len(found)} static-check finding(s) — plpgsql_check"
+            " reads each as a body that cannot do what it says"
+        )
+    # A suppression is allowed only with its reason (#1605): the comment
+    # line directly above it.
+    lines.extend(
+        f"{head} {f.function}: line {u.line}: suppression `{u.options}` has no"
+        " reason — the comment line directly above it says why"
+        for f in report.functions
+        if isinstance(f, Reading)
+        for u in f.suppressions
+        if u.reason is None
+    )
     return lines
+
+
+def suppressed_lines(label: str, report: Report) -> list[str]:
+    """Name every suppression that carries its reason, on every run.
+
+    Returns:
+        One line per suppression, so none is invisible.
+
+    """
+    return [
+        f"{label}: plpgsql: {f.function}: line {u.line}: suppresses"
+        f" `{u.options}` — {u.reason}"
+        for f in report.functions
+        if isinstance(f, Reading)
+        for u in f.suppressions
+        if u.reason is not None
+    ]
 
 
 def totals(label: str, report_path: str) -> int:
@@ -527,6 +805,9 @@ def totals(label: str, report_path: str) -> int:
             file=sys.stderr,
         )
         return 1
+    if isinstance(report, Report):
+        for line in suppressed_lines(label, report):
+            print(line, file=sys.stderr)
     lines = refusals(label, report)
     if lines or isinstance(report, Failed):
         print("\n".join(lines), file=sys.stderr)

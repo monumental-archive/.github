@@ -24,7 +24,9 @@ The site renders Baseline criteria under their display names
 (`OSPS-AC-01.01_status`) while the file carries the input names the
 app accepts (`osps_ac_01_01_status`, #379), so a file key is looked up
 under its display name. Every `_status` and `_justification` key in
-the file is compared; nothing the file does not answer is.
+the file is compared; nothing the file does not answer is. Each answer,
+in the file and on the site, is a string or null: any other value is
+refused by name where the document is read (#1681).
 """
 
 import argparse
@@ -34,6 +36,9 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
+
+import decoded
+from typed_std import group
 
 # A live shield on the entry: the metal badge or the Baseline one.
 SHIELD = re.compile(
@@ -58,7 +63,8 @@ def project(readme: str) -> tuple[str | None, str | None]:
         (None, finding) when the shields name more than one entry.
 
     """
-    ids = sorted(set(SHIELD.findall(COMMENT.sub("", readme))), key=int)
+    live = COMMENT.sub("", readme)
+    ids = sorted({group(m, 1) or "" for m in SHIELD.finditer(live)}, key=int)
     if len(ids) > 1:
         return None, f"README shields name more than one entry: {', '.join(ids)}"
     return (ids[0] if ids else None), None
@@ -74,11 +80,11 @@ def site_key(key: str) -> str:
     found = BASELINE.fullmatch(key)
     if found is None:
         return key
-    family, control, item, field = found.groups()
+    family, control, item, field = (group(found, n) or "" for n in range(1, 5))
     return f"OSPS-{family.upper()}-{control}.{item}_{field}"
 
 
-def shown(value: object) -> str:
+def shown(value: str | None) -> str:
     """Render a status for a finding.
 
     Returns:
@@ -88,10 +94,52 @@ def shown(value: object) -> str:
     return "absent" if value is None else json.dumps(value)
 
 
-def drift(answers: dict, entry: dict) -> list[str]:
+def answers(document: dict[str, object], where: str) -> dict[str, str | None]:
+    """Read the file's answers: its `_status` and `_justification` keys.
+
+    Returns:
+        Each answer under its file key, in the file's order.
+
+    Raises:
+        UndecodableError: an answer is not a string or null.
+
+    """
+    found: dict[str, str | None] = {}
+    for key, value in document.items():
+        if FIELD.fullmatch(key) is None:
+            continue
+        if value is not None and not isinstance(value, str):
+            msg = f"{where}: {key} is not a string or null"
+            raise decoded.UndecodableError(msg)
+        found[key] = value
+    return found
+
+
+def published(entry: dict[str, object], keys: list[str]) -> dict[str, str | None]:
+    """Read the site's answer to each file key, under its display name.
+
+    Returns:
+        Each answer under its file key; None where the site has none.
+
+    Raises:
+        UndecodableError: an answer is not a string or null.
+
+    """
+    found: dict[str, str | None] = {}
+    for key in keys:
+        value = entry.get(site_key(key))
+        if value is not None and not isinstance(value, str):
+            msg = f"the site's answer: {site_key(key)} is not a string or null"
+            raise decoded.UndecodableError(msg)
+        found[key] = value
+    return found
+
+
+def drift(answers: dict[str, str | None], entry: dict[str, str | None]) -> list[str]:
     """List the criteria whose published answer differs from the file's.
 
-    A justification the site holds as null equals an empty one.
+    Both sides are keyed by the file's names. A justification the site
+    holds as null equals an empty one.
 
     Returns:
         One line per criterion, in the file's order; empty when they agree.
@@ -102,8 +150,8 @@ def drift(answers: dict, entry: dict) -> list[str]:
         match = FIELD.fullmatch(key)
         if match is None:
             continue
-        criterion, field = match.groups()
-        have = entry.get(site_key(key))
+        criterion, field = group(match, 1) or "", group(match, 2) or ""
+        have = entry.get(key)
         if field == "justification":
             if (have or "") != (want or ""):
                 found.setdefault(criterion, []).append("justification differs")
@@ -114,7 +162,7 @@ def drift(answers: dict, entry: dict) -> list[str]:
     return [f"{criterion}: {'; '.join(why)}" for criterion, why in found.items()]
 
 
-def load(text: str, what: str) -> dict:
+def load(source: str | bytes, what: str) -> dict[str, object]:
     """Parse one JSON object.
 
     Returns:
@@ -126,11 +174,11 @@ def load(text: str, what: str) -> dict:
 
     """
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError as err:
+        data = decoded.load_json(source)
+    except decoded.UndecodableError as err:
         message = f"{what} is not JSON: {err}"
         raise ValueError(message) from err
-    if not isinstance(data, dict):
+    if not decoded.is_object(data):
         message = f"{what} is not a JSON object"
         raise TypeError(message)
     return data
@@ -145,12 +193,13 @@ def compare(path: str, repo: str, ident: str, entry_text: str) -> int:
     """
     label = f"audit:bestpractices: {repo} (bestpractices.dev project {ident})"
     try:
-        answers = load(Path(path).read_text(encoding="utf-8"), path)
+        wanted = answers(load(Path(path).read_bytes(), path), path)
         entry = load(entry_text, "the site's answer")
+        have = published(entry, list(wanted))
     except (ValueError, TypeError) as err:
         print(f"{label}: {err}", file=sys.stderr)
         return 1
-    lines = drift(answers, entry)
+    lines = drift(wanted, have)
     if not lines:
         print(f"{label}: the published entry matches {path}")
         return 0
@@ -239,6 +288,14 @@ def audit(path: str, repo: str, readme: str) -> int:
     return compare(path, repo, ident, entry)
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    file: str
+    repo: str
+    readme: str
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the audit over one repository.
 
@@ -250,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("file", help="the repository's .bestpractices.json")
     parser.add_argument("repo", help="the repository, for the findings")
     parser.add_argument("readme", help="the tracked README, or empty for none")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     return audit(args.file, args.repo, args.readme)
 
 

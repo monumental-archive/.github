@@ -39,8 +39,8 @@ import gate_tools
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 CHECKOUT = f"actions/checkout@{SHA} # v6.0.0"
 
@@ -155,7 +155,7 @@ class Planted(unittest.TestCase):
             path.write_text(text, encoding="utf-8")
         self.git("add", "-A")
 
-    def run_task(self, task: str) -> subprocess.CompletedProcess:
+    def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
         """Run a task's body in the planted tree.
 
         Returns:
@@ -448,7 +448,7 @@ class AllowlistAudit(Planted):
     first row here fails with exit 1 and empty output.
     """
 
-    def audit(self, patterns: list[str]) -> subprocess.CompletedProcess:
+    def audit(self, patterns: list[str]) -> subprocess.CompletedProcess[str]:
         """Run the audit with the org answering `patterns`.
 
         Returns:

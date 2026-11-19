@@ -34,7 +34,6 @@ gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -52,7 +51,7 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "security-release.sh"
 DATA = CANON / "release" / "testdata" / "security-release"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 
 AFFECTED = (DATA / "report-affected.json").read_text()
 CLEAN = (DATA / "report-clean.json").read_text()
@@ -164,11 +163,9 @@ class Repo:
     def __init__(self, root: Path) -> None:
         """Lay out the tree, the stand-ins and the passing case's inputs.
 
-        Raises:
-            FileNotFoundError: A real tool the script calls is not on
-                PATH. Loud, never a skip: a skipped table reads as a
-                passing one.
-
+        A real tool the script calls and PATH lacks is red by name
+        (hermetic.tool). Loud, never a skip: a skipped table reads as a
+        passing one.
         """
         self.root = root
         self.tree = root / "tree"
@@ -180,11 +177,7 @@ class Repo:
         for d in (self.tree, self.fake, self.bin, self.tools, self.canon / "slsa", vex):
             d.mkdir(parents=True)
         for tool in REAL_TOOLS:
-            found = shutil.which(tool)
-            if found is None:
-                message = f"{tool} is not on PATH, and the script under test calls it"
-                raise FileNotFoundError(message)
-            (self.tools / tool).symlink_to(found)
+            (self.tools / tool).symlink_to(hermetic.tool(tool))
         for name, body in FAKES.items():
             path = self.bin / name
             path.write_text(textwrap.dedent(body))

@@ -38,7 +38,7 @@ CANON = RELEASE.parent
 STAGE = RELEASE / "pgrx_images.py"
 PROOF = RELEASE / "pgrx-image-proof.sh"
 TABLE = CANON / "docker" / "pgrx-base-images.toml"
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 
 VERSION = "1.2.3"
 CRATE = "crates/edtf-postgres"
@@ -83,7 +83,7 @@ def cell(pg: str, *, lib: bool = True, share: bool = True) -> dict[str, bytes]:
 
 def run(
     args: list[str], cwd: Path, env: dict | None = None
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run a helper the way the workflow step does.
 
     Returns:
@@ -119,7 +119,7 @@ class Stage(unittest.TestCase):
         tarball(self.root / "tarballs" / name, cell(pg, **kw), links)
         return f"tarballs/{name}"
 
-    def stage(self, pg: str) -> subprocess.CompletedProcess:
+    def stage(self, pg: str) -> subprocess.CompletedProcess[str]:
         """Run the stage verb for one major.
 
         Returns:
@@ -303,7 +303,9 @@ IMAGE = "ghcr.io/example/edtf-postgres"
 PINNED = IMAGE + "@sha256:" + "a" * 64
 
 
-def render(recipe: str, image: str, base: str, pg: str) -> subprocess.CompletedProcess:
+def render(
+    recipe: str, image: str, base: str, pg: str
+) -> subprocess.CompletedProcess[str]:
     """Run the consumer-dockerfile verb.
 
     Returns:
@@ -429,7 +431,7 @@ class Proof(unittest.TestCase):
 
     def prove(
         self, pg: str, digest: str = "sha256:" + "a" * 64
-    ) -> tuple[subprocess.CompletedProcess, list[str]]:
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the proof for one major against the canon tree.
 
         Returns:
@@ -552,7 +554,7 @@ class Proof(unittest.TestCase):
         self.assertEqual([], lines)
 
 
-def extension_name(tree: Path) -> subprocess.CompletedProcess:
+def extension_name(tree: Path) -> subprocess.CompletedProcess[str]:
     """Run the extension-name verb on a tree.
 
     Returns:

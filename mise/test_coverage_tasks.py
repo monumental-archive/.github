@@ -35,8 +35,8 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 
@@ -1188,15 +1188,6 @@ class ReportsSelector(CoverageTaskCase):
         )
 
 
-# The real coverage.py the belt pins, or None. The rows below run the
-# python leg with it, not a stub: what they hold is coverage's own
-# reading of a child started from another directory (#1528).
-COVERAGE_TOOL = shutil.which("coverage")
-COVERAGE_MISSING = (
-    "coverage is not on PATH: these rows run the belt's real coverage.py"
-    " over a planted suite — run: mise install"
-)
-
 # The refusal the python leg prints when coverage recorded a file that
 # no longer resolves, with the planted child's file named.
 NO_SOURCE_MSG = (
@@ -1262,10 +1253,15 @@ class ChildFromAnotherDirectory(unittest.TestCase):
     since #1528, where it rendered only the JSON before.
     """
 
-    def setUp(self) -> None:
-        """Assert the tool first, as the belt's tasks assert theirs."""
-        if COVERAGE_TOOL is None:
-            self.fail(COVERAGE_MISSING)
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Assert the tool first, as the belt's tasks assert theirs.
+
+        The rows run the python leg with the real coverage.py the belt
+        pins, not a stub: what they hold is coverage's own reading of a
+        child started from another directory (#1528).
+        """
+        hermetic.tool("coverage")
 
     def test_a_child_run_from_a_subdirectory_is_red_by_name(self) -> None:
         """The belt's words, the recorded file, and the remedy."""

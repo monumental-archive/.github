@@ -18,7 +18,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import io
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tomllib
@@ -34,8 +33,8 @@ import hermetic
 _HERE = Path(__file__).resolve().parent
 
 ISSUE = "\t# canon helper: #1386"
-GIT = shutil.which("git") or "git"
-BASH = shutil.which("bash") or "bash"
+GIT = hermetic.tool("git")
+BASH = hermetic.tool("bash")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and `git ls-files` would list the canon's own workflows.
@@ -883,6 +882,23 @@ class Tasks(unittest.TestCase):
         rc, out, err = self.run_ceiling(config(lint_a=15))
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("every task body fits 15 lines or its debt entry (0 over", out)
+
+    def test_a_config_that_is_not_toml_is_refused_by_name(self) -> None:
+        """An undecodable config is a refusal naming it, in each mode (#1681)."""
+        try:
+            tomllib.loads("lint")
+        except tomllib.TOMLDecodeError as exc:
+            why = str(exc)
+        for write, label in ((False, "task-shell"), (True, "fix:task-shell")):
+            rc, out, err = self.run_ceiling("lint", write=write)
+            self.assertEqual((rc, out), (1, ""))
+            self.assertEqual(err, f"{label}: {self.cfg}: not TOML: {why}\n")
+
+    def test_tasks_that_is_not_a_table_is_refused_by_name(self) -> None:
+        """`tasks = 1` has no bodies to weigh; it is named, not a crash."""
+        rc, out, err = self.run_ceiling("tasks = 1\n")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(err, f"task-shell: {self.cfg}: tasks is not a table\n")
 
     def test_no_debt_file_and_no_long_body_passes(self) -> None:
         """A repository with nothing over the ceiling carries no file."""

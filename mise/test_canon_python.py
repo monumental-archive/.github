@@ -60,17 +60,10 @@ def bash() -> str:
     """Find bash.
 
     Returns:
-        Its path.
-
-    Raises:
-        RuntimeError: bash is not on PATH.
+        Its path; a missing bash is red by name (hermetic.tool).
 
     """
-    found = shutil.which("bash")
-    if found is None:
-        msg = "bash is not on PATH"
-        raise RuntimeError(msg)
-    return found
+    return hermetic.tool("bash")
 
 
 class InstallTheBeltsPython(unittest.TestCase):

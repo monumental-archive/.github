@@ -21,7 +21,6 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
-import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
@@ -40,7 +39,7 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "publish.yml"
 STEP = "Compare the two builds (stele verify repro)"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 CRATES = "aa  edtf-core-1.3.5.crate\nbb  edtf-cli-1.3.5.crate"
 WASM = "cc  lab-wasm-0.28.5.tgz"
 

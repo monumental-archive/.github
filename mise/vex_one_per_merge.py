@@ -149,6 +149,12 @@ def count() -> int:
     return 0
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    revisions: str | None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Count for the gate, or list a range's decisions for the workflow.
 
@@ -158,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--list", metavar="RANGE", dest="revisions")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     if args.revisions is None:
         return count()
     for name in changed(args.revisions):

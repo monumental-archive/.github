@@ -50,7 +50,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import textwrap
@@ -69,9 +68,9 @@ SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
 TESTDATA = CANON / "release" / "testdata"
 # Absolute, resolved once: a partial path lets PATH decide which binary a
 # test ran, and the stub `gh` this file installs is proof PATH is in play.
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
-JQ = shutil.which("jq")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
+JQ = hermetic.optional_tool("jq")
 
 GH_STUB = """#!/usr/bin/env bash
 # Stub `gh` for the derivation tests: answers the release listing from a
@@ -508,7 +507,7 @@ class LeavesTheCallersGitAlone(unittest.TestCase):
 
 RECORD = ".pgrx-installable"
 LINT = CANON / "mise" / "pg-upgrade-path.sh"
-CARGO = shutil.which("cargo")
+CARGO = hermetic.optional_tool("cargo")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -660,7 +659,7 @@ class WritesTheInstallableSet(unittest.TestCase):
             )
             subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [
-                    CARGO,
+                    hermetic.tool("cargo"),
                     "generate-lockfile",
                     "--offline",
                     "--manifest-path",
@@ -859,7 +858,7 @@ def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
     archive = dest / "prev.tar.gz"
     # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run(
-        [shutil.which("tar"), "-czf", str(archive), "-C", str(stage), top],
+        [hermetic.tool("tar"), "-czf", str(archive), "-C", str(stage), top],
         check=True,
     )
     return archive
@@ -887,7 +886,7 @@ class ReadsThePreviousArchive(unittest.TestCase):
     """
 
     @staticmethod
-    def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess:
+    def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess[str]:
         """Derive lab_pg 0.29.0 from a 0.28.1 archive of this shape.
 
         Returns:

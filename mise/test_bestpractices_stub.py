@@ -23,7 +23,6 @@ gate as `mise run test`, which `ci` collects.
 
 import json
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -34,8 +33,8 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 STUB_PATH = "scaffold/.bestpractices.json"
 STUB = (CANON / STUB_PATH).read_text(encoding="utf-8")
 CANON_URL = "https://github.com/monumental-archive/.github/"

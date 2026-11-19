@@ -17,9 +17,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
+
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutation-totals.sh"
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 LABEL = "audit:mutants: rust"
 
 
@@ -37,7 +39,7 @@ class Totals(unittest.TestCase):
         sub.mkdir(exist_ok=True)
         (sub / f"{lang}.tsv").write_text(row + "\n", encoding="utf-8")
 
-    def run_totals(self, lang: str = "rust") -> subprocess.CompletedProcess:
+    def run_totals(self, lang: str = "rust") -> subprocess.CompletedProcess[str]:
         """Run the helper over the planted directory.
 
         Returns:

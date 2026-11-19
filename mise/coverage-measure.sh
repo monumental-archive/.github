@@ -529,8 +529,11 @@ if [[ -n ${measure_py} ]]; then
   # Appended to sys.path, never prepended: the suite's imports resolve
   # exactly as they do unmeasured.
   site_literal=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "${cov_site}")
+  # Written by the belt's one hook writer, which runs the next
+  # sitecustomize on the path after this one's work (#1542): the
+  # mutation leg's, a repository's own.
   printf 'import sys\nsys.path.append(%s)\nimport coverage\ncoverage.process_startup()\n' \
-    "${site_literal}" > "${work}/hook/sitecustomize.py"
+    "${site_literal}" | "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/startup_hook.py" "${work}/hook"
   # Branches from the start (#1336 property 2). Test files are omitted:
   # a suite executes itself completely by construction, and counting it
   # would raise the number without one more line of the code under test

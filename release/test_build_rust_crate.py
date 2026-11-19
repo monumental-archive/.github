@@ -55,7 +55,6 @@ as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import unittest
@@ -71,7 +70,7 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-rust-crate.yml"
-BASH = shutil.which("bash")
+BASH = hermetic.tool("bash")
 VERSION = "1.3.4"
 MEMBERS = ("edtf-core", "edtf-cli", "edtf-postgres")
 UNCOMPILABLE = "edtf-postgres"

@@ -47,8 +47,8 @@ import hermetic
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
 SCRIPT = BELT / "audit-badges.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 OWNER = "monumental-archive"
 PROJECT = f"https://api.scorecard.dev/projects/github.com/{OWNER}"
 UA = f"User-Agent: {OWNER}/.github audit:badges"
@@ -191,7 +191,7 @@ class Planted(unittest.TestCase):
             stub.with_name(f"{stub.name}.code").write_text(str(code), encoding="utf-8")
             stub.with_name(f"{stub.name}.body").write_text(text, encoding="utf-8")
 
-    def run_audit(self) -> subprocess.CompletedProcess:
+    def run_audit(self) -> subprocess.CompletedProcess[str]:
         """Run the task body in the planted tree.
 
         Returns:

@@ -34,8 +34,8 @@ import mutants_typescript
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-typescript.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 LABEL = "audit:mutants: typescript"
 MARK = "// Stryker disable next-line <Mutator>: <reason>"
 RED_TAIL = (
@@ -171,7 +171,7 @@ class Planted(unittest.TestCase):
         self.git("commit", "-q", "-m", "plant")
         self.planted.write_text(json.dumps(report(*mutants)), encoding="utf-8")
 
-    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.
 
         Returns:

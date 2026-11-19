@@ -31,8 +31,8 @@ import hermetic
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
-GIT = shutil.which("git") or "git"
-BASH = shutil.which("bash") or "bash"
+GIT = hermetic.tool("git")
+BASH = hermetic.tool("bash")
 CLEAN = hermetic.env()
 IDENTITY = {
     "GIT_CONFIG_GLOBAL": os.devnull,

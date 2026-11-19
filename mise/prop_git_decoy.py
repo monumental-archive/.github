@@ -47,7 +47,7 @@ def state(refs: dict[str, str], config: str) -> object:
         head="ref: refs/heads/main",
         commit="c0ffee",
         refs=frozenset(f"{oid} {name}" for name, oid in refs.items()),
-        index="1111",
+        index_hash="1111",
         config=config,
         status="",
     )

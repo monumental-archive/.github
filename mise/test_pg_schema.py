@@ -59,10 +59,10 @@ import pg_schema
 
 normalise = pg_schema.normalise
 
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 SNAPSHOT = "crates/ext/schema.snapshot.sql"
 BELT = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 # The belt's real sqlfluff, or None. Never a bare-name fallback (#1528):
 # the rows below put a shim NAMED sqlfluff first on PATH and exec this
 # from it, so with no real one installed a bare name resolved to the
@@ -70,7 +70,7 @@ BASH = shutil.which("bash") or "bash"
 # canon's own suite with only the badge job's five tools installed:
 # 8,364 self-execs in 1m33s on the first lint:sql row, and on main the
 # coverage upload job sat in it for its whole 30 minutes on every push.
-SQLFLUFF = shutil.which("sqlfluff")
+SQLFLUFF = hermetic.optional_tool("sqlfluff")
 SQLFLUFF_MISSING = (
     "sqlfluff is not on PATH: these rows run the belt's real sqlfluff behind"
     " a shim named sqlfluff, and cannot run without it — run: mise install"
@@ -543,7 +543,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         """Make a repository, the shims, and an empty member list.
 
         The tool is asserted first, as the belt's tasks assert theirs: a
-        row that needs sqlfluff fails by name without it (#1528).
+        row that needs sqlfluff fails by name without it (#1528), which
+        AbsentSqlfluffFailsByName plants.
         """
         if SQLFLUFF is None:
             self.fail(SQLFLUFF_MISSING)
@@ -601,7 +602,7 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{self.shims}{os.pathsep}{os.environ['PATH']}",
             "PLANT_METADATA": str(self.metadata),
-            "PLANT_SQLFLUFF": SQLFLUFF,
+            "PLANT_SQLFLUFF": hermetic.tool("sqlfluff"),
             "PLANT_SQLFLUFF_LOG": str(self.log),
         }
         # ruff: ignore[subprocess-without-shell-equals-true]
@@ -626,7 +627,13 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         path.write_text(LAB_SNAPSHOT, encoding="utf-8")
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
-            [SQLFLUFF, "lint", "--config", str(BELT / "sqlfluff.cfg"), str(path)],
+            [
+                hermetic.tool("sqlfluff"),
+                "lint",
+                "--config",
+                str(BELT / "sqlfluff.cfg"),
+                str(path),
+            ],
             capture_output=True,
             text=True,
             check=False,

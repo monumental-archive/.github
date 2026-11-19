@@ -15,7 +15,6 @@ under coverage the same figure.
 import json
 import pathlib
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -26,8 +25,8 @@ import hermetic
 _HERE = pathlib.Path(__file__).resolve().parent
 RUNNER = _HERE / "unittest_guarded.py"
 MEASURE = _HERE / "coverage-measure.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 # unittest prints its own timing; two runs never agree on it.
 TIMING = re.compile(r"Ran (\d+ tests?) in \d+\.\d+s")
 
@@ -608,8 +607,7 @@ class Measured(unittest.TestCase):
             The finished measurement.
 
         """
-        coverage = shutil.which("coverage")
-        self.assertIsNotNone(coverage, "the belt pins pipx:coverage; run: mise install")
+        hermetic.tool("coverage")
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         base = pathlib.Path(tmp.name).resolve()

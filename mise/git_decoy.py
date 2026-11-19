@@ -101,7 +101,7 @@ class State(NamedTuple):
     head: str  # what HEAD names, symbolic or not
     commit: str  # the commit HEAD resolves to
     refs: frozenset[str]  # every ref, as `<oid> <name>`
-    index: str  # the index file's hash
+    index_hash: str  # the index file's hash (`index` is tuple's method)
     config: str  # the config file's hash
     status: str  # `git status --porcelain`, which is empty when clean
 
@@ -120,7 +120,7 @@ def state(decoy: pathlib.Path) -> State:
         refs=frozenset(
             git(decoy, "for-each-ref", "--format=%(objectname) %(refname)").splitlines()
         ),
-        index=digest(gitdir / "index"),
+        index_hash=digest(gitdir / "index"),
         config=digest(gitdir / "config"),
         status=git(decoy, "status", "--porcelain", "--untracked-files=all"),
     )
@@ -148,7 +148,7 @@ def changes(decoy: pathlib.Path, before: State, after: State) -> list[str]:
     out += [f"lost ref: {r.split(' ', 1)[1]}" for r in sorted(before.refs - after.refs)]
     if after.config != before.config:
         out.append("config rewritten")
-    if after.index != before.index or after.status:
+    if after.index_hash != before.index_hash or after.status:
         staged = git(decoy, "diff", "--cached", "--name-status", "HEAD")
         out += [f"staged: {line}" for line in staged.splitlines()]
         out += [f"status: {line}" for line in after.status.splitlines()]
@@ -185,6 +185,14 @@ def run(decoy: pathlib.Path, command: list[str]) -> int:
     return status
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    verb: str
+    decoy: pathlib.Path
+    command: list[str]
+
+
 def main() -> None:
     """Parse arguments and dispatch."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -194,7 +202,7 @@ def main() -> None:
     r = sub.add_parser("run", help="run CMD with git aimed at the decoy")
     r.add_argument("decoy", type=pathlib.Path)
     r.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=Args())
     decoy = args.decoy.resolve()
     if args.verb == "plant":
         plant(decoy)

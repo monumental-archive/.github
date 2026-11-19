@@ -22,10 +22,9 @@ gate as `mise run test`.
 
 import ast
 import json
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -34,7 +33,7 @@ import hermetic
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 DEEP = 100_000
 # A raising reader: a decoded value and where it came from.
 Reader = Callable[[object, str], object]
@@ -60,13 +59,8 @@ MOVING = frozenset({
     ".github/rekor-monitor/test_standing_issue.py",
     ".github/rekor-monitor/test_verdict.py",
     ".github/rekor-monitor/verdict.py",
-    "mise/adoption_population.py",
-    "mise/belt_shell.py",
-    "mise/bestpractices_drift.py",
-    "mise/bestpractices_owner.py",
     "mise/biome_config.py",
     "mise/deny_skips.py",
-    "mise/embedded_shell.py",
     "mise/gate_surface.py",
     "mise/gate_tools.py",
     "mise/licence_texts.py",
@@ -80,7 +74,6 @@ MOVING = frozenset({
     "mise/prop_deny_skips.py",
     "mise/prop_security_config.py",
     "mise/security_config.py",
-    "mise/subject_budget.py",
     "mise/test_action_lints.py",
     "mise/test_audit_scheduled.py",
     "mise/test_belt_shell.py",
@@ -131,7 +124,6 @@ MOVING = frozenset({
     "mise/test_zizmor_signer.py",
     "mise/tsconfig_dials.py",
     "mise/workspace_inherit.py",
-    "mise/zizmor_signer.py",
     "release/attach_publish.py",
     "release/caller_pins.py",
     "release/matrix.py",
@@ -311,6 +303,34 @@ class LoadJson(unittest.TestCase):
         quoted = '"' + inside
         escaped: list[object] = [quoted]
         self.assertEqual(escaped, decoded.load_json(f'["\\{quoted}"]'))
+
+    def test_an_unterminated_string_is_scanned_once(self) -> None:
+        """2 MB of escaped quotes after one opening quote: one pass, json's refusal.
+
+        The depth scan reads each character once, counted as it reads them,
+        never by timing: a scan that looked for a whole string at each
+        quote was quadratic on exactly this text.
+        """
+        text = '"' + '\\"' * 1_000_000
+        self.assertEqual(
+            "Unterminated string starting at: line 1 column 1 (char 0)",
+            self.refused(text),
+        )
+        visits: list[str] = []
+
+        def counted() -> Iterator[str]:
+            """Yield the text's characters, recording each.
+
+            Yields:
+                Each character, once.
+
+            """
+            for char in text:
+                visits.append(char)
+                yield char
+
+        decoded.within_depth(counted())
+        self.assertEqual(len(text), len(visits))
 
     def test_a_stack_too_small_for_the_bound_is_refused(self) -> None:
         """The backstop: RecursionError under the bound is still a refusal."""

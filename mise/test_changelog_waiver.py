@@ -21,7 +21,6 @@ gate as `mise run test`.
 """
 
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
@@ -31,7 +30,7 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
-RUMDL = shutil.which("rumdl") or "rumdl"
+RUMDL = hermetic.tool("rumdl")
 
 
 SECTION = "1.23.1"

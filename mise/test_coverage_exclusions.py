@@ -23,8 +23,8 @@ import hermetic
 
 _HERE = Path(__file__).resolve().parent
 HELPER = _HERE / "coverage_exclusions.py"
-GIT = shutil.which("git") or "git"
-BASH = shutil.which("bash") or "bash"
+GIT = hermetic.tool("git")
+BASH = hermetic.tool("bash")
 # No user or system git config reaches a fixture repository.
 GIT_CONFIG = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 

@@ -25,7 +25,6 @@ import io
 import json
 import os
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -38,9 +37,9 @@ import typescript_properties as tp
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
-PYTHON = shutil.which("python3")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
+PYTHON = hermetic.tool("python3")
 
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 GATE = CONFIG["tasks"]["test:typescript-properties"]["run"]

@@ -19,13 +19,18 @@ enumerates with `git ls-files` and the helper consumes, so the walk obeys
 the standing rule in one place and this script starts no processes.
 """
 
-import json
 import os
 import re
 import sys
-import tomllib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+import decoded
+import typed_std
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # ---------------------------------------------------------------------
 # The pinned allowances.
@@ -178,6 +183,45 @@ class Dep(NamedTuple):
     origin: str
 
 
+@dataclass(frozen=True)
+class Rule:
+    """One packageRule, decoded to what the resolver reads of it.
+
+    `kinds` names every matcher the rule carries, modelled or not, so an
+    unmodellable one still makes the answer unknown (#724); `matchers`
+    holds the values of the ones MATCHERS can answer; `fields` the
+    message fields the rule sets.
+    """
+
+    kinds: tuple[str, ...]
+    matchers: dict[str, tuple[str, ...]]
+    fields: dict[str, str]
+
+
+@dataclass(frozen=True)
+class CustomManager:
+    """One regex customManager: the files it claims, its patterns, its name."""
+
+    patterns: tuple[str, ...]
+    match_strings: tuple[str, ...]
+    template: str
+
+
+@dataclass(frozen=True)
+class Renovate:
+    """One Renovate config (the preset or the repo's), decoded once.
+
+    `fields` holds the message fields written at the top level beside
+    `extends`, `suffix` the vulnerabilityAlerts block's
+    commitMessageSuffix where the file writes one.
+    """
+
+    fields: dict[str, str]
+    rules: tuple[Rule, ...]
+    suffix: str | None
+    managers: tuple[CustomManager, ...]
+
+
 class Template(NamedTuple):
     """The owned subject template, gathered from where the org wrote it.
 
@@ -196,8 +240,8 @@ class Template(NamedTuple):
     and silently dropped the first.
     """
 
-    preset: dict
-    repo: dict
+    preset: Renovate
+    repo: Renovate
     suffix: str
 
 
@@ -223,7 +267,7 @@ def read_text(path: Path, report: list[str]) -> str | None:
         return None
 
 
-def load_toml(path: Path, report: list[str]) -> dict:
+def load_toml(path: Path, report: list[str]) -> dict[str, object]:
     """Parse a tracked TOML file, recording rather than raising.
 
     Returns:
@@ -234,13 +278,13 @@ def load_toml(path: Path, report: list[str]) -> dict:
     if text is None:
         return {}
     try:
-        return tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
+        return decoded.load_toml(text)
+    except decoded.UndecodableError as exc:
         report.append(f"{path}: unreadable as TOML ({exc})")
         return {}
 
 
-def load_json(path: Path, report: list[str]) -> dict:
+def load_json(path: Path, report: list[str]) -> dict[str, object]:
     """Parse a tracked JSON file, recording rather than raising.
 
     Returns:
@@ -251,17 +295,19 @@ def load_json(path: Path, report: list[str]) -> dict:
     if text is None:
         return {}
     try:
-        doc = json.loads(text)
-    except json.JSONDecodeError as exc:
+        doc = decoded.load_json(text)
+    except decoded.UndecodableError as exc:
         report.append(f"{path}: unreadable as JSON ({exc})")
         return {}
-    if not isinstance(doc, dict):
+    if not decoded.is_object(doc):
         report.append(f"{path}: not a JSON object")
         return {}
     return doc
 
 
-def table(doc: dict, key: str, path: Path, report: list[str]) -> dict:
+def table(
+    doc: dict[str, object], key: str, path: Path, report: list[str]
+) -> dict[str, object]:
     """Read one table of a manifest, recording rather than raising.
 
     A manifest's tool would refuse a table of the wrong type, but this
@@ -273,10 +319,117 @@ def table(doc: dict, key: str, path: Path, report: list[str]) -> dict:
 
     """
     value = doc.get(key, {})
-    if isinstance(value, dict):
+    if decoded.is_object(value):
         return value
     report.append(f"{path}: `{key}` is not a table")
     return {}
+
+
+# ---------------------------------------------------------------------
+# A Renovate config, decoded once where it is read. A value of the
+# wrong shape is refused by where it sits (`packageRules[0].matchManagers
+# is not a list`), never carried on to fail as a traceback (#1677).
+
+
+def strings(value: object, where: str) -> tuple[str, ...]:
+    """Decode a list of strings.
+
+    Returns:
+        The strings, in order.
+
+    """
+    items = decoded.as_array(value, where)
+    return tuple(decoded.as_str(v, f"{where}[{i}]") for i, v in enumerate(items))
+
+
+def message_fields(doc: dict[str, object], prefix: str) -> dict[str, str]:
+    """Decode the message fields one object writes.
+
+    Returns:
+        Each of MESSAGE_CONFIG the object sets, by name.
+
+    """
+    return {
+        k: decoded.as_str(doc[k], f"{prefix}{k}") for k in MESSAGE_CONFIG if k in doc
+    }
+
+
+def decode_rule(value: object, where: str) -> Rule:
+    """Decode one packageRule.
+
+    Returns:
+        The rule's matchers and message fields.
+
+    """
+    doc = decoded.as_object(value, where)
+    return Rule(
+        kinds=tuple(key for key in doc if key.startswith("match")),
+        matchers={k: strings(doc[k], f"{where}.{k}") for k in MATCHERS if k in doc},
+        fields=message_fields(doc, f"{where}."),
+    )
+
+
+def decode_manager(value: object, where: str) -> CustomManager:
+    """Decode one customManager.
+
+    Returns:
+        The files it claims, its match strings and its depNameTemplate.
+
+    """
+    doc = decoded.as_object(value, where)
+    return CustomManager(
+        patterns=strings(
+            doc.get("managerFilePatterns", []), f"{where}.managerFilePatterns"
+        ),
+        match_strings=strings(doc.get("matchStrings", []), f"{where}.matchStrings"),
+        template=decoded.as_str(
+            doc.get("depNameTemplate", ""), f"{where}.depNameTemplate"
+        ),
+    )
+
+
+def decode_config(doc: dict[str, object]) -> Renovate:
+    """Decode the parts of one Renovate config this task reads.
+
+    Returns:
+        The config's top-level message fields, rules, advisory suffix
+        and custom managers.
+
+    """
+    rules = decoded.as_array(doc.get("packageRules", []), "packageRules")
+    alerts = decoded.as_object(
+        doc.get("vulnerabilityAlerts", {}), "vulnerabilityAlerts"
+    )
+    managers = decoded.as_array(doc.get("customManagers", []), "customManagers")
+    suffix = "commitMessageSuffix"
+    return Renovate(
+        fields=message_fields(doc, ""),
+        rules=tuple(decode_rule(r, f"packageRules[{i}]") for i, r in enumerate(rules)),
+        suffix=(
+            decoded.as_str(alerts[suffix], f"vulnerabilityAlerts.{suffix}")
+            if suffix in alerts
+            else None
+        ),
+        managers=tuple(
+            decode_manager(m, f"customManagers[{i}]") for i, m in enumerate(managers)
+        ),
+    )
+
+
+def read_config(path: Path, report: list[str]) -> Renovate:
+    """Read and decode one Renovate config.
+
+    An unreadable file is recorded and decodes as an empty config, as
+    every tracked file is; a readable one of the wrong shape is refused.
+
+    Returns:
+        The decoded config.
+
+    """
+    try:
+        return decode_config(load_json(path, report))
+    except decoded.UndecodableError as exc:
+        sys.exit(f"lint:subject-budget: {path}: {exc}")
 
 
 # ---------------------------------------------------------------------
@@ -361,7 +514,7 @@ def matches(pattern: str, dep_name: str) -> bool:
 # matchFileNames is the dependency's origin, which every native manager
 # already carries as the path it read — and, since #724, so does a
 # regex-managed one.
-MATCHERS = {
+MATCHERS: dict[str, Callable[[tuple[str, ...], Dep], bool]] = {
     "matchManagers": lambda values, dep: dep.manager in values,
     "matchPackageNames": lambda values, dep: any(matches(p, dep.name) for p in values),
     "matchDepNames": lambda values, dep: any(glob_matches(p, dep.name) for p in values),
@@ -371,7 +524,7 @@ MATCHERS = {
 }
 
 
-def selects(rule: dict, dep: Dep) -> bool | None:
+def selects(rule: Rule, dep: Dep) -> bool | None:
     """Test whether a packageRule applies to one dependency.
 
     Renovate ANDs across matcher kinds and ORs within one, so a rule
@@ -397,17 +550,16 @@ def selects(rule: dict, dep: Dep) -> bool | None:
         unmodellable one has the last word.
 
     """
-    kinds = [key for key in rule if key.startswith("match")]
-    if not kinds:
+    if not rule.kinds:
         return False
     for key, admits in MATCHERS.items():
-        values = rule.get(key)
+        values = rule.matchers.get(key)
         if values is not None and not admits(values, dep):
             return False
-    return all(kind in MATCHERS for kind in kinds) or None
+    return all(kind in MATCHERS for kind in rule.kinds) or None
 
 
-def unique(configs: list[dict]) -> list[dict]:
+def unique(configs: list[dict[str, str]]) -> list[dict[str, str]]:
     """Drop duplicate resolutions, keeping the order they were reached.
 
     Two rules can fork onto the same fields, and a fork that reconverges
@@ -418,8 +570,8 @@ def unique(configs: list[dict]) -> list[dict]:
         One entry per distinct set of message fields.
 
     """
-    seen: set[tuple] = set()
-    kept: list[dict] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    kept: list[dict[str, str]] = []
     for config in configs:
         key = tuple(sorted(config.items()))
         if key not in seen:
@@ -428,7 +580,9 @@ def unique(configs: list[dict]) -> list[dict]:
     return kept
 
 
-def apply_rules(configs: list[dict], rules: list[dict], dep: Dep) -> list[dict]:
+def apply_rules(
+    configs: list[dict[str, str]], rules: tuple[Rule, ...], dep: Dep
+) -> list[dict[str, str]]:
     """Fold one packageRules list into every resolution it can reach.
 
     Later wins per field, which is Renovate's own precedence within a
@@ -452,7 +606,7 @@ def apply_rules(configs: list[dict], rules: list[dict], dep: Dep) -> list[dict]:
         verdict = selects(rule, dep)
         if verdict is False:
             continue
-        fields = {k: rule[k] for k in MESSAGE_CONFIG if k in rule}
+        fields = rule.fields
         if not fields:
             continue
         applied = [{**config, **fields} for config in configs]
@@ -460,7 +614,7 @@ def apply_rules(configs: list[dict], rules: list[dict], dep: Dep) -> list[dict]:
     return configs
 
 
-def unwritten(preset: dict, dep: Dep) -> list[str]:
+def unwritten(preset: Renovate, dep: Dep) -> list[str]:
     """Name the message fields the PRESET leaves unwritten for one dep.
 
     Asked of the preset alone, deliberately, and that is what keeps a
@@ -480,12 +634,11 @@ def unwritten(preset: dict, dep: Dep) -> list[str]:
         writes all five.
 
     """
-    base = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
-    configs = apply_rules([base], preset.get("packageRules", []), dep)
+    configs = apply_rules([dict(preset.fields)], preset.rules, dep)
     return [k for k in MESSAGE_CONFIG if any(k not in c for c in configs)]
 
 
-def effective(template: Template, dep: Dep) -> list[dict]:
+def effective(template: Template, dep: Dep) -> list[dict[str, str]]:
     """Resolve the message fields Renovate could use for one dependency.
 
     Could rather than would, and that is the whole model: where a rule
@@ -529,9 +682,7 @@ def effective(template: Template, dep: Dep) -> list[dict]:
 
     """
     preset, repo = template.preset, template.repo
-    base = {k: preset[k] for k in MESSAGE_CONFIG if k in preset}
-    base.update({k: repo[k] for k in MESSAGE_CONFIG if k in repo})
-    configs = apply_rules([base], preset.get("packageRules", []), dep)
+    configs = apply_rules([{**preset.fields, **repo.fields}], preset.rules, dep)
     missing = unwritten(preset, dep)
     if missing:
         sys.exit(
@@ -541,10 +692,10 @@ def effective(template: Template, dep: Dep) -> list[dict]:
             " explicitly in default.json (#576); this task will not"
             " assume Renovate's default for one.",
         )
-    return apply_rules(configs, repo.get("packageRules", []), dep)
+    return apply_rules(configs, repo.rules, dep)
 
 
-def advisory_suffix(preset: dict, repo_config: dict) -> str:
+def advisory_suffix(preset: Renovate, repo_config: Renovate) -> str:
     """Read the suffix Renovate appends to an ADVISORY subject.
 
     It lives in the `vulnerabilityAlerts` block, not in packageRules,
@@ -569,9 +720,8 @@ def advisory_suffix(preset: dict, repo_config: dict) -> str:
 
     """
     for source in (repo_config, preset):
-        block = source.get("vulnerabilityAlerts", {})
-        if "commitMessageSuffix" in block:
-            return block["commitMessageSuffix"]
+        if source.suffix is not None:
+            return source.suffix
     sys.exit(
         "lint:subject-budget: the owned template does not set "
         "vulnerabilityAlerts.commitMessageSuffix.\n  Renovate appends "
@@ -581,7 +731,7 @@ def advisory_suffix(preset: dict, repo_config: dict) -> str:
     )
 
 
-def render(config: dict, dep_name: str, width: int) -> tuple[str, str | None]:
+def render(config: dict[str, str], dep_name: str, width: int) -> tuple[str, str | None]:
     """Compose the widest subject the template can mint for a dependency.
 
     Returns:
@@ -636,12 +786,13 @@ def widest_version(spec: object) -> str:
         The version string, or empty when the entry declares none.
 
     """
-    entries = spec if isinstance(spec, list) else [spec]
+    entries = spec if decoded.is_array(spec) else [spec]
     widest = ""
     for entry in entries:
+        value: object
         if isinstance(entry, str):
             value = entry
-        elif isinstance(entry, dict):
+        elif decoded.is_object(entry):
             value = entry.get("version", "")
         else:
             continue
@@ -699,7 +850,7 @@ def from_actions(files: list[Path], report: list[str]) -> list[Dep]:
         if content is None:
             continue
         for match in USES.finditer(content):
-            ref = match.group(1)
+            ref = typed_std.group(match, 1) or ""
             # Local (`./`), self-repository (`$/`) and container steps
             # name no upstream dependency, and Renovate raises nothing.
             if ref.startswith(("./", "$/", "docker://")) or "@" not in ref:
@@ -710,7 +861,7 @@ def from_actions(files: list[Path], report: list[str]) -> list[Dep]:
                 continue
             # The trailing `# vX.Y.Z` is what Renovate writes into the
             # subject for a SHA-pinned action; without one, the ref is.
-            comment = match.group(2) or ""
+            comment = typed_std.group(match, 2) or ""
             if VERSION_LIKE.fullmatch(comment):
                 current = comment
             elif SHA_PIN.fullmatch(pinned):
@@ -722,7 +873,7 @@ def from_actions(files: list[Path], report: list[str]) -> list[Dep]:
     return list(found.values())
 
 
-def registry_deps(table: dict) -> list[tuple[str, str]]:
+def registry_deps(table: dict[str, object]) -> list[tuple[str, str]]:
     """Pick the entries of a manifest table that name a registry version.
 
     Path and workspace-inherited entries resolve inside the tree, so
@@ -732,18 +883,20 @@ def registry_deps(table: dict) -> list[tuple[str, str]]:
         Name and version-constraint pairs.
 
     """
-    found = []
+    found: list[tuple[str, str]] = []
     for name, spec in table.items():
         if isinstance(spec, str):
             found.append((name, spec))
-        elif isinstance(spec, dict) and not ("path" in spec or spec.get("workspace")):
+        elif decoded.is_object(spec) and not ("path" in spec or spec.get("workspace")):
             version = spec.get("version")
             if isinstance(version, str):
                 found.append((name, version))
     return found
 
 
-def cargo_tables(data: dict, path: Path, report: list[str]) -> list[dict]:
+def cargo_tables(
+    data: dict[str, object], path: Path, report: list[str]
+) -> list[dict[str, object]]:
     """Gather every manifest table Renovate's cargo manager reads.
 
     Returns:
@@ -754,7 +907,7 @@ def cargo_tables(data: dict, path: Path, report: list[str]) -> list[dict]:
     tables = [table(data, key, path, report) for key in CARGO_TABLES]
     tables += [table(workspace, key, path, report) for key in CARGO_TABLES]
     for triple, spec in table(data, "target", path, report).items():
-        if not isinstance(spec, dict):
+        if not decoded.is_object(spec):
             report.append(f"{path}: `target.{triple}` is not a table")
             continue
         tables += [table(spec, key, path, report) for key in CARGO_TABLES]
@@ -819,28 +972,35 @@ def from_gomod(files: list[Path], report: list[str]) -> list[Dep]:
             continue
         found = GO_REQUIRE.finditer(content)
         deps += [
-            Dep(m.group(1), m.group(2), "gomod", str(path))
+            Dep(
+                typed_std.group(m, 1) or "",
+                typed_std.group(m, 2) or "",
+                "gomod",
+                str(path),
+            )
             for m in found
-            if "indirect" not in (m.group(3) or "")
+            if "indirect" not in (typed_std.group(m, 3) or "")
         ]
     return deps
 
 
-def manager_targets(manager: dict, files: list[Path]) -> list[Path]:
+def manager_targets(manager: CustomManager, files: list[Path]) -> list[Path]:
     """Select the tracked files one customManager claims.
 
     Returns:
         The files whose path matches any of its patterns.
 
     """
-    patterns = []
-    for raw in manager.get("managerFilePatterns", []):
+    patterns: list[str] = []
+    for raw in manager.patterns:
         bare = raw.startswith("/") and raw.endswith("/")
         patterns.append(raw[1:-1] if bare else raw)
     return [f for f in files if any(re.search(p, str(f)) for p in patterns)]
 
 
-def custom_matches(manager: dict, path: Path, content: str, origin: str) -> list[Dep]:
+def custom_matches(
+    manager: CustomManager, path: Path, content: str, origin: str
+) -> list[Dep]:
     """Run one customManager's patterns over one file, as Renovate does.
 
     A literal depNameTemplate names the dependency outright; otherwise
@@ -862,24 +1022,27 @@ def custom_matches(manager: dict, path: Path, content: str, origin: str) -> list
         One entry per match, named by template or by capture.
 
     """
-    template = manager.get("depNameTemplate", "")
+    template = manager.template
     literal = bool(template) and "{{" not in template
     deps: list[Dep] = []
-    for raw in manager.get("matchStrings", []):
+    for raw in manager.match_strings:
         for match in re.finditer(JS_GROUP.sub("(?P<", raw), content):
-            groups = match.groupdict()
-            name = template if literal else groups.get("depName")
+            # Every named group the pattern has, as groupdict() would
+            # give them: a group the pattern lacks is simply absent.
+            taken = {n: typed_std.group(match, n) for n in match.re.groupindex}
+            name = template if literal else taken.get("depName")
             if not name:
                 unresolved = f"{origin}: {path} (template {template!r})"
                 deps.append(Dep("", "", "custom.regex", unresolved))
                 continue
-            current = groups.get("currentValue") or groups.get("currentDigest") or ""
+            value = taken.get("currentValue")
+            current = value or taken.get("currentDigest") or ""
             deps.append(Dep(name, current, "custom.regex", str(path)))
     return deps
 
 
 def from_custom_managers(
-    sources: list[tuple[str, dict]],
+    sources: list[tuple[str, Renovate]],
     files: list[Path],
     report: list[str],
 ) -> list[Dep]:
@@ -894,7 +1057,7 @@ def from_custom_managers(
     """
     deps: list[Dep] = []
     for origin, config in sources:
-        for manager in config.get("customManagers", []):
+        for manager in config.managers:
             for path in manager_targets(manager, files):
                 content = read_text(path, report)
                 if content is None:
@@ -926,10 +1089,16 @@ def ceiling() -> int:
             "CI sets MISE_GLOBAL_CONFIG_FILE, locally it is a "
             "~/.config/mise/conf.d symlink into a canon checkout",
         )
-    return tomllib.loads(config.read_text(encoding="utf-8"))["subject_length"]
+    try:
+        doc = decoded.load_toml(config.read_text(encoding="utf-8"))
+        return decoded.as_int(doc.get("subject_length"), "subject_length")
+    except decoded.UndecodableError as exc:
+        sys.exit(f"lint:subject-budget: {config}: {exc}")
 
 
-def collect(files: list[Path], report: list[str]) -> list[Dep]:
+def collect(
+    files: list[Path], report: list[str], preset: Renovate, repo_config: Renovate
+) -> list[Dep]:
     """Enumerate every dependency the repo declares, across managers.
 
     Returns:
@@ -939,10 +1108,8 @@ def collect(files: list[Path], report: list[str]) -> list[Dep]:
     deps: list[Dep] = []
     for manager in (from_mise, from_actions, from_cargo, from_npm, from_gomod):
         deps += manager(files, report)
-    preset = load_json(preset_path(files), report)
     sources = [("default.json", preset)]
-    repo_config = load_json(Path("renovate.json"), report)
-    if repo_config.get("customManagers"):
+    if repo_config.managers:
         sources.append(("renovate.json", repo_config))
     return deps + from_custom_managers(sources, files, report)
 
@@ -1056,13 +1223,18 @@ def main() -> int:
         0 when every declared dependency fits, 1 when any does not.
 
     """
-    files = [Path(line) for line in sys.stdin.read().split("\n") if line]
+    files = [Path(line) for line in typed_std.stdin_text().split("\n") if line]
     if Path("renovate.json") not in files:
         print("lint:subject-budget: no renovate.json tracked, skipped")
         return 0
 
     report: list[str] = []
-    deps = collect(files, report)
+    # Each config is read and decoded once, here: the preset for the
+    # template and its custom managers, the repo's own because it
+    # resolves after the extended preset's (#677).
+    preset = read_config(preset_path(files), report)
+    repo_config = read_config(Path("renovate.json"), report)
+    deps = collect(files, report, preset, repo_config)
     if not deps:
         print("lint:subject-budget: no declared dependencies, skipped")
         for line in report:
@@ -1070,14 +1242,6 @@ def main() -> int:
         return 0
 
     limit = ceiling()
-    preset = load_json(preset_path(files), report)
-    # The repo's own config resolves after the extended preset's, so it
-    # is read from the working tree here and folded in there (#677).
-    # Loaded a second time rather than threaded out of collect() for the
-    # same reason the preset is: the two readers want different halves
-    # of the same file, and one guaranteed-tracked re-read is cheaper
-    # than a return type that carries both.
-    repo_config = load_json(Path("renovate.json"), report)
     # The WHOLE document goes into the template, not its packageRules:
     # Renovate reads two layers of a repo config and handing over one
     # key modelled the rules while dropping a top-level message field

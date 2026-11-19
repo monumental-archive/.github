@@ -11,7 +11,6 @@ import contextlib
 import io
 import os
 import pathlib
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
@@ -36,7 +35,7 @@ _GIT_ENV = {
 }
 
 
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 
 
 def run_git(cwd: pathlib.Path | str, *args: str) -> str:

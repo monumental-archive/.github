@@ -71,9 +71,11 @@ import shlex
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
+
+import decoded
+from typed_std import group
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -214,7 +216,7 @@ def locate(text: str) -> dict[str, tuple[int, str]]:
             continue
         run = RUN_RE.match(line)
         if run and current not in found:
-            rest = run.group(1).strip()
+            rest = (group(run, 1) or "").strip()
             delim = rest if rest in {"'''", '"""'} else ""
             found[current] = (lineno, delim)
     return found
@@ -231,24 +233,24 @@ def env_names(value: object) -> set[str]:
         The variable names.
 
     """
-    tables = value if isinstance(value, list) else [value]
+    tables = value if decoded.is_array(value) else [value]
     return {
         key
         for table in tables
-        if isinstance(table, dict)
+        if decoded.is_object(table)
         for key in table
         if not key.startswith("_")
     }
 
 
-def table_of(value: object) -> dict:
+def table_of(value: object) -> dict[str, object]:
     """Take a TOML value as a table, or as nothing when it is not one.
 
     Returns:
         The table, or an empty one.
 
     """
-    return value if isinstance(value, dict) else {}
+    return value if decoded.is_object(value) else {}
 
 
 def read(path: Path) -> Config:
@@ -257,14 +259,22 @@ def read(path: Path) -> Config:
     Returns:
         The config's contribution, empty when it declares no tasks.
 
+    Raises:
+        UndecodableError: the file is not TOML; the text names it.
+
     """
-    text = path.read_text(encoding="utf-8")
-    data = tomllib.loads(text)
+    raw = path.read_bytes()
+    try:
+        data = decoded.load_toml(raw)
+    except decoded.UndecodableError as err:
+        msg = f"{path}: not TOML: {err}"
+        raise decoded.UndecodableError(msg) from None
+    text = raw.decode("utf-8")
     at = locate(text)
     env = env_names(data.get("env"))
     bodies: list[Body] = []
     for name, task in table_of(data.get("tasks")).items():
-        if not isinstance(task, dict):
+        if not decoded.is_object(task):
             continue
         env |= env_names(task.get("env"))
         run = task.get("run")
@@ -272,8 +282,9 @@ def read(path: Path) -> Config:
         # body. Every command of a list is CHECKED; none is rewritten,
         # because they share one `run =` line and splicing a block over
         # it would eat the array.
-        listed = isinstance(run, list)
-        for source in run if listed else [run]:
+        commands = run if decoded.is_array(run) else None
+        listed = commands is not None
+        for source in commands if commands is not None else [run]:
             if not isinstance(source, str) or not source.strip():
                 continue
             line, delim = at.get(name, (0, ""))
@@ -460,6 +471,16 @@ def splice(lines: list[str], body: Body, text: str) -> list[str] | None:
     return lines[:start] + block + lines[end + 1 :]
 
 
+def run_line(body: Body) -> int:
+    """Key a body by its `run =` line.
+
+    Returns:
+        The line.
+
+    """
+    return body.run_line
+
+
 def rewrite(path: Path, bodies: Sequence[Body]) -> tuple[int, list[str]]:
     """Format every rewritable body in one file, verifying by re-reading.
 
@@ -475,7 +496,7 @@ def rewrite(path: Path, bodies: Sequence[Body]) -> tuple[int, list[str]]:
     refused: list[str] = []
     landed: dict[str, str] = {}
     # Last body first: splicing shifts every line below it.
-    for body in sorted(bodies, key=lambda b: b.run_line, reverse=True):
+    for body in sorted(bodies, key=run_line, reverse=True):
         text = formatted(body.source)
         if text is None:
             refused.append(f"{path}:{body.run_line}: {body.name}: cannot format")
@@ -631,7 +652,9 @@ def nested_runs(source: str) -> Iterator[int]:
     """
     scrubbed = scrub(source)
     for match in MISE_RUN_RE.finditer(scrubbed):
-        head = COMMAND_BREAK_RE.split(scrubbed[: match.start()])[-1]
+        before = scrubbed[: match.start()]
+        cut = max((b.end() for b in COMMAND_BREAK_RE.finditer(before)), default=0)
+        head = before[cut:]
         if all(
             word in COMMAND_PREFIXES or ASSIGNMENT_RE.match(word)
             for word in head.split()
@@ -790,6 +813,15 @@ def check_mode(
     return 0
 
 
+class Args(argparse.Namespace):
+    """The arguments, typed as the parser declares them."""
+
+    files: list[str]
+    env_from: list[str]
+    source_path: list[str]
+    write: bool
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Check, or rewrite, every task body in the files named.
 
@@ -802,17 +834,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--env-from",
         action="append",
-        default=[],
+        default=list[str](),
         help="a config whose [env] the bodies read but whose tasks are not checked",
     )
     parser.add_argument(
         "--source-path",
         action="append",
-        default=[],
+        default=list[str](),
         help="a directory shellcheck may resolve `source` targets in",
     )
     parser.add_argument("--write", action="store_true", help="format bodies in place")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
 
     paths = [Path(f) for f in args.files]
     if not paths:
@@ -828,7 +860,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    configs, shell, env = collect(paths, [Path(f) for f in args.env_from])
+    try:
+        configs, shell, env = collect(paths, [Path(f) for f in args.env_from])
+    except decoded.UndecodableError as err:
+        print(f"belt-shell: {err}", file=sys.stderr)
+        return 1
 
     # Asserted before the interpreter skip below and before any body is
     # read: whether a file pins the shell, and whether a body runs a

@@ -72,9 +72,7 @@ class LinkTheCanonTree(unittest.TestCase):
             The run.
 
         """
-        bash = shutil.which("bash")
-        if bash is None:
-            self.fail("bash is not on PATH")
+        bash = hermetic.tool("bash")
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, str(script)],

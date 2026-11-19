@@ -12,7 +12,6 @@ gate as `mise run test`.
 
 import io
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import unittest
@@ -24,7 +23,7 @@ import hermetic
 import typed_std
 
 HERE = Path(__file__).resolve().parent
-BASH = shutil.which("bash") or "bash"
+BASH = hermetic.tool("bash")
 VERSION = re.compile(r"v(?P<major>\d+)\.(\d+)(-(?P<pre>\w+))?")
 
 

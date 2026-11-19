@@ -34,8 +34,8 @@ import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
-BASH = shutil.which("bash")
-GIT = shutil.which("git")
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 

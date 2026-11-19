@@ -31,8 +31,8 @@ import mutants_python as helper
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-python.sh"
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 LABEL = "audit:mutants: python"
 
 
@@ -71,8 +71,9 @@ sys.exit(99)
 # the import a child `python3` without mutmut cannot satisfy.
 TRAMPOLINE = (
     "from mutmut.mutation.trampoline import wrap_in_trampoline\n"
-    "import sys\n"
-    "print(sys.path[-1])\n"
+    "import os\n"
+    "import mutmut\n"
+    "print(os.path.dirname(os.path.dirname(mutmut.__file__)))\n"
 )
 # What every mutated function does first in the statistics pass (mutmut
 # 3.8.1, stats.record_trampoline_hit): read the run's configuration.
@@ -316,7 +317,7 @@ class Planted(unittest.TestCase):
         )
         (self.show / SURVIVOR).write_text(DIFF, encoding="utf-8")
 
-    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.
 
         Returns:
@@ -698,7 +699,7 @@ class ChildProcesses(Planted):
         mutmut and this row failed (self-mutants run 44619855559).
         """
         self.track("pkg/helper.py", TRAMPOLINE)
-        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [python3, "pkg/helper.py"],
@@ -738,11 +739,14 @@ class ChildProcesses(Planted):
             check=False,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertTrue(
-            (hook / "sitecustomize.py")
-            .read_text(encoding="utf-8")
-            .startswith(f"import sys\nsys.path.append({str(VENV['site'])!r})\n"),
+        child = subprocess.run(
+            [sys.executable, "-c", "import sys; print(sys.path[-1])"],
+            env=self.env | {"PYTHONPATH": str(hook)},
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        self.assertEqual((child.returncode, child.stdout), (0, f"{VENV['site']}\n"))
 
     def test_a_tool_with_no_readable_interpreter_is_red(self) -> None:
         """A `mutmut` whose first line names no Python is refused by name."""
@@ -784,14 +788,16 @@ class ChildConfiguration(Planted):
         where.mkdir()
         return where
 
-    def child(self, hook: Path, where: Path, **env: str) -> subprocess.CompletedProcess:
+    def child(
+        self, hook: Path, where: Path, **env: str
+    ) -> subprocess.CompletedProcess[str]:
         """Run the planted helper as `python3 helper.py` from WHERE.
 
         Returns:
             The finished child.
 
         """
-        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [python3, str(self.tree / "pkg" / "helper.py")],
