@@ -28,7 +28,7 @@ import in_process
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 
 # A helper whose `main` calls `work`, run as a script by its block.
 HELPER = """\
