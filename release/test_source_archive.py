@@ -158,7 +158,8 @@ class BuildStepIsTheHelper(unittest.TestCase):
             "- name: Build the archive twice and prove determinism"
         )
         step = step.split("      - name:")[0]
-        self.assertIn(f"        run: {HELPER}\n", step)
+        # Under the belt's Python (#1543).
+        self.assertIn(f"        run: '\"${{ORG_PYTHON}}\" {HELPER}'\n", step)
         self.assertNotIn("run: |", step)
         self.assertIn("uses: $/.github/actions/canon", before.split("steps:")[-1])
 

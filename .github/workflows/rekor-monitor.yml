@@ -161,6 +161,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # The belt's Python as ORG_PYTHON, for the helpers this job runs
+      # (#1543): never the runner's python3.
+      - name: Resolve the canon tree and the belt's Python
+        uses: $/.github/actions/canon
+
       # unattested-path: this workflow builds and signs nothing — the
       # cache holds stele's CT-log checkpoint, which is exactly the state
       # it exists to carry between legs and runs (the consistency proof
@@ -231,7 +236,7 @@ jobs:
         id: findings
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .github/rekor-monitor/findings.py --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"
+        run: '"${ORG_PYTHON}" .github/rekor-monitor/findings.py --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"'
 
       # unattested-path: the save half of the checkpoint restore
       # marked above — same cache, same reasoning: this workflow
@@ -261,7 +266,7 @@ jobs:
           CODE: ${{ steps.stele.outputs.code }}
           SAVED: ${{ steps.save.outcome == 'success' }}
         run: |
-          python3 .github/rekor-monitor/verdict.py --exit-code "${CODE}" \
+          "${ORG_PYTHON}" .github/rekor-monitor/verdict.py --exit-code "${CODE}" \
             --report "${RUNNER_TEMP}/report.json" --saved "${SAVED}"
   # Once, after the last leg: did this run gain on the log? Read from
   # stele's own checkpoints, the one the run started from and the newest
@@ -286,6 +291,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # The belt's Python as ORG_PYTHON, for the helpers this job runs
+      # (#1543): never the runner's python3.
+      - name: Resolve the canon tree and the belt's Python
+        uses: $/.github/actions/canon
+
       # unattested-path: the run's starting checkpoint, kept aside by the
       # start job. Read only; this job saves nothing.
       - name: Restore the checkpoint the run started from
@@ -309,7 +319,7 @@ jobs:
           KEPT: ${{ needs.start.outputs.kept }}
           LEGS: ${{ needs.watch.result }}
         run: |
-          python3 .github/rekor-monitor/standing-issue.py --start run-start.json \
+          "${ORG_PYTHON}" .github/rekor-monitor/standing-issue.py --start run-start.json \
             --start-kept "${KEPT}" --checkpoint checkpoint.json --legs "${LEGS}" \
             --run-url "${RUN_URL}"
 ...

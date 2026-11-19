@@ -133,7 +133,7 @@ jobs:
         # block's comments did. It writes image, digest, images and
         # registry-subjects to this step's outputs.
         run: >-
-          python3 .org-canon/release/registry.py assemble --digests digests
+          "${ORG_PYTHON}" .org-canon/release/registry.py assemble --digests digests
           --tag "${UNTRUSTED_VERSION}"
       - name: Pull the published bytes back and smoke them
         if: inputs.smoke-test != ''

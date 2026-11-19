@@ -35,6 +35,10 @@ import importlib.util
 import io
 import re
 import shlex
+import shutil
+
+# ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import tokenize
 import tomllib
@@ -1276,6 +1280,280 @@ class OneReader(unittest.TestCase):
         ):
             with self.subTest(path=path.name):
                 self.assertIn("caller-pins.py", path.read_text("utf-8"))
+
+
+# The canon's helpers run under the belt's Python (#1543). The runner's
+# python3 is pinned by nothing, and on 2026-11-18 it refused the belt's
+# own 3.14 spelling in release/registry.py and broke every image publish
+# in the org. So a `run:` step starts a tracked helper one way only,
+# `"${ORG_PYTHON}" <helper.py>`, and the job has run the canon action,
+# which installs that interpreter and exports it, before any step uses
+# the name.
+ACTIONS = CANON / ".github" / "actions"
+ORG_PYTHON_START = re.compile(r'"\$\{ORG_PYTHON\}"\s+$')
+INTERPRETER = re.compile(r"(?<![\w./$-])(python[\d.]*)\s+$")
+COMMAND_POSITION = re.compile(r"(?:^|[;&|(]|\$\()\s*$")
+
+
+def tracked_helpers() -> set[str]:
+    """Name every tracked Python file by its file name.
+
+    Returns:
+        The names, as `git ls-files` reports the canon's `*.py`.
+
+    Raises:
+        RuntimeError: git is not on PATH.
+
+    """
+    git = shutil.which("git")
+    if git is None:
+        msg = "git is not on PATH"
+        raise RuntimeError(msg)
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    listed = subprocess.run(
+        [git, "ls-files", "-z", "*.py"],
+        cwd=CANON,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {Path(p).name for p in listed.split("\0") if p}
+
+
+def action_job(text: str) -> list[str]:
+    """Read an action file's steps at a workflow job's indent.
+
+    Returns:
+        The action's lines from `runs:` on, indented as a job's are, so
+        `steps()` reads them.
+
+    """
+    lines = text.splitlines()
+    return ["  " + ln for ln in lines[lines.index("runs:") :]]
+
+
+def helper_starts(
+    rel: str, job_id: str, job: list[str], tracked: set[str]
+) -> list[str]:
+    """Name each step that starts a tracked helper but not as `"${ORG_PYTHON}"`.
+
+    A helper path is a start where it stands in a command's place (a
+    line's first word, or after `;`, `|`, `&`, `(` or `$(`), or after an
+    interpreter's name. Anywhere else it is an argument.
+
+    Returns:
+        One line per such start, naming the file, job, step and helper.
+
+    """
+    out = []
+    for step in steps(job):
+        body = re.sub(r"\$\{\{.*?\}\}", "${{expr}}", step.get("run", ""))
+        body = code(body.replace("\\\n", " "))
+        for line in body.splitlines():
+            for token in re.finditer(r"\S*\.py\b[\"']?", line):
+                name = token.group(0).rstrip("\"')").rsplit("/", 1)[-1]
+                if name not in tracked:
+                    continue
+                before = line[: token.start()].lstrip("'")
+                if ORG_PYTHON_START.search(before):
+                    continue
+                interpreter = INTERPRETER.search(before)
+                if interpreter:
+                    how = f"with the runner's {interpreter.group(1)}"
+                elif COMMAND_POSITION.search(before):
+                    how = "by its own first line"
+                else:
+                    continue
+                out.append(
+                    f"{rel} {job_id}: step '{step.get('name', '?')}' starts"
+                    f' {name} {how}; run it as "${{ORG_PYTHON}}" {name} (#1543)'
+                )
+    return out
+
+
+def uncanoned(rel: str, job_id: str, job: list[str]) -> list[str]:
+    """Name a job that uses ORG_PYTHON before the canon action exports it.
+
+    Returns:
+        One line when a step names ORG_PYTHON and no earlier step runs
+        `$/.github/actions/canon`; none otherwise.
+
+    """
+    canon = False
+    for step in steps(job):
+        if step.get("uses", "") == "$/.github/actions/canon":
+            canon = True
+        elif "ORG_PYTHON" in "\n".join(step.values()) and not canon:
+            return [
+                (
+                    f"{rel} {job_id}: step '{step.get('name', '?')}' uses ORG_PYTHON"
+                    " and no step before it runs $/.github/actions/canon, which"
+                    " exports it (#1543)"
+                )
+            ]
+    return []
+
+
+def interpreter_findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
+    """Hold every workflow and action file to the one way to start a helper.
+
+    Returns:
+        Every red line, file by file.
+
+    """
+    out = []
+    for rel, text in texts.items():
+        if rel.startswith(".github/actions/"):
+            out += helper_starts(rel, "runs", action_job(text), tracked)
+            continue
+        for job_id, job in jobs(text).items():
+            out += helper_starts(rel, job_id, job, tracked)
+            out += uncanoned(rel, job_id, job)
+    return out
+
+
+def workflow_and_action_texts() -> dict[str, str]:
+    """Read every workflow and action file the canon carries.
+
+    Returns:
+        Path relative to the canon -> text.
+
+    """
+    paths = [*sorted(WORKFLOWS.glob("*.yml")), *sorted(ACTIONS.glob("*/action.yml"))]
+    return {str(p.relative_to(CANON)): p.read_text("utf-8") for p in paths}
+
+
+PLANTED_JOB = """jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Resolve the canon tree
+        uses: $/.github/actions/canon
+"""
+
+
+class BeltPython(unittest.TestCase):
+    """Every helper a workflow or action starts runs under ORG_PYTHON (#1543)."""
+
+    def test_every_helper_start_names_org_python(self) -> None:
+        """The tree: no step starts a tracked helper any other way."""
+        self.assertEqual(
+            [], interpreter_findings(workflow_and_action_texts(), tracked_helpers())
+        )
+
+    def test_the_scan_reaches_the_helper_starts(self) -> None:
+        """Not vacuous: the tree starts helpers under ORG_PYTHON, many times."""
+        starts = sum(
+            text.count('"${ORG_PYTHON}" ')
+            for text in workflow_and_action_texts().values()
+        )
+        self.assertGreater(starts, 40)
+
+    def test_the_runners_python3_is_named(self) -> None:
+        """Planted: the image publish's call before #1543."""
+        text = PLANTED_JOB + (
+            "      - name: Push the image\n"
+            "        run: |\n"
+            '          python3 .org-canon/release/registry.py push --image "${IMAGE}"\n'
+        )
+        self.assertEqual(
+            [
+                (
+                    ".github/workflows/x.yml build: step 'Push the image' starts"
+                    " registry.py with the runner's python3; run it as"
+                    ' "${ORG_PYTHON}" registry.py (#1543)'
+                )
+            ],
+            interpreter_findings({".github/workflows/x.yml": text}, {"registry.py"}),
+        )
+
+    def test_a_start_by_first_line_is_named(self) -> None:
+        """Planted: a helper executed by its own `#!` line, in both shapes."""
+        text = PLANTED_JOB + (
+            "      - name: Attach\n"
+            "        run: .org-canon/release/attach-publish.py\n"
+            "      - name: Fetch\n"
+            "        run: |\n"
+            "          prev=$(.org-canon/release/pgrx/previous-release.py fetch \\\n"
+            '            --tag "${TAG}")\n'
+        )
+        self.assertEqual(
+            [
+                (
+                    ".github/workflows/x.yml build: step 'Attach' starts"
+                    " attach-publish.py by its own first line; run it as"
+                    ' "${ORG_PYTHON}" attach-publish.py (#1543)'
+                ),
+                (
+                    ".github/workflows/x.yml build: step 'Fetch' starts"
+                    " previous-release.py by its own first line; run it as"
+                    ' "${ORG_PYTHON}" previous-release.py (#1543)'
+                ),
+            ],
+            interpreter_findings(
+                {".github/workflows/x.yml": text},
+                {"attach-publish.py", "previous-release.py"},
+            ),
+        )
+
+    def test_a_start_in_an_action_is_named(self) -> None:
+        """Planted: an action file is held as a workflow is."""
+        text = (
+            "name: x\nruns:\n  using: composite\n  steps:\n"
+            "    - name: Derive\n      shell: bash\n"
+            '      run: python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
+        )
+        self.assertEqual(
+            [
+                (
+                    ".github/actions/x/action.yml runs: step 'Derive' starts"
+                    " derive.py with the runner's python3; run it as"
+                    ' "${ORG_PYTHON}" derive.py (#1543)'
+                )
+            ],
+            interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"}),
+        )
+
+    def test_org_python_before_the_canon_action_is_named(self) -> None:
+        """Planted: the name used where nothing has exported it yet."""
+        text = (
+            "jobs:\n  plan:\n    runs-on: ubuntu-26.04\n    steps:\n"
+            "      - name: Plan\n"
+            "        run: '\"${ORG_PYTHON}\" release/matrix.py base-images'\n"
+            "      - name: Resolve the canon tree\n"
+            "        uses: $/.github/actions/canon\n"
+        )
+        self.assertEqual(
+            [
+                (
+                    ".github/workflows/x.yml plan: step 'Plan' uses ORG_PYTHON and no"
+                    " step before it runs $/.github/actions/canon, which exports it"
+                    " (#1543)"
+                )
+            ],
+            interpreter_findings({".github/workflows/x.yml": text}, {"matrix.py"}),
+        )
+
+    def test_an_argument_an_untracked_file_and_inline_code_are_not_starts(
+        self,
+    ) -> None:
+        """Only a tracked helper in a command's place is a start."""
+        text = PLANTED_JOB + (
+            "      - name: Others\n"
+            "        run: |\n"
+            "          git ls-files '*.py' | wc -l\n"
+            "          ./caller-build.py --release\n"
+            "          python3 -c 'print(1)'\n"
+            '          "${ORG_PYTHON}" .org-canon/mise/gate-tools.py'
+            " --helper registry.py\n"
+            "          # python3 .org-canon/release/registry.py tag\n"
+        )
+        self.assertEqual(
+            [],
+            interpreter_findings(
+                {".github/workflows/x.yml": text}, {"registry.py", "gate-tools.py"}
+            ),
+        )
 
 
 if __name__ == "__main__":

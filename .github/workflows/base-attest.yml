@@ -85,13 +85,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # The belt's Python as ORG_PYTHON, for the helpers this job runs
+      # (#1543): never the runner's python3.
+      - name: Resolve the canon tree and the belt's Python
+        uses: $/.github/actions/canon
+
       - name: Enumerate every pinned digest
         id: plan
-        # The runner's python: tomllib is stdlib, and the belt has no
-        # business here — this job reads one file and emits a matrix.
         # One derivation and its tests: release/matrix.py (#1385).
         run: |
-          release/matrix.py base-images docker/pgrx-base-images.toml \
+          "${ORG_PYTHON}" release/matrix.py base-images docker/pgrx-base-images.toml \
             >> "${GITHUB_OUTPUT}"
   attest:
     name: Attest ${{ matrix.role }} base pg${{ matrix.pg }}

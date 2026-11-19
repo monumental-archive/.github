@@ -347,7 +347,7 @@ jobs:
         if: ${{ inputs.prepare != '' || inputs.binary-crate != '' }}
         id: pins
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "every class that ships a Rust binary" \
             rust cargo-auditable >> "${GITHUB_OUTPUT}"
       - name: Install mise and the caller's pinned toolchain
@@ -544,7 +544,7 @@ jobs:
         # overwrite one another) are release/registry.py (#1382), tested
         # by release/test_registry.py.
         run: >-
-          python3 .org-canon/release/registry.py push --image "${IMAGE}"
+          "${ORG_PYTHON}" .org-canon/release/registry.py push --image "${IMAGE}"
           --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}"
           --context "${UNTRUSTED_CONTEXT}" --digests /tmp/digests
           --arch "${ARCH}"

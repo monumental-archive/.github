@@ -124,7 +124,7 @@ jobs:
         # which tools (#1333). One reader, release/caller-pins.py.
         id: pins
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "the wasm-npm class" \
             rust wasm-pack node >> "${GITHUB_OUTPUT}"
       - name: Install mise and the caller's pinned toolchain
@@ -203,7 +203,7 @@ jobs:
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: .org-canon/release/pack-wasm.py
+        run: '"${ORG_PYTHON}" .org-canon/release/pack-wasm.py'
       - name: Emit the inventory plan (which package this artifact ships)
         # The artifact-to-package mapping exists with certainty exactly
         # once — here, where the tarball was just packed from the crate

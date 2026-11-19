@@ -98,7 +98,7 @@ jobs:
         # Only a release that types its entries hands its manifest on;
         # an untyped one keeps the whole-release comparison (stele#185).
         # The design and its tests: release/repro-resolve.py (#1386).
-        run: .org-canon/release/repro-resolve.py
+        run: '"${ORG_PYTHON}" .org-canon/release/repro-resolve.py'
   # The genuine article: the class workflow itself, pointed at the tag.
   # One job per class because `uses:` takes no expressions; exactly one
   # runs, and compare takes whichever produced subjects.
@@ -306,5 +306,5 @@ jobs:
           COMPARE: ${{ steps.compare.outcome }}
         # The wording, and why a verdict names its scope: the design and
         # its tests are release/repro-issue.py (#1262, #1386).
-        run: .org-canon/release/repro-issue.py
+        run: '"${ORG_PYTHON}" .org-canon/release/repro-issue.py'
 ...

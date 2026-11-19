@@ -132,7 +132,7 @@ jobs:
           UNTRUSTED_TARGETS: ${{ inputs.targets }}
         # One derivation, its runner table and its tests (#1385).
         run: |
-          .org-canon/release/matrix.py targets rust-binary \
+          "${ORG_PYTHON}" .org-canon/release/matrix.py targets rust-binary \
             "${UNTRUSTED_TARGETS}" >> "${GITHUB_OUTPUT}"
   build:
     name: Build and smoke ${{ matrix.target }}
@@ -181,7 +181,7 @@ jobs:
         # which tools (#1333). One reader, release/caller-pins.py.
         id: pins
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "every class that ships a Rust binary" \
             rust cargo-auditable >> "${GITHUB_OUTPUT}"
       - name: Install mise and the caller's pinned toolchain

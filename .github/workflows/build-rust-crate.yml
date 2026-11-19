@@ -95,7 +95,7 @@ jobs:
         # which tools (#1333). One reader, release/caller-pins.py.
         id: pins
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "the rust-crate class" \
             rust >> "${GITHUB_OUTPUT}"
       - name: Install mise and the pinned toolchain
@@ -154,7 +154,7 @@ jobs:
         # a second, unverified run that must rewrite every verified crate
         # byte for byte (#1273), and the set is then cut to what crates.io
         # receives (#1310). release/package-crates.py, which says why.
-        run: .org-canon/release/package-crates.py
+        run: '"${ORG_PYTHON}" .org-canon/release/package-crates.py'
       - name: Compute the subject manifest
         id: hash
         run: |

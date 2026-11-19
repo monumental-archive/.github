@@ -370,5 +370,5 @@ jobs:
         # judged on the build subjects its manifest types (stele#156); a
         # rehearsal stays a draft and records why (#597). The design and
         # its tests: release/attach-publish.py (#1386).
-        run: .org-canon/release/attach-publish.py
+        run: '"${ORG_PYTHON}" .org-canon/release/attach-publish.py'
 ...
