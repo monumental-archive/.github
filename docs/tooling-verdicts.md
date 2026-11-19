@@ -33,6 +33,7 @@ honestly blocked on.
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
+| fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
@@ -2675,6 +2676,70 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   the same bytes; the cron takes a random seed it prints first. A test
   restating a bound is refused. *Reopen:* an aqua package, or a `pipx:`
   lock entry that carries hashes.
+- **fast-check, adopted for TypeScript property testing (#1549,
+  2026-11-19), the repository's own.** The TypeScript half of
+  property 3 (#1336), #1332's shape. The belt pins neither fast-check
+  nor vitest: both are read from the repository's lockfile, the
+  coverage leg's rule (#1357). The decision was how the seed reaches
+  fast-check, and it was measured on monumental-archive at `f060c67`
+  (vitest 4.1.12, `@fast-check/vitest` 0.5.0, fast-check 4.9.0 as
+  its pnpm lockfile pins them, installed `--frozen-lockfile`):
+  - fast-check 4.9.0 reads **no environment variable** (no
+    `process.env` in its `lib/`); unseeded, every run is a fresh
+    seed. Only `fc.configureGlobal`, inside the test process, sets it.
+  - vitest **refuses a setup file on its command line**: `vitest run
+    --setupFiles <f>` exits on `CACError: Unknown option
+    --setupFiles`. Item 4(a) by flag is not available.
+  - Item 4(a) **through a wrapper config works**, so it is the design
+    and (b) is not needed: the leg writes, in a scratch directory, a
+    config that imports the repository's own unchanged (a function
+    config is called), adds the belt's setup file to `setupFiles`,
+    narrows `include` to exactly the tracked property files, resets
+    `exclude` to vitest's default and adds a JSON report, and hands it
+    to the repository's vitest with `-c` and `--root`. Nothing is
+    written into the repository. monumental-archive's real config
+    (a custom sequencer, `globalSetup`, `include`) loaded through it
+    intact. A config with `test.projects` is refused by name: a
+    project does not inherit root `setupFiles`.
+  - The setup file must import what the repository locks: a bare
+    `import "fast-check"` from it fails in that tree (`Cannot find
+    package 'fast-check'`: pnpm keeps a transitive dependency off the
+    top level), while the `fc` that `@fast-check/vitest` re-exports
+    resolves and is the instance the tests use. The setup configures
+    every one of the two that imports.
+  - Behaviour, one probe property at 3 runs, examples printed by the
+    property: seed 42 gave `9, -994490854, -1536816376` on two runs;
+    seed 7 gave `-897639049, 922382085, 1907858427`. The global
+    configuration reached all four forms the org writes —
+    `test.prop` with a tuple and with a record, `fc.assert` on a
+    property and on an async property — so the belt's reporter prints
+    one line per property (test, runs, seed, a digest of every
+    generated example) and two gate runs of one commit print the same
+    lines. A failing property still throws fast-check's own report:
+    counterexample `[10]` for `n < 10`, shrunk, with its replay path.
+  - A `*.prop.test.ts` file also matches vitest's default
+    `*.test.ts` include, so a repository's own `vitest run` would
+    run its properties a second time, unseeded, in the same gate.
+    Ruled 2026-11-19 (on #1549): the gate leg asks vitest which files
+    the repository's own config collects (`vitest list --filesOnly
+    --json`, which evaluates the config and, measured on
+    monumental-archive's, runs no `globalSetup`) and is red by name on
+    any property file in that set, with the line to add:
+    `exclude: [...configDefaults.exclude, "**/*.prop.test.*"]`. With
+    that line the probe tree's leg held; without it the leg was red
+    before running anything. Renaming properties outside the default
+    include (`*.prop.ts`) and a lint reading the config as text are
+    refused in the ruling.
+  The gate's seed is fixed (1336) at 200 runs; the cron's is fresh,
+  printed first and taken from `ORG_PROPERTY_SEED` when set, at
+  10,000. A property restating `seed`, `numRuns` or
+  `configureGlobal(...)` is refused by `lint:typescript-properties`,
+  as a restated bound is for Python; so is a fast-check import outside
+  a `*.prop.test.*` file. A second property library pinned by the
+  belt, an unseeded gate, and a coverage-guided TypeScript fuzzer are
+  refused in the issue. *Reopen:* vitest accepting `setupFiles` on
+  its command line (the wrapper retires), or fast-check reading a seed
+  from the environment.
 - **atheris, refused (#1332, 2026-11-17).** The one Python fuzzer
   Scorecard's `Fuzzing` check detects (the literal `import atheris`,
   ossf/scorecard `checks/raw/fuzzing.go`). It cannot be installed

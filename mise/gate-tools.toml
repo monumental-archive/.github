@@ -201,10 +201,12 @@ tasks = [
   "lint:subject-budget",
   "lint:task-shell",
   "lint:tsconfig-dials",
+  "lint:typescript-properties",
   "lint:workflow-shell",
   "lint:workspace-inherit",
   "test:pgrx",
   "test:python-properties",
+  "test:typescript-properties",
 ]
 run = ["python3", "python"]
 

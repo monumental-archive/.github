@@ -121,6 +121,17 @@ class Gate(unittest.TestCase):
         )
         self.assertEqual(hits, [])
 
+    def test_ci_names_each_property_leg(self) -> None:
+        """A belt test leg is named in `ci`, never collected (#1332, #1549).
+
+        `test` is the repository's, so a belt-defined test reaches the
+        gate only by a line of its own in `ci`'s depends.
+        """
+        direct = [named(entry) for entry in tasks()["ci"]["depends"]]
+        for leg in ("test:python-properties", "test:typescript-properties"):
+            with self.subTest(leg=leg):
+                self.assertIn(leg, direct)
+
     def test_the_walk_sees_a_planted_audit(self) -> None:
         """The walk is not vacuous: a planted depends on audit is found."""
         defined = tasks()
