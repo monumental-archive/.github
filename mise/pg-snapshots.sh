@@ -18,6 +18,7 @@
 # Nothing at all when no Cargo.toml is tracked or no member is an
 # extension; the caller says which of those it was.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
 
@@ -33,7 +34,7 @@ command -v cargo > /dev/null || {
 # workspace with no extension — an empty answer nobody could tell from
 # the real one.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$(python3 "${belt}/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}")
 while IFS=$'\t' read -r record spec kind majors dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   [[ ${dir} != "-" ]] || {

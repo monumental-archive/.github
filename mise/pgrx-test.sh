@@ -17,6 +17,7 @@
 # this is where it is held to the truth. A plan that missed a major is a
 # red here, not a major quietly untested.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="test:pgrx"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
@@ -35,7 +36,7 @@ command -v cargo > /dev/null || {
 # derivation would skip this suite silently, which is the exact failure
 # #813 exists to end.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$(python3 "${belt}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" <<< "${metadata}")
 crates=""
 declared=""
 while IFS=$'\t' read -r record spec kind crate_majors dir; do
@@ -87,7 +88,7 @@ cargo fetch --locked
 . "${belt}/pgrx-env.sh"
 org_pgrx_darwin_flags
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-plan=$(python3 "${belt}/pgrx-postgres.py" --majors "${only:-${declared}}" <<< "${installed}")
+plan=$("${ORG_PYTHON}" "${belt}/pgrx-postgres.py" --majors "${only:-${declared}}" <<< "${installed}")
 org_pgrx_init <<< "${plan}" > /dev/null
 
 # The runs this invocation owes, as `dir:major`.

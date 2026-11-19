@@ -48,5 +48,5 @@ jobs:
         # registry token, the manifest GET and PUT and the resolve check
         # are release/registry.py (#1382), tested against a stub docker
         # and a fake registry by release/test_registry.py.
-        run: python3 .org-canon/release/registry.py tag
+        run: '"${ORG_PYTHON}" .org-canon/release/registry.py tag'
 ...

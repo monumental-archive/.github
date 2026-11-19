@@ -116,7 +116,7 @@ class BuildStepIsTheHelper(unittest.TestCase):
         """The run: is the call alone, by the recorded tree."""
         body = step("Build every command")
         self.assertIn(
-            '        run: |\n          "${ORG_CANON_TREE}/release/'
+            '        run: |\n          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/'
             'build-go-commands.py"\n',
             body,
         )

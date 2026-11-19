@@ -205,7 +205,7 @@ jobs:
           ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
           ORG_QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           ORG_QUEUE_TOKEN: ${{ github.token }}
-        run: python3 .org-canon/mise/queue-head.py
+        run: '"${ORG_PYTHON}" .org-canon/mise/queue-head.py'
 
       # The Rust toolchains live INSIDE the directory the tool cache
       # below restores (#1165). mise installs rust through rustup, and
@@ -235,7 +235,7 @@ jobs:
       # it pins is ever disabled. Local runs are unchanged: nothing sets
       # it there.
       - name: Leave out the belt tools this tree does not need
-        run: python3 .org-canon/mise/gate-tools.py disable
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate-tools.py disable'
 
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
@@ -261,7 +261,7 @@ jobs:
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: python3 .org-canon/mise/gate-cache-key.py mise-v2 .org-canon
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate-cache-key.py mise-v2 .org-canon'
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
@@ -439,7 +439,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         # The composition, the title's own-reference refusal (#800) and
         # the CRLF body (#880): mise/squash-message.py (#1386).
-        run: python3 .org-canon/mise/squash-message.py
+        run: '"${ORG_PYTHON}" .org-canon/mise/squash-message.py'
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       - name: Run the gate
@@ -537,7 +537,7 @@ jobs:
         env:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "every pgrx leg of the gate" \
             --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \
             rust cargo-pgrx >> "${GITHUB_OUTPUT}"
@@ -557,7 +557,7 @@ jobs:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
           ORG_TOOL_INSTALL: jq ${{ steps.pins.outputs.install }}
         run: |
-          python3 .org-canon/mise/gate-cache-key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
+          "${ORG_PYTHON}" .org-canon/mise/gate-cache-key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
             .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
@@ -730,7 +730,7 @@ jobs:
         env:
           ORG_PGRX_MAJORS: ${{ needs.plan.outputs.majors }}
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "the coverage badge feed" \
             --if-pinned rust --if-pinned go --if-pinned cargo-pgrx \
             --if-pinned node --if-pinned pnpm \
@@ -746,7 +746,7 @@ jobs:
             jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv pipx:coverage
             ${{ steps.pins.outputs.install }}
         run: |
-          python3 .org-canon/mise/gate-cache-key.py mise-coverage-v1 \
+          "${ORG_PYTHON}" .org-canon/mise/gate-cache-key.py mise-coverage-v1 \
             .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly

@@ -135,7 +135,7 @@ jobs:
           UNTRUSTED_TARGETS: ${{ inputs.targets }}
         # One derivation, its runner table and its tests (#1385).
         run: |
-          .org-canon/release/matrix.py targets go-binary \
+          "${ORG_PYTHON}" .org-canon/release/matrix.py targets go-binary \
             "${UNTRUSTED_TARGETS}" >> "${GITHUB_OUTPUT}"
   build:
     name: Build and smoke ${{ matrix.target }}
@@ -179,7 +179,7 @@ jobs:
         # which tools (#1333). One reader, release/caller-pins.py.
         id: pins
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "the go-binary class" \
             go >> "${GITHUB_OUTPUT}"
           # Unlinked before go runs: an untracked path in the tree stamps
@@ -239,7 +239,7 @@ jobs:
         # name two would share. Run from the tree the pins step recorded:
         # the .org-canon link is gone by now. release/build-go-commands.py.
         run: |
-          "${ORG_CANON_TREE}/release/build-go-commands.py"
+          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/build-go-commands.py"
       - name: Refuse a binary whose stamp is not the released commit
         # Go embeds the module list and the VCS facts in every binary —
         # the artifact-carries-its-inventory property this class rests on
@@ -249,7 +249,7 @@ jobs:
         # .org-canon link is gone by now. release/check-go-stamps.py
         # (#1371).
         run: |
-          "${ORG_CANON_TREE}/release/check-go-stamps.py"
+          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/check-go-stamps.py"
       - name: Smoke the binaries
         if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:

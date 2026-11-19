@@ -62,6 +62,7 @@
 # `go list` order and, given MUTANTS_SUMMARY_DIR, writes its counts to
 # go.tsv there (creating it) for the job that states the totals.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: go"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
@@ -150,7 +151,7 @@ fi
 # refusal are mutants-go.py's (`build-go`); the go calls stay here.
 built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2; exit }')
 running=$(go env GOVERSION)
-python3 "${belt}/mutants-go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
+"${ORG_PYTHON}" "${belt}/mutants-go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
   --built "${built}" --running "${running}"
 
 root=$(pwd -P)
@@ -232,7 +233,7 @@ done < "${scratch}/shard.tsv"
 
 git grep -n -e '//mutants:equivalent' -- ':!vendor/**' '*.go' > "${scratch}/records.txt" || true
 
-python3 "${belt}/mutants-go.py" \
+"${ORG_PYTHON}" "${belt}/mutants-go.py" \
   --label "${label}" --where "${where}" --shard "${shard:-whole}" \
   --root "${root}" --scratch "${scratch}" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

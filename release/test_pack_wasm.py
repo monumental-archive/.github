@@ -149,7 +149,8 @@ class PackStepIsTheHelper(unittest.TestCase):
         text = WORKFLOW.read_text("utf-8")
         step = text.split("- name: Pack and hash the exact bytes that will publish")[1]
         step = step.split("      - name:")[0]
-        self.assertIn(f"        run: {HELPER}\n", step)
+        # Under the belt's Python (#1543).
+        self.assertIn(f"        run: '\"${{ORG_PYTHON}}\" {HELPER}'\n", step)
         self.assertNotIn("run: |", step)
 
 

@@ -285,7 +285,8 @@ class PackageStepIsTheHelper(unittest.TestCase):
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """Nothing but the call is left in the workflow."""
-        self.assertEqual(f"{HELPER}\n", step_body("Package"))
+        # Under the belt's Python (#1543).
+        self.assertEqual(f"'\"${{ORG_PYTHON}}\" {HELPER}'\n", step_body("Package"))
 
 
 class PackageAnExcludedMember(unittest.TestCase):

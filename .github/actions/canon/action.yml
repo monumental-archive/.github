@@ -13,8 +13,8 @@
 ---
 name: canon
 description: >-
-  Link the canon tree this run resolved to .org-canon and name the
-  resolved ref
+  Link the canon tree this run resolved to .org-canon, name the
+  resolved ref, and export the belt's Python as ORG_PYTHON
 outputs:
   ref:
     description: >-
@@ -36,4 +36,19 @@ runs:
       # Shipped beside this file and run from the action's own path: it
       # is the step that makes the canon tree available (#1386).
       run: '"${GITHUB_ACTION_PATH}/link.sh"'
+    # The mise binary alone, at the version every workflow pins: the
+    # next step installs the belt's Python through it (#1543).
+    - name: Install mise
+      uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      with:
+        version: 2026.11.7
+        cache: false
+        install: false
+    # Every step that runs a tracked helper runs it as
+    # `"${ORG_PYTHON}" <helper.py>`: the belt's pinned, locked Python,
+    # never the runner's python3. PATH is left alone, so the caller's
+    # own code sees the interpreter it saw before.
+    - name: Install the belt's Python as ORG_PYTHON
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/python.sh"'
 ...

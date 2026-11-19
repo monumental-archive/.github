@@ -481,7 +481,10 @@ class Workflow(unittest.TestCase):
         )
         runs = [line for line in step.splitlines() if line.startswith("        run:")]
         self.assertEqual(
-            runs, ["        run: python3 .org-canon/mise/queue-head.py"], step
+            runs,
+            # Under the belt's Python (#1543).
+            ["        run: '\"${ORG_PYTHON}\" .org-canon/mise/queue-head.py'"],
+            step,
         )
         for key, value in (
             ("ORG_QUEUE_BASE", "github.event.merge_group.base_sha"),

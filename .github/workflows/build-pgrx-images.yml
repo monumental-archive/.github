@@ -119,7 +119,7 @@ jobs:
           UNTRUSTED_MAJORS: ${{ inputs.pg-majors }}
         # One derivation and its tests (#1385).
         run: |
-          .org-canon/release/matrix.py pgrx-images "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
+          "${ORG_PYTHON}" .org-canon/release/matrix.py pgrx-images "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
   image:
     name: Assemble and prove the pg${{ matrix.pg }} artifact image
     needs: plan
@@ -170,7 +170,7 @@ jobs:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
         run: |
-          .org-canon/release/pgrx-images.py stage --pg "${PG}" \
+          "${ORG_PYTHON}" .org-canon/release/pgrx-images.py stage --pg "${PG}" \
             --version "${UNTRUSTED_VERSION}" --crate-dir "${UNTRUSTED_CRATE_DIR}"
       - name: Resolve the image name
         id: name
@@ -201,7 +201,7 @@ jobs:
         # along in the record, applied only post-gate by tag-images.yml,
         # so the step that names the tag is the step that records it.
         run: >-
-          python3 .org-canon/release/registry.py push --image "${IMAGE}"
+          "${ORG_PYTHON}" .org-canon/release/registry.py push --image "${IMAGE}"
           --file .org-canon/docker/pgrx-artifact.Dockerfile --context .
           --digests /tmp/digests --pg "${PG}"
           --platform linux/amd64,linux/arm64

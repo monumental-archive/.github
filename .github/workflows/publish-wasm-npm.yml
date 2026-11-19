@@ -73,7 +73,7 @@ jobs:
         # which tools (#1333). One reader, release/caller-pins.py.
         id: pins
         run: |
-          .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
             --input-of "the wasm-npm class" \
             node >> "${GITHUB_OUTPUT}"
       - name: Install mise and the caller's pinned toolchain
@@ -101,5 +101,5 @@ jobs:
         # reasons are in the helper, where its tests run (#1383).
         env:
           PACKAGE: ${{ inputs.package }}
-        run: .org-canon/release/publish-npm.py "${PACKAGE}"
+        run: '"${ORG_PYTHON}" .org-canon/release/publish-npm.py "${PACKAGE}"'
 ...
