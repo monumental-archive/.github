@@ -19,6 +19,7 @@ import gzip
 import hashlib
 import io
 import os
+import runpy
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
@@ -27,6 +28,11 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
@@ -108,17 +114,16 @@ def run_helper(
         for i, data in enumerate(archives):
             (planted / f"{i}.tar.gz").write_bytes(data)
         log = tmp / "git.log"
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "VERSION": VERSION,
-            "GITHUB_REPOSITORY": repo,
-            "STUB_LOG": str(log),
-            "STUB_COUNTER": str(tmp / "counter"),
-            "STUB_PLANTED": str(planted),
-            "STUB_TRACKED": str(tracked),
-            "STUB_FAIL": "1" if fail else "",
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            VERSION=VERSION,
+            GITHUB_REPOSITORY=repo,
+            STUB_LOG=str(log),
+            STUB_COUNTER=str(tmp / "counter"),
+            STUB_PLANTED=str(planted),
+            STUB_TRACKED=str(tracked),
+            STUB_FAIL="1" if fail else "",
+        )
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [HELPER],

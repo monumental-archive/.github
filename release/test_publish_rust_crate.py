@@ -58,13 +58,19 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 import shutil
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import mock
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 CANON = Path(__file__).resolve().parent.parent
 TESTDATA = CANON / "release" / "testdata"
@@ -219,19 +225,18 @@ def run_publish(
         (crates / "edtf-core-1.3.3.crate").write_bytes(
             CRATE.read_bytes() if crate is None else crate
         )
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "EXCLUDE_FLAGS": OLD_CALLER_EXCLUDES,
-            "ORG_USER_AGENT": USER_AGENT,
-            "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "stub-request-token",
-            "ACTIONS_ID_TOKEN_REQUEST_URL": OIDC_URL,
-            "STUB_LOG": str(log),
-            "STUB_CRATES": str(crates),
-            "STUB_TARGET": str(tmp / "target"),
-            "STUB_METADATA": str(metadata),
-            "STUB_PUBLISH_RC": str(answers.get("publish_rc", 0)),
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            EXCLUDE_FLAGS=OLD_CALLER_EXCLUDES,
+            ORG_USER_AGENT=USER_AGENT,
+            ACTIONS_ID_TOKEN_REQUEST_TOKEN="stub-request-token",  # ruff: ignore[hardcoded-password-func-arg]
+            ACTIONS_ID_TOKEN_REQUEST_URL=OIDC_URL,
+            STUB_LOG=str(log),
+            STUB_CRATES=str(crates),
+            STUB_TARGET=str(tmp / "target"),
+            STUB_METADATA=str(metadata),
+            STUB_PUBLISH_RC=str(answers.get("publish_rc", 0)),
+        )
         fetch = Fetch(
             served, oidc=answers.get("oidc", 200), exchange=answers.get("exchange", 200)
         )

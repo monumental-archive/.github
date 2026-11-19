@@ -100,14 +100,20 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 import threading
 import unittest
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Self
 from unittest import mock
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -585,20 +591,19 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         text = cff if cff is not None else citation(licence, concept)
         b64.write_text(base64.b64encode(text.encode()).decode())
         summary = tmp / "summary"
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "ZENODO_TOKEN": "stub-token",
-            "BASE_URL": z.base,
-            "UNTRUSTED_VERSION": version,
-            "GH_TOKEN": "stub",
-            "TAG": f"v{version}",
-            "ORG_USER_AGENT": "monumental-archive-publish (stub)",
-            "GITHUB_REPOSITORY": repo,
-            "GITHUB_STEP_SUMMARY": str(summary),
-            "STUB_CFF_B64": str(b64),
-            "STUB_CFF_STATUS": str(cff_status),
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            ZENODO_TOKEN="stub-token",  # ruff: ignore[hardcoded-password-func-arg]
+            BASE_URL=z.base,
+            UNTRUSTED_VERSION=version,
+            GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
+            TAG=f"v{version}",
+            ORG_USER_AGENT="monumental-archive-publish (stub)",
+            GITHUB_REPOSITORY=repo,
+            GITHUB_STEP_SUMMARY=str(summary),
+            STUB_CFF_B64=str(b64),
+            STUB_CFF_STATUS=str(cff_status),
+        )
         out = io.StringIO()
         with (
             mock.patch.object(MINT, "pause", pauses.append),

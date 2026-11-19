@@ -14,7 +14,6 @@ gate as `mise run test`.
 
 import ast
 import os
-import re
 import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -22,7 +21,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest import mock
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 HERE = Path(__file__).resolve().parent
 hermetic = SimpleNamespace(**runpy.run_path(str(HERE / "hermetic.py")))
@@ -45,14 +48,118 @@ PLANTED = {
     "GIT_INDEX_FILE": "/nowhere/.git/index",
 }
 
-# The five ways a test file copies the caller's environment. `dict(` is
-# anchored so `mock.patch.dict(os.environ, env, clear=True)` is not
-# counted: that REPLACES the process environment with `env`, it does not
-# copy the caller's into a fixture.
-COPIES = re.compile(
-    r"os\.environ\.items\(\)|\{\*\*os\.environ|(?<![\w.])dict\(os\.environ"
-    r"|os\.environ\.copy\(\)|os\.environ \|"
-)
+# A whole-mapping read of the environment, by method (#1638).
+WHOLE_READS = frozenset({"copy", "items", "keys", "values"})
+
+
+def environment_names(module: ast.Module) -> tuple[set[str], set[str]]:
+    """Name what the file binds to `os` and to the environment itself.
+
+    `import os` and `import os as x` bind the module; `from os import
+    environ` (aliased or not) and `name = <the environment>` bind the
+    environment, followed until nothing new is bound.
+
+    Returns:
+        The names bound to `os`, and the names bound to `os.environ`.
+
+    """
+    modules: set[str] = set()
+    environs: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            modules |= {a.asname or a.name for a in node.names if a.name == "os"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "os":
+            environs |= {a.asname or a.name for a in node.names if a.name == "environ"}
+    assigned = [
+        (t.id, node.value)
+        for node in ast.walk(module)
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name)
+    ]
+    grew = True
+    while grew:
+        grew = False
+        for name, value in assigned:
+            if name not in environs and is_environment(value, modules, environs):
+                environs.add(name)
+                grew = True
+    return modules, environs
+
+
+def is_environment(node: ast.AST, modules: set[str], environs: set[str]) -> bool:
+    """Say whether an expression IS the process environment, whole.
+
+    Returns:
+        True for `os.environ` through any binding of `os`, or a name
+        bound to the environment.
+
+    """
+    if isinstance(node, ast.Name):
+        return node.id in environs
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id in modules
+    )
+
+
+def copies(source: str) -> list[int]:
+    """Find every line where a file reads the environment whole (#1638).
+
+    A copy is a dict display with `**` the environment; `dict(...)`
+    given it, plainly or as `**`; `.copy()`, `.items()`, `.keys()` or
+    `.values()` on it; it as either side of `|`, the right of `|=`, or
+    an argument of `.update(`; a comprehension or `for` over it. One
+    variable read (`os.environ["X"]`, `.get("X")`, `in`) is not a copy,
+    nor is `mock.patch.dict(os.environ, env, clear=True)`, which
+    REPLACES the environment: it calls an attribute `dict`, never the
+    bare name.
+
+    Returns:
+        The line of each copy, sorted.
+
+    """
+    module = ast.parse(source)
+    modules, environs = environment_names(module)
+
+    def env(node: ast.AST | None) -> bool:
+        return node is not None and is_environment(node, modules, environs)
+
+    return sorted(
+        node.iter.lineno if isinstance(node, ast.comprehension) else node.lineno
+        for node in ast.walk(module)
+        if reads_whole(node, env)
+    )
+
+
+def reads_whole(node: ast.AST, env: Callable[[ast.AST | None], bool]) -> bool:
+    """Say whether one node reads the environment whole (see `copies`).
+
+    Returns:
+        True for each shape `copies` names.
+
+    """
+    if isinstance(node, ast.Dict):
+        return any(
+            k is None and env(v) for k, v in zip(node.keys, node.values, strict=True)
+        )
+    if isinstance(node, ast.Call):
+        func = node.func
+        given = [*node.args, *(k.value for k in node.keywords if k.arg is None)]
+        if isinstance(func, ast.Name):
+            return func.id == "dict" and any(env(a) for a in given)
+        return isinstance(func, ast.Attribute) and (
+            (func.attr in WHOLE_READS and env(func.value))
+            or (func.attr == "update" and any(env(a) for a in given))
+        )
+    if isinstance(node, (ast.BinOp, ast.AugAssign)) and isinstance(node.op, ast.BitOr):
+        sides = [node.left, node.right] if isinstance(node, ast.BinOp) else [node.value]
+        return any(env(side) for side in sides)
+    if isinstance(node, (ast.comprehension, ast.For, ast.AsyncFor)):
+        return env(node.iter)
+    return False
 
 
 def listed_test_files() -> list[str]:
@@ -263,14 +370,89 @@ class TheLaw(unittest.TestCase):
 
     def test_no_test_file_copies_the_callers_environment(self) -> None:
         """Every fixture environment is built through hermetic.env."""
-        listed = listed_test_files()
         offenders = [
-            path
-            for path in listed
+            f"{path}:{line}"
+            for path in listed_test_files()
             if path not in EXCEPTED
-            and COPIES.search((CANON / path).read_text(encoding="utf-8"))
+            for line in copies((CANON / path).read_text(encoding="utf-8"))
         ]
         self.assertEqual([], offenders)
+
+    def test_every_spelling_of_a_copy_is_found(self) -> None:
+        """Planted: each way to read the environment whole, at its line."""
+        planted = {
+            "display": "import os\nenv = {**os.environ}\n",
+            "multi-line display": (
+                "import os\nenv = {\n    **os.environ,\n    'A': '1',\n}\n"
+            ),
+            "spaced display": "import os\nenv = { **os.environ }\n",
+            "dict(env)": "import os\nenv = dict(os.environ)\n",
+            "dict(**env)": "import os\nenv = dict(**os.environ)\n",
+            "copy": "import os\nenv = os.environ.copy()\n",
+            "items": "import os\nenv = dict(os.environ.items())\n",
+            "keys": "import os\nnames = list(os.environ.keys())\n",
+            "values": "import os\nvals = list(os.environ.values())\n",
+            "or": "import os\nenv = os.environ | {'A': '1'}\n",
+            "or, no space": "import os\nenv = os.environ|{'A': '1'}\n",
+            "or, right": "import os\nenv = {'A': '1'} | os.environ\n",
+            "or-assign": "import os\nenv = {}\nenv |= os.environ\n",
+            "update": "import os\nenv = {}\nenv.update(os.environ)\n",
+            "update **": "import os\nenv = {}\nenv.update(**os.environ)\n",
+            "comprehension": (
+                "import os\nenv = {k: v for k, v in\n    os.environ.items()}\n"
+            ),
+            "comprehension over keys": "import os\nenv = {k: 1 for k in os.environ}\n",
+            "for": "import os\nenv = {}\nfor k in os.environ:\n    env[k] = 1\n",
+            "from os import environ": "from os import environ\nenv = {**environ}\n",
+            "from os import environ as e": (
+                "from os import environ as e\nenv = e.copy()\n"
+            ),
+            "import os as x": "import os as x\nenv = dict(x.environ)\n",
+            "name = os.environ": "import os\nsrc = os.environ\nenv = {**src}\n",
+        }
+        lines = {
+            "display": [2],
+            "multi-line display": [2],
+            "spaced display": [2],
+            "dict(env)": [2],
+            "dict(**env)": [2],
+            "copy": [2],
+            "items": [2],
+            "keys": [2],
+            "values": [2],
+            "or": [2],
+            "or, no space": [2],
+            "or, right": [2],
+            "or-assign": [3],
+            "update": [3],
+            "update **": [3],
+            "comprehension": [3],
+            "comprehension over keys": [2],
+            "for": [3],
+            "from os import environ": [2],
+            "from os import environ as e": [2],
+            "import os as x": [2],
+            "name = os.environ": [3],
+        }
+        for name, source in planted.items():
+            with self.subTest(name):
+                self.assertEqual(lines[name], copies(source))
+
+    def test_a_single_read_is_not_a_copy(self) -> None:
+        """One variable, or a replacement of the whole, is allowed."""
+        allowed = {
+            "key": "import os\nx = os.environ['A']\n",
+            "get": "import os\nx = os.environ.get('A', '')\n",
+            "in": "import os\nx = 'A' in os.environ\n",
+            "patch.dict": (
+                "import os\nfrom unittest import mock\n"
+                "with mock.patch.dict(os.environ, env, clear=True):\n    pass\n"
+            ),
+            "set one": "import os\nos.environ['A'] = '1'\n",
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual([], copies(source))
 
     def test_no_test_file_lists_the_canons_tree_directly(self) -> None:
         """Every listing of the canon's own tree goes through tracked (#1618)."""
