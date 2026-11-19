@@ -115,7 +115,9 @@ jobs:
 
       # What changed, and the push/recover mode, are facts about the CI
       # event and stay here (#1373). A push is a RANGE: the merge changed
-      # one decision, and the one it changed is the one to sign. A
+      # one decision, and the one it changed is the one to sign, read by
+      # lint:vex-one-per-merge's own reader with renames off, so a
+      # decision renamed and edited is listed at its new name (#1615). A
       # dispatch (or an unusable before-sha) is a STATE, enumerated from
       # tracked files and never diffed, and recovery asks the store which
       # decisions it already holds.
@@ -148,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
-            mode=() none="no changed statements" list=$(git diff --name-only --diff-filter=AM "${BEFORE}..HEAD" -- "${DECISIONS}")
+            mode=() none="no changed statements" list=$("${ORG_PYTHON}" .org-canon/mise/vex-one-per-merge.py --list "${BEFORE}..")
           else
             mode=(--unsigned-only --store "${REPO}") none="security/vex/ holds no decisions" list=$(git ls-files "${DECISIONS}")
           fi

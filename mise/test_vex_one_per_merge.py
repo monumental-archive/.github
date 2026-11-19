@@ -19,6 +19,7 @@ gate as `mise run test`.
 import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -39,6 +40,7 @@ A = "security/vex/RUSTSEC-0000-0001.openvex.json"
 B = "security/vex/RUSTSEC-0000-0002.openvex.json"
 C = "security/vex/RUSTSEC-0000-0003.openvex.json"
 README = "security/vex/README.md"
+HELPER = BELT / "vex-one-per-merge.py"
 
 
 def body() -> str:
@@ -94,6 +96,23 @@ class Tree:
     def mark_main(self) -> None:
         """Point origin/main at HEAD: everything so far is the default branch."""
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def listing(self) -> subprocess.CompletedProcess[str]:
+        """List the decisions ahead of origin/main, as vex-attest.yml asks.
+
+        Returns:
+            The finished process, output captured.
+
+        """
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
+            [sys.executable, str(HELPER), "--list", "origin/main.."],
+            cwd=self.dir,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     def run(self, event: str = "") -> subprocess.CompletedProcess[str]:
         """Run the task's body in the tree, as the CI event `event`.
@@ -243,6 +262,71 @@ class NoneTracked(unittest.TestCase):
             done = tree.run()
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertIn(f"{TASK}: no VEX decisions tracked, skipped", done.stdout)
+
+
+class Listing(unittest.TestCase):
+    """vex-attest.yml's signing list is the lint's own reader (#1615)."""
+
+    def setUp(self) -> None:
+        """Plant a tree whose default branch holds two decisions."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tree = Tree(Path(tmp.name))
+        self.tree.commit(A, B, README)
+        self.tree.mark_main()
+
+    def listed(self) -> list[str]:
+        """Run the listing and require it to succeed.
+
+        Returns:
+            The decisions it printed, one per line.
+
+        """
+        done = self.tree.listing()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.splitlines()
+
+    def test_a_rename_with_an_edit_is_listed_at_its_new_name(self) -> None:
+        """Moved and edited: new bytes at a new name, so it is signed."""
+        self.tree.git("mv", A, C)
+        self.tree.commit(C)
+        self.assertEqual(self.listed(), [C])
+
+    def test_a_pure_rename_is_listed(self) -> None:
+        """Moved alone: listed, and the store decides if its bytes are held."""
+        self.tree.git("mv", A, C)
+        self.tree.commit()
+        self.assertEqual(self.listed(), [C])
+
+    def test_a_deletion_is_not_listed(self) -> None:
+        """Removed: nothing to sign."""
+        self.tree.commit(remove=(A,))
+        self.assertEqual(self.listed(), [])
+
+    def test_the_count_and_the_listing_agree(self) -> None:
+        """Two changed: the gate reds on two, and the listing names the two."""
+        self.tree.commit(A, B)
+        self.assertEqual(self.listed(), [A, B])
+        done = self.tree.run()
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn(f"  {A}\n  {B}\n", done.stderr)
+
+
+class Workflow(unittest.TestCase):
+    """The push branch asks the helper and holds no diff of its own."""
+
+    def test_the_step_calls_the_helper_and_holds_no_git_diff(self) -> None:
+        """The collect step lists through the helper; `git diff` is gone."""
+        workflow = (CANON / ".github/workflows/vex-attest.yml").read_text(
+            encoding="utf-8"
+        )
+        start = workflow.index("        id: collect\n")
+        step = workflow[start : workflow.index("\n  sign-vex:", start)]
+        self.assertIn(
+            '"${ORG_PYTHON}" .org-canon/mise/vex-one-per-merge.py --list "${BEFORE}.."',
+            step,
+        )
+        self.assertNotIn("git diff", step)
 
 
 class OneWording(unittest.TestCase):
