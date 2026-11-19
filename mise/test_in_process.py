@@ -13,6 +13,7 @@ gate as `mise run test`.
 
 import contextlib
 import io
+import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -20,6 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 import hermetic
 import in_process
@@ -320,6 +322,13 @@ class Tree(Case):
         self.main("--write")
         debt = (self.root / in_process.DEBT).read_text(encoding="utf-8")
         self.same(sorted(in_process.read_debt(debt)), [ENTRY])
+
+    def test_git_variables_of_the_caller_do_not_reach_the_listing(self) -> None:
+        """Under a hook's GIT_DIR and GIT_INDEX_FILE, root is still listed."""
+        planted = {"GIT_DIR": "/nowhere/.git", "GIT_INDEX_FILE": "/nowhere/index"}
+        with mock.patch.dict(os.environ, planted):
+            listed = in_process.tracked(self.root)
+        self.same(listed, ["mise/hello.py", "mise/test_hello.py"])
 
     def test_the_script_contract(self) -> None:
         """Run as a script: red, by name, exit 1 (the one end-to-end row)."""

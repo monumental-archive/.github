@@ -79,8 +79,6 @@ mise/mutants_typescript.py:classify	# #1696
 mise/mutants_typescript.py:judge	# #1696
 mise/mutants_typescript.py:main	# #1696
 mise/mutants_typescript.py:site	# #1696
-mise/plpgsql_coverage.py:as_list	# #1696
-mise/plpgsql_coverage.py:as_object	# #1696
 mise/plpgsql_coverage.py:branch_total	# #1696
 mise/plpgsql_coverage.py:collect	# #1696
 mise/plpgsql_coverage.py:count_field	# #1696
