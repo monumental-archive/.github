@@ -51,6 +51,10 @@ INHERITED: dict[str, str] = {
     # branch floor falls (measured: 86.75% against 89.1%).
     "COVERAGE_PROCESS_START": "where coverage's child-process rc file is",
     "PYTHONPATH": "the coverage start-up hook, when the suite is measured",
+    # The belt's Python, which every script that starts a helper runs it
+    # under and refuses to run without (#1543): the canon action exports
+    # it in CI, the belt's [env] locally.
+    "ORG_PYTHON": "the interpreter a script starts its helpers under",
 }
 
 # What a tool needs beyond INHERITED, per tool, each with why. A row

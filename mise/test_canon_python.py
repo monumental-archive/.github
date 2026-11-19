@@ -245,6 +245,9 @@ def starters() -> list[pathlib.Path]:
     listed = subprocess.run(
         [git, "ls-files", "-z", "*.sh"],
         cwd=CANON,
+        # Without git's own variables: the suite aims GIT_DIR at a decoy
+        # repository (#1463), where this listing would come back empty.
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
         capture_output=True,
         text=True,
         check=True,

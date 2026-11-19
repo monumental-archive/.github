@@ -33,6 +33,7 @@ GATE_LISTS names them, and GATE_WHOLE the job that keeps everything.
 import ast
 import importlib.util
 import io
+import os
 import re
 import shlex
 import shutil
@@ -1313,6 +1314,9 @@ def tracked_helpers() -> set[str]:
     listed = subprocess.run(
         [git, "ls-files", "-z", "*.py"],
         cwd=CANON,
+        # Without git's own variables: the suite aims GIT_DIR at a decoy
+        # repository (#1463), where this listing would come back empty.
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
         capture_output=True,
         text=True,
         check=True,
@@ -1443,6 +1447,9 @@ class BeltPython(unittest.TestCase):
 
     def test_the_scan_reaches_the_helper_starts(self) -> None:
         """Not vacuous: the tree starts helpers under ORG_PYTHON, many times."""
+        self.assertLessEqual(
+            {"registry.py", "caller-pins.py", "verdict.py"}, tracked_helpers()
+        )
         starts = sum(
             text.count('"${ORG_PYTHON}" ')
             for text in workflow_and_action_texts().values()
