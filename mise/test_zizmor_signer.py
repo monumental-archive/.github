@@ -285,6 +285,22 @@ class Refusals(unittest.TestCase):
         self.assertEqual(2, status)
         self.assertIn("names no owner/repository", err)
 
+    def test_a_finding_of_the_wrong_shape_is_kept_not_raised(self) -> None:
+        """The shrunk examples: kept and reported, never a traceback (#1555)."""
+        for finding in (
+            {"ident": []},
+            {"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]},
+            {"ident": "stale-action-refs", "locations": 5},
+            {
+                "ident": "stale-action-refs",
+                "locations": [{"symbolic": {"kind": "Primary"}, "concrete": 1}],
+            },
+        ):
+            with self.subTest(finding=finding):
+                status, _, err = run([finding])
+                self.assertEqual(1, status)
+                self.assertIn("1 finding(s) remain", err)
+
     def test_input_that_is_not_the_finding_array_is_refused(self) -> None:
         """A SARIF document or an error object is not silently empty."""
         self.assertEqual(2, run({"runs": []})[0])

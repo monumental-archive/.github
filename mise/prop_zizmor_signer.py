@@ -9,6 +9,9 @@ generated zizmor findings:
   audit uses, is in the signer's repository, however the owner and
   repository are cased; the order of the findings never changes how
   many are dropped or kept.
+- Refusal (R): whatever JSON arrives on stdin, `main` answers 0, 1 or
+  its own refusal 2, and never raises (#1555: a finding whose ident,
+  locations or location fields were the wrong type raised).
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -22,7 +25,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -112,6 +115,56 @@ def run(stdin: str) -> tuple[int, str]:
     finally:
         sys.stdin = old
     return status, out.getvalue()
+
+
+JSON = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.text(max_size=10),
+    lambda inner: (
+        st.lists(inner, max_size=4)
+        | st.dictionaries(st.text(max_size=10), inner, max_size=4)
+    ),
+    max_leaves=15,
+)
+SHAPED = st.lists(
+    st.fixed_dictionaries(
+        {"ident": st.one_of(IDENT, JSON)},
+        optional={
+            "locations": st.one_of(
+                JSON,
+                st.lists(
+                    st.fixed_dictionaries(
+                        {},
+                        optional={
+                            "symbolic": st.one_of(
+                                JSON, st.fixed_dictionaries({"kind": JSON})
+                            ),
+                            "concrete": st.one_of(
+                                JSON, st.fixed_dictionaries({"feature": JSON})
+                            ),
+                        },
+                    ),
+                    max_size=3,
+                ),
+            ),
+            "ignored": JSON,
+        },
+    ),
+    max_size=3,
+)
+
+
+class Refusal(unittest.TestCase):
+    """Any stdin is answered, never a traceback."""
+
+    @given(
+        st.one_of(JSON.map(json.dumps), SHAPED.map(json.dumps), st.text(max_size=40))
+    )
+    @example('[{"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]}]')
+    @example('[{"ident": []}]')
+    def test_main_answers_any_stdin(self, stdin: str) -> None:
+        """0, 1 or 2."""
+        status, _ = run(stdin)
+        self.assertIn(status, (0, 1, 2))
 
 
 if __name__ == "__main__":
