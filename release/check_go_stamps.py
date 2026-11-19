@@ -26,6 +26,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 # A VCS setting's own line, `\tbuild\tvcs.revision=<sha>`, and nothing
 # else: anchored at the line's `build` field, because another setting's
 # VALUE is the builder's text and may spell `vcs.revision=` itself —
@@ -166,7 +173,7 @@ def main() -> int:
     try:
         check_staged()
     except RefusedError as e:
-        print(f"::error::{e}", flush=True)
+        workflow_command.error(str(e))
         return 1
     except ToolFailedError as e:
         return e.status

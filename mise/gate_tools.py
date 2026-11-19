@@ -67,6 +67,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
 
 import caller_pins
+import workflow_command
 
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "gate-tools.toml"
@@ -300,10 +301,10 @@ def main(argv: list[str] | None = None) -> int:
     unknown = sorted(set(belt["tools"]) ^ set(table))
     if unknown:
         for key in unknown:
-            print(
-                f"::error::gate-tools: {key} is in one of mise/config.toml's"
+            workflow_command.error(
+                f"gate-tools: {key} is in one of mise/config.toml's"
                 " [tools] and mise/gate-tools.toml but not the other",
-                file=sys.stderr,
+                stream=sys.stderr,
             )
         return 1
     tracked = tracked_files(args.root)

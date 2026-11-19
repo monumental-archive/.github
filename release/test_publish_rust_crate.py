@@ -242,7 +242,7 @@ def run_publish(
             try:
                 code = publish_crates.run(env, tmp, fetch)
             except publish_crates.RefusalError as e:
-                print(e)
+                publish_crates.workflow_command.error(str(e))
                 code = 1
 
         def read(name: str) -> list[str]:
@@ -380,7 +380,7 @@ class AnUnreadableIndexIsUnread(unittest.TestCase):
                     )
                 self.assertEqual(
                     str(refused.exception),
-                    "::error::the crates.io index for edtf-core"
+                    "the crates.io index for edtf-core"
                     " (https://index.crates.io/ed/tf/edtf-core) is not one JSON"
                     " record per line with a cksum; an unread index is not"
                     ' "not published"',
@@ -488,7 +488,7 @@ class Main(unittest.TestCase):
         """The refusal's own line, exit 1."""
         self.assertEqual(
             (1, "::error::stop\n"),
-            self.main(publish_crates.RefusalError("::error::stop")),
+            self.main(publish_crates.RefusalError("stop")),
         )
 
     def test_a_failed_command_names_itself_and_its_status(self) -> None:

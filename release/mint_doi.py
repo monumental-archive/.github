@@ -30,6 +30,7 @@ import base64
 import itertools
 import json
 import os
+import pathlib
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -39,6 +40,13 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from urllib.parse import quote
+
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -82,7 +90,7 @@ FIRST_CONCEPT = "first release — concept DOI equals this version"
 
 
 class RefusedError(Exception):
-    """A refusal: printed as one `::error::` line, exit 1."""
+    """A refusal: printed as one error workflow command, exit 1."""
 
 
 class HttpError(Exception):
@@ -451,7 +459,7 @@ class Mint:
             lines += ["", extra]
         with open(self.summary, "a", encoding="utf-8") as f:  # ruff: ignore[builtin-open] - a path from the runner
             f.write("\n".join(lines) + "\n")
-        print(f"::notice::DOI {doi} (concept {concept})")
+        workflow_command.notice(f"DOI {doi} (concept {concept})")
         return 0
 
     def verify_published(self, recid: str, doi: str) -> None:
@@ -668,9 +676,8 @@ class Mint:
                 and (rid if isinstance(rid, str) else compact(rid)) == concept_recid
             ):
                 url = d["links"]["self"]
-                print(
-                    f"::notice::deleting stale unpublished draft {url} left by an"
-                    " interrupted run"
+                workflow_command.notice(
+                    f"deleting stale unpublished draft {url} left by an interrupted run"
                 )
                 z.call("DELETE", url)
         newv = json.loads(
@@ -864,9 +871,9 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     try:
         return mint.run(args.pipeline)
     except RefusedError as e:
-        print(f"::error::{e}")
+        workflow_command.error(str(e))
     except (HttpError, ValueError, KeyError, TypeError) as e:
-        print(f"::error::{type(e).__name__}: {e}")
+        workflow_command.error(f"{type(e).__name__}: {e}")
     return 1
 
 

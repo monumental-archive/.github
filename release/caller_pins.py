@@ -69,6 +69,13 @@ import sys
 import tomllib
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 CANDIDATES = ("mise.toml", ".mise.toml", "mise/config.toml")
 
 
@@ -339,7 +346,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         pins = read_pins(root, needed, optional, args.input_of, majors)
     except RefusalError as refusal:
         for line in str(refusal).splitlines():
-            print(f"::error::{line}", file=sys.stderr)
+            workflow_command.error(line, stream=sys.stderr)
         return 1
     if args.mode == "env":
         for var, _, name in pairs:

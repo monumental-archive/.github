@@ -33,6 +33,13 @@ import sys
 import tomllib
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 # The canon's target-to-runner tables, one per class that builds per
 # target, with the hint the refusal of an unknown target carries.
 TARGETS = {
@@ -306,14 +313,14 @@ def main(argv: list[str] | None = None) -> int:
         print(refusal, file=sys.stderr)
         return 1
     except RefusalError as refusal:
-        print(f"::error::{refusal}", file=sys.stderr)
+        workflow_command.error(str(refusal), stream=sys.stderr)
         return 1
     if planned is None:
         print(USAGE, file=sys.stderr)
         return 2
     outputs, notices = planned
     for line in notices:
-        print(f"::notice::{line}", file=sys.stderr)
+        workflow_command.notice(line, stream=sys.stderr)
     for line in outputs:
         print(line)
     return 0

@@ -28,6 +28,13 @@ import sys
 import tomllib
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import workflow_command
+
 MAJOR = re.compile(r"^[0-9]+$")
 
 
@@ -105,7 +112,7 @@ def main(argv: list[str]) -> int:
     try:
         entries = plan(Path(argv[0]), argv[1], os.environ.get("PLAN_DOC_PREFIX", ""))
     except RefusedError as e:
-        print(f"::error::{e}", flush=True)
+        workflow_command.error(str(e))
         return 1
     out = Path("plan")
     out.mkdir(exist_ok=True)
@@ -113,7 +120,7 @@ def main(argv: list[str]) -> int:
     (out / "plan.json").write_text(rendered, encoding="utf-8")
     for e in entries:
         doc, pkg = e["doc"], e["params"]["cargoPackage"]
-        print(f"::notice::plans inventory {doc} for package {pkg}")
+        workflow_command.notice(f"plans inventory {doc} for package {pkg}")
     return 0
 
 

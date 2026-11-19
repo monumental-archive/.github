@@ -72,6 +72,13 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import workflow_command
+
 # The runner's own, resolved on PATH once.
 GH = shutil.which("gh") or "gh"
 TAR = shutil.which("tar") or "tar"
@@ -243,20 +250,22 @@ def guard(repo: str, version: str, crate_dir: str) -> int:
         return status
     name = extension_name(crate_dir)
     if carrier(rows, name, version) is not None:
-        print(f"::notice::re-run of {version}; upgrade path not applicable")
+        workflow_command.notice(f"re-run of {version}; upgrade path not applicable")
         return 0
     prev = predecessor(rows, Path(crate_dir) / "sql", name, version)
     if prev is None:
-        print("::notice::no previous release; first publish needs no upgrade path")
+        workflow_command.notice(
+            "no previous release; first publish needs no upgrade path"
+        )
         return 0
     upgrade = f"{crate_dir}/sql/{name}--{prev.version}--{version}.sql"
     if not Path(upgrade).is_file():
-        print(
-            f"::error::no upgrade path {upgrade} from published {prev.version}"
+        workflow_command.error(
+            f"no upgrade path {upgrade} from published {prev.version}"
             f" ({prev.tag}) — existing installations would be stranded"
         )
         return 1
-    print(f"::notice::upgrade path {prev.version} -> {version} present")
+    workflow_command.notice(f"upgrade path {prev.version} -> {version} present")
     return 0
 
 
@@ -277,8 +286,8 @@ def fetch(args: argparse.Namespace) -> int:
     if carrier(rows, name, args.version) is None:
         prev = predecessor(rows, Path(args.crate_dir) / "sql", name, args.version)
     if prev is None:
-        print(
-            "::notice::no previous release; upgrade execution skipped", file=sys.stderr
+        workflow_command.notice(
+            "no previous release; upgrade execution skipped", stream=sys.stderr
         )
         return 0
     asset = f"{name}-{prev.version}-pg{args.pg}-linux-{args.arch}.tar.gz"
@@ -300,9 +309,9 @@ def fetch(args: argparse.Namespace) -> int:
         check=False,
     )
     if download.returncode != 0:
-        print(
-            f"::notice::{prev.tag} shipped no {asset}; upgrade execution skipped",
-            file=sys.stderr,
+        workflow_command.notice(
+            f"{prev.tag} shipped no {asset}; upgrade execution skipped",
+            stream=sys.stderr,
         )
         return 0
     Path(args.dest).mkdir(parents=True, exist_ok=True)

@@ -49,6 +49,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -123,7 +130,7 @@ def show_debug_log(env: Mapping[str, str], cwd: Path) -> None:
         else []
     )
     if not logs:
-        say(f"::warning::npm left no debug log under {logdir}")
+        workflow_command.warning(f"npm left no debug log under {logdir}")
         return
     say(f"::group::npm debug log (masked) — {logs[-1]}")
     for line in masked(Path(logs[-1]).read_text(encoding="utf-8", errors="replace")):
@@ -140,16 +147,16 @@ def run(package: str, env: Mapping[str, str], cwd: Path) -> int:
     """
     have = npm(env, cwd, "--version").stdout.strip()
     if version_key(have) < version_key(NEED):
-        say(
-            f"::error::npm {have} < {NEED}; trusted publishing needs {NEED}+"
+        workflow_command.error(
+            f"npm {have} < {NEED}; trusted publishing needs {NEED}+"
             " — bump the pin in this repository's mise config"
         )
         return 1
     if not env.get("ACTIONS_ID_TOKEN_REQUEST_URL") or not env.get(
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
     ):
-        say(
-            "::error::the OIDC token endpoint is absent from this job's environment,"
+        workflow_command.error(
+            "the OIDC token endpoint is absent from this job's environment,"
             " so npm cannot use trusted publishing — every job in the call chain must"
             " grant id-token: write, including the caller's own job in its repository"
         )
@@ -157,7 +164,9 @@ def run(package: str, env: Mapping[str, str], cwd: Path) -> int:
     say(f"trusted publishing: npm {have}, OIDC endpoint present")
 
     if npm(env, cwd, "view", package, "version").returncode == 0:
-        say(f"::notice::{package} already on the registry; publish is complete")
+        workflow_command.notice(
+            f"{package} already on the registry; publish is complete"
+        )
         return 0
 
     # The shell's `dist/*.tgz`: hidden names are not matched.
@@ -167,7 +176,7 @@ def run(package: str, env: Mapping[str, str], cwd: Path) -> int:
         if not p.name.startswith(".")
     )
     if len(tarballs) != 1:
-        say(f"::error::expected exactly one tarball, found {len(tarballs)}")
+        workflow_command.error(f"expected exactly one tarball, found {len(tarballs)}")
         return 1
 
     rc = npm(

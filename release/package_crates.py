@@ -38,6 +38,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 HERE = Path(__file__).resolve().parent
 PACKAGE = Path("target") / "package"
 
@@ -85,7 +92,7 @@ def changed_unverified(verified: dict[Path, str]) -> list[str]:
     """Name each verified crate the --no-verify run rewrote differently.
 
     Returns:
-        One error line per crate whose bytes moved.
+        One refusal per crate whose bytes moved.
 
     """
     lines = []
@@ -93,7 +100,7 @@ def changed_unverified(verified: dict[Path, str]) -> list[str]:
         now = hashlib.sha256(crate.read_bytes()).hexdigest()
         if now != was:
             lines.append(
-                f"::error::{crate.name} changed when packaged again"
+                f"{crate.name} changed when packaged again"
                 f" without verifying: {was} verified, {now} now"
             )
     return lines
@@ -137,7 +144,7 @@ def package(flags: str) -> list[str]:
     if flags.strip():
         verified = digests()
         if not verified:
-            return ["::error::cargo package wrote no crate to verify"]
+            return ["cargo package wrote no crate to verify"]
         cargo("package", "--workspace", "--locked", "--no-verify")
         changed = changed_unverified(verified)
         if changed:
@@ -149,7 +156,7 @@ def package(flags: str) -> list[str]:
         ships.add(crate)
         if not (PACKAGE / crate).is_file():
             missing.append(
-                f"::error::{name} {version} publishes to crates.io,"
+                f"{name} {version} publishes to crates.io,"
                 f" but cargo package wrote no {crate}"
             )
     if missing:
@@ -177,7 +184,7 @@ def main() -> int:
     except CargoFailedError as e:
         return e.status
     for line in refused:
-        print(line, flush=True)
+        workflow_command.error(line)
     return 1 if refused else 0
 
 

@@ -46,6 +46,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import workflow_command
+
 TITLE = "rekor-monitor: the signer-identity watch is behind"
 EXIT_RED = 1
 EXIT_ERROR = 2
@@ -346,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
     print(f"standing-issue: {done}")
     if outcome.red:
-        print(f"::error::{outcome.why}")
+        workflow_command.error(outcome.why)
         return EXIT_RED
     print(f"standing-issue: green: {outcome.why}")
     return 0

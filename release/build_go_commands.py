@@ -21,6 +21,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The canon's one writer of workflow commands, in mise/ (#1660).
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_command
+
 MAINS = '{{if eq .Name "main"}}{{.ImportPath}}{{end}}'
 
 
@@ -91,7 +98,7 @@ def main() -> int:
     try:
         build()
     except RefusedError as e:
-        print(f"::error::{e}", flush=True)
+        workflow_command.error(str(e))
         return 1
     except GoFailedError as e:
         return e.status
