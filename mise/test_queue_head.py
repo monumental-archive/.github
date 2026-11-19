@@ -21,9 +21,9 @@ its own scrubbed environment (#1463).
 from __future__ import annotations
 
 import gzip
-import os
 import pathlib
 import re
+import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
@@ -31,12 +31,22 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "queue-head.py"
 BUNDLE = HERE / "testdata" / "queue-head" / "edtf-265.bundle.gz"
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 GIT = shutil.which("git") or "git"
+hermetic = SimpleNamespace(**runpy.run_path(str(HERE / "hermetic.py")))
+# An empty HOME for every fixture, made once for the module.
+HOME_DIR = tempfile.mkdtemp()
+
+
+def tearDownModule() -> None:
+    """Remove the fixtures' HOME."""
+    shutil.rmtree(HOME_DIR, ignore_errors=True)
+
 
 # edtf#265, measured 2026-11-17 and 2026-11-19.
 EDTF_BASE = "19fa2d6c261e49fe6cecd9e8a0b487ae49df9fd0"
@@ -50,22 +60,16 @@ NUMBER = "7"
 
 
 def scrubbed() -> dict[str, str]:
-    """Return an environment that names no repository and no machine config.
+    """Return the fixture environment: the allow-list, and no git config.
+
+    HOME is a directory of its own, so no user's git config (signing
+    above all) reaches a fixture commit.
 
     Returns:
         The environment.
 
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update({
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_AUTHOR_NAME": "queue",
-        "GIT_AUTHOR_EMAIL": "queue@example.invalid",
-        "GIT_COMMITTER_NAME": "queue",
-        "GIT_COMMITTER_EMAIL": "queue@example.invalid",
-    })
-    return env
+    return hermetic.env(HOME_DIR, GIT_CONFIG_NOSYSTEM="1")
 
 
 def git(repo: pathlib.Path, *args: str) -> str:
