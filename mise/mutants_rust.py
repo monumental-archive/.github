@@ -112,7 +112,7 @@ def unexplained(text: str) -> list[tuple[int, str, str]]:
     for number, line in enumerate(lines_of(text), start=1):
         match = KEY_LINE.match(line)
         if match:
-            key = match.group(1)
+            key = typed_std.group(match, 1) or ""
             rest = OPENING.sub("", line, count=1)
             if QUOTED.match(rest):
                 found.append((number, key, "an entry on the opening line"))

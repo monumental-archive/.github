@@ -208,13 +208,13 @@ def lint(files: list[str]) -> int:
         for number, line in enumerate(text.splitlines(), 1):
             if not PROPERTY.search(name):
                 findings.extend(
-                    f"{name}:{number}: imports {match.group(1)} but is not a"
+                    f"{name}:{number}: imports {typed_std.group(match, 1)} but is not a"
                     " *.prop.test.{ts,tsx,mts,cts} file"
                     for match in IMPORT.finditer(line)
                 )
                 continue
             for match in RESTATED.finditer(line):
-                what = match.group(1) or f"{match.group(2)}()"
+                what = typed_std.group(match, 1) or f"{typed_std.group(match, 2)}()"
                 findings.append(
                     f"{name}:{number}: restates {what}; the belt's seed and run"
                     " count own every property"
