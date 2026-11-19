@@ -14,7 +14,8 @@ generated adoption configs, pragma records, results and diffs:
   follow it, and an `end` pragma owes nothing.
 - Round trip (T): a `mutmut results` listing reads back as its
   killed, surviving and unjudged tallies; a mutant name built from a
-  function, or a method, reads back as that function.
+  function, or a method, reads back as that function (#1555: a method
+  whose name began `x_` lost the prefix).
 - Round trip (T): a survivor's removed line is found at its own line,
   after its function's `def`.
 - Refusal (R): `scan`, `pragmas`, `read_results` and `read_show` read
@@ -28,6 +29,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
@@ -163,6 +165,7 @@ class Results(unittest.TestCase):
         self.assertEqual(got.total, got.killed + len(got.survivors) + got.unjudged)
 
     @given(IDENT, IDENT, st.one_of(st.none(), IDENT), st.integers(1, 99))
+    @example("a", "x_", "a", 1)
     def test_function_of_round_trip(
         self, module: str, func: str, cls: str | None, n: int
     ) -> None:

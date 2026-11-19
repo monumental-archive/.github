@@ -336,7 +336,11 @@ def function_of(name: str) -> str:
     func = name.rsplit(".", 1)[-1]
     if "__mutmut_" in func:
         func = func[: func.rindex("__mutmut_")]
-    func = func.rsplit("ǁ", 1)[-1]
+    # A method's own name follows the last ǁ, whole: only a function's
+    # name carries the `x_` prefix (#1555: method `x_offset` read as
+    # `offset`, so its survivor was never located).
+    if "ǁ" in func:
+        return func.rsplit("ǁ", 1)[-1]
     return func.removeprefix("x_")
 
 
