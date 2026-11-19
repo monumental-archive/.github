@@ -20,6 +20,8 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import contextlib
+import io
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import tomllib
@@ -27,6 +29,7 @@ import unittest
 from pathlib import Path
 
 import hermetic
+import lock_platforms
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -395,6 +398,58 @@ class Defaults(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         for key in ALL.split(","):
             self.assertIn(f"  {key}: node@26.5.1\n", done.stderr)
+
+
+class ReadDocuments(unittest.TestCase):
+    """`read_documents` in process: both files read, or one refused."""
+
+    @staticmethod
+    def read(config: str, lock: str) -> tuple[object, str, Path, Path]:
+        """Plant mise.toml and mise.lock and read them in process.
+
+        Returns:
+            What `read_documents` returned, its stderr, and both paths.
+
+        """
+        root = Path(tempfile.mkdtemp())
+        config_path, lock_path = root / "mise.toml", root / "mise.lock"
+        config_path.write_text(config, encoding="utf-8")
+        lock_path.write_text(lock, encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            got = lock_platforms.read_documents(config_path, lock_path)
+        return got, err.getvalue(), config_path, lock_path
+
+    def test_both_files_read(self) -> None:
+        """The baseline tree: node and cargo-fuzz configured, node locked."""
+        got, err, _config, _lock = self.read(CONFIG, LOCK)
+        self.assertEqual("", err)
+        self.assertEqual(
+            (
+                {
+                    "node": [("26.5.1", None)],
+                    "cargo:cargo-fuzz": [("0.13.2", None)],
+                },
+                [("node", "26.5.1", set(THREE))],
+            ),
+            got,
+        )
+
+    def test_each_unreadable_file_is_named_and_none_returned(self) -> None:
+        """The refused file, and only that one, is named."""
+        for config, lock, which, said in (
+            ("tools = 1\n", LOCK, "config", "tools is not an object"),
+            (CONFIG, "tools = 1\n", "lock", "tools is not an object"),
+        ):
+            with self.subTest(which=which):
+                got, err, config_path, lock_path = self.read(config, lock)
+                path = config_path if which == "config" else lock_path
+                self.assertIsNone(got)
+                self.assertEqual(
+                    f"{NAME}: cannot read {path} — {said}\n"
+                    "  a file this cannot read is not one it may pass\n",
+                    err,
+                )
 
 
 if __name__ == "__main__":
