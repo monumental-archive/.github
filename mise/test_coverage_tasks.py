@@ -74,7 +74,7 @@ case "${cmd}" in
     printf '{"totals": {"percent_statements_covered": %s,' "${STUB_PY}" > "${out}"
     printf ' "percent_branches_covered": %s}}\\n' "${STUB_BR}" >> "${out}"
     ;;
-  xml) echo "<coverage/>" > "${out}" ;;
+  xml) [[ -n ${STUB_NO_XML:-} ]] || echo "<coverage/>" > "${out}" ;;
   *) exit 1 ;;
 esac
 """
@@ -188,16 +188,53 @@ def plant_typescript(tree: Path, runner: str) -> list[str]:
     return tracked
 
 
-def plant_leftovers(tree: Path, leftovers: dict[str, bool]) -> list[str]:
-    """Plant report files as an earlier run would leave them.
+def upload_line(tree: Path, *names: str, label: str = "coverage:check") -> str:
+    """Render the upload line naming reports in the row's directory.
 
     Returns:
-        The names to track: those the row marks as the repository's own.
+        The line, with each name under the ORG_COVERAGE_REPORTS the
+        planted run was given: `reports` beside the tree.
 
     """
-    for name in leftovers:
-        (tree / name).write_text("leftover\n", encoding="utf-8")
-    return [name for name, is_tracked in leftovers.items() if is_tracked]
+    paths = ",".join(str(tree.parent / "reports" / name) for name in names)
+    return f"{label}: upload {paths}\n"
+
+
+def reports_env(tmp: Path, *, reports_dir: bool | str) -> dict[str, str]:
+    """Name the row's ORG_COVERAGE_REPORTS, or leave it unset.
+
+    Returns:
+        The variable to add: `reports` beside the tree for True, the
+        given path for a string, nothing for False.
+
+    """
+    if not reports_dir:
+        return {}
+    named = tmp / "reports" if reports_dir is True else Path(reports_dir)
+    return {"ORG_COVERAGE_REPORTS": str(named)}
+
+
+def init_tree(
+    tree: Path, env: dict[str, str], tracked: list[str], *, commit: bool
+) -> None:
+    """Make the planted tree a repository tracking `tracked`.
+
+    `commit` commits it, so `git status` reads what the run changed.
+    """
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [GIT, "init", "-q"], cwd=tree, env=env, check=True
+    )
+    if tracked:
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [GIT, "add", *tracked], cwd=tree, env=env, check=True
+        )
+    if commit:
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [GIT, "-c", "commit.gpgsign=false", "commit", "-qm", "planted"],
+            cwd=tree,
+            env=env,
+            check=True,
+        )
 
 
 def captured_env(captured_test: str | None, tree: Path) -> dict[str, str]:
@@ -230,16 +267,20 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     ts_branches: str = "81.0",
     test_run: str | None = None,
     depends: dict[str, str] | None = None,
-    leftovers: dict[str, bool] | None = None,
     go_profile: bool = True,
     captured_test: str | None = None,
+    reports_dir: bool | str = True,
+    commit: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
-    `leftovers` plants report files as an earlier run would leave them:
-    name to whether the repository tracks it. Each holds "leftover".
     `captured_test` names the captured task-references task mise
-    answers as `test`, every other task as captured.
+    answers as `test`, every other task as captured. `reports_dir`
+    names `reports`, beside the tree and not yet made, as
+    ORG_COVERAGE_REPORTS, as the gate job names one; False leaves the
+    variable unset, as on a developer's machine; a path names that.
+    `commit` commits the planted tree, so `git status` reads what the
+    run changed.
 
     Returns:
         The finished process, and a snapshot directory holding the
@@ -286,7 +327,6 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if floor:
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
         tracked.append(".coverage-floor")
-    tracked += plant_leftovers(tree, leftovers or {})
 
     env = hermetic.env()
     env |= {
@@ -302,13 +342,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_TS_BR": ts_branches,
     }
     env |= captured_env(captured_test, tree)
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [GIT, "init", "-q"], cwd=tree, env=env, check=True
-    )
-    if tracked:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "add", *tracked], cwd=tree, env=env, check=True
-        )
+    env |= reports_env(tmp, reports_dir=reports_dir)
+    init_tree(tree, env, tracked, commit=commit)
     done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
         [BASH, "-euo", "pipefail", "-c", CONFIG["tasks"][task]["run"]],
         cwd=tree,
@@ -342,12 +377,12 @@ class CheckRows(CoverageTaskCase):
 
     def test_python_only_tree_measures_and_holds(self) -> None:
         """Both Python legs print, and each holds the floor by name."""
-        done, _ = self.run_task("coverage:check")
+        done, tree = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
             "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
-            "coverage:check: upload coverage.xml\n",
+            + upload_line(tree, "coverage.xml"),
             done.stdout,
         )
         self.assertIn("suite ran", done.stderr)
@@ -391,13 +426,13 @@ class CheckRows(CoverageTaskCase):
 
     def test_mixed_go_and_python_prints_every_leg(self) -> None:
         """A mixed tree measures each language it tracks."""
-        done, _ = self.run_task("coverage:check", go="93.0")
+        done, tree = self.run_task("coverage:check", go="93.0")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: go leg holds the floor 80.0 (93.0%)\n"
             "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
             "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
-            "coverage:check: upload coverage.txt,coverage.xml\n",
+            + upload_line(tree, "coverage.txt", "coverage.xml"),
             done.stdout,
         )
 
@@ -416,12 +451,12 @@ class TypeScriptRows(CoverageTaskCase):
 
     def test_a_vitest_tree_measures_and_holds(self) -> None:
         """Both TypeScript legs print, and each holds the floor by name."""
-        done, _ = self.run_task("coverage:check", python=False, typescript="vitest")
+        done, tree = self.run_task("coverage:check", python=False, typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n"
             "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n"
-            "coverage:check: upload lcov-typescript.info\n",
+            + upload_line(tree, "lcov-typescript.info"),
             done.stdout,
         )
         self.assertIn("vitest suite ran", done.stderr)
@@ -490,14 +525,14 @@ class TypeScriptRows(CoverageTaskCase):
 
     def test_mixed_python_and_typescript_prints_every_leg(self) -> None:
         """A mixed tree measures each language it tracks."""
-        done, _ = self.run_task("coverage:check", typescript="vitest")
+        done, tree = self.run_task("coverage:check", typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
             "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
             "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n"
             "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n"
-            "coverage:check: upload lcov-typescript.info,coverage.xml\n",
+            + upload_line(tree, "lcov-typescript.info", "coverage.xml"),
             done.stdout,
         )
 
@@ -612,11 +647,12 @@ class TypeScriptRows(CoverageTaskCase):
         done, tree = self.run_task("coverage:check", python=False, typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertTrue(
-            done.stdout.endswith("coverage:check: upload lcov-typescript.info\n"),
+            done.stdout.endswith(upload_line(tree, "lcov-typescript.info")),
             done.stdout,
         )
-        self.assertEqual("TN:\n", (tree / "lcov-typescript.info").read_text("utf-8"))
-        self.assertFalse((tree / "lcov.info").exists())
+        reports = tree.parent / "reports"
+        self.assertEqual("TN:\n", (reports / "lcov-typescript.info").read_text("utf-8"))
+        self.assertFalse((reports / "lcov.info").exists())
 
 
 class TaskReferenceRows(CoverageTaskCase):
@@ -868,29 +904,78 @@ class CheckUploadLine(CoverageTaskCase):
         done, tree = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertTrue(
-            done.stdout.endswith("coverage:check: upload coverage.xml\n"),
+            done.stdout.endswith(upload_line(tree, "coverage.xml")),
             done.stdout,
         )
-        self.assertEqual("<coverage/>\n", (tree / "coverage.xml").read_text("utf-8"))
+        self.assertEqual(
+            "<coverage/>\n",
+            (tree.parent / "reports" / "coverage.xml").read_text("utf-8"),
+        )
 
-    def test_an_untracked_leftover_is_not_listed(self) -> None:
-        """A report an earlier run left behind is removed, never uploaded."""
+
+class CheckLeavesTheTree(CoverageTaskCase):
+    """A coverage run leaves the working tree as it found it (#1628).
+
+    The reports were written into the tree, where nothing ignores them,
+    and a local run followed by `git add -A` committed them.
+    """
+
+    @staticmethod
+    def status(tree: Path) -> str:
+        """Read the planted tree's `git status --porcelain`.
+
+        Returns:
+            The status, empty for a tree as it was planted.
+
+        """
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [GIT, "status", "--porcelain"],
+            cwd=tree,
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    def named(self, stdout: str) -> list[Path]:
+        """Read the paths the upload line names.
+
+        Returns:
+            Each path, in the line's order.
+
+        """
+        line = stdout.splitlines()[-1]
+        self.assertTrue(line.startswith("coverage:check: upload "), stdout)
+        return [Path(p) for p in line.split(" upload ", 1)[1].split(",")]
+
+    def test_a_named_directory_holds_every_report_and_the_tree_is_clean(
+        self,
+    ) -> None:
+        """The gate's shape: the files the line names exist, outside it."""
+        done, tree = self.run_task("coverage:check", go="93.0", commit=True)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("", self.status(tree))
+        named = self.named(done.stdout)
+        self.assertEqual(
+            [tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")],
+            named,
+        )
+        for path in named:
+            self.assertTrue(path.is_file(), path)
+
+    def test_unset_writes_a_scratch_directory_and_removes_it(self) -> None:
+        """A developer's run: the tree is clean and the scratch is gone."""
         done, tree = self.run_task(
-            "coverage:check", leftovers={"lcov.info": False, "coverage.txt": False}
+            "coverage:check", go="93.0", reports_dir=False, commit=True
         )
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertTrue(
-            done.stdout.endswith("coverage:check: upload coverage.xml\n"),
-            done.stdout,
-        )
-        self.assertFalse((tree / "lcov.info").exists())
-        self.assertFalse((tree / "coverage.txt").exists())
-
-    def test_a_tracked_file_of_the_same_name_is_left_alone(self) -> None:
-        """The repository's own file is never deleted by the belt."""
-        done, tree = self.run_task("coverage:check", leftovers={"lcov.info": True})
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("leftover\n", (tree / "lcov.info").read_text("utf-8"))
+        self.assertEqual("", self.status(tree))
+        named = self.named(done.stdout)
+        self.assertEqual(["coverage.txt", "coverage.xml"], [p.name for p in named])
+        scratch = named[0].parent
+        self.assertNotEqual(tree, scratch)
+        self.assertNotIn(tree, scratch.parents)
+        self.assertFalse(scratch.exists(), scratch)
 
     def test_a_run_that_wrote_no_report_is_refused(self) -> None:
         """A leg that ran and left no report is refused by the task."""
@@ -985,6 +1070,7 @@ class MeasureSelectors(unittest.TestCase):
                 "STUB_LF": "13",
                 "STUB_LH": "8",
             }
+            env["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
             done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
                 cwd=tree,
@@ -993,7 +1079,7 @@ class MeasureSelectors(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            written = (tree / "lcov.info").is_file()
+            written = (Path(tmp) / "reports" / "lcov.info").is_file()
         self.assertEqual(0, done.returncode, done.stderr)
         # 8 of 13 lines, summed over every file: the report it wrote.
         self.assertEqual("rust 61.53846153846154\n", done.stdout)
@@ -1035,41 +1121,69 @@ class MeasureSelectors(unittest.TestCase):
         self.assertEqual("go 93.0\nrust 61.5\n", done.stdout)
 
 
-def run_reports(legs: str, files: list[str]) -> subprocess.CompletedProcess[str]:
-    """Run the `reports` selector beside planted reports, legs on stdin.
+class ReportsSelector(CoverageTaskCase):
+    """`reports` names what a run wrote, and refuses a run of nothing (#1528)."""
 
-    Returns:
-        The finished process.
+    @staticmethod
+    def reports(tree: Path) -> subprocess.CompletedProcess[str]:
+        """Run the `reports` selector in a planted tree.
 
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        for name in files:
-            (Path(tmp) / name).write_text("report\n", encoding="utf-8")
+        Returns:
+            The finished process.
+
+        """
+        env = hermetic.env()
+        env |= {
+            "ORG_BELT_DIR": str(BELT),
+            "ORG_COVERAGE_REPORTS": str(tree.parent / "reports"),
+        }
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "reports"],
-            cwd=tmp,
-            env=hermetic.env(),
-            input=legs,
+            cwd=tree,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
         )
 
-
-class ReportsSelector(unittest.TestCase):
-    """`reports` names what a run wrote, and refuses a run of nothing (#1528)."""
-
-    def test_the_line_names_each_report_in_order(self) -> None:
-        """The order the badge job lists them in, whatever exists."""
-        done = run_reports("go 90.0\npython 80.0\n", ["coverage.xml", "coverage.txt"])
+    def test_the_legs_print_then_the_line_names_each_report(self) -> None:
+        """The legs' lines, then the reports in the badge job's order."""
+        done, tree = self.run_task("coverage:check", go="93.0")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            "coverage:test: upload coverage.txt,coverage.xml\n", done.stdout
+        self.assertTrue(
+            done.stdout.endswith(
+                "python-branches leg holds the floor 80.0 (85.0%)\n"
+                + upload_line(tree, "coverage.txt", "coverage.xml")
+            ),
+            done.stdout,
         )
+
+    def test_a_stale_report_in_a_named_directory_is_not_listed(self) -> None:
+        """An earlier run's report is cleared: the list is this run's."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = Path(tmp) / "lcov.info"
+            stale.write_text("stale\n", encoding="utf-8")
+            done, _ = self.run_task("coverage:check", reports_dir=tmp)
+            self.assertEqual(0, done.returncode, done.stderr)
+            self.assertTrue(
+                done.stdout.endswith(
+                    f"coverage:check: upload {Path(tmp) / 'coverage.xml'}\n"
+                ),
+                done.stdout,
+            )
+            self.assertFalse(stale.exists())
 
     def test_a_run_that_measured_nothing_is_refused(self) -> None:
         """No leg lines: refused before any report is read."""
-        done = run_reports("", ["coverage.xml"])
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "tree"
+            tree.mkdir()
+            (Path(tmp) / "reports").mkdir()
+            (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [GIT, "init", "-q"], cwd=tree, env=hermetic.env(), check=True
+            )
+            done = self.reports(tree)
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
         self.assertIn(
@@ -1127,6 +1241,7 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STUB_TASK": str(task),
+            "ORG_COVERAGE_REPORTS": str(Path(tmp) / "reports"),
         }
         for args in (["init", "-q"], ["add", "sub/helper.py"]):
             subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
@@ -1140,7 +1255,7 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
             text=True,
             check=False,
         )
-        return done, (tree / "coverage.xml").is_file()
+        return done, (Path(tmp) / "reports" / "coverage.xml").is_file()
 
 
 class ChildFromAnotherDirectory(unittest.TestCase):

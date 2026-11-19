@@ -6693,14 +6693,18 @@ dir = "{{cwd}}"
 #
 # The badge is fed from this run (#1528). Every leg writes the report
 # Codecov parses beside its number, and the last line names the files
-# this run wrote: `coverage:check: upload <files>`. On a push to the
-# default branch the gate job keeps them as an artifact and the badge
-# job uploads that, measuring nothing. It used to re-measure with a
-# toolset of its own in a second task, coverage:report, and hung on
-# main for a day in a test the gate passes. Which files, and the
-# refusals of a run that measured or wrote nothing, are the measurement
-# script's `reports` answer, asked before the floor is held so a refusal
-# is never preceded by a hold line. The line is printed last.
+# this run wrote: `coverage:check: upload <paths>`. They are written
+# outside the working tree (#1628), into ORG_COVERAGE_REPORTS, which
+# the gate job names; unset, into a scratch directory the measurement
+# removes when it ends, so a local run leaves the tree as it found it.
+# On a push to the default branch the gate job keeps that directory as
+# an artifact and the badge job uploads it, measuring nothing. It used
+# to re-measure with a toolset of its own in a second task,
+# coverage:report, and hung on main for a day in a test the gate
+# passes. The measurement's `reports` selector measures every leg and
+# names the files last, refusing a run that measured or wrote nothing
+# before the floor is held, so a refusal is never preceded by a hold
+# line. The line is printed last.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
 tracked=$(git ls-files -- '*.py' && { git grep -lIiE "language[[:space:]]+'?plpgsql" || true; }) || tracked=""
@@ -6717,8 +6721,8 @@ if [[ -z ${applies} ]]; then
   echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), skipped"
   exit 0
 fi
-legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
-upload=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports <<< "${legs}") || exit 1
+legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports) || exit 1
+upload=${legs##*$'\n'} legs=${legs%$'\n'*}
 while read -r leg pct; do
   if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
     echo "coverage:check: ${leg}: ${pct}% is below the derived floor ${floor}%" >&2

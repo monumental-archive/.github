@@ -91,7 +91,10 @@ case "$1 $2" in
     for pkg in ${STUB_PKGS}; do echo "${PWD}/${pkg}"; done
     ;;
   "test ./...")
-    echo "mode: atomic" > coverage.txt
+    # The profile at the path the leg names (#1628), outside the tree.
+    for arg in "$@"; do
+      [[ ${arg} != -coverprofile=* ]] || echo "mode: atomic" > "${arg#*=}"
+    done
     ;;
   "tool cover") printf 'total:\\t(statements)\\t%s%%\\n' "${STUB_LINES}" ;;
   *) exit 1 ;;
@@ -243,6 +246,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_FAIL": fail,
         "STUB_LINES": "95.0",
         "STUB_REAL_GOBCO": str(tmp / "real" / "gobco"),
+        "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
     }
     if silent:
         env["STUB_SILENT"] = "1"
@@ -442,11 +446,11 @@ class GateRows(GoBranchCase):
 
     def test_check_measures_statements_beside_a_go_branches_line(self) -> None:
         """A committed go-branches line changes nothing the gate runs."""
-        done, _, calls = self.run_task("coverage:check")
+        done, tmp, calls = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: go leg holds the floor 90.0 (95.0%)\n"
-            "coverage:check: upload coverage.txt\n",
+            f"coverage:check: upload {tmp / 'reports' / 'coverage.txt'}\n",
             done.stdout,
         )
         self.assertEqual([], calls)

@@ -635,75 +635,6 @@ class LegRows(unittest.TestCase):
         self.assertNotIn("suite ran", done.stderr)
 
 
-class ReportRows(unittest.TestCase):
-    """The report step names the formatless legs, never counts them."""
-
-    def reports(
-        self, measured: str, files: tuple[str, ...] = ()
-    ) -> subprocess.CompletedProcess:
-        """Run `coverage-measure.sh <label> reports` over planted legs.
-
-        Returns:
-            The finished step.
-
-        """
-        tree = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tree, ignore_errors=True)
-        env = hermetic.env() | {"ORG_PYTHON": sys.executable}
-        run([GIT, "init", "-q"], env, tree)
-        for name in files:
-            (tree / name).write_text("TN:\n", encoding="utf-8")
-        script = str(BELT / "coverage-measure.sh")
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(
-            [BASH, script, "leg", "reports"],
-            cwd=tree,
-            env=env,
-            input=measured,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    def test_only_formatless_legs_pass_by_name(self) -> None:
-        """No report is owed where no leg measured has a format."""
-        done = self.reports("plpgsql 95.00\nplpgsql-branches 90.00\n")
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            "leg: upload none — every leg measured has no upload format"
-            " (plpgsql, plpgsql-branches)\n",
-            done.stdout,
-        )
-        self.assertEqual(
-            "leg: plpgsql, plpgsql-branches: no upload format,"
-            " not counted as a report writer\n",
-            done.stderr,
-        )
-
-    def test_a_leg_with_a_format_that_wrote_nothing_is_refused(self) -> None:
-        """A formatless leg beside it does not excuse the missing report."""
-        done = self.reports("typescript 88.0\nplpgsql 95.00\n")
-        self.assertEqual(1, done.returncode)
-        self.assertEqual("", done.stdout)
-        self.assertIn(
-            "leg: the legs measured wrote no report — nothing for the badge"
-            " to upload\n",
-            done.stderr,
-        )
-
-    def test_a_formatless_leg_beside_a_written_report(self) -> None:
-        """The written report uploads; the formatless leg is named."""
-        done = self.reports(
-            "typescript 88.0\nplpgsql 95.00\n", files=("lcov-typescript.info",)
-        )
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual("leg: upload lcov-typescript.info\n", done.stdout)
-        self.assertEqual(
-            "leg: plpgsql: no upload format, not counted as a report writer\n",
-            done.stderr,
-        )
-
-
 # The coverage.py stub the python leg's rows use, read from its suite.
 COVERAGE = str(
     runpy.run_path(str(Path(__file__).resolve().with_name("test_coverage_tasks.py")))[
@@ -742,8 +673,12 @@ class RunOnceRows(unittest.TestCase):
         selector: str = "all",
         *,
         python: bool = True,
+        no_xml: bool = False,
     ) -> tuple[subprocess.CompletedProcess, Path]:
         """Run coverage-measure.sh over planted tasks, python and PL/pgSQL.
+
+        Reports go to `reports` beside the tree (#1628); `no_xml` has the
+        python leg write none.
 
         Returns:
             The finished script and the planted tree.
@@ -777,6 +712,8 @@ class RunOnceRows(unittest.TestCase):
             STUB_PYTHON=sys.executable,
             STUB_PY="90.0",
             STUB_BR="85.0",
+            STUB_NO_XML="1" if no_xml else "",
+            ORG_COVERAGE_REPORTS=str(tmp / "reports"),
         )
         run([GIT, "init", "-q"], env, tree)
         run([GIT, "add", *tracked], env, tree)
@@ -865,6 +802,53 @@ class RunOnceRows(unittest.TestCase):
         self.assertEqual(
             str((tree / "sub").resolve()) + "\n",
             (tree.parent / "where").read_text("utf-8"),
+        )
+
+    def test_only_formatless_legs_pass_by_name(self) -> None:
+        """No report is owed where no leg measured has a format."""
+        done, _ = self.measure(
+            {"test": {"run": [self.COLLECT]}}, "reports", python=False
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "plpgsql 60.00\nplpgsql-branches 66.66\n"
+            "leg: upload none — every leg measured has no upload format"
+            " (plpgsql, plpgsql-branches)\n",
+            done.stdout,
+        )
+        self.assertIn(
+            "leg: plpgsql, plpgsql-branches: no upload format,"
+            " not counted as a report writer\n",
+            done.stderr,
+        )
+
+    def test_a_leg_with_a_format_that_wrote_nothing_is_refused(self) -> None:
+        """A formatless leg beside it does not excuse the missing report."""
+        done, _ = self.measure(
+            {"test": {"run": [self.COLLECT]}}, "reports", no_xml=True
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        self.assertIn(
+            "leg: the legs measured wrote no report — nothing for the badge"
+            " to upload\n",
+            done.stderr,
+        )
+
+    def test_a_formatless_leg_beside_a_written_report(self) -> None:
+        """The written report uploads; the formatless legs are named."""
+        done, tree = self.measure({"test": {"run": [self.COLLECT]}}, "reports")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertTrue(
+            done.stdout.endswith(
+                f"leg: upload {tree.parent / 'reports' / 'coverage.xml'}\n"
+            ),
+            done.stdout,
+        )
+        self.assertIn(
+            "leg: plpgsql, plpgsql-branches: no upload format,"
+            " not counted as a report writer\n",
+            done.stderr,
         )
 
     def test_a_suite_that_runs_nothing_is_refused(self) -> None:

@@ -1804,5 +1804,34 @@ class VexAttestToken(unittest.TestCase):
             self.assertNotIn("steps.token", text, job_id)
 
 
+class GateCoverageReports(unittest.TestCase):
+    """The gate keeps coverage:check's reports from outside the tree (#1628).
+
+    The reports were written into the checkout, where nothing ignores
+    them and one `git add -A` commits them. The gate names a directory
+    under the runner's temporary directory, and keeps that directory.
+    """
+
+    REPORTS = "${{ runner.temp }}/coverage-reports"
+
+    def test_the_gate_names_the_directory_its_artifact_keeps(self) -> None:
+        """The run step's variable is the artifact step's path."""
+        gate = steps(load("ci.yml")["gate"])
+        runs = [s for s in gate if s.get("run", "").strip() == "mise run ci"]
+        keeps = [s for s in gate if s.get("id") == "coverage-reports"]
+        self.assertEqual(1, len(runs))
+        self.assertEqual(1, len(keeps))
+        self.assertEqual(self.REPORTS, runs[0].get("env.ORG_COVERAGE_REPORTS"))
+        self.assertEqual(self.REPORTS, keeps[0].get("with.path"))
+
+    def test_the_badge_job_downloads_beside_the_checkout(self) -> None:
+        """The artifact lands in the workspace, where the list reads it."""
+        upload = steps(load("ci.yml")["coverage-upload"])
+        fetch = [s for s in upload if "download-artifact" in s.get("uses", "")]
+        self.assertEqual(1, len(fetch))
+        self.assertEqual("coverage-reports", fetch[0].get("with.name"))
+        self.assertNotIn("with.path", fetch[0])
+
+
 if __name__ == "__main__":
     unittest.main()
