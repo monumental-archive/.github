@@ -10,6 +10,66 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.3](https://github.com/monumental-archive/.github/compare/v1.70.2...v1.70.3) - 2026-11-19
+
+### Fixed
+
+- update first-party canon ([#1539](https://github.com/monumental-archive/.github/pull/1539))
+- update jdx/mise to 2026.11.7 ([#1541](https://github.com/monumental-archive/.github/pull/1541))
+- validate pgrx majors in one place ([#1553](https://github.com/monumental-archive/.github/pull/1553))
+- update aqua:astral-sh/uv to 0.13.8 ([#1561](https://github.com/monumental-archive/.github/pull/1561))
+- update jdx/mise-action to v5.2.8 ([#1563](https://github.com/monumental-archive/.github/pull/1563))
+- decide the humantime and chrono unmaintained notices ([#1551](https://github.com/monumental-archive/.github/pull/1551))
+- hold task bodies to the 15-line shell ceiling ([#1560](https://github.com/monumental-archive/.github/pull/1560))
+- red any tracked codecov config by name ([#1552](https://github.com/monumental-archive/.github/pull/1552))
+- compare the bestpractices.dev entry with its file ([#1559](https://github.com/monumental-archive/.github/pull/1559))
+- load a child's config where the run does ([#1554](https://github.com/monumental-archive/.github/pull/1554))
+- refuse a body line starting with committer (#1529) ([#1571](https://github.com/monumental-archive/.github/pull/1571))
+- refuse a spelled go stamp and non-table pins (#1556) ([#1572](https://github.com/monumental-archive/.github/pull/1572))
+- refuse malformed manifests by name (#1556) ([#1577](https://github.com/monumental-archive/.github/pull/1577))
+- update pipx:coverage to 7.17.3 ([#1581](https://github.com/monumental-archive/.github/pull/1581))
+- refuse a queue group built from an old head (#1422) ([#1558](https://github.com/monumental-archive/.github/pull/1558))
+- name an undecodable file in mutmut-pragmas (#1555) ([#1579](https://github.com/monumental-archive/.github/pull/1579))
+- update jdx/mise-action to v5.2.8 ([#1580](https://github.com/monumental-archive/.github/pull/1580))
+- drop only the one skip in each deny variant (#1555) ([#1583](https://github.com/monumental-archive/.github/pull/1583))
+- refuse an unread index and malformed base rows (#1556) ([#1585](https://github.com/monumental-archive/.github/pull/1585))
+- run fast-check properties at the belt's seed (#1549) ([#1569](https://github.com/monumental-archive/.github/pull/1569))
+- add a typescript mutation leg (#1358) ([#1575](https://github.com/monumental-archive/.github/pull/1575))
+- refuse a pgrx package that is not a table (#1556) ([#1587](https://github.com/monumental-archive/.github/pull/1587))
+- record a wrong-shaped manifest in subject-budget (#1555) ([#1588](https://github.com/monumental-archive/.github/pull/1588))
+- run every helper under the belt's python ([#1565](https://github.com/monumental-archive/.github/pull/1565))
+- read an [[env]] array in belt-shell (#1555) ([#1593](https://github.com/monumental-archive/.github/pull/1593))
+- read past a task reference in coverage-js-runner (#1555) ([#1595](https://github.com/monumental-archive/.github/pull/1595))
+- read only ASCII digits as a version in msrv-plan (#1555) ([#1596](https://github.com/monumental-archive/.github/pull/1596))
+- read only ASCII digits as a major in pgrx-postgres (#1555) ([#1598](https://github.com/monumental-archive/.github/pull/1598))
+- refuse a non-object config in tsconfig-dials (#1555) ([#1599](https://github.com/monumental-archive/.github/pull/1599))
+- keep a wrong-shaped finding in zizmor-signer (#1555) ([#1601](https://github.com/monumental-archive/.github/pull/1601))
+- refuse a non-object cargo metadata in gate-surface (#1555) ([#1606](https://github.com/monumental-archive/.github/pull/1606))
+- read a step shell key wherever it sits (#1555) ([#1612](https://github.com/monumental-archive/.github/pull/1612))
+- read the population with the audit app token (#1602) ([#1609](https://github.com/monumental-archive/.github/pull/1609))
+- label copied fixtures with their source's licence (#1589) ([#1594](https://github.com/monumental-archive/.github/pull/1594))
+- start task helpers under the belt's python (#1582) ([#1614](https://github.com/monumental-archive/.github/pull/1614))
+- name the pgrx predecessor by one function (#1592) ([#1610](https://github.com/monumental-archive/.github/pull/1610))
+
+### Documentation
+
+- re-answer regression_tests_added50 from the backfill (#1545) ([#1590](https://github.com/monumental-archive/.github/pull/1590))
+
+### Testing
+
+- vary three small readers (#1555) ([#1562](https://github.com/monumental-archive/.github/pull/1562))
+- vary five file judges (#1555) ([#1567](https://github.com/monumental-archive/.github/pull/1567))
+- vary five environment readers (#1555) ([#1568](https://github.com/monumental-archive/.github/pull/1568))
+- vary coverage and gate readers (#1555) ([#1574](https://github.com/monumental-archive/.github/pull/1574))
+- backfill regression rows, second part (#1545) ([#1570](https://github.com/monumental-archive/.github/pull/1570))
+- property tests for the three helpers (#1557) ([#1573](https://github.com/monumental-archive/.github/pull/1573))
+- backfill regression rows, first part (#1545) ([#1564](https://github.com/monumental-archive/.github/pull/1564))
+- vary cargo, lock and plan readers (#1555) ([#1576](https://github.com/monumental-archive/.github/pull/1576))
+- backfill regression rows, third part (#1545) ([#1578](https://github.com/monumental-archive/.github/pull/1578))
+- vary four large judges (#1555) ([#1584](https://github.com/monumental-archive/.github/pull/1584))
+- vary the inputs of mutants-rust (#1555) ([#1586](https://github.com/monumental-archive/.github/pull/1586))
+- refuse a nested mise in the real lint:badges (#1545) ([#1600](https://github.com/monumental-archive/.github/pull/1600))
+
 ## [1.70.2](https://github.com/monumental-archive/.github/compare/v1.70.1...v1.70.2) - 2026-11-18
 
 ### Fixed
