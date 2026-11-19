@@ -140,9 +140,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {bad}", file=sys.stderr)
         return 1
 
-    stated = resolved.get("compilerOptions", {})
+    # tsc --showConfig prints an object; anything else is not a config
+    # this can judge (#1555: an array raised AttributeError).
+    whole = isinstance(resolved, dict)
+    stated = resolved.get("compilerOptions", {}) if whole else None
     if not isinstance(stated, dict):
-        print(f"{NAME}: {args.name}: compilerOptions is not an object", file=sys.stderr)
+        what = "compilerOptions is not" if whole else "tsc did not resolve to"
+        print(f"{NAME}: {args.name}: {what} an object", file=sys.stderr)
         return 1
 
     findings = judge(stated, required)
