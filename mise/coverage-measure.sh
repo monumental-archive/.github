@@ -170,6 +170,10 @@ if [[ ${legs} == reports ]]; then
   for f in "${reports[@]}"; do rm -f -- "${out:?}/${f}"; done
   measured=$(ORG_COVERAGE_REPORTS="${out}" "${BASH}" "${BASH_SOURCE[0]}" "${label}" all) || exit 1
   if [[ -z ${measured} ]]; then
+    # A floor that records its legs names each one this run lost (#1666),
+    # which is the case a repository most needs named; the generic line
+    # is for a floor with no record.
+    "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-floor.py" hold --label "${label}" < /dev/null || exit 1
     echo "${label}: no leg was measured — a check that reads nothing must not pass" >&2
     exit 1
   fi

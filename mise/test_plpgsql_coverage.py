@@ -675,6 +675,31 @@ class LegRows(unittest.TestCase):
             done.stderr,
         )
 
+    def test_a_record_whose_every_leg_reports_nothing_names_them(self) -> None:
+        """Every recorded leg lost: each named, never the generic refusal."""
+        done = self.check(
+            TWO,
+            legs="python python-branches",
+            files={"README.md": "no python left\n"},
+            collects=False,
+        )
+        self.assertEqual(1, done.returncode)
+        remedy = (
+            "  the python leg needs tracked *.py and a `test` task; or record"
+            " the leg's removal on purpose: `# dropped: {leg} <reason>` in"
+            " .coverage-floor\n"
+        )
+        self.assertEqual(
+            "coverage:check: the floor was derived with python and this run"
+            " measured none\n"
+            + remedy.format(leg="python")
+            + "coverage:check: the floor was derived with python-branches and"
+            " this run measured none\n" + remedy.format(leg="python-branches"),
+            done.stderr.removeprefix("suite ran\n"),
+        )
+        self.assertNotIn("no leg was measured", done.stderr)
+        self.assertEqual("", done.stdout)
+
     def test_a_recorded_leg_that_reports_nothing_is_red_by_name(self) -> None:
         """The teardown stopped collecting: the leg is named, never dropped."""
         done = self.check(
