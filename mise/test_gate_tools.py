@@ -34,7 +34,10 @@ from pre-push. Every git here runs without any `GIT_*` variable.
 stdlib `unittest`, matching the other mise/test_*.py.
 """
 
+import contextlib
+import dataclasses
 import functools
+import io
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -260,7 +263,7 @@ def derivation(tasks: dict | None = None) -> dict[str, list[tuple[str, str]]]:
             inner = closure([t for t in tasks if t.startswith(prefixes)], tasks)
             inner = [expand(body(tasks[t]), set()) for t in inner]
         for key in tools:
-            cmds = gate_tools.commands(key, table.get(key, {}))
+            cmds = gate_tools.commands(key, table.get(key, gate_tools.Row()))
             at = first_call(lines, cmds)
             if at is None and any(first_call(x, cmds) is not None for x in inner):
                 at = len(lines)
@@ -273,7 +276,9 @@ def derivation(tasks: dict | None = None) -> dict[str, list[tuple[str, str]]]:
     return out
 
 
-def drift(table: dict, found: dict[str, list[tuple[str, str]]]) -> list[str]:
+def drift(
+    table: dict[str, gate_tools.Row], found: dict[str, list[tuple[str, str]]]
+) -> list[str]:
     """Hold the table to the derivation.
 
     Returns:
@@ -290,9 +295,9 @@ def drift(table: dict, found: dict[str, list[tuple[str, str]]]) -> list[str]:
                 for task, _ in uses
             ]
             continue
-        when = row.get("when")
+        when = row.when
         for task, guard in uses:
-            if task not in row.get("tasks", []):
+            if task not in row.tasks:
                 out.append(f"{task} calls {key}; its row does not list the task")
             if when is None:
                 continue
@@ -308,9 +313,9 @@ def drift(table: dict, found: dict[str, list[tuple[str, str]]]) -> list[str]:
                     " its row's `when` does not install it there"
                 )
     for key, row in sorted(table.items()):
-        stale = sorted(set(row.get("tasks", [])) - {t for t, _ in found.get(key, [])})
+        stale = sorted(set(row.tasks) - {t for t, _ in found.get(key, [])})
         out += [f"{key}: its row lists {t}, which does not call it" for t in stale]
-        if row.get("when") == [] and found.get(key):
+        if row.when == () and found.get(key):
             out.append(f"{key}: its row says no gate task calls it")
     return out
 
@@ -350,7 +355,8 @@ class Table(unittest.TestCase):
         """Planted: hadolint's row forgets the `*.Dockerfile` form."""
         table = gate_tools.load_table()
         row = table["aqua:hadolint/hadolint"]
-        row["when"] = [w for w in row["when"] if w != "*.Dockerfile"]
+        when = tuple(w for w in row.when or () if w != "*.Dockerfile")
+        table["aqua:hadolint/hadolint"] = dataclasses.replace(row, when=when)
         self.assertIn(
             (
                 "lint:hadolint runs aqua:hadolint/hadolint on a tree tracking"
@@ -435,7 +441,7 @@ class Table(unittest.TestCase):
         providers = [
             key
             for key in belt()["tools"]
-            if "jq" in gate_tools.commands(key, table.get(key, {}))
+            if "jq" in gate_tools.commands(key, table.get(key, gate_tools.Row()))
         ]
         self.assertEqual(["jq"], providers, f"gate tasks call jq: {callers}")
 
@@ -504,7 +510,7 @@ class Helper(unittest.TestCase):
     def test_an_empty_tree_gets_the_unconditional_tools_only(self) -> None:
         """Nothing tracked: no conditional row fires."""
         table = gate_tools.load_table()
-        unconditional = {k for k, r in table.items() if r.get("when") is None}
+        unconditional = {k for k, r in table.items() if r.when is None}
         self.assertTrue(unconditional <= always())
         self.assertNotIn("aqua:hadolint/hadolint", always())
         self.assertNotIn("aqua:golangci/golangci-lint", always())
@@ -560,7 +566,7 @@ class Helper(unittest.TestCase):
     def test_the_canon_tree(self) -> None:
         """The canon runs lint:scaffold-assembly, which runs every task."""
         table = gate_tools.load_table()
-        reached = {k for k, r in table.items() if r.get("when") != []}
+        reached = {k for k, r in table.items() if r.when != ()}
         self.assertEqual(reached, install(CANON) & reached)
 
     def test_a_caller_task_brings_a_belt_tool(self) -> None:
@@ -651,6 +657,77 @@ class Helper(unittest.TestCase):
         self.assertIn(
             "::error::gate-tools: aqua:hadolint/hadolint is in one of", result.stderr
         )
+
+
+class Refusals(unittest.TestCase):
+    """A table or belt config of the wrong shape is refused by name."""
+
+    def run_main(self, table_text: str, config_text: str) -> tuple[int, str, Path]:
+        """Run the helper in-process over a table and config written here.
+
+        Returns:
+            Exit status, stderr and the table's path.
+
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        table = Path(tmp.name) / "gate-tools.toml"
+        table.write_text(table_text, encoding="utf-8")
+        (Path(tmp.name) / "config.toml").write_text(config_text, encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            status = gate_tools.main(["--table", str(table), "list"])
+        return status, err.getvalue(), table
+
+    def test_wrong_shapes_in_the_table(self) -> None:
+        """Each shape the decoder refuses, with the field it names."""
+        rows = [
+            ("[tools\n", "Expected ']'"),
+            ("tools = 1\n", "[tools] is not an object"),
+            ("[tools]\nx = 1\n", "tools.x is not an object"),
+            ('[tools.x]\ntasks = "lint:a"\n', "tools.x.tasks is not a list of strings"),
+            ("[tools.x]\nwhen = [1]\n", "tools.x.when is not a list of strings"),
+            ("[tools.x]\nfor = {}\n", "tools.x.for is not a list of strings"),
+            ('[tools.x]\nrun = [""," ", 2]\n', "tools.x.run is not a list of strings"),
+        ]
+        for text, message in rows:
+            with self.subTest(text=text):
+                status, err, table = self.run_main(text, "[tools]\n")
+                self.assertEqual(1, status)
+                self.assertTrue(
+                    err.startswith(f"::error::gate-tools: {table}: "), msg=err
+                )
+                self.assertIn(message, err)
+
+    def test_belt_tools_not_a_table(self) -> None:
+        """The belt config's [tools] is read through the same decoder."""
+        status, err, table = self.run_main("[tools]\n", "tools = []\n")
+        self.assertEqual(1, status)
+        self.assertEqual(
+            f"::error::gate-tools: {table.parent / 'config.toml'}: [tools] "
+            "is not an object\n",
+            err,
+        )
+
+    def test_a_well_formed_row_decodes(self) -> None:
+        """Absent fields take their defaults; `for` is the row's needs."""
+        with tempfile.TemporaryDirectory() as d:
+            table = Path(d) / "t.toml"
+            table.write_text(
+                '[tools.a]\ntasks = ["lint:a"]\nwhen = []\nfor = ["b"]\n'
+                '[tools.b]\nrun = ["b1"]\n',
+                encoding="utf-8",
+            )
+            got = gate_tools.load_table(table)
+        self.assertEqual(
+            {
+                "a": gate_tools.Row(tasks=("lint:a",), when=(), needs=("b",)),
+                "b": gate_tools.Row(run=("b1",)),
+            },
+            got,
+        )
+        self.assertEqual(["b1"], gate_tools.commands("b", got["b"]))
+        self.assertEqual(["a"], gate_tools.commands("a", got["a"]))
 
 
 if __name__ == "__main__":

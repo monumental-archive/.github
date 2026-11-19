@@ -51,14 +51,13 @@ than that task's guard.
 
 import argparse
 import fnmatch
-import functools
 import hashlib
 import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
-import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 # The canon's one reader of a caller's pins, beside this tree in release/.
@@ -67,6 +66,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
 
 import caller_pins
+import decoded
 import workflow_command
 
 HERE = Path(__file__).resolve().parent
@@ -74,8 +74,13 @@ TABLE = HERE / "gate-tools.toml"
 GIT = shutil.which("git") or "git"
 
 # mise's own homes for a repository's tasks, besides its config's [tasks].
-TASK_DIRS = ("mise-tasks/", ".mise-tasks/", "mise/tasks/", ".mise/tasks/")
-TASK_DIRS += (".config/mise/tasks/",)
+TASK_DIRS = (
+    "mise-tasks/",
+    ".mise-tasks/",
+    "mise/tasks/",
+    ".mise/tasks/",
+    ".config/mise/tasks/",
+)
 CONFIGS = ("mise.toml", ".mise.toml", "mise/config.toml", ".config/mise.toml")
 
 # A command stands at the start of a line, after a separator or
@@ -107,8 +112,9 @@ def strip_literals(text: str) -> str:
     return re.sub(r'"(?:[^"\\\n]|\\.)*"', _keep_substitution, text)
 
 
-def _keep_substitution(m: re.Match) -> str:
-    return m.group(0) if "$(" in m.group(0) else '""'
+def _keep_substitution(m: re.Match[str]) -> str:
+    whole: str = m.group(0)
+    return whole if "$(" in whole else '""'
 
 
 def shell_calls(text: str, commands: list[str]) -> int | None:
@@ -127,14 +133,21 @@ def shell_calls(text: str, commands: list[str]) -> int | None:
     return None
 
 
-@functools.cache
-def _call_pattern(commands: tuple[str, ...]) -> re.Pattern:
-    forms = []
+# One compiled pattern per command list, built on first use.
+_PATTERNS: dict[tuple[str, ...], re.Pattern[str]] = {}
+
+
+def _call_pattern(commands: tuple[str, ...]) -> re.Pattern[str]:
+    if commands in _PATTERNS:
+        return _PATTERNS[commands]
+    forms: list[str] = []
     for cmd in commands:
         forms.append(re.escape(cmd))
         if cmd.startswith("cargo-"):
             forms.append(r"cargo\s+" + re.escape(cmd[len("cargo-") :]))
-    return re.compile(_LEAD + "(?:" + "|".join(forms) + r")(?![\w./-]|\+?=)")
+    pattern = re.compile(_LEAD + "(?:" + "|".join(forms) + r")(?![\w./-]|\+?=)")
+    _PATTERNS[commands] = pattern
+    return pattern
 
 
 def python_calls(text: str, commands: list[str]) -> bool:
@@ -166,24 +179,82 @@ def matches(pattern: str, path: str) -> bool:
     return path == base or path.startswith(base + "/")
 
 
-def load_table(path: Path = TABLE) -> dict[str, dict]:
+@dataclass(frozen=True)
+class Row:
+    """One tool's row of the table, as decoded from it."""
+
+    tasks: tuple[str, ...] = ()
+    when: tuple[str, ...] | None = None  # None: every repository
+    needs: tuple[str, ...] = ()  # the row's `for`: installed for these keys
+    run: tuple[str, ...] | None = None  # None: the key's own tool name
+
+
+def _strings(row: dict[str, object], field: str, where: str) -> tuple[str, ...] | None:
+    """Read one optional list-of-strings field of a row.
+
+    Returns:
+        The strings, or None when the row does not carry the field.
+
+    Raises:
+        UndecodableError: the field is not a list of strings.
+
+    """
+    if field not in row:
+        return None
+    value = row[field]
+    if not decoded.is_strings(value):
+        msg = f"{where}.{field} is not a list of strings"
+        raise decoded.UndecodableError(msg)
+    return tuple(value)
+
+
+def row_of(key: str, value: object) -> Row:
+    """Decode one row of the table.
+
+    A row or a field of the wrong shape raises `UndecodableError`.
+
+    Returns:
+        The row.
+
+    """
+    where = f"tools.{key}"
+    row = decoded.as_object(value, where)
+    return Row(
+        tasks=_strings(row, "tasks", where) or (),
+        when=_strings(row, "when", where),
+        needs=_strings(row, "for", where) or (),
+        run=_strings(row, "run", where),
+    )
+
+
+def load_table(path: Path = TABLE) -> dict[str, Row]:
     """Read the table.
 
     Returns:
         Belt key to its row: `tasks`, optional `when`, `for`, `run`.
 
+    Raises:
+        UndecodableError: the file is not TOML, or a row has the wrong
+            shape; the text names the file and the field.
+
     """
-    return tomllib.loads(path.read_text("utf-8"))["tools"]
+    try:
+        doc = decoded.load_toml(path.read_bytes())
+        tools = decoded.as_object(doc.get("tools"), "[tools]")
+        return {key: row_of(key, value) for key, value in tools.items()}
+    except decoded.UndecodableError as err:
+        msg = f"{path}: {err}"
+        raise decoded.UndecodableError(msg) from None
 
 
-def commands(key: str, row: dict) -> list[str]:
+def commands(key: str, row: Row) -> list[str]:
     """Name the commands a tool puts on PATH that the belt runs.
 
     Returns:
         The row's `run` list, or the key's tool name.
 
     """
-    return row.get("run", [tool_name(key)])
+    return list(row.run) if row.run is not None else [tool_name(key)]
 
 
 def caller_text(root: Path, tracked: list[str]) -> str:
@@ -210,25 +281,44 @@ def caller_text(root: Path, tracked: list[str]) -> str:
         if path.endswith(".toml"):
             text = _task_bodies(text)
         out.append(text)
-        named = {w.removeprefix("./") for w in re.findall(r"[\w./-]+", text)}
+        named = {w.removeprefix("./") for w in _words(text)}
         pending += sorted((named & files) - seen)
     return "\n".join(out)
 
 
+def _words(text: str) -> list[str]:
+    """Split text into the path-like words a task can name a file by.
+
+    Returns:
+        Each run of word characters, dots, slashes and dashes.
+
+    """
+    out: list[str] = []
+    for found in re.finditer(r"[\w./-]+", text):
+        word: str = found.group(0)
+        out.append(word)
+    return out
+
+
 def _task_bodies(text: str) -> str:
     try:
-        tasks = tomllib.loads(text).get("tasks", {})
-    except tomllib.TOMLDecodeError:
+        doc = decoded.load_toml(text)
+    except decoded.UndecodableError:
         return text
-    bodies = []
+    tasks = doc.get("tasks", {})
+    if not decoded.is_object(tasks):
+        # A config this cannot read as tasks is searched as text, as one
+        # that is not TOML at all is.
+        return text
+    bodies: list[object] = []
     for task in tasks.values():
-        run = task.get("run", "") if isinstance(task, dict) else task
-        bodies.extend(run if isinstance(run, list) else [run])
+        run = task.get("run", "") if decoded.is_object(task) else task
+        bodies.extend(run if decoded.is_array(run) else [run])
     return "\n".join(b for b in bodies if isinstance(b, str))
 
 
 def needed(
-    table: dict[str, dict],
+    table: dict[str, Row],
     tracked: list[str],
     caller: str = "",
     pinned: frozenset[str] | set[str] = frozenset(),
@@ -241,7 +331,7 @@ def needed(
     """
     reasons: dict[str, str] = {}
     for key, row in table.items():
-        when = row.get("when")
+        when = row.when
         if when is None:
             reasons[key] = "needed: every repository"
             continue
@@ -258,7 +348,7 @@ def needed(
                 "no gate task calls it" if not when else "nothing it lints is tracked"
             )
     for key, row in table.items():
-        users = [k for k in row.get("for", []) if reasons[k].startswith("needed")]
+        users = [k for k in row.needs if reasons[k].startswith("needed")]
         if users and not reasons[key].startswith("needed"):
             reasons[key] = f"needed: installs {users[0]}"
     return reasons
@@ -284,21 +374,38 @@ def tracked_files(root: Path) -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
+class Args(argparse.Namespace):
+    """The command line, typed where argparse writes it."""
+
+    root: Path
+    table: Path
+    mode: str
+
+
 def main(argv: list[str] | None = None) -> int:
     """Name the belt tools this tree needs, or disable the rest.
 
     Returns:
-        0, or 1 when the table names a key the belt does not pin.
+        0, or 1 when the table names a key the belt does not pin, or the
+        table or the belt's config cannot be read.
 
     """
     parser = argparse.ArgumentParser(prog="gate_tools.py")
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--table", type=Path, default=TABLE)
-    parser.add_argument("mode", choices=["list", "disable"])
-    args = parser.parse_args(argv)
-    table = load_table(args.table)
-    belt = tomllib.loads((args.table.parent / "config.toml").read_text("utf-8"))
-    unknown = sorted(set(belt["tools"]) ^ set(table))
+    modes: tuple[str, ...] = ("list", "disable")
+    parser.add_argument("mode", choices=modes)
+    args = parser.parse_args(argv, namespace=Args())
+    config = args.table.parent / "config.toml"
+    try:
+        table = load_table(args.table)
+        belt = decoded.as_object(
+            decoded.load_toml(config.read_bytes()).get("tools"), f"{config}: [tools]"
+        )
+    except decoded.UndecodableError as err:
+        workflow_command.error(f"gate-tools: {err}", stream=sys.stderr)
+        return 1
+    unknown = sorted(set(belt) ^ set(table))
     if unknown:
         for key in unknown:
             workflow_command.error(

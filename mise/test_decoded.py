@@ -62,7 +62,6 @@ MOVING = frozenset({
     "mise/biome_config.py",
     "mise/coverage_js_runner.py",
     "mise/deny_skips.py",
-    "mise/gate_tools.py",
     "mise/licence_texts.py",
     "mise/lock_arch.py",
     "mise/lock_platforms.py",
