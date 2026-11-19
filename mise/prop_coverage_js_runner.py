@@ -13,10 +13,11 @@ over generated lockfile entries and task run scripts:
   comments are dropped.
 - Invariance (V): `read_line` reads the arguments after vitest behind
   any launcher the leg knows, and refuses vitest behind any other.
-- Refusal (R): `--vitest-command` answers any task stream `mise tasks
-  info --json` can give (a run script, or a list of scripts and
-  `{ task = … }` / `{ tasks = […] }` references) with 0 and the
-  command or 1 and its refusal, never a traceback (#1555: a task
+- Refusal (R): any tasks `mise tasks info --json` can give (a run
+  script, or a list of scripts and `{ task = … }` / `{ tasks = […] }`
+  references) are walked by task_walk.py and answered by
+  `--vitest-command` with 0 and the command or 1 and its refusal, or
+  refused by the walk by name; never a traceback (#1555: a task
   reference raised AttributeError until this found it).
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
@@ -40,6 +41,8 @@ _SPEC = importlib.util.spec_from_file_location(
 )
 cj = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cj)
+# The walk the runner reads (#1608), loaded beside it by the runner.
+tw = cj.task_walk
 
 VERSION = st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 # One entry per lockfile dialect, for a package at a version.
@@ -170,10 +173,15 @@ class VitestCommand(unittest.TestCase):
     @example([{"name": "test", "run": [{"task": "build"}, "vitest run"]}])
     def test_any_stream_is_answered(self, tasks: list[dict]) -> None:
         """0 with JSON on stdout, or 1 with the refusal on stderr."""
-        stream = "".join(json.dumps(t) + "\n" for t in tasks)
+        answers = {t["name"]: t for t in tasks}
+        try:
+            walked = tw.walk(tasks[0]["name"] if tasks else "test", answers.get, list)
+        except tw.RefusedError as exc:
+            self.assertIn("task '", str(exc))
+            return
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = cj.vitest_command("coverage:check", stream)
+            status = cj.vitest_command("coverage:check", walked)
         self.assertIn(status, (0, 1))
         if status == 0:
             self.assertEqual(json.loads(out.getvalue())["args"][0], "run")
