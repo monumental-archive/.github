@@ -239,26 +239,8 @@ def starters() -> list[pathlib.Path]:
     Returns:
         Their paths, sorted.
 
-    Raises:
-        RuntimeError: git is not on PATH.
-
     """
-    git = shutil.which("git")
-    if git is None:
-        msg = "git is not on PATH"
-        raise RuntimeError(msg)
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    listed = subprocess.run(
-        [git, "ls-files", "-z", "*.sh"],
-        cwd=CANON,
-        # hermetic.env carries no git variables: the suite aims GIT_DIR at
-        # a decoy repository (#1463), where this listing would be empty.
-        env=hermetic.env(),
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    paths = [CANON / p for p in listed.split("\0") if p]
+    paths = [CANON / p for p in hermetic.tracked(CANON, "*.sh")]
     return sorted(p for p in paths if starts_helpers(p.read_text("utf-8")))
 
 

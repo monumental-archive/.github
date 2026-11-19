@@ -38,10 +38,6 @@ import io
 import re
 import runpy
 import shlex
-import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
-import subprocess
 import tempfile
 import tokenize
 import tomllib
@@ -212,6 +208,7 @@ DYNAMIC = {
     "mise/belt-shell.py": "splats its shfmt and shellcheck argvs from lists",
     "mise/embedded-shell.py": "splats its shfmt argv from a list",
     "mise/git-decoy.py": "runs its caller's command against a decoy repository",
+    "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
     "mise/mutants-python.py": "asks mutmut's own interpreter, read from its"
     " installed script, where mutmut lives",
     "mise/with-lock.py": "runs its caller's command under the lock",
@@ -1377,28 +1374,10 @@ def tracked_helpers() -> set[str]:
     """Name every tracked Python file by its file name.
 
     Returns:
-        The names, as `git ls-files` reports the canon's `*.py`.
-
-    Raises:
-        RuntimeError: git is not on PATH.
+        The names of the canon's tracked `*.py`.
 
     """
-    git = shutil.which("git")
-    if git is None:
-        msg = "git is not on PATH"
-        raise RuntimeError(msg)
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    listed = subprocess.run(
-        [git, "ls-files", "-z", "*.py"],
-        cwd=CANON,
-        # hermetic.env carries no git variables: the suite aims GIT_DIR at
-        # a decoy repository (#1463), where this listing would be empty.
-        env=hermetic.env(),
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return {Path(p).name for p in listed.split("\0") if p}
+    return {Path(p).name for p in hermetic.tracked(CANON, "*.py")}
 
 
 def action_job(text: str) -> list[str]:

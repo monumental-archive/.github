@@ -680,15 +680,7 @@ class NoSiteAsksForTheLatestRelease(unittest.TestCase):
 
     def test_no_untagged_release_view(self) -> None:
         """Every `gh release view` in release/ names the release it reads."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        tracked = subprocess.run(
-            [shutil.which("git") or "git", "ls-files", "release"],
-            cwd=CANON,
-            env=hermetic.env(),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.split()
+        tracked = hermetic.tracked(CANON, "release")
         found = []
         for path in tracked:
             name = Path(path).name

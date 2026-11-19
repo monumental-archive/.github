@@ -19,14 +19,26 @@ the next variable a job exported. A row that needs a variable states
 it in its overrides; a tool that needs one gets it in its extension,
 with why. stdlib only; imported by every test file in the four
 discovery roots, which `test_hermetic.py` holds them to.
+
+The files a tree tracks are read here too, through the same
+environment (#1618):
+
+    names = hermetic.tracked(CANON, "*.py")        # relative to CANON
+
+A test that lists the canon's own tree calls `tracked`, never `git
+ls-files` in the tree: mutmut runs the suite in `mutants/`, a gitignored
+copy of the tree, where git lists nothing under the copy and every such
+test failed the statistics pass (self-mutants run 44597898554).
 """
 
 import os
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from pathlib import Path
 
 # What every fixture inherits, by name, and why.
 INHERITED: dict[str, str] = {
@@ -103,3 +115,69 @@ def env(
     }
     out |= overrides
     return out
+
+
+def top(pathspec: str) -> str:
+    """Anchor one pathspec at the repository's top, keeping its magic.
+
+    Returns:
+        `:(top)` added to the pathspec: `*.py` is `:(top)*.py`, the
+        short exclude `:!x` is `:(top,exclude)x`, and a long-form
+        `:(glob)x` is `:(top,glob)x`.
+
+    """
+    if pathspec.startswith((":!", ":^")):
+        return f":(top,exclude){pathspec[2:]}"
+    if pathspec.startswith(":("):
+        return f":(top,{pathspec[2:]}"
+    return f":(top){pathspec}"
+
+
+def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
+    """Name the files a tree tracks, relative to the tree's root (#1618).
+
+    `root` is a checkout's top, or a copy of the whole tree inside it
+    (mutmut's `mutants/`). git is asked from the repository's top, with
+    every pathspec anchored there and the names in full, so a copy gets
+    the tracked names; a name is kept when the file exists under `root`,
+    so a copy is judged on what was copied into it. In a checkout that
+    is exactly `git ls-files` at its top. The listing runs under `env`,
+    with the row's `overrides`.
+
+    Returns:
+        The names, in git's order.
+
+    Raises:
+        RuntimeError: git is not on PATH, or lists no file at all: an
+            empty listing where files were asked for is never a pass.
+
+    """
+    git = shutil.which("git")
+    if git is None:
+        msg = "hermetic.tracked: git is not on PATH"
+        raise RuntimeError(msg)
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    listed = subprocess.run(
+        [
+            git,
+            "-C",
+            str(root),
+            "ls-files",
+            "-z",
+            "--full-name",
+            "--",
+            *(top(spec) for spec in pathspecs),
+        ],
+        env=env(**overrides),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    names = [n for n in listed.split("\0") if n and os.path.lexists(Path(root, n))]
+    if not names:
+        msg = (
+            f"hermetic.tracked: git lists no tracked file under {root}"
+            f" for {list(pathspecs) or ['(every file)']}"
+        )
+        raise RuntimeError(msg)
+    return names
