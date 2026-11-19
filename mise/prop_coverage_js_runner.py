@@ -13,7 +13,7 @@ over generated lockfile entries and task run scripts:
   comments are dropped.
 - Invariance (V): `read_line` reads the arguments after vitest behind
   any launcher the leg knows, and refuses vitest behind any other.
-- Refusal (R): `--vitest-command` answers any task stream `mise tasks
+- Refusal (R): `--vitest-command` answers any tasks `mise tasks
   info --json` can give (a run script, or a list of scripts and
   `{ task = … }` / `{ tasks = […] }` references) with 0 and the
   command or 1 and its refusal, never a traceback (#1555: a task
@@ -169,10 +169,9 @@ class VitestCommand(unittest.TestCase):
     @example([{"name": "test", "run": [{"task": "build"}, "vitest run"]}])
     def test_any_stream_is_answered(self, tasks: list[dict]) -> None:
         """0 with JSON on stdout, or 1 with the refusal on stderr."""
-        stream = "".join(json.dumps(t) + "\n" for t in tasks)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = cj.vitest_command("coverage:check", stream)
+            status = cj.vitest_command("coverage:check", tasks)
         self.assertIn(status, (0, 1))
         if status == 0:
             self.assertEqual(json.loads(out.getvalue())["args"][0], "run")

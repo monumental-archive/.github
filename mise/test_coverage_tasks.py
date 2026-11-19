@@ -97,6 +97,24 @@ esac
 
 MISE = """\
 #!/usr/bin/env bash
+# With STUB_FIXTURE, the captured mise answers (#1608): `tasks info`
+# from the capture, `test` being the task STUB_ROOT names, its probe
+# directory the planted tree; `tasks ls` the capture's names.
+if [[ -n ${STUB_FIXTURE:-} ]]; then
+  case "$1 $2" in
+    "tasks info")
+      n=$3
+      [[ ${n} != test ]] || n=${STUB_ROOT}
+      exec jq -e --arg n "${n}" --arg d "${STUB_DIR}" \\
+        '."tasks info --json"[$n] // empty | .dir |= sub("<probe>"; $d)' \\
+        "${STUB_FIXTURE}"
+      ;;
+    "tasks ls")
+      exec jq '[."tasks ls --hidden --json"[] | {name: .}]' "${STUB_FIXTURE}"
+      ;;
+    *) exit 1 ;;
+  esac
+fi
 # `tasks info <name> --json`: the planted test task, or a planted
 # dependency of it beside that file as task.<name>.json.
 if [[ "$1 $2" == "tasks info" ]]; then
@@ -126,6 +144,11 @@ lines='{"total": {"lines": {"pct": %s}, "branches": {"pct": %s}}}\\n'
 printf "${lines}" "${STUB_TS}" "${STUB_TS_BR}" > "${dir}/coverage-summary.json"
 echo "TN:" > "${dir}/lcov.info"
 """
+
+# `mise tasks info --json` for every task of a probe holding each way
+# mise 2026.11.7 documents for one task to run another (#1608), captured
+# from task-references/probe.toml.
+TASK_REFERENCES = BELT / "testdata" / "task-references" / "tasks-info.json"
 
 # The head of every refusal of the test task's vitest command.
 HEAD_MSG = (
@@ -177,6 +200,22 @@ def plant_leftovers(tree: Path, leftovers: dict[str, bool]) -> list[str]:
     return [name for name, is_tracked in leftovers.items() if is_tracked]
 
 
+def captured_env(captured_test: str | None, tree: Path) -> dict[str, str]:
+    """Point the mise stub at the task-references capture, if asked.
+
+    Returns:
+        The stub's variables, or none when no captured task is `test`.
+
+    """
+    if captured_test is None:
+        return {}
+    return {
+        "STUB_FIXTURE": str(TASK_REFERENCES),
+        "STUB_ROOT": captured_test,
+        "STUB_DIR": str(tree),
+    }
+
+
 def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
     task: str,
     *,
@@ -193,11 +232,14 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     depends: dict[str, str] | None = None,
     leftovers: dict[str, bool] | None = None,
     go_profile: bool = True,
+    captured_test: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
     `leftovers` plants report files as an earlier run would leave them:
     name to whether the repository tracks it. Each holds "leftover".
+    `captured_test` names the captured task-references task mise
+    answers as `test`, every other task as captured.
 
     Returns:
         The finished process, and a snapshot directory holding the
@@ -259,6 +301,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_TS": ts,
         "STUB_TS_BR": ts_branches,
     }
+    env |= captured_env(captured_test, tree)
     subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
         [GIT, "init", "-q"], cwd=tree, env=env, check=True
     )
@@ -572,6 +615,98 @@ class TypeScriptRows(CoverageTaskCase):
         )
         self.assertEqual("TN:\n", (tree / "lcov-typescript.info").read_text("utf-8"))
         self.assertFalse((tree / "lcov.info").exists())
+
+
+class TaskReferenceRows(CoverageTaskCase):
+    """The leg follows every task the test task runs to vitest (#1608).
+
+    mise answers from the task-references capture: its own `tasks info
+    --json` for a probe holding each documented way one task runs
+    another.
+    """
+
+    def captured(self, root: str) -> subprocess.CompletedProcess[str]:
+        """Run the typescript leg with the captured task as `test`.
+
+        Returns:
+            The finished process.
+
+        """
+        done, _ = self.run_task(
+            "coverage:check", python=False, typescript="vitest", captured_test=root
+        )
+        return done
+
+    def found_through(self, root: str) -> None:
+        """Assert the captured task's vitest is reached and measured."""
+        done = self.captured(root)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            "vitest args: run tests/unit --coverage.enabled=true", done.stderr
+        )
+
+    def test_vitest_through_a_run_task_entry_is_found(self) -> None:
+        """`run = [{ task = "unit" }, …]` runs unit, where vitest is (#1608)."""
+        self.found_through("run-task")
+
+    def test_vitest_through_a_run_tasks_entry_is_found(self) -> None:
+        """`run = [{ tasks = ["lint", "unit"] }]` runs unit too (#1608)."""
+        self.found_through("run-tasks")
+
+    def test_vitest_through_depends_post_is_found(self) -> None:
+        """`depends_post = ["unit"]` runs unit after the task (#1608)."""
+        self.found_through("post-name")
+
+    def test_every_captured_reference_form_is_followed(self) -> None:
+        """Each form mise reports a reference in reaches unit (#1608).
+
+        A depends with arguments (reported as an array), with an env
+        prefix (as a table), a table with args, env and optional, a
+        table depends_post, a `{ task }` with args and env, and a run
+        inherited through `extends`. Patterns are the helper's rows: the
+        probe's match tasks that run no vitest.
+        """
+        for root in (
+            "depends-name",
+            "depends-string",
+            "depends-args",
+            "depends-array",
+            "depends-env",
+            "depends-table",
+            "post-table",
+            "run-task-args",
+            "extends",
+        ):
+            with self.subTest(root=root):
+                self.found_through(root)
+
+    def test_a_cycle_ends_and_refuses_by_name(self) -> None:
+        """cycle-a depends on cycle-b, which runs cycle-a: no vitest."""
+        done = self.captured("cycle-a")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            HEAD_MSG + ", and the test task and its depends run none —\n"
+            "  tasks walked: test, cycle-b, cycle-a\n",
+            done.stderr,
+        )
+        self.assertNotIn("vitest suite ran", done.stderr)
+
+    def test_no_vitest_anywhere_names_the_tasks_walked(self) -> None:
+        """A depends and a `{ task }` entry are walked, and named."""
+        done = self.captured("none")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            HEAD_MSG + ", and the test task and its depends run none —\n"
+            "  tasks walked: test, lint, run-string\n",
+            done.stderr,
+        )
+        self.assertNotIn("vitest suite ran", done.stderr)
+
+    def test_wait_for_is_not_followed(self) -> None:
+        """`wait_for` adds no task to the run, so its vitest is not the suite."""
+        done = self.captured("wait-for")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn("  tasks walked: test\n", done.stderr)
 
 
 def upload_step() -> str:

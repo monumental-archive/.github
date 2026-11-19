@@ -26,13 +26,17 @@ The leg supports vitest. Any other runner is named, from the root
 package.json's dependencies or its `test` script, so a skip says what
 it skipped rather than reading as a tree with nothing to measure.
 
-`--vitest-command <label>` is the second question: WHICH vitest run
+`--vitest-command <label> <task>` is the second question: WHICH vitest run
 the leg measures. #1357 item 2 says the leg runs the repository's own
 test command, so the suite measured is the suite the gate runs (#707),
 never vitest's whole configured suite where the `test` task runs a
-narrower one. Standard input carries `mise tasks info --json` for the
-`test` task and every task it depends on, one per line. The one plain
-vitest invocation in their `run` scripts is printed as JSON,
+narrower one. The helper walks from the `test` task to every task it
+runs (#1608), asking `mise tasks info <name> --json` of each: its
+`depends`, its `depends_post`, and each `{ task }` and `{ tasks }`
+entry in its `run`, in every form mise reports them, a pattern
+expanded against `mise tasks ls`. Each task is read once, so a cycle
+ends. The one plain vitest invocation in their `run` scripts is
+printed as JSON,
 `{"dir": <the task's dir>, "args": [<its arguments>]}`, and the caller
 runs the repository's own vitest with exactly those arguments plus the
 coverage flags. Running the task's scripts with a coverage-adding
@@ -51,8 +55,14 @@ flag the leg would contradict.
 import json
 import re
 import shlex
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Lockfiles the leg reads, in the order a package manager would prefer.
 LOCKFILES = ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock")
@@ -232,7 +242,118 @@ def read_line(line: str) -> tuple[list[str] | None, str | None]:
     return words[at + 1 :], None
 
 
-def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
+def entry_names(entry: object) -> list[str]:
+    """Name the tasks one `depends`, `depends_post` or `run` entry runs.
+
+    The forms are mise's as `tasks info --json` reports them (#1608,
+    measured at the belt's pin in testdata/task-references): a name or
+    pattern; `[name, args…]`, which is also how a depends string with
+    arguments is reported; `{"task": name, …}`, also an env-prefixed
+    depends string; and a run entry's `{"tasks": [names]}`.
+
+    Returns:
+        The names and patterns the entry runs; none for a run script.
+
+    """
+    if isinstance(entry, str):
+        return [entry]
+    if isinstance(entry, list):
+        return entry[:1] if entry and isinstance(entry[0], str) else []
+    if not isinstance(entry, dict):
+        return []
+    named = entry.get("tasks")
+    names = [n for n in named if isinstance(n, str)] if isinstance(named, list) else []
+    task = entry.get("task")
+    return [task, *names] if isinstance(task, str) else names
+
+
+def references(task: dict) -> list[str]:
+    """Name every task a task runs: depends, depends_post, run entries.
+
+    `wait_for` is not one: it adds no task to the run.
+
+    Returns:
+        The names and patterns, in the order mise lists them.
+
+    """
+    out: list[str] = []
+    for key in ("depends", "depends_post", "run"):
+        entries = task.get(key) or []
+        if key == "run" and isinstance(entries, str):
+            continue
+        for entry in entries if isinstance(entries, list) else [entries]:
+            if key != "run" or not isinstance(entry, str):
+                out += entry_names(entry)
+    return out
+
+
+def glob_regex(pattern: str) -> str:
+    """Translate a mise task pattern to a regular expression.
+
+    mise's wildcards (docs/tasks/running-tasks.md): `?` one character,
+    `*` any characters within one `:`-separated group, `**` any number
+    of groups, `{a,b}` either, `[abc]` and `[!abc]` a set.
+
+    Returns:
+        The expression, to be matched in full against a task name.
+
+    """
+    out, i = "", 0
+    while i < len(pattern):
+        c = pattern[i]
+        if pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+            continue
+        close = pattern.find("}" if c == "{" else "]", i)
+        if c in "{[" and close > i:
+            body = pattern[i + 1 : close]
+            if c == "{":
+                out += "(?:" + "|".join(glob_regex(a) for a in body.split(",")) + ")"
+            else:
+                negated = body.startswith("!")
+                out += "[^" + body[1:] + "]" if negated else "[" + body + "]"
+            i = close + 1
+            continue
+        out += {"*": "[^:]*", "?": "[^:]"}.get(c, re.escape(c))
+        i += 1
+    return out
+
+
+def walk(
+    root: str,
+    info: Callable[[str], dict | None],
+    names: Callable[[], list[str]],
+) -> tuple[list[dict], str | None]:
+    """Read the root task and every task it runs, each once.
+
+    `info` answers `mise tasks info <name> --json` (None when mise
+    cannot), and `names` every task's name, for patterns.
+
+    Returns:
+        Each task read, with its name, in the order reached; and the
+        name mise could not read, or None.
+
+    """
+    queue, seen, tasks = [root], set(), []
+    listed: list[str] | None = None
+    while queue:
+        name = queue.pop(0)
+        if any(c in name for c in "*?[{"):
+            listed = names() if listed is None else listed
+            queue[:0] = [n for n in listed if re.fullmatch(glob_regex(name), n)]
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        task = info(name)
+        if not isinstance(task, dict):
+            return tasks, name
+        tasks.append(task | {"name": name})
+        queue += references(task)
+    return tasks, None
+
+
+def collect(tasks: list[dict]) -> tuple[list[tuple[str, list[str]]], list[str]]:
     """Read every task's run scripts for vitest invocations.
 
     Returns:
@@ -242,15 +363,11 @@ def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
     """
     found: list[tuple[str, list[str]]] = []
     refused: list[str] = []
-    for raw in stream.splitlines():
-        if not raw.strip():
-            continue
-        task = json.loads(raw)
+    for task in tasks:
         run = task.get("run") or []
         for script in [run] if isinstance(run, str) else run:
-            # A `{ task = … }` entry runs another task, and mise reports
-            # it as an object (#1555: it raised AttributeError here). It
-            # holds no script of this task's to read.
+            # A `{ task = … }` entry runs another task (#1555), which
+            # walk() reads as a task of its own: no script of this one's.
             if not isinstance(script, str):
                 continue
             for line in logical_lines(script):
@@ -262,7 +379,9 @@ def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
     return found, refused
 
 
-def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str]:
+def problems(
+    found: list[tuple[str, list[str]]], refused: list[str], walked: list[str]
+) -> list[str]:
     """Say why the collected invocations are not one measurable run.
 
     Returns:
@@ -279,6 +398,7 @@ def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str
     if not found:
         return [
             ", and the test task and its depends run none —",
+            f"  tasks walked: {', '.join(walked)}",
             f"  run vitest from the test task as {FORMS}",
         ]
     if len(found) > 1:
@@ -300,15 +420,16 @@ def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str
     return []
 
 
-def vitest_command(label: str, stream: str) -> int:
-    """Print the test task's one vitest invocation, or refuse it by name.
+def vitest_command(label: str, tasks: list[dict]) -> int:
+    """Print the walked tasks' one vitest invocation, or refuse it by name.
 
     Returns:
         0 with the JSON on stdout, or 1 with the refusal on stderr.
 
     """
-    found, refused = collect(stream)
-    lines = problems(found, refused)
+    found, refused = collect(tasks)
+    walked = [str(t.get("name", "test")) for t in tasks]
+    lines = problems(found, refused, walked)
     if lines:
         head = f"{label}: typescript: the leg measures the test task's own"
         print(f"{head} vitest command{lines[0]}", file=sys.stderr)
@@ -355,7 +476,56 @@ def main(tracked: list[str]) -> int:
     return 0
 
 
+def mise_json(*args: str) -> object:
+    """Ask mise a read-only question in JSON.
+
+    Returns:
+        The decoded answer, or None when mise cannot give one.
+
+    """
+    mise = shutil.which("mise")
+    if mise is None:
+        return None
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    r = subprocess.run(
+        [mise, *args, "--json"], capture_output=True, text=True, check=False
+    )
+    try:
+        return json.loads(r.stdout) if r.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def task_names() -> list[str]:
+    """Name every task mise lists, hidden ones too.
+
+    Returns:
+        The names, or none when mise cannot list them.
+
+    """
+    listed = mise_json("tasks", "ls", "--hidden")
+    rows = listed if isinstance(listed, list) else []
+    return [r["name"] for r in rows if isinstance(r, dict) and "name" in r]
+
+
+def walked_command(label: str, root: str) -> int:
+    """Walk from the root task and print its one vitest invocation.
+
+    Returns:
+        vitest_command's status, or 1 when a task cannot be read.
+
+    """
+    tasks, unread = walk(root, lambda n: mise_json("tasks", "info", n), task_names)
+    if unread is not None:
+        print(
+            f"{label}: typescript: cannot read task '{unread}' with mise tasks info",
+            file=sys.stderr,
+        )
+        return 1
+    return vitest_command(label, tasks)
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--vitest-command"]:
-        sys.exit(vitest_command(sys.argv[2], sys.stdin.read()))
+        sys.exit(walked_command(sys.argv[2], sys.argv[3]))
     sys.exit(main(sys.argv[1:]))

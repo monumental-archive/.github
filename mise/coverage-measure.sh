@@ -451,29 +451,12 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
     exit 1
   fi
   # The vitest run the gate's `test` task makes, read from the task and
-  # every task it depends on (#1357 item 2): one plain invocation, its
-  # arguments and its task's dir, or a refusal by name. The depends are
-  # walked here with the same read-only `mise tasks info` the python leg
-  # makes; the reading of the scripts is coverage-js-runner.py's.
-  tasks_json=""
-  queue="test"
-  seen=" "
-  while [[ -n ${queue// /} ]]; do
-    name=${queue%% *}
-    queue=${queue#"${name}"}
-    queue=${queue# }
-    [[ -n ${name} && ${seen} != *" ${name} "* ]] || continue
-    seen="${seen}${name} "
-    info=$(mise tasks info "${name}" --json 2> /dev/null) || {
-      echo "${label}: typescript: cannot read task '${name}' with mise tasks info" >&2
-      exit 1
-    }
-    tasks_json+=$(jq -c --arg n "${name}" '. + {name: $n}' <<< "${info}")$'\n'
-    deps=$(jq -r '(.depends // [])[] | if type == "string" then . else (.task // empty) end' <<< "${info}")
-    queue="${queue} ${deps//$'\n'/ }"
-  done
+  # every task it runs (#1357 item 2, #1608): one plain invocation, its
+  # arguments and its task's dir, or a refusal by name. The walk and the
+  # reading of the scripts are coverage-js-runner.py's, by the same
+  # read-only `mise tasks info` the python leg makes.
   command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
-    --vitest-command "${label}" <<< "${tasks_json}") || exit 1
+    --vitest-command "${label}" test) || exit 1
   test_dir=$(jq -r '.dir' <<< "${command_json}")
   args_lines=$(jq -r '.args[]' <<< "${command_json}")
   test_args=()
