@@ -280,6 +280,11 @@ class Planted(unittest.TestCase):
             "MUTANTS_SUMMARY_DIR": str(self.summary),
             "ORG_BELT_DIR": str(BELT),
         }
+        # The planted leg runs a stub mutmut, under no mutant: the suite's
+        # own mutation state, which hermetic.env passes on (#1542), is the
+        # real run's, never this fixture's. A row that needs one states it.
+        for name in ("MUTANT_UNDER_TEST", "MUTMUT_DEPENDENCY_DEPTH"):
+            self.env.pop(name, None)
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
@@ -922,7 +927,7 @@ class MutatedCopy(Planted):
         hook = self.tmp / "hook"
         # ruff: ignore[subprocess-without-shell-equals-true]
         written = subprocess.run(
-            [sys.executable, str(BELT / "mutants-python.py"), "hook", str(hook)],
+            [sys.executable, str(BELT / "mutants_python.py"), "hook", str(hook)],
             cwd=self.tree,
             env=self.env,
             capture_output=True,

@@ -72,7 +72,7 @@ INHERITED: dict[str, str] = {
     # from MUTANT_UNDER_TEST (mutation/trampoline.py:54) and bounds its
     # statistics by MUTMUT_DEPENDENCY_DEPTH (trampoline.py:95), and the
     # leg's start-up hook loads mutmut's configuration only under
-    # MUTANT_UNDER_TEST (mutants-python.py's CHILD_CONFIG). Its path
+    # MUTANT_UNDER_TEST (mutants_python.py's CHILD_CONFIG). Its path
     # rides on PYTHONPATH, above. Dropped, a child runs the ORIGINAL
     # function for every mutant, and the mutant survives untested.
     "MUTANT_UNDER_TEST": "the mutant a child process runs",
