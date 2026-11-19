@@ -294,7 +294,7 @@ jobs:
       # its restoreMiseCache passes no restore keys — and saves from
       # every ref, so the steps either side of it do both instead.
       - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.11.7
           cache: false
@@ -559,7 +559,7 @@ jobs:
       # its restoreMiseCache passes no restore keys — and saves from
       # every ref, so the steps either side of it do both instead.
       - name: Install mise and the leg's tools
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.11.7
           cache: false
@@ -779,7 +779,7 @@ jobs:
       # its restoreMiseCache passes no restore keys — and saves from
       # every ref, so the steps either side of it do both instead.
       - name: Install mise and the report's tools
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.11.7
           cache: false
