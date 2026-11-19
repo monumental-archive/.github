@@ -249,7 +249,11 @@ class Shape(unittest.TestCase):
         self.text = WORKFLOW.read_text(encoding="utf-8")
 
     def test_the_workflow_holds(self) -> None:
-        """The workflow as built names no problem."""
+        """The workflow as built names no problem.
+
+        The alert's `always()` is #1149's: a leg ended by its timeout is
+        cancelled, which `failure()` does not match, and nothing was filed.
+        """
         self.assertEqual(problems(self.text), [])
 
     def test_rows(self) -> None:

@@ -467,7 +467,11 @@ OUTSPEC = (
 
 
 class Push(Harness):
-    """Push by digest: the build's argv, the digest check, the record."""
+    """Push by digest: the build's argv, the digest check, the record.
+
+    The argv carries the determinism set (#291): no embedded provenance
+    or SBOM, and layer times clamped, so two builds share a digest.
+    """
 
     def test_a_per_architecture_push(self) -> None:
         """Labels only, no floor, the raw digest in <digests>/<arch>."""

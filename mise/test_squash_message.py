@@ -141,7 +141,7 @@ class SquashMessage(unittest.TestCase):
         self.assertEqual(self.checked(), "fix: x (#812)\n")
 
     def test_failing_commit_check(self) -> None:
-        """The canon's refusal names what to fix: the title or the body."""
+        """#411: the canon's refusal names what to fix, the title or the body."""
         done = self.squash("Fix: Capitalised", "Body.", verdict=1)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(done.stdout, FAILS_CANON)
