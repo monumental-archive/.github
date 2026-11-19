@@ -54,10 +54,11 @@ from typing import TYPE_CHECKING
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import workflow_command
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 # The one registry the org publishes images to. A host, not an owner:
 # every name under it comes from the calling workflow.
@@ -77,6 +78,8 @@ INDEX_ACCEPT = (
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 IMAGE_REF = re.compile(r"ghcr\.io/[a-z0-9._/-]+")
 TAG = re.compile(r"[A-Za-z0-9._-]+")
+# The fields tag-images.yml's input holds per image.
+KEYS = ("image", "tag", "digest")
 
 # The determinism set (#118), measured in the lab's first full-width gate
 # run. --provenance=false and --sbom=false: buildx otherwise embeds a
@@ -106,6 +109,22 @@ class RefusedError(Exception):
     """A refusal: printed as one error workflow command, exit 1."""
 
 
+class Args(argparse.Namespace):
+    """The flags every subcommand's parser may set, typed as parsed."""
+
+    command: str
+    image: str
+    file: str
+    context: str
+    digests: str
+    metadata_file: str
+    arch: str | None
+    pg: str | None
+    platform: str | None
+    tag: str | None
+    run: Callable[[Registry, Args], int]
+
+
 class Registry:
     """The registry's HTTP API and the `docker` that talks to it."""
 
@@ -113,6 +132,22 @@ class Registry:
         """Take the step's env for credentials; the origin never comes from it."""
         self.env = env
         self.origin = origin
+
+    def need(self, name: str) -> str:
+        """Read one variable of the step's env.
+
+        Returns:
+            Its value.
+
+        Raises:
+            RefusedError: it is not set.
+
+        """
+        value = self.env.get(name)
+        if value is None:
+            msg = f"{name} is not set"
+            raise RefusedError(msg)
+        return value
 
     def docker(
         self, *args: str, stdin: bytes | None = None, capture: bool = True
@@ -148,9 +183,9 @@ class Registry:
             "login",
             REGISTRY,
             "-u",
-            self.env["GITHUB_ACTOR"],
+            self.need("GITHUB_ACTOR"),
             "--password-stdin",
-            stdin=self.env["GH_TOKEN"].encode(),
+            stdin=self.need("GH_TOKEN").encode(),
         )
 
     @staticmethod
@@ -196,7 +231,7 @@ class Registry:
             RefusedError: the endpoint answered no token.
 
         """
-        basic = f"{self.env['GITHUB_ACTOR']}:{self.env['GH_TOKEN']}"
+        basic = f"{self.need('GITHUB_ACTOR')}:{self.need('GH_TOKEN')}"
         url = (
             f"{self.origin}/token?scope=repository:{name}:pull,push&service={REGISTRY}"
         )
@@ -205,10 +240,7 @@ class Registry:
             url,
             {"Authorization": "Basic " + base64.b64encode(basic.encode()).decode()},
         )
-        try:
-            token = json.loads(body).get("token")
-        except ValueError, AttributeError:
-            token = None
+        token = field(body, "token")
         if not isinstance(token, str) or not token:
             msg = f"the token endpoint answered no token for {name}"
             raise RefusedError(msg)
@@ -233,11 +265,23 @@ class Registry:
         out = self.docker(
             "buildx", "imagetools", "inspect", ref, "--format", "{{json .Manifest}}"
         )
-        try:
-            digest = json.loads(out).get("digest")
-        except ValueError, AttributeError:
-            return ""
+        digest = field(out, "digest")
         return digest if isinstance(digest, str) else ""
+
+
+def field(source: str | bytes, key: str) -> object:
+    """Read one field of a JSON object, or None where there is none.
+
+    Returns:
+        The field's value; None when the text is not a JSON object or
+        holds no such field.
+
+    """
+    try:
+        doc = decoded.load_json(source)
+    except decoded.UndecodableError:
+        return None
+    return doc.get(key) if decoded.is_object(doc) else None
 
 
 def name_of(image: str) -> str:
@@ -262,7 +306,15 @@ def buildx_floor(version_output: str) -> None:
     """
     line = version_output.splitlines()[0] if version_output else ""
     found = re.search(r"(\d+)\.(\d+)\.\d+", line)
-    have = (int(found[1]), int(found[2])) if found else None
+    # Sliced by each group's span: `group()` is typed `str | Any`.
+    have = (
+        (
+            int(line[found.start(1) : found.end(1)]),
+            int(line[found.start(2) : found.end(2)]),
+        )
+        if found
+        else None
+    )
     if have is None or have < BUILDX_FLOOR:
         shown = f"{have[0]}.{have[1]}" if have else "unknown"
         msg = f"buildx {shown} < 0.12: index annotations would be dropped silently"
@@ -284,10 +336,10 @@ def facts_pairs(facts: str) -> list[str]:
 
     """
     try:
-        parsed = json.loads(facts)
-    except ValueError, RecursionError:
+        parsed = decoded.load_json(facts)
+    except decoded.UndecodableError:
         parsed = None
-    if not isinstance(parsed, dict):
+    if not decoded.is_object(parsed):
         msg = "facts is not a JSON object"
         raise RefusedError(msg)
     return [
@@ -329,15 +381,15 @@ def read_metadata_digest(path: Path, refusal: str) -> str:
 
     """
     try:
-        digest = json.loads(path.read_text("utf-8")).get("containerimage.digest")
-    except OSError, ValueError, AttributeError, RecursionError:
+        digest = field(path.read_bytes(), "containerimage.digest")
+    except OSError:
         digest = None
     if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
         raise RefusedError(refusal)
     return digest
 
 
-def push(reg: Registry, args: argparse.Namespace) -> int:
+def push(reg: Registry, args: Args) -> int:
     """Build and push by digest, untagged, then record the digest.
 
     `--arch`: one native per-architecture image (build-oci-image.yml),
@@ -369,7 +421,7 @@ def push(reg: Registry, args: argparse.Namespace) -> int:
         "--file",
         args.file,
         *platform,
-        *fact_flags(reg.env["FACTS"], labels=True, index=index),
+        *fact_flags(reg.need("FACTS"), labels=True, index=index),
         *DETERMINISM,
         "--output",
         OUTPUT.format(image=args.image),
@@ -387,7 +439,7 @@ def push(reg: Registry, args: argparse.Namespace) -> int:
             json.dumps(record, indent=2) + "\n", "utf-8"
         )
         workflow_command.notice(f"pg{args.pg} index {digest}")
-    else:
+    elif args.arch is not None:  # the group requires --arch or --pg
         digest = read_metadata_digest(meta, "no digest from the push")
         (digests / args.arch).write_text(digest, "utf-8")
         workflow_command.notice(f"{args.arch} pushed as {digest}")
@@ -441,17 +493,14 @@ def index_bytes(dry_run: bytes) -> tuple[bytes, str]:
         )
         raise RefusedError(msg)
     body = dry_run[:-1]
-    try:
-        ctype = json.loads(body).get("mediaType") or ""
-    except ValueError, AttributeError, RecursionError:
-        ctype = ""
+    ctype = field(body, "mediaType") or ""
     if ctype != OCI_INDEX:
         msg = (
             f"the assembled index is '{ctype or 'no media type'}',"
             " not an OCI image index"
         )
         raise RefusedError(msg)
-    return body, ctype
+    return body, OCI_INDEX
 
 
 def write_outputs(path: str, outputs: dict[str, str]) -> None:
@@ -460,7 +509,7 @@ def write_outputs(path: str, outputs: dict[str, str]) -> None:
         f.writelines(f"{k}={v}\n" for k, v in outputs.items())
 
 
-def assemble(reg: Registry, args: argparse.Namespace) -> int:
+def assemble(reg: Registry, args: Args) -> int:
     """Assemble the per-architecture digests into one index, by digest.
 
     The index is pushed BY DIGEST, with no tag (#1280): a manifest PUT
@@ -476,7 +525,7 @@ def assemble(reg: Registry, args: argparse.Namespace) -> int:
 
     """
     buildx_floor(reg.docker("buildx", "version").decode())
-    image = f"{REGISTRY}/{reg.env['GITHUB_REPOSITORY'].lower()}"
+    image = f"{REGISTRY}/{reg.need('GITHUB_REPOSITORY').lower()}"
     digests = read_arch_digests(Path(args.digests), ["amd64", "arm64"])
     reg.login()
     dry = reg.docker(
@@ -484,7 +533,7 @@ def assemble(reg: Registry, args: argparse.Namespace) -> int:
         "imagetools",
         "create",
         "--dry-run",
-        *fact_flags(reg.env["FACTS"], labels=False, index=True),
+        *fact_flags(reg.need("FACTS"), labels=False, index=True),
         *(f"{image}@{d}" for d in digests),
     )
     body, ctype = index_bytes(dry)
@@ -509,7 +558,7 @@ def assemble(reg: Registry, args: argparse.Namespace) -> int:
     # above the per-architecture builds folded here, so the target is the
     # publisher's name for the whole of it.
     write_outputs(
-        reg.env["GITHUB_OUTPUT"],
+        reg.need("GITHUB_OUTPUT"),
         {
             "image": image,
             "digest": index,
@@ -538,23 +587,23 @@ def parse_images(raw: str) -> list[tuple[str, str, str]]:
     # RecursionError too: JSON nested past the parser's depth is a shape
     # untrusted input can take, and it died here as a traceback (#1556).
     try:
-        parsed = json.loads(raw)
-    except ValueError, RecursionError:
+        parsed = decoded.load_json(raw)
+    except decoded.UndecodableError:
         parsed = None
-    keys = ("image", "tag", "digest")
-    if (
-        not isinstance(parsed, list)
-        or not parsed
-        or not all(
-            isinstance(e, dict) and all(isinstance(e.get(k), str) for k in keys)
-            for e in parsed
-        )
-    ):
+    triples: list[tuple[str, str, str]] = []
+    for e in parsed if decoded.is_array(parsed) else []:
+        image, tag, digest = (e.get(k) if decoded.is_object(e) else None for k in KEYS)
+        if not (
+            isinstance(image, str) and isinstance(tag, str) and isinstance(digest, str)
+        ):
+            triples = []
+            break
+        triples.append((image, tag, digest))
+    if not triples:
         msg = "images is not a JSON array of {image, tag, digest}"
         raise RefusedError(msg)
-    out = []
-    for e in parsed:
-        image, tag, digest = (e[k] for k in keys)
+    out: list[tuple[str, str, str]] = []
+    for image, tag, digest in triples:
         if not IMAGE_REF.fullmatch(image):
             msg = "not a lowercase ghcr.io reference"
             raise RefusedError(msg)
@@ -568,7 +617,7 @@ def parse_images(raw: str) -> list[tuple[str, str, str]]:
     return out
 
 
-def tag(reg: Registry, _args: argparse.Namespace) -> int:
+def tag(reg: Registry, _args: Args) -> int:
     """Put each gated digest's exact manifest bytes under its tag (#118).
 
     Fetch the manifest by digest, PUT the same bytes to the tag name, and
@@ -584,7 +633,7 @@ def tag(reg: Registry, _args: argparse.Namespace) -> int:
         RefusedError: a tag that resolves to another digest.
 
     """
-    for image, name_tag, digest in parse_images(reg.env["UNTRUSTED_IMAGES"]):
+    for image, name_tag, digest in parse_images(reg.need("UNTRUSTED_IMAGES")):
         name = name_of(image)
         token = reg.token(name)
         body, ctype = reg.request(
@@ -658,7 +707,7 @@ def main(
 
     """
     p = parser()
-    args = p.parse_args(argv)
+    args = p.parse_args(argv, namespace=Args())
     if args.command == "push" and args.pg is not None and not args.tag:
         p.error("push --pg needs --tag")
     reg = Registry(os.environ if env is None else env, origin)
@@ -666,8 +715,6 @@ def main(
         return args.run(reg, args)
     except RefusedError as e:
         workflow_command.error(str(e))
-    except KeyError as e:
-        workflow_command.error(f"{e.args[0]} is not set")
     return 1
 
 
