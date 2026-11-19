@@ -283,6 +283,45 @@ class StandingIssue(Rows):
         self.assertIn(f"{NEXT}{unreadable}", text)
         self.assertIn(f"- Checkpoint signed tree head: {unreadable}", text)
 
+    def test_next_infinity_is_unreadable(self) -> None:
+        """A `next` of Infinity: named unreadable, never a traceback (#1557)."""
+        doc = checkpoint()
+        self.end.write_text(
+            json.dumps(doc).replace(f'"next": {BEHIND_NEXT}', '"next": Infinity'),
+            encoding="utf-8",
+        )
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        text = self.gh_calls()[1][7]
+        self.assertIn(f"{NEXT}unknown: the checkpoint file could not be read\n", text)
+
+    def test_timestamp_out_of_range_is_unreadable(self) -> None:
+        """A head time past the platform's range: named, never a traceback.
+
+        prop_standing_issue.py's shrunk example (#1557): the start's
+        timestamp 9.223372036854776e+21.
+        """
+        doc = checkpoint()
+        doc["treeHead"]["timestamp"] = 9.223372036854776e21
+        self.write(self.start, doc)
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn(
+            "::error::the checkpoint the run started from was not kept"
+            " (the checkpoint file could not be read)",
+            proc.stdout,
+        )
+
+    def test_nested_past_the_parser_is_unreadable(self) -> None:
+        """JSON nested past the parser's depth: named, never a traceback."""
+        self.end.write_bytes(b"[" * 100_000)
+        proc = self.run_helper([])
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn(
+            "::error::the newest checkpoint: the checkpoint file could not be read",
+            proc.stdout,
+        )
+
     def test_start_not_kept_is_named(self) -> None:
         """The start job did not finish: red, behind, the count named unknown."""
         proc = self.run_helper([], kept="")

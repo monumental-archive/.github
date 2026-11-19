@@ -109,7 +109,10 @@ def read_checkpoint(path: Path) -> Checkpoint:
         head = doc["treeHead"]
         nxt, size = int(doc["next"]), int(head["treeSize"])
         when = dt.datetime.fromtimestamp(int(head["timestamp"]) / 1000, dt.UTC)
-    except ValueError, TypeError, KeyError:
+    # Overflow and OS errors: a `next` of Infinity, or a timestamp past the
+    # platform's range; recursion: JSON nested past the parser's depth.
+    # Each was a traceback until prop_standing_issue.py (#1557).
+    except ValueError, TypeError, KeyError, OverflowError, OSError, RecursionError:
         return Checkpoint(None, None, None, "the checkpoint file could not be read")
     return Checkpoint(nxt, size, when, None)
 
