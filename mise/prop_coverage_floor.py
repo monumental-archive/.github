@@ -91,12 +91,23 @@ class Quantise(unittest.TestCase):
     """One decimal place, rounded down, stable."""
 
     @given(PERCENT)
+    @example(
+        Decimal(
+            "12.4999999999999999999999999999950907152865081376266506282146775419773"
+        )
+    )
     def test_twice_is_once_and_never_up(self, value: Decimal) -> None:
-        """Idempotent, a lower bound, within one step."""
+        """Idempotent, a lower bound, within one step.
+
+        The step is held by comparison, which Decimal does exactly, never
+        by `value - once`: that subtraction rounds to the context's 28
+        digits, and for the example above returns exactly 0.1 where the
+        true gap is just under it (#1555, audit seed 2849470511876116666).
+        """
         once = cf.quantise(value)
         self.assertEqual(cf.quantise(once), once)
         self.assertLessEqual(once, value)
-        self.assertLess(value - once, cf.STEP)
+        self.assertLess(value, once + cf.STEP)
 
 
 class Ratchet(unittest.TestCase):
