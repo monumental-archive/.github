@@ -125,15 +125,15 @@ class InstallTheBeltsPython(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash(), str(self.script)],
-            env={
-                "PATH": self.path,
-                "HOME": str(self.tmp),
-                "GITHUB_ENV": str(self.env_file),
-                "RUNNER_TEMP": str(self.runner_temp),
-                "STUB_LOG": str(self.log),
-                "STUB_INSTALL": str(status),
-                "STUB_WHERE": str(self.where),
-            },
+            env=hermetic.env(
+                PATH=self.path,
+                HOME=str(self.tmp),
+                GITHUB_ENV=str(self.env_file),
+                RUNNER_TEMP=str(self.runner_temp),
+                STUB_LOG=str(self.log),
+                STUB_INSTALL=str(status),
+                STUB_WHERE=str(self.where),
+            ),
             capture_output=True,
             text=True,
             check=False,
@@ -262,7 +262,9 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        env = {"PATH": os.environ["PATH"], "HOME": tmp, "PGRX_HOME": f"{tmp}/p"}
+        env = hermetic.env(tmp, PGRX_HOME=f"{tmp}/p")
+        # The row decides ORG_PYTHON: unset, or the value it names.
+        env.pop("ORG_PYTHON", None)
         if value is not None:
             env["ORG_PYTHON"] = value
         # ruff: ignore[subprocess-without-shell-equals-true]

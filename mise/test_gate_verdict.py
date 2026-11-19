@@ -15,11 +15,18 @@ from __future__ import annotations
 
 import os
 import pathlib
+import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
 
 WORKFLOW = pathlib.Path(__file__).resolve().parent.parent / ".github/workflows/ci.yml"
 STEP = "- name: Every part of the gate passed"
@@ -80,13 +87,9 @@ class EveryPartPassed(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, "-c", step_script()],
-            env={
-                "PATH": os.environ["PATH"],
-                "PLAN": plan,
-                "GATE": gate,
-                "PGRX": pgrx,
-                "MAJORS": majors,
-            },
+            env=hermetic.env(
+                PATH=os.environ["PATH"], PLAN=plan, GATE=gate, PGRX=pgrx, MAJORS=majors
+            ),
             capture_output=True,
             text=True,
             check=False,

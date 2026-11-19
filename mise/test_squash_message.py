@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import runpy
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
@@ -20,6 +21,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
 
 HELPER = pathlib.Path(__file__).resolve().parent / "squash_message.py"
 STUB_MISE = """#!/usr/bin/env bash
@@ -64,15 +71,15 @@ class SquashMessage(unittest.TestCase):
             The run.
 
         """
-        env = {
-            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
-            "HOME": str(self.tmp),
-            "STUB_DIR": str(self.tmp),
-            "STUB_EXIT": str(verdict),
-            "RUNNER_TEMP": str(self.tmp),
-            "PR_TITLE": title,
-            "PR_NUMBER": "812",
-        }
+        env = hermetic.env(
+            PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            HOME=str(self.tmp),
+            STUB_DIR=str(self.tmp),
+            STUB_EXIT=str(verdict),
+            RUNNER_TEMP=str(self.tmp),
+            PR_TITLE=title,
+            PR_NUMBER="812",
+        )
         if body is not None:
             env["PR_BODY"] = body
         # ruff: ignore[subprocess-without-shell-equals-true]

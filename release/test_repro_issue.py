@@ -21,11 +21,18 @@ as `mise run test`, which `ci` collects.
 
 import os
 import pathlib
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[0] / "mise" / "hermetic.py"))
+)
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_issue.py"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
@@ -80,19 +87,19 @@ class FileAnIssue(unittest.TestCase):
 
         """
         args_file = self.tmp / "gh-args"
-        env = {
-            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
-            "HOME": str(self.tmp),
-            "GH_ARGS": str(args_file),
-            "GH_TOKEN": "test",
-            "TAG": "v0.28.1",
-            "MANIFEST": manifest,
-            "CLASS": "pgrx-extension",
-            "COMPARE": outcome,
-            "GITHUB_SERVER_URL": "https://github.com",
-            "GITHUB_REPOSITORY": "monumental-archive/lab",
-            "GITHUB_RUN_ID": "42044978939",
-        }
+        env = hermetic.env(
+            PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            HOME=str(self.tmp),
+            GH_ARGS=str(args_file),
+            GH_TOKEN="test",  # ruff: ignore[hardcoded-password-func-arg]
+            TAG="v0.28.1",
+            MANIFEST=manifest,
+            CLASS="pgrx-extension",
+            COMPARE=outcome,
+            GITHUB_SERVER_URL="https://github.com",
+            GITHUB_REPOSITORY="monumental-archive/lab",
+            GITHUB_RUN_ID="42044978939",
+        )
         proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [sys.executable, str(HELPER)],
             env=env,

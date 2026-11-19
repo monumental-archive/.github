@@ -153,14 +153,13 @@ def run(
         path = [str(Path(PYTHON).parent), str(Path(GIT).parent), "/usr/bin", "/bin"]
         if tool_dir:
             path.insert(0, tool_dir)
-        environ = {
-            "PATH": os.pathsep.join(path),
-            "HOME": scratch,
-            "ORG_BELT_DIR": str(BELT),
-            # The interpreter the script starts its helpers under (#1543).
-            "ORG_PYTHON": str(PYTHON),
-            **(env or {}),
-        }
+        environ = hermetic.env(
+            PATH=os.pathsep.join(path),
+            HOME=scratch,
+            ORG_BELT_DIR=str(BELT),
+            ORG_PYTHON=str(PYTHON),
+            **env or {},
+        )
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", body],
             cwd=root,

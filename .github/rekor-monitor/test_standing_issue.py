@@ -16,11 +16,17 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - the helper is run as the workflow runs it
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 HERE = Path(__file__).resolve().parent
 HELPER = HERE / "standing_issue.py"
@@ -105,12 +111,12 @@ class Rows(unittest.TestCase):
         self.end = self.dir / "checkpoint.json"
         self.write(self.start, checkpoint())
         self.write(self.end, checkpoint())
-        self.env = {
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "GITHUB_REPOSITORY": REPO,
-            "STUB_CALLS": str(self.calls),
-            "STUB_LIST": "[]",
-        }
+        self.env = hermetic.env(
+            PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            GITHUB_REPOSITORY=REPO,
+            STUB_CALLS=str(self.calls),
+            STUB_LIST="[]",
+        )
 
     @staticmethod
     def write(path: Path, doc: dict) -> None:

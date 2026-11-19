@@ -629,9 +629,10 @@ class Measured(unittest.TestCase):
             STUB_TASK=str(task),
         )
         # The suite this row runs in may itself be measured: its hook
-        # must not reach the measurement under test.
+        # must not reach the measurement under test. Without
+        # COVERAGE_PROCESS_START the hook starts nothing, so PYTHONPATH
+        # stays, and with it the mutation leg's hook (#1542).
         env.pop("COVERAGE_PROCESS_START", None)
-        env.pop("PYTHONPATH", None)
         env["PATH"] = f"{stubs}:{env.get('PATH', '')}"
         for argv in ([GIT, "init", "-q"], [GIT, "add", "."]):
             # ruff: ignore[subprocess-without-shell-equals-true]

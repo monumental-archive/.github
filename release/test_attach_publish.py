@@ -19,11 +19,18 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[0] / "mise" / "hermetic.py"))
+)
 
 HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "attach_publish.py"
@@ -126,18 +133,18 @@ class AttachAndPublish(unittest.TestCase):
                 json.dumps(manifest), encoding="utf-8"
             )
         log = self.tmp / "gh-log"
-        env = {
-            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
-            "HOME": str(self.tmp),
-            "GH_LOG": str(log),
-            "STUB_DRAFT": draft,
-            "STUB_FIXTURES": str(self.fixtures),
-            "TAG": TAG,
-            "DRY_RUN": dry_run,
-            "GITHUB_REPOSITORY": REPO,
-            "GITHUB_SERVER_URL": "https://github.com",
-            "GITHUB_RUN_ID": "42",
-        }
+        env = hermetic.env(
+            PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            HOME=str(self.tmp),
+            GH_LOG=str(log),
+            STUB_DRAFT=draft,
+            STUB_FIXTURES=str(self.fixtures),
+            TAG=TAG,
+            DRY_RUN=dry_run,
+            GITHUB_REPOSITORY=REPO,
+            GITHUB_SERVER_URL="https://github.com",
+            GITHUB_RUN_ID="42",
+        )
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [sys.executable, str(HELPER)],
             cwd=self.work,

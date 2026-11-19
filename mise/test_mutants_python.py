@@ -24,6 +24,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import hermetic
 import mutants_python as helper
@@ -97,6 +98,82 @@ def config():
         _config = Path.cwd()
     return _config
 """
+# The stand-in's trampoline chooses as mutmut 3.8.1's does
+# (mutation/trampoline.py): MUTANT_UNDER_TEST names `module.mutant`; under
+# "stats" it reads the configuration and runs the original; a mutant of
+# THIS function's module runs the mutant; anything else, the original.
+STAND_IN_TRAMPOLINE = """import os
+
+MutantDict = dict
+
+
+def wrap_in_trampoline(mutants, is_classmethod=False):
+    def mutated(func):
+        def trampoline(*args, **kwargs):
+            active = os.environ.get("MUTANT_UNDER_TEST", "")
+            if active == "stats":
+                from mutmut.configuration import config
+                config()
+                return mutants["_mutmut_orig"](*args, **kwargs)
+            module, _, name = active.rpartition(".")
+            if module == func.__module__ and name in mutants:
+                return mutants[name](*args, **kwargs)
+            return mutants["_mutmut_orig"](*args, **kwargs)
+        return trampoline
+    return mutated
+"""
+# A helper as `mutmut run` writes it into mutants/ (mutmut 3.8.1, measured
+# on a two-file project): its header, the trampolined function, the
+# original and one mutant, `n + 1` made `n - 1`.
+MUTATED_HELPER = """import sys
+
+
+from mutmut.mutation.trampoline import wrap_in_trampoline as _mutmut_mutated, MutantDict
+mutants_x_answer__mutmut: MutantDict = {}  # type: ignore
+
+
+@_mutmut_mutated(mutants_x_answer__mutmut)
+def answer(n):
+    return n + 1
+
+
+def x_answer__mutmut_orig(n):
+    return n + 1
+
+
+def x_answer__mutmut_1(n):
+    return n - 1
+
+mutants_x_answer__mutmut['_mutmut_orig'] = x_answer__mutmut_orig
+mutants_x_answer__mutmut['x_answer__mutmut_1'] = x_answer__mutmut_1
+
+
+if __name__ == "__main__":
+    print(answer(int(sys.argv[1])))
+"""
+# The helper's test, in the canon's shape: it starts the helper as a child
+# through hermetic.env, the one way a child's environment is built.
+HELPER_TEST = """import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+import hermetic
+
+HERE = Path(__file__).resolve().parent
+
+
+class Answer(unittest.TestCase):
+    def test_answer(self):
+        done = subprocess.run(
+            [sys.executable, str(HERE / "helper.py"), "1"],
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual((done.returncode, done.stdout), (0, "2\\n"), done.stderr)
+"""
 VENV: dict[str, Path] = {}
 
 
@@ -125,9 +202,7 @@ def setUpModule() -> None:
     package.mkdir(parents=True)
     (package.parent / "__init__.py").write_text("", encoding="utf-8")
     (package / "__init__.py").write_text("", encoding="utf-8")
-    (package / "trampoline.py").write_text(
-        "wrap_in_trampoline = None\n", encoding="utf-8"
-    )
+    (package / "trampoline.py").write_text(STAND_IN_TRAMPOLINE, encoding="utf-8")
     (package.parent / "configuration.py").write_text(CONFIGURATION, encoding="utf-8")
     VENV["python"] = python
     VENV["site"] = Path(site)
@@ -813,6 +888,80 @@ class ChildConfiguration(Planted):
         done = self.child(self.write_hook(self.scratch()), self.tree)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, "ran\n")
+
+
+class MutatedCopy(Planted):
+    """A mutated helper and its test, as mutmut runs them (#1542).
+
+    Three dispatched runs each stopped on a different test, because the
+    statistics pass stops at the first failure; measured whole, every
+    failure was one traceback: a mutated helper's first import is
+    mutmut's trampoline, and a child whose environment was not handed
+    the leg's hook could not import it. This row keeps that from
+    returning one dispatch at a time.
+    """
+
+    def copy(self) -> Path:
+        """Plant the run directory and its mutated copy, as mutmut lays them out.
+
+        Returns:
+            The copy, `mutants/`.
+
+        """
+        self.track("pyproject.toml", CONFIG)
+        copy = self.tree / "mutants"
+        copy.mkdir()
+        (copy / "helper.py").write_text(MUTATED_HELPER, encoding="utf-8")
+        (copy / "test_helper.py").write_text(HELPER_TEST, encoding="utf-8")
+        shutil.copy(BELT / "hermetic.py", copy / "hermetic.py")
+        return copy
+
+    def test_the_statistics_environment_passes(self) -> None:
+        """The helper's test, run as mutmut's statistics pass runs it, passes."""
+        copy = self.copy()
+        hook = self.tmp / "hook"
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        written = subprocess.run(
+            [sys.executable, str(BELT / "mutants-python.py"), "hook", str(hook)],
+            cwd=self.tree,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(written.returncode, 0, written.stderr)
+        done = subprocess.run(
+            [sys.executable, "-m", "unittest", "test_helper"],
+            cwd=copy,
+            env=self.env | {"PYTHONPATH": str(hook), "MUTANT_UNDER_TEST": "stats"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_child_through_hermetic_runs_the_mutant(self) -> None:
+        """A child that imports the helper runs the mutant the parent names.
+
+        Fails where hermetic.env drops MUTANT_UNDER_TEST: the child runs
+        the original for every mutant. A child that runs the helper as a
+        SCRIPT runs the original whatever it is handed (its functions'
+        module is `__main__`, never mutmut's name for it); #1673 holds
+        that.
+        """
+        copy = self.copy()
+        planted = {"MUTANT_UNDER_TEST": "helper.x_answer__mutmut_1"}
+        with mock.patch.dict(os.environ, planted | {"PYTHONPATH": str(VENV["site"])}):
+            env = hermetic.env()
+        done = subprocess.run(
+            [sys.executable, "-c", "import helper; print(helper.answer(1))"],
+            cwd=copy,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual((done.returncode, done.stdout), (0, "0\n"), done.stderr)
 
 
 class ConfigReader(unittest.TestCase):
