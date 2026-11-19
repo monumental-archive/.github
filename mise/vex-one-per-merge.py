@@ -18,8 +18,12 @@ The refusal prints `vex-one-per-merge.txt`, the one sentence the
 workflow prints too, then the files.
 
 Skips clean, by name: where no decision is tracked, where there is no
-`origin/main`, and where nothing is ahead of it (the default branch
-itself). Network-free, so deterministic.
+`origin/main`, where nothing is ahead of it (the default branch
+itself), and in a merge group. A group's range holds every entry queued
+ahead of it too, so two pull requests with one decision each would red
+the second for obeying the rule. Nothing is lost: the pull-request run
+judged the same head, and the gate's queue-head step (#1422) refuses a
+group not built from that head. Network-free, so deterministic.
 
 Usage:
   vex-one-per-merge.py      (in the repository, from its root)
@@ -27,6 +31,7 @@ Usage:
 Exits 0 at most one changed, 1 more than one.
 """
 
+import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -84,6 +89,12 @@ def main() -> int:
     """
     if not git("ls-files", "--", DECISIONS).strip():
         print(f"{NAME}: no VEX decisions tracked, skipped")
+        return 0
+    if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+        print(
+            f"{NAME}: judged on the pull request: a merge group's range also"
+            " holds the entries queued ahead of it, skipped"
+        )
         return 0
     # ruff: ignore[subprocess-without-shell-equals-true]
     known = subprocess.run(

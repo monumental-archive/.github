@@ -95,8 +95,8 @@ class Tree:
         """Point origin/main at HEAD: everything so far is the default branch."""
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
-    def run(self) -> subprocess.CompletedProcess[str]:
-        """Run the task's body in the tree.
+    def run(self, event: str = "") -> subprocess.CompletedProcess[str]:
+        """Run the task's body in the tree, as the CI event `event`.
 
         Returns:
             The finished process, output captured.
@@ -106,7 +106,11 @@ class Tree:
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=self.dir,
-            env={**self.env, "ORG_BELT_DIR": str(BELT)},
+            env={
+                **self.env,
+                "ORG_BELT_DIR": str(BELT),
+                **({"GITHUB_EVENT_NAME": event} if event else {}),
+            },
             capture_output=True,
             text=True,
             check=False,
@@ -195,6 +199,28 @@ class OnePerMerge(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         skipped = "nothing ahead of origin/main (the default branch itself), skipped"
         self.assertIn(f"{TASK}: {skipped}", done.stdout)
+
+    def test_a_merge_group_skips_by_name(self) -> None:
+        """A group's range holds the entries queued ahead, so it is not judged."""
+        self.tree.commit(B)
+        self.tree.commit(C)
+        done = self.tree.run("merge_group")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(
+            f"{TASK}: judged on the pull request: a merge group's range also"
+            " holds the entries queued ahead of it, skipped",
+            done.stdout,
+        )
+
+    def test_the_same_tree_is_red_on_a_pull_request(self) -> None:
+        """The tree the merge-group row skips is red as a pull request."""
+        self.tree.commit(B)
+        self.tree.commit(C)
+        done = self.tree.run("pull_request")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn(f"{TASK}: {SENTENCE}:", done.stderr)
+        self.assertIn(f"  {B}\n", done.stderr)
+        self.assertIn(f"  {C}\n", done.stderr)
 
     def test_no_origin_main_skips_by_name(self) -> None:
         """A clone with no default branch to diverge from skips."""
