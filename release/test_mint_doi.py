@@ -134,6 +134,7 @@ GH_STUB = """#!/usr/bin/env bash
 # Stub `gh`: the tag's tarball, and CITATION.cff base64-encoded the way
 # the contents API's .content carries it; an empty one is a 404, which
 # gh reports by printing the error body to stdout and exiting 1.
+# STUB_CFF_STATUS makes gh fail AFTER printing a decodable body (#103).
 set -euo pipefail
 case "$2" in
   */tarball/*) printf 'tarball' ;;
@@ -143,6 +144,7 @@ case "$2" in
       exit 1
     fi
     cat "${STUB_CFF_B64}"
+    exit "${STUB_CFF_STATUS:-0}"
     ;;
   *) echo "gh stub: refusing $*" >&2; exit 1 ;;
 esac
@@ -549,6 +551,7 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
     version: str = "1.3.5",
     repo: str = "monumental-archive/edtf",
     cff: str | None = None,
+    cff_status: int = 0,
 ) -> Run:
     """Run the helper with CITATION.cff stating `licence`.
 
@@ -563,6 +566,7 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         version: the version being released.
         repo: the repository releasing.
         cff: the whole CITATION.cff, overriding `licence` and `concept`.
+        cff_status: gh's exit status on the CITATION.cff read.
 
     Returns:
         The run's status, output and the fake's request log.
@@ -593,6 +597,7 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
             "GITHUB_REPOSITORY": repo,
             "GITHUB_STEP_SUMMARY": str(summary),
             "STUB_CFF_B64": str(b64),
+            "STUB_CFF_STATUS": str(cff_status),
         }
         out = io.StringIO()
         with (
@@ -1064,7 +1069,7 @@ class ALaterMint(unittest.TestCase):
         cls.run_ = canon_run(canon_zenodo())
 
     def test_it_publishes_the_new_version(self) -> None:
-        """Green, with the new version's DOI and no first-mint instruction."""
+        """Green through the concept's redirect, with the new DOI (#337)."""
         self.assertEqual(self.run_.returncode, 0, self.run_.stdout)
         self.assertIn(f"::notice::DOI 10.5281/zenodo.{CANON_DRAFT}", self.run_.stdout)
         self.assertNotIn("First mint", self.run_.summary)
@@ -1409,6 +1414,22 @@ class FirstMintGuards(unittest.TestCase):
     def test_no_citation_refuses_by_name(self) -> None:
         """Gh failing to fetch CITATION.cff is red, naming the tag."""
         run = run_helper("0BSD", cff="")
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::no CITATION.cff at v1.3.5 — a DOI-minting repo derives one"
+            " from REUSE.toml (fix:citation; lint:citation gates this upstream)",
+            run.stdout,
+        )
+        self.assertEqual(run.requests, [])
+
+    def test_a_failed_read_refuses_though_its_body_decodes(self) -> None:
+        """Gh's exit status decides, never the decoder (#103).
+
+        A 404 reached the fallback only because its error body happened
+        not to be valid base64. Here gh fails after printing a body that
+        decodes to a whole CITATION.cff: the read failed, so it refuses.
+        """
+        run = run_helper("0BSD", cff_status=1)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
             "::error::no CITATION.cff at v1.3.5 — a DOI-minting repo derives one"

@@ -283,7 +283,7 @@ class ControlFileRefusal(PreviousRelease):
         self.assertEqual(1, len(self.gh_calls()))
 
     def test_the_extensions_first_publish(self) -> None:
-        """A previous release that shipped no tarball of this extension."""
+        """A previous release that shipped no tarball of this extension (#87)."""
         result = self.previous("guard", tag="v1.1.0", shipped="0")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
