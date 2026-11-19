@@ -1,0 +1,117 @@
+# Probe for #1608: every way mise's task documentation
+# (docs/tasks/task-configuration.md at v2026.11.7, the belt's pinned
+# mise) lists for one task to run another, each in a task of its own.
+#
+# tasks-info.json beside this file is its capture, made at mise
+# 2026.11.7 with this file copied to an empty directory as mise.toml and
+# the global config unloaded (MISE_GLOBAL_CONFIG_FILE, MISE_CONFIG_DIR
+# and MISE_SYSTEM_CONFIG_FILE pointed at absent files): the name list of
+# `mise tasks ls --hidden --json`, and `mise tasks info <name> --json`
+# for each name, with that directory's path written as `<probe>`, then
+# laid out by fix:biome. Recapture it when the pin moves; never edit it
+# by hand.
+#
+# Measured there: a depends string with arguments is reported as an
+# array, `["unit", "--reporter=dot"]`; one with a `VAR=value` prefix as a
+# table, `{"task": "unit", "env": {...}}`; a pattern as written, and
+# `tasks info <pattern>` answers only its first match while a run of the
+# pattern runs every match; `extends` is resolved into `run`.
+
+[tasks.unit]
+run = "pnpm exec vitest run tests/unit"
+
+[tasks."unit:extra"]
+run = "echo extra"
+
+[tasks."unit:more:deep"]
+run = "echo deep"
+
+[tasks.lint]
+run = "echo lint"
+
+# run: a `{ task }` entry, with and without args and env.
+[tasks.run-task]
+run = [{ task = "unit" }, "echo after"]
+
+[tasks.run-task-args]
+run = [{ task = "unit", args = ["--reporter=dot"], env = { CI = "1" } }]
+
+# run: a `{ tasks }` entry, run in parallel.
+[tasks.run-tasks]
+run = [{ tasks = ["lint", "unit"] }]
+
+# run: a `{ task }` entry naming a pattern.
+[tasks.run-task-pattern]
+run = [{ task = "unit:**" }]
+
+# run: one string.
+[tasks.run-string]
+run = "echo one"
+
+# depends: a name, a name with arguments, an env-prefixed name, a
+# pattern, an array, and a table.
+[tasks.depends-name]
+depends = ["unit"]
+run = "echo test"
+
+[tasks.depends-args]
+depends = ["unit --reporter=dot"]
+run = "echo test"
+
+[tasks.depends-env]
+depends = ["NODE_ENV=test unit"]
+run = "echo test"
+
+[tasks.depends-pattern]
+depends = ["unit:*"]
+run = "echo test"
+
+[tasks.depends-array]
+depends = [["unit", "--reporter=dot"]]
+run = "echo test"
+
+[tasks.depends-table]
+depends = [
+  { task = "unit", args = [
+    "--reporter=dot",
+  ], env = { CI = "1" }, optional = true },
+]
+run = "echo test"
+
+[tasks.depends-string]
+depends = "unit"
+run = "echo test"
+
+# depends_post: the same forms after the task.
+[tasks.post-name]
+depends_post = ["unit"]
+run = "echo test"
+
+[tasks.post-table]
+depends_post = [{ task = "unit" }]
+run = "echo test"
+
+# wait_for: waits, never adds a task to the run.
+[tasks.wait-for]
+wait_for = ["unit"]
+run = "echo test"
+
+# extends: inherits run, here a `{ task }` entry, from a template.
+[task_templates.runs-unit]
+run = [{ task = "unit" }]
+
+[tasks.extends]
+extends = "runs-unit"
+
+# A cycle through a depends edge and a run reference, with no vitest.
+[tasks.cycle-a]
+depends = ["cycle-b"]
+run = "echo a"
+
+[tasks.cycle-b]
+run = [{ task = "cycle-a" }]
+
+# No vitest anywhere it reaches.
+[tasks.none]
+depends = ["lint"]
+run = [{ task = "run-string" }, "echo none"]
