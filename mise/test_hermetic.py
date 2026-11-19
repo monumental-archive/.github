@@ -19,7 +19,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 from unittest import mock
 
 import call_names
@@ -27,11 +27,12 @@ import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
 HERE = Path(__file__).resolve().parent
 
 CANON = HERE.parent
-GIT = shutil.which("git") or "git"
+GIT = hermetic.tool("git")
 ROOTS = ("mise", "release", ".github/rekor-monitor", "settings")
 
 # The release job's step inputs, the runner's ambient, and the
@@ -619,6 +620,85 @@ class Tracked(unittest.TestCase):
             [hermetic.top(s) for s in ("*.py", ":!v/**", ":^v", ":(glob)**/x")],
             [":(top)*.py", ":(top,exclude)v/**", ":(top,exclude)v", ":(top,glob)**/x"],
         )
+
+
+def on_path(path: str) -> AbstractContextManager[object]:
+    """Replace the suite's PATH for one block.
+
+    Returns:
+        The patch, entered by the row.
+
+    """
+    values: dict[str, str] = {"PATH": path}
+    return mock.patch.dict(os.environ, values)
+
+
+class Tool(unittest.TestCase):
+    """hermetic.tool and hermetic.optional_tool (#1684)."""
+
+    @override
+    def setUp(self) -> None:
+        """Plant a directory holding one executable, `planted-tool`."""
+        self.bin = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.bin)
+        (self.bin / "planted-tool").write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.bin / "planted-tool").chmod(0o755)
+
+    def test_a_present_tool_is_its_absolute_path(self) -> None:
+        """Found on PATH, the path is absolute."""
+        with on_path(str(self.bin)):
+            found = hermetic.tool("planted-tool")
+        self.assertEqual(str(self.bin / "planted-tool"), found)
+        self.assertTrue(Path(found).is_absolute())
+
+    def test_a_relative_path_entry_still_gives_an_absolute_path(self) -> None:
+        """A relative PATH entry is made absolute and normal, never resolved."""
+        with on_path(os.path.relpath(self.bin)):
+            found = hermetic.tool("planted-tool")
+        self.assertEqual(str(self.bin / "planted-tool"), found)
+
+    def test_a_link_is_not_resolved(self) -> None:
+        """A mise shim is a link that dispatches on its own name."""
+        shims = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, shims)
+        (shims / "shim").symlink_to(self.bin / "planted-tool")
+        self.assertEqual(str(shims / "shim"), hermetic.tool("shim", path=str(shims)))
+
+    def test_a_missing_tool_is_red_by_name(self) -> None:
+        """The message names the tool, where it looked, and the remedy."""
+        with (
+            on_path(str(self.bin)),
+            self.assertRaises(hermetic.MissingToolError) as raised,
+        ):
+            hermetic.tool("no-such-tool")
+        self.assertEqual(
+            "hermetic.tool: no-such-tool is not on PATH;"
+            " the belt provides it: run mise install",
+            str(raised.exception),
+        )
+
+    def test_the_search_path_is_honoured(self) -> None:
+        """`path=` is searched instead of the suite's PATH, both ways."""
+        empty = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, empty)
+        with on_path(str(empty)):
+            found = hermetic.tool("planted-tool", path=str(self.bin))
+        self.assertEqual(str(self.bin / "planted-tool"), found)
+        with (
+            on_path(str(self.bin)),
+            self.assertRaises(hermetic.MissingToolError) as raised,
+        ):
+            hermetic.tool("planted-tool", path=str(empty))
+        self.assertIn(f"the search path {str(empty)!r}", str(raised.exception))
+
+    def test_an_optional_tool_is_none_when_absent(self) -> None:
+        """Absence is the row's decision: None, never a raise."""
+        with on_path(str(self.bin)):
+            self.assertIsNone(hermetic.optional_tool("no-such-tool"))
+            self.assertEqual(
+                str(self.bin / "planted-tool"),
+                hermetic.optional_tool("planted-tool"),
+            )
 
 
 class TheLaw(unittest.TestCase):

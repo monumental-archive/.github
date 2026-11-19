@@ -29,6 +29,18 @@ A test that lists the canon's own tree calls `tracked`, never `git
 ls-files` in the tree: mutmut runs the suite in `mutants/`, a gitignored
 copy of the tree, where git lists nothing under the copy and every such
 test failed the statistics pass (self-mutants run 44597898554).
+
+A test finds the tools it runs here too (#1684):
+
+    BASH = hermetic.tool("bash")                  # absolute, or raises
+    DASH = hermetic.optional_tool("dash")         # None when absent
+
+`tool` is for a tool the row needs: a missing one is red by name at the
+lookup, never a `TypeError` in `subprocess` three frames later, and
+never a bare name the child's own PATH resolves to something else.
+`optional_tool` is for a lookup whose absence is a decision the row
+makes: a skip, or a planted "tool missing". No test calls
+`shutil.which` itself; `test_hermetic.py` holds them to that.
 """
 
 import os
@@ -86,6 +98,48 @@ TOOLS: dict[str, dict[str, str]] = {}
 
 IDENTITY_NAME = "hermetic harness"
 IDENTITY_EMAIL = "harness@example.invalid"
+
+
+class MissingToolError(RuntimeError):
+    """A tool a test needs is not on the search path (#1684)."""
+
+
+def optional_tool(name: str, *, path: str | None = None) -> str | None:
+    """Find a tool whose absence the row decides on.
+
+    `path` is the search path; without one, the suite's PATH.
+
+    Returns:
+        The tool's absolute path, or None when it is not found.
+
+    """
+    found = shutil.which(name, path=path)
+    return None if found is None else os.path.normpath(Path(found).absolute())
+
+
+def tool(name: str, *, path: str | None = None) -> str:
+    """Find a tool the row needs, or say which one is missing.
+
+    `path` is the search path; without one, the suite's PATH. The path
+    is absolute, not resolved: a mise shim is a link that dispatches on
+    its own name.
+
+    Returns:
+        The tool's absolute path.
+
+    Raises:
+        MissingToolError: the tool is not on the search path.
+
+    """
+    found = optional_tool(name, path=path)
+    if found is None:
+        where = "PATH" if path is None else f"the search path {path!r}"
+        msg = (
+            f"hermetic.tool: {name} is not on {where};"
+            " the belt provides it: run mise install"
+        )
+        raise MissingToolError(msg)
+    return found
 
 
 def env(
