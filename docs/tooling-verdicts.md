@@ -2194,9 +2194,12 @@ statement coverage read it as 90.0% and saw one of the three.
 `-branch` mode was measured too and refused: it missed the planted
 `a && b` (4/6), the very gap the issue named.
 
-*What the leg does for gobco* (`go-branches` in
-`mise/coverage-measure.sh`, held by stub rows in
-`mise/test_coverage_go_branches.py`; no row runs gobco):
+*What the leg does for gobco* (`mise/coverage-go-branches.sh`, held by
+stub rows in `mise/test_coverage_go_branches.py`; no row runs gobco). A
+helper of its own rather than a selector of `coverage-measure.sh`: the
+gate's tool derivation (#1410) reads every call in a script a gate task
+runs, and `coverage:check` runs that one, so a gobco call there would
+record the gate as calling a tool it never runs.
 
 - **One package per call.** v1.3.4 panics on more than one ("checking
   multiple packages doesn't work yet"), so the leg loops `go list ./...`

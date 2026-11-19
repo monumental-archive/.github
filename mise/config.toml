@@ -482,8 +482,8 @@ python = "3.15.2"
 "go:github.com/sivchari/gomu/cmd/gomu" = { version = "0.3.0", lazy = true, lazy_bins = [
   "gomu",
 ] }
-# Go condition coverage (#1546): coverage-measure.sh's `go-branches`
-# leg, held by audit:coverage-go-branches on the Monday cron, never the
+# Go condition coverage (#1546): mise/coverage-go-branches.sh, the
+# `go-branches` leg, held by audit:coverage-go-branches on the Monday cron, never the
 # gate (6.15 times `go test` on stele, measured per package). Chosen
 # over gocoverageplus on a measured comparison (docs/tooling-verdicts.md):
 # the only one that reported a half-taken `a && b`. Built from source by
@@ -7213,7 +7213,7 @@ if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
 elif [[ -f Cargo.toml ]]; then
   echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
 fi
-[[ ! -f go.mod ]] || legs+=$'\n'"$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt go-branches)" || exit 1
+[[ ! -f go.mod ]] || legs+=$'\n'"$("${ORG_BELT_DIR}/coverage-go-branches.sh" coverage:adopt)" || exit 1
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" write \
   --provenance "coverage:adopt" --adopt <<< "${legs}"
 '''
@@ -8355,7 +8355,7 @@ description = "Hold the Go condition-coverage floor (.coverage-floor's go-branch
 dir = "{{cwd}}"
 # The Go half of #1336's property 2 (#1546), beside the Rust half above.
 # Go's own coverage counts statements, so the figure is gobco's condition
-# coverage: coverage-measure.sh's `go-branches` leg, one package per
+# coverage: mise/coverage-go-branches.sh, one package per
 # call. Held here, on the Monday cron, because it costs 6.15 times
 # `go test` (measured on stele) where the gate's budget is a fifth. The
 # floor is the `go-branches` line coverage:adopt derived, read through
@@ -8371,7 +8371,7 @@ floor=$(python3 "${ORG_BELT_DIR}/coverage-floor.py" read --leg go-branches) || e
   echo "audit:coverage-go-branches: no go-branches line in .coverage-floor, skipped"
   exit 0
 }
-pct=$("${ORG_BELT_DIR}/coverage-measure.sh" audit:coverage-go-branches go-branches) || exit 1
+pct=$("${ORG_BELT_DIR}/coverage-go-branches.sh" audit:coverage-go-branches) || exit 1
 if [[ ${pct} != "go-branches "* ]] || awk -v p="${pct#go-branches }" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
   echo "audit:coverage-go-branches: go-branches: ${pct#go-branches }% is below the derived floor ${floor}%" >&2
   exit 1

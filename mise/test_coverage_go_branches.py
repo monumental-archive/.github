@@ -3,7 +3,7 @@
 
 `audit:coverage-go-branches` holds the `go-branches` line of
 `.coverage-floor` on the Monday cron, measured by
-`mise/coverage-measure.sh`'s `go-branches` leg with gobco;
+`mise/coverage-go-branches.sh` with gobco;
 `coverage:adopt` writes that line. The bodies under test are the tasks'
 own `run` strings, read out of mise/config.toml with tomllib and run by
 bash in a planted git tree, and they call the real measurement script
