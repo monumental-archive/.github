@@ -270,6 +270,20 @@ class HelperRows(unittest.TestCase):
             read.stderr,
         )
 
+    def test_an_oid_that_is_not_a_number_is_never_formatted(self) -> None:
+        """A listing row whose oid is not digits is unreadable, by name."""
+        odd = {"7; DROP TABLE t": ("public.odd()", "1\t1\t1\t1\t0")}
+        collected, read = self.measure(odd)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: plpgsql_check cannot read public.odd(): its oid"
+            " '7; DROP TABLE t' is not a number\n"
+            "leg: plpgsql: 1 function(s) unreadable — a function the extension"
+            " cannot read is never dropped from the total\n",
+            read.stderr,
+        )
+
     def test_no_plpgsql_function_prints_no_totals(self) -> None:
         """A database with no PL/pgSQL function has nothing to total."""
         collected, read = self.measure({})
@@ -319,6 +333,34 @@ class HelperRows(unittest.TestCase):
         self.assertEqual(
             "leg: plpgsql: the test task wrote no report — its teardown must"
             " call plpgsql-coverage.py collect while ORG_PLPGSQL_COVERAGE is set\n",
+            read.stderr,
+        )
+
+    def test_a_file_that_is_not_a_report_is_refused_by_what(self) -> None:
+        """The one decoder names what about the file is wrong."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        planted = tmp / "report.json"
+        entry = {
+            "function": "public.guard()",
+            "statements": 0.8,
+            "branches": "1",
+            "statement_count": 5,
+            "executed": 4,
+            "branch_free": False,
+        }
+        document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
+        planted.write_text(json.dumps(document), encoding="utf-8")
+        read = run(
+            [sys.executable, str(HELPER), "totals", "leg", str(planted)],
+            hermetic.env(),
+            tmp,
+        )
+        self.assertEqual(1, read.returncode)
+        self.assertEqual("", read.stdout)
+        self.assertEqual(
+            "leg: plpgsql: the report is not a coverage report: function 0:"
+            " 'statements' is not a string\n",
             read.stderr,
         )
 

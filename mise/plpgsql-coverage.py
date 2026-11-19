@@ -72,11 +72,14 @@ figures beside the totals, so the totals can be checked by hand.
 
 import json
 import os
+import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
+from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
+from typing import cast
 
 NAME = "plpgsql-coverage"
 ENV = "ORG_PLPGSQL_COVERAGE"
@@ -120,12 +123,60 @@ SELECT plpgsql_coverage_statements({oid}::regprocedure),
                                    OR stmtname LIKE 'FOR%') AS branching
           FROM plpgsql_profiler_function_statements_tb({oid}::regprocedure)) s"""
 
+OID = re.compile(r"[0-9]+")
+SETTINGS = 2  # the profiler and the preload list
+LISTING = 2  # an oid and a signature
 PLACES = Decimal("0.01")
 HUNDRED = Decimal(100)
 
 
+@dataclass(frozen=True)
+class Reading:
+    """One function the extension read.
+
+    The fractions are Decimals parsed from the text psql printed, never
+    floats: a figure must never be rounded up past a floor on its way
+    through.
+    """
+
+    function: str
+    statements: Decimal
+    branches: Decimal
+    statement_count: int
+    executed: int
+    branch_free: bool
+
+
+@dataclass(frozen=True)
+class Unreadable:
+    """One function the extension could not read, with the reason."""
+
+    function: str
+    error: str
+
+
+@dataclass(frozen=True)
+class Report:
+    """A collection that reached the database."""
+
+    profiler: str
+    preload: str
+    functions: tuple[Reading | Unreadable, ...]
+
+
+@dataclass(frozen=True)
+class Failed:
+    """A collection that could not read the database at all."""
+
+    error: str
+
+
 class ReadError(Exception):
     """A read failed (psql, or mise for a task); the message names it."""
+
+
+class NotAReportError(Exception):
+    """The report file does not decode to a coverage report."""
 
 
 def psql(conninfo: str, sql: str) -> list[list[str]]:
@@ -165,29 +216,87 @@ def psql(conninfo: str, sql: str) -> list[list[str]]:
     return [line.split("\t") for line in done.stdout.splitlines() if line]
 
 
-def read_function(conninfo: str, oid: str, signature: str) -> dict:
+def read_function(conninfo: str, oid: str, signature: str) -> Reading | Unreadable:
     """Read one function's figures, or the reason they cannot be read.
 
     Returns:
-        The function's report entry.
+        The function's reading, or why it is unreadable.
 
     """
-    entry: dict = {"function": signature}
+    if not OID.fullmatch(oid):
+        return Unreadable(signature, f"its oid '{oid}' is not a number")
     try:
         rows = psql(conninfo, READ_SQL.format(oid=oid))
-        statements, branches, count, executed, branching = rows[0]
-        entry |= {
-            "statements": float(statements),
-            "branches": float(branches),
-            "statement_count": int(count),
-            "executed": int(executed),
-            "branch_free": Decimal(branches) == 1 and int(branching) == 0,
-        }
     except ReadError as exc:
-        entry["error"] = str(exc)
+        return Unreadable(signature, str(exc))
+    try:
+        statements, branches, count, executed, branching = rows[0]
+        return Reading(
+            function=signature,
+            statements=Decimal(statements),
+            branches=Decimal(branches),
+            statement_count=int(count),
+            executed=int(executed),
+            branch_free=Decimal(branches) == 1 and int(branching) == 0,
+        )
     except IndexError, ValueError, InvalidOperation:
-        entry["error"] = f"unreadable figures: {rows!r}"
-    return entry
+        return Unreadable(signature, f"unreadable figures: {rows!r}")
+
+
+def gather(conninfo: str) -> Report | Failed:
+    """Read the settings and every function from the database.
+
+    Returns:
+        The report, or the failure that stopped the collection.
+
+    """
+    try:
+        settings = psql(conninfo, META_SQL)
+        psql(conninfo, CREATE_SQL)
+        listed = psql(conninfo, LIST_SQL)
+    except FileNotFoundError:
+        return Failed("psql is not on PATH (the repository's own client)")
+    except ReadError as exc:
+        return Failed(str(exc))
+    if len(settings) != 1 or len(settings[0]) != SETTINGS:
+        return Failed(f"unreadable settings from the database: {settings!r}")
+    functions: list[Reading | Unreadable] = []
+    for row in listed:
+        if len(row) != LISTING:
+            return Failed(f"unreadable function listing: {row!r}")
+        functions.append(read_function(conninfo, row[0], row[1]))
+    return Report(settings[0][0], settings[0][1], tuple(functions))
+
+
+def encode(report: Report | Failed) -> str:
+    """Write a report in the helper's own wire format.
+
+    Returns:
+        The JSON text; fractions as the decimal text psql printed.
+
+    """
+    if isinstance(report, Failed):
+        document: dict[str, object] = {"error": report.error}
+    else:
+        entries: list[dict[str, object]] = []
+        for f in report.functions:
+            if isinstance(f, Unreadable):
+                entries.append({"function": f.function, "error": f.error})
+            else:
+                entries.append({
+                    "function": f.function,
+                    "statements": str(f.statements),
+                    "branches": str(f.branches),
+                    "statement_count": f.statement_count,
+                    "executed": f.executed,
+                    "branch_free": f.branch_free,
+                })
+        document = {
+            "profiler": report.profiler,
+            "preload": report.preload,
+            "functions": entries,
+        }
+    return json.dumps(document, indent=2) + "\n"
 
 
 def collect(conninfo: str) -> int:
@@ -204,23 +313,153 @@ def collect(conninfo: str) -> int:
             file=sys.stderr,
         )
         return 1
-    report: dict = {}
-    try:
-        profiler, preload = psql(conninfo, META_SQL)[0]
-        report |= {"profiler": profiler, "preload": preload}
-        psql(conninfo, CREATE_SQL)
-        listed = psql(conninfo, LIST_SQL)
-        report["functions"] = [
-            read_function(conninfo, oid, signature) for oid, signature in listed
-        ]
-    except FileNotFoundError:
-        report["error"] = "psql is not on PATH (the repository's own client)"
-    except ReadError as exc:
-        report["error"] = str(exc)
-    except ValueError:
-        report["error"] = "unreadable settings from the database"
-    Path(target).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    Path(target).write_text(encode(gather(conninfo)), encoding="utf-8")
     return 0
+
+
+def text_field(document: dict[str, object], key: str, where: str) -> str:
+    """Read one string field.
+
+    Returns:
+        The field.
+
+    Raises:
+        NotAReportError: the field is absent or not a string.
+
+    """
+    value = document.get(key)
+    if not isinstance(value, str):
+        msg = f"{where}: '{key}' is not a string"
+        raise NotAReportError(msg)
+    return value
+
+
+def count_field(document: dict[str, object], key: str, where: str) -> int:
+    """Read one non-negative integer field (never a boolean).
+
+    Returns:
+        The field.
+
+    Raises:
+        NotAReportError: the field is absent, not an integer, or negative.
+
+    """
+    value = document.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        msg = f"{where}: '{key}' is not a count"
+        raise NotAReportError(msg)
+    return value
+
+
+def fraction_field(document: dict[str, object], key: str, where: str) -> Decimal:
+    """Read one fraction, written as decimal text, between 0 and 1.
+
+    Returns:
+        The fraction.
+
+    Raises:
+        NotAReportError: the field is not decimal text from 0 to 1.
+
+    """
+    text = text_field(document, key, where)
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        value = Decimal(-1)
+    if not value.is_finite() or not 0 <= value <= 1:
+        msg = f"{where}: '{key}' is not a fraction from 0 to 1"
+        raise NotAReportError(msg)
+    return value
+
+
+def as_object(value: object, where: str) -> dict[str, object]:
+    """Narrow a decoded JSON value to an object with string keys.
+
+    Returns:
+        The object.
+
+    Raises:
+        NotAReportError: the value is not a JSON object.
+
+    """
+    if not isinstance(value, dict):
+        msg = f"{where} is not an object"
+        raise NotAReportError(msg)
+    # JSON object keys are strings; the values are read field by field.
+    return cast("dict[str, object]", value)
+
+
+def as_list(value: object, where: str) -> list[object]:
+    """Narrow a decoded JSON value to a list.
+
+    Returns:
+        The list; its items are read one by one.
+
+    Raises:
+        NotAReportError: the value is not a JSON array.
+
+    """
+    if not isinstance(value, list):
+        msg = f"{where} is not a list"
+        raise NotAReportError(msg)
+    return cast("list[object]", value)
+
+
+def decode_function(value: object, where: str) -> Reading | Unreadable:
+    """Decode one function entry, in one of its two shapes.
+
+    Returns:
+        The reading, or the unreadable function.
+
+    Raises:
+        NotAReportError: the entry is neither shape.
+
+    """
+    entry = as_object(value, where)
+    function = text_field(entry, "function", where)
+    if "error" in entry:
+        return Unreadable(function, text_field(entry, "error", where))
+    branch_free = entry.get("branch_free")
+    if not isinstance(branch_free, bool):
+        msg = f"{where}: 'branch_free' is not a boolean"
+        raise NotAReportError(msg)
+    return Reading(
+        function=function,
+        statements=fraction_field(entry, "statements", where),
+        branches=fraction_field(entry, "branches", where),
+        statement_count=count_field(entry, "statement_count", where),
+        executed=count_field(entry, "executed", where),
+        branch_free=branch_free,
+    )
+
+
+def decode(text: str) -> Report | Failed:
+    """Decode a report file: the one place its JSON is read.
+
+    Returns:
+        The typed report.
+
+    Raises:
+        NotAReportError: what about the file is not a coverage report.
+
+    """
+    try:
+        decoded: object = json.loads(text)
+    except ValueError as exc:
+        msg = f"not JSON ({exc})"
+        raise NotAReportError(msg) from exc
+    document = as_object(decoded, "the document")
+    if "error" in document:
+        return Failed(text_field(document, "error", "the document"))
+    listed = as_list(document.get("functions"), "the document: 'functions'")
+    functions = tuple(
+        decode_function(item, f"function {index}") for index, item in enumerate(listed)
+    )
+    return Report(
+        profiler=text_field(document, "profiler", "the document"),
+        preload=text_field(document, "preload", "the document"),
+        functions=functions,
+    )
 
 
 def percent(value: Decimal) -> str:
@@ -233,18 +472,7 @@ def percent(value: Decimal) -> str:
     return str((value * HUNDRED).quantize(PLACES, rounding=ROUND_DOWN))
 
 
-def statement_total(functions: list[dict]) -> tuple[int, int]:
-    """Count covered statements over all statements: the exact figure.
-
-    Returns:
-        (executed, statements) summed over every function.
-
-    """
-    executed = sum(f["executed"] for f in functions)
-    return executed, sum(f["statement_count"] for f in functions)
-
-
-def branch_total(functions: list[dict]) -> Decimal | None:
+def branch_total(readings: list[Reading]) -> Decimal | None:
     """Combine the branch fractions, statement-weighted.
 
     plpgsql_check returns each function's branch fraction without the
@@ -258,15 +486,15 @@ def branch_total(functions: list[dict]) -> Decimal | None:
         The weighted fraction, or None when no function has a branch.
 
     """
-    branching = [f for f in functions if not f["branch_free"]]
-    weight = sum(f["statement_count"] for f in branching)
+    branching = [f for f in readings if not f.branch_free]
+    weight = sum(f.statement_count for f in branching)
     if weight == 0:
         return None
-    covered = sum(Decimal(str(f["branches"])) * f["statement_count"] for f in branching)
+    covered = sum((f.branches * f.statement_count for f in branching), Decimal(0))
     return covered / weight
 
 
-def refusals(label: str, report: dict) -> list[str]:
+def refusals(label: str, report: Report | Failed) -> list[str]:
     """Name every reason the report cannot become a measurement.
 
     Returns:
@@ -274,27 +502,25 @@ def refusals(label: str, report: dict) -> list[str]:
 
     """
     head = f"{label}: plpgsql:"
-    if "error" in report:
-        return [f"{head} the teardown's collection failed: {report['error']}"]
+    if isinstance(report, Failed):
+        return [f"{head} the teardown's collection failed: {report.error}"]
     lines = []
-    if report.get("profiler") != "on":
+    if report.profiler != "on":
         lines.append(
-            f"{head} plpgsql_check.profiler is '{report.get('profiler', '')}' —"
+            f"{head} plpgsql_check.profiler is '{report.profiler}' —"
             " with the profiler off every function reads 0%, which is not a"
             " measurement; start the test database with"
             " -c plpgsql_check.profiler=on"
         )
-    preload = [p.strip() for p in str(report.get("preload", "")).split(",")]
-    if "plpgsql_check" not in preload:
+    if "plpgsql_check" not in [p.strip() for p in report.preload.split(",")]:
         lines.append(
             f"{head} plpgsql_check is not in shared_preload_libraries"
-            f" ('{report.get('preload', '')}') — the profile is per session and"
+            f" ('{report.preload}') — the profile is per session and"
             " the teardown sees none of the suite's; preload plpgsql,plpgsql_check"
         )
-    unread = [f for f in report.get("functions", []) if "error" in f]
+    unread = [f for f in report.functions if isinstance(f, Unreadable)]
     lines.extend(
-        f"{head} plpgsql_check cannot read {f['function']}: {f['error']}"
-        for f in unread
+        f"{head} plpgsql_check cannot read {f.function}: {f.error}" for f in unread
     )
     if unread:
         lines.append(
@@ -312,9 +538,8 @@ def totals(label: str, report_path: str) -> int:
         1 when the report is missing or refused.
 
     """
-    path = Path(report_path)
     try:
-        report = json.loads(path.read_text(encoding="utf-8"))
+        report = decode(Path(report_path).read_text(encoding="utf-8"))
     except FileNotFoundError:
         print(
             f"{label}: plpgsql: the test task wrote no report — its teardown"
@@ -322,35 +547,39 @@ def totals(label: str, report_path: str) -> int:
             file=sys.stderr,
         )
         return 1
-    except ValueError as exc:
-        print(f"{label}: plpgsql: the report is not JSON: {exc}", file=sys.stderr)
+    except NotAReportError as exc:
+        print(
+            f"{label}: plpgsql: the report is not a coverage report: {exc}",
+            file=sys.stderr,
+        )
         return 1
     lines = refusals(label, report)
-    if lines:
+    if lines or isinstance(report, Failed):
         print("\n".join(lines), file=sys.stderr)
         return 1
-    functions = report.get("functions", [])
-    for f in functions:
+    readings = [f for f in report.functions if isinstance(f, Reading)]
+    for f in readings:
         branches = (
             "none (left out of the branch total)"
-            if f["branch_free"]
-            else f"{percent(Decimal(str(f['branches'])))}%"
+            if f.branch_free
+            else f"{percent(f.branches)}%"
         )
         print(
-            f"{label}: plpgsql: {f['function']}:"
-            f" statements {f['executed']} of {f['statement_count']}"
-            f" ({percent(Decimal(str(f['statements'])))}%),"
+            f"{label}: plpgsql: {f.function}:"
+            f" statements {f.executed} of {f.statement_count}"
+            f" ({percent(f.statements)}%),"
             f" branches {branches}",
             file=sys.stderr,
         )
-    if not functions:
+    if not readings:
         print(
             f"{label}: plpgsql: the database holds no PL/pgSQL function",
             file=sys.stderr,
         )
         return 0
-    executed, statements = statement_total(functions)
-    branched = branch_total(functions)
+    executed = sum(f.executed for f in readings)
+    statements = sum(f.statement_count for f in readings)
+    branched = branch_total(readings)
     stmt_pct = (
         percent(Decimal(executed) / Decimal(statements)) if statements else "0.00"
     )
@@ -370,7 +599,7 @@ def totals(label: str, report_path: str) -> int:
     return 0
 
 
-def task_info(name: str) -> dict:
+def task_info(name: str) -> dict[str, object]:
     """Read one task as mise resolved it, read-only (never a nested run).
 
     Returns:
@@ -387,10 +616,14 @@ def task_info(name: str) -> dict:
         text=True,
         check=False,
     )
+    msg = f"cannot read task '{name}' with mise tasks info"
     if done.returncode != 0:
-        msg = f"cannot read task '{name}' with mise tasks info"
         raise ReadError(msg)
-    return json.loads(done.stdout)
+    try:
+        decoded: object = json.loads(done.stdout)
+        return as_object(decoded, f"task '{name}'")
+    except (ValueError, NotAReportError) as exc:
+        raise ReadError(msg) from exc
 
 
 def scripts(name: str, seen: set[str]) -> list[tuple[str, str]]:
@@ -409,14 +642,19 @@ def scripts(name: str, seen: set[str]) -> list[tuple[str, str]]:
     seen.add(name)
     info = task_info(name)
     out: list[tuple[str, str]] = []
-    for dep in info.get("depends") or []:
-        dep_name = dep if isinstance(dep, str) else dep.get("task", "")
+    for dep in as_list(info.get("depends") or [], f"task '{name}' depends"):
+        dep_name = dep if isinstance(dep, str) else ""
+        if isinstance(dep, dict):
+            task = as_object(dep, f"task '{name}' depends").get("task")
+            dep_name = task if isinstance(task, str) else ""
         out += scripts(dep_name, seen)
-    for run in info.get("run") or []:
+    directory = info.get("dir")
+    where = directory if isinstance(directory, str) and directory else str(Path.cwd())
+    for run in as_list(info.get("run") or [], f"task '{name}' run"):
         if not isinstance(run, str):
             msg = f"task '{name}' has a run entry that is not a script"
             raise ReadError(msg)
-        out.append((info.get("dir") or str(Path.cwd()), run))
+        out.append((where, run))
     return out
 
 
