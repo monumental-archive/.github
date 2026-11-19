@@ -66,17 +66,24 @@ criterion would notice; the audit's red is what says the form is owed.
 
 Silver now stands on one remaining MUST:
 
-- `regression_tests_added50` — **Unmet, re-answered 2026-11-18
-  (#1360)**. Window 2026-05-17 to `9f1b3ec`: 213 bugs fixed — the 58
-  `fix` commits that arrived with a test, and 155 of the 176 that
-  arrived without one (the other 21 were not bugs). **50 (23.5%)** are
-  now held by a test shown failing on its own assertion with the fix
-  reverted: 30 of the 58 tests that arrived with their fix, every one
-  revert-checked (#1335 sampled 30, #1360 checked the other 28), and
-  20 tests backfilled under #1360. Counting every test, proven or
-  not: 78 (36.6%). Of the other 135, 119 live in workflow YAML or
-  task bodies (left for #1352), 12 fixed code since removed, and 4 need
-  a live Postgres, a container or macOS; #1360's checklist names each.
+- `regression_tests_added50` — **Unmet, re-answered 2026-11-19
+  (#1360, #1545)**. Window 2026-05-17 to `9f1b3ec`: 213 bugs fixed —
+  the 58 `fix` commits that arrived with a test, and 155 of the 176
+  that arrived without one (the other 21 were not bugs). **76 (35.7%)**
+  are now held by a test shown failing on its own assertion with the
+  bug put back: 30 of the 58 tests that arrived with their fix, every
+  one revert-checked (#1335 sampled 30, #1360 checked the other 28),
+  20 tests backfilled under #1360, and 26 under #1545 for fixes whose
+  logic has left workflow YAML. Counting every test, proven or not:
+  115 (54.0%), the 28 unproven tests that arrived with their fix and
+  11 fixes now held by a named stele test added to the 76.
+
+  Of the 98 held by no test: 69 still live in workflow YAML or task
+  bodies (#1360's 119 less the 50 #1545 took up; #1544 extracts
+  them), 2 more were found still in YAML by #1545, 20
+  fixed code since removed, 6 cannot run in the gate (a live
+  Postgres, a container or macOS), and 1 waits on a stele test
+  (stele#486). The checklists on #1360 and #1545 name each.
 
   `mise/regression-count.py` sorts every `fix`-typed commit into test
   added, no test, not a code fix (docs, data, pins, Renovate's
