@@ -140,7 +140,8 @@ while IFS= read -r control; do
   [[ -n ${control} ]] || continue
   name=$(basename "${control}" .control)
   crate_dir=$(dirname "${control}")
-  answer=$("${canon}/release/pgrx/previous-release.py" predecessor \
+  answer=$("${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}" \
+    "${canon}/release/pgrx/previous-release.py" predecessor \
     --repo "${repo_slug}" --version "${version}" --control "${control}") || {
     echo "FAIL: refusing to mint ${tag} — the release listing could not be read" >&2
     echo "  to find ${name}'s predecessor; nothing was minted, re-run this job." >&2

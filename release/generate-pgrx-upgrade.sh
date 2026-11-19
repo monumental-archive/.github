@@ -99,7 +99,7 @@ fi
 # published versions a first publish. Installability is a fact about
 # release assets, so it is settled per extension, in the loop below.
 predecessor_helper="${canon}/release/pgrx/previous-release.py"
-graph_targets=$("${predecessor_helper}" graph "${controls[@]}")
+graph_targets=$("${ORG_PYTHON}" "${predecessor_helper}" graph "${controls[@]}")
 graph_head=$(head -n 1 <<< "${graph_targets}")
 if [[ -z ${graph_head} ]]; then
   echo "no upgrade graph; first publish of this extension needs no upgrade path"
@@ -124,7 +124,7 @@ fi
 # only maps, never aggregates: `--paginate` applies a filter per page,
 # and an aggregating one answered once PER MATCHING PAGE (#825).
 record=".pgrx-installable"
-predecessors=$("${predecessor_helper}" record --repo "${GITHUB_REPOSITORY}" \
+predecessors=$("${ORG_PYTHON}" "${predecessor_helper}" record --repo "${GITHUB_REPOSITORY}" \
   --version "${VERSION}" --out "${record}" "${controls[@]}")
 echo "installable set recorded in ${record}:"
 sed 's/^/  /' "${record}"
