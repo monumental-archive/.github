@@ -8494,11 +8494,12 @@ description = "Type-check tracked Python with mypy at its strictest, the belt's 
 dir = "{{cwd}}"
 # #1604: mypy over every tracked .py/.pyi, mise/mypy.ini delivered, and
 # the seams mypy lets through refused (python-types.sh says which).
-# STAGED, not advisory: an audit:* task is run by nothing until a leg
-# names it, and this one is named by none. It is here so the canon's
+# STAGED, not advisory: outside `ci`, run by the canon's Monday audit
+# (audit.yml, red until the canon conforms; lint:audit-scheduled
+# refuses an audit task no workflow runs). It is here so the canon's
 # findings can be run down against the real task, one lane per
 # directory; the pull request that clears the last renames it
-# `lint:python-types`, which `ci` collects. No standing period.
+# `lint:python-types`, which `ci` collects, and drops the audit leg.
 run = '''
 "${ORG_BELT_DIR}/python-types.sh" audit:python-types
 '''

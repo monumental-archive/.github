@@ -2029,9 +2029,11 @@ Proven by running 2.4.1:
 tracked files when the pin landed: 1719 in the helpers (`mise/` 1295,
 `release/` 335, the rest 89) and 9155 in their tests. A `ci` task
 would stop every merge until the last was fixed, so the task lands as
-`audit:python-types`, which no leg runs; the findings are run down one
-lane per directory, and the pull request that clears the last renames
-it `lint:python-types`, which `ci` collects. `pipx:mypy` is the
+`audit:python-types`, run by the canon's Monday audit and red there
+(`lint:audit-scheduled` refuses an audit task no workflow runs); the
+findings are run down one lane per directory, and the pull request
+that clears the last renames it `lint:python-types`, which `ci`
+collects, and drops the audit leg. `pipx:mypy` is the
 seventh `pipx:` exception; its five dependencies (`typing_extensions`,
 `mypy_extensions`, `pathspec`, `librt`, `ast-serialize`) are unhashed
 in `mise.lock`, held by uv under the `UV_*` floor, as Hypothesis's one
