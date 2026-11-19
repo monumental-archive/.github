@@ -155,7 +155,7 @@ class Survivors(unittest.TestCase):
         covered = {} if how == "uncovered" else {path: [range(line, line + 1)]}
         shard = mg.Shard("/r", {}, {path}, {path}, covered, records)
         verdict = mg.Verdict()
-        mutant = {"filePath": f"/r/{path}", "line": line, "type": kind}
+        mutant = mg.Mutant(file=f"/r/{path}", line=line, column=1, kind=kind)
         mg.class_survivor(shard, verdict, mutant, "site")
         self.assertEqual(verdict.not_covered, ["site"] if how == "uncovered" else [])
         self.assertEqual(verdict.survived, ["site"] if how == "survived" else [])

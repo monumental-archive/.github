@@ -58,11 +58,12 @@ refusal and exits 1, or exits 0 silently.
 """
 
 import argparse
-import json
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import decoded
 
 MARK = "//mutants:equivalent"
 KILLED = frozenset({"KILLED", "TIMED_OUT"})
@@ -127,7 +128,55 @@ class Shard:
     records: list[Record]
 
 
-def parse_args() -> argparse.Namespace:
+@dataclass(frozen=True)
+class Mutant:
+    """One mutant as gomu's report names it."""
+
+    # The absolute file, as gomu spells it.
+    file: str
+    line: int
+    column: int
+    kind: str
+
+
+@dataclass(frozen=True)
+class Result:
+    """One mutant's result: its status and the check's error, if any."""
+
+    mutant: Mutant
+    status: str
+    error: str
+
+
+@dataclass(frozen=True)
+class Report:
+    """One of gomu's JSON reports: the mutants it counted, and each result."""
+
+    counted: int
+    results: tuple[Result, ...]
+
+
+class Args(argparse.Namespace):
+    """The shell half's arguments, each a string."""
+
+    label: str
+    where: str
+    shard: str
+    root: str
+    scratch: str
+    summary_dir: str
+
+
+class BuildArgs(argparse.Namespace):
+    """`build-go`'s arguments, each a string."""
+
+    label: str
+    gomu: str
+    built: str
+    running: str
+
+
+def parse_args() -> Args:
     """Read the shell half's arguments.
 
     Returns:
@@ -137,7 +186,54 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     for name in ("label", "where", "shard", "root", "scratch", "summary-dir"):
         parser.add_argument(f"--{name}", required=True)
-    return parser.parse_args()
+    return parser.parse_args(namespace=Args())
+
+
+def read_result(item: object, where: str) -> Result:
+    """Decode one entry of a report's `results`.
+
+    Returns:
+        The result; a missing or empty `error` reads as "".
+
+    """
+    result = decoded.as_object(item, where)
+    mutant = decoded.as_object(result.get("mutant"), f"{where}.mutant")
+    error = result.get("error")
+    return Result(
+        mutant=Mutant(
+            file=decoded.as_str(mutant.get("filePath"), f"{where}.mutant.filePath"),
+            line=decoded.as_int(mutant.get("line"), f"{where}.mutant.line"),
+            column=decoded.as_int(mutant.get("column"), f"{where}.mutant.column"),
+            kind=decoded.as_str(mutant.get("type"), f"{where}.mutant.type"),
+        ),
+        status=decoded.as_str(result.get("status"), f"{where}.status"),
+        error=decoded.as_str(error, f"{where}.error") if error else "",
+    )
+
+
+def read_report(source: bytes) -> Report:
+    """Decode one of gomu's JSON reports.
+
+    A missing or empty `results` is none, and a missing `totalMutants`
+    is 0, as gomu leaves them out; any field of another shape is refused
+    by name, through `decoded`'s readers.
+
+    Returns:
+        The report.
+
+    """
+    data = decoded.as_object(decoded.load_json(source), "the report")
+    results = data.get("results")
+    counted = data.get("totalMutants", 0)
+    return Report(
+        counted=decoded.as_int(counted, "totalMutants"),
+        results=tuple(
+            read_result(item, f"results[{index}]")
+            for index, item in enumerate(
+                decoded.as_array(results, "results") if results else []
+            )
+        ),
+    )
 
 
 def rows(path: Path) -> list[list[str]]:
@@ -218,7 +314,7 @@ def read_coverage(scratch: Path, packages: dict[str, str]) -> dict[str, list[ran
     return covered
 
 
-def read_shard(args: argparse.Namespace) -> Shard:
+def read_shard(args: Args) -> Shard:
     """Read the scratch directory's tables.
 
     Returns:
@@ -240,19 +336,19 @@ def read_shard(args: argparse.Namespace) -> Shard:
     )
 
 
-def class_survivor(shard: Shard, verdict: Verdict, mutant: dict, site: str) -> None:
+def class_survivor(shard: Shard, verdict: Verdict, mutant: Mutant, site: str) -> None:
     """Class one SURVIVED mutant: not covered, explained, or a survivor."""
-    path = relative(mutant["filePath"], shard.root)
-    line = mutant["line"]
+    path = relative(mutant.file, shard.root)
+    line = mutant.line
     runs = any(line in block for block in shard.covered.get(path, []))
-    verdict.at_site.setdefault((path, line), []).append((mutant["type"], runs))
+    verdict.at_site.setdefault((path, line), []).append((mutant.kind, runs))
     if not runs:
         verdict.not_covered.append(site)
         return
     matched = [
         r
         for r in shard.records
-        if r.sound and (r.path, r.site, r.kind) == (path, line, mutant["type"])
+        if r.sound and (r.path, r.site, r.kind) == (path, line, mutant.kind)
     ]
     for r in matched:
         r.used = True
@@ -261,26 +357,33 @@ def class_survivor(shard: Shard, verdict: Verdict, mutant: dict, site: str) -> N
 
 
 def class_report(shard: Shard, verdict: Verdict, report: Path) -> None:
-    """Class every result in one of gomu's JSON reports."""
-    data = json.loads(report.read_text(encoding="utf-8"))
-    results = data.get("results") or []
-    counted = data.get("totalMutants", 0)
+    """Class every result in one of gomu's JSON reports.
+
+    A report that is not gomu's shape is not judged, by name.
+    """
+    try:
+        data = read_report(report.read_bytes())
+    except decoded.UndecodableError as err:
+        verdict.unjudged.append(f"{report.name}: {err}")
+        return
+    results = data.results
+    counted = data.counted
     if counted != len(results):
         verdict.unjudged.append(
             f"{report.name}: gomu counted {counted} mutants and reported {len(results)}"
         )
     for result in results:
         verdict.total += 1
-        mutant = result["mutant"]
-        path = relative(mutant["filePath"], shard.root)
-        site = f"{path}:{mutant['line']}:{mutant['column']} {mutant['type']}"
-        status = result["status"]
+        mutant = result.mutant
+        path = relative(mutant.file, shard.root)
+        site = f"{path}:{mutant.line}:{mutant.column} {mutant.kind}"
+        status = result.status
         if status in KILLED:
             verdict.killed += 1
-        elif status == "NOT_VIABLE" and COMPILER.search(result.get("error") or ""):
+        elif status == "NOT_VIABLE" and COMPILER.search(result.error):
             verdict.not_viable += 1
         elif status == "NOT_VIABLE":
-            reason = (result.get("error") or "no error given").splitlines()[0]
+            reason = (result.error or "no error given").splitlines()[0]
             verdict.unjudged.append(f"NOT_VIABLE: {site} — not the compiler: {reason}")
         elif status == "SURVIVED":
             class_survivor(shard, verdict, mutant, site)
@@ -334,7 +437,7 @@ def unmatched(shard: Shard, verdict: Verdict) -> list[str]:
     return found
 
 
-def report(args: argparse.Namespace, verdict: Verdict, excluded: int) -> None:
+def report(args: Args, verdict: Verdict, excluded: int) -> None:
     """Print the survivors, the reds and the summary line; write go.tsv."""
     label = args.label
     for site in verdict.survived:
@@ -404,7 +507,7 @@ def build_go(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="mutants_go.py build-go")
     for name in ("label", "gomu", "built", "running"):
         parser.add_argument(f"--{name}", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=BuildArgs())
     if not older(args.built, args.running):
         return 0
     spelled = args.built or "an unreadable Go"
@@ -417,6 +520,16 @@ def build_go(argv: list[str]) -> int:
         file=sys.stderr,
     )
     return 1
+
+
+def report_number(path: Path) -> int:
+    """Order the reports as the shell half numbered them.
+
+    Returns:
+        The number the report is named by.
+
+    """
+    return int(path.stem)
 
 
 def main() -> int:
@@ -441,7 +554,7 @@ def main() -> int:
     verdict.unjudged.extend(runs.splitlines())
 
     verdict.red.extend(malformed(shard))
-    for path in sorted((scratch / "reports").glob("*.json"), key=lambda p: int(p.stem)):
+    for path in sorted((scratch / "reports").glob("*.json"), key=report_number):
         class_report(shard, verdict, path)
     verdict.red.extend(unmatched(shard, verdict))
 
