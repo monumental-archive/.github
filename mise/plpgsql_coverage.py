@@ -38,7 +38,13 @@ trigger function once per table its triggers sit on. Each reading
 carries its findings (line, level, message); `totals` reds every
 finding, whatever its level, by function and line, before it judges the
 floor, and the decoder refuses a reading with no findings answer: a
-report from a helper that did not ask is not a clean result.
+report from a helper that did not ask is not a clean result. The one
+suppression is the extension's own per-function option,
+`-- @plpgsql_check_options: <check> = false`: the helper reads each
+function's source as the database holds it (`pg_proc.prosrc`) and
+records every options line that turns a check off; `totals` names every
+one on every run and reds one with no comment line directly above it
+saying why.
 
 The run is not this helper's: `coverage-measure.sh` walks the `test`
 task and its depends once, for every leg that reads that run, and sets
@@ -92,6 +98,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 
 from decoded import UndecodableError, as_array, as_object, load_json
+from typed_std import group
 
 NAME = "plpgsql-coverage"
 ENV = "ORG_PLPGSQL_COVERAGE"
@@ -155,6 +162,17 @@ SELECT coalesce(lineno::text, ''), level,
                                  security_warnings => true,
                                  compatibility_warnings => true)"""
 
+# One function's source, base64 so its newlines survive psql's rows.
+SOURCE_SQL = (
+    "SELECT replace(encode(convert_to(prosrc, 'UTF8'), 'base64'), E'\\n', '')"
+    " FROM pg_proc WHERE oid = {oid}"
+)
+
+# The extension's own per-function option (#1605): the one suppression
+# allowed, read from the function's source as the database holds it.
+OPTIONS = re.compile(r"--\s*@plpgsql_check_options:\s*(?P<options>.*)")
+SETTING = re.compile(r"(?P<name>\w+)\s*=\s*(?P<value>\w+)")
+
 OID = re.compile(r"[0-9]+")
 SETTINGS = 2  # the profiler and the preload list
 LISTING = 3  # an oid, a signature, and the tables its triggers sit on
@@ -170,6 +188,19 @@ class Finding:
     line: int | None
     level: str
     message: str
+
+
+@dataclass(frozen=True)
+class Suppression:
+    """One `@plpgsql_check_options` line that turns a check off.
+
+    `reason` is the comment line directly above it, or None when there
+    is none: a suppression without its reason is red.
+    """
+
+    line: int
+    options: str
+    reason: str | None
 
 
 @dataclass(frozen=True)
@@ -189,6 +220,8 @@ class Reading:
     branch_free: bool
     # What plpgsql_check's static check reported (#1605); empty is clean.
     findings: tuple[Finding, ...] = ()
+    # The function's own options that turn a check off (#1605).
+    suppressions: tuple[Suppression, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -292,6 +325,63 @@ def lint_function(conninfo: str, oid: str, relids: list[str]) -> tuple[Finding, 
     return tuple(found)
 
 
+def suppresses(options: str) -> bool:
+    """Say whether an options line turns any check off.
+
+    Returns:
+        True when it sets a check false, or `without_warnings` true; a
+        line that only turns checks on suppresses nothing.
+
+    """
+    for setting in SETTING.finditer(options):
+        name, value = group(setting, "name") or "", group(setting, "value") or ""
+        on = value.lower() in {"true", "on", "yes", "1"}
+        if on == (name.lower() == "without_warnings"):
+            return True
+    return False
+
+
+def suppressions_in(source: str) -> tuple[Suppression, ...]:
+    """Find every options line in a function's source that suppresses.
+
+    Returns:
+        Each with its line (as plpgsql_check numbers the source) and the
+        reason the comment line directly above it gives, if any.
+
+    """
+    lines = source.splitlines()
+    found: list[Suppression] = []
+    for index, raw in enumerate(lines):
+        found_options = OPTIONS.search(raw)
+        options = group(found_options, "options") if found_options else None
+        if options is None or not suppresses(options):
+            continue
+        above = lines[index - 1].strip() if index else ""
+        said = above.removeprefix("--").strip() if above.startswith("--") else ""
+        reason = said if said and OPTIONS.search(above) is None else None
+        found.append(Suppression(index + 1, options.strip(), reason))
+    return tuple(found)
+
+
+def read_source(conninfo: str, oid: str) -> str:
+    """Read one function's source as the database holds it.
+
+    Returns:
+        The source text.
+
+    Raises:
+        ReadError: psql failed, or printed something not one source.
+
+    """
+    rows = psql(conninfo, SOURCE_SQL.format(oid=oid))
+    try:
+        (encoded,) = rows[0]
+        return base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (IndexError, ValueError) as exc:
+        msg = f"unreadable source: {rows!r}"
+        raise ReadError(msg) from exc
+
+
 def read_function(
     conninfo: str, oid: str, signature: str, relids: list[str]
 ) -> Reading | Unreadable:
@@ -306,6 +396,7 @@ def read_function(
     try:
         rows = psql(conninfo, READ_SQL.format(oid=oid))
         findings = lint_function(conninfo, oid, relids)
+        suppressed = suppressions_in(read_source(conninfo, oid))
     except ReadError as exc:
         return Unreadable(signature, str(exc))
     try:
@@ -318,6 +409,7 @@ def read_function(
             executed=int(executed),
             branch_free=Decimal(branches) == 1 and int(branching) == 0,
             findings=findings,
+            suppressions=suppressed,
         )
     except IndexError, ValueError, InvalidOperation:
         return Unreadable(signature, f"unreadable figures: {rows!r}")
@@ -373,6 +465,10 @@ def encode(report: Report | Failed) -> str:
                     "findings": [
                         {"line": g.line, "level": g.level, "message": g.message}
                         for g in f.findings
+                    ],
+                    "suppressions": [
+                        {"line": u.line, "options": u.options, "reason": u.reason}
+                        for u in f.suppressions
                     ],
                 })
         document = {
@@ -456,6 +552,28 @@ def fraction_field(document: dict[str, object], key: str, where: str) -> Decimal
     return value
 
 
+def decode_suppression(value: object, where: str) -> Suppression:
+    """Decode one recorded suppression.
+
+    Returns:
+        The suppression.
+
+    Raises:
+        NotAReportError: the entry is not one.
+
+    """
+    entry = as_object(value, where)
+    line = entry.get("line")
+    if isinstance(line, bool) or not isinstance(line, int) or line < 1:
+        msg = f"{where}: 'line' is not a line number"
+        raise NotAReportError(msg)
+    reason = entry.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        msg = f"{where}: 'reason' is not a string"
+        raise NotAReportError(msg)
+    return Suppression(line, text_field(entry, "options", where), reason)
+
+
 def decode_finding(value: object, where: str) -> Finding:
     """Decode one static-check finding.
 
@@ -497,6 +615,7 @@ def decode_function(value: object, where: str) -> Reading | Unreadable:
     # A reading without the static check's answer is not a clean result:
     # the helper that wrote it did not ask (#1605).
     findings = as_array(entry.get("findings"), f"{where}: 'findings'")
+    suppressed = as_array(entry.get("suppressions"), f"{where}: 'suppressions'")
     return Reading(
         function=function,
         statements=fraction_field(entry, "statements", where),
@@ -507,6 +626,10 @@ def decode_function(value: object, where: str) -> Reading | Unreadable:
         findings=tuple(
             decode_finding(item, f"{where} finding {index}")
             for index, item in enumerate(findings)
+        ),
+        suppressions=tuple(
+            decode_suppression(item, f"{where} suppression {index}")
+            for index, item in enumerate(suppressed)
         ),
     )
 
@@ -629,7 +752,34 @@ def refusals(label: str, report: Report | Failed) -> list[str]:
             f"{head} {len(found)} static-check finding(s) — plpgsql_check"
             " reads each as a body that cannot do what it says"
         )
+    # A suppression is allowed only with its reason (#1605): the comment
+    # line directly above it.
+    lines.extend(
+        f"{head} {f.function}: line {u.line}: suppression `{u.options}` has no"
+        " reason — the comment line directly above it says why"
+        for f in report.functions
+        if isinstance(f, Reading)
+        for u in f.suppressions
+        if u.reason is None
+    )
     return lines
+
+
+def suppressed_lines(label: str, report: Report) -> list[str]:
+    """Name every suppression that carries its reason, on every run.
+
+    Returns:
+        One line per suppression, so none is invisible.
+
+    """
+    return [
+        f"{label}: plpgsql: {f.function}: line {u.line}: suppresses"
+        f" `{u.options}` — {u.reason}"
+        for f in report.functions
+        if isinstance(f, Reading)
+        for u in f.suppressions
+        if u.reason is not None
+    ]
 
 
 def totals(label: str, report_path: str) -> int:
@@ -655,6 +805,9 @@ def totals(label: str, report_path: str) -> int:
             file=sys.stderr,
         )
         return 1
+    if isinstance(report, Report):
+        for line in suppressed_lines(label, report):
+            print(line, file=sys.stderr)
     lines = refusals(label, report)
     if lines or isinstance(report, Failed):
         print("\n".join(lines), file=sys.stderr)

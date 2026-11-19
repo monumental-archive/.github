@@ -72,6 +72,17 @@ case "${sql}" in
     # An extension's own functions answer any listing that keeps them.
     [[ ${sql} == *"d.deptype = 'e'"* ]] || cat "${STUB_DIR}/extension"
     ;;
+  *prosrc*)
+    # A function's source, base64 on one line, as the helper asks.
+    oid=${sql##*oid = }
+    planted="${STUB_DIR}/source.${oid}"
+    if [[ -f ${planted} ]]; then
+      base64 < "${planted}" | tr -d '\n'
+    else
+      printf 'BEGIN RETURN 1; END' | base64 | tr -d '\n'
+    fi
+    echo
+    ;;
   *plpgsql_check_function_tb*)
     # The static check: the findings planted for this oid and table, or
     # none (a clean function); every call is logged for the rows.
@@ -222,6 +233,7 @@ class Collecting(unittest.TestCase):
         unreadable: dict[str, str] | None = None,
         listing: str | None = None,
         lint: dict[str, str] | None = None,
+        sources: dict[str, str] | None = None,
         **planted: str,
     ) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess]:
         """Collect a report from the planted database and read it.
@@ -242,6 +254,8 @@ class Collecting(unittest.TestCase):
             (answers / "functions").write_text(listing, encoding="utf-8")
         for key, rows in (lint or {}).items():
             (answers / f"lint.{key}").write_text(rows, encoding="utf-8")
+        for oid, source in (sources or {}).items():
+            (answers / f"source.{oid}").write_text(source, encoding="utf-8")
         report = tmp / "report.json"
         self.answers, self.report = answers, report
         env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(report), **planted)
@@ -394,6 +408,7 @@ class HelperRows(Collecting):
             "executed": 4,
             "branch_free": False,
             "findings": [],
+            "suppressions": [],
         }
         document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
         planted.write_text(json.dumps(document), encoding="utf-8")
@@ -574,6 +589,69 @@ class LintRows(Collecting):
         )
 
 
+REASON = "-- the RAISE ends the guard, so the RETURN after it never runs"
+OPTIONS_OFF = "-- @plpgsql_check_options: extra_warnings = false"
+BODY = "\nBEGIN\n  RAISE EXCEPTION 'no';\n  RETURN NULL;\nEND\n"
+
+
+class SuppressionRows(Collecting):
+    """The extension's own option, its reason read from the source (#1605)."""
+
+    def test_a_suppression_with_its_reason_is_green_and_printed(self) -> None:
+        """Every suppression is named on every run, with why."""
+        source = f"\n{REASON}\n{OPTIONS_OFF}{BODY}"
+        _, read = self.measure(TWO, sources={"101": source})
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertIn(
+            "leg: plpgsql: public.guard(): line 3: suppresses"
+            " `extra_warnings = false` — the RAISE ends the guard, so the"
+            " RETURN after it never runs\n",
+            read.stderr,
+        )
+        self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", read.stdout)
+
+    def test_a_suppression_without_a_reason_is_red(self) -> None:
+        """No comment above, an empty one, or another options line."""
+        for name, above, line in (
+            ("nothing above", "", 1),
+            ("an empty comment", "--", 2),
+            (
+                "another options line",
+                "-- @plpgsql_check_options: fatal_errors = true",
+                2,
+            ),
+        ):
+            with self.subTest(name):
+                source = (f"{above}\n" if above else "") + OPTIONS_OFF + BODY
+                _, read = self.measure(TWO, sources={"101": source})
+                self.assertEqual(1, read.returncode)
+                self.assertEqual("", read.stdout)
+                self.assertEqual(
+                    f"leg: plpgsql: public.guard(): line {line}: suppression"
+                    " `extra_warnings = false` has no reason — the comment line"
+                    " directly above it says why\n",
+                    read.stderr,
+                )
+
+    def test_an_options_line_that_only_turns_checks_on_is_no_suppression(
+        self,
+    ) -> None:
+        """Turning a check on needs no reason and is not listed."""
+        source = "\n-- @plpgsql_check_options: performance_warnings = true" + BODY
+        _, read = self.measure(TWO, sources={"101": source})
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertNotIn("suppress", read.stderr)
+
+    def test_without_warnings_is_a_suppression(self) -> None:
+        """Its `true` turns every warning off."""
+        source = "\n-- @plpgsql_check_options: without_warnings = true" + BODY
+        _, read = self.measure(TWO, sources={"101": source})
+        self.assertEqual(1, read.returncode)
+        self.assertIn(
+            "suppression `without_warnings = true` has no reason", read.stderr
+        )
+
+
 class RefusalRows(Collecting):
     """Every way a collection or a report file is refused, by name."""
 
@@ -660,6 +738,7 @@ class RefusalRows(Collecting):
             "executed": 4,
             "branch_free": False,
             "findings": [],
+            "suppressions": [],
         }
 
         def report(*entries: object) -> dict[str, object]:

@@ -3389,8 +3389,13 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   repository's own issue. Suppression: an in-comment option in the
   function body, `-- @plpgsql_check_options: <check> = false`, turns
   that check off for that function, and holds with every check asked
-  for (measured); it is the only suppression, written with its reason
-  in the same comment. The positional pragma
+  for (measured); it is the only suppression. The helper reads each
+  function's source from the database (`pg_proc.prosrc`, never a
+  tracked file) and records every options line that turns a check off;
+  the reader prints every suppression on every run, by function and
+  line, and reds one whose options line has no comment line directly
+  above it saying why. A line that only turns checks on is not a
+  suppression; `without_warnings = true` is one. The positional pragma
   `plpgsql_check_pragma('disable:<check>')` did not suppress a finding
   in a declaration before it (measured), and is not the mechanism.
   **Rejected, so it is not re-proposed:** adding the extension to the
