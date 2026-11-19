@@ -25,7 +25,10 @@ the profile's four bounds (`max_examples`, `derandomize`, `database`,
 them.
 
 Each `prop_*.py` file is imported from its own directory, as the
-`unittest` discovery beside it would, and must hold at least one
+`unittest` discovery beside it would, with the belt's own directory on
+the path too, so `from typed_hypothesis import given` (the typed `given`
+the belt delivers, #1604) resolves in any repository. It must hold at
+least one
 Hypothesis test: a property file with no property is a check that looks
 like success. The output is the tests in file and name order and their
 outcome, then every failure's traceback — Hypothesis prints the shrunk
@@ -55,6 +58,8 @@ BOUNDS = ("max_examples", "derandomize", "database", "deadline")
 EXIT_USAGE = 2
 # A profile name and at least one file.
 MIN_ARGS = 2
+# The belt: typed_hypothesis.py sits beside this runner.
+BELT = Path(__file__).resolve().parent
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
 
 settings.register_profile(
@@ -82,9 +87,9 @@ def load(path: Path, index: int) -> object:
         The module.
 
     """
-    directory = str(path.resolve().parent)
-    if directory not in sys.path:
-        sys.path.insert(0, directory)
+    for directory in (str(BELT), str(path.resolve().parent)):
+        if directory not in sys.path:
+            sys.path.insert(0, directory)
     name = f"prop_{index}_{path.stem}"
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)

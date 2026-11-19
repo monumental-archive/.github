@@ -22,8 +22,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from hypothesis import example, given
+from hypothesis import example
 from hypothesis import strategies as st
+from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "mutmut_pragmas",

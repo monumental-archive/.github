@@ -20,8 +20,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from hypothesis import given
 from hypothesis import strategies as st
+from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "git_decoy",

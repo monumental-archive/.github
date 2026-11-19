@@ -24,8 +24,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from hypothesis import example, given
+from hypothesis import example
 from hypothesis import strategies as st
+from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "package_crates",
@@ -57,7 +58,9 @@ def changed(draw: st.DrawFn, data: bytes) -> bytes:
 
 
 @st.composite
-def workspaces(draw: st.DrawFn) -> tuple[dict, dict, dict, set]:
+def workspaces(
+    draw: st.DrawFn,
+) -> tuple[dict[str, str], dict[str, bytes], dict[str, bytes], set[str]]:
     """Draw members, which are excluded, and each run's bytes.
 
     Returns:

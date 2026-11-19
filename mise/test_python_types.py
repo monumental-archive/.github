@@ -36,7 +36,13 @@ BELT = Path(__file__).resolve().parent
 BASH = shutil.which("bash") or "bash"
 GIT = shutil.which("git") or "git"
 LABEL = "audit:python-types"
-BELT_FILES = ("python-types.sh", "python-types-seams.py", "mypy.ini", "config.toml")
+BELT_FILES = (
+    "python-types.sh",
+    "python-types-seams.py",
+    "mypy.ini",
+    "config.toml",
+    "typed_hypothesis.py",
+)
 
 STUB = """\
 #!/usr/bin/env bash
@@ -309,6 +315,60 @@ class TheConfig(unittest.TestCase):
         done = run(files)
         self.assertEqual(1, done.returncode)
         self.assertIn("a.py:1: error: Incompatible types in assignment", done.stdout)
+
+
+PROPERTY = """\
+\"\"\"A property.\"\"\"
+
+import unittest
+
+from hypothesis import strategies as st
+from typed_hypothesis import given
+
+
+class Holds(unittest.TestCase):
+    \"\"\"Doubling.\"\"\"
+
+    @given(st.integers(), st.data())
+    def test_double(self, n: int, data: st.DataObject) -> None:
+        \"\"\"Even.\"\"\"
+        self.assertEqual((2 * n + 2 * data.draw(st.integers())) % 2, 0)
+"""
+
+
+@unittest.skipUnless(real_mypy(), "the belt's pinned mypy is not installed here")
+@unittest.skipUnless(
+    shutil.which("hypothesis"), "the belt's Hypothesis is not installed here"
+)
+class TheTypedGiven(unittest.TestCase):
+    """The belt's `given` under the unmodified config (#1604)."""
+
+    def test_a_property_is_clean(self) -> None:
+        """No finding on the decorator or the decorated test."""
+        done = run({"prop_a.py": PROPERTY})
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertIn(f"{LABEL}: 1 file(s) clean under mypy", done.stdout)
+
+    def test_the_body_is_still_checked(self) -> None:
+        """An `int` parameter used as a `str` is red."""
+        text = PROPERTY.replace("% 2, 0)", "% 2, 0)\n        n.upper()")
+        done = run({"prop_a.py": text})
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            'error: "int" has no attribute "upper"  [attr-defined]', done.stdout
+        )
+
+    def test_a_strategy_that_does_not_match_its_parameter_is_red(self) -> None:
+        """An `int` strategy feeding a `str` parameter names the argument."""
+        text = PROPERTY.replace("n: int,", "n: str,")
+        done = run({"prop_a.py": text})
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            "error: Argument 1 has incompatible type"
+            ' "Callable[[Holds, str, DataObject], None]";'
+            ' expected "Callable[[Holds, int, DataObject], None]"  [arg-type]',
+            done.stdout,
+        )
 
 
 if __name__ == "__main__":

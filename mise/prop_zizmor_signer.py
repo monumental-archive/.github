@@ -25,8 +25,9 @@ import sys
 import unittest
 from pathlib import Path
 
-from hypothesis import example, given
+from hypothesis import example
 from hypothesis import strategies as st
+from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "zizmor_signer",
@@ -49,7 +50,7 @@ IDENT = st.sampled_from([*zs.AUDITS, "unpinned-uses", "excessive-permissions"])
 
 
 @st.composite
-def finding(draw: st.DrawFn) -> tuple[dict, bool]:
+def finding(draw: st.DrawFn) -> tuple[dict[str, object], bool]:
     """Draw a finding and whether it is on the signer.
 
     Returns:

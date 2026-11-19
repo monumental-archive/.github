@@ -42,9 +42,10 @@ if [[ ${profile} == gate ]]; then
   # The design condition, enforced: ordinary tests never import
   # Hypothesis. Read from each file's syntax tree, so a fixture that
   # carries Hypothesis source as a string is not an importer. The
-  # belt's own runner is the one other file that may.
+  # belt's own runner and its typed `given` are the two other files
+  # that may.
   others=$(git ls-files ':!vendor/**' '*.py' \
-    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python-properties.py"')
+    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python-properties.py" && $0 != "mise/typed_hypothesis.py"')
   leaks=""
   if [[ -n ${others} ]]; then
     leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis-imports.py")
@@ -55,6 +56,19 @@ if [[ ${profile} == gate ]]; then
       echo "  ${leak}" >&2
     done <<< "${leaks}"
     echo "  property tests live in prop_*.py, so the ordinary suites run with nothing installed" >&2
+    exit 1
+  fi
+  # A property takes the belt's typed `given` (#1604): Hypothesis's own
+  # is typed `Callable[..., None]`, which the belt's mypy reds on every
+  # property, and the typed one also refuses a strategy that does not
+  # match its parameter.
+  untyped=$(tr '\n' '\0' <<< "${files}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis-imports.py" --given)
+  if [[ -n ${untyped} ]]; then
+    echo "${label}: these take given from hypothesis, not the belt's typed one:" >&2
+    while IFS= read -r file; do
+      echo "  ${file}" >&2
+    done <<< "${untyped}"
+    echo "  write: from typed_hypothesis import given" >&2
     exit 1
   fi
 fi

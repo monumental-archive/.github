@@ -21,8 +21,9 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-from hypothesis import example, given
+from hypothesis import example
 from hypothesis import strategies as st
+from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "msrv_plan",
@@ -61,7 +62,7 @@ class Refusal(unittest.TestCase):
 
 
 @st.composite
-def workspace(draw: st.DrawFn) -> list[dict]:
+def workspace(draw: st.DrawFn) -> list[dict[str, str | None]]:
     """Draw members, each with or without a rust-version promise.
 
     Returns:

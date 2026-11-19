@@ -50,7 +50,8 @@ AUDIT = CONFIG["tasks"]["audit:python-properties"]["run"]
 
 HOLDS = """\
 import unittest
-from hypothesis import given, strategies as st
+from hypothesis import strategies as st
+from typed_hypothesis import given
 
 
 class Holds(unittest.TestCase):
@@ -61,13 +62,27 @@ class Holds(unittest.TestCase):
 
 FAILS = """\
 import unittest
-from hypothesis import given, strategies as st
+from hypothesis import strategies as st
+from typed_hypothesis import given
 
 
 class Fails(unittest.TestCase):
     @given(st.integers(min_value=0))
     def test_small(self, n):
         self.assertLess(n, 10)
+"""
+
+# A property taking Hypothesis's own `given`, which the belt's mypy reds
+# on every property (#1604): the gate names the file and the remedy.
+UNTYPED = """\
+import unittest
+from hypothesis import given, strategies as st
+
+
+class Untyped(unittest.TestCase):
+    @given(st.integers())
+    def test_double_is_even(self, n):
+        self.assertEqual((2 * n) % 2, 0)
 """
 
 NO_PROPERTY = """\
@@ -81,7 +96,8 @@ class Plain(unittest.TestCase):
 
 OWN_BOUNDS = """\
 import unittest
-from hypothesis import given, settings, strategies as st
+from hypothesis import settings, strategies as st
+from typed_hypothesis import given
 
 
 class Bounded(unittest.TestCase):
@@ -216,6 +232,17 @@ class Refusals(unittest.TestCase):
             done.stderr,
         )
         self.assertIn("  pkg/test_leak.py\n", done.stderr)
+
+    def test_given_from_hypothesis_is_red(self) -> None:
+        """A property taking Hypothesis's own `given`: red, file and remedy named."""
+        done = run(GATE, {"prop_x.py": HOLDS, "pkg/prop_y.py": UNTYPED}, tool_dir=None)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(
+            "test:python-properties: these take given from hypothesis,"
+            " not the belt's typed one:\n  pkg/prop_y.py\n"
+            "  write: from typed_hypothesis import given\n",
+            done.stderr,
+        )
 
     def test_hypothesis_source_in_a_string_is_not_an_import(self) -> None:
         """A fixture carrying Hypothesis source as text: not a leak."""
