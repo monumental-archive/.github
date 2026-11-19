@@ -2661,9 +2661,8 @@ while read -r sha; do
   # Fixed-string match on the address: a real email contains regex
   # metacharacters (the + in a GitHub noreply address is the common one),
   # and interpolating it into a pattern silently matches the wrong thing.
-  git log -1 --format=%B "${sha}" | grep -i "^Signed-off-by:" \
-    | grep -qF "<${email}>" \
-    || bad="${bad} ${sha:0:8}"
+  signoffs=$(git log -1 --format=%B "${sha}" | grep -i "^Signed-off-by:" || true)
+  grep -qF "<${email}>" <<< "${signoffs}" || bad="${bad} ${sha:0:8}"
 done <<< "${shas}"
 if [[ -n ${bad} ]]; then
   echo "lint:dco: commits missing a sign-off matching their author:${bad}" >&2
@@ -2917,7 +2916,8 @@ command -v cargo > /dev/null || {
 # and this task would lint nothing. Asserted with a remedy, never
 # installed: a task-time rustup races every other task driving the
 # toolchain (measured twice on the lab's v0.18.0 release PR, #117).
-if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
+installed=$(rustup component list --installed 2> /dev/null) || installed=""
+if ! grep -q "^clippy" <<< "${installed}"; then
   echo "lint:rust: clippy component missing — declare it with the rust pin in mise.toml:" >&2
   echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
   echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
@@ -2972,14 +2972,13 @@ fi
 # config), so both carriers are read here — and an unresolvable belt is
 # fatal, because clippy would otherwise silently run at its own defaults.
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
-out=""
-fmt_out=""
+out="" fmt_out=""
 rc=0
 trap 'rc=$?; rm -f "${out}" "${fmt_out}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 # The rustfmt leg, first because it is seconds against clippy's minutes.
 # rustfmt is a rustup component of the repo's own pin exactly like clippy,
 # asserted with a remedy and never installed.
-if ! rustup component list --installed 2> /dev/null | grep -q "^rustfmt"; then
+if ! grep -q "^rustfmt" <<< "${installed}"; then
   echo "lint:rust: rustfmt component missing — declare it with the rust pin in mise.toml:" >&2
   echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
   exit 1
@@ -3243,15 +3242,13 @@ command -v cargo > /dev/null || {
   echo "fix:rust: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
   exit 1
 }
-if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
-  echo "fix:rust: clippy component missing — declare it with the rust pin in mise.toml" >&2
+installed=$(rustup component list --installed 2> /dev/null) || installed=""
+for component in clippy rustfmt; do
+  grep -q "^${component}" <<< "${installed}" && continue
+  echo "fix:rust: ${component} component missing — declare it with the rust pin in mise.toml" >&2
   exit 1
-fi
+done
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
-if ! rustup component list --installed 2> /dev/null | grep -q "^rustfmt"; then
-  echo "fix:rust: rustfmt component missing — declare it with the rust pin in mise.toml" >&2
-  exit 1
-fi
 # Format first: clippy --fix rewrites source, and handing it canonically
 # formatted input keeps its edits from arriving pre-mangled.
 cargo fmt --all -- --config-path "${ORG_BELT_DIR}/rustfmt.toml"
@@ -3557,7 +3554,7 @@ done <<< "${surface}"
 }
 # clippy is a rustup COMPONENT of the repo's own pin, asserted with a
 # remedy and never installed mid-run — the lint:rust reasoning verbatim.
-if ! rustup component list --installed 2> /dev/null | grep -q "^clippy"; then
+if ! installed=$(rustup component list --installed 2> /dev/null) || ! grep -q "^clippy" <<< "${installed}"; then
   echo "lint:pg-clippy: clippy component missing — declare it with the rust pin in mise.toml:" >&2
   echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
   exit 1
@@ -7830,7 +7827,7 @@ if [[ -z ${FUZZ_TOOLCHAIN:-} ]]; then
   echo "  a dated nightly, never bare 'nightly' — a moving channel is not a pinned input" >&2
   exit 1
 fi
-if ! rustup toolchain list 2> /dev/null | grep -q "^${FUZZ_TOOLCHAIN}"; then
+if ! toolchains=$(rustup toolchain list 2> /dev/null) || ! grep -q "^${FUZZ_TOOLCHAIN}" <<< "${toolchains}"; then
   echo "audit:fuzz: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
   echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
   exit 1
@@ -7838,7 +7835,7 @@ fi
 # --careful implies -Zbuild-std, which rebuilds the standard library from
 # source and fails without rust-src. Asserted with a remedy rather than
 # discovered halfway through a build, the llvm-tools/clippy pattern.
-if ! rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/null | grep -q "^rust-src"; then
+if ! src=$(rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/null) || ! grep -q "^rust-src" <<< "${src}"; then
   echo "audit:fuzz: the nightly lacks rust-src, which --careful needs (it implies -Zbuild-std)" >&2
   echo "  components ride the pin, so declare them there rather than adding them by hand:" >&2
   echo "    rust = [\"1.xx.x\", { version = \"${FUZZ_TOOLCHAIN}\", components = \"rust-src\" }]" >&2

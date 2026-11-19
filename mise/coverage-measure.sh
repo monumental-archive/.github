@@ -221,13 +221,14 @@ fi
 # runs on, the pgrx provisioning, and the COVERAGE_EXCLUDE list. Sets
 # `excludes`. The toolchain is empty for the repository's stable pin.
 rust_surface() {
-  local toolchain="$1" member
+  local toolchain="$1" member installed
   # No task-time rustup, by rule: a component installed mid-run races
   # every other task driving the toolchain (measured twice on the lab's
   # v0.18.0 release PR, #117). llvm-tools is a declared build input —
   # pinned in the repository's mise.toml, installed before any task runs
   # — and this asserts it with a remedy, never installs it.
-  if ! rustup component list --installed ${toolchain:+--toolchain "${toolchain}"} 2> /dev/null | grep -q "^llvm-tools"; then
+  installed=$(rustup component list --installed ${toolchain:+--toolchain "${toolchain}"} 2> /dev/null) || installed=""
+  if ! grep -q "^llvm-tools" <<< "${installed}"; then
     if [[ -z ${toolchain} ]]; then
       echo "${label}: llvm-tools component missing — declare it with the" >&2
       echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
@@ -302,7 +303,8 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
     echo '    [env] FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"' >&2
     exit 1
   fi
-  if ! rustup toolchain list 2> /dev/null | grep -q "^${FUZZ_TOOLCHAIN}"; then
+  toolchains=$(rustup toolchain list 2> /dev/null) || toolchains=""
+  if ! grep -q "^${FUZZ_TOOLCHAIN}" <<< "${toolchains}"; then
     echo "${label}: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
     echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
     exit 1

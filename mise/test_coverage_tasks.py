@@ -763,6 +763,14 @@ RUSTUP = """\
 echo "llvm-tools-stub"
 """
 
+# llvm-tools first, then a listing past a pipe buffer: a probe that stops
+# at the first line closes the pipe on a rustup still writing (#1637).
+RUSTUP_LONG = """\
+#!/usr/bin/env bash
+echo "llvm-tools-stub"
+head -c 200000 /dev/zero | tr '\\0' '\\n'
+"""
+
 CARGO = """\
 #!/usr/bin/env bash
 case "$1" in
@@ -787,12 +795,24 @@ class MeasureSelectors(unittest.TestCase):
 
     def test_the_rust_selector_measures_the_rust_leg(self) -> None:
         """`rust` is accepted, so it must not measure nothing and pass."""
+        self.assert_rust_leg_measured(RUSTUP)
+
+    def test_llvm_tools_ahead_of_a_long_listing_is_found(self) -> None:
+        """`llvm-tools…` first, then 200 kB: the leg measures (#1637).
+
+        On main the probe stopped at the first line and the leg reported
+        the component missing.
+        """
+        self.assert_rust_leg_measured(RUSTUP_LONG)
+
+    def assert_rust_leg_measured(self, rustup: str) -> None:
+        """Run the `rust` selector with this rustup and require its number."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp) / "tree"
             stubs = Path(tmp) / "stubs"
             tree.mkdir()
             stubs.mkdir()
-            for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
+            for name, text in (("rustup", rustup), ("cargo", CARGO)):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
