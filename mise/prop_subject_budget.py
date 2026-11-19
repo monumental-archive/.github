@@ -13,12 +13,20 @@ generated dependency names, paths and commit templates:
   placeholder for each column of version width, carries the dependency
   name wherever the template asks for it, and reports a template as
   unmodelled exactly when a placeholder it cannot resolve is left.
+- Refusal (R): the dependency readers (`from_cargo`, `from_npm`,
+  `from_gomod`, `from_actions`, `from_mise`) read any bytes, and any
+  well-formed document of any shape, and answer with dependencies and
+  unmodelled lines, never a traceback (#1555). A table of the wrong
+  type, a non-object package.json and a file that is not UTF-8 all
+  raised until this found them.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -131,6 +139,83 @@ class Render(unittest.TestCase):
         left = any("{{unknownField}}" in f for f in fields)
         self.assertEqual(unmodelled is not None, left)
         self.assertTrue(narrow.endswith(sb.PR_TAIL))
+
+
+SCALAR = st.one_of(st.booleans(), st.integers(-9, 9), st.text(max_size=8))
+VALUE = st.recursive(
+    SCALAR,
+    lambda inner: (
+        st.lists(inner, max_size=3)
+        | st.dictionaries(st.text(max_size=8), inner, max_size=3)
+    ),
+    max_leaves=10,
+)
+MANIFEST_KEY = st.sampled_from([
+    "dependencies",
+    "dev-dependencies",
+    "devDependencies",
+    "workspace",
+    "target",
+    "tools",
+    "x",
+])
+
+
+def toml(value: object) -> str:
+    """Write a value as a TOML inline value.
+
+    Returns:
+        The TOML text.
+
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        inner = ", ".join(f"{json.dumps(k)} = {toml(v)}" for k, v in value.items())
+        return "{ " + inner + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(toml(v) for v in value) + "]"
+    return json.dumps(value)
+
+
+DOCUMENT = st.dictionaries(MANIFEST_KEY, VALUE, max_size=4)
+READERS = {
+    "Cargo.toml": "from_cargo",
+    "package.json": "from_npm",
+    "go.mod": "from_gomod",
+    ".github/workflows/ci.yml": "from_actions",
+    "mise.toml": "from_mise",
+}
+
+
+class Readers(unittest.TestCase):
+    """Any manifest is read or recorded as unmodelled."""
+
+    @given(
+        st.sampled_from(sorted(READERS)),
+        st.one_of(
+            st.binary(max_size=80),
+            DOCUMENT.map(lambda d: json.dumps(d).encode()),
+            DOCUMENT.map(
+                lambda d: "".join(
+                    f"{json.dumps(k)} = {toml(v)}\n" for k, v in d.items()
+                )
+            ).map(str.encode),
+            VALUE.map(lambda v: json.dumps(v).encode()),
+        ),
+    )
+    @example("mise.toml", b'"tools"={""=false}')
+    def test_any_manifest_is_answered(self, name: str, data: bytes) -> None:
+        """Dependencies and report lines, never a traceback."""
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            report: list[str] = []
+            deps = getattr(sb, READERS[name])([path], report)
+        self.assertIsInstance(deps, list)
+        for line in report:
+            self.assertTrue(line.startswith(str(path)), line)
 
 
 if __name__ == "__main__":
