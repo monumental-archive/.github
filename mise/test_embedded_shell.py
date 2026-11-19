@@ -613,6 +613,8 @@ class DebtFile(unittest.TestCase):
             ("w.yml\t\t16\t# #1\n", "this line has 4 field(s)"),
             ("w.yml\tBig\t15\t# #1\n", "'15' is not a line count over the 15-line"),
             ("w.yml\tBig\tmany\t# #1\n", "'many' is not a line count"),
+            # A non-ASCII digit: isdigit took it and int() raised (#1555).
+            ("w.yml\tBig\t\u00b2\t# #1\n", "'\u00b2' is not a line count"),
             ("w.yml\tBig\t16\tsoon #1\n", "the note is a `#` comment naming the issue"),
             ("w.yml\tBig\t16\t# later\n", "the note is a `#` comment naming the issue"),
             (
@@ -713,6 +715,25 @@ class Reader(unittest.TestCase):
         )
         [run] = read_runs(text)
         self.assertEqual((run.name, run.line), ("Act", 7))
+
+    def test_the_shell_key_anywhere_in_the_step(self) -> None:
+        """First on the `- ` line, or after the block: still the step's (#1555).
+
+        Both were read as bash, so a python block went to shfmt and
+        shellcheck.
+        """
+        rows = [
+            ("- shell: python\n  run: |\n    print(1)\n", "python"),
+            ("- run: |\n    print(1)\n  shell: python\n", "python"),
+            ("- name: S\n  run: |\n    x\n  shell: sh\n", "sh"),
+            ("- run: |\n    shell: python\n", "bash"),
+            ("- shell: python\n  run: |\n    x\n- run: |\n    y\n", "python"),
+        ]
+        for text, shell in rows:
+            with self.subTest(text=text):
+                self.assertEqual(read_runs(workflow(text))[0].shell, shell)
+        second = read_runs(workflow(rows[-1][0]))[1]
+        self.assertEqual(second.shell, "bash")
 
     def test_every_interpreter_is_held_but_shellcheck_reads_bash(self) -> None:
         """The ceiling counts a python block; shellcheck's view skips it."""
