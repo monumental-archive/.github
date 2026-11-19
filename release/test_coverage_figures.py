@@ -38,8 +38,8 @@ import hermetic
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
-BASH = shutil.which("bash") or "bash"
-GIT = shutil.which("git") or "git"
+BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 SHA = "977d99f0ee27ca9d8a3c9c4cf5911105c88241bf"
 OTHER = "2980f36dba6e88b75ecd97536850263c140a4103"
