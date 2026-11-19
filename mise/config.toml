@@ -5144,6 +5144,42 @@ fi
 echo "audit:badges: ${checked} shield(s) checked, all agree with their issuers"
 '''
 
+[tasks."audit:bestpractices"]
+description = "The published bestpractices.dev entry matches .bestpractices.json (network, not in ci)"
+dir = "{{cwd}}"
+# A repository's Best Practices answers live in its own
+# .bestpractices.json, and bestpractices.dev reads that file only when
+# the form is re-entered (docs/best-practices.md). Nothing compared the
+# two, so the published entry sat behind the measured answers
+# indefinitely: on 2026-11-18 the canon's entry read Unmet on six
+# criteria its file answered Met (#1536). audit:badges asks whether the
+# entry passes and is the wearer's, never whether it says what the file
+# says.
+#
+# Tree-local by the #681 test: the subject is this repository's own
+# file and the entry its own README's shield names, so the leg runs in
+# repo-audit.yml for every caller and in the canon's audit.yml for the
+# canon. Every `_status` and `_justification` the file carries is
+# compared, and a difference is red by criterion. THE FILE IS THE
+# SOURCE: the step a red names is re-entering the form from the file,
+# never editing the file to match the site.
+#
+# The guard and the call stay here and the rest is the helper's
+# (bestpractices-drift.py), under the 15-line ceiling (#1544); curl is
+# still what fetches, so a stub curl is what the rows plant.
+#
+# audit:*, not lint:*: the entry is a property of somebody else's
+# server, not of the change under review.
+run = '''
+git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
+  echo "audit:bestpractices: no tracked .bestpractices.json, skipped"
+  exit 0
+}
+top=$(git rev-parse --show-toplevel)
+readme=$(git ls-files | grep -iE '^readme(\.md|\.markdown)?$' | head -n 1 || true)
+python3 "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
+'''
+
 [tasks."audit:links"]
 description = "Check links in tracked markdown (lychee — network, not in ci)"
 dir = "{{cwd}}"

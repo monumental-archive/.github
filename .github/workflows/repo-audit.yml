@@ -469,6 +469,38 @@ jobs:
       - name: Run every Python property at a random seed
         run: mise run audit:python-properties
 
+  bestpractices:
+    name: audit / best practices entry matches its file
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.7
+          cache: false
+
+      # Tree-local by the #681 test (#1536): this repository's own
+      # .bestpractices.json against the bestpractices.dev entry its
+      # README's shield names. Red names each criterion the published
+      # entry has not caught up with, and the step is re-entering the
+      # form from the file, never editing the file. One anonymous read
+      # of bestpractices.dev, so no token. Skips clean with no tracked
+      # file or no shield.
+      - name: Compare the published entry with .bestpractices.json
+        run: mise run audit:bestpractices
+
   repo-audits:
     name: audit / this repository's own audit tasks
     runs-on: ubuntu-26.04

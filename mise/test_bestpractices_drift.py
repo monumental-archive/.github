@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""Table tests for audit:bestpractices (#1536).
+
+The leg compares a repository's published bestpractices.dev entry with
+its own `.bestpractices.json`, criterion by criterion, and names the
+step a red asks for: re-enter the form from the file.
+
+The body under test is the task's own `run` string, read out of
+mise/config.toml with tomllib and run by bash in a planted git tree,
+with `curl` a stub on PATH that serves the row's planted entry and
+status and logs the URL it was asked. Each red row asserts the whole
+message, not just the exit status.
+
+The answers planted are the canon's real `.bestpractices.json`, so a
+row exercises every key shape the file carries, Baseline display names
+included, and the entry is the same answers under the names the site
+serves them by.
+
+stdlib `unittest`, matching the other mise/test_*.py. Run through the
+gate as `mise run test`, which `ci` collects.
+"""
+
+import contextlib
+import io
+import json
+import runpy
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import tempfile
+import tomllib
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
+)
+drift = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().with_name("bestpractices-drift.py")))
+)
+
+CANON = Path(__file__).resolve().parent.parent
+BELT = CANON / "mise"
+BASH = shutil.which("bash") or "bash"
+GIT = shutil.which("git") or "git"
+ANSWERS = json.loads((CANON / ".bestpractices.json").read_text(encoding="utf-8"))
+REPO = "monumental-archive/example"
+ID = "14058"
+URL = f"https://www.bestpractices.dev/projects/{ID}.json"
+LABEL = f"audit:bestpractices: {REPO} (bestpractices.dev project {ID})"
+README = (
+    "# example\n\n<!-- badges:begin -->\n"
+    f"[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/{ID}/badge)]"
+    f"(https://www.bestpractices.dev/projects/{ID})\n"
+    "<!-- badges:end -->\n"
+)
+STEP = (
+    "  re-enter the form from the file (docs/best-practices.md); the file is\n"
+    "  the source, never edit it to match the site (#1536)\n"
+)
+SKIPPED = "README carries no bestpractices.dev shield, skipped"
+CURL_STUB = """#!/usr/bin/env bash
+printf 'curl %s\\n' "${*: -1}" >> "${PLANT_LOG}"
+cat "${PLANT_ENTRY}"
+printf '\\n%s' "${PLANT_CODE}"
+"""
+
+
+def body() -> str:
+    """Read the task's run string as mise would render it.
+
+    Returns:
+        The task body; it carries no Tera, so it renders as written.
+
+    """
+    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
+    return config["tasks"]["audit:bestpractices"]["run"]
+
+
+BODY = body()
+
+
+def published(edit: dict | None = None) -> dict:
+    """Return the canon's answers as the site serves them, edited.
+
+    Returns:
+        The entry: every file key under the site's name, plus the
+        fields the site carries that the file does not.
+
+    """
+    entry = {drift.site_key(k): v for k, v in ANSWERS.items()}
+    entry |= {"id": int(ID), "name": "example", "badge_percentage_0": 100}
+    entry |= {drift.site_key(k): v for k, v in (edit or {}).items()}
+    return entry
+
+
+def run(
+    *,
+    entry: dict | str | None = None,
+    code: str = "200",
+    readme: str | None = README,
+    answers: bool = True,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run the leg in a planted tree.
+
+    Returns:
+        The finished process and the stub's log of URLs asked.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tree = root / "tree"
+        bin_dir = root / "bin"
+        tree.mkdir()
+        bin_dir.mkdir()
+        stub = bin_dir / "curl"
+        stub.write_text(CURL_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        planted = root / "entry.json"
+        if entry is None:
+            entry = published()
+        planted.write_text(
+            entry if isinstance(entry, str) else json.dumps(entry),
+            encoding="utf-8",
+        )
+        log = root / "log"
+        log.touch()
+        env = hermetic.env()
+        env |= {
+            "ORG_BELT_DIR": str(BELT),
+            "GITHUB_REPOSITORY": REPO,
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "PLANT_ENTRY": str(planted),
+            "PLANT_CODE": code,
+            "PLANT_LOG": str(log),
+        }
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [GIT, "init", "-q"], cwd=tree, env=env, check=True
+        )
+        if answers:
+            (tree / ".bestpractices.json").write_text(
+                json.dumps(ANSWERS, indent=2) + "\n", encoding="utf-8"
+            )
+        if readme is not None:
+            (tree / "README.md").write_text(readme, encoding="utf-8")
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [GIT, "add", "-A"], cwd=tree, env=env, check=True
+        )
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [BASH, "-euo", "pipefail", "-c", BODY],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done, log.read_text(encoding="utf-8")
+
+
+class Green(unittest.TestCase):
+    """The shapes the leg passes or skips clean, by name."""
+
+    def test_a_matching_entry_passes(self) -> None:
+        """The published entry says what the file says."""
+        done, log = run()
+        self.assertEqual(done.stderr, "")
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(
+            done.stdout,
+            f"{LABEL}: the published entry matches .bestpractices.json\n",
+        )
+        self.assertEqual(log, f"curl {URL}\n")
+
+    def test_a_null_justification_equals_an_empty_one(self) -> None:
+        """The site's null and the file's empty string are one answer."""
+        key = next(k for k in ANSWERS if k.endswith("_justification"))
+        answers = dict(ANSWERS)
+        answers[key] = ""
+        self.assertEqual(drift.drift(answers, published({key: None})), [])
+        # And only then: against the file's real words, null is a drift.
+        self.assertEqual(
+            drift.drift(ANSWERS, published({key: None})),
+            [f"{key.removesuffix('_justification')}: justification differs"],
+        )
+
+    def test_a_repository_with_no_badge_is_skipped_by_name(self) -> None:
+        """No shield names an entry, so there is nothing to compare."""
+        done, log = run(readme="# example\n")
+        self.assertEqual(done.stderr, "")
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(
+            done.stdout,
+            f"audit:bestpractices: {REPO}: README carries no bestpractices.dev"
+            " shield, skipped\n",
+        )
+        self.assertEqual(log, "")
+
+    def test_a_commented_out_badge_is_not_a_badge(self) -> None:
+        """A shield inside a comment is not worn."""
+        shield = README.splitlines()[3]
+        done, log = run(readme=README.replace(shield, f"<!-- {shield} -->"))
+        self.assertEqual(done.returncode, 0)
+        self.assertIn(SKIPPED, done.stdout)
+        self.assertEqual(log, "")
+
+    def test_a_repository_with_no_readme_is_skipped_by_name(self) -> None:
+        """No README, so no shield."""
+        done, _ = run(readme=None)
+        self.assertEqual(done.returncode, 0)
+        self.assertIn(SKIPPED, done.stdout)
+
+    def test_a_repository_with_no_file_is_skipped(self) -> None:
+        """Nothing tracks the answers, so nothing is compared."""
+        done, log = run(answers=False)
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(
+            done.stdout,
+            "audit:bestpractices: no tracked .bestpractices.json, skipped\n",
+        )
+        self.assertEqual(log, "")
+
+
+class Red(unittest.TestCase):
+    """Each red row is red when planted, with the stated message."""
+
+    def assert_red(self, message: str, **kwargs: object) -> None:
+        """Assert exit 1 and exactly this message on stderr."""
+        done, _ = run(**kwargs)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertEqual(done.stderr, message)
+
+    def test_a_status_that_differs_is_red_by_criterion(self) -> None:
+        """The defect measured on 14058: Unmet on the site, Met in the file."""
+        self.assert_red(
+            f"{LABEL}: the published entry differs from .bestpractices.json:\n"
+            '  test_most: status "Unmet" on the site, "Met" in the file\n' + STEP,
+            entry=published({"test_most_status": "Unmet"}),
+        )
+
+    def test_a_baseline_status_is_read_under_its_display_name(self) -> None:
+        """`osps_ac_01_01` in the file is `OSPS-AC-01.01` on the site."""
+        self.assert_red(
+            f"{LABEL}: the published entry differs from .bestpractices.json:\n"
+            '  osps_ac_01_01: status "?" on the site, "Met" in the file\n' + STEP,
+            entry=published({"osps_ac_01_01_status": "?"}),
+        )
+
+    def test_a_justification_that_differs_is_red(self) -> None:
+        """Same status, older words: the 16735 shape."""
+        self.assert_red(
+            f"{LABEL}: the published entry differs from .bestpractices.json:\n"
+            "  regression_tests_added50: justification differs\n" + STEP,
+            entry=published({
+                "regression_tests_added50_justification": "Not measured."
+            }),
+        )
+
+    def test_both_fields_of_one_criterion_are_one_line(self) -> None:
+        """A criterion is named once, with every field that differs."""
+        self.assert_red(
+            f"{LABEL}: the published entry differs from .bestpractices.json:\n"
+            '  dynamic_analysis: status "Unmet" on the site, "Met" in the file;'
+            " justification differs\n" + STEP,
+            entry=published({
+                "dynamic_analysis_status": "Unmet",
+                "dynamic_analysis_justification": "Not met.",
+            }),
+        )
+
+    def test_a_criterion_the_site_lacks_is_red(self) -> None:
+        """An answer the entry does not carry at all has not reached it."""
+        entry = published()
+        del entry["test_most_status"]
+        self.assert_red(
+            f"{LABEL}: the published entry differs from .bestpractices.json:\n"
+            '  test_most: status absent on the site, "Met" in the file\n' + STEP,
+            entry=entry,
+        )
+
+    def test_an_issuer_that_does_not_answer_is_red_not_drift(self) -> None:
+        """A 503 is a question unanswered, never a finding about answers."""
+        self.assert_red(
+            f"audit:bestpractices: {REPO}: {URL} did not answer — HTTP 503,"
+            " a question unanswered, not a drift\n",
+            code="503",
+            entry="busy",
+        )
+
+    def test_curl_answering_nothing_is_red_not_drift(self) -> None:
+        """No status at all is named as none, never as a finding."""
+        self.assert_red(
+            f"audit:bestpractices: {REPO}: {URL} did not answer — HTTP none,"
+            " a question unanswered, not a drift\n",
+            code="",
+            entry="",
+        )
+
+    def test_an_answer_that_is_not_json_is_red(self) -> None:
+        """A 200 over HTML is not an entry."""
+        done, _ = run(entry="<html>")
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue(
+            done.stderr.startswith(f"{LABEL}: the site's answer is not JSON: "),
+            done.stderr,
+        )
+
+    def test_an_answer_that_is_not_an_object_is_red(self) -> None:
+        """A JSON list is not a project."""
+        self.assert_red(
+            f"{LABEL}: the site's answer is not a JSON object\n", entry="[]"
+        )
+
+    def test_two_entries_on_one_readme_are_red(self) -> None:
+        """Which entry the file answers for cannot be guessed."""
+        other = README.replace(ID, "16735")
+        self.assert_red(
+            f"README shields name more than one entry: {ID}, 16735\n"
+            f"audit:bestpractices: {REPO}: cannot tell which entry to compare\n",
+            readme=README + other,
+        )
+
+
+class Helper(unittest.TestCase):
+    """The helper's pieces, in process."""
+
+    def test_site_key_maps_baseline_and_keeps_the_rest(self) -> None:
+        """Only Baseline input names are renamed."""
+        self.assertEqual(drift.site_key("osps_qa_02_02_status"), "OSPS-QA-02.02_status")
+        self.assertEqual(
+            drift.site_key("osps_br_04_01_justification"),
+            "OSPS-BR-04.01_justification",
+        )
+        self.assertEqual(drift.site_key("test_most_status"), "test_most_status")
+
+    def test_the_baseline_shield_names_the_entry_too(self) -> None:
+        """Either shield on the entry names it."""
+        readme = f"![b](https://bestpractices.dev/projects/{ID}/baseline)\n"
+        self.assertEqual(drift.project(readme), (ID, None))
+
+    def test_keys_that_are_not_answers_are_ignored(self) -> None:
+        """Only `_status` and `_justification` keys are compared."""
+        self.assertEqual(drift.drift({"name": "x"}, {"name": "y"}), [])
+
+    def test_an_empty_readme_names_no_entry(self) -> None:
+        """No README text, no shield."""
+        self.assertEqual(drift.project(""), (None, None))
+
+    def test_no_curl_is_red(self) -> None:
+        """The fetch is curl's; without it the leg cannot ask."""
+        with tempfile.TemporaryDirectory() as tmp:
+            readme = Path(tmp) / "README.md"
+            readme.write_text(README, encoding="utf-8")
+            with (
+                mock.patch.object(shutil, "which", return_value=None),
+                contextlib.redirect_stderr(io.StringIO()) as err,
+            ):
+                status = drift.main([".bestpractices.json", REPO, str(readme)])
+        self.assertEqual(status, 1)
+        self.assertEqual(err.getvalue(), "audit:bestpractices: curl missing\n")
+
+    def test_an_unreadable_file_is_red(self) -> None:
+        """A file that is not JSON is a finding, not a crash."""
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", encoding="utf-8"
+        ) as handle:
+            handle.write("{")
+            handle.flush()
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(drift.compare(handle.name, REPO, ID, "{}"), 1)
+        self.assertIn(" is not JSON: ", err.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

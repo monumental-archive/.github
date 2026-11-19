@@ -1037,6 +1037,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:badges
 
+  bestpractices:
+    name: audit / best practices entry matches its file
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          version: 2026.11.7
+          cache: false
+
+      # Tree-local by the #681 test (#1536): the subject is this
+      # repository's own .bestpractices.json and the entry its README's
+      # shield names, so this job is how the canon's own entry is held
+      # and repo-audit.yml carries the matching leg. One anonymous read
+      # of bestpractices.dev, no GitHub API, so no token. Red names each
+      # criterion the published entry has not caught up with; the step
+      # is re-entering the form from the file.
+      - name: Compare the published entry with .bestpractices.json
+        run: mise run audit:bestpractices
+
   baseline-drift:
     name: audit / repo settings drift
     needs: plan
