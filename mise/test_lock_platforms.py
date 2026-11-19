@@ -332,6 +332,26 @@ class Unreadable(Case):
         )
         self.assertIn(detail, first)
 
+    def test_a_config_or_lock_it_cannot_read_is_refused_by_name(self) -> None:
+        """Not TOML, or `tools` / an entry not a table: named, exit 2."""
+        for files, said in (
+            (tree(config="[tools\n"), "cannot read mise.toml — "),
+            (tree(config="tools = 1\n"), "cannot read mise.toml — tools is not an object"),
+            (tree(lock="tools = 1\n"), "cannot read mise.lock — tools is not an object"),
+            (
+                tree(lock='[tools]\nnode = ["26.5.1"]\n'),
+                "cannot read mise.lock — tools.node[0] is not an object",
+            ),
+        ):
+            with self.subTest(said=said):
+                done = lint(files)
+                self.assertEqual((2, ""), (done.returncode, done.stdout))
+                lines = done.stderr.splitlines()
+                self.assertTrue(lines[0].startswith(f"{NAME}: {said}"), done.stderr)
+                self.assertEqual(
+                    "  a file this cannot read is not one it may pass", lines[1]
+                )
+
     def test_a_block_scalar_is_refused(self) -> None:
         """A folded list would otherwise read as no targets."""
         folded = stub(
