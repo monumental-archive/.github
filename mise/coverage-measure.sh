@@ -48,8 +48,8 @@
 # file declares a PL/pgSQL function and a `test` task exists, it sets
 # ORG_PLPGSQL_COVERAGE, naming a report the suite's teardown writes, in
 # the one run of that task, and prints `plpgsql <percent>` and
-# `plpgsql-branches <percent>`. The task and its depends are walked
-# here (`walk_task`) and run once for every leg that reads them, under
+# `plpgsql-branches <percent>`. The task is walked by task_walk.py
+# (#1608) and its steps run once for every leg that reads them, under
 # the union of those legs' variables; the reading and the refusals are
 # plpgsql-coverage.py's.
 #
@@ -355,29 +355,6 @@ py_report() {
   exit 1
 }
 
-# The test task and every task it depends on, walked ONCE (#1547):
-# depends first, post-order, each task once, then the task's own `run`,
-# each script from its own task's `dir`, as the gate's `mise run test`
-# runs them. Read with `mise tasks info --json`, the read-only query, not
-# a nested `mise run` (the #82 race). One line of compact JSON per task,
-# with its name; the run below, and the typescript leg's search for its
-# vitest command, both read this.
-test_tasks="" walked=" "
-walk_task() {
-  local name=$1 info deps dep
-  [[ ${walked} != *" ${name} "* ]] || return 0
-  walked="${walked}${name} "
-  info=$(mise tasks info "${name}" --json 2> /dev/null) || {
-    echo "${label}: cannot read task '${name}' with mise tasks info" >&2
-    exit 1
-  }
-  deps=$(jq -r '(.depends // [])[] | if type == "string" then . else (.task // empty) end' <<< "${info}")
-  while read -r dep; do
-    [[ -z ${dep} ]] || walk_task "${dep}"
-  done <<< "${deps}"
-  test_tasks+=$(jq -c --arg n "${name}" '. + {name: $n}' <<< "${info}")$'\n'
-}
-
 # The legs that read the one run of the test task: the python leg its
 # coverage data, the plpgsql leg the report its teardown writes. Each
 # selected leg adds its own variables to that run, and nothing else.
@@ -458,23 +435,12 @@ EOF
 fi
 
 if [[ -n ${measure_py}${measure_pg} ]]; then
-  # Every command is read before anything runs: a task this run cannot
-  # read is refused by name, never measured as empty. base64 per entry:
-  # a script is multi-line, and one record per line is what a bash read
-  # loop can split; `-` stands for a task with no `dir`.
-  walk_task test
-  steps=$(jq -r '.name as $n | (if (.dir // "") == "" then "-" else (.dir | @base64) end) as $d
-    | (.run // [])[] | if type == "string" then "\($d) \(@base64)" else "! \($n)" end' <<< "${test_tasks}")
-  if [[ -z ${steps} ]]; then
-    echo "${label}: the test task and its depends run nothing — the legs measure" >&2
-    echo "  the repository's own suite and cannot measure a task that runs nothing" >&2
-    exit 1
-  fi
-  if [[ ${steps} =~ (^|$'\n')!\ ([^$'\n']*) ]]; then
-    echo "${label}: task '${BASH_REMATCH[2]}' has a run entry that is not a script —" >&2
-    echo "  the measured run reads scripts only" >&2
-    exit 1
-  fi
+  # The test task's steps, walked ONCE by task_walk.py (#1547, #1608):
+  # the order `mise run test` runs them, each script from its own task's
+  # `dir`, every one read before anything runs. A task the walk cannot
+  # run as written is refused by name, never measured as empty. One
+  # record per line, base64 per field: a script is multi-line.
+  steps=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/task_walk.py" steps "${label}") || exit 1
   while read -r dir_b64 script_b64; do
     dir=${PWD}
     [[ ${dir_b64} == - ]] || dir=$(base64 --decode <<< "${dir_b64}")
@@ -544,15 +510,12 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
     echo "  tracked lockfile before measuring" >&2
     exit 1
   fi
-  # The vitest run the gate's `test` task makes, read from the task and
-  # every task it depends on (#1357 item 2): one plain invocation, its
-  # arguments and its task's dir, or a refusal by name. The depends are
-  # walked here with the same read-only `mise tasks info` the python leg
-  # makes; the reading of the scripts is coverage-js-runner.py's.
-  walk_task test
-  tasks_json=${test_tasks}
+  # The vitest run the gate's `test` task makes, read from the steps
+  # task_walk.py walks (#1357 item 2, #1608): one plain invocation, its
+  # arguments and its task's dir, or a refusal by name. The reading of
+  # the scripts is coverage-js-runner.py's.
   command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
-    --vitest-command "${label}" <<< "${tasks_json}") || exit 1
+    --vitest-command "${label}" test) || exit 1
   test_dir=$(jq -r '.dir' <<< "${command_json}")
   args_lines=$(jq -r '.args[]' <<< "${command_json}")
   test_args=()

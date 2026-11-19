@@ -26,13 +26,13 @@ The leg supports vitest. Any other runner is named, from the root
 package.json's dependencies or its `test` script, so a skip says what
 it skipped rather than reading as a tree with nothing to measure.
 
-`--vitest-command <label>` is the second question: WHICH vitest run
+`--vitest-command <label> <task>` is the second question: WHICH vitest run
 the leg measures. #1357 item 2 says the leg runs the repository's own
 test command, so the suite measured is the suite the gate runs (#707),
 never vitest's whole configured suite where the `test` task runs a
-narrower one. Standard input carries `mise tasks info --json` for the
-`test` task and every task it depends on, one per line. The one plain
-vitest invocation in their `run` scripts is printed as JSON,
+narrower one. The scripts are the `test` task's run as `task_walk.py`
+walks it (#1608), the one walk every leg reads. The one plain vitest
+invocation in them is printed as JSON,
 `{"dir": <the task's dir>, "args": [<its arguments>]}`, and the caller
 runs the repository's own vitest with exactly those arguments plus the
 coverage flags. Running the task's scripts with a coverage-adding
@@ -53,6 +53,16 @@ import re
 import shlex
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+# The one walk of a task (#1608), a module beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import task_walk
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from task_walk import Step, Walk
 
 # Lockfiles the leg reads, in the order a package manager would prefer.
 LOCKFILES = ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock")
@@ -232,8 +242,8 @@ def read_line(line: str) -> tuple[list[str] | None, str | None]:
     return words[at + 1 :], None
 
 
-def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
-    """Read every task's run scripts for vitest invocations.
+def collect(steps: Sequence[Step]) -> tuple[list[tuple[str, list[str]]], list[str]]:
+    """Read every step's script for vitest invocations.
 
     Returns:
         Each readable invocation as (its task's dir, its arguments), and
@@ -242,27 +252,19 @@ def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
     """
     found: list[tuple[str, list[str]]] = []
     refused: list[str] = []
-    for raw in stream.splitlines():
-        if not raw.strip():
-            continue
-        task = json.loads(raw)
-        run = task.get("run") or []
-        for script in [run] if isinstance(run, str) else run:
-            # A `{ task = … }` entry runs another task, and mise reports
-            # it as an object (#1555: it raised AttributeError here). It
-            # holds no script of this task's to read.
-            if not isinstance(script, str):
-                continue
-            for line in logical_lines(script):
-                args, reason = read_line(line)
-                if reason is not None:
-                    refused.append(f"{task.get('name', 'test')}: {reason}")
-                elif args is not None:
-                    found.append((task.get("dir") or ".", args))
+    for step in steps:
+        for line in logical_lines(step.script):
+            args, reason = read_line(line)
+            if reason is not None:
+                refused.append(f"{step.task}: {reason}")
+            elif args is not None:
+                found.append((step.dir or ".", args))
     return found, refused
 
 
-def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str]:
+def problems(
+    found: list[tuple[str, list[str]]], refused: list[str], walked: list[str]
+) -> list[str]:
     """Say why the collected invocations are not one measurable run.
 
     Returns:
@@ -279,6 +281,7 @@ def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str
     if not found:
         return [
             ", and the test task and its depends run none —",
+            f"  tasks walked: {', '.join(walked)}",
             f"  run vitest from the test task as {FORMS}",
         ]
     if len(found) > 1:
@@ -300,15 +303,15 @@ def problems(found: list[tuple[str, list[str]]], refused: list[str]) -> list[str
     return []
 
 
-def vitest_command(label: str, stream: str) -> int:
-    """Print the test task's one vitest invocation, or refuse it by name.
+def vitest_command(label: str, walked: Walk) -> int:
+    """Print the walked steps' one vitest invocation, or refuse it by name.
 
     Returns:
         0 with the JSON on stdout, or 1 with the refusal on stderr.
 
     """
-    found, refused = collect(stream)
-    lines = problems(found, refused)
+    found, refused = collect(walked.steps)
+    lines = problems(found, refused, list(walked.tasks))
     if lines:
         head = f"{label}: typescript: the leg measures the test task's own"
         print(f"{head} vitest command{lines[0]}", file=sys.stderr)
@@ -320,6 +323,21 @@ def vitest_command(label: str, stream: str) -> int:
         args = ["run", *args]
     print(json.dumps({"dir": directory, "args": args}))
     return 0
+
+
+def walked_command(label: str, root: str) -> int:
+    """Walk from the root task with mise and print its vitest command.
+
+    Returns:
+        vitest_command's status, or 1 when the walk refuses a task.
+
+    """
+    try:
+        walked = task_walk.walk_mise(root)
+    except task_walk.RefusedError as exc:
+        print(f"{label}: typescript: {exc}", file=sys.stderr)
+        return 1
+    return vitest_command(label, walked)
 
 
 def main(tracked: list[str]) -> int:
@@ -357,5 +375,5 @@ def main(tracked: list[str]) -> int:
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--vitest-command"]:
-        sys.exit(vitest_command(sys.argv[2], sys.stdin.read()))
+        sys.exit(walked_command(sys.argv[2], sys.argv[3]))
     sys.exit(main(sys.argv[1:]))
