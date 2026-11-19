@@ -86,4 +86,71 @@ pre-push:
         : {files};
         MISE_CEILING_PATHS="$(dirname "$(git rev-parse --show-toplevel)")"
         mise run ci
+
+# THE BELT OF THIS CLONE'S PIN (#1686). A clone loads the belt its gate
+# stub pins, as a project config, so a laptop judges each repository
+# with the tools CI judges it with, whatever else the machine holds.
+#
+# The pin is the tracked gate stub's
+# `uses: <owner>/<repo>/.github/workflows/ci.yml@<40-hex sha>`, the line
+# lint:belt-current reads; there is no second pin. The tree is cached
+# once per sha at ${XDG_CACHE_HOME:-~/.cache}/org-belt/<sha>, shared by
+# every clone and worktree on the machine, and never written again once
+# it exists: it is fetched into a temporary directory beside it, its
+# HEAD checked against the sha (the sha is the integrity check), and
+# renamed into place, so two hooks at once leave one whole tree. The
+# network is touched only when the cache has no tree for the pin.
+#
+# Two links, both untracked and ignored: `.config/mise/conf.d/belt.toml`
+# (mise loads it as a project config) and `.config/mise/mise.lock`
+# (mise locks a project conf.d file with its config directory's lock,
+# one level up, and with nothing else: measured on #1686). A line is
+# printed only when a link changes. No pin (the canon, whose tree is
+# its belt) does nothing.
+#
+# git exports its own variables to a hook (GIT_DIR among them); they are
+# unset before the fetch, so the cache repository is never the clone's.
+# Git runs post-checkout on `git worktree add`, so a new worktree links
+# itself. Once per clone, after `lefthook install`:
+#   lefthook run post-checkout
+post-checkout:
+  jobs:
+    - name: belt
+      run: &belt >-
+        top="$(git rev-parse --show-toplevel)" || exit 1;
+        pin="$(cat "${top}"/.github/workflows/*.y*ml 2>/dev/null
+        | sed -nE 's|.*uses:[[:space:]]*([^[:space:]/]+/[^[:space:]/]+)/\.github/workflows/ci\.ya?ml@([0-9a-f]+).*|\1 \2|p'
+        | sed -n '1p')";
+        [ -n "${pin}" ] || exit 0;
+        repo="${pin% *}"; sha="${pin#* }";
+        [ "${#sha}" -eq 40 ] || { echo "org-belt: the gate stub pins ${sha}, not a 40-hex sha; nothing linked" >&2; exit 1; };
+        cache="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt"; tree="${cache}/${sha}";
+        unset $(git rev-parse --local-env-vars);
+        if [ ! -d "${tree}" ]; then
+        mkdir -p "${cache}" && tmp="$(mktemp -d "${cache}/.fetch.XXXXXX")" || exit 1;
+        if ! { git -C "${tmp}" init -q && git -C "${tmp}" fetch -q --depth 1 "https://github.com/${repo}" "${sha}"
+        && git -C "${tmp}" -c advice.detachedHead=false checkout -q FETCH_HEAD; }; then
+        rm -rf "${tmp}"; echo "org-belt: could not fetch ${repo}@${sha}; nothing linked" >&2; exit 1; fi;
+        got="$(git -C "${tmp}" rev-parse HEAD)";
+        if [ "${got}" != "${sha}" ]; then
+        rm -rf "${tmp}"; echo "org-belt: fetched ${got}, not the pinned ${sha}; nothing linked" >&2; exit 1; fi;
+        perl -e 'rename($ARGV[0], $ARGV[1])' "${tmp}" "${tree}"; rm -rf "${tmp}"; fi;
+        if [ ! -f "${tree}/mise/config.toml" ] || [ ! -f "${tree}/mise/mise.lock" ]; then
+        echo "org-belt: ${tree} holds no mise/config.toml and mise.lock; nothing linked" >&2; exit 1; fi;
+        dir="${top}/.config/mise"; mkdir -p "${dir}/conf.d" || exit 1; changed=0;
+        for pair in "conf.d/belt.toml:config.toml" "mise.lock:mise.lock"; do
+        link="${dir}/${pair%%:*}"; want="${tree}/mise/${pair#*:}";
+        if [ "$(readlink "${link}" 2>/dev/null)" != "${want}" ]; then
+        ln -sfn "${want}" "${link}" || exit 1; changed=1; fi; done;
+        [ "${changed}" -eq 0 ] || echo "org-belt: .config/mise links the belt of ${repo}@${sha}"
+
+post-merge:
+  jobs:
+    - name: belt
+      run: *belt
+
+post-rewrite:
+  jobs:
+    - name: belt
+      run: *belt
 ...
