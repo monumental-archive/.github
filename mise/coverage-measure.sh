@@ -45,10 +45,12 @@
 #
 # `plpgsql` (#1547) measures PL/pgSQL through plpgsql_check, in a
 # database only the repository's suite has: applicable where a tracked
-# file declares a PL/pgSQL function and a `test` task exists, it runs
-# that task with ORG_PLPGSQL_COVERAGE naming a report its teardown
-# writes, and prints `plpgsql <percent>` and `plpgsql-branches
-# <percent>`. The reading, the refusals and the task walk are
+# file declares a PL/pgSQL function and a `test` task exists, it sets
+# ORG_PLPGSQL_COVERAGE, naming a report the suite's teardown writes, in
+# the one run of that task, and prints `plpgsql <percent>` and
+# `plpgsql-branches <percent>`. The task and its depends are walked
+# here (`walk_task`) and run once for every leg that reads them, under
+# the union of those legs' variables; the reading and the refusals are
 # plpgsql-coverage.py's.
 #
 # Invoked directly, never through a nested `mise run`: a nested mise
