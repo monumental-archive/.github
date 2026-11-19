@@ -32,6 +32,7 @@ tasks = [
   "lint:scaffold-assembly",
   "lint:shell",
   "lint:shell-embedded",
+  "lint:task-shell",
   "lint:workflow-shell",
 ]
 
@@ -66,6 +67,7 @@ tasks = [
   "lint:scaffold-assembly",
   "lint:shell",
   "lint:shell-embedded",
+  "lint:task-shell",
   "lint:workflow-shell",
 ]
 
