@@ -200,6 +200,39 @@ That is the whole wiring.
   pollutes only the badge feed: the gate's ratchet (`coverage:check`)
   computes locally and never reads Codecov.
 
+  Codecov posts no pass or fail (#1532). Its defaults post
+  `codecov/project` and `codecov/patch` commit statuses against a
+  target it computes itself: a second coverage threshold that can
+  contradict the gate's `.coverage-floor`, and that the gate cannot
+  reproduce offline. The org has one threshold, the gate's; whether
+  the code a pull request adds is tested is the gate's question too
+  (#1432). So Codecov is the badge and the PR comment only, set once
+  for every repository in Codecov's organisation default, an owner
+  step (app.codecov.io -> monumental-archive -> Settings -> Global
+  YAML), recorded here the way `rulesets.md` records the rulesets:
+  no mirror file, no sync script.
+
+  ```yaml
+  coverage:
+    status:
+      project: off
+      patch: off
+  ```
+
+  Validated with `curl --data-binary @<file>
+  https://codecov.io/validate` (2026-11-19: `Valid!`, both keys
+  `false`). The values are bare YAML booleans: edtf's former
+  `.github/codecov.yml` quoted them (`'off'`), the validator rejects
+  that (`must be of ['dict', 'boolean'] type`), and its statuses
+  stayed on. A repository file replaces the organisation default
+  rather than layering on it, so no repository carries one:
+  `lint:codecov-yml` is red by name on any tracked `codecov.yml`,
+  `.codecov.yml`, `codecov.yaml` or `.codecov.yaml` at the root or
+  under `dev/` or `.github/`, the locations Codecov reads. This
+  began with edtf's file (edtf#141), for a reason that no longer
+  holds: it refused any threshold, and the org has had the floor
+  since. The reason now is the one above: one threshold, the gate's.
+
 ## Cutting a release
 
 Nothing to type. Merge conventional commits; the release PR tracks them;
