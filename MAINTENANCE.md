@@ -18,11 +18,17 @@ with no change of its own.
 - **The toolbelt** (`mise/config.toml` + `mise.lock`): the set of tools
   and their pins. Tool version bumps are dependency chores and ship with
   the next release rather than forcing one; removing a tool repos invoke
-  directly is breaking.
+  directly is breaking. A laptop loads the belt of each clone's own pin:
+  the org hooks link `.config/mise/conf.d/belt.toml` and
+  `.config/mise/mise.lock` into the machine's cache tree of the sha the
+  gate stub pins (#1686), so `.config/mise/` in a consuming repository is
+  the belt's, and `lint:belt-link` refuses a tracked file there.
 - **Org hooks** (`lefthook/org-hooks.yml`): the hook set and what it
   enforces. Removing a hook is a minor (loosening); a new blocking hook
   is a minor (tightening is the product); renaming in ways that break
-  `extends` consumers is breaking.
+  `extends` consumers is breaking. The post-checkout, post-merge and
+  post-rewrite jobs make the belt link above; a clone runs them once by
+  hand after `lefthook install` (`lefthook run post-checkout`).
 - **The Renovate preset** (`default.json`): its observable behaviour —
   automerge classes, age gates, custom managers. Narrowing automerge or
   removing a manager consumers rely on is breaking.

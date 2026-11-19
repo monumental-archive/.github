@@ -19,8 +19,10 @@ Every change arrives by pull request — nothing lands on `main` directly —
 and must pass the organisation's CI gate, which is the coding standard in
 executable form:
 
-1. Copy nothing, configure nothing: run `mise trust && mise install` in the
-   repository and the full toolchain arrives pinned.
+1. Copy nothing, configure nothing: once per clone, run
+   `lefthook install && lefthook run post-checkout`, which links the clone
+   to the toolbelt its gate pins, then `mise trust && mise install`, and
+   the full toolchain arrives pinned.
 2. `mise run ci` locally is **exactly** the check CI runs. If it passes on
    your machine, it passes in CI.
 3. **A change that adds or changes behaviour adds the check that holds

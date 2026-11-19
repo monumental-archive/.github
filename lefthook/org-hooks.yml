@@ -9,7 +9,7 @@
 #       refetch_frequency: 24h
 #       configs:
 #         - lefthook/org-hooks.yml
-# Then once per clone: lefthook install
+# Then once per clone: lefthook install && lefthook run post-checkout
 #
 # Every job that runs mise sets MISE_CEILING_PATHS to the parent of the
 # tree's top level first (#1232). mise walks up from the working
