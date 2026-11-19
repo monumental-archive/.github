@@ -1075,6 +1075,23 @@ class CoverageFigures(unittest.TestCase):
             "path: ${{ runner.temp }}/coverage-reports/coverage-figures.txt", kept
         )
 
+    def test_the_release_job_reads_with_a_token_that_can(self) -> None:
+        """The floor step has a token, and its job may read artifacts."""
+        job = load("release.yml")["release-pr"]
+        floor = step(job, "Re-derive the coverage floor")
+        self.assertIn("run: .org-canon/release/derive-coverage-floor.sh", floor)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", floor)
+        self.assertIn("      actions: read", "\n".join(job))
+
+    def test_every_caller_grants_the_read(self) -> None:
+        """The template and the canon's own caller grant `actions: read`."""
+        for path in (
+            CANON / "workflow-templates" / "release.yml",
+            WORKFLOWS / "self-release.yml",
+        ):
+            with self.subTest(caller=path.name):
+                self.assertRegex(path.read_text("utf-8"), r"\n {6}actions: read\b")
+
     def test_the_figures_step_follows_the_gate(self) -> None:
         """Kept only after `mise run ci` passed: a red gate keeps nothing."""
         job = load("ci.yml")["gate"]

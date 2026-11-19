@@ -170,6 +170,12 @@ jobs:
       # `contents: read` is the whole grant either reader buys, and it
       # is read-only.
       contents: read
+      # The third reader (#1622): the coverage floor step reads the
+      # figures the gate kept for this commit, the `coverage-figures-<sha>`
+      # artifact of its merge-group or push run, instead of measuring the
+      # same commit again. Listing a run's artifacts and downloading one
+      # takes `actions: read`; it reads, and writes nothing.
+      actions: read
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
@@ -228,10 +234,17 @@ jobs:
         # before a version number is spent — rather than lowering the
         # floor, because the floor only rises. A repository with no
         # `.coverage-floor` has adopted no ratchet and skips clean.
+        #
+        # The gate already measured this commit (#1622): the step reads
+        # the figures its merge-group or push run kept, and measures only
+        # when there are none for this commit, saying which.
         if: steps.prepare.outputs.release == 'true'
         id: floor
         env:
           VERSION: ${{ steps.prepare.outputs.version }}
+          # Read-only: this repository's artifact listing, one run, and
+          # one artifact download (`actions: read` above).
+          GH_TOKEN: ${{ github.token }}
         run: .org-canon/release/derive-coverage-floor.sh
 
       - name: Mint the Release-PR token
