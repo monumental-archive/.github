@@ -119,7 +119,10 @@ def stamp(info: str, pattern: re.Pattern[str]) -> str:
 
     """
     found = pattern.search(info)
-    return found.group("value").strip() if found else ""
+    if found is None:
+        return ""
+    # Sliced by the group's span: `group()` is typed `str | Any`.
+    return info[found.start("value") : found.end("value")].strip()
 
 
 def check(binary: Path, head: str) -> None:

@@ -27,8 +27,14 @@ from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
+# A JSON scalar: JSON has no NaN or Infinity, and the manifest is read
+# strictly (#1676), so a float that is not finite is not one.
 SCALAR = (
-    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text()
+    st.none()
+    | st.booleans()
+    | st.integers()
+    | st.floats(allow_nan=False, allow_infinity=False)
+    | st.text()
 )
 JSON = st.recursive(
     SCALAR,

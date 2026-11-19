@@ -40,6 +40,7 @@ import sys
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import workflow_command
 
 CHECKSUMS = pathlib.Path("checksums.txt")
@@ -95,22 +96,22 @@ def first_entry_name(path: pathlib.Path) -> str:
     if not path.is_file() or path.stat().st_size == 0:
         return ""
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as err:
+        doc = decoded.load_json(path.read_bytes())
+    except decoded.UndecodableError as err:
         msg = f"{path} is not JSON: {err}"
         raise StepError(msg) from err
-    if not isinstance(doc, dict):
+    if not decoded.is_object(doc):
         msg = f"{path} is not a JSON object"
         raise StepError(msg)
     entries = doc.get("entries") or []
     # Entries that are not a list type nothing; `{"entries": true}` and
     # `{"entries": {"": null}}` died here as a TypeError and a KeyError
     # (#1556).
-    if not isinstance(entries, list):
+    if not decoded.is_array(entries):
         msg = f"{path} is not an evidence manifest: its entries are not a list"
         raise StepError(msg)
-    first = entries[0] if entries and isinstance(entries[0], dict) else {}
-    name = first.get("name")
+    first = entries[0] if entries else None
+    name = first.get("name") if decoded.is_object(first) else None
     if name is None or name is False:
         return ""
     return name if isinstance(name, str) else json.dumps(name)

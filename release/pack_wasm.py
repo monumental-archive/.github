@@ -30,6 +30,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 # The canon's one writer of workflow commands, in mise/ (#1660).
@@ -37,6 +38,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import workflow_command
 
 
@@ -89,7 +91,16 @@ def raw(value: object) -> str:
     return json.dumps(value)
 
 
-def repository(manifest: Mapping[str, object]) -> str:
+@dataclass(frozen=True)
+class Manifest:
+    """What the pack step reads of package.json, each as `jq -r` prints it."""
+
+    name: str
+    version: str
+    repository: str
+
+
+def repository(manifest: dict[str, object]) -> str:
     """Read package.json's repository, URL form or string form.
 
     Returns:
@@ -97,7 +108,7 @@ def repository(manifest: Mapping[str, object]) -> str:
 
     """
     repo = manifest.get("repository")
-    if isinstance(repo, Mapping):
+    if decoded.is_object(repo):
         url = repo.get("url")
         if url is not None and url is not False:
             return raw(url)
@@ -106,14 +117,14 @@ def repository(manifest: Mapping[str, object]) -> str:
     return raw(repo)
 
 
-def check(manifest: Mapping[str, object], version: str, caller: str) -> None:
+def check(manifest: Manifest, version: str, caller: str) -> None:
     """Refuse a package that names another repository or another version.
 
     Raises:
         RefusedError: the repository or the version is not the release's.
 
     """
-    repo_url = repository(manifest)
+    repo_url = manifest.repository
     want = f"https://github.com/{caller}"
     norm = repo_url.removeprefix("git+").removesuffix(".git")
     if norm != want:
@@ -124,34 +135,38 @@ def check(manifest: Mapping[str, object], version: str, caller: str) -> None:
             " true)"
         )
         raise RefusedError(msg)
-    said = raw(manifest.get("version"))
+    said = manifest.version
     if said != version:
         msg = f"package.json says {said}, tag says {version}"
         raise RefusedError(msg)
 
 
-def read_manifest(path: Path) -> Mapping[str, object]:
+def read_manifest(path: Path) -> Manifest:
     """Read package.json, which must be a JSON object.
 
     `0`, `[]` or text that is not JSON died here with a traceback
     (#1556); each is refused by name.
 
     Returns:
-        The parsed object.
+        Its name, version and repository, rendered as `jq -r` prints them.
 
     Raises:
         RefusedError: it is not JSON, or not a JSON object.
 
     """
     try:
-        manifest = json.loads(path.read_text("utf-8"))
-    except json.JSONDecodeError as err:
+        doc = decoded.load_json(path.read_bytes())
+    except decoded.UndecodableError as err:
         msg = f"{path} is not JSON: {err}"
         raise RefusedError(msg) from err
-    if not isinstance(manifest, dict):
+    if not decoded.is_object(doc):
         msg = f"{path} is not a JSON object"
         raise RefusedError(msg)
-    return manifest
+    return Manifest(
+        name=raw(doc.get("name")),
+        version=raw(doc.get("version")),
+        repository=repository(doc),
+    )
 
 
 def pack(env: Mapping[str, str]) -> list[str]:
@@ -185,7 +200,7 @@ def pack(env: Mapping[str, str]) -> list[str]:
         "subjects<<SUBJECTS_EOF",
         line,
         "SUBJECTS_EOF",
-        f"package={raw(manifest.get('name'))}@{raw(manifest.get('version'))}",
+        f"package={manifest.name}@{manifest.version}",
         f"registry-subjects=package {line}",
     ]
 

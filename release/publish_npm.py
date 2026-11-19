@@ -79,7 +79,7 @@ def version_key(version: str) -> tuple[int, ...]:
         The version's numeric parts.
 
     """
-    return tuple(int(part) for part in re.findall(r"\d+", version))
+    return tuple(int(version[m.start() : m.end()]) for m in re.finditer(r"\d+", version))
 
 
 def npm(
