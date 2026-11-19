@@ -31,6 +31,7 @@ import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 hermetic = SimpleNamespace(
     **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
@@ -286,6 +287,15 @@ class Red(unittest.TestCase):
             entry="busy",
         )
 
+    def test_curl_answering_nothing_is_red_not_drift(self) -> None:
+        """No status at all is named as none, never as a finding."""
+        self.assert_red(
+            f"audit:bestpractices: {REPO}: {URL} did not answer — HTTP none,"
+            " a question unanswered, not a drift\n",
+            code="",
+            entry="",
+        )
+
     def test_an_answer_that_is_not_json_is_red(self) -> None:
         """A 200 over HTML is not an entry."""
         done, _ = run(entry="<html>")
@@ -332,9 +342,22 @@ class Helper(unittest.TestCase):
         """Only `_status` and `_justification` keys are compared."""
         self.assertEqual(drift.drift({"name": "x"}, {"name": "y"}), [])
 
-    def test_main_prints_nothing_for_an_empty_readme_argument(self) -> None:
-        """An empty README path means no README."""
-        self.assertEqual(drift.main(["project", ""]), 0)
+    def test_an_empty_readme_names_no_entry(self) -> None:
+        """No README text, no shield."""
+        self.assertEqual(drift.project(""), (None, None))
+
+    def test_no_curl_is_red(self) -> None:
+        """The fetch is curl's; without it the leg cannot ask."""
+        with tempfile.TemporaryDirectory() as tmp:
+            readme = Path(tmp) / "README.md"
+            readme.write_text(README, encoding="utf-8")
+            with (
+                mock.patch.object(shutil, "which", return_value=None),
+                contextlib.redirect_stderr(io.StringIO()) as err,
+            ):
+                status = drift.main([".bestpractices.json", REPO, str(readme)])
+        self.assertEqual(status, 1)
+        self.assertEqual(err.getvalue(), "audit:bestpractices: curl missing\n")
 
     def test_an_unreadable_file_is_red(self) -> None:
         """A file that is not JSON is a finding, not a crash."""

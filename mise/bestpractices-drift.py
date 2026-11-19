@@ -11,14 +11,14 @@ THE FILE IS THE SOURCE. A difference is fixed by re-entering the form
 from the file (docs/best-practices.md), never by editing the file to
 match the site, so every finding names that step.
 
-Two subcommands, both stdlib:
+    bestpractices-drift.py FILE REPO README
 
-    project README          print the project id the README's live
-                            bestpractices.dev shield names; nothing
-                            when it carries none
-    compare FILE REPO ID    the entry's JSON on stdin; exit 1 naming
-                            each criterion whose status or
-                            justification differs from FILE
+reads the project id from the README's live bestpractices.dev shield
+(skipped by name when it carries none), fetches the entry with `curl`
+(identified, retried, the status kept, as audit:badges asks an issuer,
+#1161: a refusal or an outage is a question unanswered, red, and never
+reported as drift), and exits 1 naming each criterion whose status or
+justification differs from FILE. stdlib and curl only.
 
 The site renders Baseline criteria under their display names
 (`OSPS-AC-01.01_status`) while the file carries the input names the
@@ -30,6 +30,8 @@ the file is compared; nothing the file does not answer is.
 import argparse
 import json
 import re
+import shutil
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
 
@@ -135,7 +137,7 @@ def load(text: str, what: str) -> dict:
 
 
 def compare(path: str, repo: str, ident: str, entry_text: str) -> int:
-    """Judge the entry on stdin against the file.
+    """Judge the fetched entry against the file.
 
     Returns:
         The process exit status.
@@ -159,32 +161,97 @@ def compare(path: str, repo: str, ident: str, entry_text: str) -> int:
     return 1
 
 
+def fetch(url: str, repo: str) -> tuple[str, str]:
+    """Ask bestpractices.dev for the entry, through curl.
+
+    Returns:
+        (HTTP status, body); the status is empty when curl answered
+        nothing at all.
+
+    Raises:
+        FileNotFoundError: curl is not on PATH.
+
+    """
+    curl = shutil.which("curl")
+    if curl is None:
+        message = "curl missing"
+        raise FileNotFoundError(message)
+    done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [
+            curl,
+            "-s",
+            "--retry",
+            "3",
+            "--retry-all-errors",
+            "--retry-delay",
+            "2",
+            "--max-time",
+            "30",
+            "-H",
+            f"User-Agent: audit:bestpractices ({repo})",
+            "-w",
+            "\n%{http_code}",
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    body, _, code = done.stdout.rpartition("\n")
+    return code, body
+
+
+def audit(path: str, repo: str, readme: str) -> int:
+    """Find the entry, fetch it, and judge it against the file.
+
+    Returns:
+        The process exit status.
+
+    """
+    text = Path(readme).read_text(encoding="utf-8") if readme else ""
+    ident, problem = project(text)
+    if problem is not None:
+        print(problem, file=sys.stderr)
+        print(
+            f"audit:bestpractices: {repo}: cannot tell which entry to compare",
+            file=sys.stderr,
+        )
+        return 1
+    if ident is None:
+        print(
+            f"audit:bestpractices: {repo}: README carries no bestpractices.dev"
+            " shield, skipped"
+        )
+        return 0
+    url = f"https://www.bestpractices.dev/projects/{ident}.json"
+    try:
+        code, entry = fetch(url, repo)
+    except FileNotFoundError as err:
+        print(f"audit:bestpractices: {err}", file=sys.stderr)
+        return 1
+    if code != "200":
+        print(
+            f"audit:bestpractices: {repo}: {url} did not answer — HTTP"
+            f" {code or 'none'}, a question unanswered, not a drift",
+            file=sys.stderr,
+        )
+        return 1
+    return compare(path, repo, ident, entry)
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Dispatch a subcommand.
+    """Run the audit over one repository.
 
     Returns:
         The process exit status.
 
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    sub = parser.add_subparsers(dest="command", required=True)
-    one = sub.add_parser("project", help="the entry a README's shields name")
-    one.add_argument("readme", help="the tracked README, or empty for none")
-    two = sub.add_parser("compare", help="the entry on stdin against the file")
-    two.add_argument("file", help="the repository's .bestpractices.json")
-    two.add_argument("repo", help="the repository, for the findings")
-    two.add_argument("id", help="the bestpractices.dev project id")
+    parser.add_argument("file", help="the repository's .bestpractices.json")
+    parser.add_argument("repo", help="the repository, for the findings")
+    parser.add_argument("readme", help="the tracked README, or empty for none")
     args = parser.parse_args(argv)
-    if args.command == "compare":
-        return compare(args.file, args.repo, args.id, sys.stdin.read())
-    text = Path(args.readme).read_text(encoding="utf-8") if args.readme else ""
-    ident, problem = project(text)
-    if problem is not None:
-        print(problem, file=sys.stderr)
-        return 1
-    if ident is not None:
-        print(ident)
-    return 0
+    return audit(args.file, args.repo, args.readme)
 
 
 if __name__ == "__main__":

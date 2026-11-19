@@ -5084,6 +5084,10 @@ dir = "{{cwd}}"
 # SOURCE: the step a red names is re-entering the form from the file,
 # never editing the file to match the site.
 #
+# The guard and the call stay here and the rest is the helper's
+# (bestpractices-drift.py), under the 15-line ceiling (#1544); curl is
+# still what fetches, so a stub curl is what the rows plant.
+#
 # audit:*, not lint:*: the entry is a property of somebody else's
 # server, not of the change under review.
 run = '''
@@ -5092,34 +5096,8 @@ git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
   exit 0
 }
 top=$(git rev-parse --show-toplevel)
-repo="${GITHUB_REPOSITORY:-${top##*/}}"
 readme=$(git ls-files | grep -iE '^readme(\.md|\.markdown)?$' | head -n 1 || true)
-id=$(python3 "${ORG_BELT_DIR}/bestpractices-drift.py" project "${readme}") || {
-  echo "audit:bestpractices: ${repo}: cannot tell which entry to compare" >&2
-  exit 1
-}
-[[ -n ${id} ]] || {
-  echo "audit:bestpractices: ${repo}: README carries no bestpractices.dev shield, skipped"
-  exit 0
-}
-command -v curl > /dev/null || {
-  echo "audit:bestpractices: curl missing" >&2
-  exit 1
-}
-# Identified and retried, and the status kept, as audit:badges asks an
-# issuer (#1161): a refusal or an outage is a question unanswered, red,
-# and never reported as drift.
-url="https://www.bestpractices.dev/projects/${id}.json"
-ua="audit:bestpractices (${repo})"
-out=$(curl -s --retry 3 --retry-all-errors --retry-delay 2 --max-time 30 \
-  -H "User-Agent: ${ua}" -w '\n%{http_code}' "${url}" || true)
-code="${out##*$'\n'}"
-entry="${out%$'\n'*}"
-[[ ${code} == 200 ]] || {
-  echo "audit:bestpractices: ${repo}: ${url} did not answer — HTTP ${code:-none}, a question unanswered, not a drift" >&2
-  exit 1
-}
-python3 "${ORG_BELT_DIR}/bestpractices-drift.py" compare .bestpractices.json "${repo}" "${id}" <<< "${entry}"
+python3 "${ORG_BELT_DIR}/bestpractices-drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme}"
 '''
 
 [tasks."audit:links"]
