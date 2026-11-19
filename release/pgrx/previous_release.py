@@ -269,7 +269,24 @@ def guard(repo: str, version: str, crate_dir: str) -> int:
     return 0
 
 
-def fetch(args: argparse.Namespace) -> int:
+class Args(argparse.Namespace):
+    """The flags every mode's parser may set, typed as parsed."""
+
+    mode: str
+    repo: str
+    version: str
+    crate_dir: str
+    pg: str
+    arch: str
+    tarball: str
+    dest: str
+    control: str
+    out: str
+    below: str | None
+    controls: list[str]
+
+
+def fetch(args: Args) -> int:
     """Fetch and extract the predecessor's tarball of this cell.
 
     Returns:
@@ -334,7 +351,7 @@ def control_parts(control: str) -> tuple[Path, str]:
     return path.parent / "sql", path.name.removesuffix(".control")
 
 
-def answer(args: argparse.Namespace) -> int:
+def answer(args: Args) -> int:
     """Print the predecessor of the extension a control file declares.
 
     Returns:
@@ -350,7 +367,7 @@ def answer(args: argparse.Namespace) -> int:
     return 0
 
 
-def record(args: argparse.Namespace) -> int:
+def record(args: Args) -> int:
     """Write the installability record and print each predecessor.
 
     Returns:
@@ -380,14 +397,14 @@ def record(args: argparse.Namespace) -> int:
     return 0
 
 
-def targets(args: argparse.Namespace) -> int:
+def targets(args: Args) -> int:
     """Print the union of the extensions' graph targets, newest first.
 
     Returns:
         0.
 
     """
-    union = set()
+    union: set[str] = set()
     for control in args.controls:
         union.update(upgrade_graph(*control_parts(control)).targets)
     ceiling = version_key(args.below) if args.below else None
@@ -423,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         if mode == "record":
             p.add_argument("--out", required=True)
             p.add_argument("controls", nargs="+")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     modes = {"fetch": fetch, "graph": targets, "predecessor": answer, "record": record}
     if args.mode == "guard":
         return guard(args.repo, args.version, args.crate_dir)
