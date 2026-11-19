@@ -16,7 +16,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "caller_pins",
-    Path(__file__).with_name("caller-pins.py"),
+    Path(__file__).with_name("caller_pins.py"),
 )
 caller_pins = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(caller_pins)

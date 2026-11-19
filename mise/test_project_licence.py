@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for project-licence.py, the reader both derivations call (#1589).
+"""Tests for project_licence.py, the reader both derivations call (#1589).
 
 The script rows live beside their scripts (`test_citation.py`,
 `test_derive_badges.py`), which run each derivation whole. These run
@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
-pl = SimpleNamespace(**runpy.run_path(str(HERE / "project-licence.py")))
+pl = SimpleNamespace(**runpy.run_path(str(HERE / "project_licence.py")))
 
 
 def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str, str]:
@@ -38,7 +38,7 @@ def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str,
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            status = pl.main(argv or ["project-licence.py", "fix:test"])
+            status = pl.main(argv or ["project_licence.py", "fix:test"])
         return status, out.getvalue(), err.getvalue()
 
 
@@ -79,8 +79,8 @@ class Reader(unittest.TestCase):
 
     def test_usage(self) -> None:
         """No caller is a usage error, not a pass."""
-        status, out, err = run({}, ["project-licence.py"])
-        usage = "usage: project-licence.py <caller>\n"
+        status, out, err = run({}, ["project_licence.py"])
+        usage = "usage: project_licence.py <caller>\n"
         self.assertEqual((2, "", usage), (status, out, err))
 
 

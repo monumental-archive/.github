@@ -22,7 +22,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "pgrx_postgres",
-    Path(__file__).with_name("pgrx-postgres.py"),
+    Path(__file__).with_name("pgrx_postgres.py"),
 )
 pgrx_postgres = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(pgrx_postgres)

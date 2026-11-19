@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mutmut-pragmas.py's pragma finder, on modules nobody wrote down.
+"""mutmut_pragmas.py's pragma finder, on modules nobody wrote down.
 
 The properties of `test_mutmut_pragmas.py`'s fixed rows (#1548), over
 generated modules:
@@ -28,7 +28,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "mutmut_pragmas",
-    Path(__file__).with_name("mutmut-pragmas.py"),
+    Path(__file__).with_name("mutmut_pragmas.py"),
 )
 mp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mp)

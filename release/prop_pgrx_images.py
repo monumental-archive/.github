@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pgrx-images.py's names and readers, on any crate, tree and table.
+"""pgrx_images.py's names and readers, on any crate, tree and table.
 
 The properties of `test_pgrx_images.py`'s fixed rows (#1556):
 
@@ -31,7 +31,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "pgrx_images",
-    Path(__file__).with_name("pgrx-images.py"),
+    Path(__file__).with_name("pgrx_images.py"),
 )
 images = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(images)

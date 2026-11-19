@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/source-archive.py, the source-archive build, on a stub git.
+"""Run release/source_archive.py, the source-archive build, on a stub git.
 
 #1384 moved the step "Build the archive twice and prove determinism"
 out of build-source-archive.yml into the helper, refusals unchanged.
@@ -36,7 +36,7 @@ hermetic = SimpleNamespace(
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
-HELPER = ".org-canon/release/source-archive.py"
+HELPER = ".org-canon/release/source_archive.py"
 VERSION = "1.3.4"
 
 GIT_STUB = """#!/usr/bin/env bash

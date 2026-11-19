@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run `mise/queue-head.py` against scratch repositories (#1422).
+"""Run `mise/queue_head.py` against scratch repositories (#1422).
 
 Each row builds an `origin` holding `refs/pull/<n>/head` and a checkout
 holding the group's base and group commit, the way the gate job's
@@ -34,7 +34,7 @@ import unittest
 from types import SimpleNamespace
 
 HERE = pathlib.Path(__file__).resolve().parent
-HELPER = HERE / "queue-head.py"
+HELPER = HERE / "queue_head.py"
 BUNDLE = HERE / "testdata" / "queue-head" / "edtf-265.bundle.gz"
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 GIT = shutil.which("git") or "git"
@@ -473,7 +473,7 @@ class Workflow(unittest.TestCase):
 
     def test_the_step_runs_on_merge_group_only_as_one_line(self) -> None:
         """One gate step calls the helper; its `if:` and `run:` are held."""
-        steps = [s for s in gate_steps() if "queue-head.py" in s]
+        steps = [s for s in gate_steps() if "queue_head.py" in s]
         self.assertEqual(len(steps), 1, steps)
         step = steps[0]
         self.assertIn(
@@ -483,7 +483,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual(
             runs,
             # Under the belt's Python (#1543).
-            ["        run: '\"${ORG_PYTHON}\" .org-canon/mise/queue-head.py'"],
+            ["        run: '\"${ORG_PYTHON}\" .org-canon/mise/queue_head.py'"],
             step,
         )
         for key, value in (

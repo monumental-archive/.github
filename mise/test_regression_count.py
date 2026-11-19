@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for regression-count.py, the fix-commit classifier (#1335).
+"""Tests for regression_count.py, the fix-commit classifier (#1335).
 
 Every row builds a real repository in a temporary directory, commits
 into it, and asks the classifier what it sees: the classifier's input
@@ -28,7 +28,7 @@ hermetic = SimpleNamespace(
 
 
 _SPEC = importlib.util.spec_from_file_location(
-    "regression_count", pathlib.Path(__file__).with_name("regression-count.py")
+    "regression_count", pathlib.Path(__file__).with_name("regression_count.py")
 )
 rc = importlib.util.module_from_spec(_SPEC)
 sys.modules["regression_count"] = rc

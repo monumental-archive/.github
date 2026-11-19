@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bestpractices-owner.py's ownership verdict, on inputs nobody wrote down.
+"""bestpractices_owner.py's ownership verdict, on inputs nobody wrote down.
 
 The properties of `test_bestpractices_owner.py`'s fixed rows (#1548),
 over generated repository URLs and issuer answers:
@@ -29,7 +29,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "bestpractices_owner",
-    Path(__file__).with_name("bestpractices-owner.py"),
+    Path(__file__).with_name("bestpractices_owner.py"),
 )
 bo = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(bo)

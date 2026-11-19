@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""plan-producers.py's join, on policies and workflows nobody wrote down.
+"""plan_producers.py's join, on policies and workflows nobody wrote down.
 
 The properties of `test_plan_producers.py`'s fixed rows (#1548), over
 generated planned obligations and the workflows that produce them:
@@ -24,7 +24,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "plan_producers",
-    Path(__file__).with_name("plan-producers.py"),
+    Path(__file__).with_name("plan_producers.py"),
 )
 pp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(pp)

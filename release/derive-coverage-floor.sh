@@ -10,7 +10,7 @@
 # nothing noticed, because the floor sat far enough below the ceiling
 # that the headroom became a landing zone.
 #
-# The ratchet law lives in mise/coverage-floor.py, with the drift check
+# The ratchet law lives in mise/coverage_floor.py, with the drift check
 # `coverage:check` runs, so there is one definition of "the floor only
 # rises" rather than a release-time copy of it. If the measurement is
 # below `floor + band`, that script refuses and this step fails the
@@ -62,6 +62,6 @@ fi
 # number this prints and this derives the floor from it, so the flags
 # cannot drift apart (#316's shape, #652's fix).
 legs=$("${belt}/coverage-measure.sh" "release:coverage-floor")
-"${ORG_PYTHON}" "${belt}/coverage-floor.py" write --provenance "v${VERSION}" <<< "${legs}"
+"${ORG_PYTHON}" "${belt}/coverage_floor.py" write --provenance "v${VERSION}" <<< "${legs}"
 
 emit "files=.coverage-floor"

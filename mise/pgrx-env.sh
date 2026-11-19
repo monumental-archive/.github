@@ -73,7 +73,7 @@ org_pgrx_darwin_icu() { # put ICU's headers where the prebuilt Postgres expects 
   # do not have, and nothing downstream would say so.
   local listing paths path pg_config flags major needed="" icu version where
   listing=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  # ACTIVE entries only, the rule pgrx-postgres.py states: `mise ls`
+  # ACTIVE entries only, the rule pgrx_postgres.py states: `mise ls`
   # reports everything installed on the machine, and a copy somebody
   # installed by hand is not a pin — it passes here and is absent in CI.
   paths=$(jq -r '.[] | select(.active and .installed) | .install_path' <<< "${listing}") || return 1
@@ -88,7 +88,7 @@ org_pgrx_darwin_icu() { # put ICU's headers where the prebuilt Postgres expects 
     done
   done <<< "${paths}"
   # No pinned Postgres names an ICU: nothing was built against one, or no
-  # Postgres is pinned yet and pgrx-postgres.py will say so in its own
+  # Postgres is pinned yet and pgrx_postgres.py will say so in its own
   # words. Either way there is nothing here to correct.
   needed="${needed# }"
   [[ -n ${needed} ]] || return 0
@@ -123,7 +123,7 @@ org_pgrx_darwin_icu() { # put ICU's headers where the prebuilt Postgres expects 
   export CFLAGS="${include} ${CFLAGS:-}"
 }
 
-org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
+org_pgrx_init() { # usage: org_pgrx_init < records from pgrx_postgres.py
   # Registers every major in one call. Measured: five majors, including
   # the initdb each one needs, in 17 seconds — so this is run per task
   # rather than cached, and re-running it is idempotent.
@@ -155,7 +155,7 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
   # with an exclusive lock on a file beside PGRX_HOME. The waiter then
   # runs its own init over a finished home, which is the idempotent case.
   #
-  # The lock is the KERNEL's (#1481): `with-lock.py` holds an `flock` for
+  # The lock is the KERNEL's (#1481): `with_lock.py` holds an `flock` for
   # as long as the locked command runs, and the kernel releases it when
   # the holder exits, killed included — mise stops the sibling tasks
   # when one fails. #1140's `mkdir` lock named its holder in a pid file
@@ -170,7 +170,7 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx-postgres.py
   local lock="${home}.init.flock"
   mkdir -p "$(dirname "${home}")"
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/with-lock.py" --timeout 600 \
+  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/with_lock.py" --timeout 600 \
     --message "pgrx-env: waited ten minutes for another task's Postgres init (${lock})" \
     "${lock}" -- bash -euo pipefail -c \
     "$(declare -f org_pgrx_init_locked); org_pgrx_init_locked \"\$@\"" \
@@ -251,7 +251,7 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   # workspace with no extension — the skip #813 exists to end.
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-  surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}") || return 1
+  surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}") || return 1
   while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     for member in ${held}; do
@@ -270,6 +270,6 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   [[ -n ${majors} ]] || return 0
   org_pgrx_darwin_flags || return 1
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  plan=$("${ORG_PYTHON}" "${belt}/pgrx-postgres.py" --majors "${majors}" <<< "${installed}") || return 1
+  plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}") || return 1
   org_pgrx_init <<< "${plan}" > /dev/null
 }

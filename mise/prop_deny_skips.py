@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deny-skips.py's variants, on deny.toml files nobody wrote down.
+"""deny_skips.py's variants, on deny.toml files nobody wrote down.
 
 The properties of `test_deny_skips.py`'s fixed rows (#1555), over
 generated `[bans]` tables:
@@ -29,7 +29,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "deny_skips",
-    Path(__file__).with_name("deny-skips.py"),
+    Path(__file__).with_name("deny_skips.py"),
 )
 ds = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ds)

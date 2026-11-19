@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tsconfig-dials.py's level check, on configs nobody wrote down.
+"""tsconfig_dials.py's level check, on configs nobody wrote down.
 
 The properties of `test_tsconfig_dials.py`'s fixed rows (#1548), over
 generated flag files and resolved configs:
@@ -33,7 +33,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "tsconfig_dials",
-    Path(__file__).with_name("tsconfig-dials.py"),
+    Path(__file__).with_name("tsconfig_dials.py"),
 )
 td = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(td)

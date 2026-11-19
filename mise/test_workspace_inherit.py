@@ -38,7 +38,7 @@ from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
     "workspace_inherit",
-    Path(__file__).with_name("workspace-inherit.py"),
+    Path(__file__).with_name("workspace_inherit.py"),
 )
 wi = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(wi)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""standing-issue.py against a stub `gh` on PATH (#1353, #1339).
+"""standing_issue.py against a stub `gh` on PATH (#1353, #1339).
 
 The stub records every argv it is called with and answers `issue list`
 from the row's canned listing (or fails, for the read-failure row).
@@ -23,7 +23,7 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HELPER = HERE / "standing-issue.py"
+HELPER = HERE / "standing_issue.py"
 DATA = HERE / "testdata"
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"

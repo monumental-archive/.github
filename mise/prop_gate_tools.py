@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gate-tools.py's pathspecs and call finder, on inputs nobody wrote down.
+"""gate_tools.py's pathspecs and call finder, on inputs nobody wrote down.
 
 The properties of `test_gate_tools.py`'s fixed rows (#1548), over
 generated paths, pathspecs and task bodies:
@@ -28,7 +28,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "gate_tools",
-    Path(__file__).with_name("gate-tools.py"),
+    Path(__file__).with_name("gate_tools.py"),
 )
 gt = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gt)

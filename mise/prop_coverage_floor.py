@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""coverage-floor.py's derived floor, on measurements nobody wrote down.
+"""coverage_floor.py's derived floor, on measurements nobody wrote down.
 
 The properties of `test_coverage_floor.py`'s fixed rows (#1548), over
 generated measurements, provenances and floor files:
@@ -34,7 +34,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "coverage_floor",
-    Path(__file__).with_name("coverage-floor.py"),
+    Path(__file__).with_name("coverage_floor.py"),
 )
 cf = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cf)

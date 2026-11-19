@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pg-schema.py's normalised surface, on schemas nobody wrote down.
+"""pg_schema.py's normalised surface, on schemas nobody wrote down.
 
 The properties of `test_pg_schema.py`'s fixed rows (#1548), over
 generated `cargo pgrx schema` output:
@@ -28,7 +28,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "pg_schema",
-    Path(__file__).with_name("pg-schema.py"),
+    Path(__file__).with_name("pg_schema.py"),
 )
 ps = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ps)

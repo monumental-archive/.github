@@ -1736,7 +1736,7 @@ esac
 @unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
 @unittest.skipUnless(JQ, "jq drives the forge stub")
 class TagReleaseUpgradePath(unittest.TestCase):
-    """The mint guard acts on previous-release.py's predecessor (#1592).
+    """The mint guard acts on previous_release.py's predecessor (#1592).
 
     edtf's captures: its release listing and its extension's `sql/`
     directory at a tag (testdata/edtf-*). The guard used GitHub's latest

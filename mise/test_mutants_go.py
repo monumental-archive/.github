@@ -50,7 +50,7 @@ BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-go.sh"
 BASH = shutil.which("bash") or "bash"
 
-_SPEC = importlib.util.spec_from_file_location("mutants_go", BELT / "mutants-go.py")
+_SPEC = importlib.util.spec_from_file_location("mutants_go", BELT / "mutants_go.py")
 mutants_go = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mutants_go)
 GIT = shutil.which("git") or "git"

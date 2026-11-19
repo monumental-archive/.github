@@ -406,7 +406,7 @@ class SelectsThePredecessor(unittest.TestCase):
 
 
 class ReadsThePinsThroughTheOneReader(unittest.TestCase):
-    """The pins come from release/caller-pins.py, as the build leg's do (#1333)."""
+    """The pins come from release/caller_pins.py, as the build leg's do (#1333)."""
 
     def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(self) -> None:
         """The reader names the tool, the script keeps its own FAIL line."""
@@ -779,7 +779,7 @@ def captured_edges(tag: str) -> list[tuple[str, str]]:
 
 @unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
 class AsksTheOnePredecessor(unittest.TestCase):
-    """The derivation acts on previous-release.py's answer (#1592).
+    """The derivation acts on previous_release.py's answer (#1592).
 
     edtf on 2026-11-19: v1.3.5 published and carries its tarballs, the
     drafts v1.3.0 to v1.3.3 burned, and the graph at v1.3.5 reaches it.

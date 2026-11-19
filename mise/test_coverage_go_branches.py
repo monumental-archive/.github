@@ -7,7 +7,7 @@
 `coverage:adopt` writes that line. The bodies under test are the tasks'
 own `run` strings, read out of mise/config.toml with tomllib and run by
 bash in a planted git tree, and they call the real measurement script
-and the real `coverage-floor.py`. Only `go` and `gobco` are stubs, and
+and the real `coverage_floor.py`. Only `go` and `gobco` are stubs, and
 no row runs gobco or a Go suite.
 
 The `go` stub answers what the leg asks of it (GOROOT, GOVERSION, the
@@ -51,7 +51,7 @@ CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 
 _SPEC = importlib.util.spec_from_file_location(
     "coverage_floor",
-    BELT / "coverage-floor.py",
+    BELT / "coverage_floor.py",
 )
 cf = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cf)

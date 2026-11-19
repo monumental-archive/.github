@@ -40,7 +40,7 @@ A = "security/vex/RUSTSEC-0000-0001.openvex.json"
 B = "security/vex/RUSTSEC-0000-0002.openvex.json"
 C = "security/vex/RUSTSEC-0000-0003.openvex.json"
 README = "security/vex/README.md"
-HELPER = BELT / "vex-one-per-merge.py"
+HELPER = BELT / "vex_one_per_merge.py"
 
 
 def body() -> str:
@@ -323,7 +323,7 @@ class Workflow(unittest.TestCase):
         start = workflow.index("        id: collect\n")
         step = workflow[start : workflow.index("\n  sign-vex:", start)]
         self.assertIn(
-            '"${ORG_PYTHON}" .org-canon/mise/vex-one-per-merge.py --list "${BEFORE}.."',
+            '"${ORG_PYTHON}" .org-canon/mise/vex_one_per_merge.py --list "${BEFORE}.."',
             step,
         )
         self.assertNotIn("git diff", step)

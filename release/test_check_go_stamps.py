@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/check-go-stamps.py, the go-binary stamp check, on a stub go.
+"""Run release/check_go_stamps.py, the go-binary stamp check, on a stub go.
 
 #1371 moved the step "Refuse a binary whose stamp is not the released
 commit" out of build-go-binary.yml into the helper, refusals unchanged.
@@ -34,7 +34,7 @@ hermetic = SimpleNamespace(
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
-HELPER = CANON / "release" / "check-go-stamps.py"
+HELPER = CANON / "release" / "check_go_stamps.py"
 
 GO_STUB = """#!/usr/bin/env bash
 # Stub `go`: `version -m FILE` prints FILE; STUB_FAIL fails it.
@@ -177,7 +177,7 @@ class StampStepIsTheHelper(unittest.TestCase):
         self.assertIn(
             "        run: |\n"
             '          "${ORG_PYTHON}"'
-            ' "${ORG_CANON_TREE}/release/check-go-stamps.py"\n',
+            ' "${ORG_CANON_TREE}/release/check_go_stamps.py"\n',
             body,
         )
         self.assertNotIn("go version", body)

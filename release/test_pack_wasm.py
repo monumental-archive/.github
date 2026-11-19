@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/pack-wasm.py, the wasm-npm pack step, on a stub npm (#1384).
+"""Run release/pack_wasm.py, the wasm-npm pack step, on a stub npm (#1384).
 
 WHAT RUNS. The helper itself, as the job runs it, through a
 `.org-canon` link to this tree, from a workspace holding the crate's
@@ -34,7 +34,7 @@ hermetic = SimpleNamespace(
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
-HELPER = ".org-canon/release/pack-wasm.py"
+HELPER = ".org-canon/release/pack_wasm.py"
 REPO = "monumental-archive/edtf"
 WANT = f"https://github.com/{REPO}"
 VERSION = "1.3.4"

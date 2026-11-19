@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""caller-pins.py, the reader of a caller's build-input pins, on any TOML.
+"""caller_pins.py, the reader of a caller's build-input pins, on any TOML.
 
 The properties of `test_caller_pins.py`'s fixed rows (#1556), over
 generated mise configs:
@@ -34,7 +34,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "caller_pins",
-    Path(__file__).with_name("caller-pins.py"),
+    Path(__file__).with_name("caller_pins.py"),
 )
 caller_pins = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(caller_pins)

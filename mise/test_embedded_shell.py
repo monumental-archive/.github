@@ -39,7 +39,7 @@ hermetic = SimpleNamespace(
 _HERE = Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location(
     "embedded_shell",
-    _HERE / "embedded-shell.py",
+    _HERE / "embedded_shell.py",
 )
 es = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(es)
@@ -1118,7 +1118,7 @@ class Cli(unittest.TestCase):
         """Red is exit 1 with the finding on stderr; green is exit 0."""
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
-            argv = [sys.executable, str(_HERE / "embedded-shell.py"), "--ceiling"]
+            argv = [sys.executable, str(_HERE / "embedded_shell.py"), "--ceiling"]
             red = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [*argv, str(t.debt), str(t.wf)],
                 capture_output=True,
@@ -1143,7 +1143,7 @@ class Cli(unittest.TestCase):
             cfg.write_text(config(lint_a=16), encoding="utf-8")
             argv = [
                 sys.executable,
-                str(_HERE / "embedded-shell.py"),
+                str(_HERE / "embedded_shell.py"),
                 "--task-ceiling",
                 str(debt),
                 str(cfg),

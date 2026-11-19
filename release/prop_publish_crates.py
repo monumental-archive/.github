@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""publish-crates.py's index reading, on any sparse-index answer.
+"""publish_crates.py's index reading, on any sparse-index answer.
 
 The properties of `test_publish_rust_crate.py`'s fixed rows (#1556),
 over generated index files. The fetch is replaced in-process by the
@@ -28,7 +28,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "publish_crates",
-    Path(__file__).with_name("publish-crates.py"),
+    Path(__file__).with_name("publish_crates.py"),
 )
 publish = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(publish)

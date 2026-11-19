@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""coverage-js-runner.py's readers, on lockfiles and scripts nobody wrote.
+"""coverage_js_runner.py's readers, on lockfiles and scripts nobody wrote.
 
 The properties of `test_coverage_js_runner.py`'s fixed rows (#1548),
 over generated lockfile entries and task run scripts:
@@ -37,7 +37,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "coverage_js_runner",
-    Path(__file__).with_name("coverage-js-runner.py"),
+    Path(__file__).with_name("coverage_js_runner.py"),
 )
 cj = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cj)

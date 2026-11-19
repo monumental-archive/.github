@@ -150,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
-            mode=() none="no changed statements" list=$("${ORG_PYTHON}" .org-canon/mise/vex-one-per-merge.py --list "${BEFORE}..")
+            mode=() none="no changed statements" list=$("${ORG_PYTHON}" .org-canon/mise/vex_one_per_merge.py --list "${BEFORE}..")
           else
             mode=(--unsigned-only --store "${REPO}") none="security/vex/ holds no decisions" list=$(git ls-files "${DECISIONS}")
           fi

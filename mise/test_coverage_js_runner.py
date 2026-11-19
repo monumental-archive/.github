@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for coverage-js-runner.py's reading of task run entries.
+"""Tests for coverage_js_runner.py's reading of task run entries.
 
 The regression row of the defect `prop_coverage_js_runner.py` found
 (#1555): `mise tasks info --json` reports a `{ task = "build" }` run
@@ -25,7 +25,7 @@ from types import SimpleNamespace
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
-cj = SimpleNamespace(**runpy.run_path(str(HERE / "coverage-js-runner.py")))
+cj = SimpleNamespace(**runpy.run_path(str(HERE / "coverage_js_runner.py")))
 
 
 class TaskReferences(unittest.TestCase):

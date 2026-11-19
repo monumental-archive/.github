@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run `release/mint-doi.py` against a local fake Zenodo.
+"""Run `release/mint_doi.py` against a local fake Zenodo.
 
 #1365 moved the `mint-doi` step's Zenodo client out of the workflow
-into `release/mint-doi.py`; the step is now one call to it. These rows
+into `release/mint_doi.py`; the step is now one call to it. These rows
 run that helper as the step does, in-process, against an
 `http.server` on 127.0.0.1 standing in for zenodo.org, with a stub `gh`
 first on PATH for the tag's tarball and CITATION.cff. The fake refuses
@@ -119,7 +119,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 CANON = Path(__file__).resolve().parent.parent
-HELPER = CANON / "release" / "mint-doi.py"
+HELPER = CANON / "release" / "mint_doi.py"
 TESTDATA = CANON / "release" / "testdata"
 DRAFT = TESTDATA / "zenodo-rdm-draft.json"
 CANON_LATEST = TESTDATA / "zenodo-canon-latest.json"

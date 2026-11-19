@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""embedded-shell.py's `run:` reader and writer, on files nobody wrote.
+"""embedded_shell.py's `run:` reader and writer, on files nobody wrote.
 
 The properties of `test_embedded_shell.py`'s fixed rows (#1555), over
 generated workflow steps and debt lines:
@@ -35,7 +35,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "embedded_shell",
-    Path(__file__).with_name("embedded-shell.py"),
+    Path(__file__).with_name("embedded_shell.py"),
 )
 es = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(es)

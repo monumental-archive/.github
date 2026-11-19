@@ -26,7 +26,7 @@ hermetic = SimpleNamespace(
 )
 
 _HERE = Path(__file__).resolve().parent
-HELPER = _HERE / "coverage-exclusions.py"
+HELPER = _HERE / "coverage_exclusions.py"
 GIT = shutil.which("git") or "git"
 BASH = shutil.which("bash") or "bash"
 # No user or system git config reaches a fixture repository.
@@ -239,22 +239,22 @@ class MissingSibling(unittest.TestCase):
         )
 
     def test_exit_trap_without_belt_shell(self) -> None:
-        """exit-trap.py names belt-shell.py and exits non-zero."""
-        r = self.alone(_HERE / "exit-trap.py", "mise/exit-trap.py")
+        """exit_trap.py names belt_shell.py and exits non-zero."""
+        r = self.alone(_HERE / "exit_trap.py", "mise/exit_trap.py")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(
-            r.stderr, "exit-trap: belt-shell.py did not arrive beside this file\n"
+            r.stderr, "exit-trap: belt_shell.py did not arrive beside this file\n"
         )
 
     def test_publish_crates_without_crates_index(self) -> None:
-        """publish-crates.py names mise/crates-index.py and exits non-zero."""
+        """publish_crates.py names mise/crates_index.py and exits non-zero."""
         r = self.alone(
-            _HERE.parent / "release" / "publish-crates.py", "release/publish-crates.py"
+            _HERE.parent / "release" / "publish_crates.py", "release/publish_crates.py"
         )
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(
             r.stderr,
-            "publish-crates: mise/crates-index.py did not arrive in the canon tree\n",
+            "publish-crates: mise/crates_index.py did not arrive in the canon tree\n",
         )
 
 

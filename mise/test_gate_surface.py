@@ -25,7 +25,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "gate_surface",
-    Path(__file__).with_name("gate-surface.py"),
+    Path(__file__).with_name("gate_surface.py"),
 )
 gate_surface = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gate_surface)

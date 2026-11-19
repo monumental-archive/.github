@@ -7,7 +7,7 @@ every tool in it, every release: edtf's v1.3.5 publish spent 4,484 runner
 seconds installing, most of it compiling tools no job called. So every
 uncached `jdx/mise-action` step on those paths installs a named list
 (`install_args`): the belt's tools by the belt's own keys, the caller's
-build inputs by `release/caller-pins.py`, which reads their versions from
+build inputs by `release/caller_pins.py`, which reads their versions from
 the caller's config.
 
 The cost of a list is that a tool a job starts calling is missing on the
@@ -54,7 +54,7 @@ CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
 
 _SPEC = importlib.util.spec_from_file_location(
-    "caller_pins", Path(__file__).with_name("caller-pins.py")
+    "caller_pins", Path(__file__).with_name("caller_pins.py")
 )
 caller_pins = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(caller_pins)
@@ -151,7 +151,7 @@ GATE_NONE = {
 }
 
 # The caller's build inputs, by the commands that run them: the tool name
-# is what `release/caller-pins.py` is asked for.
+# is what `release/caller_pins.py` is asked for.
 CALLER_COMMANDS = {
     "cargo": "rust",
     "rustup": "rust",
@@ -169,10 +169,10 @@ CALLER_COMMANDS = {
 }
 
 # Calls a tool's name never appears in: the Postgres a pgrx task runs is
-# located by pgrx-postgres.py from `mise ls` and registered with
+# located by pgrx_postgres.py from `mise ls` and registered with
 # `cargo pgrx init`, both by path.
 PROVISIONS = {
-    r"pgrx-postgres\.py": ["postgresql-binaries"],
+    r"pgrx_postgres\.py": ["postgresql-binaries"],
 }
 
 # What stele execs, read from its source (internal/cargo, internal/osv,
@@ -199,27 +199,27 @@ SUBPROCESS_CALLS = {"run", "check_output", "check_call", "Popen"}
 # a variable, a splat or a computed path. Each contributes nothing to its
 # job's calls, so each is named here with why; a new one is red by name.
 DYNAMIC = {
-    "release/attach-publish.py": "runs record-draft.sh by its path, which"
+    "release/attach_publish.py": "runs record-draft.sh by its path, which"
     " scripts() follows by name",
-    "release/package-crates.py": "runs crates-io-members.sh by its path,"
+    "release/package_crates.py": "runs crates-io-members.sh by its path,"
     " which scripts() follows by name",
-    "release/publish-crates.py": "runs crates-io-members.sh by its path, and"
+    "release/publish_crates.py": "runs crates-io-members.sh by its path, and"
     " builds its cargo metadata, package and publish argvs in variables",
-    "mise/belt-shell.py": "splats its shfmt and shellcheck argvs from lists",
-    "mise/embedded-shell.py": "splats its shfmt argv from a list",
-    "mise/git-decoy.py": "runs its caller's command against a decoy repository",
+    "mise/belt_shell.py": "splats its shfmt and shellcheck argvs from lists",
+    "mise/embedded_shell.py": "splats its shfmt argv from a list",
+    "mise/git_decoy.py": "runs its caller's command against a decoy repository",
     "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
-    "mise/mutants-python.py": "asks mutmut's own interpreter, read from its"
+    "mise/mutants_python.py": "asks mutmut's own interpreter, read from its"
     " installed script, where mutmut lives",
-    "mise/with-lock.py": "runs its caller's command under the lock",
-    "mise/unittest-guarded.py": "starts itself as a worker under the"
+    "mise/with_lock.py": "runs its caller's command under the lock",
+    "mise/unittest_guarded.py": "starts itself as a worker under the"
     " interpreter it runs on (#1623)",
-    "mise/security-config.py": "builds its gh argv in a variable",
+    "mise/security_config.py": "builds its gh argv in a variable",
 }
 
 # Scripts that run before any tool is installed, so call nothing a list
 # could carry (the reader prints tool names in its own prose).
-PRE_INSTALL = {"caller-pins.py"}
+PRE_INSTALL = {"caller_pins.py"}
 
 
 def belt() -> dict:
@@ -359,7 +359,7 @@ def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
     optional: list[str] = []
     if ref:
         (pins,) = [s for s in steps(job) if s.get("id") == ref.group(1)]
-        call = pins["run"].replace("\\\n", " ").split("caller-pins.py", 1)[1]
+        call = pins["run"].replace("\\\n", " ").split("caller_pins.py", 1)[1]
         words = shlex.split(call.split(">", 1)[0])
         it = iter(words[1:])
         for word in it:
@@ -739,14 +739,14 @@ def readers(path: Path, text: str) -> list[str]:
         One line when `text` looks a tool up in a parsed `[tools]` table.
 
     """
-    if path.name == "caller-pins.py" or path.name.startswith("test_"):
+    if path.name == "caller_pins.py" or path.name.startswith("test_"):
         return []
     if not re.search(r'tools\.get\(|\.get\("tools"|\["tools"\]', text):
         return []
     return [
         (
             f"{path.relative_to(CANON)}: reads a caller's mise config itself;"
-            " read it through release/caller-pins.py (#1333)"
+            " read it through release/caller_pins.py (#1333)"
         )
     ]
 
@@ -999,7 +999,7 @@ class GateInstalls(unittest.TestCase):
         )
 
     def test_a_leg_that_drops_its_postgres_is_named(self) -> None:
-        """Planted: no `--major`, so no Postgres for pgrx-postgres.py."""
+        """Planted: no `--major`, so no Postgres for pgrx_postgres.py."""
         job = [ln for ln in load("ci.yml")["pgrx"] if "--major" not in ln]
         self.assertEqual(
             ["ci.yml pgrx: calls postgresql-binaries and does not install it"],
@@ -1045,7 +1045,7 @@ def measures(workflow: str, job_id: str, job: list[str]) -> list[str]:
         for _ in mise_steps(job)
     ]
     text = code("\n".join(job))
-    if "caller-pins.py" in text:
+    if "caller_pins.py" in text:
         found.append(f"{workflow} {job_id}: installs the caller's build inputs")
     if re.search(r"(?<![\w-])mise\s+run\b", text):
         found.append(f"{workflow} {job_id}: runs a mise task")
@@ -1319,7 +1319,7 @@ class ArgvCalls(unittest.TestCase):
 
 
 class OneReader(unittest.TestCase):
-    """release/caller-pins.py is the canon's one reader of a caller's pins."""
+    """release/caller_pins.py is the canon's one reader of a caller's pins."""
 
     def test_no_other_reader_in_release_or_the_workflows(self) -> None:
         """Every script under release/ and every workflow, read whole."""
@@ -1342,7 +1342,7 @@ class OneReader(unittest.TestCase):
             [
                 (
                     ".github/workflows/build-pgrx-extension.yml: reads a caller's"
-                    " mise config itself; read it through release/caller-pins.py"
+                    " mise config itself; read it through release/caller_pins.py"
                     " (#1333)"
                 )
             ],
@@ -1356,7 +1356,7 @@ class OneReader(unittest.TestCase):
             CANON / "release" / "generate-pgrx-upgrade.sh",
         ):
             with self.subTest(path=path.name):
-                self.assertIn("caller-pins.py", path.read_text("utf-8"))
+                self.assertIn("caller_pins.py", path.read_text("utf-8"))
 
 
 # The canon's helpers run under the belt's Python (#1543). The runner's
@@ -1506,7 +1506,7 @@ class BeltPython(unittest.TestCase):
     def test_the_scan_reaches_the_helper_starts(self) -> None:
         """Not vacuous: the tree starts helpers under ORG_PYTHON, many times."""
         self.assertLessEqual(
-            {"registry.py", "caller-pins.py", "verdict.py"}, tracked_helpers()
+            {"registry.py", "caller_pins.py", "verdict.py"}, tracked_helpers()
         )
         starts = sum(
             text.count('"${ORG_PYTHON}" ')
@@ -1536,28 +1536,28 @@ class BeltPython(unittest.TestCase):
         """Planted: a helper executed by its own `#!` line, in both shapes."""
         text = PLANTED_JOB + (
             "      - name: Attach\n"
-            "        run: .org-canon/release/attach-publish.py\n"
+            "        run: .org-canon/release/attach_publish.py\n"
             "      - name: Fetch\n"
             "        run: |\n"
-            "          prev=$(.org-canon/release/pgrx/previous-release.py fetch \\\n"
+            "          prev=$(.org-canon/release/pgrx/previous_release.py fetch \\\n"
             '            --tag "${TAG}")\n'
         )
         self.assertEqual(
             [
                 (
                     ".github/workflows/x.yml build: step 'Attach' starts"
-                    " attach-publish.py by its own first line; run it as"
-                    ' "${ORG_PYTHON}" attach-publish.py (#1543)'
+                    " attach_publish.py by its own first line; run it as"
+                    ' "${ORG_PYTHON}" attach_publish.py (#1543)'
                 ),
                 (
                     ".github/workflows/x.yml build: step 'Fetch' starts"
-                    " previous-release.py by its own first line; run it as"
-                    ' "${ORG_PYTHON}" previous-release.py (#1543)'
+                    " previous_release.py by its own first line; run it as"
+                    ' "${ORG_PYTHON}" previous_release.py (#1543)'
                 ),
             ],
             interpreter_findings(
                 {".github/workflows/x.yml": text},
-                {"attach-publish.py", "previous-release.py"},
+                {"attach_publish.py", "previous_release.py"},
             ),
         )
 
@@ -1609,14 +1609,14 @@ class BeltPython(unittest.TestCase):
             "          git ls-files '*.py' | wc -l\n"
             "          ./caller-build.py --release\n"
             "          python3 -c 'print(1)'\n"
-            '          "${ORG_PYTHON}" .org-canon/mise/gate-tools.py'
+            '          "${ORG_PYTHON}" .org-canon/mise/gate_tools.py'
             " --helper registry.py\n"
             "          # python3 .org-canon/release/registry.py tag\n"
         )
         self.assertEqual(
             [],
             interpreter_findings(
-                {".github/workflows/x.yml": text}, {"registry.py", "gate-tools.py"}
+                {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}
             ),
         )
 

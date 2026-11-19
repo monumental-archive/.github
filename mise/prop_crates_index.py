@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""crates-index.py's index paths, on crate names nobody wrote down.
+"""crates_index.py's index paths, on crate names nobody wrote down.
 
 The properties of `test_crates_index.py`'s fixed rows (#1548), over
 generated crate names:
@@ -27,7 +27,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "crates_index",
-    Path(__file__).with_name("crates-index.py"),
+    Path(__file__).with_name("crates_index.py"),
 )
 ci = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ci)

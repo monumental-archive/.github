@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pgrx-postgres.py's plan, on listings nobody wrote down.
+"""pgrx_postgres.py's plan, on listings nobody wrote down.
 
 The properties of `test_pgrx_postgres.py`'s fixed rows (#1548), over
 generated `mise ls` listings and declared majors:
@@ -29,7 +29,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "pgrx_postgres",
-    Path(__file__).with_name("pgrx-postgres.py"),
+    Path(__file__).with_name("pgrx_postgres.py"),
 )
 pp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(pp)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""biome-config.py's identity merge, on declarations nobody wrote down.
+"""biome_config.py's identity merge, on declarations nobody wrote down.
 
 The properties of `test_biome_config.py`'s fixed rows (#1548), over
 generated repository declarations, manifests and nursery tables:
@@ -30,7 +30,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "biome_config",
-    Path(__file__).with_name("biome-config.py"),
+    Path(__file__).with_name("biome_config.py"),
 )
 bc = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(bc)

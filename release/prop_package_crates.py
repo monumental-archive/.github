@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""package-crates.py's verified-then-unverified packaging, on any bytes.
+"""package_crates.py's verified-then-unverified packaging, on any bytes.
 
 The property of `test_build_rust_crate.py`'s fixed rows (#1556), over
 generated workspaces. `cargo` is replaced in-process: the verified run
@@ -30,7 +30,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "package_crates",
-    Path(__file__).with_name("package-crates.py"),
+    Path(__file__).with_name("package_crates.py"),
 )
 crates = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(crates)

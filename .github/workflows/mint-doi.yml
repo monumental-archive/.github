@@ -93,12 +93,12 @@ jobs:
           ORG_USER_AGENT: >-
             monumental-archive-publish
             (https://github.com/monumental-archive/.github)
-        # The Zenodo client is release/mint-doi.py (#1365), tested
+        # The Zenodo client is release/mint_doi.py (#1365), tested
         # against a local fake Zenodo by release/test_mint_doi.py; its
         # docstrings carry what this block's comments did. The pipeline
         # sentence is passed in, so the helper names no organisation.
         run: >-
-          "${ORG_PYTHON}" .org-canon/release/mint-doi.py --pipeline "Built, proven
+          "${ORG_PYTHON}" .org-canon/release/mint_doi.py --pipeline "Built, proven
           and signed by the monumental-archive release pipeline;
           verification instructions ship with the GitHub release."
 ...

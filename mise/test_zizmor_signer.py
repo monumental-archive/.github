@@ -30,7 +30,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location(
     "zizmor_signer",
-    HERE / "zizmor-signer.py",
+    HERE / "zizmor_signer.py",
 )
 signer = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(signer)

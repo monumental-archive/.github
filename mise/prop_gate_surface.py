@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gate-surface.py's derivation, on workspaces and stubs nobody wrote down.
+"""gate_surface.py's derivation, on workspaces and stubs nobody wrote down.
 
 The properties of `test_gate_surface.py`'s fixed rows (#1548), over
 generated cargo packages and publish stubs:
@@ -34,7 +34,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "gate_surface",
-    Path(__file__).with_name("gate-surface.py"),
+    Path(__file__).with_name("gate_surface.py"),
 )
 gs = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gs)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run release/build-go-commands.py, the go-binary build, on a stub go.
+"""Run release/build_go_commands.py, the go-binary build, on a stub go.
 
 #1384 moved the step "Build every command" out of build-go-binary.yml
 into the helper, refusals unchanged. The pins step unlinks .org-canon
@@ -33,7 +33,7 @@ hermetic = SimpleNamespace(
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
-HELPER = CANON / "release" / "build-go-commands.py"
+HELPER = CANON / "release" / "build_go_commands.py"
 TEMPLATE = '{{if eq .Name "main"}}{{.ImportPath}}{{end}}'
 
 GO_STUB = """#!/usr/bin/env bash
@@ -122,7 +122,7 @@ class BuildStepIsTheHelper(unittest.TestCase):
         body = step("Build every command")
         self.assertIn(
             '        run: |\n          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/'
-            'build-go-commands.py"\n',
+            'build_go_commands.py"\n',
             body,
         )
         self.assertNotIn("go build", body)

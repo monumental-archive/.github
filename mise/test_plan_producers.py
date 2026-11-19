@@ -29,7 +29,7 @@ from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
     "plan_producers",
-    Path(__file__).with_name("plan-producers.py"),
+    Path(__file__).with_name("plan_producers.py"),
 )
 pp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(pp)
@@ -356,7 +356,7 @@ class MainTest(unittest.TestCase):
         err = io.StringIO()
         with (
             redirect_stderr(err),
-            mock.patch("sys.argv", ["plan-producers.py", "--policy", str(missing)]),
+            mock.patch("sys.argv", ["plan_producers.py", "--policy", str(missing)]),
         ):
             self.assertEqual(pp.main(), 1)
         self.assertIn("does not read as JSON", err.getvalue())

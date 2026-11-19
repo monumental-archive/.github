@@ -369,6 +369,6 @@ jobs:
         # A published release converges instead of clobbering (#316),
         # judged on the build subjects its manifest types (stele#156); a
         # rehearsal stays a draft and records why (#597). The design and
-        # its tests: release/attach-publish.py (#1386).
-        run: '"${ORG_PYTHON}" .org-canon/release/attach-publish.py'
+        # its tests: release/attach_publish.py (#1386).
+        run: '"${ORG_PYTHON}" .org-canon/release/attach_publish.py'
 ...

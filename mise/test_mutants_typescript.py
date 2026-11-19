@@ -47,7 +47,7 @@ RED_TAIL = (
 )
 
 _SPEC = importlib.util.spec_from_file_location(
-    "mutants_typescript", BELT / "mutants-typescript.py"
+    "mutants_typescript", BELT / "mutants_typescript.py"
 )
 mutants_typescript = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mutants_typescript)

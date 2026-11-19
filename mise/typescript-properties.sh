@@ -10,7 +10,7 @@
 # by the belt: a fixed seed in the gate, so two runs execute the same
 # examples, and a fresh one on the cron, printed first so a failure
 # replays. How the seed reaches fast-check, and why through a wrapper
-# config, is typescript-properties.py's header. The third mode, `lint`,
+# config, is typescript_properties.py's header. The third mode, `lint`,
 # is `lint:typescript-properties`: the design conditions, no fast-check
 # import outside a property file and no property restating the seed or
 # run count, read from the source so a property that would override
@@ -50,7 +50,7 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: con
 locks=$(git ls-files -- pnpm-lock.yaml package-lock.json yarn.lock bun.lock)
 pins=""
 if [[ -n ${locks} ]]; then
-  pins=$(tr '\n' '\0' <<< "${locks}" | xargs -0 python3 "${belt}/typescript-properties.py" locked)
+  pins=$(tr '\n' '\0' <<< "${locks}" | xargs -0 python3 "${belt}/typescript_properties.py" locked)
 fi
 grep -qx fast-check <<< "${pins}" || {
   echo "${label}: no fast-check in a tracked lockfile, skipped"
@@ -63,7 +63,7 @@ if [[ ${profile} == lint ]]; then
     echo "${label}: no TypeScript or JavaScript tracked, skipped"
     exit 0
   }
-  findings=$(tr '\n' '\0' <<< "${sources}" | xargs -0 python3 "${belt}/typescript-properties.py" lint) || {
+  findings=$(tr '\n' '\0' <<< "${sources}" | xargs -0 python3 "${belt}/typescript_properties.py" lint) || {
     echo "${label}: properties live in *.prop.test.* files and take the belt's seed:" >&2
     while IFS= read -r finding; do
       echo "  ${finding}" >&2
@@ -106,7 +106,7 @@ done
 scratch=$(mktemp -d)
 rc=0
 trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-python3 "${belt}/typescript-properties.py" stage "${scratch}" ${config:+"${config}"} <<< "${files}"
+python3 "${belt}/typescript_properties.py" stage "${scratch}" ${config:+"${config}"} <<< "${files}"
 
 args=()
 while IFS= read -r f; do
@@ -127,7 +127,7 @@ if [[ ${profile} == gate ]]; then
     sed 's/^/  /' "${scratch}/list.log" >&2
     exit 1
   }
-  leaked=$(python3 "${belt}/typescript-properties.py" collected "${scratch}/collected.json" "${args[@]}") || {
+  leaked=$(python3 "${belt}/typescript_properties.py" collected "${scratch}/collected.json" "${args[@]}") || {
     echo "${label}: the repository's own vitest run collects these property files," >&2
     echo "  so its test task runs them a second time with no seed:" >&2
     while IFS= read -r line; do
@@ -157,7 +157,7 @@ if ((status != 0)); then
 fi
 # vitest exits 0 for a filter that matched nothing it could run under a
 # config that passes with no tests; the report is the proof each ran.
-missing=$(python3 "${belt}/typescript-properties.py" verify "${scratch}/report.json" "${args[@]}") || {
+missing=$(python3 "${belt}/typescript_properties.py" verify "${scratch}/report.json" "${args[@]}") || {
   echo "${label}: not every property file ran:" >&2
   while IFS= read -r line; do
     echo "  ${line}" >&2

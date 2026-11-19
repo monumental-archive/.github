@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""inventory-plan.py, one pgrx cell's inventory plan, on any manifest.
+"""inventory_plan.py, one pgrx cell's inventory plan, on any manifest.
 
 The properties of `test_pgrx_inventory_plan.py`'s fixed rows (#1556),
 over generated crate manifests, majors and document prefixes:
@@ -32,7 +32,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "inventory_plan",
-    Path(__file__).with_name("inventory-plan.py"),
+    Path(__file__).with_name("inventory_plan.py"),
 )
 inventory = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(inventory)

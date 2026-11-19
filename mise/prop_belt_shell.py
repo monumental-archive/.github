@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""belt-shell.py's body parsers, on inputs nobody wrote down (#1332).
+"""belt_shell.py's body parsers, on inputs nobody wrote down (#1332).
 
 The properties of `test_belt_shell.py`'s fixed rows, stated over
 generated task bodies:
@@ -40,7 +40,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "belt_shell",
-    Path(__file__).with_name("belt-shell.py"),
+    Path(__file__).with_name("belt_shell.py"),
 )
 bs = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(bs)

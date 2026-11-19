@@ -33,7 +33,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "adoption_population",
-    Path(__file__).with_name("adoption-population.py"),
+    Path(__file__).with_name("adoption_population.py"),
 )
 ap = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ap)

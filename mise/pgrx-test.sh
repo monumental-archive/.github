@@ -7,7 +7,7 @@
 # major and nothing else: that is what one leg of the gate's fan-out
 # does. Run with nothing set, it tests every major the crate declares,
 # side by side — the local form of the same thing. The list is the
-# crate's own `[features]` either way, read through gate-surface.py, so
+# crate's own `[features]` either way, read through gate_surface.py, so
 # the workflow and the laptop cannot name different majors.
 #
 # `ORG_PGRX_FANNED` is the third form, for the gate's main job when the
@@ -36,7 +36,7 @@ command -v cargo > /dev/null || {
 # derivation would skip this suite silently, which is the exact failure
 # #813 exists to end.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" --exclude "${CLIPPY_EXCLUDE:-}" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}" <<< "${metadata}")
 crates=""
 declared=""
 while IFS=$'\t' read -r record spec kind crate_majors dir; do
@@ -88,7 +88,7 @@ cargo fetch --locked
 . "${belt}/pgrx-env.sh"
 org_pgrx_darwin_flags
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-plan=$("${ORG_PYTHON}" "${belt}/pgrx-postgres.py" --majors "${only:-${declared}}" <<< "${installed}")
+plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${only:-${declared}}" <<< "${installed}")
 org_pgrx_init <<< "${plan}" > /dev/null
 
 # The runs this invocation owes, as `dir:major`.

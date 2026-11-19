@@ -14,7 +14,7 @@
 #     unparsable file is a warning and exit 0 under mypy's defaults;
 #   - a seam in a source file that lowers the org's level for itself
 #     (inline `# mypy:`, a bare `# type: ignore`, `no_type_check`),
-#     named by python-types-seams.py.
+#     named by python_types_seams.py.
 # A mypy that is not the belt's pin is red by name: a stale install
 # would check against another version's rules.
 #
@@ -70,7 +70,7 @@ while IFS= read -r f; do
 done <<< "${files}"
 
 red=0
-seams=$("${ORG_PYTHON}" "${belt}/python-types-seams.py" "${args[@]}") || red=1
+seams=$("${ORG_PYTHON}" "${belt}/python_types_seams.py" "${args[@]}") || red=1
 if [[ -n ${seams} ]]; then
   echo "${label}: these lower the org's level for their own file:" >&2
   while IFS= read -r line; do

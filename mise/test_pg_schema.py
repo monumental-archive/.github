@@ -64,7 +64,7 @@ hermetic = SimpleNamespace(
 
 _SPEC = importlib.util.spec_from_file_location(
     "pg_schema",
-    Path(__file__).with_name("pg-schema.py"),
+    Path(__file__).with_name("pg_schema.py"),
 )
 pg_schema = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(pg_schema)
@@ -540,7 +540,7 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
 
     The body under test is each task's own `run` string from
     mise/config.toml, run by bash in a planted repository with the real
-    pg-snapshots.sh and gate-surface.py behind it. Only cargo is a shim
+    pg-snapshots.sh and gate_surface.py behind it. Only cargo is a shim
     (the canon pins no Rust); sqlfluff is the belt's own, wrapped to
     record the file list, which every row asserts.
 

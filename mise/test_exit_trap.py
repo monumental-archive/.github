@@ -30,7 +30,7 @@ from tempfile import TemporaryDirectory
 
 _SPEC = importlib.util.spec_from_file_location(
     "exit_trap",
-    Path(__file__).with_name("exit-trap.py"),
+    Path(__file__).with_name("exit_trap.py"),
 )
 et = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(et)

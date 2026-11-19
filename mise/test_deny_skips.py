@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for deny-skips.py's one-entry variants (#1555).
+"""Tests for deny_skips.py's one-entry variants (#1555).
 
 The regression rows of the defect `prop_deny_skips.py` found: a
 variant dropped every line naming the crate, not the one skip entry.
@@ -21,7 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
-ds = SimpleNamespace(**runpy.run_path(str(HERE / "deny-skips.py")))
+ds = SimpleNamespace(**runpy.run_path(str(HERE / "deny_skips.py")))
 
 TWO_VERSIONS = """\
 [bans]
@@ -56,9 +56,9 @@ def variants(text: str) -> list[tuple[str, dict]]:
         path.write_text(text, encoding="utf-8")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status = ds.main(["deny-skips.py", str(path)])
+            status = ds.main(["deny_skips.py", str(path)])
         if status != 0:
-            msg = f"deny-skips.py exited {status}"
+            msg = f"deny_skips.py exited {status}"
             raise AssertionError(msg)
         found = []
         for line in out.getvalue().splitlines():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adoption-population.py's obligations, on rosters nobody wrote down.
+"""adoption_population.py's obligations, on rosters nobody wrote down.
 
 The properties of `test_adoption_population.py`'s fixed rows (#1548),
 over generated population documents:
@@ -31,7 +31,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "adoption_population",
-    Path(__file__).with_name("adoption-population.py"),
+    Path(__file__).with_name("adoption_population.py"),
 )
 ap = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ap)

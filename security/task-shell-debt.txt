@@ -14,7 +14,7 @@
 # carries `#1544 unassigned`.
 #
 # Generated from the tree by the lint's own counter
-# (mise/embedded-shell.py), never typed.
+# (mise/embedded_shell.py), never typed.
 mise/config.toml	audit	19	# #1544 unassigned
 mise/config.toml	lint:toml	28	# #1544 unassigned
 mise/config.toml	lint:sql	26	# #1544 unassigned

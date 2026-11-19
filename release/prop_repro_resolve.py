@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""repro-resolve.py's manifest reader, on any JSON.
+"""repro_resolve.py's manifest reader, on any JSON.
 
 The properties of `test_repro_resolve.py`'s fixed rows (#1556), over
 generated evidence manifests:
@@ -29,7 +29,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "repro_resolve",
-    Path(__file__).with_name("repro-resolve.py"),
+    Path(__file__).with_name("repro_resolve.py"),
 )
 resolve = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(resolve)

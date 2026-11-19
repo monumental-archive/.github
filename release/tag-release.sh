@@ -122,7 +122,7 @@ esac
 # (release-lab v0.24.3, all ten cells). This is the same check moved to
 # the last reversible moment: a stale derivation refuses the MINT, and
 # nothing burns. The predecessor is the one answer the generator and the
-# publish guard use, previous-release.py's (#1592): the newest version in
+# publish guard use, previous_release.py's (#1592): the newest version in
 # the extension's upgrade graph LOWER than this one that a non-draft
 # release carries tarballs for, and that release's tag whatever it is
 # named. It used to be GitHub's "latest" release with a `v` on its tag,
@@ -141,7 +141,7 @@ while IFS= read -r control; do
   name=$(basename "${control}" .control)
   crate_dir=$(dirname "${control}")
   answer=$("${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}" \
-    "${canon}/release/pgrx/previous-release.py" predecessor \
+    "${canon}/release/pgrx/previous_release.py" predecessor \
     --repo "${repo_slug}" --version "${version}" --control "${control}") || {
     echo "FAIL: refusing to mint ${tag} — the release listing could not be read" >&2
     echo "  to find ${name}'s predecessor; nothing was minted, re-run this job." >&2

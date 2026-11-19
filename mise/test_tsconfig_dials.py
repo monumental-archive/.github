@@ -22,7 +22,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "tsconfig_dials",
-    Path(__file__).with_name("tsconfig-dials.py"),
+    Path(__file__).with_name("tsconfig_dials.py"),
 )
 tsconfig_dials = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(tsconfig_dials)

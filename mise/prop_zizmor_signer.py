@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""zizmor-signer.py's exemption, on findings nobody wrote down.
+"""zizmor_signer.py's exemption, on findings nobody wrote down.
 
 The properties of `test_zizmor_signer.py`'s fixed rows (#1548), over
 generated zizmor findings:
@@ -31,7 +31,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "zizmor_signer",
-    Path(__file__).with_name("zizmor-signer.py"),
+    Path(__file__).with_name("zizmor_signer.py"),
 )
 zs = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(zs)

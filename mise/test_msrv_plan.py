@@ -25,7 +25,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "msrv_plan",
-    Path(__file__).with_name("msrv-plan.py"),
+    Path(__file__).with_name("msrv_plan.py"),
 )
 msrv_plan = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(msrv_plan)

@@ -31,7 +31,7 @@ from typing import Self
 
 _SPEC = importlib.util.spec_from_file_location(
     "coverage_floor",
-    Path(__file__).with_name("coverage-floor.py"),
+    Path(__file__).with_name("coverage_floor.py"),
 )
 cf = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cf)

@@ -33,7 +33,7 @@ from tempfile import TemporaryDirectory
 
 _SPEC = importlib.util.spec_from_file_location(
     "belt_shell",
-    Path(__file__).with_name("belt-shell.py"),
+    Path(__file__).with_name("belt_shell.py"),
 )
 bs = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(bs)

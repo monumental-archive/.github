@@ -3,7 +3,7 @@
 
 Each row runs the task's own `run` body, read from mise/config.toml, in
 a planted git tree, against a belt directory holding this tree's
-python-types.sh, python-types-seams.py, mypy.ini and config.toml (the
+python-types.sh, python_types_seams.py, mypy.ini and config.toml (the
 pin). The STUB rows put a `mypy` on PATH that records its arguments and
 prints and exits as the row says: they hold the task's wiring, which
 mypy cannot see. The REAL rows run the belt's pinned mypy over planted
@@ -38,7 +38,7 @@ GIT = shutil.which("git") or "git"
 LABEL = "audit:python-types"
 BELT_FILES = (
     "python-types.sh",
-    "python-types-seams.py",
+    "python_types_seams.py",
     "mypy.ini",
     "config.toml",
     "typed_hypothesis.py",

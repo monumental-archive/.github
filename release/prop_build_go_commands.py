@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""build-go-commands.py, the go-binary build, on any package graph.
+"""build_go_commands.py, the go-binary build, on any package graph.
 
 The properties of `test_build_go_commands.py`'s fixed rows (#1556),
 over generated `go list` output. `go` is replaced in-process: `list`
@@ -26,7 +26,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "build_go_commands",
-    Path(__file__).with_name("build-go-commands.py"),
+    Path(__file__).with_name("build_go_commands.py"),
 )
 commands = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(commands)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""source-archive.py, the source-archive build, on any repository name.
+"""source_archive.py, the source-archive build, on any repository name.
 
 The property of `test_source_archive.py`'s fixed rows (#1556), over
 generated owners, repository names and versions. `git` is replaced
@@ -30,7 +30,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "source_archive",
-    Path(__file__).with_name("source-archive.py"),
+    Path(__file__).with_name("source_archive.py"),
 )
 source = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(source)

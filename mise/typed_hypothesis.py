@@ -14,7 +14,7 @@ own typing would let through. The arities are the ones the canon's 54
 property files use (1 to 6); a seventh strategy is "no overload
 variant", red until an overload is added here.
 
-`mise/python-properties.py` puts this directory on the path for the
+`mise/python_properties.py` puts this directory on the path for the
 run and `mise/python-types.sh` hands mypy the same, so a repository's
 property file needs one line, `from typed_hypothesis import given`;
 `test:python-properties` refuses `given` taken from `hypothesis`.

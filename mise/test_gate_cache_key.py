@@ -21,7 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
-    "gate_cache_key", Path(__file__).with_name("gate-cache-key.py")
+    "gate_cache_key", Path(__file__).with_name("gate_cache_key.py")
 )
 gate_cache_key = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gate_cache_key)

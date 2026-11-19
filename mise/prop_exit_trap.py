@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""exit-trap.py's guard check, on scripts nobody wrote down.
+"""exit_trap.py's guard check, on scripts nobody wrote down.
 
 The properties of `test_exit_trap.py`'s fixed rows (#1548), over
 generated scripts:
@@ -25,7 +25,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "exit_trap",
-    Path(__file__).with_name("exit-trap.py"),
+    Path(__file__).with_name("exit_trap.py"),
 )
 et = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(et)

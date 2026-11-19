@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""coverage-exclusions.py's markers, on sources nobody wrote down.
+"""coverage_exclusions.py's markers, on sources nobody wrote down.
 
 The properties of `test_coverage_exclusions.py`'s fixed rows (#1548),
 over generated sources in each language it reads:
@@ -25,7 +25,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "coverage_exclusions",
-    Path(__file__).with_name("coverage-exclusions.py"),
+    Path(__file__).with_name("coverage_exclusions.py"),
 )
 ce = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ce)

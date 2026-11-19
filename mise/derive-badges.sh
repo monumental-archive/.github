@@ -15,7 +15,7 @@
 # wants); unset, the block is spliced into README.md between the markers.
 set -euo pipefail
 # Refused before any early exit, so a missing interpreter is never a
-# clean skip (#1565): project-licence.py runs under it below.
+# clean skip (#1565): project_licence.py runs under it below.
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 [[ -f REUSE.toml ]] || {
@@ -185,10 +185,10 @@ fi
 # carries several (code under one licence, documentation under
 # another), nothing here can know which one is the PROJECT's, and
 # guessing is how a badge comes to lie: the repository says so, once,
-# as `licence <SPDX expression>`. project-licence.py decides, and
+# as `licence <SPDX expression>`. project_licence.py decides, and
 # citation.sh asks it the same question, so the shield and the
 # citation cannot state two licences (#1589).
-lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project-licence.py" fix:badges)
+lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project_licence.py" fix:badges)
 if [[ -z ${lic} ]]; then
   echo "fix:badges: REUSE.toml carries no SPDX-License-Identifier — the licence shield has nothing to state" >&2
   exit 1

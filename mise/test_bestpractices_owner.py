@@ -26,7 +26,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location(
     "bestpractices_owner",
-    HERE / "bestpractices-owner.py",
+    HERE / "bestpractices_owner.py",
 )
 owner = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(owner)

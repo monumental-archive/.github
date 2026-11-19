@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pack-wasm.py's package checks, on any package.json and repository.
+"""pack_wasm.py's package checks, on any package.json and repository.
 
 The properties of `test_pack_wasm.py`'s fixed rows (#1556), over
 generated callers, repository fields and package.json documents. `npm`
@@ -33,7 +33,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "pack_wasm",
-    Path(__file__).with_name("pack-wasm.py"),
+    Path(__file__).with_name("pack_wasm.py"),
 )
 pack = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(pack)

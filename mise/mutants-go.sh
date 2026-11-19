@@ -21,7 +21,7 @@
 #   //mutants:equivalent <type> <reason>
 #
 # trailing the mutant's line, or alone on the line directly above it.
-# <type> is gomu's mutator name (`gomu run --list`). mutants-go.py reads
+# <type> is gomu's mutator name (`gomu run --list`). mutants_go.py reads
 # them and holds each one to a surviving mutant of its type at its site;
 # its header has the rules. The belt delivers the reader, never a record.
 #
@@ -148,10 +148,10 @@ fi
 # belt builds it with the repository's own go; a stale local binary or a
 # cache restored across a Go bump is refused here, by name, before it can
 # panic or quietly lose its type information. The comparison and the
-# refusal are mutants-go.py's (`build-go`); the go calls stay here.
+# refusal are mutants_go.py's (`build-go`); the go calls stay here.
 built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2 }')
 running=$(go env GOVERSION)
-"${ORG_PYTHON}" "${belt}/mutants-go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
+"${ORG_PYTHON}" "${belt}/mutants_go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
   --built "${built}" --running "${running}"
 
 root=$(pwd -P)
@@ -233,7 +233,7 @@ done < "${scratch}/shard.tsv"
 
 git grep -n -e '//mutants:equivalent' -- ':!vendor/**' '*.go' > "${scratch}/records.txt" || true
 
-"${ORG_PYTHON}" "${belt}/mutants-go.py" \
+"${ORG_PYTHON}" "${belt}/mutants_go.py" \
   --label "${label}" --where "${where}" --shard "${shard:-whole}" \
   --root "${root}" --scratch "${scratch}" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

@@ -4,7 +4,7 @@
 build-pgrx-extension.yml carried this logic as shell three quotes deep
 inside `docker run … bash -c '… su postgres -c "…"'`, with no tests.
 It now lives in release/pgrx/ as plain scripts the containers run from
-the pinned canon tree, and in release/pgrx/previous-release.py on the
+the pinned canon tree, and in release/pgrx/previous_release.py on the
 runner. Each guard branch is a row here, and every refusal row asserts
 its message, word for word, against the wording the workflow carried.
 
@@ -36,7 +36,7 @@ hermetic = SimpleNamespace(
 
 CANON = Path(__file__).resolve().parent.parent
 PGRX = CANON / "release" / "pgrx"
-PREVIOUS = PGRX / "previous-release.py"
+PREVIOUS = PGRX / "previous_release.py"
 BASH = shutil.which("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 
@@ -182,7 +182,7 @@ class FloorBlock(unittest.TestCase):
 
 
 # --------------------------------------------------------------------
-# previous-release.py: the control-file refusal and the previous
+# previous_release.py: the control-file refusal and the previous
 # tarball, against a stub `gh` that serves a release listing.
 # --------------------------------------------------------------------
 
@@ -670,12 +670,12 @@ class NoSiteAsksForTheLatestRelease(unittest.TestCase):
 
     `gh release view` with no tag answers GitHub's latest release, which
     is the forge's opinion of newest and not what an installation can be
-    sitting on. The predecessor is previous-release.py's to answer.
+    sitting on. The predecessor is previous_release.py's to answer.
     """
 
     # The one other caller, and why it is not a predecessor search:
     # it proves the latest release itself, and asks nothing before it.
-    NOT_A_PREDECESSOR = ("release/repro-resolve.py",)
+    NOT_A_PREDECESSOR = ("release/repro_resolve.py",)
     UNTAGGED = re.compile(r"""\brelease["',\s]*view["',]*\s+["']?--""")
 
     def test_no_untagged_release_view(self) -> None:

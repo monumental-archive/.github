@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""subject-budget.py's globs and templates, on inputs nobody wrote down.
+"""subject_budget.py's globs and templates, on inputs nobody wrote down.
 
 The properties of `test_subject_budget.py`'s fixed rows (#1332), over
 generated dependency names, paths and commit templates:
@@ -36,7 +36,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "subject_budget",
-    Path(__file__).with_name("subject-budget.py"),
+    Path(__file__).with_name("subject_budget.py"),
 )
 sb = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sb)

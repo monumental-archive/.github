@@ -26,7 +26,7 @@ from typing import ClassVar
 
 _SPEC = importlib.util.spec_from_file_location(
     "biome_config",
-    Path(__file__).with_name("biome-config.py"),
+    Path(__file__).with_name("biome_config.py"),
 )
 biome_config = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(biome_config)

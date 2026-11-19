@@ -14,7 +14,7 @@
 #     43886371474) — every crate before its first publish is in it.
 #
 # So the population is cargo's own account of the workspace, read through
-# gate-surface.py — the one derivation of which crates are pgrx and which
+# gate_surface.py — the one derivation of which crates are pgrx and which
 # majors each declares — and each crate gets one verdict per thing that
 # can be judged:
 #
@@ -61,11 +61,11 @@ command -v cargo > /dev/null || {
 # Assigned one step each: an empty here-string from a failed derivation
 # would read as a workspace with nothing to judge.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
 # Per member: where it may be published, as cargo resolved it (`null` is
 # anywhere, `[]` is `publish = false`, a list names registries, crates.io
 # as `crates-io`), and whether it has a target the tool can judge (the
-# kinds above). Never an empty field — see gate-surface.py on tabs.
+# kinds above). Never an empty field — see gate_surface.py on tabs.
 where=$(jq -r '
   .workspace_members as $ids
   | .packages[]
@@ -106,7 +106,7 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
 
   # The record's URL is the belt's one index rule, shared with the
   # crates publisher (#1383), so the two can never read different paths.
-  url=$("${ORG_PYTHON}" "${belt}/crates-index.py" url "${crate}")
+  url=$("${ORG_PYTHON}" "${belt}/crates_index.py" url "${crate}")
   # curl's own exit is not the verdict: the status is. No answer at all
   # writes 000, which is red like every status but 200 and 404.
   code=$(curl --silent --output /dev/null --write-out '%{http_code}' \

@@ -13,7 +13,7 @@
 # toolchain and reds on any difference, so an unpinned tool can make a
 # gate fail and can never make one pass.
 #
-# The derivation itself is gate-surface.py's, the one every other
+# The derivation itself is gate_surface.py's, the one every other
 # consumer uses. No major is written here.
 set -euo pipefail
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
@@ -32,7 +32,7 @@ for tool in cargo jq; do
 done
 
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${canon}/mise/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${canon}/mise/gate_surface.py" <<< "${metadata}")
 majors=""
 while IFS=$'\t' read -r record _spec kind crate_majors _dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue

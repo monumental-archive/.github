@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""regression-count.py's path and pin rules, on inputs nobody wrote down.
+"""regression_count.py's path and pin rules, on inputs nobody wrote down.
 
 The properties of `test_regression_count.py`'s fixed rows (#1548), over
 generated paths, diff lines and patches:
@@ -25,7 +25,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "regression_count",
-    Path(__file__).with_name("regression-count.py"),
+    Path(__file__).with_name("regression_count.py"),
 )
 rc = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(rc)

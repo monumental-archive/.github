@@ -98,7 +98,7 @@ fi
 # about 1.3.0 alone, found nothing, and called an extension with eleven
 # published versions a first publish. Installability is a fact about
 # release assets, so it is settled per extension, in the loop below.
-predecessor_helper="${canon}/release/pgrx/previous-release.py"
+predecessor_helper="${canon}/release/pgrx/previous_release.py"
 graph_targets=$("${ORG_PYTHON}" "${predecessor_helper}" graph "${controls[@]}")
 graph_head=$(head -n 1 <<< "${graph_targets}")
 if [[ -z ${graph_head} ]]; then
@@ -116,7 +116,7 @@ fi
 # answer as derived state alongside the upgrade script itself.
 #
 # One listing, not one per candidate, and one function (#1592):
-# previous-release.py's `record` lists every non-draft release's assets
+# previous_release.py's `record` lists every non-draft release's assets
 # once, writes the record from that listing, and prints each extension's
 # predecessor from the same listing by the same function the mint guard
 # and the build's backstop call. The record, this derivation and both
@@ -150,7 +150,7 @@ fi
 # under whichever backend key pins them, and for a LIST of rust versions
 # (a repo that fuzzes declares a nightly beside the stable one, .github#445)
 # the first entry, the one mise puts on PATH and this build must use.
-pins=$("${ORG_PYTHON}" "${canon}/release/caller-pins.py" env --input-of "the pgrx-extension class" \
+pins=$("${ORG_PYTHON}" "${canon}/release/caller_pins.py" env --input-of "the pgrx-extension class" \
   RUST_VERSION=rust PGRX_VERSION=cargo-pgrx) || {
   echo "FAIL: rust and cargo:cargo-pgrx must be pinned in this repository's mise config" >&2
   exit 1
@@ -193,7 +193,7 @@ for control in "${controls[@]}"; do
   # same as concluding there is no predecessor. Only when NO version in
   # the whole graph is carried has this extension truly never shipped.
   #
-  # The predecessor is previous-release.py's answer, printed above by
+  # The predecessor is previous_release.py's answer, printed above by
   # `record` from the same listing the record was written from (#1592).
   # The candidates it passed over are named here, newest first.
   answer=$(awk -F'\t' -v ext="${name}" '$1 == ext { print $2 "\t" $3; exit }' \

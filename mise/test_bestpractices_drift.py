@@ -37,7 +37,7 @@ hermetic = SimpleNamespace(
     **runpy.run_path(str(Path(__file__).resolve().with_name("hermetic.py")))
 )
 drift = SimpleNamespace(
-    **runpy.run_path(str(Path(__file__).resolve().with_name("bestpractices-drift.py")))
+    **runpy.run_path(str(Path(__file__).resolve().with_name("bestpractices_drift.py")))
 )
 
 CANON = Path(__file__).resolve().parent.parent

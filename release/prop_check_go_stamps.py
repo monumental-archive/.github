@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check-go-stamps.py, the go-binary stamp check, on any build info.
+"""check_go_stamps.py, the go-binary stamp check, on any build info.
 
 The properties of `test_check_go_stamps.py`'s fixed rows (#1556), over
 generated `go version -m` output. `go` is replaced in-process by the
@@ -27,7 +27,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "check_go_stamps",
-    Path(__file__).with_name("check-go-stamps.py"),
+    Path(__file__).with_name("check_go_stamps.py"),
 )
 stamps = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(stamps)

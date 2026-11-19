@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""git-decoy.py's scrub and state diff, on inputs nobody wrote down.
+"""git_decoy.py's scrub and state diff, on inputs nobody wrote down.
 
 The properties of `test_git_decoy.py`'s fixed rows (#1548), over
 generated environments and decoy states:
@@ -25,7 +25,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "git_decoy",
-    Path(__file__).with_name("git-decoy.py"),
+    Path(__file__).with_name("git_decoy.py"),
 )
 gd = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gd)

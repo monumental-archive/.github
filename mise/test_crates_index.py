@@ -13,7 +13,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
-    "crates_index", Path(__file__).resolve().parent / "crates-index.py"
+    "crates_index", Path(__file__).resolve().parent / "crates_index.py"
 )
 crates_index = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(crates_index)
@@ -56,7 +56,7 @@ class IndexPath(unittest.TestCase):
 
 
 class Command(unittest.TestCase):
-    """`crates-index.py url <crate>`, for the shell reader."""
+    """`crates_index.py url <crate>`, for the shell reader."""
 
     @staticmethod
     def run_main(*argv: str) -> tuple[int, str, str]:
@@ -83,14 +83,14 @@ class Command(unittest.TestCase):
         for argv in ((), ("url",), ("path", "alpha"), ("url", "a", "b")):
             with self.subTest(argv=argv):
                 self.assertEqual(
-                    (2, "", "usage: crates-index.py url <crate>\n"),
+                    (2, "", "usage: crates_index.py url <crate>\n"),
                     self.run_main(*argv),
                 )
 
     def test_an_empty_name(self) -> None:
         """The refusal reaches the caller's stderr by name."""
         self.assertEqual(
-            (2, "", "crates-index.py: a crate with no name has no index record\n"),
+            (2, "", "crates_index.py: a crate with no name has no index record\n"),
             self.run_main("url", ""),
         )
 

@@ -194,7 +194,7 @@ jobs:
         # of rust versions yields the first, the one mise puts on PATH
         # (.github#445).
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller-pins.py env \
+          "${ORG_PYTHON}" .org-canon/release/caller_pins.py env \
             --input-of "the pgrx-extension class" \
             RUST_VERSION=rust PGRX_VERSION=cargo-pgrx \
             AUDITABLE_VERSION=cargo-auditable >> "${GITHUB_ENV}"
@@ -222,14 +222,14 @@ jobs:
           fi
       - name: Refuse a control file that strands existing installations
         # The backstop for a tag minted around the Release PR's derived
-        # upgrade path: release/pgrx/previous-release.py, which reads the
+        # upgrade path: release/pgrx/previous_release.py, which reads the
         # previous release through gh and names every path it takes.
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          "${ORG_PYTHON}" .org-canon/release/pgrx/previous-release.py guard \
+          "${ORG_PYTHON}" .org-canon/release/pgrx/previous_release.py guard \
             --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
             --crate-dir "${UNTRUSTED_CRATE_DIR}"
       - name: Build, test and package inside the target Postgres
@@ -290,7 +290,7 @@ jobs:
         # EXTENSION at the old version, install the new package over it,
         # ALTER EXTENSION UPDATE, and read the version back
         # (release/pgrx/upgrade.sh). Skips cleanly when no previous
-        # release shipped this cell (release/pgrx/previous-release.py
+        # release shipped this cell (release/pgrx/previous_release.py
         # fetch prints no version) — the fresh-install smokes above are
         # then the whole story.
         if: ${{ !inputs.repro }}
@@ -300,7 +300,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          prev=$("${ORG_PYTHON}" .org-canon/release/pgrx/previous-release.py fetch \
+          prev=$("${ORG_PYTHON}" .org-canon/release/pgrx/previous_release.py fetch \
             --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
             --crate-dir "${UNTRUSTED_CRATE_DIR}" --pg "${PG}" --arch "${ARCH}" --tarball /tmp/prev.tar.gz --dest /tmp/prevroot)
           [[ -n ${prev} ]] || exit 0
@@ -354,7 +354,7 @@ jobs:
         # divergent ones. Not on the repro leg: the comparator proves
         # bytes, not inventories. No belt on a build leg, so the helper
         # is stdlib Python from the canon tree:
-        # release/pgrx/inventory-plan.py (#1371).
+        # release/pgrx/inventory_plan.py (#1371).
         #
         # plan-producer: pgrx-extension sbom-pgrx-
         if: ${{ !inputs.repro }}
@@ -362,7 +362,7 @@ jobs:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
           PLAN_DOC_PREFIX: sbom-pgrx-
         run: |
-          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory-plan.py "${UNTRUSTED_CRATE_DIR}" "${PG}"
+          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory_plan.py "${UNTRUSTED_CRATE_DIR}" "${PG}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:

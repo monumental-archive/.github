@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""attach-publish.py's two readers, on any checksums list and manifest.
+"""attach_publish.py's two readers, on any checksums list and manifest.
 
 The properties of `test_attach_publish.py`'s fixed rows (#1556):
 
@@ -30,7 +30,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "attach_publish",
-    Path(__file__).with_name("attach-publish.py"),
+    Path(__file__).with_name("attach_publish.py"),
 )
 attach = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(attach)

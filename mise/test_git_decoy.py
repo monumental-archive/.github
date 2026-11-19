@@ -35,7 +35,7 @@ hermetic = SimpleNamespace(
 
 
 _HERE = pathlib.Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location("git_decoy", _HERE / "git-decoy.py")
+_SPEC = importlib.util.spec_from_file_location("git_decoy", _HERE / "git_decoy.py")
 gd = importlib.util.module_from_spec(_SPEC)
 sys.modules["git_decoy"] = gd
 _SPEC.loader.exec_module(gd)
@@ -154,7 +154,7 @@ class Task(unittest.TestCase):
         for root in ROOT_RE.findall(body()):
             (tree / root).mkdir(parents=True, exist_ok=True)
             (tree / root / "test_ok.py").write_text(PASSING, encoding="utf-8")
-        for helper in ("git-decoy.py", "unittest-guarded.py"):
+        for helper in ("git_decoy.py", "unittest_guarded.py"):
             shutil.copy(_HERE / helper, tree / "mise" / helper)
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
         (tree / "mise" / "test_leaky.py").write_text(leaky, encoding="utf-8")
@@ -228,7 +228,7 @@ class Helper(unittest.TestCase):
         r = subprocess.run(
             [
                 sys.executable,
-                str(_HERE / "git-decoy.py"),
+                str(_HERE / "git_decoy.py"),
                 "run",
                 str(self.decoy),
                 "--",

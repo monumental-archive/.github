@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""msrv-plan.py's versions and promises, on inputs nobody wrote down.
+"""msrv_plan.py's versions and promises, on inputs nobody wrote down.
 
 The properties of `test_msrv_plan.py`'s fixed rows (#1548), over
 generated versions, workspaces and toolchain listings:
@@ -27,7 +27,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "msrv_plan",
-    Path(__file__).with_name("msrv-plan.py"),
+    Path(__file__).with_name("msrv_plan.py"),
 )
 mp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mp)

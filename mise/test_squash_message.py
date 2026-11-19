@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run `mise/squash-message.py` against a stub `mise` (#1386).
+"""Run `mise/squash_message.py` against a stub `mise` (#1386).
 
 The gate's squash-message step is now one call to the helper. These rows
 run it as the step does, with a stub `mise` first on PATH that keeps a
@@ -21,7 +21,7 @@ import sys
 import tempfile
 import unittest
 
-HELPER = pathlib.Path(__file__).resolve().parent / "squash-message.py"
+HELPER = pathlib.Path(__file__).resolve().parent / "squash_message.py"
 STUB_MISE = """#!/usr/bin/env bash
 printf '%s\\n' "$*" > "${STUB_DIR}/mise-args"
 cp "${ORG_COMMIT_MSG_FILE}" "${STUB_DIR}/checked-message"

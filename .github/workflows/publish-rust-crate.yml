@@ -68,10 +68,10 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller-pins.py.
+        # which tools (#1333). One reader, release/caller_pins.py.
         id: pins
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller-pins.py install \
+          "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
             --input-of "the rust-crate class" \
             rust >> "${GITHUB_OUTPUT}"
       - name: Install mise and the pinned toolchain
@@ -93,5 +93,5 @@ jobs:
         # (#1218, #1273); trusted publishing by hand, with the org's
         # User-Agent (#907). The reasons are in the helper, where its
         # tests run (#1383).
-        run: '"${ORG_PYTHON}" .org-canon/release/publish-crates.py'
+        run: '"${ORG_PYTHON}" .org-canon/release/publish_crates.py'
 ...

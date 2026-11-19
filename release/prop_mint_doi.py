@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mint-doi.py's readers and renderer, on any CITATION.cff and value.
+"""mint_doi.py's readers and renderer, on any CITATION.cff and value.
 
 The properties of `test_mint_doi.py`'s fixed rows (#1556):
 
@@ -29,7 +29,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "mint_doi",
-    Path(__file__).with_name("mint-doi.py"),
+    Path(__file__).with_name("mint_doi.py"),
 )
 mint = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mint)

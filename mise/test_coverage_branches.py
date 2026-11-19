@@ -7,7 +7,7 @@
 dated nightly; `coverage:adopt` writes that line. The bodies under test
 are the tasks' own `run` strings, read out of mise/config.toml with
 tomllib and run by bash in a planted git tree, and they call the real
-measurement script, the real `coverage-floor.py` and the real
+measurement script, the real `coverage_floor.py` and the real
 `pgrx-env.sh`. Only `cargo` and `rustup` are stubs: cargo answers
 `metadata` with a workspace holding no extension and `llvm-cov` with
 the numbers the row planted, and logs every `llvm-cov` call with the
@@ -46,7 +46,7 @@ CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
 
 _SPEC = importlib.util.spec_from_file_location(
     "coverage_floor",
-    BELT / "coverage-floor.py",
+    BELT / "coverage_floor.py",
 )
 cf = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(cf)

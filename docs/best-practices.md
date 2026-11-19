@@ -87,7 +87,7 @@ Silver now stands on one remaining MUST:
   stele test is missing (stele#486). The checklists on #1360 and
   #1545 name each.
 
-  `mise/regression-count.py` sorts every `fix`-typed commit into test
+  `mise/regression_count.py` sorts every `fix`-typed commit into test
   added, no test, not a code fix (docs, data, pins, Renovate's
   `fix(deps)` and `fix(canon)`) and unclassifiable, and reports 58 of
   234 (24.8%) for the window. That is tests that arrived with the fix:

@@ -39,7 +39,7 @@ from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
     "security_config",
-    Path(__file__).with_name("security-config.py"),
+    Path(__file__).with_name("security_config.py"),
 )
 sc = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sc)

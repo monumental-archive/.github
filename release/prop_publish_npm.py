@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""publish-npm.py's version order and log masking, on any input.
+"""publish_npm.py's version order and log masking, on any input.
 
 The properties of `test_publish_npm.py`'s fixed rows (#1556):
 
@@ -25,7 +25,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "publish_npm",
-    Path(__file__).with_name("publish-npm.py"),
+    Path(__file__).with_name("publish_npm.py"),
 )
 publish = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(publish)

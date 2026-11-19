@@ -56,7 +56,7 @@ CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 GIT = shutil.which("git")
 
-_SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate-tools.py")
+_SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate_tools.py")
 gate_tools = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gate_tools)
 
@@ -613,7 +613,7 @@ class Helper(unittest.TestCase):
                 result = subprocess.run(
                     [
                         sys.executable,
-                        str(BELT / "gate-tools.py"),
+                        str(BELT / "gate_tools.py"),
                         "--root",
                         str(root),
                         "disable",
@@ -645,7 +645,7 @@ class Helper(unittest.TestCase):
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(BELT / "gate-tools.py"),
+                    str(BELT / "gate_tools.py"),
                     "--table",
                     str(table),
                     "list",

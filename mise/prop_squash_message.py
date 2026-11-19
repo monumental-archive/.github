@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""squash-message.py's composition, on titles and bodies nobody wrote down.
+"""squash_message.py's composition, on titles and bodies nobody wrote down.
 
 The properties of `test_squash_message.py`'s fixed rows (#1548), over
 generated pull request titles, bodies and numbers:
@@ -27,7 +27,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "squash_message",
-    Path(__file__).with_name("squash-message.py"),
+    Path(__file__).with_name("squash_message.py"),
 )
 sm = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sm)

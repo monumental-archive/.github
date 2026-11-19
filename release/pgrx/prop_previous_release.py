@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""previous-release.py's one predecessor, on any graph and any listing.
+"""previous_release.py's one predecessor, on any graph and any listing.
 
 The properties of `test_pgrx_build.py`'s PreviousRelease and
 OnePredecessor rows (#1556, #1592), over generated upgrade graphs,
@@ -47,7 +47,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "previous_release",
-    Path(__file__).with_name("previous-release.py"),
+    Path(__file__).with_name("previous_release.py"),
 )
 previous = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(previous)

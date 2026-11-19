@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lock-platforms.py's stub reader, on workflows nobody wrote down.
+"""lock_platforms.py's stub reader, on workflows nobody wrote down.
 
 The properties of `test_lock_platforms.py`'s fixed rows (#1548), over
 generated publish stubs, scalars and tool configs:
@@ -28,7 +28,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "lock_platforms",
-    Path(__file__).with_name("lock-platforms.py"),
+    Path(__file__).with_name("lock_platforms.py"),
 )
 lp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(lp)

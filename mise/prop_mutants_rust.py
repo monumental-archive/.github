@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mutants-rust.py's reason rule and default major, on inputs nobody wrote.
+"""mutants_rust.py's reason rule and default major, on inputs nobody wrote.
 
 The properties of `test_mutants_rust.py`'s fixed rows (#1555), over
 generated `.cargo/mutants.toml` files and cargo metadata:
@@ -26,7 +26,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "mutants_rust",
-    Path(__file__).with_name("mutants-rust.py"),
+    Path(__file__).with_name("mutants_rust.py"),
 )
 mr = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mr)

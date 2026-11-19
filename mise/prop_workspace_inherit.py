@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""workspace-inherit.py's verdict, on workspaces nobody wrote down.
+"""workspace_inherit.py's verdict, on workspaces nobody wrote down.
 
 The properties of `test_workspace_inherit.py`'s fixed rows (#1548),
 over generated `[workspace.package]` tables and cargo's per-member
@@ -25,7 +25,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "workspace_inherit",
-    Path(__file__).with_name("workspace-inherit.py"),
+    Path(__file__).with_name("workspace_inherit.py"),
 )
 wi = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(wi)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gate-cache-key.py's cache names, on inputs nobody wrote down.
+"""gate_cache_key.py's cache names, on inputs nobody wrote down.
 
 The properties of `test_gate_cache_key.py`'s fixed rows (#1548), over
 generated install lists, environments and pins:
@@ -28,7 +28,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "gate_cache_key",
-    Path(__file__).with_name("gate-cache-key.py"),
+    Path(__file__).with_name("gate_cache_key.py"),
 )
 gk = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gk)

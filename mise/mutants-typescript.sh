@@ -11,7 +11,7 @@
 #   // Stryker disable next-line <Mutator>: <reason>
 #
 # StrykerJS's own mechanism; the belt delivers the reader, never a
-# record. mutants-typescript.py has the classes and the config refusals.
+# record. mutants_typescript.py has the classes and the config refusals.
 #
 # ADOPTION IS THE TOOL'S OWN CONFIG: a tracked root `stryker.config.json`,
 # which names the paths to mutate (`mutate`) and the test runner. Without
@@ -95,7 +95,7 @@ if [[ -z ${CI:-} ]]; then
 fi
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
-python3 "${belt}/mutants-typescript.py" --label "${label}" config "${adoption}"
+python3 "${belt}/mutants_typescript.py" --label "${label}" config "${adoption}"
 
 stryker=node_modules/.bin/stryker
 [[ -x ${stryker} ]] || {
@@ -140,6 +140,6 @@ if [[ ! -s ${report} ]]; then
 fi
 mv "${report}" "${scratch}/mutation.json"
 
-python3 "${belt}/mutants-typescript.py" --label "${label}" \
+python3 "${belt}/mutants_typescript.py" --label "${label}" \
   verdict "${scratch}/mutation.json" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

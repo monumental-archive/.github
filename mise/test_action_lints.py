@@ -44,7 +44,7 @@ hermetic = SimpleNamespace(
 
 
 BELT = Path(__file__).resolve().parent
-_SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate-tools.py")
+_SPEC = importlib.util.spec_from_file_location("gate_tools", BELT / "gate_tools.py")
 gate_tools = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gate_tools)
 BASH = shutil.which("bash") or "bash"

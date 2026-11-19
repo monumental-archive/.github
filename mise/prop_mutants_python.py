@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mutants-python.py's readers, on configs and listings nobody wrote.
+"""mutants_python.py's readers, on configs and listings nobody wrote.
 
 The properties of `test_mutants_python.py`'s fixed rows (#1555), over
 generated adoption configs, pragma records, results and diffs:
@@ -35,7 +35,7 @@ from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "mutants_python",
-    Path(__file__).with_name("mutants-python.py"),
+    Path(__file__).with_name("mutants_python.py"),
 )
 mp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(mp)

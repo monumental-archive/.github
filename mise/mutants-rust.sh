@@ -27,9 +27,9 @@
 # wrote for this purpose. A pgrx extension is mutated in a run of its
 # own, under ONE major, the crate's default (`default = ["pgNN"]`), with
 # `pg_test` so its `#[pg_test]` suite runs; which members are pgrx comes
-# from gate-surface.py, as for every other pgrx task.
+# from gate_surface.py, as for every other pgrx task.
 #
-# THIS FILE IS THE SEQUENCE; mutants-rust.py READS AND JUDGES (#1486).
+# THIS FILE IS THE SEQUENCE; mutants_rust.py READS AND JUDGES (#1486).
 # Every step that parses or decides — the reason rule, the default
 # major, the listings' counts, which exit statuses mean judged, the
 # tally — is a call to the helper, so it comes under the canon's
@@ -72,7 +72,7 @@ fi
 
 # Reasons first: cheap, and a malformed exclusion is red whatever the run
 # would have found.
-"${ORG_PYTHON}" "${belt}/mutants-rust.py" reasons "${config}"
+"${ORG_PYTHON}" "${belt}/mutants_rust.py" reasons "${config}"
 
 skips=$(git grep -n -e 'mutants::skip' -- ':!vendor/**' '*.rs' || true)
 if [[ -n ${skips} ]]; then
@@ -95,7 +95,7 @@ command -v cargo-mutants > /dev/null || {
 # Assigned one step each: an empty here-string from a failed derivation
 # would read as a workspace with nothing to mutate.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate-surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
 
 plain=()
 pgrx=()
@@ -110,7 +110,7 @@ done <<< "${surface}"
 
 # The crate's default major: the one `pgNN` its `default` feature names.
 default_major() {
-  "${ORG_PYTHON}" "${belt}/mutants-rust.py" default-major "$1" <<< "${metadata}"
+  "${ORG_PYTHON}" "${belt}/mutants_rust.py" default-major "$1" <<< "${metadata}"
 }
 
 # The status survives the cleanup, and a run that died before its last
@@ -139,7 +139,7 @@ mutate() {
     cargo mutants --list --shard "${shard}" "$@" > "${out}/here.txt"
     here="${out}/here.txt"
   fi
-  "${ORG_PYTHON}" "${belt}/mutants-rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
+  "${ORG_PYTHON}" "${belt}/mutants_rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
     --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
@@ -184,5 +184,5 @@ if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then
   exit 1
 fi
 
-"${ORG_PYTHON}" "${belt}/mutants-rust.py" verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
+"${ORG_PYTHON}" "${belt}/mutants_rust.py" verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
 org_done=1
