@@ -202,6 +202,7 @@ tasks = [
   "lint:task-shell",
   "lint:tsconfig-dials",
   "lint:typescript-properties",
+  "lint:vex-one-per-merge",
   "lint:workflow-shell",
   "lint:workspace-inherit",
   "test:pgrx",
