@@ -105,7 +105,8 @@ def build_subjects(path: pathlib.Path) -> list[str]:
         untyped manifest.
 
     Raises:
-        StepError: The manifest is not a JSON object.
+        StepError: The manifest is not a JSON object, or its entries
+            are not a list.
 
     """
     if not path.is_file() or path.stat().st_size == 0:
@@ -119,6 +120,11 @@ def build_subjects(path: pathlib.Path) -> list[str]:
         msg = f"{path} is not a JSON object"
         raise StepError(msg)
     entries = doc.get("entries") or []
+    # A manifest whose entries are not a list types nothing it can be
+    # read for; `{"entries": true}` died here as a TypeError (#1556).
+    if not isinstance(entries, list):
+        msg = f"{path} is not an evidence manifest: its entries are not a list"
+        raise StepError(msg)
     return [
         raw(entry.get("name"))
         for entry in entries
