@@ -84,17 +84,37 @@ esac
 # happened (#1386). An `all` run first removes any report an earlier
 # run left untracked, so the list is that run's; a tracked file of the
 # same name is the repository's and never touched.
+#
+# Every leg is in exactly one of the two lists below. A leg in
+# `formatless` has no format Codecov reads (#1547: plpgsql_check numbers
+# lines within a function, never within a file), so it is named and
+# never counted as a writer: where every leg measured is formatless the
+# step says so and passes, and the badge job finds no artifact and
+# skips, as it does for a tree without a floor.
 reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
+formatless=(plpgsql plpgsql-branches)
 if [[ ${legs} == reports ]]; then
   measured=$(cat)
   if [[ -z ${measured} ]]; then
     echo "${label}: no leg was measured — a check that reads nothing must not pass" >&2
     exit 1
   fi
-  files=""
+  files="" named="" writers=""
   for f in "${reports[@]}"; do
     [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
   done
+  while read -r leg _; do
+    if [[ " ${formatless[*]} " == *" ${leg} "* ]]; then
+      named="${named:+${named}, }${leg}"
+    else
+      writers=1
+    fi
+  done <<< "${measured}"
+  [[ -z ${named} ]] || echo "${label}: ${named}: no upload format, not counted as a report writer" >&2
+  if [[ -z ${files} && -z ${writers} ]]; then
+    echo "${label}: upload none — every leg measured has no upload format (${named})"
+    exit 0
+  fi
   if [[ -z ${files} ]]; then
     echo "${label}: the legs measured wrote no report — nothing for the badge to upload" >&2
     exit 1

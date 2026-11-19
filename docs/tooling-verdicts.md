@@ -3325,6 +3325,10 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   exception handlers, all taken, is read the same way and left out,
   which never raises the total. The leg's log lists every function's
   figures beside the totals, so the totals can be checked by hand.
+  The two legs have no upload format (plpgsql_check numbers lines
+  within a function, not a file): the report step names them and never
+  counts them as writers, so a tree whose only legs are these uploads
+  nothing and the badge job skips.
   *Reopen the weighting:* plpgsql_check exposing its branch counts.
   **Rejected, so it is not re-proposed:** adding the extension to the
   published database image (a test tool in a production image); a

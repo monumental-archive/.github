@@ -390,7 +390,9 @@ class LegRows(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: plpgsql leg holds the floor 80.0 (95.00%)\n"
-            "coverage:check: plpgsql-branches leg holds the floor 80.0 (90.00%)\n",
+            "coverage:check: plpgsql-branches leg holds the floor 80.0 (90.00%)\n"
+            "coverage:check: upload none — every leg measured has no upload"
+            " format (plpgsql, plpgsql-branches)\n",
             done.stdout,
         )
         self.assertIn("suite ran", done.stderr)
@@ -415,6 +417,75 @@ class LegRows(unittest.TestCase):
             done.stdout,
         )
         self.assertNotIn("suite ran", done.stderr)
+
+
+class ReportRows(unittest.TestCase):
+    """The report step names the formatless legs, never counts them."""
+
+    def reports(
+        self, measured: str, files: tuple[str, ...] = ()
+    ) -> subprocess.CompletedProcess:
+        """Run `coverage-measure.sh <label> reports` over planted legs.
+
+        Returns:
+            The finished step.
+
+        """
+        tree = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tree, ignore_errors=True)
+        env = hermetic.env() | {"ORG_PYTHON": sys.executable}
+        run([GIT, "init", "-q"], env, tree)
+        for name in files:
+            (tree / name).write_text("TN:\n", encoding="utf-8")
+        script = str(BELT / "coverage-measure.sh")
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
+            [BASH, script, "leg", "reports"],
+            cwd=tree,
+            env=env,
+            input=measured,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_only_formatless_legs_pass_by_name(self) -> None:
+        """No report is owed where no leg measured has a format."""
+        done = self.reports("plpgsql 95.00\nplpgsql-branches 90.00\n")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "leg: upload none — every leg measured has no upload format"
+            " (plpgsql, plpgsql-branches)\n",
+            done.stdout,
+        )
+        self.assertEqual(
+            "leg: plpgsql, plpgsql-branches: no upload format,"
+            " not counted as a report writer\n",
+            done.stderr,
+        )
+
+    def test_a_leg_with_a_format_that_wrote_nothing_is_refused(self) -> None:
+        """A formatless leg beside it does not excuse the missing report."""
+        done = self.reports("typescript 88.0\nplpgsql 95.00\n")
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        self.assertIn(
+            "leg: the legs measured wrote no report — nothing for the badge"
+            " to upload\n",
+            done.stderr,
+        )
+
+    def test_a_formatless_leg_beside_a_written_report(self) -> None:
+        """The written report uploads; the formatless leg is named."""
+        done = self.reports(
+            "typescript 88.0\nplpgsql 95.00\n", files=("lcov-typescript.info",)
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("leg: upload lcov-typescript.info\n", done.stdout)
+        self.assertEqual(
+            "leg: plpgsql: no upload format, not counted as a report writer\n",
+            done.stderr,
+        )
 
 
 if __name__ == "__main__":
