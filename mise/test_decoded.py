@@ -25,7 +25,7 @@ import json
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -316,6 +316,34 @@ class LoadJson(unittest.TestCase):
         quoted = '"' + inside
         escaped: list[object] = [quoted]
         self.assertEqual(escaped, decoded.load_json(f'["\\{quoted}"]'))
+
+    def test_an_unterminated_string_is_scanned_once(self) -> None:
+        """2 MB of escaped quotes after one opening quote: one pass, json's refusal.
+
+        The depth scan reads each character once, counted as it reads them,
+        never by timing: a scan that looked for a whole string at each
+        quote was quadratic on exactly this text.
+        """
+        text = '"' + '\\"' * 1_000_000
+        self.assertEqual(
+            "Unterminated string starting at: line 1 column 1 (char 0)",
+            self.refused(text),
+        )
+        visits: list[str] = []
+
+        def counted() -> Iterator[str]:
+            """Yield the text's characters, recording each.
+
+            Yields:
+                Each character, once.
+
+            """
+            for char in text:
+                visits.append(char)
+                yield char
+
+        decoded.within_depth(counted())
+        self.assertEqual(len(text), len(visits))
 
     def test_a_stack_too_small_for_the_bound_is_refused(self) -> None:
         """The backstop: RecursionError under the bound is still a refusal."""
