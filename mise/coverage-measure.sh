@@ -149,6 +149,9 @@ esac
 # skips, as it does for a tree without a floor.
 reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
 formatless=(plpgsql plpgsql-branches)
+# The leg lines a `reports` run printed, as a file in the same
+# directory: what the gate keeps for the release job (#1622).
+figures=coverage-figures.txt
 if [[ ${legs} != probe ]]; then
   # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
   # that dies on an unset variable would otherwise exit 0. One trap for
@@ -167,7 +170,7 @@ fi
 if [[ ${legs} == reports ]]; then
   # The directory is the belt's by definition, so a report an earlier
   # run left in a named one is cleared: the list is this run's.
-  for f in "${reports[@]}"; do rm -f -- "${out:?}/${f}"; done
+  for f in "${reports[@]}" "${figures}"; do rm -f -- "${out:?}/${f}"; done
   measured=$(ORG_COVERAGE_REPORTS="${out}" "${BASH}" "${BASH_SOURCE[0]}" "${label}" all) || exit 1
   if [[ -z ${measured} ]]; then
     # A floor that records its legs names each one this run lost (#1666),
@@ -177,6 +180,10 @@ if [[ ${legs} == reports ]]; then
     echo "${label}: no leg was measured — a check that reads nothing must not pass" >&2
     exit 1
   fi
+  # The leg lines themselves, beside the reports (#1622): the gate keeps
+  # them for the release job, which derives the floor from this
+  # measurement instead of measuring the same commit again.
+  printf '%s\n' "${measured}" > "${out}/${figures}"
   files="" named="" writers=""
   for f in "${reports[@]}"; do
     [[ ! -f ${out}/${f} ]] || files="${files:+${files},}${out}/${f}"

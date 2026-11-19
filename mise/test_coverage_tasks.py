@@ -958,6 +958,20 @@ class CheckLeavesTheTree(CoverageTaskCase):
         for path in named:
             self.assertTrue(path.is_file(), path)
 
+    def test_the_figures_the_check_judged_are_kept_beside_the_reports(
+        self,
+    ) -> None:
+        """coverage-figures.txt: the leg lines, for the release job (#1622)."""
+        done, tree = self.run_task("coverage:check", go="93.0", commit=True)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "go 93.0\npython 90.0\npython-branches 85.0\n",
+            (tree.parent / "reports" / "coverage-figures.txt").read_text(
+                encoding="utf-8"
+            ),
+        )
+        self.assertNotIn("coverage-figures.txt", done.stdout)
+
     def test_unset_writes_a_scratch_directory_and_removes_it(self) -> None:
         """A developer's run: the tree is clean and the scratch is gone."""
         done, tree = self.run_task(

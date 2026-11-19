@@ -1040,6 +1040,51 @@ def measures(workflow: str, job_id: str, job: list[str]) -> list[str]:
     return found
 
 
+def step(job: list[str], name: str) -> str:
+    """Read one step of a job, from its `- name:` line to the next step.
+
+    Returns:
+        The step's lines, joined; empty when the job has no such step.
+
+    """
+    start = next(
+        (i for i, line in enumerate(job) if line.strip() == f"- name: {name}"), None
+    )
+    if start is None:
+        return ""
+    end = next(
+        (i for i in range(start + 1, len(job)) if job[i].strip().startswith("- name:")),
+        len(job),
+    )
+    return "\n".join(job[start:end])
+
+
+class CoverageFigures(unittest.TestCase):
+    """The gate keeps its figures; the release job reads them (#1622)."""
+
+    def test_the_gate_keeps_the_figures_for_the_commit_that_lands(self) -> None:
+        """Merge group and default-branch push only, named for the commit."""
+        kept = step(load("ci.yml")["gate"], "Keep the coverage figures for the release")
+        self.assertIn("github.event_name == 'merge_group'", kept)
+        self.assertIn(
+            "github.event_name == 'push' && github.ref == 'refs/heads/main'", kept
+        )
+        self.assertNotIn("pull_request", kept)
+        self.assertIn("name: coverage-figures-${{ github.sha }}", kept)
+        self.assertIn(
+            "path: ${{ runner.temp }}/coverage-reports/coverage-figures.txt", kept
+        )
+
+    def test_the_figures_step_follows_the_gate(self) -> None:
+        """Kept only after `mise run ci` passed: a red gate keeps nothing."""
+        job = load("ci.yml")["gate"]
+        names = [line.strip() for line in job if line.strip().startswith("- name:")]
+        self.assertLess(
+            names.index("- name: Run the gate"),
+            names.index("- name: Keep the coverage figures for the release"),
+        )
+
+
 class GateUploadMeasuresNothing(unittest.TestCase):
     """The coverage upload installs no measurement tool (#1528)."""
 
