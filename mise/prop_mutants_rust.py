@@ -92,7 +92,8 @@ class DefaultMajor(unittest.TestCase):
             ]
         }
         self.assertEqual(
-            mr.default_major(metadata, "ext"), majors[0] if len(majors) == 1 else ""
+            mr.default_major(mr.read_metadata(metadata), "ext"),
+            majors[0] if len(majors) == 1 else "",
         )
 
 
