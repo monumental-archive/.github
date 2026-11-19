@@ -36,9 +36,12 @@ the equivalent, and it resolves identically on both platforms.
 """
 
 import argparse
-import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
+
+from decoded import UndecodableError, as_array, as_object, load_json
 
 NAME = "pgrx-postgres"
 
@@ -46,6 +49,47 @@ NAME = "pgrx-postgres"
 # task, so a repository's remedy line and the check that produced it can
 # never name different packages.
 PACKAGE = "aqua:theseus-rs/postgresql-binaries"
+
+
+class Args(argparse.Namespace):
+    """The parsed command line, typed."""
+
+    majors: str
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One entry of `mise ls <pkg> --json`, as this check reads it."""
+
+    version: str
+    active: bool
+    installed: bool
+    install_path: str
+
+
+def entries(listing: object) -> list[Entry]:
+    """Decode `mise ls <pkg> --json` into its entries.
+
+    The fields are read as the check always read them: `active` and
+    `installed` by truth, `version` and `install_path` as text.
+
+    Returns:
+        The entries, in listing order. A listing that is not a list of
+        objects is refused by `decoded`'s readers, naming where.
+
+    """
+    out: list[Entry] = []
+    for index, item in enumerate(as_array(listing, "the listing")):
+        raw = as_object(item, f"listing[{index}]")
+        out.append(
+            Entry(
+                version=str(raw.get("version", "")),
+                active=bool(raw.get("active")),
+                installed=bool(raw.get("installed")),
+                install_path=str(raw.get("install_path", "")),
+            )
+        )
+    return out
 
 
 def digits(text: str) -> bool:
@@ -61,7 +105,7 @@ def digits(text: str) -> bool:
     return text.isascii() and text.isdigit()
 
 
-def pinned(listing: list[dict]) -> tuple[dict[int, dict], list[str]]:
+def pinned(listing: list[Entry]) -> tuple[dict[int, Entry], list[str]]:
     """Read the Postgres majors this repository's config actually pins.
 
     Only ACTIVE entries count, the same rule as the MSRV toolchain check:
@@ -74,23 +118,23 @@ def pinned(listing: list[dict]) -> tuple[dict[int, dict], list[str]]:
         declared but not installed.
 
     """
-    found: dict[int, dict] = {}
+    found: dict[int, Entry] = {}
     absent: list[str] = []
     for entry in listing:
-        if not entry.get("active"):
+        if not entry.active:
             continue
-        raw = str(entry.get("version", ""))
+        raw = entry.version
         head = raw.split(".", 1)[0]
         if not digits(head):
             continue
-        if entry.get("installed"):
+        if entry.installed:
             found[int(head)] = entry
         else:
             absent.append(raw)
     return found, absent
 
 
-def pg_config(entry: dict) -> Path | None:
+def pg_config(entry: Entry) -> Path | None:
     """Find the `pg_config` inside one installed package.
 
     Returns:
@@ -98,7 +142,7 @@ def pg_config(entry: dict) -> Path | None:
         broken install rather than a missing pin, and is worded as one.
 
     """
-    root = Path(str(entry.get("install_path", "")))
+    root = Path(entry.install_path)
     if not root.is_dir():
         return None
     direct = root / "bin" / "pg_config"
@@ -110,7 +154,7 @@ def pg_config(entry: dict) -> Path | None:
 
 def plan(
     majors: list[int],
-    listing: list[dict],
+    listing: list[Entry],
 ) -> tuple[list[str], list[str]]:
     """Resolve every declared major to a `pg_config`.
 
@@ -134,7 +178,7 @@ def plan(
         where = pg_config(entry)
         if where is None:
             findings.append(
-                f"pg{major} is pinned at {entry.get('version')} and that "
+                f"pg{major} is pinned at {entry.version} and that "
                 "install carries no bin/pg_config — reinstall it",
             )
             continue
@@ -168,13 +212,19 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description="the gate's Postgres provisioning")
     parser.add_argument("--majors", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
 
+    stdin: TextIO = sys.stdin
     try:
-        listing = json.loads(sys.stdin.read())
-    except json.JSONDecodeError as bad:
+        document = load_json(stdin.read())
+    except UndecodableError as bad:
         print(f"{NAME}: `mise ls {PACKAGE}` did not give JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)
+        return 1
+    try:
+        listing = entries(document)
+    except UndecodableError as bad:
+        print(f"{NAME}: `mise ls {PACKAGE}`: {bad}", file=sys.stderr)
         return 1
 
     majors = [int(m) for m in args.majors.split(",") if digits(m.strip())]

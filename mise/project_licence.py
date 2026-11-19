@@ -22,13 +22,14 @@ the reason on stderr otherwise.
 
 import pathlib
 import sys
-import tomllib
+
+from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
 
 EXPECTED_ARGC = 2
 DECLARE = "  say which is the project's in .badge-states: 'licence <SPDX expression>'"
 
 
-def expressions(config: dict) -> list[str]:
+def expressions(config: dict[str, object]) -> list[str]:
     """Collect each distinct licence expression the annotations name.
 
     `SPDX-License-Identifier` may be one string or a list of them.
@@ -36,11 +37,24 @@ def expressions(config: dict) -> list[str]:
     Returns:
         The expressions, sorted, each once.
 
+    Raises:
+        UndecodableError: an annotation is not that shape, naming where.
+
     """
     found: set[str] = set()
-    for annotation in config.get("annotations", []):
-        value = annotation.get("SPDX-License-Identifier", [])
-        found.update([value] if isinstance(value, str) else value)
+    annotations = as_array(config.get("annotations", []), "annotations")
+    for index, item in enumerate(annotations):
+        where = f"annotations[{index}]"
+        value = as_object(item, where).get("SPDX-License-Identifier", [])
+        if isinstance(value, str):
+            found.add(value)
+        elif is_strings(value):
+            found.update(value)
+        else:
+            msg = (
+                f"{where}.SPDX-License-Identifier is not a string or a list of strings"
+            )
+            raise UndecodableError(msg)
     return sorted(found)
 
 
@@ -96,13 +110,18 @@ def main(argv: list[str]) -> int:
         return 2
     caller = argv[1]
     try:
-        config = tomllib.loads(pathlib.Path("REUSE.toml").read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as error:
+        config = load_toml(pathlib.Path("REUSE.toml").read_text(encoding="utf-8"))
+    except UndecodableError as error:
         print(f"{caller}: REUSE.toml does not parse: {error}", file=sys.stderr)
+        return 1
+    try:
+        names = expressions(config)
+    except UndecodableError as error:
+        print(f"{caller}: REUSE.toml: {error}", file=sys.stderr)
         return 1
     states = pathlib.Path(".badge-states")
     text = states.read_text(encoding="utf-8") if states.is_file() else ""
-    choice, errors = decide(caller, expressions(config), declared(text))
+    choice, errors = decide(caller, names, declared(text))
     for line in errors:
         print(line, file=sys.stderr)
     if errors:

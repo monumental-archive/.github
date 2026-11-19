@@ -91,5 +91,41 @@ class OneEntry(unittest.TestCase):
         self.assertEqual([d["crate"] for d in bans["deny"]], ["openssl"])
 
 
+class Refusals(unittest.TestCase):
+    """A deny.toml the helper cannot read is refused by name."""
+
+    @staticmethod
+    def refused(text: str) -> tuple[int, str, str]:
+        """Run the helper on a deny.toml, capturing both streams.
+
+        Returns:
+            The status, stdout, and stderr with the path written PATH.
+
+        """
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "deny.toml"
+            path.write_text(text, encoding="utf-8")
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = ds.main(["deny_skips.py", str(path)])
+            return status, out.getvalue(), err.getvalue().replace(str(path), "PATH")
+
+    def test_each_wrong_document_is_named(self) -> None:
+        """Not TOML, `bans` not a table, a skip key not an array."""
+        for text, said in (
+            ("[bans\n", "lint:deny: PATH: Expected ']' at the end of a table"),
+            ("bans = 1\n", "lint:deny: PATH: bans is not an object\n"),
+            ("[bans]\nskip = 1\n", "lint:deny: PATH: bans.skip is not a list\n"),
+            (
+                "[bans]\nskip-tree = {}\n",
+                "lint:deny: PATH: bans.skip-tree is not a list\n",
+            ),
+        ):
+            with self.subTest(said=said):
+                status, out, err = self.refused(text)
+                self.assertEqual((1, ""), (status, out))
+                self.assertTrue(err.startswith(said), err)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,8 @@ import pathlib
 import re
 import sys
 import tempfile
-import tomllib
+
+from decoded import UndecodableError, as_array, as_object, load_toml
 
 # argv[0] plus the config path.
 EXPECTED_ARGC = 2
@@ -39,19 +40,21 @@ ARRAY_OPEN = re.compile(r"^\s*(?:bans\.)?(skip|skip-tree)\s*=\s*\[\s*(?:#.*)?$")
 ARRAY_CLOSE = re.compile(r"^\s*\]")
 
 
-def entries(config: dict) -> list[tuple[str, str]]:
+def entries(config: dict[str, object]) -> list[tuple[str, str]]:
     """Collect every bans skip, in declaration order within each key.
 
     Returns:
         (key, spec) per entry: `skip` or `skip-tree`, and the crate as
         the entry writes it, version included. Two skips of one crate at
-        two versions are two entries, each tested on its own.
+        two versions are two entries, each tested on its own. A `bans`
+        that is not a table, or a skip key that is not an array, is
+        refused by `decoded`'s readers, naming which.
 
     """
     found: list[tuple[str, str]] = []
-    bans = config.get("bans", {})
+    bans = as_object(config.get("bans", {}), "bans")
     for key in SKIP_KEYS:
-        for item in bans.get(key, []):
+        for item in as_array(bans.get(key, []), f"bans.{key}"):
             # Both spellings: a bare "crate@version" string, or a table
             # carrying the reason the org requires with every exception.
             spec = item.get("crate") if isinstance(item, dict) else item
@@ -77,7 +80,7 @@ def variant_without(
     # so `foo` never takes `foo-bar`'s line nor `foo@1` take `foo@2`'s.
     table = re.compile(rf'^\s*\{{\s*crate\s*=\s*"{re.escape(spec)}"')
     string = re.compile(rf'^\s*"{re.escape(spec)}"\s*,?\s*(?:#.*)?$')
-    inside = None
+    inside: str | None = None
     seen = 0
     for index, line in enumerate(lines):
         opened = ARRAY_OPEN.match(line)
@@ -105,8 +108,11 @@ def main(argv: list[str]) -> int:
         print("usage: deny_skips.py <deny.toml>", file=sys.stderr)
         return 2
     source = pathlib.Path(argv[1])
-    config = tomllib.loads(source.read_text(encoding="utf-8"))
-    skips = entries(config)
+    try:
+        skips = entries(load_toml(source.read_text(encoding="utf-8")))
+    except UndecodableError as error:
+        print(f"lint:deny: {source}: {error}", file=sys.stderr)
+        return 1
     if not skips:
         return 0
     lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
