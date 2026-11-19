@@ -2025,6 +2025,37 @@ Proven by running 2.4.1:
   it; without it, 54 `import-not-found`), asserted to be the same
   Python as the repository's `python3`.
 
+**`given`, typed by the belt** (ruled on #1604). Hypothesis types
+`given(...)` as returning `Callable[..., None]`, so on every property
+the strict config reds the decorator expression (`disallow_any_expr`,
+191 on `301cf46`) and the decorated test (`disallow_any_decorated`,
+197). Neither is the property's fault, and neither flag comes off:
+`mise/org_hypothesis.py` gives `given` an exact type instead, one
+overload per arity, each strategy's value type tied to its parameter
+after `self` and the decorated test taking `self` alone. Every `@given`
+in the canon's 54 property files is that shape (positional strategies
+on a `unittest.TestCase` method, 1 to 6 of them, `st.data()` and stacked
+`@example` included), so 1 to 6 overloads cover all 191. It is stricter
+than Hypothesis's own type: `@given(st.integers())` over `n: str` is
+`Argument 1 has incompatible type`, and a seventh strategy is "no
+overload variant" until one is written. One `cast`, in the module,
+meets Hypothesis's type; no `type: ignore` anywhere. Measured after: 0
+decorator and 0 decorated findings from `given`'s own type. 36
+`@given` lines stay red because the STRATEGY passed carries `Any` in
+its value type (recursive JSON strategies, values from helpers loaded
+untyped): that is the strategy's type, answered by typing it. Rejected
+on the way: two mypy passes with the decorated flag off for property
+files (it left the 191 red and was a second run), a per-module section
+(mypy refuses `prop_*` as a pattern, and a property file's module name
+depends on where it sits), and a per-site ignore. `@st.composite` is
+typed precisely by Hypothesis; its six findings were bare `dict`/`set`
+return annotations (five, typed here) and a type from a helper loaded
+through `importlib` (one, which #1634's rename answers). Reach: the
+properties runner puts the belt's directory on the path for the run,
+the types task sets `MYPYPATH` to it, and `test:python-properties`
+reds a property file that takes `given` from `hypothesis`, so a
+repository needs only `from org_hypothesis import given`.
+
 **Staged, not advisory.** The canon held 10 874 findings over its 226
 tracked files when the pin landed: 1719 in the helpers (`mise/` 1295,
 `release/` 335, the rest 89) and 9155 in their tests. A `ci` task
