@@ -56,6 +56,7 @@ hermetic = SimpleNamespace(
 
 CANON = Path(__file__).resolve().parent.parent
 RELEASE = CANON / "release"
+TESTDATA = RELEASE / "testdata"
 BASH = shutil.which("bash")
 GIT = shutil.which("git")
 JQ = shutil.which("jq")
@@ -1698,6 +1699,158 @@ class TagReleasePush(unittest.TestCase):
         self.assertIn(
             "-----BEGIN SIGNED MESSAGE-----", self.pushed_tag, self.pushed_tag
         )
+
+
+# The forge for the mint guard's rows: the release listing from a
+# captured fixture, and `gh release view` answered as GitHub would, so a
+# row run against the inline guard this replaced fails on its decision
+# rather than on a refused call. Everything else (the draft release after
+# a push) is refused.
+MINT_FORGE_STUB = """#!/usr/bin/env bash
+expr="."
+tag=""
+verb="$1 $2"
+shift 2
+while (($#)); do
+  case "$1" in
+    --jq) expr="$2"; shift ;;
+    --json | --repo) shift ;;
+    -*) ;;
+    *) tag="$1" ;;
+  esac
+  shift
+done
+[[ -n ${STUB_LISTING} ]] || { echo "HTTP 502" >&2; exit 1; }
+case "${verb}" in
+  api\\ *) jq -r "${expr}" "${STUB_LISTING}" ;;
+  "release view")
+    if [[ -z ${tag} ]]; then printf '%s\\n' "${STUB_LATEST}"; exit 0; fi
+    jq --arg t "${tag}" 'first(.[] | select(.tag_name == $t))' "${STUB_LISTING}" \\
+      | jq -r "${expr}"
+    ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+@unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
+@unittest.skipUnless(JQ, "jq drives the forge stub")
+class TagReleaseUpgradePath(unittest.TestCase):
+    """The mint guard acts on previous-release.py's predecessor (#1592).
+
+    edtf's captures: its release listing and its extension's `sql/`
+    directory at a tag (testdata/edtf-*). The guard used GitHub's latest
+    release and a `v` on its tag, so an imported scheme passed unread and
+    a maintenance release marked latest was checked in place of the
+    newest. Each row reaches the push or stops before signing.
+    """
+
+    def _run(
+        self, listing: str, sql_at: str, latest: str, subject: str, *extra: str
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        """Mint over edtf's `sql/` at `sql_at`: a feature, then `subject`.
+
+        Returns:
+            The completed process, and the remote's tags after it.
+
+        """
+        root = Path(self.enterContext(TemporaryDirectory()))
+        home = root / "home"
+        home.mkdir()
+        env = hermetic_env(home)
+        remote = root / "remote.git"
+        repo = root / "repo"
+        sql = repo / "crates" / "edtf-postgres" / "sql"
+        sql.mkdir(parents=True)
+
+        def git(cwd: Path, *args: str) -> str:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            return subprocess.run(
+                [GIT, *args],
+                cwd=cwd,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+
+        git(root, "init", "-q", "--bare", str(remote))
+        (sql.parent / "edtf_postgres.control").write_text("default_version = ''\n")
+        for name in (TESTDATA / f"edtf-sql-{sql_at}.txt").read_text().split():
+            (sql / name).write_text("")
+        git(repo, "init", "-q", ".")
+        git(repo, "config", "commit.gpgSign", "false")
+        git(repo, "config", "core.hooksPath", str(repo / ".githooks-none"))
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "feat: initial")
+        git(repo, "tag", "-a", sql_at, "-m", sql_at)
+        (repo / "b.txt").write_text("y\n")
+        for name in extra:
+            (sql / name).write_text("")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "feat: a change")
+        git(repo, "commit", "-q", "--allow-empty", "-m", subject)
+        git(repo, "remote", "add", "origin", str(remote))
+        stubs = root / "stubs"
+        stubs.mkdir()
+        for name, body in (("gitsign", GITSIGN_STUB), ("gh", MINT_FORGE_STUB)):
+            (stubs / name).write_text(body)
+            (stubs / name).chmod(0o755)
+        (repo / ".rt").mkdir()
+        result = run_script(
+            "tag-release.sh",
+            repo,
+            GITHUB_REPOSITORY="monumental-archive/edtf",
+            RUNNER_TEMP=str(repo / ".rt"),
+            PATH=f"{stubs}:{os.environ['PATH']}",
+            STUB_LISTING=str(TESTDATA / listing) if listing else "",
+            STUB_LATEST=latest,
+        )
+        return result, git(remote, "tag", "--list")
+
+    def test_an_imported_predecessor_without_a_path_refuses_the_mint(self) -> None:
+        """No 1.2.3--1.3.0 path: refused, naming `edtf-postgres-v1.2.3`."""
+        result, pushed = self._run(
+            "edtf-releases.json",
+            "v1.2.3",
+            "edtf-postgres-v1.2.3",
+            "chore: release v1.3.0",
+        )
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            "FAIL: refusing to mint v1.3.0 — no upgrade path"
+            " crates/edtf-postgres/sql/edtf_postgres--1.2.3--1.3.0.sql from"
+            " published 1.2.3 (edtf-postgres-v1.2.3)\n"
+            "  The Release PR derived its path before edtf-postgres-v1.2.3"
+            " finished publishing\n",
+            result.stderr,
+        )
+        self.assertEqual("", pushed)
+
+    def test_the_path_from_the_newest_mints_past_an_older_latest(self) -> None:
+        """Latest is v1.3.4; the path from 1.3.5 is the one owed, and is there."""
+        result, pushed = self._run(
+            "edtf-releases-v1.3.5.json",
+            "v1.3.5",
+            "v1.3.4",
+            "chore: release v1.4.0",
+            "edtf_postgres--1.3.5--1.4.0.sql",
+        )
+        self.assertIn("pushed v1.4.0 (signed)", result.stdout, result.stderr)
+        self.assertIn("v1.4.0\n", pushed)
+
+    def test_an_unreadable_listing_refuses_the_mint(self) -> None:
+        """A failed listing read is a refusal by name, never a pass."""
+        result, pushed = self._run("", "v1.2.3", "", "chore: release v1.3.0")
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            "HTTP 502\n"
+            "FAIL: refusing to mint v1.3.0 — the release listing could not be"
+            " read\n  to find edtf_postgres's predecessor; nothing was minted,"
+            " re-run this job.\n",
+            result.stderr,
+        )
+        self.assertEqual("", pushed)
 
 
 class InventoryStepWiring(unittest.TestCase):

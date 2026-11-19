@@ -19,6 +19,7 @@
 # this job is the only place in the org a release tag can come from.
 set -euo pipefail
 
+canon="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
 repo_url="https://github.com/${repo_slug}"
 groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
@@ -120,9 +121,14 @@ esac
 # it only AFTER this tag exists, burning an immutable version number
 # (release-lab v0.24.3, all ten cells). This is the same check moved to
 # the last reversible moment: a stale derivation refuses the MINT, and
-# nothing burns. Same carve-outs as the generator and the publish
-# guard: no extension control files, no previous release, or a previous
-# release that shipped no tarballs for the extension all pass.
+# nothing burns. The predecessor is the one answer the generator and the
+# publish guard use, previous-release.py's (#1592): the newest version in
+# the extension's upgrade graph LOWER than this one that a non-draft
+# release carries tarballs for, and that release's tag whatever it is
+# named. It used to be GitHub's "latest" release with a `v` on its tag,
+# which an imported tag scheme, a burned head or a maintenance release
+# published after a newer one each made a different release, or none.
+# No extension control files, or no installable predecessor, pass.
 #
 # It stays here rather than moving into the plan because it is not a fact
 # about this repository's history: it compares a derived file against what
@@ -134,17 +140,20 @@ while IFS= read -r control; do
   [[ -n ${control} ]] || continue
   name=$(basename "${control}" .control)
   crate_dir=$(dirname "${control}")
-  prev=$(gh release view --json tagName --jq .tagName 2> /dev/null || true)
-  [[ -n ${prev} && ${prev} == v* ]] || continue
-  prev="${prev#v}"
-  [[ ${prev} != "${version}" ]] || continue
-  shipped=$(gh release view "v${prev}" --json assets --jq \
-    "[.assets[].name | select(startswith(\"${name}-${prev}-pg\"))] | length")
-  [[ ${shipped} != "0" ]] || continue
+  answer=$("${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}" \
+    "${canon}/release/pgrx/previous-release.py" predecessor \
+    --repo "${repo_slug}" --version "${version}" --control "${control}") || {
+    echo "FAIL: refusing to mint ${tag} — the release listing could not be read" >&2
+    echo "  to find ${name}'s predecessor; nothing was minted, re-run this job." >&2
+    exit 1
+  }
+  [[ -n ${answer} ]] || continue
+  prev="${answer%%$'\t'*}"
+  prev_tag="${answer#*$'\t'}"
   upgrade="${crate_dir}/sql/${name}--${prev}--${version}.sql"
   if [[ ! -f ${upgrade} ]]; then
-    echo "FAIL: refusing to mint ${tag} — no upgrade path ${upgrade} from published v${prev}" >&2
-    echo "  The Release PR derived its path before v${prev} finished publishing" >&2
+    echo "FAIL: refusing to mint ${tag} — no upgrade path ${upgrade} from published ${prev} (${prev_tag})" >&2
+    echo "  The Release PR derived its path before ${prev_tag} finished publishing" >&2
     echo "  (#358 seam 5). No tag was minted, so ${version} is NOT burned:" >&2
     echo "  once the in-flight publish is complete, refresh the derivation via" >&2
     echo "  the Release-PR leg (a push to the default branch, or the" >&2

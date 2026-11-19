@@ -17,7 +17,9 @@ that reads like a pass (#364).
 stdlib `unittest`, matching the other tests here.
 """
 
+import json
 import os
+import re
 import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -181,51 +183,100 @@ class FloorBlock(unittest.TestCase):
 
 # --------------------------------------------------------------------
 # previous-release.py: the control-file refusal and the previous
-# tarball, against a stub `gh`.
+# tarball, against a stub `gh` that serves a release listing.
 # --------------------------------------------------------------------
 
+# The stub answers from one listing in the REST shape (`tag_name`,
+# `draft`, `assets[].name`), so every call a version of the helper can
+# make reads the same forge: the listing `gh api` streams, one release's
+# assets, a download, and `gh release view` with no tag, which is the
+# LATEST release (STUB_LATEST). The helper no longer asks for that last
+# one (#1592); it is answered so a row run against the code it replaced
+# fails on what that code decided, not on a refused call.
 GH_STUB = """
 printf '%s\\n' "$*" >> "${GH_LOG}"
-case "$1 $2" in
+expr="."
+tag=""
+pattern=""
+out=""
+verb="$1 $2"
+shift 2
+while (($#)); do
+  case "$1" in
+    --jq) expr="$2"; shift ;;
+    --pattern) pattern="$2"; shift ;;
+    --output) out="$2"; shift ;;
+    --repo | --json | -q) shift ;;
+    -*) ;;
+    *) tag="$1" ;;
+  esac
+  shift
+done
+[[ -n ${STUB_LISTING} ]] || { echo "HTTP 502" >&2; exit 1; }
+case "${verb}" in
+  api\\ *)
+    jq -r "${expr}" "${STUB_LISTING}"
+    ;;
   "release view")
-    if [[ $3 == --repo ]]; then
-      # The newest release's tag: none means gh's own error.
-      [[ -n ${STUB_TAG} ]] || { echo "release not found" >&2; exit 1; }
-      printf '%s\\n' "${STUB_TAG}"
-    else
-      # The previous release's assets, already counted by --jq.
-      [[ -n ${STUB_SHIPPED} ]] || { echo "HTTP 502" >&2; exit 1; }
-      printf '%s\\n' "${STUB_SHIPPED}"
+    if [[ -z ${tag} ]]; then
+      [[ -n ${STUB_LATEST} ]] || { echo "release not found" >&2; exit 1; }
+      printf '%s\\n' "${STUB_LATEST}"
+      exit 0
     fi
+    one=$(jq --arg t "${tag}" 'first(.[] | select(.tag_name == $t))' "${STUB_LISTING}")
+    [[ -n ${one} ]] || { echo "release not found" >&2; exit 1; }
+    jq -r "${expr}" <<< "${one}"
     ;;
   "release download")
-    [[ -n ${STUB_TARBALL} ]] || { echo "no assets match" >&2; exit 1; }
-    while (($#)); do
-      [[ $1 == --output ]] && cp "${STUB_TARBALL}" "$2"
-      shift
-    done
+    hits=$(jq --arg t "${tag}" --arg p "${pattern}" \\
+      '[.[] | select(.tag_name == $t) | .assets[].name | select(. == $p)] | length' \\
+      "${STUB_LISTING}")
+    [[ ${hits} != 0 && -n ${STUB_TARBALL} ]] || { echo "no assets match" >&2; exit 1; }
+    cp "${STUB_TARBALL}" "${out}"
     ;;
 esac
 """
 
+JQ = shutil.which("jq")
+TESTDATA = CANON / "release" / "testdata"
+DEMO_CELL = "demo_ext-1.1.0-pg18-linux-arm64.tar.gz"
 
+
+def release(tag: str, *assets: str, draft: bool = False) -> dict[str, object]:
+    """Shape one release as the REST listing does.
+
+    Returns:
+        The release, with only the fields the helper reads.
+
+    """
+    return {
+        "assets": [{"name": name} for name in assets],
+        "draft": draft,
+        "tag_name": tag,
+    }
+
+
+@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
 class PreviousRelease(unittest.TestCase):
     """The rows share one directory: a stub gh, a crate, a log."""
 
+    CRATE = "crates/demo-ext"
+
     def setUp(self) -> None:
-        """Put a stub gh first on PATH and a crate at crates/demo-ext."""
+        """Put a stub gh first on PATH and a crate at CRATE."""
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name)
         bindir = self.root / "bin"
         bindir.mkdir()
         stub(bindir, "gh", GH_STUB)
-        (self.root / "crates" / "demo-ext" / "sql").mkdir(parents=True)
+        self.sql = self.root / self.CRATE / "sql"
+        self.sql.mkdir(parents=True)
         self.log = self.root / "gh.log"
         self.env = {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "GH_LOG": str(self.log),
-            "STUB_TAG": "",
-            "STUB_SHIPPED": "",
+            "STUB_LISTING": "",
+            "STUB_LATEST": "",
             "STUB_TARBALL": "",
         }
 
@@ -233,20 +284,30 @@ class PreviousRelease(unittest.TestCase):
         """Drop the directory."""
         self.tmp.cleanup()
 
+    def forge(self, releases: list[dict[str, object]], latest: str = "") -> None:
+        """Serve `releases` as the listing, and `latest` as GitHub's latest."""
+        listing = self.root / "listing.json"
+        listing.write_text(json.dumps(releases))
+        self.env["STUB_LISTING"] = str(listing)
+        self.env["STUB_LATEST"] = latest
+
+    def graph(self, *files: str) -> None:
+        """Put these files, empty, in the crate's `sql/` directory."""
+        for name in files:
+            (self.sql / name).write_text("")
+
     def previous(
-        self, mode: str, *extra: str, **stubs: str
+        self, mode: str, *extra: str, version: str = "1.2.0", **stubs: str
     ) -> subprocess.CompletedProcess[str]:
-        """Run the helper at version 1.2.0 for crates/demo-ext.
+        """Run the helper at `version` for CRATE.
 
         Returns:
             The completed process.
 
         """
         env = {**self.env, **{f"STUB_{k.upper()}": v for k, v in stubs.items()}}
-        argv = [str(PREVIOUS), mode, "--repo", "acme/demo", "--version", "1.2.0"]
-        return run(
-            [*argv, "--crate-dir", "crates/demo-ext", *extra], env, cwd=self.root
-        )
+        argv = [str(PREVIOUS), mode, "--repo", "acme/demo", "--version", version]
+        return run([*argv, "--crate-dir", self.CRATE, *extra], env, cwd=self.root)
 
     def gh_calls(self) -> list[str]:
         """Each gh invocation, its arguments joined by spaces.
@@ -262,10 +323,12 @@ class ControlFileRefusal(PreviousRelease):
     """`guard`: the backstop for a tag minted around the upgrade path."""
 
     def test_no_previous_release(self) -> None:
-        """Gh errors (no release) or answers a tag that is not v*."""
-        for tag in ("", "release-1"):
-            with self.subTest(tag=tag):
-                result = self.previous("guard", tag=tag)
+        """No release at all, or none carrying this extension's tarballs."""
+        for releases, latest in (([], ""), ([release("release-1")], "release-1")):
+            with self.subTest(latest=latest):
+                self.forge(releases, latest)
+                self.graph("demo_ext--1.0.0--1.1.0.sql")
+                result = self.previous("guard")
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual(
                     "::notice::no previous release; first publish needs no"
@@ -274,8 +337,9 @@ class ControlFileRefusal(PreviousRelease):
                 )
 
     def test_a_rerun(self) -> None:
-        """The newest release IS this version: nothing to upgrade from."""
-        result = self.previous("guard", tag="v1.2.0")
+        """A release already carries THIS version: nothing to upgrade from."""
+        self.forge([release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")])
+        result = self.previous("guard")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
             "::notice::re-run of 1.2.0; upgrade path not applicable\n", result.stdout
@@ -283,52 +347,60 @@ class ControlFileRefusal(PreviousRelease):
         self.assertEqual(1, len(self.gh_calls()))
 
     def test_the_extensions_first_publish(self) -> None:
-        """A previous release that shipped no tarball of this extension (#87)."""
-        result = self.previous("guard", tag="v1.1.0", shipped="0")
+        """A previous release that shipped no tarball of this extension (#87).
+
+        One meaning of first publish now (#1592): no version in the graph
+        is installable. It used to be said per tag, naming GitHub's latest
+        release, which is no longer what anything asks.
+        """
+        self.forge([release("v1.1.0", "demo-cli.tar.gz")], "v1.1.0")
+        self.graph("demo_ext--1.0.0--1.1.0.sql")
+        result = self.previous("guard")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
-            "::notice::v1.1.0 shipped no demo_ext tarballs; first publish of this"
-            " extension, no upgrade path needed\n",
+            "::notice::no previous release; first publish needs no upgrade path\n",
             result.stdout,
         )
         self.assertEqual(
-            "release view v1.1.0 --repo acme/demo --json assets --jq"
-            ' [.assets[].name | select(startswith("demo_ext-1.1.0-pg"))] | length',
-            self.gh_calls()[1],
+            "api repos/acme/demo/releases --paginate --jq"
+            " .[] | select(.draft | not) | {tag: .tag_name, asset: .assets[]?.name}"
+            ' | "\\(.tag)\\t\\(.asset)"',
+            self.gh_calls()[0],
         )
 
     def test_a_missing_upgrade_path_is_refused(self) -> None:
         """Shipped before, no sql/<ext>--prev--new.sql: stranded, refused."""
-        result = self.previous("guard", tag="v1.1.0", shipped="10")
+        self.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
+        self.graph("demo_ext--1.0.0--1.1.0.sql")
+        result = self.previous("guard")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
             "::error::no upgrade path crates/demo-ext/sql/demo_ext--1.1.0--1.2.0.sql"
-            " from published 1.1.0 — existing installations would be stranded\n",
+            " from published 1.1.0 (v1.1.0) — existing installations would be"
+            " stranded\n",
             result.stdout,
         )
 
     def test_a_present_upgrade_path_passes(self) -> None:
         """The derived script is there: the release may proceed."""
-        upgrade = (
-            self.root / "crates" / "demo-ext" / "sql" / "demo_ext--1.1.0--1.2.0.sql"
-        )
-        upgrade.write_text("SELECT 1;\n")
-        result = self.previous("guard", tag="v1.1.0", shipped="10")
+        self.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
+        self.graph("demo_ext--1.0.0--1.1.0.sql", "demo_ext--1.1.0--1.2.0.sql")
+        result = self.previous("guard")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
             "::notice::upgrade path 1.1.0 -> 1.2.0 present\n", result.stdout
         )
 
-    def test_a_failed_asset_read_is_red(self) -> None:
-        """Gh failing on the assets is a red with gh's own words, never a pass."""
-        result = self.previous("guard", tag="v1.1.0")
+    def test_a_failed_listing_read_is_red(self) -> None:
+        """Gh failing on the listing is a red with gh's own words, never a pass."""
+        result = self.previous("guard")
         self.assertEqual(1, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertEqual("HTTP 502\n", result.stderr)
 
 
 class PreviousTarball(PreviousRelease):
-    """`fetch`: the previous release's tarball of this cell, or a skip."""
+    """`fetch`: the predecessor's tarball of this cell, or a skip."""
 
     CELL = ("--pg", "18", "--arch", "arm64")
 
@@ -348,10 +420,13 @@ class PreviousTarball(PreviousRelease):
         return self.previous("fetch", *self.CELL, *dest, **stubs)
 
     def test_no_previous_release_or_a_rerun_skips(self) -> None:
-        """No tag, a tag not v*, or this version: nothing printed, said why."""
-        for tag in ("", "release-1", "v1.2.0"):
-            with self.subTest(tag=tag):
-                result = self.fetch(tag=tag)
+        """No release, none of this extension, or this version: said why."""
+        rerun = release("v1.2.0", "demo_ext-1.2.0-pg18-linux-arm64.tar.gz")
+        for releases in ([], [release("release-1")], [rerun]):
+            with self.subTest(releases=releases):
+                self.forge(releases)
+                self.graph("demo_ext--1.0.0--1.1.0.sql")
+                result = self.fetch()
                 self.assertEqual(0, result.returncode)
                 self.assertEqual("", result.stdout)
                 self.assertEqual(
@@ -360,8 +435,10 @@ class PreviousTarball(PreviousRelease):
                 )
 
     def test_no_tarball_for_this_cell_skips(self) -> None:
-        """The previous release shipped no tarball of this pg and arch."""
-        result = self.fetch(tag="v1.1.0")
+        """The predecessor shipped no tarball of this pg and arch."""
+        self.forge([release("v1.1.0", "demo_ext-1.1.0-pg17-linux-arm64.tar.gz")])
+        self.graph("demo_ext--1.0.0--1.1.0.sql")
+        result = self.fetch()
         self.assertEqual(0, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertEqual(
@@ -375,8 +452,13 @@ class PreviousTarball(PreviousRelease):
             self.gh_calls()[1],
         )
 
-    def test_the_tarball_is_extracted_and_the_version_printed(self) -> None:
-        """The cell's tarball lands under DEST, and stdout is the version."""
+    def tarball(self) -> Path:
+        """Pack a one-file pkgroot archive beside the crate.
+
+        Returns:
+            The archive.
+
+        """
         payload = self.root / "pkgroot" / "usr" / "lib" / "demo_ext.so"
         payload.parent.mkdir(parents=True)
         payload.write_bytes(b"\x7fELF")
@@ -384,7 +466,13 @@ class PreviousTarball(PreviousRelease):
         with tarfile.open(tarball, "w:gz") as tar:
             tar.add(self.root / "pkgroot", arcname="pkgroot")
         shutil.rmtree(self.root / "pkgroot")
-        result = self.fetch(tag="v1.1.0", tarball=str(tarball))
+        return tarball
+
+    def test_the_tarball_is_extracted_and_the_version_printed(self) -> None:
+        """The cell's tarball lands under DEST, and stdout is the version."""
+        self.forge([release("v1.1.0", DEMO_CELL)])
+        self.graph("demo_ext--1.0.0--1.1.0.sql")
+        result = self.fetch(tarball=str(self.tarball()))
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("1.1.0\n", result.stdout)
         extracted = self.root / "prevroot" / "pkgroot" / "usr" / "lib" / "demo_ext.so"
@@ -392,11 +480,228 @@ class PreviousTarball(PreviousRelease):
 
     def test_a_corrupt_tarball_is_red(self) -> None:
         """Tar failing is tar's own red, and no version is printed."""
+        self.forge([release("v1.1.0", DEMO_CELL)])
+        self.graph("demo_ext--1.0.0--1.1.0.sql")
         tarball = self.root / "asset.tar.gz"
         tarball.write_bytes(b"not a tarball")
-        result = self.fetch(tag="v1.1.0", tarball=str(tarball))
+        result = self.fetch(tarball=str(tarball))
         self.assertNotEqual(0, result.returncode)
         self.assertEqual("", result.stdout)
+
+
+# --------------------------------------------------------------------
+# The one predecessor (#1592), on edtf's real history: its release
+# listing captured 2026-08-21 after v1.3.0 burned
+# (testdata/edtf-releases.json) and 2026-11-19 after v1.3.5 published
+# (testdata/edtf-releases-v1.3.5.json), and its extension's `sql/`
+# directory at three tags (testdata/edtf-sql-<tag>.txt, the names under
+# crates/edtf-postgres/sql/, read from the tag's git tree). v1.2.3 is the
+# tree the canon's first edtf release started from: every published
+# extension version sits on an `edtf-postgres-v*` release, and `v1.2.3`
+# is a tag with no release object. Only GitHub's "latest" is authored
+# (STUB_LATEST), because a listing does not carry it.
+# --------------------------------------------------------------------
+
+
+class OnePredecessor(PreviousRelease):
+    """The function and the two build sites, from edtf's captures."""
+
+    CRATE = "crates/edtf-postgres"
+
+    def edtf(self, listing: str, sql_at: str, latest: str, *extra: str) -> None:
+        """Serve a captured listing over a captured `sql/` directory."""
+        self.env["STUB_LISTING"] = str(TESTDATA / listing)
+        self.env["STUB_LATEST"] = latest
+        names = (TESTDATA / f"edtf-sql-{sql_at}.txt").read_text().split()
+        self.graph(*names, *extra)
+
+    def predecessor(self, version: str) -> subprocess.CompletedProcess[str]:
+        """Ask the helper for edtf_postgres's predecessor of `version`.
+
+        Returns:
+            The completed process.
+
+        """
+        argv = [str(PREVIOUS), "predecessor", "--repo", "acme/demo"]
+        control = f"{self.CRATE}/edtf_postgres.control"
+        argv += ["--version", version, "--control", control]
+        return run(argv, self.env, cwd=self.root)
+
+    def test_an_imported_tag_scheme_yields_the_published_predecessor(self) -> None:
+        """At import, 1.2.3 sits on `edtf-postgres-v1.2.3` (main: none)."""
+        self.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
+        result = self.predecessor("1.3.0")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("1.2.3\tedtf-postgres-v1.2.3\n", result.stdout)
+
+    def test_a_burned_head_yields_the_next_installable_version(self) -> None:
+        """At v1.3.1 the graph's next head, 1.3.0, burned: 1.2.3 it is."""
+        self.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
+        result = self.predecessor("1.3.1")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("1.2.3\tedtf-postgres-v1.2.3\n", result.stdout)
+
+    def test_an_older_release_marked_latest_yields_the_newest(self) -> None:
+        """A maintenance release v1.3.4 published last: 1.3.5 is still newest."""
+        self.edtf("edtf-releases-v1.3.5.json", "v1.3.5", "v1.3.4")
+        result = self.predecessor("1.3.6")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("1.3.5\tv1.3.5\n", result.stdout)
+
+    def test_an_empty_graph_yields_nothing(self) -> None:
+        """No upgrade script at all: first publish, whatever is published."""
+        self.env["STUB_LISTING"] = str(TESTDATA / "edtf-releases-v1.3.5.json")
+        self.graph("README.md")
+        result = self.predecessor("1.3.6")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("", result.stdout)
+
+    def test_the_guard_refuses_from_the_imported_predecessor(self) -> None:
+        """No 1.2.3--1.3.0 path: refused, naming the release that carries 1.2.3."""
+        self.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
+        result = self.previous("guard", version="1.3.0")
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertEqual(
+            "::error::no upgrade path"
+            " crates/edtf-postgres/sql/edtf_postgres--1.2.3--1.3.0.sql from"
+            " published 1.2.3 (edtf-postgres-v1.2.3) — existing installations"
+            " would be stranded\n",
+            result.stdout,
+        )
+
+    def test_the_guard_checks_past_a_burned_head(self) -> None:
+        """At v1.3.1 the path is from 1.2.3, and it is there."""
+        self.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
+        result = self.previous("guard", version="1.3.1")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            "::notice::upgrade path 1.2.3 -> 1.3.1 present\n", result.stdout
+        )
+
+    def test_the_guard_checks_from_the_newest_not_the_latest(self) -> None:
+        """Latest is v1.3.4; the path owed is from 1.3.5, and it is there."""
+        self.edtf(
+            "edtf-releases-v1.3.5.json",
+            "v1.3.5",
+            "v1.3.4",
+            "edtf_postgres--1.3.5--1.3.6.sql",
+        )
+        result = self.previous("guard", version="1.3.6")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            "::notice::upgrade path 1.3.5 -> 1.3.6 present\n", result.stdout
+        )
+
+    def test_the_fetch_downloads_the_imported_predecessor(self) -> None:
+        """The upgrade execution starts from 1.2.3, off its own release."""
+        self.edtf("edtf-releases.json", "v1.3.1", "edtf-postgres-v1.2.3")
+        tarball = self.root / "asset.tar.gz"
+        with tarfile.open(tarball, "w:gz") as tar:
+            tar.add(self.sql, arcname="pkgroot")
+        dest = ("--tarball", str(self.root / "prev.tar.gz"))
+        dest += ("--dest", str(self.root / "prevroot"))
+        cell = ("--pg", "18", "--arch", "arm64", *dest)
+        result = self.previous("fetch", *cell, version="1.3.1", tarball=str(tarball))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("1.2.3\n", result.stdout)
+        self.assertEqual(
+            "release download edtf-postgres-v1.2.3 --repo acme/demo --pattern"
+            " edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz --output"
+            f" {self.root}/prev.tar.gz",
+            self.gh_calls()[1],
+        )
+
+
+class OlderLine(PreviousRelease):
+    """The predecessor is LOWER than the version under release (#1592).
+
+    1.2.4 and 1.3.0 are both published. A release on the older line,
+    1.2.5, upgrades from 1.2.4: a path from 1.3.0 would be a downgrade.
+    A release on the newer line, 1.3.1, upgrades from 1.3.0.
+    """
+
+    def setUp(self) -> None:
+        """Publish 1.2.4 and 1.3.0, each on its own `v` release."""
+        super().setUp()
+        self.forge(
+            [
+                release("v1.3.0", "demo_ext-1.3.0-pg18-linux-arm64.tar.gz"),
+                release("v1.2.4", "demo_ext-1.2.4-pg18-linux-arm64.tar.gz"),
+            ],
+            "v1.3.0",
+        )
+        self.graph("demo_ext--1.2.3--1.2.4.sql", "demo_ext--1.2.4--1.3.0.sql")
+
+    def predecessor(self, version: str) -> subprocess.CompletedProcess[str]:
+        """Ask the helper for demo_ext's predecessor of `version`.
+
+        Returns:
+            The completed process.
+
+        """
+        argv = [str(PREVIOUS), "predecessor", "--repo", "acme/demo"]
+        control = f"{self.CRATE}/demo_ext.control"
+        argv += ["--version", version, "--control", control]
+        return run(argv, self.env, cwd=self.root)
+
+    def test_each_line_yields_its_own_predecessor(self) -> None:
+        """1.2.5 comes from 1.2.4 on v1.2.4; 1.3.1 from 1.3.0 on v1.3.0."""
+        for version, want in (
+            ("1.2.5", "1.2.4\tv1.2.4\n"),
+            ("1.3.1", "1.3.0\tv1.3.0\n"),
+        ):
+            with self.subTest(version=version):
+                result = self.predecessor(version)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(want, result.stdout)
+
+    def test_the_guard_owes_no_downgrade_path(self) -> None:
+        """Releasing 1.2.5 with 1.2.4--1.2.5 present passes; 1.3.0 is not asked."""
+        self.graph("demo_ext--1.2.4--1.2.5.sql")
+        result = self.previous("guard", version="1.2.5")
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertEqual(
+            "::notice::upgrade path 1.2.4 -> 1.2.5 present\n", result.stdout
+        )
+
+
+class NoSiteAsksForTheLatestRelease(unittest.TestCase):
+    """No tracked file under release/ finds a predecessor as "latest" (#1592).
+
+    `gh release view` with no tag answers GitHub's latest release, which
+    is the forge's opinion of newest and not what an installation can be
+    sitting on. The predecessor is previous-release.py's to answer.
+    """
+
+    # The one other caller, and why it is not a predecessor search:
+    # it proves the latest release itself, and asks nothing before it.
+    NOT_A_PREDECESSOR = ("release/repro-resolve.py",)
+    UNTAGGED = re.compile(r"""\brelease["',\s]*view["',]*\s+["']?--""")
+
+    def test_no_untagged_release_view(self) -> None:
+        """Every `gh release view` in release/ names the release it reads."""
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        tracked = subprocess.run(
+            [shutil.which("git") or "git", "ls-files", "release"],
+            cwd=CANON,
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        found = []
+        for path in tracked:
+            name = Path(path).name
+            if "/testdata/" in path or name.startswith(("test_", "prop_")):
+                continue
+            if path in self.NOT_A_PREDECESSOR:
+                continue
+            text = (CANON / path).read_text(encoding="utf-8", errors="replace")
+            found += [
+                f"{path}:{text.count(chr(10), 0, hit.start()) + 1}"
+                for hit in self.UNTAGGED.finditer(text)
+            ]
+        self.assertEqual([], found)
 
 
 # --------------------------------------------------------------------
