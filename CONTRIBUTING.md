@@ -22,7 +22,24 @@ executable form:
 1. Copy nothing, configure nothing: once per clone, run
    `lefthook install && lefthook run post-checkout`, which links the clone
    to the toolbelt its gate pins, then `mise trust && mise install`, and
-   the full toolchain arrives pinned.
+   the full toolchain arrives pinned. The hooks keep the link current on
+   every checkout, merge and rebase after that.
+
+   A machine set up before each clone carried its own link has a belt of
+   its own, which loads beside the pinned one: any task only it defines
+   runs locally and not in CI, and `lint:belt-current` says so on every
+   run. Once every clone is linked, remove it, once per machine:
+
+   ```sh
+   # once per clone (the hooks also do it on the next checkout, merge or rebase)
+   lefthook install && lefthook run post-checkout
+   # then, once per machine
+   rm ~/.config/mise/conf.d/toolbelt.toml ~/.config/mise/conf.d/mise.lock ~/.config/mise/mise.lock
+   ```
+
+   A clone that was never linked has no belt after the second command
+   (`mise run ci` reports no such task); the first command, run in that
+   clone, is its remedy.
 2. `mise run ci` locally is **exactly** the check CI runs. If it passes on
    your machine, it passes in CI.
 3. **A change that adds or changes behaviour adds the check that holds

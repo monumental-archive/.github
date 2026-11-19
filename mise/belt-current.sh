@@ -96,6 +96,24 @@ elif git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
   fi
 fi
 
+# 3. A machine belt beside the link (#1686, third amendment). Until the
+# owner removes the machine's own conf.d belt, a linked clone loads both:
+# the pinned belt wins every name they share, but a task only the
+# machine's checkout defines is still collected by `ci` here and never
+# in CI. Removing it is a write to the owner's own configuration that no
+# session may make, so this is a note on every run, never a red.
+if [[ -z ${carrier} && -n ${sha} && -L .config/mise/conf.d/belt.toml ]]; then
+  conf="${XDG_CONFIG_HOME:-${HOME}/.config}/mise"
+  for f in "${conf}"/conf.d/*.toml; do
+    t=$(readlink "${f}" 2> /dev/null || echo "${f}")
+    [[ -f "$(dirname "${t}")/clippy.toml" ]] || continue
+    echo "belt-current: note — the machine's own belt ($(dirname "$(dirname "${t}")")) loads beside the pinned one;" \
+      "a task only it defines runs here and not in CI. Owner step, once per machine:" \
+      "rm ${f} ${conf}/conf.d/mise.lock ${conf}/mise.lock"
+    break
+  done
+fi
+
 [[ ${status} -eq 0 ]] || exit 1
 if [[ -n ${carrier} ]]; then
   echo "lint:belt-current: mise ${have}; the belt arrived by MISE_GLOBAL_CONFIG_FILE (${carrier}), named on purpose"
