@@ -151,7 +151,7 @@ class AttachAndPublish(unittest.TestCase):
         return done, [line.split("\0")[:-1] for line in lines]
 
     def test_identical_published_release_converges(self) -> None:
-        """#316: a resume into a published release passes through."""
+        """#316, #586: a resume converges on the build subjects alone."""
         resigned = REBUILT.replace("cccc", "dddd")  # a fresh signature
         done, calls = self.publish("false", published=resigned, manifest=TYPED)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)

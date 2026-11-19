@@ -383,5 +383,20 @@ class LicenceShield(unittest.TestCase):
         )
 
 
+class CoverageShield(unittest.TestCase):
+    """The coverage shield is derived from the floor, never declared (#362)."""
+
+    def test_a_declared_state_without_a_floor_renders_no_shield(self) -> None:
+        """`coverage exemplary` once wore a shield over no data at all.
+
+        The shield renders iff `.coverage-floor` exists, so a state line
+        saying otherwise renders nothing and is not refused.
+        """
+        done, block = render({".badge-states": "coverage exemplary\n"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, "")
+        self.assertNotIn("codecov.io", block)
+
+
 if __name__ == "__main__":
     unittest.main()
