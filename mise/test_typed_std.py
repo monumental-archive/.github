@@ -177,7 +177,7 @@ class Opener(urllib.request.OpenerDirector):
     def open(
         self,
         fullurl: str | urllib.request.Request,
-        data: bytes | None = None,
+        data: object = None,
         timeout: float | None = None,
     ) -> object:
         """Answer the canned value.
@@ -198,24 +198,32 @@ class Urlopen(unittest.TestCase):
     def test_urllib_s_answer_is_returned_and_read(self) -> None:
         """No opener: urllib's own urlopen answers, with the timeout."""
         answer = Answer(200, b"body", "text/plain")
+        timeouts: list[float] = []
+
+        def opened(request: urllib.request.Request, *, timeout: float) -> Answer:
+            del request
+            timeouts.append(timeout)
+            return answer
+
+        # typed_std's urllib.request is this module: the one urlopen it calls.
         with (
-            mock.patch.object(
-                typed_std.urllib.request, "urlopen", return_value=answer
-            ) as opened,
+            mock.patch.object(urllib.request, "urlopen", opened),
             typed_std.urlopen(urllib.request.Request(URL), timeout=7) as got,
         ):
             self.assertEqual(
                 (200, b"body", "text/plain"),
                 (got.status, got.read(), got.getheader("Content-Type")),
             )
-        self.assertEqual(7, opened.call_args.kwargs["timeout"])
+        want: list[float] = [7]
+        self.assertEqual(want, timeouts)
 
     def test_an_opener_s_answer_is_used(self) -> None:
         """An opener handed in answers instead of urllib's default."""
         opener = Opener(Answer(201, b"made", "application/json"))
         got = typed_std.urlopen(urllib.request.Request(URL), timeout=3, opener=opener)
         self.assertEqual((201, b"made"), (got.status, got.read()))
-        self.assertEqual([(URL, 3)], opener.asked)
+        want: list[tuple[str, float | None]] = [(URL, 3)]
+        self.assertEqual(want, opener.asked)
 
     def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
         """Refused by name, the URL and what came back named."""
@@ -317,7 +325,8 @@ class TheLaw(unittest.TestCase):
             if path != HOME
             for line in opens((CANON / path).read_text(encoding="utf-8"))
         ]
-        self.assertEqual([], breaches)
+        none: list[str] = []
+        self.assertEqual(none, breaches)
 
     def test_each_spelling_is_an_open(self) -> None:
         """Planted: every way a file can open a URL itself is found."""
@@ -347,7 +356,8 @@ class TheLaw(unittest.TestCase):
             "typed_std.urlopen(r, timeout=1, opener=o)\n"
             "Path('x').open()\nopen('x')\n"
         )
-        self.assertEqual([], opens(text))
+        none: list[int] = []
+        self.assertEqual(none, opens(text))
 
 
 if __name__ == "__main__":
