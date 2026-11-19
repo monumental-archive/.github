@@ -24,16 +24,18 @@ with every finding on stderr, 0 with nothing to say.
 """
 
 import pathlib
+import re
 import sys
-from typing import TextIO
 
 from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
+from typed_std import group, stdin_text
 
 PLACEHOLDER = "<SPDX expression>"
 
 # Operators, matched in either case as SPDX 2.3 allows; parentheses and
 # whitespace separate the rest. What remains is an identifier.
 OPERATORS = frozenset({"AND", "OR", "WITH"})
+TOKEN = re.compile(r"[^\s()]+")
 
 
 def identifiers(expression: str) -> list[str]:
@@ -47,7 +49,8 @@ def identifiers(expression: str) -> list[str]:
 
     """
     found: list[str] = []
-    for token in expression.replace("(", " ").replace(")", " ").split():
+    for found_token in TOKEN.finditer(expression):
+        token = group(found_token) or ""
         if token.upper() in OPERATORS:
             continue
         name = token.removesuffix("+")
@@ -139,8 +142,7 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: git ls-files -z | licence_texts.py", file=sys.stderr)
         return 2
-    stdin: TextIO = sys.stdin
-    tracked = [path for path in stdin.read().split("\0") if path]
+    tracked = [path for path in stdin_text().split("\0") if path]
     out = findings(pathlib.Path.cwd(), tracked)
     for message in out:
         print(f"lint:licence: {message}", file=sys.stderr)

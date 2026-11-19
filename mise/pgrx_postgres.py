@@ -39,9 +39,9 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
 
 from decoded import UndecodableError, as_array, as_object, load_json
+from typed_std import stdin_text
 
 NAME = "pgrx-postgres"
 
@@ -214,9 +214,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--majors", required=True)
     args = parser.parse_args(argv, namespace=Args())
 
-    stdin: TextIO = sys.stdin
     try:
-        document = load_json(stdin.read())
+        document = load_json(stdin_text())
     except UndecodableError as bad:
         print(f"{NAME}: `mise ls {PACKAGE}` did not give JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)

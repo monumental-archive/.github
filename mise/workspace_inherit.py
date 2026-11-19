@@ -32,7 +32,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, TextIO
+from typing import NamedTuple
 
 from decoded import (
     UndecodableError,
@@ -43,6 +43,7 @@ from decoded import (
     load_json,
     load_toml,
 )
+from typed_std import stdin_text
 
 # The [workspace.package] keys cargo reports per package, and the field
 # each is reported under.
@@ -291,9 +292,8 @@ def main() -> int:
         0 when every declared key reaches a member, 1 when one does not.
 
     """
-    stdin: TextIO = sys.stdin
     try:
-        root, members = metadata(load_json(stdin.read()))
+        root, members = metadata(load_json(stdin_text()))
     except UndecodableError as exc:
         sys.exit(f"lint:workspace-inherit: cargo metadata is unreadable ({exc})")
 

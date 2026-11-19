@@ -29,6 +29,7 @@ import sys
 import tempfile
 
 from decoded import UndecodableError, as_array, as_object, load_toml
+from typed_std import group
 
 # argv[0] plus the config path.
 EXPECTED_ARGC = 2
@@ -85,7 +86,7 @@ def variant_without(
     for index, line in enumerate(lines):
         opened = ARRAY_OPEN.match(line)
         if opened:
-            inside = opened.group(1)
+            inside = group(opened, 1)
             continue
         if inside is not None and ARRAY_CLOSE.match(line):
             inside = None

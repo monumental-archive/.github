@@ -44,9 +44,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import TextIO
 
 from decoded import UndecodableError, is_object, load_json
+from typed_std import stdin_text
 
 NAME = "tsconfig-dials"
 
@@ -143,9 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{NAME}: {args.flags} names no dial at all", file=sys.stderr)
         return 1
 
-    stdin: TextIO = sys.stdin
     try:
-        resolved = load_json(stdin.read())
+        resolved = load_json(stdin_text())
     except UndecodableError as bad:
         print(f"{NAME}: {args.name}: tsc did not resolve to JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)

@@ -27,9 +27,9 @@ Prints nothing when every entry agrees.
 
 import pathlib
 import sys
-from typing import TextIO
 
 from decoded import UndecodableError, as_object, is_object, load_toml
+from typed_std import stdin_text
 
 # Architecture tokens as they appear in release asset names, longest
 # first so `x86_64` is decided before `x86` and `aarch64` before `arm`.
@@ -234,8 +234,7 @@ def main() -> int:
         caller decides, once it has asked the release what it publishes.
 
     """
-    stdin: TextIO = sys.stdin
-    for raw in stdin:
+    for raw in stdin_text().splitlines():
         name = raw.strip()
         if not name:
             continue

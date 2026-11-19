@@ -39,9 +39,10 @@ import copy
 import json
 import sys
 from pathlib import Path
-from typing import NamedTuple, TextIO
+from typing import NamedTuple
 
 from decoded import UndecodableError, as_object, is_object, load_json
+from typed_std import stdin_text
 
 NAME = "biome-config"
 
@@ -363,8 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--declaration", type=Path, default=Path("biome.json"))
     args = parser.parse_args(argv, namespace=Args())
-    stdin: TextIO = sys.stdin
-    manifests = [Path(line) for line in stdin.read().split() if line]
+    manifests = [Path(line) for line in stdin_text().split() if line]
     return run(args, manifests)
 
 

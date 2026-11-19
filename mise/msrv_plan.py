@@ -46,7 +46,6 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
 
 from decoded import (
     UndecodableError,
@@ -56,6 +55,7 @@ from decoded import (
     is_strings,
     load_json,
 )
+from typed_std import stdin_text
 
 NAME = "msrv-plan"
 
@@ -317,9 +317,8 @@ def read_inputs(listing_file: Path) -> tuple[list[Package], list[Toolchain]] | N
         having said on stderr which document was refused and why.
 
     """
-    stdin: TextIO = sys.stdin
     try:
-        metadata = load_json(stdin.read())
+        metadata = load_json(stdin_text())
         listing = load_json(listing_file.read_text(encoding="utf-8"))
     except UndecodableError as bad:
         print(

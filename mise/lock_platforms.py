@@ -34,9 +34,9 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import TextIO
 
 from decoded import UndecodableError, as_object, is_array, is_object, load_toml
+from typed_std import stdin_text
 
 NAME = "lint:lock-platforms"
 
@@ -405,8 +405,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--config", required=True, type=pathlib.Path)
     parser.add_argument("--lock", required=True, type=pathlib.Path)
     args = parser.parse_args(argv, namespace=Args())
-    stdin: TextIO = sys.stdin
-    workflows = [pathlib.Path(line) for line in stdin.read().splitlines() if line]
+    workflows = [pathlib.Path(line) for line in stdin_text().splitlines() if line]
     try:
         platforms, stubs = declared(workflows, canon_defaults(args.defaults))
     except UnreadableError as err:
