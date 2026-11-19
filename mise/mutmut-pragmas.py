@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             for line, text in pragmas(Path(name)):
                 print(f"{name}\t{line}\t{text}")
-        except (OSError, SyntaxError, tokenize.TokenError) as bad:
+        except (OSError, SyntaxError, UnicodeDecodeError, tokenize.TokenError) as bad:
             print(f"{NAME}: {name}: could not tokenize: {bad}", file=sys.stderr)
             status = 1
     return status
