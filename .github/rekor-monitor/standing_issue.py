@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import json
 import os
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - gh is the forge client this workflow uses
@@ -51,6 +50,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import decoded
 import workflow_command
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"
@@ -64,6 +64,24 @@ RUNS_BEHIND = re.compile(r"^- Runs behind since it opened: (\d+)$", re.MULTILINE
 
 class StandingIssueError(Exception):
     """A read or write that could not complete; the run must go red."""
+
+
+class Args(argparse.Namespace):
+    """The command line, typed."""
+
+    start: Path
+    start_kept: str
+    checkpoint: Path
+    legs: str
+    run_url: str
+
+
+@dataclass(frozen=True)
+class Issue:
+    """An open standing issue, as the forge lists it."""
+
+    number: int
+    body: str
 
 
 @dataclass(frozen=True)
@@ -111,17 +129,33 @@ def read_checkpoint(path: Path) -> Checkpoint:
     """
     if not path.is_file() or path.stat().st_size == 0:
         return Checkpoint(None, None, None, "no checkpoint file")
+    # Not strict JSON (a `next` of Infinity, JSON nested past the parser's
+    # depth), a field that is not an integer, or a timestamp past the
+    # platform's range (overflow, OS and value errors): each was a
+    # traceback until prop_standing_issue.py (#1557), and each is one
+    # refusal. decoded.UndecodableError is a ValueError.
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        head = doc["treeHead"]
-        nxt, size = int(doc["next"]), int(head["treeSize"])
-        when = dt.datetime.fromtimestamp(int(head["timestamp"]) / 1000, dt.UTC)
-    # Overflow and OS errors: a `next` of Infinity, or a timestamp past the
-    # platform's range; recursion: JSON nested past the parser's depth.
-    # Each was a traceback until prop_standing_issue.py (#1557).
-    except ValueError, TypeError, KeyError, OverflowError, OSError, RecursionError:
+        return decode_checkpoint(path.read_bytes())
+    except ValueError, OverflowError, OSError:
         return Checkpoint(None, None, None, "the checkpoint file could not be read")
-    return Checkpoint(nxt, size, when, None)
+
+
+def decode_checkpoint(raw: bytes) -> Checkpoint:
+    """Decode a checkpoint's next index, tree size and head time.
+
+    Not strict JSON, or a field that is not an integer, is refused by
+    decoded's readers; a time past the platform's range by datetime.
+
+    Returns:
+        The checkpoint, read.
+
+    """
+    doc = decoded.as_object(decoded.load_json(raw), "the checkpoint")
+    head = decoded.as_object(doc.get("treeHead"), "treeHead")
+    nxt = decoded.as_int(doc.get("next"), "next")
+    size = decoded.as_int(head.get("treeSize"), "treeHead.treeSize")
+    millis = decoded.as_int(head.get("timestamp"), "treeHead.timestamp")
+    return Checkpoint(nxt, size, dt.datetime.fromtimestamp(millis / 1000, dt.UTC), None)
 
 
 def judge(start: Checkpoint, kept: str, end: Checkpoint) -> Outcome:
@@ -189,14 +223,15 @@ def gh(*args: str) -> str:
     return proc.stdout
 
 
-def open_standing(repo: str) -> list[dict]:
+def open_standing(repo: str) -> list[Issue]:
     """List the open issues titled exactly TITLE.
 
     Returns:
         Each open issue whose title is exactly the standing title.
 
     Raises:
-        StandingIssueError: the listing could not be read.
+        StandingIssueError: the listing could not be read, or an issue in
+            it has no number or a body that is not text.
 
     """
     out = gh(
@@ -204,11 +239,34 @@ def open_standing(repo: str) -> list[dict]:
         "--limit", "1000", "--json", "number,title,body",
     )  # fmt: skip
     try:
-        issues = json.loads(out)
-    except json.JSONDecodeError as err:
+        answer = decoded.load_json(out)
+    except decoded.UndecodableError as err:
         msg = f"gh issue list answered something that is not JSON: {err}"
         raise StandingIssueError(msg) from err
-    return [i for i in issues if i.get("title") == TITLE]
+    try:
+        return standing_issues(answer)
+    except decoded.UndecodableError as err:
+        msg = f"gh issue list answered something that is not a list of issues: {err}"
+        raise StandingIssueError(msg) from err
+
+
+def standing_issues(answer: object) -> list[Issue]:
+    """Decode the listing's issues titled exactly TITLE.
+
+    Returns:
+        Each one's number and body; a body the forge left empty is "".
+
+    """
+    found: list[Issue] = []
+    for at, item in enumerate(decoded.as_array(answer, "the answer")):
+        issue = decoded.as_object(item, f"issue {at}")
+        if issue.get("title") != TITLE:
+            continue
+        number = decoded.as_int(issue.get("number"), f"issue {at}: number")
+        text = issue.get("body")
+        text = "" if text is None else decoded.as_str(text, f"issue {at}: body")
+        found.append(Issue(number, text))
+    return found
 
 
 def count(n: int | None, missing: str | None) -> str:
@@ -280,13 +338,13 @@ def behind(repo: str, end: Checkpoint, run: Run) -> str:
         gh("issue", "create", "--repo", repo, "--title", TITLE, "--body", text)
         return "opened the standing issue"
     issue = found[0]
-    previous = issue.get("body") or ""
+    previous = issue.body
     since_match = BEHIND_SINCE.search(previous)
     since = since_match.group(1) if since_match else "unknown: not in the previous body"
     count_match = RUNS_BEHIND.search(previous)
     runs = int(count_match.group(1)) + 1 if count_match else 1
     text = body(end, run, since, runs)
-    number = str(issue["number"])
+    number = str(issue.number)
     gh("issue", "edit", number, "--repo", repo, "--body", text)
     return f"updated the standing issue #{number} ({runs} runs behind)"
 
@@ -304,8 +362,8 @@ def caught_up(repo: str, end: Checkpoint, run_url: str) -> str:
     size = count(end.size, end.missing)
     comment = f"Caught up: {run_url} judged the log to its head, tree size {size}."
     for issue in found:
-        gh("issue", "close", str(issue["number"]), "--repo", repo, "--comment", comment)
-    return "closed " + ", ".join(f"#{i['number']}" for i in found)
+        gh("issue", "close", str(issue.number), "--repo", repo, "--comment", comment)
+    return "closed " + ", ".join(f"#{i.number}" for i in found)
 
 
 def keep(repo: str, standing: str | None, end: Checkpoint, run: Run) -> str:
@@ -335,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--legs", default="")
     parser.add_argument("--run-url", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
         print("standing-issue: GITHUB_REPOSITORY is not set", file=sys.stderr)

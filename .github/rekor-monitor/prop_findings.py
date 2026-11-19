@@ -72,7 +72,12 @@ def condition_lines(index: int, group: list, log: str) -> list[str]:
         The lines between the section's head and the blank line after it.
 
     """
-    text = findings.body(index, group, log, "https://example.invalid/run")
+    # body() takes decoded findings; decode each as read_finding does.
+    typed = [
+        findings.Finding(index, str(f.get("assertion", "")), str(f.get("detail", "")))
+        for f in group
+    ]
+    text = findings.body(index, typed, log, "https://example.invalid/run")
     lines = text.split("\n")
     head = lines.index(HEAD)
     return lines[head + 1 : lines.index("", head)]
@@ -133,9 +138,7 @@ class ReportReading(unittest.TestCase):
         self.assertEqual(sum(len(v) for v in grouped.values()), len(listed))
         for index, group in grouped.items():
             for finding in group:
-                subject = finding["subject"]
-                self.assertTrue(subject.startswith("CT index "))
-                self.assertEqual(int(subject.removeprefix("CT index ")), index)
+                self.assertEqual(finding.index, index)
 
     @given(st.binary(max_size=64))
     @example(DEEP)

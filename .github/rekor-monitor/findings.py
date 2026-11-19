@@ -29,12 +29,18 @@ is named here. Stdlib only, and `gh` on PATH.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import] - gh is the forge client this workflow uses
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+# The canon's one document loader, in mise/ (#1676). Appended, so this
+# file's own directory and the standard library come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import decoded
 
 TARGET = "assert signer-certificates"
 EXIT_ERROR = 2
@@ -44,6 +50,30 @@ PREFIX = "rekor-monitor: certificate at CT index"
 
 class FindingsError(Exception):
     """Nothing more can be filed; the run must go red and save nothing."""
+
+
+class Args(argparse.Namespace):
+    """The command line, typed."""
+
+    report: Path
+    run_url: str
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One condition one certificate failed, as stele recorded it."""
+
+    index: int
+    assertion: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class Report:
+    """What this tool reads of stele's report: the log and its findings."""
+
+    log: str
+    findings: tuple[Finding, ...]
 
 
 def title(index: int, conditions: list[str]) -> str:
@@ -68,14 +98,16 @@ def filed_title(index: int) -> re.Pattern[str]:
     return re.compile(rf"^{re.escape(PREFIX)} {index} did not reconcile")
 
 
-def read_report(path: Path) -> dict:
-    """Read stele's report.
+def read_report(path: Path) -> Report:
+    """Read stele's report, every finding decoded where it is read.
 
     Returns:
-        The report document.
+        The report's log and findings.
 
     Raises:
-        FindingsError: no report, or not stele's signer-certificates one.
+        FindingsError: no report, not stele's signer-certificates one,
+            findings that are not a list of objects, or a finding whose
+            subject is not a CT index.
 
     """
     if not path.is_file() or path.stat().st_size == 0:
@@ -84,47 +116,65 @@ def read_report(path: Path) -> dict:
             " (its reason is in its own step)"
         )
         raise FindingsError(msg)
-    try:
-        report = json.loads(path.read_text(encoding="utf-8"))
     # Not UTF-8, past the parser's digit limit or its depth: each was a
     # traceback, exit 1, until prop_findings.py read bytes (#1557).
-    except (ValueError, RecursionError) as err:
+    try:
+        report = decoded.load_json(path.read_bytes())
+    except decoded.UndecodableError as err:
         msg = f"stele's report is not JSON: {err}"
         raise FindingsError(msg) from err
-    if not isinstance(report, dict) or report.get("target") != TARGET:
+    if not decoded.is_object(report) or report.get("target") != TARGET:
         msg = f"the report is not stele's {TARGET} report"
         raise FindingsError(msg)
-    return report
+    listed = report.get("findings")
+    if listed is None:
+        listed = []
+    if not decoded.is_array(listed):
+        msg = f"the report's findings are not a list: {listed!r}"
+        raise FindingsError(msg)
+    return Report(
+        log=str(report.get("subject", "")),
+        findings=tuple(read_finding(item) for item in listed),
+    )
 
 
-def by_certificate(report: dict) -> dict[int, list[dict]]:
+def read_finding(value: object) -> Finding:
+    """Decode one finding.
+
+    Returns:
+        The finding, its subject read as a CT index.
+
+    Raises:
+        FindingsError: it is not an object, or its subject is not a CT
+            index. Refused by name, never a traceback (#1332): a
+            traceback exits 1, and this tool's refusal is 2.
+
+    """
+    if not decoded.is_object(value):
+        msg = f"a finding is not an object: {value!r}"
+        raise FindingsError(msg)
+    subject = value.get("subject", "")
+    match = SUBJECT.match(subject) if isinstance(subject, str) else None
+    if not match:
+        msg = f"a finding's subject is not a CT index: {subject!r}"
+        raise FindingsError(msg)
+    return Finding(
+        index=int(match.group(1)),
+        assertion=str(value.get("assertion", "")),
+        detail=str(value.get("detail", "")),
+    )
+
+
+def by_certificate(report: Report) -> dict[int, list[Finding]]:
     """Group the report's findings by CT index.
 
     Returns:
         CT index to its findings, in report order.
 
-    Raises:
-        FindingsError: findings that are not a list of objects, or a
-            finding whose subject is not a CT index.
-
     """
-    grouped: dict[int, list[dict]] = {}
-    findings = report.get("findings") or []
-    if not isinstance(findings, list):
-        msg = f"the report's findings are not a list: {findings!r}"
-        raise FindingsError(msg)
-    for finding in findings:
-        # Refused by name, never a traceback (#1332): a traceback exits 1,
-        # and this tool's refusal is 2.
-        if not isinstance(finding, dict):
-            msg = f"a finding is not an object: {finding!r}"
-            raise FindingsError(msg)
-        subject = finding.get("subject", "")
-        match = SUBJECT.match(subject) if isinstance(subject, str) else None
-        if not match:
-            msg = f"a finding's subject is not a CT index: {subject!r}"
-            raise FindingsError(msg)
-        grouped.setdefault(int(match.group(1)), []).append(finding)
+    grouped: dict[int, list[Finding]] = {}
+    for finding in report.findings:
+        grouped.setdefault(finding.index, []).append(finding)
     return grouped
 
 
@@ -138,7 +188,7 @@ def one_line(text: str) -> str:
     return " ".join(text.splitlines())
 
 
-def reasons(findings: list[dict]) -> list[str]:
+def reasons(findings: list[Finding]) -> list[str]:
     """Write one line per failed condition, its findings' reasons joined.
 
     Returns:
@@ -148,15 +198,14 @@ def reasons(findings: list[dict]) -> list[str]:
     """
     grouped: dict[str, list[str]] = {}
     for f in findings:
-        condition = str(f.get("assertion", ""))
-        grouped.setdefault(condition, []).append(one_line(str(f.get("detail", ""))))
+        grouped.setdefault(f.assertion, []).append(one_line(f.detail))
     return [
         f"- **{one_line(condition)}**: {'; '.join(details)}"
         for condition, details in grouped.items()
     ]
 
 
-def body(index: int, findings: list[dict], log: str, run_url: str) -> str:
+def body(index: int, findings: list[Finding], log: str, run_url: str) -> str:
     """Write a certificate's issue body.
 
     Returns:
@@ -209,7 +258,8 @@ def already_filed(repo: str, index: int) -> int | None:
         Its number, or None when none was filed.
 
     Raises:
-        FindingsError: the search answered something that is not JSON.
+        FindingsError: the search answered something that is not JSON,
+            or not a list of issues each with a number and a title.
 
     """
     out = gh(
@@ -217,35 +267,42 @@ def already_filed(repo: str, index: int) -> int | None:
         "--search", f'"CT index {index}" in:title', "--json", "number,title",
     )  # fmt: skip
     try:
-        issues = json.loads(out)
-    except json.JSONDecodeError as err:
+        answer = decoded.load_json(out)
+    except decoded.UndecodableError as err:
         msg = f"gh issue list answered something that is not JSON: {err}"
         raise FindingsError(msg) from err
     pattern = filed_title(index)
-    for issue in issues:
-        if pattern.match(issue.get("title", "")):
-            return int(issue["number"])
+    try:
+        for at, item in enumerate(decoded.as_array(answer, "the answer")):
+            issue = decoded.as_object(item, f"issue {at}")
+            if pattern.match(decoded.as_str(issue.get("title"), f"issue {at}: title")):
+                return decoded.as_int(issue.get("number"), f"issue {at}: number")
+    except decoded.UndecodableError as err:
+        msg = f"gh issue list answered something that is not a list of issues: {err}"
+        raise FindingsError(msg) from err
     return None
 
 
-def file_all(repo: str, report: dict, run_url: str) -> list[str]:
+def file_all(repo: str, report: Report, run_url: str) -> list[str]:
     """File each certificate's issue that is not filed yet.
 
     Returns:
         One line per certificate, for the run's log.
 
     """
-    log = str(report.get("subject", ""))
-    done = []
+    done: list[str] = []
     for index, findings in sorted(by_certificate(report).items()):
         existing = already_filed(repo, index)
         if existing is not None:
             done.append(f"CT index {index}: already filed as #{existing}")
             continue
-        conditions = list(dict.fromkeys(str(f.get("assertion", "")) for f in findings))
+        conditions: list[str] = []
+        for f in findings:
+            if f.assertion not in conditions:
+                conditions.append(f.assertion)
         gh(
             "issue", "create", "--repo", repo, "--title", title(index, conditions),
-            "--body", body(index, findings, log, run_url),
+            "--body", body(index, findings, report.log, run_url),
         )  # fmt: skip
         done.append(f"CT index {index}: filed ({', '.join(conditions)})")
     return done
@@ -261,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--run-url", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
         print("findings: GITHUB_REPOSITORY is not set", file=sys.stderr)

@@ -79,8 +79,8 @@ def search(index: int) -> list[str]:
     ]  # fmt: skip
 
 
-class Findings(unittest.TestCase):
-    """One row per guard branch of findings.py."""
+class Harness(unittest.TestCase):
+    """A stub gh, its call log and the real report, for each row."""
 
     def setUp(self) -> None:
         """Lay out a stub gh, its call log, and the real report."""
@@ -129,6 +129,10 @@ class Findings(unittest.TestCase):
             return []
         lines = self.calls.read_text(encoding="utf-8").splitlines()
         return [json.loads(line) for line in lines]
+
+
+class Findings(Harness):
+    """One row per guard branch of findings.py."""
 
     def test_no_findings_files_nothing(self) -> None:
         """The real report, no findings: exit 0, gh never called."""
@@ -318,6 +322,68 @@ class Findings(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), [])
         self.assertEqual(proc.stderr.strip(), "findings: GITHUB_REPOSITORY is not set")
+
+
+class Decoded(Harness):
+    """Each document findings.py reads is decoded where it is read (#1683)."""
+
+    def test_a_search_answer_that_is_not_a_list_of_issues(self) -> None:
+        """Each wrong shape of the search's answer: exit 2 by name."""
+        self.doc["findings"] = [finding(448200001, "run", "gone")]
+        title = json.dumps(f"{PREFIX} 448200001 did not reconcile (run)")
+        rows = {
+            '{"number": 7}': "the answer is not a list",
+            "[7]": "issue 0 is not an object",
+            '[{"number": 7}]': "issue 0: title is not a string",
+            f'[{{"number": "7", "title": {title}}}]': (
+                "issue 0: number is not an integer"
+            ),
+        }
+        for answer, why in rows.items():
+            with self.subTest(answer=answer):
+                proc = self.run_helper(STUB_LIST=answer)
+                self.assertEqual(proc.returncode, 2)
+                self.assertEqual(
+                    proc.stderr.strip(),
+                    "findings: gh issue list answered something that is not a list"
+                    f" of issues: {why}; the checkpoint is not saved",
+                )
+
+    def test_a_search_answer_that_is_not_json(self) -> None:
+        """A search answer that is not strict JSON: exit 2 by name."""
+        self.doc["findings"] = [finding(448200001, "run", "gone")]
+        proc = self.run_helper(STUB_LIST='{"a": 1, "a": 2}')
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(
+            proc.stderr.strip(),
+            "findings: gh issue list answered something that is not JSON:"
+            ' duplicate key "a"; the checkpoint is not saved',
+        )
+
+    def test_findings_that_are_not_a_list(self) -> None:
+        """Findings of another kind, falsy or not: exit 2 by name (#1683)."""
+        for value in ("", 0, {}, "ab"):
+            with self.subTest(findings=value):
+                self.doc["findings"] = value
+                proc = self.run_helper()
+                self.assertEqual(proc.returncode, 2)
+                self.assertEqual(
+                    proc.stderr.strip(),
+                    f"findings: the report's findings are not a list: {value!r};"
+                    " the checkpoint is not saved",
+                )
+
+    def test_report_with_a_key_twice(self) -> None:
+        """A report that is not strict JSON is not JSON here: exit 2 by name."""
+        self.doc = None
+        self.report.write_text('{"target": "x", "target": "y"}', encoding="utf-8")
+        proc = self.run_helper()
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(
+            proc.stderr.strip(),
+            'findings: stele\'s report is not JSON: duplicate key "target";'
+            " the checkpoint is not saved",
+        )
 
 
 if __name__ == "__main__":

@@ -218,6 +218,40 @@ class Verdict(unittest.TestCase):
             " the report could not be read",
         )
 
+    def test_a_report_not_of_stele_s_shape_is_unreadable(self) -> None:
+        """Each wrong shape, read where the report is decoded: one refusal (#1683)."""
+        target = json.dumps("assert signer-certificates")
+        rows = {
+            "a fact's value is not a string": (
+                f'{{"target": {target}, "facts": [{{"name": "judged", "value": 3}}]}}'
+            ),
+            "a fact has no value": (
+                f'{{"target": {target}, "facts": [{{"name": "judged"}}]}}'
+            ),
+            "the facts are not a list": f'{{"target": {target}, "facts": {{}}}}',
+            "the findings are not a list": f'{{"target": {target}, "findings": "x"}}',
+            "the report is not an object": "[]",
+            "a key appears twice": f'{{"target": {target}, "target": {target}}}',
+            "a number JSON does not have": f'{{"target": {target}, "findings": [NaN]}}',
+        }
+        for why, text in rows.items():
+            with self.subTest(why=why):
+                self.report.write_text(text, encoding="utf-8")
+                argv = [
+                    sys.executable, str(HELPER), "--exit-code", "0",
+                    "--report", str(self.report), "--saved", "true",
+                ]  # fmt: skip
+                proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
+                    argv, capture_output=True, text=True, check=False
+                )
+                self.assertEqual(proc.returncode, 1, proc.stderr)
+                self.assertEqual(proc.stderr, "")
+                self.assertEqual(
+                    proc.stdout.strip(),
+                    "::error::stele exited 0 and its report could not be judged:"
+                    " the report could not be read",
+                )
+
     def test_report_from_another_target(self) -> None:
         """Another verb's report: named, never read on."""
         doc = load("report-budget.json")
