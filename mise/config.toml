@@ -2272,7 +2272,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 '''
 
 [tasks."lint:belt-current"]
-description = "This machine's mise and belt are as current as CI's"
+description = "This machine's mise is as current as CI's, and its belt is the one the gate stub pins (#1686)"
 dir = "{{cwd}}"
 # The belt keeps every TOOL at the pinned version on every machine, and
 # says nothing about two things that sit underneath it. Both were found
@@ -2284,22 +2284,26 @@ dir = "{{cwd}}"
 # asset) and silently rewrote mise.lock on `mise install`, dropping a
 # field the newer version writes. Nothing was red.
 #
-# The belt checkout: every repository on a machine reads ONE canon
-# checkout through the conf.d symlink. That checkout was 215 commits
-# behind, so every repository was being linted locally with August's
-# tools while its gate ran November's.
+# The belt: every repository on a machine read ONE canon checkout
+# through the conf.d symlink. That checkout was 215 commits behind, so
+# every repository was being linted locally with August's tools while
+# its gate ran November's; and one checkout sits on one commit while the
+# org's repositories pin several. Now each clone loads the belt of its
+# own pin (#1686): the org hooks link `.config/mise/conf.d/belt.toml` to
+# the machine's cache tree of exactly the gate stub's sha. So the check
+# is exact: the belt answering (ORG_CANON_DIR) is that tree, or it is
+# red, naming both and `lefthook run post-checkout`; older and newer are
+# one red. In the canon, which has no pin, the belt is the tree.
 #
 # Both comparisons are derived — the mise version from the canon's own
-# ci.yml, the canon version from the gate stub's pin comment — so no
+# ci.yml, the pinned sha from the gate stub's `uses:` line — so no
 # second literal exists to drift and Renovate has nothing extra to bump.
-# Older is red; a NEWER local mise is a note, since refusing to push
-# from a machine that is ahead helps nobody.
+# An older mise is red; a NEWER local mise is a note, since refusing to
+# push from a machine that is ahead helps nobody.
 #
-# Always green in CI by construction (the canon action delivers mise
-# and the tree at one resolution), so like lint:belt-tree this is a
-# LOCAL control. It cannot see a checkout that is behind its own remote
-# while the repository under test pins something older still; that
-# needs the network, and the gate has none.
+# The belt half is silent in CI, where the canon action delivers mise
+# and the tree at the pin's own resolution, so like lint:belt-tree it is
+# a LOCAL control.
 run = '''
 "${ORG_BELT_DIR}/belt-current.sh"
 '''
@@ -5718,6 +5722,31 @@ canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub_fix.py" "${canon}" .github/workflows/*.y*ml
+'''
+
+[tasks."lint:belt-link"]
+description = "Nothing is tracked under .config/mise/: the belt's link and lock live there (#1686)"
+dir = "{{cwd}}"
+# The org hooks link a clone to the belt its gate stub pins (#1686):
+# `.config/mise/conf.d/belt.toml`, which mise loads as a project config,
+# and `.config/mise/mise.lock` beside conf.d, because mise locks a
+# project conf.d file with its config directory's own lock and with
+# nothing else (measured on #1686). mise reads one lock per directory, so
+# a repository that tracked its own config under `.config/mise/` would
+# need that same lock for its own tools. The belt claims the directory:
+# a tracked file there is red by name. Every org repository keeps its own
+# config as `mise.toml` at its root.
+run = '''
+found=$(git ls-files -- .config/mise/)
+if [[ -n ${found} ]]; then
+  {
+    echo "lint:belt-link: the belt's link and lock live in .config/mise/; a repository's"
+    echo "  own config is mise.toml at its root. Tracked there:"
+    while IFS= read -r f; do echo "  ${f}"; done <<< "${found}"
+  } >&2
+  exit 1
+fi
+echo "lint:belt-link: nothing tracked under .config/mise/"
 '''
 
 [tasks."lint:capability-boundary"]
