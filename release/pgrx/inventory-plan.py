@@ -52,7 +52,9 @@ def package_name(crate_dir: Path) -> str:
     except (OSError, tomllib.TOMLDecodeError) as e:
         msg = f"{manifest}: {e}"
         raise RefusedError(msg) from e
-    name = parsed.get("package", {}).get("name")
+    package = parsed.get("package", {})
+    # `package = false` died here as an AttributeError (#1556).
+    name = package.get("name") if isinstance(package, dict) else None
     if not isinstance(name, str) or not name:
         msg = f"{manifest} names no package — a cell plans the crate it built"
         raise RefusedError(msg)
