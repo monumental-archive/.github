@@ -29,6 +29,7 @@ import matrix
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+from workflow_command import escape_data as escaped
 
 CLASS = st.sampled_from(sorted(matrix.TARGETS))
 MAJOR = st.integers(10, 99).map(str)
@@ -126,7 +127,8 @@ class StrangerRefusedByName(unittest.TestCase):
         code, out, err = run(["targets", cls, request])
         self.assertEqual(
             (code, out, err),
-            (1, "", f"::error::unknown target {stranger}; {hint}\n"),
+            # The field is the caller's text: written escaped (#1660).
+            (1, "", f"::error::unknown target {escaped(stranger)}; {hint}\n"),
         )
 
     @given(STRANGER.filter(lambda f: not (f.isascii() and f.isdigit())), st.data())
@@ -138,7 +140,8 @@ class StrangerRefusedByName(unittest.TestCase):
         request = ",".join([*before, stranger])
         code, out, err = run(["pgrx-images", request])
         self.assertEqual(
-            (code, out, err), (1, "", f"::error::{stranger} is not a PG major\n")
+            (code, out, err),
+            (1, "", f"::error::{escaped(stranger)} is not a PG major\n"),
         )
 
 

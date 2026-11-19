@@ -103,7 +103,7 @@ class AssetName(unittest.TestCase):
         base = f"{shipped}-{version}"
         notice, calls, dist = run_build(f"{owner}/{name}", version)
         self.assertEqual(dist, [f"{base}.tar.gz"])
-        self.assertTrue(notice.startswith(f"::notice::{base}.tar.gz: "), notice)
+        self.assertTrue(notice.startswith(f"{base}.tar.gz: "), notice)
         self.assertEqual(len(calls), 2)
         for call in calls:
             self.assertIn(f"--prefix={base}/", call)

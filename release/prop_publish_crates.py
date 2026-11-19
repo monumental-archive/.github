@@ -97,7 +97,6 @@ class AnyIndexText(unittest.TestCase):
         try:
             got = read(body, version)
         except publish.RefusalError as refused:
-            self.assertTrue(str(refused).startswith("::error::"), refused)
             self.assertIn(NAME, str(refused))
         else:
             self.assertTrue(got is None or isinstance(got, str))
