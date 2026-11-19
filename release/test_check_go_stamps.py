@@ -236,6 +236,24 @@ class Refuses(unittest.TestCase):
             "tool: no module stamp — the shipped bytes must carry their inventory",
         )
 
+    def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(self) -> None:
+        """An -ldflags value naming HEAD is not a stamp (#1556's shrunk example).
+
+        The setting read was the first `vcs.revision=` anywhere in the
+        text, so this binary, with no VCS stamp at all, passed.
+        """
+        spelled = (
+            "staged/tool: go1.26.6\n"
+            "\tpath\texample.com/m/cmd/tool\n"
+            "\tmod\texample.com/m\tv1.0.0\t\n"
+            "\tbuild\t-ldflags=-X=main.v=vcs.revision={head}\n"
+            "\tbuild\t-ldflags=-X=main.m=vcs.modified=false\n"
+        )
+        self.assert_refused(
+            run_helper({"tool": spelled}),
+            "tool: stamped revision <none> is not the released commit HEAD",
+        )
+
     def test_the_first_bad_binary_in_name_order_is_named(self) -> None:
         """staged/ is read in name order, as the shell's glob read it."""
         run = run_helper({"b": info("{head}", "true"), "a": info("f" * 40)})

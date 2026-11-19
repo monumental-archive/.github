@@ -26,8 +26,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-REVISION = re.compile(r"vcs\.revision=(?P<value>.*)$", re.MULTILINE)
-MODIFIED = re.compile(r"vcs\.modified=(?P<value>.*)$", re.MULTILINE)
+# A VCS setting's own line, `\tbuild\tvcs.revision=<sha>`, and nothing
+# else: anchored at the line's `build` field, because another setting's
+# VALUE is the builder's text and may spell `vcs.revision=` itself —
+# `-ldflags=-X=main.v=vcs.revision=<HEAD>` printed before the real
+# setting passed a binary built from any commit (#1556).
+REVISION = re.compile(r"^[ \t]*build[ \t]+vcs\.revision=(?P<value>.*)$", re.MULTILINE)
+MODIFIED = re.compile(r"^[ \t]*build[ \t]+vcs\.modified=(?P<value>.*)$", re.MULTILINE)
 # The main module's own line: `go version -m` prints it indented, as
 # `\tmod\t<path>\t<version>`.
 MODULE = re.compile(r"^\s+mod\s", re.MULTILINE)
