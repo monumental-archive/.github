@@ -418,6 +418,29 @@ class Table(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(0, first_call(expand(text, set()), [cmd]))
 
+    def test_jq_the_gate_calls_is_a_pinned_belt_tool(self) -> None:
+        """Jq was a gate dependency that was never pinned (#390).
+
+        The runner image happens to carry a jq, so nothing reddened: a
+        call to a command no [tools] key provides is invisible to the
+        derivation above, which only looks for the tools the belt has.
+        So the callers are found by the command's own name.
+        """
+        tasks = belt()["tasks"]
+        callers = [
+            name
+            for name in gate_tasks(tasks)
+            if first_call(expand(body(tasks[name]), set()), ["jq"]) is not None
+        ]
+        self.assertNotEqual([], callers)
+        table = gate_tools.load_table()
+        providers = [
+            key
+            for key in belt()["tools"]
+            if "jq" in gate_tools.commands(key, table.get(key, {}))
+        ]
+        self.assertEqual(["jq"], providers, f"gate tasks call jq: {callers}")
+
 
 def clean_env() -> dict[str, str]:
     """Copy the environment without git's repository variables.
