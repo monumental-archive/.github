@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Table tests for the `run:` block ceiling (#1352).
+"""Table tests for the `run:` block ceiling (#1352) and the task one (#1544).
 
 One row per guard branch of lint:workflow-shell, each driven through the
 same reader the lint uses and each asserting the MESSAGE, not just the
@@ -812,8 +812,286 @@ class Task(unittest.TestCase):
         self.assertIn("skipped", r.stdout)
 
 
+def config(**tasks: int | list[int]) -> str:
+    """Build a mise config whose tasks carry bodies of the given weights.
+
+    A list weight is a `run` given as a list of commands, one per entry.
+
+    Returns:
+        The TOML text.
+
+    """
+    out = ""
+    for name, lines in tasks.items():
+        out += f'[tasks."{name.replace("_", ":")}"]\n'
+        if isinstance(lines, list):
+            cmds = ", ".join(
+                '"' + "\\n".join(f"echo {i}" for i in range(n)) + '"' for n in lines
+            )
+            out += f"run = [{cmds}]\n"
+        else:
+            body = "# why\n\n" + "".join(f"echo {i}\n" for i in range(lines))
+            out += f"run = '''\n{body}'''\n"
+    return out
+
+
+class Tasks(unittest.TestCase):
+    """The Done-when rows of #1544: task bodies under the same ceiling."""
+
+    def setUp(self) -> None:
+        """Give each row a scratch directory for the config and the debt."""
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.cfg = self.root / "mise.toml"
+        self.debt = self.root / "debt.txt"
+
+    def run_ceiling(self, text: str, *, write: bool = False) -> tuple[int, str, str]:
+        """Write the config and run the task ceiling over it.
+
+        Returns:
+            (exit status, stdout, stderr).
+
+        """
+        self.cfg.write_text(text, encoding="utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = es.task_ceiling([str(self.cfg)], self.debt, write=write)
+        return rc, out.getvalue(), err.getvalue()
+
+    def entry(self, name: str, lines: int, note: str = "# #1544 unassigned") -> str:
+        """Return one debt line naming this row's config.
+
+        Returns:
+            The tab-separated entry, newline-terminated.
+
+        """
+        return f"{self.cfg}\t{name}\t{lines}\t{note}\n"
+
+    def test_at_the_ceiling_passes(self) -> None:
+        """Fifteen counted lines, comments and blanks free, needs no entry."""
+        rc, out, err = self.run_ceiling(config(lint_a=15))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("every task body fits 15 lines or its debt entry (0 over", out)
+
+    def test_no_debt_file_and_no_long_body_passes(self) -> None:
+        """A repository with nothing over the ceiling carries no file."""
+        rc, out, _ = self.run_ceiling(config(lint_a=3, fix_a=[2, 2]))
+        self.assertEqual(rc, 0)
+        self.assertIn("task-shell: every task body fits", out)
+        self.assertFalse(self.debt.exists())
+
+    def test_over_the_ceiling_and_unlisted_is_red_by_name(self) -> None:
+        """Sixteen lines with no entry is red, naming the task."""
+        rc, _, err = self.run_ceiling(config(lint_a=16))
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            f"{self.cfg}: task 'lint:a' holds a body of 16 lines, over the 15-line "
+            f"ceiling, and {self.debt} does not list it — move the logic out",
+            err,
+        )
+        self.assertIn("task-shell: 1 finding(s)", err)
+
+    def test_list_run_is_one_body(self) -> None:
+        """A `run` list of 8 + 8 commands is a 16-line body, not two."""
+        self.cfg.write_text(config(lint_a=[8, 8]), encoding="utf-8")
+        self.assertEqual(list(es.task_bodies(self.cfg)), [("lint:a", 16)])
+        rc, _, err = self.run_ceiling(config(lint_a=[8, 8]))
+        self.assertEqual(rc, 1)
+        self.assertIn("task 'lint:a' holds a body of 16 lines", err)
+
+    def test_listed_passes(self) -> None:
+        """A body at or under its entry is green."""
+        self.debt.write_text(self.entry("lint:a", 20), encoding="utf-8")
+        rc, out, err = self.run_ceiling(config(lint_a=20))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("(1 over the ceiling, all listed)", out)
+
+    def test_listed_body_that_grew_is_red(self) -> None:
+        """A body past its entry's number is red; the debt only shrinks."""
+        self.debt.write_text(self.entry("lint:a", 20), encoding="utf-8")
+        rc, _, err = self.run_ceiling(config(lint_a=21))
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            f"{self.cfg}: task 'lint:a' holds 21 lines, more than its debt "
+            f"entry's 20 ({self.debt}:1) — the debt only shrinks",
+            err,
+        )
+
+    def test_stale_entries_are_red(self) -> None:
+        """An entry whose body fits, or is gone, is red by its line."""
+        self.debt.write_text(
+            self.entry("lint:a", 20) + self.entry("lint:gone", 30), encoding="utf-8"
+        )
+        rc, _, err = self.run_ceiling(config(lint_a=15))
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            f"{self.debt}:1: task 'lint:a' in {self.cfg} now fits the ceiling "
+            "(15 lines) — remove the entry (mise run fix:task-shell)",
+            err,
+        )
+        self.assertIn(
+            f"{self.debt}:2: task 'lint:gone' in {self.cfg} names no task body "
+            "— remove the entry (mise run fix:task-shell)",
+            err,
+        )
+
+    def test_shrunk_entry_is_noted_and_lowered(self) -> None:
+        """A body that shrank is green; fix writes its new number."""
+        self.debt.write_text("# head\n" + self.entry("lint:a", 20), encoding="utf-8")
+        rc, out, _ = self.run_ceiling(config(lint_a=18))
+        self.assertEqual(rc, 0)
+        self.assertIn(f"{self.debt}:2: the body now holds 18 lines", out)
+        rc, out, _ = self.run_ceiling(config(lint_a=18), write=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("1 entry(ies) lowered, 0 removed", out)
+        self.assertEqual(
+            self.debt.read_text(encoding="utf-8"),
+            "# head\n" + self.entry("lint:a", 18),
+        )
+
+    def test_fix_removes_stale_and_never_adds_to_a_file(self) -> None:
+        """With a debt file, fix settles it down and leaves new bodies red."""
+        self.debt.write_text(
+            self.entry("lint:a", 20) + self.entry("lint:gone", 30), encoding="utf-8"
+        )
+        rc, out, _ = self.run_ceiling(config(lint_a=20, lint_b=17), write=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("0 entry(ies) lowered, 1 removed", out)
+        self.assertEqual(
+            self.debt.read_text(encoding="utf-8"), self.entry("lint:a", 20)
+        )
+        rc, _, err = self.run_ceiling(config(lint_a=20, lint_b=17))
+        self.assertEqual(rc, 1)
+        self.assertIn("task 'lint:b' holds a body of 17 lines", err)
+
+    def test_fix_generates_an_absent_file(self) -> None:
+        """With no debt file, fix writes every body over the ceiling."""
+        rc, out, _ = self.run_ceiling(config(lint_a=16, lint_b=3, fix_c=40), write=True)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"generated {self.debt} with 2 entry(ies)", out)
+        text = self.debt.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(es.TASK_HEADER))
+        self.assertEqual(
+            text.removeprefix(es.TASK_HEADER),
+            self.entry("lint:a", 16) + self.entry("fix:c", 40),
+        )
+        rc, out, err = self.run_ceiling(config(lint_a=16, lint_b=3, fix_c=40))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("(2 over the ceiling, all listed)", out)
+
+    def test_fix_with_nothing_over_writes_no_file(self) -> None:
+        """A repository with nothing over the ceiling gets no debt file."""
+        rc, out, _ = self.run_ceiling(config(lint_a=3), write=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("every task body fits; no debt file needed", out)
+        self.assertFalse(self.debt.exists())
+
+    def test_umbrella_is_1544(self) -> None:
+        """A task note naming #1544 must say `unassigned`; #1352 is any issue."""
+        self.debt.write_text(
+            self.entry("lint:a", 20, "# canon helper: #1544")
+            + self.entry("lint:b", 20, "# #1352"),
+            encoding="utf-8",
+        )
+        rc, _, err = self.run_ceiling(config(lint_a=20, lint_b=20))
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            f"{self.debt}:1: a note naming #1544 says `unassigned`: name the issue "
+            "that removes the body, or mark it unassigned",
+            err,
+        )
+        self.assertIn("task 'lint:a' holds a body of 20 lines", err)
+        self.assertNotIn("lint:b", err)
+
+    def test_listed_twice_names_the_task(self) -> None:
+        """A duplicate entry is named as a task, not a step."""
+        self.debt.write_text(self.entry("lint:a", 20) * 2, encoding="utf-8")
+        _, errors = es.read_debt(self.debt, es.TASKS)
+        self.assertEqual(
+            errors, [f"{self.debt}:2: task 'lint:a' in {self.cfg} is listed twice"]
+        )
+
+    def test_non_bodies_are_not_weighed(self) -> None:
+        """A `file =` task, a non-table task and a blank body carry nothing."""
+        self.cfg.write_text(
+            '[tasks]\nalias = "x"\n[tasks.f]\nfile = "a.sh"\n'
+            '[tasks.blank]\nrun = "  "\n[tasks.n]\nrun = [1, "echo"]\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(list(es.task_bodies(self.cfg)), [("n", 1)])
+
+
+class TaskShellTask(unittest.TestCase):
+    """lint:task-shell and fix:task-shell, run as mise runs them.
+
+    The first row fails before #1544: on main the belt defines neither
+    task, so decoding the body raises KeyError.
+    """
+
+    def repo(self) -> Path:
+        """Initialise an empty git repository.
+
+        Returns:
+            Its root.
+
+        """
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+        return root
+
+    @staticmethod
+    def track(root: Path, text: str) -> None:
+        """Write and stage a root mise.toml."""
+        (root / "mise.toml").write_text(text, encoding="utf-8")
+        subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+
+    def test_tracked_long_body_is_red_then_generated(self) -> None:
+        """The lint reaches the helper; fix generates; the lint goes green."""
+        root = self.repo()
+        self.track(root, config(lint_a=16))
+        r = run_task(root, "lint:task-shell")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(
+            "mise.toml: task 'lint:a' holds a body of 16 lines, over the 15-line "
+            "ceiling, and security/task-shell-debt.txt does not list it",
+            r.stderr,
+        )
+        (root / "security").mkdir()
+        r = run_task(root, "fix:task-shell")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            "generated security/task-shell-debt.txt with 1 entry(ies)", r.stdout
+        )
+        r = run_task(root, "lint:task-shell")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(1 over the ceiling, all listed)", r.stdout)
+
+    def test_no_mise_config_skips_clean(self) -> None:
+        """A tree tracking no mise config skips both tasks by name."""
+        root = self.repo()
+        for name, message in [
+            ("lint:task-shell", "no mise config tracked, skipped"),
+            ("fix:task-shell", "no mise config tracked, nothing to fix"),
+        ]:
+            with self.subTest(task=name):
+                r = run_task(root, name)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"{name}: {message}", r.stdout)
+
+    def test_untracked_config_is_not_read(self) -> None:
+        """Tracked files only: an untracked long body leaves the tree skipped."""
+        root = self.repo()
+        (root / "mise.toml").write_text(config(lint_a=16), encoding="utf-8")
+        r = run_task(root, "lint:task-shell")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("skipped", r.stdout)
+
+
 class Cli(unittest.TestCase):
-    """`--ceiling` on the command line exits by the verdict."""
+    """`--ceiling` and `--task-ceiling` on the command line exit by the verdict."""
 
     def test_exit_status(self) -> None:
         """Red is exit 1 with the finding on stderr; green is exit 0."""
@@ -835,6 +1113,31 @@ class Cli(unittest.TestCase):
             )
         self.assertEqual(red.returncode, 1)
         self.assertIn("step 'Big' holds a run: block of 16 lines", red.stderr)
+        self.assertEqual(green.returncode, 0, green.stderr)
+
+    def test_task_ceiling_exit_status(self) -> None:
+        """`--task-ceiling` is red on an unlisted long body, green when listed."""
+        with TemporaryDirectory() as tmp:
+            cfg, debt = Path(tmp) / "mise.toml", Path(tmp) / "debt.txt"
+            cfg.write_text(config(lint_a=16), encoding="utf-8")
+            argv = [
+                sys.executable,
+                str(_HERE / "embedded-shell.py"),
+                "--task-ceiling",
+                str(debt),
+                str(cfg),
+            ]
+            red = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                argv, capture_output=True, text=True, check=False
+            )
+            debt.write_text(
+                f"{cfg}\tlint:a\t16\t# #1544 unassigned\n", encoding="utf-8"
+            )
+            green = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                argv, capture_output=True, text=True, check=False
+            )
+        self.assertEqual(red.returncode, 1)
+        self.assertIn("task 'lint:a' holds a body of 16 lines", red.stderr)
         self.assertEqual(green.returncode, 0, green.stderr)
 
 

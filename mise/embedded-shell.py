@@ -817,7 +817,9 @@ def judge_tasks(files: list[str], debt: Path) -> tuple[Verdict, list[Entry]]:
             continue
         stale.add(e.lineno)
         if n is None:
-            findings.append(f"{at} names no task body — remove the entry ({TASK_SETTLE})")
+            findings.append(
+                f"{at} names no task body — remove the entry ({TASK_SETTLE})"
+            )
         else:
             findings.append(
                 f"{at} now fits the ceiling ({n} lines) — remove the entry "
@@ -833,9 +835,7 @@ def generated(over: list[Entry]) -> str:
         The file's text: the header, then one entry per body.
 
     """
-    rows = "".join(
-        f"{e.file}\t{e.step}\t{e.lines}\t# #1544 unassigned\n" for e in over
-    )
+    rows = "".join(f"{e.file}\t{e.step}\t{e.lines}\t# #1544 unassigned\n" for e in over)
     return TASK_HEADER + rows
 
 
