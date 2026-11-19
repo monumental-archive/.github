@@ -428,10 +428,10 @@ def main(argv: list[str]) -> int:
     # longer names is stale and never installed — edtf v1.3.0's lock
     # carried nine such entries without macos-x64, and the leg named only
     # the two configured ones.
-    read = read_documents(args.config, args.lock)
-    if read is None:
+    documents = read_documents(args.config, args.lock)
+    if documents is None:
         return 2
-    tools, locked = read
+    tools, locked = documents
     entries = [e for e in locked if e[0] in tools]
     missing: dict[str, list[str]] = {}
     for tool, version, keys in entries:

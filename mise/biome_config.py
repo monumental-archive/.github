@@ -35,10 +35,13 @@ dependency for turns rules ON, and the hazard is one-directional — the
 """
 
 import argparse
+import copy
 import json
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TextIO
+
+from decoded import UndecodableError, as_object, is_object, load_json
 
 NAME = "biome-config"
 
@@ -66,6 +69,16 @@ MANIFEST_SECTIONS = (
     "peerDependencies",
     "optionalDependencies",
 )
+
+
+class Args(argparse.Namespace):
+    """The parsed command line, typed."""
+
+    org: Path
+    domains: Path
+    nursery: Path
+    out: Path
+    declaration: Path
 
 
 class Domains(NamedTuple):
@@ -115,31 +128,34 @@ def read_nursery(path: Path) -> dict[str, str]:
     return table
 
 
-def declaration_problems(document: object, identity: dict[str, list[str]]) -> list[str]:
-    """Judge a repository's `biome.json` against what a repo may say.
+def declaration(
+    document: object, identity: dict[str, list[str]]
+) -> tuple[set[str], list[str]]:
+    """Read a repository's `biome.json` against what a repo may say.
 
     Returns:
-        One line per refusal, empty when the declaration is admissible.
+        The domains it claims, and one line per refusal, empty when the
+        declaration is admissible.
 
     """
-    if not isinstance(document, dict):
-        return ["the file must be a JSON object"]
+    if not is_object(document):
+        return set(), ["the file must be a JSON object"]
     problems = [
         f'"{key}" — a repository states its domains and nothing else'
         for key in document
         if key not in {"$schema", "linter"}
     ]
     linter = document.get("linter", {})
-    if not isinstance(linter, dict):
-        return [*problems, '"linter" must be an object']
+    if not is_object(linter):
+        return set(), [*problems, '"linter" must be an object']
     problems += [
         f'"linter.{key}" — the org owns every rule; the repo owns only domains'
         for key in linter
         if key != "domains"
     ]
     domains = linter.get("domains", {})
-    if not isinstance(domains, dict):
-        return [*problems, '"linter.domains" must be an object']
+    if not is_object(domains):
+        return set(), [*problems, '"linter.domains" must be an object']
     for domain, value in domains.items():
         if domain not in identity:
             problems.append(
@@ -151,7 +167,17 @@ def declaration_problems(document: object, identity: dict[str, list[str]]) -> li
                 f'"{domain}": "{value}" — the only value a repository may '
                 f'write is "{CLAIM}"; the belt writes every "none"',
             )
-    return problems
+    return set(domains), problems
+
+
+def declaration_problems(document: object, identity: dict[str, list[str]]) -> list[str]:
+    """Judge a repository's `biome.json` against what a repo may say.
+
+    Returns:
+        One line per refusal, empty when the declaration is admissible.
+
+    """
+    return declaration(document, identity)[1]
 
 
 def declared_packages(manifests: list[Path]) -> dict[str, list[str]]:
@@ -164,14 +190,14 @@ def declared_packages(manifests: list[Path]) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for manifest in manifests:
         try:
-            document = json.loads(manifest.read_text(encoding="utf-8"))
-        except OSError, json.JSONDecodeError:
+            document = load_json(manifest.read_text(encoding="utf-8"))
+        except OSError, UndecodableError:
             continue
-        if not isinstance(document, dict):
+        if not is_object(document):
             continue
         for section in MANIFEST_SECTIONS:
             block = document.get(section, {})
-            if isinstance(block, dict):
+            if is_object(block):
                 for package in block:
                     found.setdefault(package, []).append(str(manifest))
     return found
@@ -200,7 +226,7 @@ def omissions(
 
 
 def silence_nursery(
-    config: dict,
+    config: dict[str, object],
     claimed: set[str],
     domains: Domains,
     nursery: dict[str, str],
@@ -214,10 +240,14 @@ def silence_nursery(
     config, where the repository's identity is already known.
 
     Returns:
-        How many rules were switched off.
+        How many rules were switched off. A `linter`, `rules` or
+        `nursery` that is not an object is refused by `decoded`, naming
+        which.
 
     """
-    block = config.get("linter", {}).get("rules", {}).get("nursery", {})
+    linter = as_object(config.get("linter", {}), "linter")
+    rules = as_object(linter.get("rules", {}), "linter.rules")
+    block = as_object(rules.get("nursery", {}), "linter.rules.nursery")
     silenced = 0
     for rule in block:
         domain = nursery.get(rule, NO_DOMAIN)
@@ -231,11 +261,11 @@ def silence_nursery(
 
 
 def generate(
-    org: dict,
+    org: dict[str, object],
     claimed: set[str],
     domains: Domains,
     nursery: dict[str, str],
-) -> tuple[dict, int]:
+) -> tuple[dict[str, object], int]:
     """Merge the org's rules with the repository's identity.
 
     Returns:
@@ -243,10 +273,12 @@ def generate(
         rules its identity switched off.
 
     """
-    config = json.loads(json.dumps(org))
+    config = copy.deepcopy(org)
     written = {d: CLAIM if d in claimed else "none" for d in domains.identity}
     written.update(dict.fromkeys(domains.org, CLAIM))
-    config.setdefault("linter", {})["domains"] = written
+    linter = as_object(config.get("linter", {}), "linter")
+    linter["domains"] = written
+    config["linter"] = linter
     silenced = silence_nursery(config, claimed, domains, nursery)
     return config, silenced
 
@@ -265,7 +297,7 @@ def complain(headline: str, lines: list[str], remedy: str) -> int:
     return 1
 
 
-def run(args: argparse.Namespace, manifests: list[Path]) -> int:
+def run(args: Args, manifests: list[Path]) -> int:
     """Validate the declaration and write the generated config.
 
     Returns:
@@ -274,26 +306,23 @@ def run(args: argparse.Namespace, manifests: list[Path]) -> int:
     """
     domains = read_domains(args.domains)
     nursery = read_nursery(args.nursery)
-    org = json.loads(args.org.read_text(encoding="utf-8"))
-
     claimed: set[str] = set()
     if args.declaration.is_file():
         try:
-            document = json.loads(args.declaration.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as bad:
+            document = load_json(args.declaration.read_text(encoding="utf-8"))
+        except UndecodableError as bad:
             return complain(
                 f"{args.declaration} is not valid JSON",
                 [str(bad)],
                 "it declares only this repository's biome domains",
             )
-        problems = declaration_problems(document, domains.identity)
+        claimed, problems = declaration(document, domains.identity)
         if problems:
             return complain(
                 f"{args.declaration} says more than a repository may say",
                 problems,
                 "the org's rules are delivered; this file carries linter.domains only",
             )
-        claimed = set(document.get("linter", {}).get("domains", {}))
 
     unclaimed = omissions(claimed, domains.identity, declared_packages(manifests))
     if unclaimed:
@@ -305,7 +334,15 @@ def run(args: argparse.Namespace, manifests: list[Path]) -> int:
             "silence here lowers an org rule",
         )
 
-    config, silenced = generate(org, claimed, domains, nursery)
+    try:
+        org = as_object(load_json(args.org.read_text(encoding="utf-8")), "the document")
+        config, silenced = generate(org, claimed, domains, nursery)
+    except UndecodableError as bad:
+        return complain(
+            f"{args.org} cannot be read",
+            [str(bad)],
+            "it is the belt's delivered config; restore it from the canon",
+        )
     args.out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     named = ", ".join(sorted(claimed)) if claimed else "none"
     print(f"{NAME}: domains claimed: {named}; {silenced} nursery rule(s) off")
@@ -325,8 +362,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--nursery", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--declaration", type=Path, default=Path("biome.json"))
-    args = parser.parse_args(argv)
-    manifests = [Path(line) for line in sys.stdin.read().split() if line]
+    args = parser.parse_args(argv, namespace=Args())
+    stdin: TextIO = sys.stdin
+    manifests = [Path(line) for line in stdin.read().split() if line]
     return run(args, manifests)
 
 
