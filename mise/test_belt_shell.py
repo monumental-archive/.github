@@ -133,6 +133,33 @@ class Read(unittest.TestCase):
             )
             self.assertEqual(bs.read(path).env, {"A", "B"})
 
+    def test_env_array_names_every_table(self) -> None:
+        """`[[env]]`, mise's ordered form, names each table's variables.
+
+        The regression row of #1555: an env array raised AttributeError.
+        """
+        with TemporaryDirectory() as tmp:
+            path = write(
+                tmp,
+                '[[env]]\nA = "1"\n[[env]]\nB = "2"\n"_.path" = "x"\n\n'
+                '[tasks.t]\nrun = "x"\n',
+            )
+            self.assertEqual(bs.read(path).env, {"A", "B"})
+
+    def test_wrong_shaped_tables_read_as_nothing(self) -> None:
+        """A non-table env, tasks or task_config sets nothing, no traceback."""
+        for text in (
+            "env = 1\n",
+            "env = [1]\n",
+            "tasks = 1\n",
+            "task_config = 1\n",
+            '[tasks.t]\nenv = 1\nrun = "x"\n',
+        ):
+            with self.subTest(text=text), TemporaryDirectory() as tmp:
+                config = bs.read(write(tmp, text))
+                self.assertEqual(config.env, set())
+                self.assertIsNone(config.shell)
+
     def test_no_tasks_is_an_empty_contribution(self) -> None:
         """A TOML file that is not a mise config reads as nothing."""
         with TemporaryDirectory() as tmp:

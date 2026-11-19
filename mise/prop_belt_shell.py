@@ -15,12 +15,22 @@ generated task bodies:
   check read the wrong line.
 - `unshellify` undoes `shellify`, or refuses (None) when the body's own
   comments look like commented-out Tera. It never returns anything else.
+- Not idempotence: scrubbing scrubbed text may blank more, and should.
+  A backslash, `=`, `#` scrubs to two blanks and a `#` (inside a word);
+  scrubbed again, that `#` opens a comment. Blanking changes the
+  context of what follows, so the property `scrub` keeps is the
+  offsets one above.
+- Refusal (R): `read` and `locate` read any TOML document, of any
+  shape mise's keys can take, and never raise (#1555): an `[[env]]`
+  array, mise's ordered form, raised AttributeError until this found
+  it, and a non-table `env`, `tasks` or `task_config` raised too.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -109,6 +119,109 @@ class ShellifyRoundTrip(unittest.TestCase):
             self.assertIsNone(back)
         else:
             self.assertEqual(back, "\n".join(source.splitlines()) + "\n")
+
+
+SCALAR = st.one_of(st.booleans(), st.integers(-9, 9), st.text(max_size=8))
+VALUE = st.recursive(
+    SCALAR,
+    lambda inner: (
+        st.lists(inner, max_size=3)
+        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
+    ),
+    max_leaves=10,
+)
+KEY = st.sampled_from(["env", "tasks", "task_config", "tools", "x"])
+TASK = st.fixed_dictionaries(
+    {},
+    optional={
+        "run": st.one_of(VALUE, st.text(max_size=20)),
+        "env": VALUE,
+        "file": st.text(max_size=5),
+    },
+)
+
+
+def toml(value: object) -> str:
+    """Write a value as a TOML inline value.
+
+    Returns:
+        The TOML text.
+
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        inner = ", ".join(f"{quoted(k)} = {toml(v)}" for k, v in value.items())
+        return "{ " + inner + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(toml(v) for v in value) + "]"
+    if isinstance(value, str):
+        return quoted(value)
+    return str(value)
+
+
+def quoted(text: str) -> str:
+    """Write a TOML basic string.
+
+    Returns:
+        The string, quoted, with every character TOML refuses escaped.
+
+    """
+    out = []
+    for char in text:
+        if char in {'"', "\\"}:
+            out.append("\\" + char)
+        elif ord(char) < 0x20 or ord(char) == 0x7F:  # ruff: ignore[magic-value-comparison] - TOML refuses DEL
+            out.append(f"\\u{ord(char):04x}")
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
+
+
+@st.composite
+def config(draw: st.DrawFn) -> str:
+    """Write a mise config of any shape: top keys, task tables, `[[env]]`.
+
+    Returns:
+        The TOML text.
+
+    """
+    lines = [
+        f"{quoted(k)} = {toml(v)}"
+        for k, v in draw(st.dictionaries(KEY, VALUE, max_size=3)).items()
+    ]
+    tops = {line.split(" = ", 1)[0] for line in lines}
+    if '"env"' not in tops:
+        for table in draw(
+            st.lists(
+                st.dictionaries(st.text(max_size=6), SCALAR, max_size=3), max_size=2
+            )
+        ):
+            lines.append("[[env]]")
+            lines += [f"{quoted(k)} = {toml(v)}" for k, v in table.items()]
+    if '"tasks"' not in tops:
+        for name, task in draw(
+            st.dictionaries(
+                st.from_regex(r"[a-z:]{1,6}", fullmatch=True), TASK, max_size=3
+            )
+        ).items():
+            lines.append(f'[tasks."{name}"]')
+            lines += [f"{k} = {toml(v)}" for k, v in task.items()]
+    return "\n".join(lines) + "\n"
+
+
+class ReadAnyConfig(unittest.TestCase):
+    """Any mise config is read, never a traceback."""
+
+    @given(config())
+    def test_read_and_locate_answer(self, text: str) -> None:
+        """Bodies, env names and a shell or None."""
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "mise.toml"
+            path.write_text(text, encoding="utf-8")
+            got = bs.read(path)
+        self.assertIsInstance(got.env, set)
+        self.assertIsInstance(bs.locate(text), dict)
 
 
 if __name__ == "__main__":
