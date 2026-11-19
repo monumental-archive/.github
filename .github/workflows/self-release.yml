@@ -22,8 +22,14 @@ name: self-release
   workflow_dispatch: {}
 permissions: {}
 
-# Serialise, never cancel: a run that is minting a tag must not be killed
-# by the next push to main.
+# Serialise, never cancel in progress: a run that is minting a tag must
+# not be killed by the next push to main. Pending runs ARE replaced: the
+# forge holds one pending run per group and a newer one cancels it, so a
+# burst of merges reads `cancelled` here on all but the first and last
+# (four of eleven, 2026-11-19 19:00Z-19:53Z, #1617). That is correct for
+# this workflow: every run regenerates the one Release PR from main's
+# tip, so only the newest push matters, and two at once would race the
+# same branch.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
