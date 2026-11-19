@@ -15,7 +15,7 @@ taken inside it: the repository's test teardown runs
 
 before it stops the database, when ORG_PLPGSQL_COVERAGE names the file
 to write. Postgres is reached through the repository's own `psql`,
-already needed to run its tests; the belt pins no client. Three
+already needed to run its tests; the belt pins no client. Two
 subcommands:
 
   collect <conninfo>     the teardown's call. Writes the report, a JSON
@@ -30,9 +30,11 @@ subcommands:
                          per-function figures on stderr, or refuses by
                          name. A report with no PL/pgSQL function prints
                          no totals and exits 0.
-  measure <label>        the leg: runs the repository's `test` task, and
-                         every task it depends on, with
-                         ORG_PLPGSQL_COVERAGE set, then `totals`.
+
+The run is not this helper's: `coverage-measure.sh` walks the `test`
+task and its depends once, for every leg that reads that run, and sets
+ORG_PLPGSQL_COVERAGE in it when the plpgsql leg is selected; the leg
+then calls `totals` on the report the teardown wrote.
 
 The functions read are every PL/pgSQL function outside the system
 schemas that no extension owns: postgis alone owns 22 PL/pgSQL
@@ -75,7 +77,6 @@ import os
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
-import tempfile
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
@@ -172,7 +173,7 @@ class Failed:
 
 
 class ReadError(Exception):
-    """A read failed (psql, or mise for a task); the message names it."""
+    """psql exited non-zero; the message is its stderr."""
 
 
 class NotAReportError(Exception):
@@ -599,106 +600,6 @@ def totals(label: str, report_path: str) -> int:
     return 0
 
 
-def task_info(name: str) -> dict[str, object]:
-    """Read one task as mise resolved it, read-only (never a nested run).
-
-    Returns:
-        The task's `mise tasks info --json` object.
-
-    Raises:
-        ReadError: mise could not answer for the task (named).
-
-    """
-    # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
-    done = subprocess.run(
-        ["mise", "tasks", "info", name, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    msg = f"cannot read task '{name}' with mise tasks info"
-    if done.returncode != 0:
-        raise ReadError(msg)
-    try:
-        decoded: object = json.loads(done.stdout)
-        return as_object(decoded, f"task '{name}'")
-    except (ValueError, NotAReportError) as exc:
-        raise ReadError(msg) from exc
-
-
-def scripts(name: str, seen: set[str]) -> list[tuple[str, str]]:
-    """List a task's run scripts after those of every task it depends on.
-
-    Returns:
-        (directory, script) pairs in the order they run.
-
-    Raises:
-        ReadError: a task that cannot be read, or a run entry that is
-            not a script.
-
-    """
-    if name in seen:
-        return []
-    seen.add(name)
-    info = task_info(name)
-    out: list[tuple[str, str]] = []
-    for dep in as_list(info.get("depends") or [], f"task '{name}' depends"):
-        dep_name = dep if isinstance(dep, str) else ""
-        if isinstance(dep, dict):
-            task = as_object(dep, f"task '{name}' depends").get("task")
-            dep_name = task if isinstance(task, str) else ""
-        out += scripts(dep_name, seen)
-    directory = info.get("dir")
-    where = directory if isinstance(directory, str) and directory else str(Path.cwd())
-    for run in as_list(info.get("run") or [], f"task '{name}' run"):
-        if not isinstance(run, str):
-            msg = f"task '{name}' has a run entry that is not a script"
-            raise ReadError(msg)
-        out.append((where, run))
-    return out
-
-
-def measure(label: str) -> int:
-    """Run the test task with the report path set, then read it.
-
-    Returns:
-        `totals`'s status, or 1 when the suite cannot run or fails.
-
-    """
-    try:
-        steps = scripts("test", set())
-    except ReadError as exc:
-        print(f"{label}: plpgsql: {exc}", file=sys.stderr)
-        return 1
-    if not steps:
-        print(
-            f"{label}: plpgsql: the test task runs nothing — the leg measures"
-            " the repository's own suite",
-            file=sys.stderr,
-        )
-        return 1
-    with tempfile.TemporaryDirectory() as work:
-        report = str(Path(work) / "plpgsql-coverage.json")
-        env = os.environ | {ENV: report}
-        for directory, script in steps:
-            # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
-            done = subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", script],
-                cwd=directory,
-                env=env,
-                stdout=sys.stderr,
-                check=False,
-            )
-            if done.returncode != 0:
-                print(
-                    f"{label}: plpgsql: the test task failed under measurement —"
-                    " a suite that does not pass cannot measure a floor",
-                    file=sys.stderr,
-                )
-                return 1
-        return totals(label, report)
-
-
 def main(argv: list[str]) -> int:
     """Dispatch a subcommand.
 
@@ -711,12 +612,9 @@ def main(argv: list[str]) -> int:
             return collect(conninfo)
         case ["totals", label, report]:
             return totals(label, report)
-        case ["measure", label]:
-            return measure(label)
         case _:
             print(
-                f"usage: {NAME} collect <conninfo> | totals <label> <report>"
-                " | measure <label>",
+                f"usage: {NAME} collect <conninfo> | totals <label> <report>",
                 file=sys.stderr,
             )
             return 2

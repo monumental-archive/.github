@@ -530,5 +530,177 @@ class ReportRows(unittest.TestCase):
         )
 
 
+# The coverage.py stub the python leg's rows use, read from its suite.
+COVERAGE = str(
+    runpy.run_path(str(Path(__file__).resolve().with_name("test_coverage_tasks.py")))[
+        "COVERAGE"
+    ]
+)
+
+# `mise tasks info <name> --json`, for any task planted in STUB_TASKS.
+MISE_TASKS = """\
+#!/usr/bin/env bash
+f="${STUB_TASKS}/$3.json"
+if [[ "$1 $2" == "tasks info" && -f ${f} ]]; then
+  cat "${f}"
+  exit 0
+fi
+exit 1
+"""
+
+
+def counter(tree: Path) -> int:
+    """Read how many times the counting script ran.
+
+    Returns:
+        The number of lines the script appended.
+
+    """
+    return len((tree.parent / "counter").read_text("utf-8").splitlines())
+
+
+class RunOnceRows(unittest.TestCase):
+    """The test task and its depends run once, for every leg that reads it."""
+
+    def measure(
+        self,
+        tasks: dict[str, dict[str, object]],
+        selector: str = "all",
+        *,
+        python: bool = True,
+    ) -> tuple[subprocess.CompletedProcess, Path]:
+        """Run coverage-measure.sh over planted tasks, python and PL/pgSQL.
+
+        Returns:
+            The finished script and the planted tree.
+
+        """
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        stubs, answers = plant_stubs(tmp, TWO)
+        for name, text in (("coverage", COVERAGE), ("mise", MISE_TASKS)):
+            (stubs / name).write_text(text, encoding="utf-8")
+            (stubs / name).chmod(0o755)
+        (stubs / "python3").symlink_to(sys.executable)
+        tree = tmp / "tree"
+        (tree / "sub").mkdir(parents=True)
+        defs = tmp / "tasks"
+        defs.mkdir()
+        tracked = ["schema.sql"]
+        (tree / "schema.sql").write_text(f"CREATE FUNCTION f() {CLAUSE};\n", "utf-8")
+        if python:
+            (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
+            tracked.append("helper.py")
+        for name, task in tasks.items():
+            planted = {"dir": str(tree)} | task
+            if task.get("dir") == "sub":
+                planted["dir"] = str(tree / "sub")
+            (defs / f"{name}.json").write_text(json.dumps(planted), "utf-8")
+        env = stub_env(
+            stubs,
+            answers,
+            STUB_TASKS=str(defs),
+            STUB_PYTHON=sys.executable,
+            STUB_PY="90.0",
+            STUB_BR="85.0",
+        )
+        run([GIT, "init", "-q"], env, tree)
+        run([GIT, "add", *tracked], env, tree)
+        script = str(BELT / "coverage-measure.sh")
+        return run([BASH, script, "leg", selector], env, tree), tree
+
+    COLLECT = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql-coverage.py" collect stub'
+    COUNT = 'echo ran >> "${STUB_TASKS}/../counter"'
+
+    def test_both_legs_read_one_run_under_all(self) -> None:
+        """Python and PL/pgSQL print their figures; the suite ran once."""
+        done, tree = self.measure({
+            "test": {"run": [self.COLLECT], "depends": ["test:unit"]},
+            "test:unit": {"run": [self.COUNT]},
+        })
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "python 90.0\npython-branches 85.0\n"
+            "plpgsql 60.00\nplpgsql-branches 66.66\n",
+            done.stdout,
+        )
+        self.assertEqual(1, counter(tree))
+
+    def test_plpgsql_alone_runs_once_without_python(self) -> None:
+        """The plpgsql selector sets only its own variable."""
+        marker = 'echo "${COVERAGE_PROCESS_START:-unset}" > "${STUB_TASKS}/../py"'
+        done, tree = self.measure(
+            {
+                "test": {"run": [self.COLLECT], "depends": ["test:unit"]},
+                "test:unit": {"run": [self.COUNT, marker]},
+            },
+            "plpgsql",
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", done.stdout)
+        self.assertEqual(1, counter(tree))
+        self.assertEqual("unset\n", (tree.parent / "py").read_text("utf-8"))
+
+    def test_python_measures_what_only_a_depend_runs(self) -> None:
+        """The depend's script runs under the python leg's measurement."""
+        marker = 'echo "${COVERAGE_PROCESS_START:-unset}" > "${STUB_TASKS}/../py"'
+        done, tree = self.measure(
+            {
+                "test": {"run": ["echo suite in a depend"], "depends": ["test:unit"]},
+                "test:unit": {"run": [marker]},
+            },
+            "python",
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("python 90.0\npython-branches 85.0\n", done.stdout)
+        recorded = (tree.parent / "py").read_text("utf-8").strip()
+        self.assertTrue(recorded.endswith("/rc"), recorded)
+
+    def test_a_shared_depend_runs_once(self) -> None:
+        """Two tasks depending on one run it once, before both."""
+        done, tree = self.measure(
+            {
+                "test": {"run": [self.COLLECT], "depends": ["a", "b"]},
+                "a": {"run": ["echo a >> ${STUB_TASKS}/../order"], "depends": ["c"]},
+                "b": {"run": ["echo b >> ${STUB_TASKS}/../order"], "depends": ["c"]},
+                "c": {"run": [self.COUNT, "echo c >> ${STUB_TASKS}/../order"]},
+            },
+            python=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(1, counter(tree))
+        self.assertEqual("c\na\nb\n", (tree.parent / "order").read_text("utf-8"))
+
+    def test_a_script_runs_from_its_own_tasks_dir(self) -> None:
+        """A depend with a `dir` of its own runs there, not in the root."""
+        where = 'pwd -P > "${STUB_TASKS}/../where"'
+        done, tree = self.measure(
+            {
+                "test": {"run": [self.COLLECT], "depends": ["test:unit"]},
+                "test:unit": {"run": [where], "dir": "sub"},
+            },
+            python=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            str((tree / "sub").resolve()) + "\n",
+            (tree.parent / "where").read_text("utf-8"),
+        )
+
+    def test_a_suite_that_runs_nothing_is_refused(self) -> None:
+        """Neither the task nor its depends carries a script."""
+        done, _ = self.measure(
+            {"test": {"run": [], "depends": ["x"]}, "x": {}}, python=False
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        self.assertEqual(
+            "leg: the test task and its depends run nothing — the legs measure\n"
+            "  the repository's own suite and cannot measure a task that runs"
+            " nothing\n",
+            done.stderr,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

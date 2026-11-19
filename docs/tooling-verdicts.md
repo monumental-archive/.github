@@ -3328,7 +3328,13 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   The two legs have no upload format (plpgsql_check numbers lines
   within a function, not a file): the report step names them and never
   counts them as writers, so a tree whose only legs are these uploads
-  nothing and the badge job skips.
+  nothing and the badge job skips. The `test` task runs once for every
+  leg that reads it: `coverage-measure.sh` walks it and its depends
+  (depends first, each task once, each script from its own task's
+  `dir`) and runs that walk under the union of the selected legs'
+  variables. The python leg reads the same run, so a `test` task whose
+  suite sits in a depend now has that depend measured for Python too,
+  where it used to run the task's own `run` alone.
   *Reopen the weighting:* plpgsql_check exposing its branch counts.
   **Rejected, so it is not re-proposed:** adding the extension to the
   published database image (a test tool in a production image); a

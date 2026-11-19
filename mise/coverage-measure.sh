@@ -353,7 +353,45 @@ py_report() {
   exit 1
 }
 
-if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
+# The test task and every task it depends on, walked ONCE (#1547):
+# depends first, post-order, each task once, then the task's own `run`,
+# each script from its own task's `dir`, as the gate's `mise run test`
+# runs them. Read with `mise tasks info --json`, the read-only query, not
+# a nested `mise run` (the #82 race). One line of compact JSON per task,
+# with its name; the run below, and the typescript leg's search for its
+# vitest command, both read this.
+test_tasks="" walked=" "
+walk_task() {
+  local name=$1 info deps dep
+  [[ ${walked} != *" ${name} "* ]] || return 0
+  walked="${walked}${name} "
+  info=$(mise tasks info "${name}" --json 2> /dev/null) || {
+    echo "${label}: cannot read task '${name}' with mise tasks info" >&2
+    exit 1
+  }
+  deps=$(jq -r '(.depends // [])[] | if type == "string" then . else (.task // empty) end' <<< "${info}")
+  while read -r dep; do
+    [[ -z ${dep} ]] || walk_task "${dep}"
+  done <<< "${deps}"
+  test_tasks+=$(jq -c --arg n "${name}" '. + {name: $n}' <<< "${info}")$'\n'
+}
+
+# The legs that read the one run of the test task: the python leg its
+# coverage data, the plpgsql leg the report its teardown writes. Each
+# selected leg adds its own variables to that run, and nothing else.
+measure_py="" measure_pg=""
+if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then measure_py=1; fi
+if [[ -n ${plpgsql_test} && ${legs} =~ ^(all|plpgsql)$ ]]; then measure_pg=1; fi
+
+if [[ -n ${measure_py}${measure_pg} ]]; then
+  work=$(mktemp -d)
+  # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
+  # that dies on an unset variable would otherwise exit 0.
+  rc=0
+  trap 'rc=$?; rm -rf "${work}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
+fi
+
+if [[ -n ${measure_py} ]]; then
   # coverage.py, measuring the repository's own `test` task (#1331). The
   # discovery roots stay where the repository wrote them; the belt never
   # restates them, so the suite measured is the suite the gate runs.
@@ -384,23 +422,6 @@ if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
   # two levels up.
   cov_site=$(dirname "$(dirname "${cov_module}")")
 
-  # Every leg command is read before anything runs: a test task this
-  # leg cannot run is refused by name, never measured as empty.
-  test_dir=$(jq -r '.dir // empty' <<< "${python_test}")
-  # base64 per entry: a run script is multi-line, and one record per
-  # line is what a bash read loop can split without guessing.
-  test_runs=$(jq -r '(.run // [])[] | @base64' <<< "${python_test}")
-  if [[ -z ${test_runs} ]]; then
-    echo "${label}: the test task has no \`run\` script — the python leg measures" >&2
-    echo "  the repository's own test command and cannot measure a task it cannot run" >&2
-    exit 1
-  fi
-
-  work=$(mktemp -d)
-  # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
-  # that dies on an unset variable would otherwise exit 0.
-  rc=0
-  trap 'rc=$?; rm -rf "${work}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   mkdir "${work}/hook" "${work}/data"
   # Child processes are measured, not only the runner (#1331): suites
   # exec their helper as `python3 helper.py`, and a leg that measured
@@ -432,21 +453,49 @@ disable_warnings = no-data-collected, module-not-measured
 [report]
 precision = 2
 EOF
+fi
 
-  while read -r encoded; do
-    script=$(base64 --decode <<< "${encoded}")
+if [[ -n ${measure_py}${measure_pg} ]]; then
+  # Every command is read before anything runs: a task this run cannot
+  # read is refused by name, never measured as empty. base64 per entry:
+  # a script is multi-line, and one record per line is what a bash read
+  # loop can split; `-` stands for a task with no `dir`.
+  walk_task test
+  steps=$(jq -r '.name as $n | (if (.dir // "") == "" then "-" else (.dir | @base64) end) as $d
+    | (.run // [])[] | if type == "string" then "\($d) \(@base64)" else "! \($n)" end' <<< "${test_tasks}")
+  if [[ -z ${steps} ]]; then
+    echo "${label}: the test task and its depends run nothing — the legs measure" >&2
+    echo "  the repository's own suite and cannot measure a task that runs nothing" >&2
+    exit 1
+  fi
+  if [[ ${steps} =~ (^|$'\n')!\ ([^$'\n']*) ]]; then
+    echo "${label}: task '${BASH_REMATCH[2]}' has a run entry that is not a script —" >&2
+    echo "  the measured run reads scripts only" >&2
+    exit 1
+  fi
+  while read -r dir_b64 script_b64; do
+    dir=${PWD}
+    [[ ${dir_b64} == - ]] || dir=$(base64 --decode <<< "${dir_b64}")
+    script=$(base64 --decode <<< "${script_b64}")
     if ! (
-      cd "${test_dir:-${PWD}}"
-      COVERAGE_PROCESS_START="${work}/rc" \
-        PYTHONPATH="${work}/hook${PYTHONPATH:+:${PYTHONPATH}}" \
-        bash -euo pipefail -c "${script}"
+      cd "${dir}"
+      if [[ -n ${measure_py} ]]; then
+        export COVERAGE_PROCESS_START="${work}/rc"
+        export PYTHONPATH="${work}/hook${PYTHONPATH:+:${PYTHONPATH}}"
+      fi
+      if [[ -n ${measure_pg} ]]; then
+        export ORG_PLPGSQL_COVERAGE="${work}/plpgsql-coverage.json"
+      fi
+      bash -euo pipefail -c "${script}"
     ) >&2; then
       echo "${label}: the test task failed under measurement — a suite that" >&2
       echo "  does not pass cannot measure a floor" >&2
       exit 1
     fi
-  done <<< "${test_runs}"
+  done <<< "${steps}"
+fi
 
+if [[ -n ${measure_py} ]]; then
   if ! coverage combine --rcfile="${work}/rc" --quiet >&2; then
     echo "${label}: the test task ran no measured Python — a measurement" >&2
     echo "  that reads nothing must not become a floor" >&2
@@ -498,23 +547,8 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   # arguments and its task's dir, or a refusal by name. The depends are
   # walked here with the same read-only `mise tasks info` the python leg
   # makes; the reading of the scripts is coverage-js-runner.py's.
-  tasks_json=""
-  queue="test"
-  seen=" "
-  while [[ -n ${queue// /} ]]; do
-    name=${queue%% *}
-    queue=${queue#"${name}"}
-    queue=${queue# }
-    [[ -n ${name} && ${seen} != *" ${name} "* ]] || continue
-    seen="${seen}${name} "
-    info=$(mise tasks info "${name}" --json 2> /dev/null) || {
-      echo "${label}: typescript: cannot read task '${name}' with mise tasks info" >&2
-      exit 1
-    }
-    tasks_json+=$(jq -c --arg n "${name}" '. + {name: $n}' <<< "${info}")$'\n'
-    deps=$(jq -r '(.depends // [])[] | if type == "string" then . else (.task // empty) end' <<< "${info}")
-    queue="${queue} ${deps//$'\n'/ }"
-  done
+  walk_task test
+  tasks_json=${test_tasks}
   command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage-js-runner.py" \
     --vitest-command "${label}" <<< "${tasks_json}") || exit 1
   test_dir=$(jq -r '.dir' <<< "${command_json}")
@@ -557,7 +591,10 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   echo "typescript ${ts_pct}"
   echo "typescript-branches ${ts_br}"
 fi
-if [[ -n ${plpgsql_test} && ${legs} =~ ^(all|plpgsql)$ ]]; then
-  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql-coverage.py" measure "${label}" || exit 1
+if [[ -n ${measure_pg} ]]; then
+  # The report the test run's teardown wrote; the reading and every
+  # refusal are plpgsql-coverage.py's.
+  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql-coverage.py" \
+    totals "${label}" "${work}/plpgsql-coverage.json" || exit 1
 fi
 org_done=1
