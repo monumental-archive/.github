@@ -22,7 +22,7 @@ printed with the reason: it cannot be cleared.
 With `--given` it prints instead each file that takes `given` from
 Hypothesis itself (`from hypothesis import given`, from any
 `hypothesis.*` module, or `hypothesis.given` by attribute). A property
-file takes the belt's typed `given` from `org_hypothesis` (#1604):
+file takes the belt's typed `given` from `typed_hypothesis` (#1604):
 Hypothesis's own is typed `Callable[..., None]`, which the belt's mypy
 reds on every property.
 """

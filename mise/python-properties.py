@@ -26,7 +26,7 @@ them.
 
 Each `prop_*.py` file is imported from its own directory, as the
 `unittest` discovery beside it would, with the belt's own directory on
-the path too, so `from org_hypothesis import given` (the typed `given`
+the path too, so `from typed_hypothesis import given` (the typed `given`
 the belt delivers, #1604) resolves in any repository. It must hold at
 least one
 Hypothesis test: a property file with no property is a check that looks
@@ -58,7 +58,7 @@ BOUNDS = ("max_examples", "derandomize", "database", "deadline")
 EXIT_USAGE = 2
 # A profile name and at least one file.
 MIN_ARGS = 2
-# The belt: org_hypothesis.py sits beside this runner.
+# The belt: typed_hypothesis.py sits beside this runner.
 BELT = Path(__file__).resolve().parent
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
 

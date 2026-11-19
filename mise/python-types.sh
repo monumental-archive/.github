@@ -79,7 +79,7 @@ if [[ -n ${seams} ]]; then
   echo "  suppress one line with '# type: ignore[<code>]', which names its rule" >&2
 fi
 
-# MYPYPATH is the belt: a property file's `from org_hypothesis import
+# MYPYPATH is the belt: a property file's `from typed_hypothesis import
 # given` resolves to the belt's typed `given`, as the properties runner
 # puts the same directory on the path (#1604).
 status=0

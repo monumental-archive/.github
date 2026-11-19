@@ -41,7 +41,7 @@ BELT_FILES = (
     "python-types-seams.py",
     "mypy.ini",
     "config.toml",
-    "org_hypothesis.py",
+    "typed_hypothesis.py",
 )
 
 STUB = """\
@@ -323,7 +323,7 @@ PROPERTY = """\
 import unittest
 
 from hypothesis import strategies as st
-from org_hypothesis import given
+from typed_hypothesis import given
 
 
 class Holds(unittest.TestCase):

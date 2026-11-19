@@ -45,7 +45,7 @@ if [[ ${profile} == gate ]]; then
   # belt's own runner and its typed `given` are the two other files
   # that may.
   others=$(git ls-files ':!vendor/**' '*.py' \
-    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python-properties.py" && $0 != "mise/org_hypothesis.py"')
+    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python-properties.py" && $0 != "mise/typed_hypothesis.py"')
   leaks=""
   if [[ -n ${others} ]]; then
     leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis-imports.py")
@@ -68,7 +68,7 @@ if [[ ${profile} == gate ]]; then
     while IFS= read -r file; do
       echo "  ${file}" >&2
     done <<< "${untyped}"
-    echo "  write: from org_hypothesis import given" >&2
+    echo "  write: from typed_hypothesis import given" >&2
     exit 1
   fi
 fi

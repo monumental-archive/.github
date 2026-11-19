@@ -24,7 +24,7 @@ import unittest
 from pathlib import Path
 
 from hypothesis import strategies as st
-from org_hypothesis import given
+from typed_hypothesis import given
 
 _SPEC = importlib.util.spec_from_file_location(
     "lock_arch",

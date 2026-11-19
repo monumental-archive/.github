@@ -51,7 +51,7 @@ AUDIT = CONFIG["tasks"]["audit:python-properties"]["run"]
 HOLDS = """\
 import unittest
 from hypothesis import strategies as st
-from org_hypothesis import given
+from typed_hypothesis import given
 
 
 class Holds(unittest.TestCase):
@@ -63,7 +63,7 @@ class Holds(unittest.TestCase):
 FAILS = """\
 import unittest
 from hypothesis import strategies as st
-from org_hypothesis import given
+from typed_hypothesis import given
 
 
 class Fails(unittest.TestCase):
@@ -97,7 +97,7 @@ class Plain(unittest.TestCase):
 OWN_BOUNDS = """\
 import unittest
 from hypothesis import settings, strategies as st
-from org_hypothesis import given
+from typed_hypothesis import given
 
 
 class Bounded(unittest.TestCase):
@@ -240,7 +240,7 @@ class Refusals(unittest.TestCase):
         self.assertIn(
             "test:python-properties: these take given from hypothesis,"
             " not the belt's typed one:\n  pkg/prop_y.py\n"
-            "  write: from org_hypothesis import given\n",
+            "  write: from typed_hypothesis import given\n",
             done.stderr,
         )
 

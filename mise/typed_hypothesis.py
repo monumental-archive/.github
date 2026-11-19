@@ -16,7 +16,7 @@ variant", red until an overload is added here.
 
 `mise/python-properties.py` puts this directory on the path for the
 run and `mise/python-types.sh` hands mypy the same, so a repository's
-property file needs one line, `from org_hypothesis import given`;
+property file needs one line, `from typed_hypothesis import given`;
 `test:python-properties` refuses `given` taken from `hypothesis`.
 """
 

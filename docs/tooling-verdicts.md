@@ -2030,7 +2030,7 @@ Proven by running 2.4.1:
 the strict config reds the decorator expression (`disallow_any_expr`,
 191 on `301cf46`) and the decorated test (`disallow_any_decorated`,
 197). Neither is the property's fault, and neither flag comes off:
-`mise/org_hypothesis.py` gives `given` an exact type instead, one
+`mise/typed_hypothesis.py` gives `given` an exact type instead, one
 overload per arity, each strategy's value type tied to its parameter
 after `self` and the decorated test taking `self` alone. Every `@given`
 in the canon's 54 property files is that shape (positional strategies
@@ -2054,7 +2054,7 @@ through `importlib` (one, which #1634's rename answers). Reach: the
 properties runner puts the belt's directory on the path for the run,
 the types task sets `MYPYPATH` to it, and `test:python-properties`
 reds a property file that takes `given` from `hypothesis`, so a
-repository needs only `from org_hypothesis import given`.
+repository needs only `from typed_hypothesis import given`.
 
 **Staged, not advisory.** The canon held 10 874 findings over its 226
 tracked files when the pin landed: 1719 in the helpers (`mise/` 1295,
