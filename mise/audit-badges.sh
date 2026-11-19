@@ -61,18 +61,50 @@ command -v gh > /dev/null || {
 ua="${GITHUB_REPOSITORY_OWNER}/.github audit:badges (https://github.com/${GITHUB_REPOSITORY_OWNER}/.github)"
 ask_code=""
 ask_body=""
+ask_stale=""
+# A cached answer past its own lifetime is not the issuer's answer
+# either (#1649): the Scorecard API served stele a 404 that had sat in
+# its cache for twelve hours against `max-age=600` while the API held
+# stele's result, and no request header asked past it. So `ask` keeps
+# the headers and sets `ask_stale` to the seconds a response is past
+# its lifetime — `Age` minus `s-maxage`, else `max-age`, when both are
+# numbers and the difference is positive; empty otherwise (no header,
+# no claim). Every leg reads it before the status: a stale answer of
+# any status is a question unanswered, never an absence and never a
+# pass. An `if` leg tests `-n ${ask_stale}` first; a `case` leg switches
+# on `${ask_stale:+stale }${ask_code}`, which no status arm matches, so
+# a stale answer reaches its `*` arm, `unanswered`. A header block per
+# attempt or hop starts at its status line, so the last block is read.
+ask_headers=$(mktemp)
+rc=0
+trap 'rc=$?; rm -f "${ask_headers}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 ask() {
   local out
   # Retried, because a single dropped connection is not an answer
   # either: doi.org reset two of three lookups in one run and served
   # all three a second later (measured 2026-11-14).
+  : > "${ask_headers}"
   out=$(curl -s --retry 3 --retry-all-errors --retry-delay 2 --max-time 30 \
-    -H "User-Agent: ${ua}" -w '\n%{http_code}' "$@" || true)
+    -H "User-Agent: ${ua}" -D "${ask_headers}" -w '\n%{http_code}' "$@" || true)
   ask_code="${out##*$'\n'}"
   ask_body="${out%$'\n'*}"
+  ask_stale=$(awk '
+    { sub(/\r$/, ""); h = tolower($0) }
+    h ~ /^http\// { age = ""; life = "" }
+    h ~ /^age: *[0-9]+ *$/ { age = h; sub(/^age: */, "", age) }
+    h ~ /^cache-control:/ {
+      max = ""; shared = ""
+      if (match(h, /s-maxage=[0-9]+/)) shared = substr(h, RSTART + 9, RLENGTH - 9)
+      if (match(h, /(^|[ ,:])max-age=[0-9]+/)) { max = substr(h, RSTART, RLENGTH); sub(/.*=/, "", max) }
+      life = (shared != "" ? shared : max)
+    }
+    END { if (age != "" && life != "" && age - life > 0) print age - life }
+  ' "${ask_headers}")
 }
 unanswered() {
-  failed="${failed} ${repo}(${1}: ${2} did not answer — HTTP ${ask_code:-none}, a question unanswered, not an absence)"
+  failed="${failed} ${repo}(${1}: ${2} did not answer — HTTP ${ask_code:-none}"
+  failed+="${ask_stale:+, answered from a cache ${ask_stale} seconds past its lifetime}"
+  failed+=", a question unanswered, not an absence)"
 }
 sc_prefix=$(org_identity shield-scorecard)
 wf_prefix=$(org_identity shield-actions)
@@ -156,7 +188,7 @@ while read -r repo; do
         ask "${url%/badge}"
         score=$(jq -r '.score // empty' <<< "${ask_body}" 2> /dev/null || true)
         floor=$(awk -v r="${repo}" '$1 == r {print $2}' "${floors}")
-        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
           unanswered scorecard "api.scorecard.dev, about ${repo},"
         elif [[ ${ask_code} == 404 || -z ${score} ]]; then
           failed="${failed} ${repo}(scorecard: issuer returned no score — a shield over nothing)"
@@ -175,7 +207,7 @@ while read -r repo; do
         id="${id%/badge}"
         ask "https://www.bestpractices.dev/projects/${id}.json"
         bp="${ask_body}"
-        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
           unanswered bestpractices "bestpractices.dev, about project ${id},"
         elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
@@ -200,7 +232,7 @@ while read -r repo; do
         id="${id%/baseline}"
         ask "https://www.bestpractices.dev/projects/${id}.json"
         bp="${ask_body}"
-        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
           unanswered baseline "bestpractices.dev, about project ${id},"
         elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
@@ -223,7 +255,7 @@ while read -r repo; do
         proj="${url#https://api.reuse.software/badge/}"
         ask "https://api.reuse.software/status/${proj}"
         st=$(jq -r '.status // empty' <<< "${ask_body}" 2> /dev/null || true)
-        case "${ask_code}" in
+        case "${ask_stale:+stale }${ask_code}" in
           200)
             if [[ ${st} != "compliant" ]]; then
               failed="${failed} ${repo}(reuse: status '${st:-none}' is not compliant)"
@@ -251,7 +283,7 @@ while read -r repo; do
         doc="${doc//%2F//}"
         ask "${doc}"
         sj="${ask_body}"
-        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+        if [[ -n ${ask_stale} || ${ask_code} != 200 && ${ask_code} != 404 ]]; then
           unanswered level-shield "${doc}"
         elif [[ ${ask_code} == 404 || -z ${sj} ]]; then
           failed="${failed} ${repo}(level-shield: published judgment ${doc} unreadable — the badge renders nothing)"
@@ -317,7 +349,7 @@ while read -r repo; do
         # and no -L, because the question is whether doi.org knows the
         # name, not whether the landing page is up.
         ask -I "https://doi.org/${doi}"
-        case "${ask_code}" in
+        case "${ask_stale:+stale }${ask_code}" in
           2?? | 3??) note "${repo}: DOI resolves" ;;
           404) failed="${failed} ${repo}(doi: ${doi} does not resolve)" ;;
           *) unanswered doi "doi.org, about ${doi}," ;;
@@ -327,7 +359,7 @@ while read -r repo; do
         crate="${url##*/}"
         crate="${crate%.svg}"
         ask "https://crates.io/api/v1/crates/${crate}"
-        case "${ask_code}" in
+        case "${ask_stale:+stale }${ask_code}" in
           200) note "${repo}: crate ${crate} exists" ;;
           404) failed="${failed} ${repo}(crates: ${crate} not on crates.io)" ;;
           *) unanswered crates "crates.io, about ${crate}," ;;
@@ -337,7 +369,7 @@ while read -r repo; do
         pkg="${url#https://img.shields.io/npm/v/}"
         pkg="${pkg%.svg}"
         ask "https://registry.npmjs.org/${pkg//%2F//}"
-        case "${ask_code}" in
+        case "${ask_stale:+stale }${ask_code}" in
           200) note "${repo}: npm package exists" ;;
           404) failed="${failed} ${repo}(npm: package not on the registry)" ;;
           *) unanswered npm "the npm registry" ;;
@@ -379,7 +411,7 @@ while read -r repo; do
         # check that only asked "is there a number" stayed green. An
         # hour's grace covers an upload still in flight.
         ask "${cc_api}/${cc}"
-        case "${ask_code}" in
+        case "${ask_stale:+stale }${ask_code}" in
           200)
             ccb=$(jq -r '.branch // empty' <<< "${ask_body}" 2> /dev/null || true)
             ask "${cc_api}/${cc}/commits?branch=${ccb:-main}"
@@ -390,7 +422,7 @@ while read -r repo; do
             gh_sha="${gh_head%%$'\t'*}"
             gh_at="${gh_head##*$'\t'}"
             now=$(date -u +%s)
-            if [[ ${ask_code} != "200" ]]; then
+            if [[ -n ${ask_stale} || ${ask_code} != "200" ]]; then
               unanswered codecov "Codecov, about ${cc}'s commits,"
             elif [[ -z ${cov} ]]; then
               failed="${failed} ${repo}(codecov: no coverage report for ${cc}'s ${ccb:-main}"
@@ -502,3 +534,4 @@ if ((checked == 0)); then
   exit 1
 fi
 echo "audit:badges: ${checked} shield(s) checked, all agree with their issuers"
+org_done=1
