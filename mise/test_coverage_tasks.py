@@ -340,7 +340,8 @@ class CheckRows(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:check: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, or package.json with vitest),"
+            " tracked *.py with a test task, package.json with vitest, or"
+            " tracked PL/pgSQL with a test task),"
             " skipped\n",
             done.stdout,
         )
@@ -425,7 +426,8 @@ class TypeScriptRows(CoverageTaskCase):
         )
         self.assertEqual(
             "coverage:check: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, or package.json with vitest),"
+            " tracked *.py with a test task, package.json with vitest, or"
+            " tracked PL/pgSQL with a test task),"
             " skipped\n",
             done.stdout,
         )
@@ -685,7 +687,8 @@ class AdoptRows(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
             "coverage:adopt: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, or package.json with vitest),"
+            " tracked *.py with a test task, package.json with vitest, or"
+            " tracked PL/pgSQL with a test task),"
             " nothing to measure\n",
             done.stdout,
         )

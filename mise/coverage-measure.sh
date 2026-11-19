@@ -43,6 +43,14 @@
 # leg — one function below, not a copy — and prints
 # `rust-branches <percent>` for the Monday audit and `coverage:adopt`.
 #
+# `plpgsql` (#1547) measures PL/pgSQL through plpgsql_check, in a
+# database only the repository's suite has: applicable where a tracked
+# file declares a PL/pgSQL function and a `test` task exists, it runs
+# that task with ORG_PLPGSQL_COVERAGE naming a report its teardown
+# writes, and prints `plpgsql <percent>` and `plpgsql-branches
+# <percent>`. The reading, the refusals and the task walk are
+# plpgsql-coverage.py's.
+#
 # Invoked directly, never through a nested `mise run`: a nested mise
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
@@ -60,10 +68,10 @@ label="${1:-coverage:measure}"
 # wrote, below.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | rust-branches | python | typescript | probe | reports) ;;
+  all | go | rust | rust-branches | python | typescript | plpgsql | probe | reports) ;;
   *)
     echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
-      "rust-branches, python, typescript, probe or reports" >&2
+      "rust-branches, python, typescript, plpgsql, probe or reports" >&2
     exit 1
     ;;
 esac
@@ -124,6 +132,16 @@ if [[ ${ts_runner} == vitest\ * ]]; then
   [[ -n ${ts_test} ]] || ts_test=$(mise tasks info test --json 2> /dev/null) || ts_test=""
 fi
 
+# PL/pgSQL is declared by a tracked file's LANGUAGE clause (quoted or
+# not, any case), and measured through the repository's `test` task.
+plpgsql_test="" plpgsql_skip=""
+if git grep -qiIE "language[[:space:]]+'?plpgsql" 2> /dev/null; then
+  plpgsql_test=$(mise tasks info test --json 2> /dev/null) || plpgsql_test=""
+  [[ -n ${plpgsql_test} ]] || plpgsql_skip="tracked PL/pgSQL but no test task"
+elif git ls-files -- '*.sql' 2> /dev/null | grep -q .; then
+  plpgsql_skip="no tracked file declares a PL/pgSQL function"
+fi
+
 if [[ ${legs} == probe ]]; then
   [[ -f go.mod ]] && echo go
   [[ -f Cargo.toml ]] && echo rust
@@ -135,6 +153,11 @@ if [[ ${legs} == probe ]]; then
       ;;
     *) ;;
   esac
+  if [[ -n ${plpgsql_test} ]]; then
+    echo plpgsql
+  elif [[ -n ${plpgsql_skip} ]]; then
+    echo "${label}: plpgsql: ${plpgsql_skip}, skipped" >&2
+  fi
   exit 0
 fi
 
@@ -513,5 +536,8 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   cp "${ts_work}/lcov.info" lcov-typescript.info
   echo "typescript ${ts_pct}"
   echo "typescript-branches ${ts_br}"
+fi
+if [[ -n ${plpgsql_test} && ${legs} =~ ^(all|plpgsql)$ ]]; then
+  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql-coverage.py" measure "${label}" || exit 1
 fi
 org_done=1

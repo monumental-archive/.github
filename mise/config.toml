@@ -6675,7 +6675,8 @@ dir = "{{cwd}}"
 # the #316 shape, where a second hardcoded --workspace drifted from the
 # first the instant a repo excluded a member. Each leg measures what its
 # language measures (statements for Go, lines for Rust, statements and
-# branches for Python, #1331, lines and branches for TypeScript, #1357);
+# branches for Python, #1331, lines and branches for TypeScript, #1357,
+# statements and branches for PL/pgSQL through plpgsql_check, #1547);
 # the floor is a minimum in all of them,
 # and every leg must hold it. Which languages apply is the measurement
 # script's `probe`. The pathspec test before it is only the necessary
@@ -6695,18 +6696,18 @@ dir = "{{cwd}}"
 # is never preceded by a hold line. The line is printed last.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage-floor.py" read) || exit 1
-tracked_py=$(git ls-files -- '*.py') || tracked_py=""
-if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked_py} && ! -f package.json ]]; then
+tracked=$(git ls-files -- '*.py' && { git grep -lIiE "language[[:space:]]+'?plpgsql" || true; }) || tracked=""
+if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked} && ! -f package.json ]]; then
   if [[ -z ${floor} ]]; then
     echo "coverage:check: no .coverage-floor, skipped"
   else
-    echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), skipped"
+    echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), skipped"
   fi
   exit 0
 fi
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1
 if [[ -z ${applies} ]]; then
-  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), skipped"
+  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), skipped"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check) || exit 1
@@ -6753,7 +6754,7 @@ dir = "{{cwd}}"
 run = '''
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
-  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, or package.json with vitest), nothing to measure"
+  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), nothing to measure"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
