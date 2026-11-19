@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import typed_std
 import workflow_command
 
 if TYPE_CHECKING:
@@ -306,12 +307,8 @@ def buildx_floor(version_output: str) -> None:
     """
     line = version_output.splitlines()[0] if version_output else ""
     found = re.search(r"(\d+)\.(\d+)\.\d+", line)
-    # Sliced by each group's span: `group()` is typed `str | Any`.
     have = (
-        (
-            int(line[found.start(1) : found.end(1)]),
-            int(line[found.start(2) : found.end(2)]),
-        )
+        (int(typed_std.group(found, 1) or "0"), int(typed_std.group(found, 2) or "0"))
         if found
         else None
     )

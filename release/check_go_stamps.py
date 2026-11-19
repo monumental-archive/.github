@@ -31,6 +31,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import typed_std
 import workflow_command
 
 # A VCS setting's own line, `\tbuild\tvcs.revision=<sha>`, and nothing
@@ -119,10 +120,8 @@ def stamp(info: str, pattern: re.Pattern[str]) -> str:
 
     """
     found = pattern.search(info)
-    if found is None:
-        return ""
-    # Sliced by the group's span: `group()` is typed `str | Any`.
-    return info[found.start("value") : found.end("value")].strip()
+    value = typed_std.group(found, "value") if found else None
+    return value.strip() if value is not None else ""
 
 
 def check(binary: Path, head: str) -> None:
