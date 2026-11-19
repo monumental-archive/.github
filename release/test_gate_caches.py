@@ -426,16 +426,18 @@ class InstallKeys(unittest.TestCase):
 
     def test_a_list_the_key_does_not_carry_is_named(self) -> None:
         """Planted: the leg installs a tool its key's list leaves out."""
+        listed = "jq aqua:taiki-e/cargo-llvm-cov"
+        pins = "${{ steps.pins.outputs.install }}"
         text = plant(
-            "          install_args: jq ${{ steps.pins.outputs.install }}",
-            "          install_args: jq typos ${{ steps.pins.outputs.install }}",
+            f"          install_args: {listed} {pins}",
+            f"          install_args: {listed} typos {pins}",
         )
         self.assertEqual(
             [
                 (
-                    "pgrx: the cache key digests 'jq ${{ steps.pins.outputs.install }}'"
+                    f"pgrx: the cache key digests '{listed} {pins}'"
                     " and the job installs"
-                    " 'jq typos ${{ steps.pins.outputs.install }}'"
+                    f" '{listed} typos {pins}'"
                 )
             ],
             install_key_findings(text),

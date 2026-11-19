@@ -3,13 +3,19 @@
 # (#813). Sourced by belt tasks (`. "${ORG_BELT_DIR}/pgrx-env.sh"`),
 # never executed.
 #
-# Four tasks compile a pgrx extension — `lint:pg-clippy`, `test:pgrx`,
-# `fix:rust`'s extension pass and the coverage measurement
-# (`coverage:check` and `coverage:adopt` share it, #917) — and each
-# needs the same two things first: a `pg_config` per
-# declared major registered with pgrx, and, on macOS, a correction to
-# flags the prebuilt Postgres recorded on somebody else's machine.
-# Written four times they would drift; written here they cannot.
+# The tasks that compile a pgrx extension — `lint:pg-clippy`,
+# `test:pgrx`, `fix:rust`'s extension pass, and the workspace-wide
+# mutation and semver audits — each need the same two things first: a
+# `pg_config` per declared major registered with pgrx, and, on macOS, a
+# correction to flags the prebuilt Postgres recorded on somebody else's
+# machine. Written in each they would drift; written here they cannot.
+#
+# The coverage measurement is no longer among them (#1656). It compiled
+# the extension under `cargo llvm-cov --workspace` (#917), but the
+# extension's functions run in the Postgres backend, which that run never
+# collected from, so every line read as zero (#1652). The rust leg now
+# leaves the extension out, and `test:pgrx` measures it, each major's
+# run built instrumented where the repository holds a floor.
 
 org_pgrx_darwin_flags() { # correct the SDK the prebuilt pg_config names
   # MEASURED, and the one real cost of the aqua-backed mechanism. The
@@ -226,9 +232,9 @@ org_pgrx_init_locked() { # usage: org_pgrx_init_locked <home> <init args…>, un
 
 org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   # For a caller that compiles the WHOLE workspace rather than naming the
-  # extension (#917). `cargo llvm-cov --workspace` reaches a pgrx crate
-  # exactly as `cargo pgrx test` does, and it was the one path that got
-  # no Postgres: measured on release-lab, it died in pgrx-bindgen on
+  # extension (#917): the mutation and semver audits. A workspace-wide
+  # cargo run reaches a pgrx crate exactly as `cargo pgrx test` does, and
+  # `cargo llvm-cov --workspace` was the first such path, with no Postgres: measured on release-lab, it died in pgrx-bindgen on
   # "'inttypes.h' file not found" on macOS, and on a cold runner nothing
   # had registered a pg_config at all.
   #

@@ -57,6 +57,16 @@
 # the union of those legs' variables; the reading and the refusals are
 # plpgsql_coverage.py's.
 #
+# `pgrx` (#1656) is not part of `all` either. A pgrx extension's code
+# runs inside the Postgres backend, so only its own suite can cover it,
+# and that suite is `test:pgrx`, which measures each major's run itself
+# and holds it to the floor in the gate. `all` therefore leaves the
+# extension crates out of the rust leg (their lines would read as zero)
+# and names the `pgrx-pgNN` legs `test:pgrx` owns; the `pgrx` selector
+# runs pgrx-test.sh's `measure` mode for every declared major and
+# prints its `pgrx-pgNN <percent>` lines, for `coverage:adopt` and the
+# release path, which derive the floor.
+#
 # Invoked directly, never through a nested `mise run`: a nested mise
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
@@ -101,6 +111,7 @@ fi
 # The caller's name, so a remedy printed here names the task the session
 # actually ran.
 label="${1:-coverage:measure}"
+belt_dir=$(dirname "${BASH_SOURCE[0]}")
 
 # Which language legs to run. Default `all`: every caller that reads
 # the percentages wants them all, because the floor is a minimum every
@@ -109,10 +120,10 @@ label="${1:-coverage:measure}"
 # below.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | rust-branches | python | typescript | plpgsql | probe | reports) ;;
+  all | go | rust | rust-branches | pgrx | python | typescript | plpgsql | probe | reports) ;;
   *)
     echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
-      "rust-branches, python, typescript, plpgsql, probe, reports or runs-test" >&2
+      "rust-branches, pgrx, python, typescript, plpgsql, probe, reports or runs-test" >&2
     exit 1
     ;;
 esac
@@ -268,13 +279,31 @@ if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
   echo "go ${go_pct}"
 fi
 
+# The workspace's pgrx extensions, from gate_surface.py, the derivation
+# every pgrx task reads (#813): sets `pgrx_names` (space-separated crate
+# names) and `pgrx_majors` (one major per line, sorted). Empty in a
+# workspace with none, which pays for one `cargo metadata`.
+pgrx_surface() {
+  local metadata surface record spec kind majors _dir
+  pgrx_names=""
+  pgrx_majors=""
+  metadata=$(cargo metadata --no-deps --format-version 1 --locked) || exit 1
+  surface=$("${ORG_PYTHON}" "${belt_dir}/gate_surface.py" <<< "${metadata}") || exit 1
+  while IFS=$'\t' read -r record spec kind majors _dir; do
+    [[ ${record} == crate && ${kind} == pgrx ]] || continue
+    pgrx_names="${pgrx_names} ${spec%@*}"
+    pgrx_majors="${pgrx_majors}${pgrx_majors:+,}${majors}"
+  done <<< "${surface}"
+  pgrx_majors=$(tr ',' '\n' <<< "${pgrx_majors}" | sed '/^$/d' | sort -un)
+}
+
 # The Rust measurement surface, shared by the `rust` and `rust-branches`
 # legs (#1359) so the line figure and the branch figure are taken over
 # one workspace: the llvm-tools assertion for the toolchain the leg
-# runs on, the pgrx provisioning, and the COVERAGE_EXCLUDE list. Sets
-# `excludes`. The toolchain is empty for the repository's stable pin.
+# runs on, and the members held out. Sets `excludes`. The toolchain is
+# empty for the repository's stable pin.
 rust_surface() {
-  local toolchain="$1" member installed
+  local toolchain="$1" member name installed
   # No task-time rustup, by rule: a component installed mid-run races
   # every other task driving the toolchain (measured twice on the lab's
   # v0.18.0 release PR, #117). llvm-tools is a declared build input —
@@ -293,18 +322,28 @@ rust_surface() {
     echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
     exit 1
   fi
-  # A pgrx extension in the workspace is compiled by the measurement like
-  # any other member, so it is given its Postgres first (#917) — and a
-  # COVERAGE_EXCLUDE that names one is refused there, not honoured.
-  # shellcheck source=mise/pgrx-env.sh
-  . "${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}/pgrx-env.sh"
-  org_pgrx_provision "${label}" "${COVERAGE_EXCLUDE:-}" >&2
+  # A pgrx extension is measured by its own suite, `test:pgrx`, and never
+  # here (#1656): its functions run in the Postgres backend, which this
+  # run does not collect from, so every one of its lines read as zero
+  # (#1652). It leaves this leg's surface, so its lines are counted once,
+  # by the leg that can cover them — and this leg needs no Postgres.
+  pgrx_surface
   # COVERAGE_EXCLUDE ([env] in the repository's mise.toml): workspace
   # members whose tests cannot run on the gate runner. Never a pgrx
-  # extension — that was its first use (the lab's lab-pg, #316) and is
-  # now refused above.
+  # extension: the belt measures that through test:pgrx (#917, #1656),
+  # and a list that names one states a hole that is not there.
   excludes=""
-  for member in ${COVERAGE_EXCLUDE:-}; do excludes="${excludes} --exclude ${member}"; done
+  for member in ${COVERAGE_EXCLUDE:-}; do
+    for name in ${pgrx_names}; do
+      [[ ${member} != "${name}" ]] || {
+        echo "${label}: COVERAGE_EXCLUDE names the pgrx extension ${member} — delete it from the" >&2
+        echo "  list: the extension is measured through test:pgrx, never held out (#917, #1656)" >&2
+        exit 1
+      }
+    done
+    excludes="${excludes} --exclude ${member}"
+  done
+  for name in ${pgrx_names}; do excludes="${excludes} --exclude ${name}"; done
 }
 
 if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
@@ -341,6 +380,18 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
     exit 1
   fi
   echo "rust ${rust_pct}"
+  # The legs the gate holds elsewhere, named so a reader of this run sees
+  # the extension is measured, not missing.
+  for one in ${pgrx_majors}; do
+    echo "${label}: pgrx-pg${one}: measured and held by test:pgrx" >&2
+  done
+fi
+
+if [[ -f Cargo.toml && ${legs} == pgrx ]]; then
+  # pgrx-test.sh's own run, every declared major, its leg lines kept on
+  # stdout and everything else sent to stderr.
+  ORG_PGRX_MAJOR="" "${belt_dir}/pgrx-test.sh" measure \
+    | awk '/^pgrx-pg[0-9]+ [0-9.]+$/ { print; next } { print > "/dev/stderr" }'
 fi
 
 if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then

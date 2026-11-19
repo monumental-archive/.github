@@ -981,7 +981,11 @@ class GateInstalls(unittest.TestCase):
     def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres(self) -> None:
         """The leg's list as derived: no linter, node, fuzz or MSRV."""
         self.assertEqual(
-            (["jq"], ["postgresql-binaries", "rust", "cargo-pgrx"], []),
+            (
+                ["jq", "aqua:taiki-e/cargo-llvm-cov"],
+                ["postgresql-binaries", "rust", "cargo-pgrx"],
+                [],
+            ),
             installs(load("ci.yml")["pgrx"]),
         )
 

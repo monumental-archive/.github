@@ -6730,6 +6730,13 @@ dir = "{{cwd}}"
 # names the files last, refusing a run that measured or wrote nothing
 # before the floor is held, so a refusal is never preceded by a hold
 # line. The line is printed last.
+#
+# A pgrx extension is not measured here (#1656): its code runs in the
+# Postgres backend, so only its own suite covers it, and test:pgrx
+# measures and holds each major in its own pgrx job. The measurement
+# leaves the extension out of the rust leg and names those legs
+# (`pgrx-pgNN: measured and held by test:pgrx`); the suite runs zero
+# times here.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
 tracked=$(git ls-files -- '*.py' && { git grep -lIiE "language[[:space:]]+'?plpgsql" || true; }) || tracked=""
@@ -6787,13 +6794,19 @@ dir = "{{cwd}}"
 # audit:coverage-go-branches. Go needs no second toolchain, so the line
 # is measured whenever go.mod is; a missing gobco is refused with its
 # install line, never skipped.
+#
+# A workspace with a pgrx extension gets one `pgrx-pgNN` line per
+# declared major (#1656), measured by test:pgrx's own run (the `pgrx`
+# selector) and inside the minimum: the gate holds each major to the
+# floor in its own pgrx job, so the floor is derived from them too. The
+# selector prints nothing where there is no extension.
 run = '''
 applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
 if [[ -z ${applies} ]]; then
   echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or tracked PL/pgSQL with a test task), nothing to measure"
   exit 0
 fi
-legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt) || exit 1
+legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt && "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt pgrx) || exit 1
 if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
   branches=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt rust-branches) || exit 1
   legs="${legs}"$'\n'"${branches}"
