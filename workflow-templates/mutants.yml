@@ -5,7 +5,8 @@
 # edit here. A repository adopts a language by tracking that tool's own
 # config: `.cargo/mutants.toml` for Rust, a `[tool.mutmut]` table in
 # `pyproject.toml` (or `[mutmut]` in `setup.cfg`) for Python, and a root
-# `.gomuignore` with no pattern for Go (#1356). Without one every leg
+# `.gomuignore` with no pattern for Go (#1356), and a root
+# `stryker.config.json` for TypeScript (#1358). Without one every leg
 # skips clean by name. Its own workflow, apart from the audit, so a
 # survivor reds this run and never the audit's.
 ---

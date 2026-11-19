@@ -10,7 +10,8 @@ group — over the tasks the belt defines, and no task it reaches may be
 an `audit:*` task or run a mutation leg.
 
 The `audit:mutants` half: every delivered leg, `mise/mutants-*.sh`, is
-named by exactly one `leg <language>` line of the task's body, so a leg
+named by exactly one `leg <language>` line of the task's delivered
+body, `mise/mutants.sh` (extracted under #1544's ceiling), so a leg
 file nobody runs cannot exist and a language is one added line (#1336's
 shared shape); MUTANTS_LEG selects one leg for that language's own jobs
 in repo-mutants.yml, and unset runs them all.
@@ -195,7 +196,10 @@ class Mutants(unittest.TestCase):
 
         A leg file nobody runs cannot exist, nor a line naming a missing leg.
         """
-        body = tasks()["audit:mutants"]["run"]
+        self.assertEqual(
+            tasks()["audit:mutants"]["run"], '"${ORG_BELT_DIR}/mutants.sh"'
+        )
+        body = (BELT / "mutants.sh").read_text(encoding="utf-8")
         named = LEG_LINE.findall(body)
         self.assertNotEqual(named, [])
         self.assertEqual(sorted(named), leg_files())
@@ -206,9 +210,10 @@ class Selection(unittest.TestCase):
     """MUTANTS_LEG selects one leg; unset, every leg runs."""
 
     def setUp(self) -> None:
-        """Plant a belt directory of stub legs that only say they ran."""
+        """Plant a belt of the real body and stub legs that only say they ran."""
         self.belt = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.belt)
+        shutil.copy2(BELT / "mutants.sh", self.belt / "mutants.sh")
         for lang in leg_files():
             (self.belt / f"mutants-{lang}.sh").write_text(
                 f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n', encoding="utf-8"

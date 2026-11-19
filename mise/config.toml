@@ -531,6 +531,12 @@ python = "3.15.2"
 # the gate, every job without a named list — skips it, and only
 # repo-mutants.yml's `mutants-python` job installs it, by name.
 "pipx:mutmut" = { version = "3.8.1", lazy = true, lazy_bins = ["mutmut"] }
+# Mutation testing for TypeScript (#1358): `audit:mutants`' TypeScript
+# leg, mise/mutants-typescript.sh, runs StrykerJS — and pins nothing
+# here. StrykerJS is the repository's, from its own lockfile under its
+# own npm provenance policy (`@stryker-mutator/core` and its runner in
+# devDependencies), the way its test runner is: a second belt copy
+# could disagree with the runner plugin the repository resolved.
 # Property testing for Python (#1332): the first third-party library
 # the belt's tests import, and only from `prop_*.py` files, which a
 # repository's own `test` task never collects — the ordinary suites
@@ -8479,7 +8485,8 @@ dir = "{{cwd}}"
 # Coverage counts a line as covered when a test runs it, whether or not
 # any test would notice a change to it; a mutation run changes it and
 # asks. One task, one leg per language, each leg its own delivered file
-# (mise/mutants-<language>.sh), so a language is ONE added line below.
+# (mise/mutants-<language>.sh), so a language is ONE added `leg` line in
+# mise/mutants.sh, the delivered body (#1544's ceiling).
 #
 # NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
 # suite once per mutant. repo-mutants.yml runs it weekly: per language a
@@ -8497,26 +8504,7 @@ dir = "{{cwd}}"
 # shard count, timeout and tick, so a red names its language at the job
 # level — and each job selects its one leg with MUTANTS_LEG=<language>.
 # A MUTANTS_LEG naming no leg is red, never a run of nothing.
-run = '''
-red=""
-ran=""
-leg() {
-  [[ -z ${MUTANTS_LEG:-} || ${MUTANTS_LEG} == "$1" ]] || return 0
-  ran+=" $1"
-  bash "${ORG_BELT_DIR}/mutants-$1.sh" || red+=" $1"
-}
-leg go
-leg python
-leg rust
-if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
-  echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2
-  exit 1
-fi
-if [[ -n ${red} ]]; then
-  echo "audit:mutants: red leg(s):${red}" >&2
-  exit 1
-fi
-'''
+run = '"${ORG_BELT_DIR}/mutants.sh"'
 
 [tasks."lint:licence"]
 description = "The repo carries its licence: tracked LICENSE or LICENSES/, and REUSE.toml's expression filled"
