@@ -3379,6 +3379,28 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   replaced by one flag on the gate's `rust` leg, and the
   `rust-branches` line folds into the main floor the way
   `python-branches` does.
+- **A pgrx extension's coverage through `cargo llvm-cov --workspace`**
+  — replaced (#1656, 2026-11-19). #917 put the extension into the rust
+  leg so the floor would not omit a published crate, but an extension's
+  functions run in the Postgres backend, which that run never collected
+  from: measured on #1652, every extension line read uncovered (0 of 18
+  on release-lab, 0 of 143 on edtf). The same suite built instrumented
+  (`cargo llvm-cov show-env`, a target directory of its own, an
+  absolute `LLVM_PROFILE_FILE`) writes backend profiles that survive
+  pgrx's own `pg_ctl stop -m fast`: 14 of 18 and 143 of 143, within a
+  second of the plain run cold and warm. So `test:pgrx` is the measured
+  run where a repository holds a floor: each major prints
+  `pgrx-pgNN <percent>` and holds the floor by itself, in its own gate
+  job; the rust leg leaves the extension out; `coverage-measure.sh pgrx`
+  gives `coverage:adopt` and the release path the same figures.
+  Rejected, so they are not re-proposed: a second instrumented run of
+  the suite beside the plain one (one run, the owner's ruling); one
+  major standing for all (false the day an extension carries per-major
+  code); merging the majors into one figure (profiles are per binary,
+  and a union hides which major is under-tested); leaving the crate in
+  the rust leg too (counted twice, once as zero). *Reopen:* a pgrx
+  release whose test harness stops the server in a way no profile
+  survives.
 - **gocoverageplus for the Go branch figure** — skipped (#1546,
   2026-11-19), measured beside gobco on stele (the table under gobco's
   entry). It crashed on every stele profile under Go 1.27: its pinned

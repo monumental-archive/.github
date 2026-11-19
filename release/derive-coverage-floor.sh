@@ -61,7 +61,13 @@ fi
 # One measurement, shared with the gate: `coverage:check` enforces the
 # number this prints and this derives the floor from it, so the flags
 # cannot drift apart (#316's shape, #652's fix).
+#
+# A pgrx extension's `pgrx-pgNN` legs (#1656) are measured by its own
+# suite, test:pgrx, every declared major, through the `pgrx` selector:
+# the gate holds them to the floor, so the floor is derived from them
+# too. Nothing is printed where there is no extension.
 legs=$("${belt}/coverage-measure.sh" "release:coverage-floor")
+legs+=$'\n'$("${belt}/coverage-measure.sh" "release:coverage-floor" pgrx)
 "${ORG_PYTHON}" "${belt}/coverage_floor.py" write --provenance "v${VERSION}" <<< "${legs}"
 
 emit "files=.coverage-floor"

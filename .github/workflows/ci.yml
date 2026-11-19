@@ -585,7 +585,7 @@ jobs:
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
           ORG_PGRX_MAJOR: ${{ matrix.major }}
-          ORG_TOOL_INSTALL: jq ${{ steps.pins.outputs.install }}
+          ORG_TOOL_INSTALL: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
         run: |
           "${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
             .org-canon --install "${ORG_TOOL_INSTALL}"
@@ -610,8 +610,10 @@ jobs:
         with:
           version: 2026.11.7
           cache: false
-          # belt tools by the belt's keys, then the caller's inputs
-          install_args: jq ${{ steps.pins.outputs.install }}
+          # belt tools by the belt's keys, then the caller's inputs.
+          # cargo-llvm-cov: a repository with a floor measures its
+          # extension in this run (#1656).
+          install_args: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
 
       # unattested-path: the write half of the tool cache restored
       # above, on the same standing. It runs on a push to the default
@@ -647,7 +649,24 @@ jobs:
       - name: Run the extension's suite at this major
         env:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
+          # Where a measured run writes its report: outside the working
+          # tree (#1628), the directory the next step keeps.
+          ORG_COVERAGE_REPORTS: ${{ runner.temp }}/coverage-reports
         run: mise run test:pgrx
+
+      # The leg's own coverage report (#1656): where the repository holds
+      # a floor, test:pgrx measured this major's run and wrote
+      # lcov-pgrx-pgNN.info into ORG_COVERAGE_REPORTS. Kept for the badge
+      # job on a push to the default branch only, like the gate's
+      # reports; a tree with no floor writes none.
+      - name: Keep the leg's coverage report for the badge (default branch only)
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-reports-pgrx-pg${{ matrix.major }}
+          path: ${{ runner.temp }}/coverage-reports
+          if-no-files-found: ignore
+          retention-days: 1
 
       # unattested-path: the write half of the cargo caches restored
       # above, on their standing: a push to the default branch that
@@ -743,10 +762,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # The gate's artifact and each pgrx leg's (#1656), into one
+      # directory: their file names never collide.
       - name: Fetch the reports the gate wrote
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: coverage-reports
+          pattern: coverage-reports*
+          merge-multiple: true
 
       # The list is what the gate's artifact holds, in coverage:check's
       # order, and the step names it: the files the gate wrote.
@@ -760,7 +782,7 @@ jobs:
           if [[ ${HAS_TOKEN} != "true" ]]; then
             echo "::notice::no token; badge upload skipped"
           else
-            for f in lcov.info lcov-typescript.info coverage.txt coverage.xml; do
+            for f in lcov.info lcov-typescript.info coverage.txt coverage.xml lcov-pgrx-pg*.info; do
               [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
             done
             if [[ -z ${files} ]]; then
