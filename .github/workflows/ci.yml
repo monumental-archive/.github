@@ -205,7 +205,7 @@ jobs:
           ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
           ORG_QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           ORG_QUEUE_TOKEN: ${{ github.token }}
-        run: python3 .org-canon/mise/queue-head.py
+        run: '"${ORG_PYTHON}" .org-canon/mise/queue-head.py'
 
       # The Rust toolchains live INSIDE the directory the tool cache
       # below restores (#1165). mise installs rust through rustup, and

@@ -176,7 +176,8 @@ class StampStepIsTheHelper(unittest.TestCase):
         body = step("Refuse a binary whose stamp is not the released commit")
         self.assertIn(
             "        run: |\n"
-            '          "${ORG_CANON_TREE}/release/check-go-stamps.py"\n',
+            '          "${ORG_PYTHON}"'
+            ' "${ORG_CANON_TREE}/release/check-go-stamps.py"\n',
             body,
         )
         self.assertNotIn("go version", body)

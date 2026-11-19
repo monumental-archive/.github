@@ -123,7 +123,7 @@ class PlanStepIsTheHelper(unittest.TestCase):
         body = step()
         self.assertIn(
             "        run: |\n"
-            "          .org-canon/release/pgrx/inventory-plan.py"
+            '          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory-plan.py'
             ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n',
             body,
         )
