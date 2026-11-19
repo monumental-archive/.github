@@ -80,6 +80,28 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # The subject derivation reconciles the declared population against
+      # the org listing, and a job token lists only what this repository
+      # can see: the private member is never in it, so every decision
+      # refused (#1602). The audit App's read token sees the population;
+      # it reaches this job only, never the signing legs below.
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
@@ -110,7 +132,7 @@ jobs:
       - name: Resolve subjects from the products the statements name
         id: collect
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
           BEFORE: ${{ github.event.before }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}
