@@ -80,7 +80,8 @@ import sys
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
-from typing import cast
+
+from decoded import UndecodableError, as_array, as_object, load_json
 
 NAME = "plpgsql-coverage"
 ENV = "ORG_PLPGSQL_COVERAGE"
@@ -373,39 +374,6 @@ def fraction_field(document: dict[str, object], key: str, where: str) -> Decimal
     return value
 
 
-def as_object(value: object, where: str) -> dict[str, object]:
-    """Narrow a decoded JSON value to an object with string keys.
-
-    Returns:
-        The object.
-
-    Raises:
-        NotAReportError: the value is not a JSON object.
-
-    """
-    if not isinstance(value, dict):
-        msg = f"{where} is not an object"
-        raise NotAReportError(msg)
-    # JSON object keys are strings; the values are read field by field.
-    return cast("dict[str, object]", value)
-
-
-def as_list(value: object, where: str) -> list[object]:
-    """Narrow a decoded JSON value to a list.
-
-    Returns:
-        The list; its items are read one by one.
-
-    Raises:
-        NotAReportError: the value is not a JSON array.
-
-    """
-    if not isinstance(value, list):
-        msg = f"{where} is not a list"
-        raise NotAReportError(msg)
-    return cast("list[object]", value)
-
-
 def decode_function(value: object, where: str) -> Reading | Unreadable:
     """Decode one function entry, in one of its two shapes.
 
@@ -445,17 +413,22 @@ def decode(text: str) -> Report | Failed:
 
     """
     try:
-        decoded: object = json.loads(text)
-    except ValueError as exc:
+        decoded = load_json(text)
+    except UndecodableError as exc:
         msg = f"not JSON ({exc})"
         raise NotAReportError(msg) from exc
-    document = as_object(decoded, "the document")
-    if "error" in document:
-        return Failed(text_field(document, "error", "the document"))
-    listed = as_list(document.get("functions"), "the document: 'functions'")
-    functions = tuple(
-        decode_function(item, f"function {index}") for index, item in enumerate(listed)
-    )
+    # A wrong shape the shared readers refuse is this report's refusal.
+    try:
+        document = as_object(decoded, "the document")
+        if "error" in document:
+            return Failed(text_field(document, "error", "the document"))
+        listed = as_array(document.get("functions"), "the document: 'functions'")
+        functions = tuple(
+            decode_function(item, f"function {index}")
+            for index, item in enumerate(listed)
+        )
+    except UndecodableError as exc:
+        raise NotAReportError(str(exc)) from exc
     return Report(
         profiler=text_field(document, "profiler", "the document"),
         preload=text_field(document, "preload", "the document"),
