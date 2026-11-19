@@ -434,6 +434,11 @@ while read -r repo; do
         ;;
       "${cc_prefix}"/*/graph/badge.svg | "${cc_prefix}"/*/branch/*/graph/badge.svg)
         cc="${url#"${cc_prefix}"/}"
+        # A badge URL that names a branch names it; otherwise the branch
+        # is the forge's default (#1668), never the issuer's idea of it.
+        ccb=""
+        [[ ${cc} != */branch/* ]] || ccb="${cc#*/branch/}"
+        ccb="${ccb%%/*}"
         cc="${cc%%/*}"
         # Knowing the repository is not having its coverage (#1161).
         # This leg used to pass on `.name` alone, which Codecov returns
@@ -442,7 +447,7 @@ while read -r repo; do
         # reading "unknown" and were reported live.
         #
         # The question is the one the image answers: what does Codecov
-        # hold for the HEAD of the default branch. Not the repository's
+        # hold for the HEAD of the branch. Not the repository's
         # `.totals` — measured on edtf's first upload, that stays null
         # while the branch head already carries 96.81 and the shield
         # already reads 97%. And the head Codecov knows must be the
@@ -451,37 +456,43 @@ while read -r repo; do
         # shield kept rendering the last figure it was given, and a
         # check that only asked "is there a number" stayed green. An
         # hour's grace covers an upload still in flight.
-        ask "${cc_api}/${cc}"
-        hear "${ask_code}"
-        case "${heard}" in
-          200)
-            ccb=$(jq -r '.branch // empty' <<< "${ask_body}" 2> /dev/null || true)
-            ask "${cc_api}/${cc}/commits?branch=${ccb:-main}"
-            cov=$(jq -r '.results[0].totals.coverage // empty' <<< "${ask_body}" 2> /dev/null || true)
-            ccsha=$(jq -r '.results[0].commitid // empty' <<< "${ask_body}" 2> /dev/null || true)
-            gh_head=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${cc}/commits/${ccb:-main}" \
-              --jq '[.sha, (.commit.committer.date | fromdate)] | @tsv' 2> /dev/null || true)
-            gh_sha="${gh_head%%$'\t'*}"
-            gh_at="${gh_head##*$'\t'}"
-            now=$(date -u +%s)
-            hear "${cov}"
-            if [[ ${heard} != 200 && (${heard} != absent || ${ask_code} != 200) ]]; then
-              unanswered codecov "Codecov, about ${cc}'s commits,"
-            elif [[ ${heard} == absent ]]; then
-              failed="${failed} ${repo}(codecov: no coverage report for ${cc}'s ${ccb:-main}"
-              failed+=" — the shield reads unknown; the gate stub must pass codecov-token)"
-            elif [[ -z ${gh_sha} ]]; then
-              failed="${failed} ${repo}(codecov: could not read ${cc}'s ${ccb:-main} head from GitHub)"
-            elif [[ ${ccsha} != "${gh_sha}" && $((now - gh_at)) -gt 3600 ]]; then
-              failed="${failed} ${repo}(codecov: stale — Codecov last heard about ${ccsha:0:7},"
-              failed+=" ${ccb:-main} is at ${gh_sha:0:7}; the upload job is not running)"
-            else
-              note "${repo}: codecov holds ${cov}% for ${cc} at ${ccsha:0:7}"
-            fi
-            ;;
-          absent) failed="${failed} ${repo}(codecov: issuer has no record of ${cc})" ;;
-          *) unanswered codecov "Codecov, about ${cc}," ;;
-        esac
+        #
+        # ONE request, the branch route (#1668): its `head_commit` and
+        # that commit's coverage are all this leg judges. The
+        # repository-detail route it used to ask first, only to learn
+        # the branch, answers 404 for `.github` while the branch route
+        # answers with main's head (measured 2026-11-19), so every run
+        # called a live shield "no record".
+        [[ -n ${ccb} ]] || ccb=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${cc}" \
+          --jq '.default_branch // empty' 2> /dev/null || true)
+        if [[ -z ${ccb} ]]; then
+          failed="${failed} ${repo}(codecov: could not read ${cc}'s default branch from GitHub)"
+          continue
+        fi
+        gh_head=$(gh api "repos/${GITHUB_REPOSITORY_OWNER}/${cc}/commits/${ccb}" \
+          --jq '[.sha, (.commit.committer.date | fromdate)] | @tsv' 2> /dev/null || true)
+        gh_sha="${gh_head%%$'\t'*}"
+        gh_at="${gh_head##*$'\t'}"
+        now=$(date -u +%s)
+        ask "${cc_api}/${cc}/branches/${ccb}"
+        cov=$(jq -r '.head_commit.totals.coverage // empty' <<< "${ask_body}" 2> /dev/null || true)
+        ccsha=$(jq -r '.head_commit.commitid // empty' <<< "${ask_body}" 2> /dev/null || true)
+        hear "${cov}"
+        if [[ ${heard} == absent && ${ask_code} == 404 ]]; then
+          failed="${failed} ${repo}(codecov: issuer has no record of ${cc})"
+        elif [[ ${heard} == absent ]]; then
+          failed="${failed} ${repo}(codecov: no coverage report for ${cc}'s ${ccb}"
+          failed+=" — the shield reads unknown; the gate stub must pass codecov-token)"
+        elif [[ ${heard} != 200 ]]; then
+          unanswered codecov "Codecov, about ${cc}'s ${ccb},"
+        elif [[ -z ${gh_sha} ]]; then
+          failed="${failed} ${repo}(codecov: could not read ${cc}'s ${ccb} head from GitHub)"
+        elif [[ ${ccsha} != "${gh_sha}" && $((now - gh_at)) -gt 3600 ]]; then
+          failed="${failed} ${repo}(codecov: stale — Codecov last heard about ${ccsha:0:7},"
+          failed+=" ${ccb} is at ${gh_sha:0:7}; the upload job is not running)"
+        else
+          note "${repo}: codecov holds ${cov}% for ${cc} at ${ccsha:0:7}"
+        fi
         ;;
       # The shields fix:badges renders from the tree alone (#1161):
       # release, licence, and the STATIC shields a repository declares
