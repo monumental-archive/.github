@@ -107,7 +107,7 @@ jobs:
           # v0.18.2 darwin leg pulled same-day mise 2026.8.4 while every
           # pinned site ran 2026.8.3 (#117: nothing unpinned on an attested
           # path, the installer included).
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.

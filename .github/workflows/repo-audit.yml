@@ -51,7 +51,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Check the advisory feed against the lock
@@ -83,7 +83,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Check the public API against the latest published release
@@ -108,7 +108,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # Bounded libFuzzer runs under AddressSanitizer — cargo-fuzz's own
@@ -179,7 +179,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # `cargo llvm-cov --branch` on the nightly the repo declares as
@@ -210,7 +210,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # Call-graph-aware advisory scan against https://vuln.go.dev —
@@ -238,7 +238,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # Link liveness over the caller's own tracked markdown. Network-
@@ -276,7 +276,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Audit workflows online
@@ -313,7 +313,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Verify pin comments and release age
@@ -350,7 +350,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Verify each locked asset is built for the platform it names
@@ -385,7 +385,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       - name: Regenerate each lock in scratch and diff it
@@ -425,7 +425,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # Tree-local by the #681 test: the subject is this repository's
@@ -455,7 +455,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # The cron half of #1332, the Python mirror of the Go fuzz step:
@@ -488,7 +488,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # The `lint:*` symmetry the audit surface went without (#704). Every

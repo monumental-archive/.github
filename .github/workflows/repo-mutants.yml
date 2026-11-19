@@ -124,7 +124,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # The belt pins cargo-mutants `lazy`, so the bare install above —
@@ -216,7 +216,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # The belt pins gomu `lazy`, so the bare install above — and every
@@ -294,7 +294,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # The belt pins mutmut `lazy`, so the bare install above — and

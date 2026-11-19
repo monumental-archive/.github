@@ -296,7 +296,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
 
       # unattested-path: the write half of the tool cache restored
@@ -561,7 +561,7 @@ jobs:
       - name: Install mise and the leg's tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
           # belt tools by the belt's keys, then the caller's inputs
           install_args: jq ${{ steps.pins.outputs.install }}
@@ -781,7 +781,7 @@ jobs:
       - name: Install mise and the report's tools
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          version: 2026.11.6
+          version: 2026.11.7
           cache: false
           # belt tools by the belt's keys, then the caller's inputs
           install_args: >-
