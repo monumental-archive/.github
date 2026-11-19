@@ -2439,6 +2439,14 @@ What the leg does, each measured on 10.1.1 and held by a stub row
 - **StrykerJS exits 0 whatever survives**, so the verdict is read
   from the report. A non-zero exit judged nothing, and is red with
   its output.
+- **Every mutant, every week: incremental mode is deferred**
+  (orchestrator's ruling on #1358). A runner starts with no earlier
+  results, so `incremental: true` would read as on and do nothing, and
+  the config check refuses it by name. Tracking the incremental file
+  was rejected: the run rewrites it, which the clean-tree guard reds.
+  *Reopen* when a full weekly run no longer fits the job; the response
+  is a restored and saved incremental file outside the tree, in its
+  own issue.
 - **Under pnpm the config must name its runner in `plugins`.** Core
   sits in `.pnpm/` and cannot find its sibling ("no TestRunner
   plugins were loaded").

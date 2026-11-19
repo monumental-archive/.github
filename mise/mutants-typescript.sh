@@ -43,9 +43,13 @@
 # config may not set), so the verdict is read from its JSON report, never
 # its exit status; a non-zero exit is a run that judged nothing, and red.
 #
-# Incremental mode is the repository's (`incremental` in its config, the
-# incremental file tracked), switched on once its survivors reach zero:
-# the report still names every mutant, reused or re-run.
+# EVERY MUTANT, EVERY WEEK: incremental mode is deferred (ruling on
+# #1358). A runner starts with no earlier results, so `incremental` in
+# the config would read as on and do nothing, and a tracked incremental
+# file would be rewritten by the run and red the clean-tree guard; the
+# config check refuses `incremental` by name. Reopen when a full weekly
+# run no longer fits the job: a restored and saved incremental file
+# outside the tree, in its own issue.
 #
 # StrykerJS has no sharding, so the leg runs whole: a shard other than
 # 0/1 is red, never a silent re-run of everything.

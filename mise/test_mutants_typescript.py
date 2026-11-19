@@ -368,6 +368,23 @@ class Refusals(Planted):
                 )
                 self.assertEqual(log, [])
 
+    def test_incremental_is_refused_as_deferred(self) -> None:
+        """`incremental: true` is red by name, with the reason it is deferred."""
+        self.plant(*KILLED, config=CONFIG | {"incremental": True})
+        done, log = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [
+                (
+                    f"{LABEL}: stryker.config.json sets `incremental` — a runner has no"
+                    " earlier results, so it would read as on and do nothing; the leg"
+                    " runs every mutant every week (deferred, #1358)"
+                )
+            ],
+        )
+        self.assertEqual(log, [])
+
     def test_a_config_that_is_not_json_is_red(self) -> None:
         """An unreadable config is red, never a skip."""
         self.track("stryker.config.json", "{ mutate: [")

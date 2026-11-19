@@ -16,7 +16,11 @@ the denominator with no reason at any site:
 - `thresholds.break` is a score: the measure is never one, and a break
   makes StrykerJS exit non-zero over a run that judged everything.
 
-Each is red by name. Nothing is printed when the config is acceptable.
+Each is red by name. So is `incremental: true`, for another reason:
+incremental mode is deferred (ruling on #1358). A runner starts with
+no earlier results, so it would read as on and do nothing; the leg
+runs every mutant every week. Nothing is printed when the config is
+acceptable.
 
 `verdict <mutation.json>`, after it: StrykerJS 10's JSON report
 (`reports/mutation/mutation.json`, mutation-testing-report-schema 1.0)
@@ -138,7 +142,15 @@ def check_config(path: str, label: str) -> int:
             f"{label}: record each equivalent mutant at its site instead: {MARK}",
             file=sys.stderr,
         )
-    return 1 if found else 0
+    incremental = isinstance(config, dict) and config.get("incremental") is True
+    if incremental:
+        print(
+            f"{label}: {path} sets `incremental` — a runner has no earlier"
+            " results, so it would read as on and do nothing; the leg runs every"
+            " mutant every week (deferred, #1358)",
+            file=sys.stderr,
+        )
+    return 1 if found or incremental else 0
 
 
 def site(path: str, mutant: dict) -> str:
