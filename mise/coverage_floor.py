@@ -795,9 +795,12 @@ def hold(path: Path, label: str, source: str) -> int:
     record demands no leg.
 
     Returns:
-        0 when every leg holds and every recorded leg reported, else 1.
+        0 when every leg holds and every recorded leg reported (and when
+        there is no floor, which holds nothing), else 1.
 
     """
+    if not path.exists():
+        return 0
     record, problems = parse(path.read_text(encoding="utf-8"))
     if record is None:
         complain(problems, path)

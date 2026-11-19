@@ -879,6 +879,11 @@ class TestLegsRecord(unittest.TestCase):
                 self.assertEqual(1, len(problems), problems)
                 self.assertIn(expected, problems[0])
 
+    def test_no_floor_holds_nothing(self) -> None:
+        """Without a floor file there is nothing to hold or demand."""
+        with Tree(None) as tree:
+            self.assertEqual((0, "", ""), run(cf.hold, tree.path, "lbl", ""))
+
     def test_legs_prints_the_record(self) -> None:
         """One leg a line; nothing for no file or no record."""
         with Tree(legs_record("93.4", "python plpgsql")) as tree:
