@@ -167,7 +167,7 @@ def requested_majors(request: str) -> list[str]:
     """
     majors = split(request)
     if not majors:
-        msg = "no PG majors requested"
+        msg = "no PG majors requested — a release that builds nothing is not a release"
         raise RefusalError(msg)
     for pg in majors:
         if not (pg.isascii() and pg.isdigit()):
@@ -186,15 +186,12 @@ def pgrx_extension(mapping: Path, request: str) -> tuple[list[str], list[str]]:
         The output lines and the notice lines.
 
     Raises:
-        RefusalError: nothing requested, a major the mapping does not pin
-            a build and a smoke image for, a duplicate.
+        RefusalError: a major the mapping does not pin a build and a smoke
+            image for, checked after `requested_majors`'s own rules.
 
     """
     t = load(mapping)
-    majors = split(request)
-    if not majors:
-        msg = "no PG majors requested — a release that builds nothing is not a release"
-        raise RefusalError(msg)
+    majors = requested_majors(request)
     include = []
     for pg in majors:
         build, smoke = pinned(t.get("build"), pg), pinned(t.get("smoke"), pg)
@@ -206,9 +203,6 @@ def pgrx_extension(mapping: Path, request: str) -> tuple[list[str], list[str]]:
             for arch, runner in PGRX_ARCHES
         ]
     planned = [f"{cell['pg']}-{cell['arch']}" for cell in include]
-    if len(planned) != len(set(planned)):
-        msg = "duplicate PG major requested"
-        raise RefusalError(msg)
     floor = t.get("floor", {}).get("glibc")
     outputs = [
         f"matrix={compact({'include': include})}",

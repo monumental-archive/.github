@@ -250,11 +250,20 @@ class PgrxExtension(Rows):
 
     def test_a_major_with_no_pinned_base_image_is_refused(self) -> None:
         """A major the mapping does not carry, numeric or not."""
-        for major in ("13", "19", "x", "pg14"):
+        for major in ("13", "19"):
             with self.subTest(major=major):
                 self.refused(
                     ("pgrx-extension", MAPPING, f"14,{major}"),
                     f"::error::pg{major} {NO_IMAGE}",
+                )
+
+    def test_a_non_numeric_major_is_refused(self) -> None:
+        """A field that is not a number is named as such, not as unpinned."""
+        for major in ("x", "pg14", ""):
+            with self.subTest(major=major):
+                self.refused(
+                    ("pgrx-extension", MAPPING, f"{major},14"),
+                    f"::error::{major} is not a PG major",
                 )
 
     def test_a_major_pinned_for_one_role_only_is_refused(self) -> None:
@@ -275,6 +284,13 @@ class PgrxExtension(Rows):
         """The same major twice."""
         self.refused(
             ("pgrx-extension", MAPPING, "16,17,16"),
+            "::error::duplicate PG major requested",
+        )
+
+    def test_a_duplicate_is_named_before_an_unpinned_major(self) -> None:
+        """The request's own rules run before the mapping's pins (#1531)."""
+        self.refused(
+            ("pgrx-extension", MAPPING, "16,13,16"),
             "::error::duplicate PG major requested",
         )
 
@@ -313,7 +329,7 @@ class PgrxImages(Rows):
             with self.subTest(request=request):
                 self.refused(
                     ("pgrx-images", request),
-                    "::error::no PG majors requested",
+                    f"::error::no PG majors requested — {NOTHING}",
                 )
 
     def test_a_non_numeric_major_is_refused(self) -> None:
@@ -348,7 +364,7 @@ class RequestedMajors(unittest.TestCase):
 
     def test_an_empty_request_is_refused(self) -> None:
         """Nothing requested."""
-        self.assert_refused("", "no PG majors requested")
+        self.assert_refused("", f"no PG majors requested — {NOTHING}")
 
     def test_a_non_numeric_major_is_refused(self) -> None:
         """A field that is not ASCII digits."""
