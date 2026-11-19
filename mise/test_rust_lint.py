@@ -63,9 +63,18 @@ case "$1" in
 esac
 """
 
+# The task asks `rustup ... | grep -q "^clippy"` under pipefail. grep -q
+# leaves at its first match, and a stub that is still writing the next
+# line then dies of SIGPIPE, which pipefail reads as "clippy missing":
+# the task stops before clippy and writes no log (measured: 19 misses in
+# 8,000 under four parallel loops; #1623's merge queue, run 44617571290).
+# So the stub ignores SIGPIPE and exits 0 whether or not it was read.
 RUSTUP = """\
 #!/usr/bin/env bash
-printf 'clippy-x86_64-unknown-linux-gnu\\nrustfmt-x86_64-unknown-linux-gnu\\n'
+trap '' PIPE
+printf 'clippy-x86_64-unknown-linux-gnu\\n' 2> /dev/null
+printf 'rustfmt-x86_64-unknown-linux-gnu\\n' 2> /dev/null
+exit 0
 """
 
 
@@ -121,6 +130,30 @@ class EveryMemberIsLinted(unittest.TestCase):
             f"lint:rust: 6 crate(s) linted: {' '.join(MEMBERS)}\n", done.stdout
         )
         self.assertIn("lint:rust: red: edtf-core\n", done.stderr)
+
+
+class TheStubOutlivesItsReader(unittest.TestCase):
+    """The rustup stub answers 0 even when nobody reads it (#1623)."""
+
+    def test_a_reader_that_has_gone_does_not_kill_the_stub(self) -> None:
+        """Written into a pipe whose reader is closed, the stub still exits 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "rustup"
+            stub.write_text(RUSTUP, encoding="utf-8")
+            stub.chmod(0o755)
+            read, write = os.pipe()
+            os.close(read)
+            try:
+                # ruff: ignore[subprocess-without-shell-equals-true]
+                done = subprocess.run(
+                    [BASH, str(stub), "component", "list", "--installed"],
+                    stdout=write,
+                    env=hermetic.env(),
+                    check=False,
+                )
+            finally:
+                os.close(write)
+        self.assertEqual(0, done.returncode)
 
 
 if __name__ == "__main__":
