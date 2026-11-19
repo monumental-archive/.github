@@ -329,10 +329,38 @@ class PgrxImages(Rows):
         """A leading empty field is kept, and refused."""
         self.refused(("pgrx-images", ",14"), "::error:: is not a PG major")
 
-    def test_a_repeated_major_is_planned_as_the_shell_planned_it(self) -> None:
-        """The images step never refused a duplicate; no behaviour changes."""
-        outputs = 'matrix={"include":[{"pg":"14"},{"pg":"14"}]}\nexpected=["14","14"]\n'
-        self.assertEqual(run("pgrx-images", "14,14"), (0, outputs, ""))
+    def test_a_duplicate_is_refused(self) -> None:
+        """The same major twice would build and push one image twice (#1531)."""
+        self.refused(
+            ("pgrx-images", "14,14"),
+            "::error::duplicate PG major requested",
+        )
+
+
+class RequestedMajors(unittest.TestCase):
+    """requested_majors: every rule about the request itself, once (#1531)."""
+
+    def assert_refused(self, request: str, message: str) -> None:
+        """Assert a request is refused with exactly `message`."""
+        with self.assertRaises(matrix.RefusalError) as caught:
+            matrix.requested_majors(request)
+        self.assertEqual(str(caught.exception), message)
+
+    def test_an_empty_request_is_refused(self) -> None:
+        """Nothing requested."""
+        self.assert_refused("", "no PG majors requested")
+
+    def test_a_non_numeric_major_is_refused(self) -> None:
+        """A field that is not ASCII digits."""
+        self.assert_refused("14,pg15", "pg15 is not a PG major")
+
+    def test_a_duplicate_is_refused(self) -> None:
+        """The same major twice."""
+        self.assert_refused("16,17,16", "duplicate PG major requested")
+
+    def test_a_clean_list_is_returned_in_order(self) -> None:
+        """The order requested is the order returned."""
+        self.assertEqual(matrix.requested_majors("18,14,16"), ["18", "14", "16"])
 
 
 class BaseImages(Rows):

@@ -151,6 +151,34 @@ def pinned(table: object, major: str) -> str | None:
     return ref if isinstance(ref, str) and ref else None
 
 
+def requested_majors(request: str) -> list[str]:
+    """Split a pgrx request into its majors: every rule about the request itself.
+
+    Both pgrx planners call this first and keep only what is theirs
+    (#1531): one rule, one place.
+
+    Returns:
+        The requested majors, in order.
+
+    Raises:
+        RefusalError: nothing requested, a major that is not a number, a
+            duplicate.
+
+    """
+    majors = split(request)
+    if not majors:
+        msg = "no PG majors requested"
+        raise RefusalError(msg)
+    for pg in majors:
+        if not (pg.isascii() and pg.isdigit()):
+            msg = f"{pg} is not a PG major"
+            raise RefusalError(msg)
+    if len(majors) != len(set(majors)):
+        msg = "duplicate PG major requested"
+        raise RefusalError(msg)
+    return majors
+
+
 def pgrx_extension(mapping: Path, request: str) -> tuple[list[str], list[str]]:
     """Plan a pgrx extension build: each major on both arches, both images.
 
@@ -192,23 +220,16 @@ def pgrx_extension(mapping: Path, request: str) -> tuple[list[str], list[str]]:
 
 
 def pgrx_images(request: str) -> tuple[list[str], list[str]]:
-    """Plan the extension images: one cell per numeric major.
+    """Plan the extension images: one cell per requested major.
+
+    The request's own rules are `requested_majors`'s; the images planner
+    adds none.
 
     Returns:
         The output lines and (none) notice lines.
 
-    Raises:
-        RefusalError: nothing requested, a major that is not a number.
-
     """
-    majors = split(request)
-    if not majors:
-        msg = "no PG majors requested"
-        raise RefusalError(msg)
-    for pg in majors:
-        if not (pg.isascii() and pg.isdigit()):
-            msg = f"{pg} is not a PG major"
-            raise RefusalError(msg)
+    majors = requested_majors(request)
     outputs = [
         f"matrix={compact({'include': [{'pg': pg} for pg in majors]})}",
         f"expected={compact(majors)}",
