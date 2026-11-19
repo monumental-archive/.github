@@ -1029,6 +1029,10 @@ backend = "pipx:hypothesis"
 version = "3.8.1"
 backend = "pipx:mutmut"
 
+[[tools."pipx:mypy"]]
+version = "2.4.1"
+backend = "pipx:mypy"
+
 [[tools."pipx:reuse"]]
 version = "6.3.0"
 backend = "pipx:reuse"

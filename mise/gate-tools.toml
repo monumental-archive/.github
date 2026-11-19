@@ -167,6 +167,7 @@ when = []
 for = [
   "pipx:coverage",
   "pipx:hypothesis",
+  "pipx:mypy",
   "pipx:reuse",
   "pipx:sqlfluff",
   "pipx:yamllint",
@@ -296,3 +297,10 @@ when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
 # git's default pathspec lets `*` cross a slash.
 tasks = ["test:python-properties"]
 when = ["*prop_*.py"]
+
+[tools."pipx:mypy"]
+# audit:python-types only (#1604): no gate task calls it until the task
+# is renamed lint:python-types, whose row is then `when = ["*.py",
+# "*.pyi"]`, the task's own guard.
+tasks = []
+when = []

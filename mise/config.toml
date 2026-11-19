@@ -569,6 +569,14 @@ python = "3.15.2"
 # pipx: exception; one dependency, sortedcontainers, which mise.lock
 # does not hash (docs/tooling-verdicts.md). Atheris is refused there.
 "pipx:hypothesis" = "6.170.15"
+# Python type checking (#1604): mypy at its strictest, the owner's
+# ruling on a three-way measurement (ty, pyright, mypy) in
+# docs/tooling-verdicts.md. The SEVENTH pipx: exception: PyPI-only, no
+# aqua package; its five dependencies are unhashed in mise.lock, as
+# Hypothesis's one is. The config is delivered (mise/mypy.ini) and
+# audit:python-types runs it; the task enters `ci` as
+# lint:python-types once the canon's findings are run down.
+"pipx:mypy" = "2.4.1"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
 # override a name; the shared workflow is the enforcement backstop.
