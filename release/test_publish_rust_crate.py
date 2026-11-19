@@ -64,6 +64,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import publish_crates
@@ -73,6 +74,9 @@ import publish_crates
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 CANON = Path(__file__).resolve().parent.parent
 TESTDATA = CANON / "release" / "testdata"
@@ -451,6 +455,57 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         )
         self.assertNotIn(publish_crates.EXCHANGE, [u for u, _ in run.curl])
 
+    def test_an_oidc_answer_with_no_token_is_refused(self) -> None:
+        """An OIDC answer that is not an object holding a string value (#1682)."""
+        rows = [
+            (b"not json", "the runner's OIDC token answer is not JSON: "),
+            (b"[]", "the runner's OIDC token answer is not an object"),
+            (b"{}", "the runner's OIDC token answer's value is not a string"),
+            (b'{"value": 1}', "the runner's OIDC token answer's value is not a string"),
+        ]
+        for body, said in rows:
+            with self.subTest(body=body):
+
+                def fetch(
+                    method: str,
+                    url: str,
+                    headers: Mapping[str, str],
+                    data: bytes | None = None,
+                    body: bytes = body,
+                ) -> publish_crates.Response:
+                    del method, url, headers, data
+                    return publish_crates.Response(200, body)
+
+                env = {
+                    "ACTIONS_ID_TOKEN_REQUEST_URL": OIDC_URL,
+                    "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "t",
+                    "ORG_USER_AGENT": USER_AGENT,
+                }
+                with self.assertRaises(publish_crates.RefusalError) as refused:
+                    publish_crates.exchange_token(env, fetch)
+                self.assertTrue(
+                    str(refused.exception).startswith(said), refused.exception
+                )
+
+    def test_an_exchange_answer_with_no_token_is_refused(self) -> None:
+        """The exchange's answer must hold its token as a string (#1682)."""
+        with self.assertRaises(publish_crates.RefusalError) as refused:
+            publish_crates.answer_field(
+                b'{"token": null}', "token", "the crates.io token exchange's answer"
+            )
+        self.assertEqual(
+            "the crates.io token exchange's answer's token is not a string",
+            str(refused.exception),
+        )
+
+    def test_cargo_metadata_with_no_target_directory_is_refused(self) -> None:
+        """The metadata must name its target directory as a string (#1682)."""
+        with self.assertRaises(publish_crates.RefusalError) as refused:
+            publish_crates.answer_field("{}", "target_directory", "cargo metadata")
+        self.assertEqual(
+            "cargo metadata's target_directory is not a string", str(refused.exception)
+        )
+
     def test_an_index_that_never_answered_is_named(self) -> None:
         """No answer at all is "nothing", never "not published"."""
         run = run_publish({"ed/tf/edtf-core": "000"} | WASM)
@@ -493,9 +548,7 @@ class Main(unittest.TestCase):
 
     def test_a_failed_command_names_itself_and_its_status(self) -> None:
         """A failed cargo or member helper is named, with its exit."""
-        failed = publish_crates.subprocess.CalledProcessError(
-            101, ["cargo", "package", "-p", "x"]
-        )
+        failed = publish_crates.CommandError(["cargo", "package", "-p", "x"], 101)
         self.assertEqual(
             (101, "::error::cargo package -p x exited 101\n"), self.main(failed)
         )

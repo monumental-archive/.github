@@ -29,9 +29,9 @@ import os
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # The canon's one writer of workflow commands, in mise/ (#1660).
 # Appended, so this file's own directory and the standard library
@@ -40,6 +40,9 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
 import workflow_command
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class RefusedError(Exception):

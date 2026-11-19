@@ -69,7 +69,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 # The belt's crates.io index reader, beside this tree in mise/. A
 # missing sibling is named, never a bare traceback (#1522).
@@ -78,6 +78,7 @@ from typing import TYPE_CHECKING
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 try:
     import crates_index
+    import decoded
     import workflow_command
 except ModuleNotFoundError as missing:
     if missing.name != "crates_index":
@@ -86,7 +87,7 @@ except ModuleNotFoundError as missing:
     raise SystemExit(msg) from None
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
 HERE = Path(__file__).resolve().parent
 EXCHANGE = "https://crates.io/api/v1/trusted_publishing/tokens"
@@ -124,6 +125,30 @@ def http(
         return Response(None, b"")
 
 
+class Fetch(Protocol):
+    """Make one HTTP request: `http`, or a test's stand-in for it."""
+
+    def __call__(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        data: bytes | None = None,
+    ) -> Response:
+        """Answer one request."""
+        ...
+
+
+@dataclass(frozen=True)
+class IndexRecord:
+    """What the publish step reads of one index record."""
+
+    # The record's version, None when it names none as a string.
+    vers: str | None
+    # Its checksum, None when absent, not a string, or empty.
+    cksum: str | None
+
+
 def say(line: object) -> None:
     """Print one job-log line at once, in order with cargo's own."""
     print(line, flush=True)
@@ -133,6 +158,37 @@ class RefusalError(Exception):
     """A stop with a message for the job log; the run exits 1."""
 
 
+class CommandError(Exception):
+    """A command this step runs exited non-zero; the run exits with it."""
+
+    def __init__(self, argv: list[str], returncode: int) -> None:
+        """Keep the command and its status, which the job log names."""
+        super().__init__(argv, returncode)
+        self.argv = argv
+        self.returncode = returncode
+
+
+def checked(
+    argv: list[str], env: Mapping[str, str], cwd: Path, *, capture: bool
+) -> str:
+    """Run one command, which must succeed.
+
+    Returns:
+        Its standard output when captured, else "".
+
+    Raises:
+        CommandError: it exited non-zero.
+
+    """
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    done = subprocess.run(
+        argv, env=dict(env), cwd=cwd, capture_output=capture, text=True, check=False
+    )
+    if done.returncode != 0:
+        raise CommandError(argv, done.returncode)
+    return done.stdout if capture else ""
+
+
 def members(env: Mapping[str, str], cwd: Path) -> list[tuple[str, str]]:
     """Ask the shared member helper which crates publish to crates.io.
 
@@ -140,19 +196,16 @@ def members(env: Mapping[str, str], cwd: Path) -> list[tuple[str, str]]:
         Each member's name and version.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    out = subprocess.run(
-        [str(HERE / "crates-io-members.sh")],
-        env=dict(env),
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return [tuple(line.split("\t", 1)) for line in out.splitlines() if line]  # type: ignore[misc]
+    out = checked([str(HERE / "crates-io-members.sh")], env, cwd, capture=True)
+    pairs: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        if line:
+            name, version = line.split("\t", 1)
+            pairs.append((name, version))
+    return pairs
 
 
-def index_records(body: bytes) -> list[dict] | None:
+def index_records(body: bytes) -> list[IndexRecord] | None:
     """Read an index file: one JSON object per line.
 
     One that does not read so is unread, never "not published": bytes
@@ -167,22 +220,52 @@ def index_records(body: bytes) -> list[dict] | None:
         lines = body.decode().split("\n")
     except UnicodeDecodeError:
         return None
-    records = []
+    records: list[IndexRecord] = []
     for line in lines:
         if not line.strip():
             continue
         try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
+            record = decoded.load_json(line)
+        except decoded.UndecodableError:
             return None
-        if not isinstance(record, dict):
+        if not decoded.is_object(record):
             return None
-        records.append(record)
+        vers, cksum = record.get("vers"), record.get("cksum")
+        records.append(
+            IndexRecord(
+                vers=vers if isinstance(vers, str) else None,
+                cksum=cksum if isinstance(cksum, str) and cksum else None,
+            )
+        )
     return records
 
 
+def answer_field(body: str | bytes, key: str, where: str) -> str:
+    """Read one string field of a JSON object something answered.
+
+    Returns:
+        The field's value.
+
+    Raises:
+        RefusalError: the answer is not JSON, not an object, or its field
+            is not a string; naming `where`.
+
+    """
+    try:
+        doc = decoded.load_json(body)
+    except decoded.UndecodableError as err:
+        msg = f"{where} is not JSON: {err}"
+        raise RefusalError(msg) from err
+    try:
+        return decoded.as_str(
+            decoded.as_object(doc, where).get(key), f"{where}'s {key}"
+        )
+    except decoded.UndecodableError as err:
+        raise RefusalError(str(err)) from err
+
+
 def published_checksum(
-    name: str, version: str, user_agent: str, fetch: Callable[..., Response]
+    name: str, version: str, user_agent: str, fetch: Fetch
 ) -> str | None:
     """Ask the sparse index whether name@version is published.
 
@@ -207,10 +290,9 @@ def published_checksum(
         raise RefusalError(msg)
     records = index_records(answer.body)
     for record in records or []:
-        if record.get("vers") == version:
-            cksum = record.get("cksum")
-            if isinstance(cksum, str) and cksum:
-                return cksum
+        if record.vers == version:
+            if record.cksum is not None:
+                return record.cksum
             records = None
             break
     if records is None:
@@ -222,14 +304,15 @@ def published_checksum(
     return None
 
 
-def exchange_token(env: Mapping[str, str], fetch: Callable[..., Response]) -> str:
+def exchange_token(env: Mapping[str, str], fetch: Fetch) -> str:
     """Mint the runner's OIDC token for crates.io and exchange it.
 
     Returns:
         The short-lived crates.io token.
 
     Raises:
-        RefusalError: when either request is answered with anything but 200.
+        RefusalError: when either request is answered with anything but 200,
+            or with anything but a JSON object holding its token string.
 
     """
     oidc = fetch(
@@ -241,12 +324,13 @@ def exchange_token(env: Mapping[str, str], fetch: Callable[..., Response]) -> st
         said = oidc.status or "nothing"
         msg = f"the runner's OIDC token endpoint answered {said}"
         raise RefusalError(msg)
-    jwt = json.loads(oidc.body)["value"]
+    jwt = answer_field(oidc.body, "value", "the runner's OIDC token answer")
+    payload: dict[str, str] = {"jwt": jwt}
     exchanged = fetch(
         "POST",
         EXCHANGE,
         {"content-type": "application/json", "User-Agent": env["ORG_USER_AGENT"]},
-        json.dumps({"jwt": jwt}).encode(),
+        json.dumps(payload).encode(),
     )
     if exchanged.status != HTTP_OK:
         said = exchanged.status or "nothing"
@@ -255,12 +339,12 @@ def exchange_token(env: Mapping[str, str], fetch: Callable[..., Response]) -> st
             " — if 403, check the User-Agent before the publisher config (#907)"
         )
         raise RefusalError(msg)
-    return str(json.loads(exchanged.body)["token"])
+    return answer_field(
+        exchanged.body, "token", "the crates.io token exchange's answer"
+    )
 
 
-def run(
-    env: Mapping[str, str], cwd: Path, fetch: Callable[..., Response] = http
-) -> int:
+def run(env: Mapping[str, str], cwd: Path, fetch: Fetch = http) -> int:
     """Publish what is not yet on crates.io.
 
     An unread index and a failed exchange raise RefusalError from the
@@ -279,18 +363,8 @@ def run(
         "--no-deps",
         "--locked",
     ]
-    metadata = json.loads(
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        subprocess.run(
-            metadata_cmd,
-            env=dict(env),
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    )
-    target_dir = Path(metadata["target_directory"])
+    metadata = checked(metadata_cmd, env, cwd, capture=True)
+    target_dir = Path(answer_field(metadata, "target_directory", "cargo metadata"))
 
     held: list[tuple[str, str, str]] = []
     pending = 0
@@ -306,8 +380,7 @@ def run(
         package = ["cargo", "package", "--locked", "--no-verify"]
         for name, _, _ in held:
             package += ["-p", name]
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        subprocess.run(package, env=dict(env), cwd=cwd, check=True)
+        checked(package, env, cwd, capture=False)
         mismatched = False
         for name, version, cksum in held:
             crate = target_dir / "package" / f"{name}-{version}.crate"
@@ -352,8 +425,8 @@ def main() -> int:
     except RefusalError as e:
         workflow_command.error(str(e))
         return 1
-    except subprocess.CalledProcessError as e:
-        workflow_command.error(f"{' '.join(map(str, e.cmd))} exited {e.returncode}")
+    except CommandError as e:
+        workflow_command.error(f"{' '.join(e.argv)} exited {e.returncode}")
         return e.returncode
 
 

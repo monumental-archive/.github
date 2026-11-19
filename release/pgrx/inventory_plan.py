@@ -116,13 +116,10 @@ def cell(crate_dir: Path, major: str, prefix: str) -> Cell:
 
 
 def plan(crate_dir: Path, major: str, prefix: str) -> list[dict[str, object]]:
-    """Build the cell's one-entry plan.
+    """Build the cell's one-entry plan; `cell` refuses what it cannot name.
 
     Returns:
         The plan document.
-
-    Raises:
-        RefusedError: no prefix, or a major that is not a number.
 
     """
     return [cell(crate_dir, major, prefix).entry()]
