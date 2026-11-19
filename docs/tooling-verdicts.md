@@ -52,6 +52,7 @@ honestly blocked on.
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`, each exclusion an `exclude_re` entry under a `#` reason (#1355) — proven first on release-lab |
 | mutmut (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is `[tool.mutmut]` in a tracked `pyproject.toml` (or `setup.cfg`), each exclusion a `# pragma: no mutate -- <reason>` at its site or a reasoned list entry (#1354) — proven first on the canon |
+| StrykerJS (the repository's own, from its lockfile; the belt pins nothing) | TypeScript mutation testing (`audit:mutants`' TypeScript leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `stryker.config.json`, each exclusion a `// Stryker disable next-line <Mutator>: <reason>` at its site; run `--inPlace` (#1358) — proven first on monumental-archive |
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt-shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
@@ -2386,6 +2387,64 @@ runner):
 *Reopen:* mutmut gaining sharding (shard the Python job like Rust's),
 or recording calls in child processes (the subprocess-only helpers
 become measurable).
+
+**StrykerJS as `audit:mutants`' TypeScript leg** (#1358, under the
+testing standard of #1336; the shape is the other legs'). The measure
+is no unexplained surviving mutant, never a score. Measured 2026-11-19 on
+StrykerJS 10.1.1 (2026-10-23): SLSA v1 provenance on every
+`@stryker-mutator/*` package and `npm audit signatures` all verified; it
+installs clean from the consumer's lockfile under pnpm's
+`trustPolicy: no-downgrade`, the seven-day release age and
+`strictDepBuilds` (no build script), and runs vitest 4.1.12. On one
+source file with one worker: 144 mutants in 35 s. The consumer's
+service-free scope instruments 932 mutants with a 2 s initial run, so
+there is one job and no sharding (StrykerJS has none).
+
+The belt pins no copy. StrykerJS is the repository's, in its
+devDependencies beside its runner plugin, the way its test runner is;
+the leg runs `node_modules/.bin/stryker`.
+
+What the leg does, each measured on 10.1.1 and held by a stub row
+(`mise/test_mutants_typescript.py`; no row runs StrykerJS):
+
+- **Adoption is a tracked root `stryker.config.json`.** It names the
+  paths to mutate, so a repository adopts its service-free code first.
+  A tracked StrykerJS config in any other form is red, never a skip:
+  the leg reads JSON. Refused in it, by name, because each drops
+  mutants with no reason at any site: `mutator.excludedMutations`,
+  `ignoreStatic`, `ignorers`, and `thresholds.break` (a score).
+- **In place, never in the sandbox.** The sandbox copies the working
+  folder without reading `.gitignore`, so a `.env` in the checkout is
+  copied. It also links `node_modules` back to the original by
+  absolute path, so a workspace package imported by name never sees
+  its mutant: on one file, 144 of 144 "survived" and none was killed.
+  `--inPlace` gave 106 killed, 5 timed out, 30 survived and 3 not
+  covered, the same as a sandbox run with hand-written aliases. The
+  leg refuses uncommitted tracked changes before the run and is red
+  if one remains after it.
+- **What counts.** The JSON report (`reports/mutation/mutation.json`,
+  schema 1.0) gives one status per mutant. Killed and Timeout are
+  killed. Survived is a survivor, and NoCoverage is a survivor named
+  `not covered`. Ignored is excluded only with a reason: the site
+  comment's reason lands in `statusReason`, and with none StrykerJS
+  writes `Ignored using a comment`, which is red. CompileError is
+  counted as not viable, never as killed. RuntimeError, Pending and
+  anything else are not judged, and red.
+- **StrykerJS exits 0 whatever survives**, so the verdict is read
+  from the report. A non-zero exit judged nothing, and is red with
+  its output.
+- **Under pnpm the config must name its runner in `plugins`.** Core
+  sits in `.pnpm/` and cannot find its sibling ("no TestRunner
+  plugins were loaded").
+
+The leg was run against StrykerJS's real report once, on the Mac, on
+that one file: the summary line, each survivor's file, line and
+column, and both kinds of exclusion (with a reason, counted; without,
+red) came out as the stub rows state.
+
+*Reopen:* StrykerJS's sandbox resolving workspace packages inside
+itself (the sandbox could then carry the run), or StrykerJS gaining
+sharding (the job splits like Rust's).
 
 **cargo-mutants as `audit:mutants`' Rust leg, compiled and kept out
 of every other job** (#1355, under #1336's testing standard). Coverage
