@@ -4882,15 +4882,19 @@ while read -r repo; do
     checked=$((checked + 1))
     case "${url}" in
       "${sc_prefix}"/*/badge)
-        proj="${url#https://api.scorecard.dev/projects/}"
-        proj="${proj%/badge}"
-        score=$(curl -sf "https://api.scorecard.dev/projects/${proj}" | jq -r '.score // empty')
-        if [[ -z ${score} ]]; then
-          failed="${failed} ${repo}(scorecard: issuer returned no score — a shield over nothing)"
-          continue
-        fi
+        # Asked as every issuer is (#1621): the bare `curl -sf | jq` this
+        # replaced died under pipefail on the 404 Scorecard answers for a
+        # repository it holds nothing on, one line above the finding
+        # written for it, and took every repository after it unchecked.
+        # The shield is the project's own API path with `/badge` added.
+        ask "${url%/badge}"
+        score=$(jq -r '.score // empty' <<< "${ask_body}" 2> /dev/null || true)
         floor=$(awk -v r="${repo}" '$1 == r {print $2}' "${floors}")
-        if [[ -z ${floor} ]]; then
+        if [[ ${ask_code} != 200 && ${ask_code} != 404 ]]; then
+          unanswered scorecard "api.scorecard.dev, about ${repo},"
+        elif [[ ${ask_code} == 404 || -z ${score} ]]; then
+          failed="${failed} ${repo}(scorecard: issuer returned no score — a shield over nothing)"
+        elif [[ -z ${floor} ]]; then
           failed="${failed} ${repo}(scorecard: no floor in ${floors} — an unfloored badge is unwatched)"
         elif awk -v s="${score}" -v f="${floor}" 'BEGIN {exit !(s < f)}'; then
           failed="${failed} ${repo}(scorecard: ${score} below floor ${floor} — regression)"
