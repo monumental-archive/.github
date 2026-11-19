@@ -39,6 +39,35 @@ class StepError(Exception):
     """A refusal: the message is printed as the step's error."""
 
 
+def header_line(body: str) -> None:
+    """Refuse a body line GitHub's squash signer reads as a header.
+
+    A body line that begins with `committer` makes the merge queue's
+    squash commit unverifiable (#1529). GitHub signs the commit, then
+    writes its `gpgsig` header after the LAST line that begins with
+    `committer` — and when the body holds one, that is inside the
+    message. The signature is good over the commit without the splice
+    and bad over the commit as stored, so `required_signatures` reads
+    it `invalid`, and the queue removes the green pull request with
+    `branch_protection_failure` and no other word. Measured on #1512,
+    whose body had `committer) and the row's own overrides.` at a line
+    start: three queue commits, all three `invalid`.
+
+    Raises:
+        StepError: A body line begins with `committer`.
+
+    """
+    for number, line in enumerate(body.split("\n"), start=1):
+        if line.startswith("committer"):
+            msg = (
+                f"PR body line {number} begins with 'committer': {line!r} — GitHub"
+                " splices the queue squash commit's signature after that line, the"
+                " commit is unverifiable and the queue drops the pull request"
+                " (#1529) — reword the BODY so no line starts with 'committer'"
+            )
+            raise StepError(msg)
+
+
 def compose(title: str, body: str, number: str) -> str:
     """Compose the commit the squash merge will mint.
 
@@ -74,6 +103,7 @@ def compose(title: str, body: str, number: str) -> str:
         raise StepError(msg)
     message = f"{title} (#{number})\n"
     body = body.replace("\r", "")
+    header_line(body)
     if any(c not in SPACE for c in body):
         message += f"\n{body}\n"
     return message

@@ -140,6 +140,31 @@ class SquashMessage(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(self.checked(), "fix: x (#812)\n")
 
+    def test_body_line_beginning_with_committer(self) -> None:
+        """#1529: GitHub splices its signature after such a line."""
+        body = (
+            "Then `HOME`, the git identity (the author and\r\n"
+            "committer) and the row's own overrides.\r\n"
+        )
+        done = self.squash("fix: x", body)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "::error::PR body line 2 begins with 'committer': \"committer) and"
+            " the row's own overrides.\" — GitHub splices the queue squash"
+            " commit's signature after that line, the commit is unverifiable"
+            " and the queue drops the pull request (#1529) — reword the BODY so"
+            " no line starts with 'committer'\n",
+        )
+        self.assertFalse((self.tmp / "mise-args").exists())
+
+    def test_committer_inside_a_line_is_not_a_header(self) -> None:
+        """Only a line START reads as a header: the word itself is fine."""
+        body = "the author and the committer) and\n    committer x\n"
+        done = self.squash("fix: x", body)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(done.stdout, PASSES)
+
     def test_failing_commit_check(self) -> None:
         """The canon's refusal names what to fix: the title or the body."""
         done = self.squash("Fix: Capitalised", "Body.", verdict=1)
