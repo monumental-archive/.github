@@ -189,7 +189,7 @@ jobs:
           echo "ORG_CANON_TREE=${tree}" >> "${GITHUB_ENV}"
           rm -- .org-canon
       - name: Install mise and the caller's pinned toolchain
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           # mise itself is a build input and floats without this pin
           # (#117: nothing unpinned on an attested path, the installer
@@ -313,7 +313,7 @@ jobs:
         uses: $/.github/actions/canon
 
       - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           version: 2026.11.7
           cache: false
