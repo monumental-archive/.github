@@ -639,7 +639,11 @@ class RunOnceRows(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", done.stdout)
         self.assertEqual(1, counter(tree))
-        self.assertEqual("unset\n", (tree.parent / "py").read_text("utf-8"))
+        # Whatever the row inherited (the canon's own coverage:check
+        # measures this suite with the variable set): the plpgsql
+        # selector leaves it as it found it.
+        inherited = os.environ.get("COVERAGE_PROCESS_START", "unset")
+        self.assertEqual(f"{inherited}\n", (tree.parent / "py").read_text("utf-8"))
 
     def test_python_measures_what_only_a_depend_runs(self) -> None:
         """The depend's script runs under the python leg's measurement."""
@@ -655,6 +659,8 @@ class RunOnceRows(unittest.TestCase):
         self.assertEqual("python 90.0\npython-branches 85.0\n", done.stdout)
         recorded = (tree.parent / "py").read_text("utf-8").strip()
         self.assertTrue(recorded.endswith("/rc"), recorded)
+        # The leg's own rc, never one the row inherited.
+        self.assertNotEqual(os.environ.get("COVERAGE_PROCESS_START"), recorded)
 
     def test_a_shared_depend_runs_once(self) -> None:
         """Two tasks depending on one run it once, before both."""
