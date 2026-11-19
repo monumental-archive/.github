@@ -998,16 +998,15 @@ def run_header_install(
         (tmp / "state").write_text("18.6-1.pgdg120+1")
         (tmp / "served").write_text("".join(f"{s}\n" for s in served))
         (tmp / "args").write_text("")
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "PG": "18",
-            "BUILD_IMAGE": "postgres:18-bookworm@sha256:planted",
-            "STUB_STATE": str(tmp / "state"),
-            "STUB_SERVED": str(tmp / "served"),
-            "STUB_ARGS": str(tmp / "args"),
-            "STUB_MOVE_TO": move_to,
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            PG="18",
+            BUILD_IMAGE="postgres:18-bookworm@sha256:planted",
+            STUB_STATE=str(tmp / "state"),
+            STUB_SERVED=str(tmp / "served"),
+            STUB_ARGS=str(tmp / "args"),
+            STUB_MOVE_TO=move_to,
+        )
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, "-euo", "pipefail", "-c", block],
             env=env,

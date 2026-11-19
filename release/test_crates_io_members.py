@@ -75,12 +75,11 @@ def run_helper(
         )
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(HELPER)],
-            env={
-                **os.environ,
-                "PATH": f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
-                "STUB_LOG": str(tmp / "cargo.log"),
-                "STUB_METADATA": str(tmp / "metadata.json"),
-            },
+            env=hermetic.env(
+                PATH=f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                STUB_LOG=str(tmp / "cargo.log"),
+                STUB_METADATA=str(tmp / "metadata.json"),
+            ),
             capture_output=True,
             text=True,
             check=False,

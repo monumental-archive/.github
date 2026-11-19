@@ -17,6 +17,7 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
+import runpy
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
@@ -24,6 +25,11 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -72,13 +78,12 @@ def run_helper(mains: str, broken: str = "") -> Run:
         (stubs / "go").write_text(GO_STUB)
         (stubs / "go").chmod(0o755)
         log = tmp / "go.log"
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "STUB_LOG": str(log),
-            "STUB_MAINS": mains,
-            "STUB_BROKEN": broken,
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            STUB_LOG=str(log),
+            STUB_MAINS=mains,
+            STUB_BROKEN=broken,
+        )
         # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [str(HELPER)],

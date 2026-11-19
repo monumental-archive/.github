@@ -55,12 +55,18 @@ as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
+import runpy
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-rust-crate.yml"
@@ -235,21 +241,20 @@ def run_steps(
             (planted / f"{m}-{VERSION}.crate").write_bytes(b)
         log, outputs = tmp / "cargo.log", tmp / "github_output"
         outputs.touch()
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "EXCLUDE_FLAGS": excludes,
-            "UNTRUSTED_VERSION": VERSION,
-            "GITHUB_OUTPUT": str(outputs),
-            "STUB_LOG": str(log),
-            "STUB_MEMBERS": " ".join(members),
-            "STUB_UNCOMPILABLE": UNCOMPILABLE,
-            "STUB_VERSION": VERSION,
-            "STUB_FIRST": str(first),
-            "STUB_SECOND": str(planted),
-            "STUB_METADATA": str(tmp / "metadata.json"),
-            "STUB_UNWRITTEN": " ".join(unwritten),
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            EXCLUDE_FLAGS=excludes,
+            UNTRUSTED_VERSION=VERSION,
+            GITHUB_OUTPUT=str(outputs),
+            STUB_LOG=str(log),
+            STUB_MEMBERS=" ".join(members),
+            STUB_UNCOMPILABLE=UNCOMPILABLE,
+            STUB_VERSION=VERSION,
+            STUB_FIRST=str(first),
+            STUB_SECOND=str(planted),
+            STUB_METADATA=str(tmp / "metadata.json"),
+            STUB_UNWRITTEN=" ".join(unwritten),
+        )
         out, err, rc = "", "", 0
         for argv in [[HELPER], *([BASH, "-c", step_body(n)] for n in STEPS)]:
             result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]

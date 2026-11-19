@@ -18,6 +18,7 @@ as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
+import runpy
 
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
@@ -25,6 +26,11 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
@@ -81,17 +87,16 @@ def run_helper(manifest: object, mode: str = "ok") -> Run:
         (pkg / "package.json").write_text(json.dumps(manifest))
         log, outputs = tmp / "npm.log", tmp / "github_output"
         outputs.touch()
-        env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "UNTRUSTED_VERSION": VERSION,
-            "UNTRUSTED_CRATE_DIR": "crates/edtf-wasm",
-            "GITHUB_REPOSITORY": REPO,
-            "GITHUB_OUTPUT": str(outputs),
-            "STUB_LOG": str(log),
-            "STUB_MODE": mode,
-            "STUB_TARBALL": TARBALL,
-        }
+        env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            UNTRUSTED_VERSION=VERSION,
+            UNTRUSTED_CRATE_DIR="crates/edtf-wasm",
+            GITHUB_REPOSITORY=REPO,
+            GITHUB_OUTPUT=str(outputs),
+            STUB_LOG=str(log),
+            STUB_MODE=mode,
+            STUB_TARBALL=TARBALL,
+        )
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [HELPER],
             env=env,

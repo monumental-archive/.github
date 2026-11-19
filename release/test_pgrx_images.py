@@ -17,6 +17,7 @@ stdlib `unittest`, matching the other release/test_*.py.
 
 import io
 import os
+import runpy
 import shutil
 import stat
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -26,6 +27,11 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+hermetic = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "mise" / "hermetic.py"))
+)
 
 RELEASE = Path(__file__).resolve().parent
 CANON = RELEASE.parent
@@ -416,11 +422,10 @@ class Proof(unittest.TestCase):
         self.staged.mkdir(parents=True)
         (self.staged / "edtf_postgres.control").write_text("control\n")
         (self.staged / "edtf_postgres--1.2.3.sql").write_text("sql\n")
-        self.env = {
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "DOCKER_LOG": str(self.log),
-        }
+        self.env = hermetic.env(
+            PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            DOCKER_LOG=str(self.log),
+        )
 
     def prove(
         self, pg: str, digest: str = "sha256:" + "a" * 64
@@ -636,12 +641,11 @@ class CopyProof(unittest.TestCase):
             path.write_text(text)
             path.chmod(0o755)
         self.log = self.root / "psql.log"
-        self.env = {
-            **os.environ,
-            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            "PGRX_PROOF_ROOT": str(self.root),
-            "PSQL_LOG": str(self.log),
-        }
+        self.env = hermetic.env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            PGRX_PROOF_ROOT=str(self.root),
+            PSQL_LOG=str(self.log),
+        )
 
     def test_copy_proof_creates_the_shipped_extension(self) -> None:
         """Create edtf_postgres, though amcheck sorts first in the destination."""
