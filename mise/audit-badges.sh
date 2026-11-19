@@ -81,9 +81,11 @@ ask_old=""
 # a dated result. One bound holds for both: an answer older than this
 # audit's own period is not this audit's answer.
 #
-# `unheard <content>` is the test an `if` leg makes before reading the
-# status; `heard` is the status a `case` leg switches on, `old …` or
-# `stale 404` reaching only its `*` arm.
+# `hear <what the leg read from the answer>` is the one reading of
+# that rule, and sets `heard`: `unanswered`, `absent` (a 404, or a 200
+# with nothing read), or the HTTP status. Every leg reads `heard`, an
+# `if` leg before judging, a `case` leg as what it switches on. A
+# `case` leg whose evidence is the status itself passes the status.
 #
 # The audit runs weekly (audit.yml, Monday 07:00), so `Age` beyond a
 # week is older than the run before this one.
@@ -121,18 +123,12 @@ ask() {
   ask_old="${cached#*|}"
   [[ -n ${ask_old} && ${ask_old} -gt ${audit_week} ]] || ask_old=""
 }
-unheard() { # usage: unheard <what the leg read from the answer>
-  [[ -n ${ask_old} ]] || [[ ${ask_code} != 200 && ${ask_code} != 404 ]] \
-    || [[ -n ${ask_stale} && (${ask_code} == 404 || -z ${1}) ]]
-}
-heard() {
-  if [[ -n ${ask_old} ]]; then
-    echo "old ${ask_code}"
-  elif [[ -n ${ask_stale} && ${ask_code} == 404 ]]; then
-    echo "stale 404"
-  else
-    echo "${ask_code}"
-  fi
+heard=""
+hear() { # usage: hear <what the leg read from the answer>; sets heard
+  heard="${ask_code}"
+  [[ ${ask_code} != 404 && (${ask_code} != 200 || -n ${1}) ]] || heard="absent"
+  [[ ${heard} != absent || -z ${ask_stale} ]] || heard="unanswered"
+  [[ -z ${ask_old} ]] || heard="unanswered"
 }
 unanswered() {
   local why="${ask_stale:+, answered from a cache ${ask_stale} seconds past its lifetime}"
@@ -225,11 +221,11 @@ while read -r repo; do
         sc_date=$(jq -r '.date // empty' <<< "${ask_body}" 2> /dev/null || true)
         sc_date="${sc_date:+result of ${sc_date%%T*}}"
         floor=$(awk -v r="${repo}" '$1 == r {print $2}' "${floors}")
-        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
-        if unheard "${score}"; then
-          unanswered scorecard "api.scorecard.dev, about ${repo},"
-        elif [[ ${ask_code} == 404 || -z ${score} ]]; then
+        hear "${score}"
+        if [[ ${heard} == absent ]]; then
           failed="${failed} ${repo}(scorecard: issuer returned no score — a shield over nothing)"
+        elif [[ ${heard} != 200 ]]; then
+          unanswered scorecard "api.scorecard.dev, about ${repo},"
         elif [[ -z ${floor} ]]; then
           failed="${failed} ${repo}(scorecard: no floor in ${floors} — an unfloored badge is unwatched)"
         elif awk -v s="${score}" -v f="${floor}" 'BEGIN {exit !(s < f)}'; then
@@ -245,11 +241,11 @@ while read -r repo; do
         id="${id%/badge}"
         ask "https://www.bestpractices.dev/projects/${id}.json"
         bp="${ask_body}"
-        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
-        if unheard "${bp}"; then
-          unanswered bestpractices "bestpractices.dev, about project ${id},"
-        elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
+        hear "${bp}"
+        if [[ ${heard} == absent ]]; then
           failed="${failed} ${repo}(bestpractices: issuer returned nothing for project ${id})"
+        elif [[ ${heard} != 200 ]]; then
+          unanswered bestpractices "bestpractices.dev, about project ${id},"
         elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices_owner.py" \
           "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(bestpractices: ${bp_owner})"
@@ -271,11 +267,11 @@ while read -r repo; do
         id="${id%/baseline}"
         ask "https://www.bestpractices.dev/projects/${id}.json"
         bp="${ask_body}"
-        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
-        if unheard "${bp}"; then
-          unanswered baseline "bestpractices.dev, about project ${id},"
-        elif [[ ${ask_code} == 404 || -z ${bp} ]]; then
+        hear "${bp}"
+        if [[ ${heard} == absent ]]; then
           failed="${failed} ${repo}(baseline: issuer returned nothing for project ${id})"
+        elif [[ ${heard} != 200 ]]; then
+          unanswered baseline "bestpractices.dev, about project ${id},"
         elif ! bp_owner=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices_owner.py" \
           "${wearer}" <<< "${bp}"); then
           failed="${failed} ${repo}(baseline: ${bp_owner})"
@@ -295,7 +291,8 @@ while read -r repo; do
         proj="${url#https://api.reuse.software/badge/}"
         ask "https://api.reuse.software/status/${proj}"
         st=$(jq -r '.status // empty' <<< "${ask_body}" 2> /dev/null || true)
-        case "$(heard)" in
+        hear "${ask_code}"
+        case "${heard}" in
           200)
             if [[ ${st} != "compliant" ]]; then
               failed="${failed} ${repo}(reuse: status '${st:-none}' is not compliant)"
@@ -303,7 +300,7 @@ while read -r repo; do
               note "${repo}: reuse compliant"
             fi
             ;;
-          404) failed="${failed} ${repo}(reuse: ${proj} is not registered at api.reuse.software)" ;;
+          absent) failed="${failed} ${repo}(reuse: ${proj} is not registered at api.reuse.software)" ;;
           *) unanswered reuse "api.reuse.software" ;;
         esac
         ;;
@@ -323,11 +320,11 @@ while read -r repo; do
         doc="${doc//%2F//}"
         ask "${doc}"
         sj="${ask_body}"
-        # shellcheck disable=SC2310  # unheard's status is the answer, not an error
-        if unheard "${sj}"; then
-          unanswered level-shield "${doc}"
-        elif [[ ${ask_code} == 404 || -z ${sj} ]]; then
+        hear "${sj}"
+        if [[ ${heard} == absent ]]; then
           failed="${failed} ${repo}(level-shield: published judgment ${doc} unreadable — the badge renders nothing)"
+        elif [[ ${heard} != 200 ]]; then
+          unanswered level-shield "${doc}"
         elif ! jq -e '.schemaVersion == 1 and .label and .message' > /dev/null 2>&1 <<< "${sj}"; then
           failed="${failed} ${repo}(level-shield: ${doc} is not a shields endpoint document)"
         else
@@ -390,9 +387,10 @@ while read -r repo; do
         # and no -L, because the question is whether doi.org knows the
         # name, not whether the landing page is up.
         ask -I "https://doi.org/${doi}"
-        case "$(heard)" in
+        hear "${ask_code}"
+        case "${heard}" in
           2?? | 3??) note "${repo}: DOI resolves" ;;
-          404) failed="${failed} ${repo}(doi: ${doi} does not resolve)" ;;
+          absent) failed="${failed} ${repo}(doi: ${doi} does not resolve)" ;;
           *) unanswered doi "doi.org, about ${doi}," ;;
         esac
         ;;
@@ -400,9 +398,10 @@ while read -r repo; do
         crate="${url##*/}"
         crate="${crate%.svg}"
         ask "https://crates.io/api/v1/crates/${crate}"
-        case "$(heard)" in
+        hear "${ask_code}"
+        case "${heard}" in
           200) note "${repo}: crate ${crate} exists" ;;
-          404) failed="${failed} ${repo}(crates: ${crate} not on crates.io)" ;;
+          absent) failed="${failed} ${repo}(crates: ${crate} not on crates.io)" ;;
           *) unanswered crates "crates.io, about ${crate}," ;;
         esac
         ;;
@@ -410,9 +409,10 @@ while read -r repo; do
         pkg="${url#https://img.shields.io/npm/v/}"
         pkg="${pkg%.svg}"
         ask "https://registry.npmjs.org/${pkg//%2F//}"
-        case "$(heard)" in
+        hear "${ask_code}"
+        case "${heard}" in
           200) note "${repo}: npm package exists" ;;
-          404) failed="${failed} ${repo}(npm: package not on the registry)" ;;
+          absent) failed="${failed} ${repo}(npm: package not on the registry)" ;;
           *) unanswered npm "the npm registry" ;;
         esac
         ;;
@@ -452,7 +452,8 @@ while read -r repo; do
         # check that only asked "is there a number" stayed green. An
         # hour's grace covers an upload still in flight.
         ask "${cc_api}/${cc}"
-        case "$(heard)" in
+        hear "${ask_code}"
+        case "${heard}" in
           200)
             ccb=$(jq -r '.branch // empty' <<< "${ask_body}" 2> /dev/null || true)
             ask "${cc_api}/${cc}/commits?branch=${ccb:-main}"
@@ -463,10 +464,10 @@ while read -r repo; do
             gh_sha="${gh_head%%$'\t'*}"
             gh_at="${gh_head##*$'\t'}"
             now=$(date -u +%s)
-            # shellcheck disable=SC2310  # unheard's status is the answer, not an error
-            if [[ ${ask_code} != 200 ]] || unheard "${cov}"; then
+            hear "${cov}"
+            if [[ ${heard} != 200 && (${heard} != absent || ${ask_code} != 200) ]]; then
               unanswered codecov "Codecov, about ${cc}'s commits,"
-            elif [[ -z ${cov} ]]; then
+            elif [[ ${heard} == absent ]]; then
               failed="${failed} ${repo}(codecov: no coverage report for ${cc}'s ${ccb:-main}"
               failed+=" — the shield reads unknown; the gate stub must pass codecov-token)"
             elif [[ -z ${gh_sha} ]]; then
@@ -478,7 +479,7 @@ while read -r repo; do
               note "${repo}: codecov holds ${cov}% for ${cc} at ${ccsha:0:7}"
             fi
             ;;
-          404) failed="${failed} ${repo}(codecov: issuer has no record of ${cc})" ;;
+          absent) failed="${failed} ${repo}(codecov: issuer has no record of ${cc})" ;;
           *) unanswered codecov "Codecov, about ${cc}," ;;
         esac
         ;;
