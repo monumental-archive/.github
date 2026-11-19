@@ -200,14 +200,25 @@ def base_image(table: Path, pg: str) -> str:
         The `[build]` row's digest-pinned reference.
 
     Raises:
-        RefusalError: the table has no row for the major.
+        RefusalError: `[build]` is not a table, it has no row for the
+            major, or the row is not a reference.
 
     """
     rows = tomllib.loads(table.read_text("utf-8")).get("build", {})
+    # `build` must be a table and its row a reference: `build = false`
+    # and a row of `[]` died here as a TypeError, and `build = "x16"`
+    # matched pg 16 as a substring (#1556).
+    if not isinstance(rows, dict):
+        msg = f"[build] in {table} is not a table of majors"
+        raise RefusalError(msg)
     if pg not in rows:
         msg = f"pg{pg} has no build image in {table}"
         raise RefusalError(msg)
-    return rows[pg]
+    ref = rows[pg]
+    if not isinstance(ref, str) or not ref:
+        msg = f"pg{pg}'s build image in {table} is not a reference"
+        raise RefusalError(msg)
+    return ref
 
 
 def main(argv: list[str] | None = None) -> int:

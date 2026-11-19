@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import itertools
 import json
 import os
 import re
@@ -134,7 +135,9 @@ def read_citation(text: str) -> Citation:
     """
     lines = text.splitlines()
     creators = []
-    for here, after in zip(lines, [*lines[1:], ""], strict=True):
+    # Each line beside the next, the last beside nothing; an empty file
+    # has no pairs (zip's strict length check refused it, #1556).
+    for here, after in itertools.pairwise([*lines, ""]):
         family, given = FAMILY.match(here), GIVEN.match(after)
         if family and given:
             creators.append(f"{family.group(1)}, {given.group(1)}")

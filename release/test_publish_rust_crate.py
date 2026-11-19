@@ -358,6 +358,33 @@ class PublishResumes(unittest.TestCase):
         )
 
 
+class AnUnreadableIndexIsUnread(unittest.TestCase):
+    """#1556's shrunk examples: a 200 the reader cannot read refuses.
+
+    Each died with a traceback before (AttributeError, UnicodeDecodeError,
+    KeyError), never naming the crate or the index.
+    """
+
+    def test_each_shape_refuses_by_name(self) -> None:
+        """Not an object, not UTF-8, our record with no cksum."""
+        for body in (b"0", b"\x80", b'{"vers": "1.3.3"}\n'):
+            with self.subTest(body=body):
+                with self.assertRaises(publish_crates.RefusalError) as refused:
+                    publish_crates.published_checksum(
+                        "edtf-core",
+                        "1.3.3",
+                        "ua",
+                        lambda *_, b=body: publish_crates.Response(200, b),
+                    )
+                self.assertEqual(
+                    str(refused.exception),
+                    "::error::the crates.io index for edtf-core"
+                    " (https://index.crates.io/ed/tf/edtf-core) is not one JSON"
+                    " record per line with a cksum; an unread index is not"
+                    ' "not published"',
+                )
+
+
 class PublishFollowsCargo(unittest.TestCase):
     """Cargo's `publish` key decides, never the build's exclusion (#1273)."""
 

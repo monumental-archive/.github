@@ -250,6 +250,38 @@ class BaseImage(unittest.TestCase):
             f"::error::pg13 has no build image in {TABLE}\n", result.stderr
         )
 
+    def test_a_table_that_is_not_majors_to_references(self) -> None:
+        """#1556's shrunk examples are refused by name.
+
+        `build = false` and a row of `[]` died with a TypeError, and
+        `build = "x16"` matched pg 16 as a substring before dying.
+        """
+        rows = [
+            ("build = false\n", "[build] in {t} is not a table of majors"),
+            ('build = "x16"\n', "[build] in {t} is not a table of majors"),
+            ("build = {16 = []}\n", "pg16's build image in {t} is not a reference"),
+        ]
+        for text, want in rows:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                table = Path(tmp) / "pgrx-base-images.toml"
+                table.write_text(text, "utf-8")
+                result = run(
+                    [
+                        sys.executable,
+                        str(STAGE),
+                        "base-image",
+                        "--pg",
+                        "16",
+                        "--table",
+                        str(table),
+                    ],
+                    CANON,
+                )
+                self.assertEqual(
+                    (1, f"::error::{want.format(t=table)}\n"),
+                    (result.returncode, result.stderr),
+                )
+
 
 def build_image(pg: str) -> str:
     """Read the [build] row the proof must use.

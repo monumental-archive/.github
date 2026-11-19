@@ -278,7 +278,7 @@ def facts_pairs(facts: str) -> list[str]:
     """
     try:
         parsed = json.loads(facts)
-    except ValueError:
+    except ValueError, RecursionError:
         parsed = None
     if not isinstance(parsed, dict):
         msg = "facts is not a JSON object"
@@ -323,7 +323,7 @@ def read_metadata_digest(path: Path, refusal: str) -> str:
     """
     try:
         digest = json.loads(path.read_text("utf-8")).get("containerimage.digest")
-    except OSError, ValueError, AttributeError:
+    except OSError, ValueError, AttributeError, RecursionError:
         digest = None
     if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
         raise RefusedError(refusal)
@@ -436,7 +436,7 @@ def index_bytes(dry_run: bytes) -> tuple[bytes, str]:
     body = dry_run[:-1]
     try:
         ctype = json.loads(body).get("mediaType") or ""
-    except ValueError, AttributeError:
+    except ValueError, AttributeError, RecursionError:
         ctype = ""
     if ctype != OCI_INDEX:
         msg = (
@@ -528,9 +528,11 @@ def parse_images(raw: str) -> list[tuple[str, str, str]]:
             fails its whitelist.
 
     """
+    # RecursionError too: JSON nested past the parser's depth is a shape
+    # untrusted input can take, and it died here as a traceback (#1556).
     try:
         parsed = json.loads(raw)
-    except ValueError:
+    except ValueError, RecursionError:
         parsed = None
     keys = ("image", "tag", "digest")
     if (

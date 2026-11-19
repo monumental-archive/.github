@@ -401,8 +401,9 @@ class Facts(Harness):
 
     def test_facts_that_are_not_an_object_refuse(self) -> None:
         """Jq died on these; the helper names what it was given."""
-        for facts in ["[]", "not json", '"x"']:
-            with self.subTest(facts=facts):
+        # The last is #1556's: nested past the parser, a RecursionError before.
+        for facts in ["[]", "not json", '"x"', "[" * 100_000]:
+            with self.subTest(facts=facts[:20]):
                 with self.assertRaises(registry.RefusedError) as cm:
                     registry.facts_pairs(facts)
                 self.assertEqual(str(cm.exception), "facts is not a JSON object")
@@ -845,9 +846,11 @@ class Tag(Harness):
             json.dumps([{**entry, "digest": None}]),
             json.dumps([{"image": "ghcr.io/a/b", "tag": "1"}]),
             json.dumps([{**entry, "tag": 1}]),
+            # #1556: nested past the parser's depth, a RecursionError before.
+            "[" * 100_000,
         ]
         for images in rows:
-            with self.subTest(images=images):
+            with self.subTest(images=images[:60]):
                 self.env["UNTRUSTED_IMAGES"] = images
                 self.refused(message, "tag")
                 self.assertEqual(Fake.log, [])

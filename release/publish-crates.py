@@ -151,6 +151,35 @@ def members(env: Mapping[str, str], cwd: Path) -> list[tuple[str, str]]:
     return [tuple(line.split("\t", 1)) for line in out.splitlines() if line]  # type: ignore[misc]
 
 
+def index_records(body: bytes) -> list[dict] | None:
+    """Read an index file: one JSON object per line.
+
+    One that does not read so is unread, never "not published": bytes
+    that are not UTF-8, or a line that is not an object, died in the
+    reader as a traceback (#1556).
+
+    Returns:
+        Each record, or None when the file is not so.
+
+    """
+    try:
+        lines = body.decode().split("\n")
+    except UnicodeDecodeError:
+        return None
+    records = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(record, dict):
+            return None
+        records.append(record)
+    return records
+
+
 def published_checksum(
     name: str, version: str, user_agent: str, fetch: Callable[..., Response]
 ) -> str | None:
@@ -160,7 +189,8 @@ def published_checksum(
         The index's checksum for that version, or None when it is not published.
 
     Raises:
-        RefusalError: when the index answered anything but 200 or 404.
+        RefusalError: when the index answered anything but 200 or 404,
+            or a 200 that is not one JSON record per line with a cksum.
 
     """
     url = crates_index.index_url(name)
@@ -174,11 +204,20 @@ def published_checksum(
             ' an unread index is not "not published"'
         )
         raise RefusalError(msg)
-    for line in answer.body.decode().splitlines():
-        if line.strip():
-            record = json.loads(line)
-            if record.get("vers") == version:
-                return str(record["cksum"])
+    records = index_records(answer.body)
+    for record in records or []:
+        if record.get("vers") == version:
+            cksum = record.get("cksum")
+            if isinstance(cksum, str) and cksum:
+                return cksum
+            records = None
+            break
+    if records is None:
+        msg = (
+            f"::error::the crates.io index for {name} ({url}) is not one JSON"
+            ' record per line with a cksum; an unread index is not "not published"'
+        )
+        raise RefusalError(msg)
     return None
 
 
