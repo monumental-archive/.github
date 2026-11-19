@@ -111,8 +111,8 @@ def tool(found: str | None, name: str) -> str:
     return found
 
 
-class TheBeltLinkHook(unittest.TestCase):
-    """Each row: a bare canon, a consumer pinning it, and the hook's work."""
+class HookFixture(unittest.TestCase):
+    """A bare canon with two commits, a consumer pinning the first, a cache."""
 
     def setUp(self) -> None:
         """Plant the canon with two commits, a consumer, HOME and cache."""
@@ -210,14 +210,46 @@ class TheBeltLinkHook(unittest.TestCase):
         }
 
     def cached(self) -> list[str]:
-        """List the cache directory, hidden entries included.
+        """List the published trees: the cache's names, `.trees` aside.
 
         Returns:
             The names, sorted; empty when there is no cache yet.
 
         """
         root = self.cache / "org-belt"
-        return sorted(p.name for p in root.iterdir()) if root.is_dir() else []
+        if not root.is_dir():
+            return []
+        return sorted(p.name for p in root.iterdir() if p.name != ".trees")
+
+    def trees(self) -> list[Path]:
+        """List the fetched trees under `.trees`.
+
+        Returns:
+            Their paths, sorted; empty when none was kept.
+
+        """
+        root = self.cache / "org-belt" / ".trees"
+        return sorted(root.iterdir()) if root.is_dir() else []
+
+    def excluded(self) -> list[str]:
+        """Read the clone's info/exclude lines that name the belt's directory.
+
+        Returns:
+            Every `.config/mise/` line.
+
+        """
+        exclude = self.consumer / ".git" / "info" / "exclude"
+        text = exclude.read_text("utf-8") if exclude.exists() else ""
+        return [ln for ln in text.splitlines() if ln == ".config/mise/"]
+
+    def commit_all(self) -> None:
+        """Commit the consumer's tree, so its status starts clean."""
+        self.git(self.consumer, "add", "-A")
+        self.git(self.consumer, "commit", "-q", "-m", "gate stub")
+
+
+class TheCacheAndTheLinks(HookFixture):
+    """Each row: what the hook fetches, publishes and links."""
 
     def test_the_first_run_makes_the_tree_and_both_links(self) -> None:
         """Fetched once, HEAD at the pin, both links into it, one line."""
@@ -229,6 +261,9 @@ class TheBeltLinkHook(unittest.TestCase):
         )
         self.assertEqual(self.cached(), [self.shas[0]])
         tree = self.cache / "org-belt" / self.shas[0]
+        self.assertTrue(tree.is_symlink())
+        self.assertEqual([tree.resolve()], [p.resolve() for p in self.trees()])
+        self.assertTrue(self.trees()[0].name.startswith(f"{self.shas[0]}."))
         head = self.git(tree, "rev-parse", "HEAD").stdout.strip()
         self.assertEqual(head, self.shas[0])
         self.assertEqual(self.links(), self.linked(self.shas[0]))
@@ -236,6 +271,7 @@ class TheBeltLinkHook(unittest.TestCase):
             (self.consumer / ".config/mise/conf.d/belt.toml").read_text("utf-8"),
             "# belt 1\n",
         )
+        self.assertEqual(self.excluded(), [".config/mise/"])
 
     def test_a_second_run_offline_changes_nothing(self) -> None:
         """The remote gone: no fetch, no output, links untouched."""
@@ -249,6 +285,7 @@ class TheBeltLinkHook(unittest.TestCase):
         self.assertEqual(
             (link.lstat().st_mtime_ns, self.cached(), self.links()), before
         )
+        self.assertEqual(self.excluded(), [".config/mise/"])
 
     def test_a_changed_pin_relinks(self) -> None:
         """The stub moves to the second commit: a second tree, new links."""
@@ -271,6 +308,7 @@ class TheBeltLinkHook(unittest.TestCase):
             self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.cached(), [self.shas[0]])
         tree = self.cache / "org-belt" / self.shas[0]
+        self.assertEqual([tree.resolve()], [p.resolve() for p in self.trees()])
         self.assertEqual(sorted(p.name for p in tree.iterdir()), [".git", "mise"])
         self.assertEqual(self.git(tree, "status", "--porcelain").stdout, "")
         self.assertEqual(self.links(), self.linked(self.shas[0]))
@@ -290,8 +328,32 @@ class TheBeltLinkHook(unittest.TestCase):
             f"org-belt: fetched {self.shas[1]}, not the pinned {self.shas[0]};"
             " nothing linked\n",
         )
-        self.assertEqual(self.cached(), [])
+        self.assertEqual((self.cached(), self.trees()), ([], []))
         self.assertEqual(self.links(), dict.fromkeys(self.linked(self.shas[0])))
+
+
+class TheCloneStaysItsOwn(HookFixture):
+    """Each row: what the hook leaves in the clone's git state."""
+
+    def test_a_fresh_clone_stays_clean(self) -> None:
+        """The links are excluded in the clone, not by a tracked ignore."""
+        self.commit_all()
+        self.assertEqual(self.hook().returncode, 0)
+        status = self.git(self.consumer, "status", "--porcelain").stdout
+        self.assertEqual(status, "")
+        self.assertFalse((self.consumer / ".gitignore").exists())
+
+    def test_a_new_worktree_stays_clean(self) -> None:
+        """A worktree links itself; the exclude is the shared one, once."""
+        self.commit_all()
+        self.assertEqual(self.hook().returncode, 0)
+        worktree = self.tmp / "worktree"
+        self.git(self.consumer, "worktree", "add", "-q", "-b", "side", str(worktree))
+        done = run([tool(SH, "sh"), "-c", hook_command()], worktree, self.env())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((worktree / ".config/mise/conf.d/belt.toml").is_symlink())
+        self.assertEqual(self.git(worktree, "status", "--porcelain").stdout, "")
+        self.assertEqual(self.excluded(), [".config/mise/"])
 
     def test_git_variables_a_hook_inherits_do_not_reach_the_fetch(self) -> None:
         """Under a hook git exports GIT_DIR: the cache is not the clone's."""

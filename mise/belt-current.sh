@@ -54,8 +54,10 @@ fi
 # the org hooks point at the machine's cache tree of exactly the pinned
 # sha. So the belt answering is either that tree or wrong: older and
 # newer are one red. The canon has no pin; there the belt is the tree.
-# In CI the canon action delivers the belt at the pin's own resolution,
-# so this half is a LOCAL control and is silent there.
+# A belt that arrived by MISE_GLOBAL_CONFIG_FILE was named on purpose
+# (CI's canon action delivers it at the pin's own resolution, or a
+# person chose one): that carrier is said in one line and passes. The
+# decision is the carrier, never a variable such as GITHUB_ACTIONS.
 sha=""
 version=""
 top=$(git rev-parse --show-toplevel)
@@ -67,8 +69,9 @@ if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
 fi
 here=$(cd -P "${canon}" 2> /dev/null && pwd || echo "${canon}")
 belt=""
-if [[ ${GITHUB_ACTIONS:-} == true ]]; then
-  belt="the canon action's"
+carrier="${MISE_GLOBAL_CONFIG_FILE:-}"
+if [[ -n ${carrier} ]]; then
+  belt="${carrier}"
 elif [[ -n ${sha} ]]; then
   want="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt/${sha}"
   belt=$(cd -P "${want}" 2> /dev/null && pwd || echo "${want}")
@@ -94,8 +97,8 @@ elif git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
 fi
 
 [[ ${status} -eq 0 ]] || exit 1
-if [[ ${GITHUB_ACTIONS:-} == true ]]; then
-  echo "lint:belt-current: mise ${have}; in CI the canon action delivers the belt at the pin"
+if [[ -n ${carrier} ]]; then
+  echo "lint:belt-current: mise ${have}; the belt arrived by MISE_GLOBAL_CONFIG_FILE (${carrier}), named on purpose"
 elif [[ -n ${sha} && -n ${belt} ]]; then
   echo "lint:belt-current: mise ${have}; the belt is the pinned ${sha}${version:+ (v${version})}"
 elif [[ -n ${belt} ]]; then

@@ -142,6 +142,12 @@ unix_default_inline_shell_args = "bash -euo pipefail -c"
 #      so the tasks and ORG_BELT_DIR name one tree.
 #   4. A ~/.config/mise/conf.d symlink into a checkout: the machine belt,
 #      kept so a machine not yet moved to the link still works.
+# mise runs this exec in the directory of the config file that defines
+# it, whatever the shell's or the task's working directory (measured on
+# #1686, mise 2026.11.7): `<clone>/.config/mise/conf.d` for the link,
+# `<canon>/mise` for the canon's own file. So `git rev-parse` in 2 and 3
+# names the clone the config belongs to; the machine's copy runs in its
+# own conf.d, outside any clone, and finds only 4.
 # The belt is identified by a file only the belt has (clippy.toml), so no
 # link's NAME in the machine's conf.d is assumed. Empty when the belt
 # did not arrive — which is not a quiet state: `ci` is itself
@@ -2301,9 +2307,10 @@ dir = "{{cwd}}"
 # An older mise is red; a NEWER local mise is a note, since refusing to
 # push from a machine that is ahead helps nobody.
 #
-# The belt half is silent in CI, where the canon action delivers mise
-# and the tree at the pin's own resolution, so like lint:belt-tree it is
-# a LOCAL control.
+# A belt that arrived by MISE_GLOBAL_CONFIG_FILE (CI's canon action,
+# which delivers the tree at the pin's own resolution, or a person who
+# named one on purpose) is said in one line and passes: the carrier
+# decides, never a variable such as GITHUB_ACTIONS that anyone can set.
 run = '''
 "${ORG_BELT_DIR}/belt-current.sh"
 '''

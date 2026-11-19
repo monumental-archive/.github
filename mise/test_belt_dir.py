@@ -151,8 +151,15 @@ class WhereTheBeltIs(unittest.TestCase):
         conf.mkdir(parents=True)
         (conf / "toolbelt.toml").symlink_to(self.machine / "config.toml")
 
-    def resolve(self, path: str | None = None) -> subprocess.CompletedProcess[str]:
-        """Run the template's command in the repository, as mise does.
+    def resolve(
+        self, where: Path, path: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the template's command in `where`, as mise does.
+
+        mise runs an `[env]` exec in the directory of the config file that
+        defines it, whatever the shell's or the task's working directory
+        (measured on #1686, mise 2026.11.7): the link's own directory in a
+        clone, `mise/` in the canon, the machine's conf.d for its belt.
 
         Returns:
             The run.
@@ -164,11 +171,20 @@ class WhereTheBeltIs(unittest.TestCase):
         if path is not None:
             extra["PATH"] = path
         argv = [tool(SH, "sh"), "-o", "errexit", "-c", template_command()]
-        return run(argv, self.repo, hermetic.env(self.home, **extra))
+        return run(argv, where, hermetic.env(self.home, **extra))
 
-    def assert_answers(self, belt: Path | None) -> None:
-        """Assert the command exits 0 printing `belt`, or nothing."""
-        done = self.resolve()
+    def link_dir(self) -> Path:
+        """Name the directory mise runs the linked belt's exec in.
+
+        Returns:
+            The clone's `.config/mise/conf.d`.
+
+        """
+        return self.repo / ".config" / "mise" / "conf.d"
+
+    def assert_answers(self, belt: Path | None, where: Path) -> None:
+        """Assert the command, run in `where`, prints `belt` or nothing."""
+        done = self.resolve(where)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{belt}\n" if belt else "")
 
@@ -178,25 +194,25 @@ class WhereTheBeltIs(unittest.TestCase):
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
         self.global_file = str(self.ci / "config.toml")
-        self.assert_answers(self.ci)
+        self.assert_answers(self.ci, self.link_dir())
 
     def test_the_tree_itself_wins_over_link_and_machine(self) -> None:
         """2. The canon's own tree, with a link and a machine belt present."""
         own = self.own_tree()
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
-        self.assert_answers(own)
+        self.assert_answers(own, own)
 
     def test_the_link_wins_over_the_machine(self) -> None:
         """3. A consumer's link to its pin's cache tree, machine belt present."""
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
-        self.assert_answers(self.cache)
+        self.assert_answers(self.cache, self.link_dir())
 
     def test_the_machine_belt_answers_last(self) -> None:
-        """4. Only the machine's conf.d: it still works."""
+        """4. The machine's conf.d, read from its own directory: it works."""
         self.machine_link()
-        self.assert_answers(self.machine)
+        self.assert_answers(self.machine, self.xdg / "mise" / "conf.d")
 
     def test_a_relative_link_is_read_from_its_own_directory(self) -> None:
         """A link written relative resolves against conf.d, not the cwd."""
@@ -205,18 +221,18 @@ class WhereTheBeltIs(unittest.TestCase):
                 self.cache / "config.toml", self.repo / ".config/mise/conf.d"
             )
         )
-        self.assert_answers(self.cache)
+        self.assert_answers(self.cache, self.link_dir())
 
     def test_a_link_to_a_tree_that_is_no_belt_falls_through(self) -> None:
         """No clippy.toml beside the link's target: the machine answers."""
         (self.cache / "clippy.toml").unlink()
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
-        self.assert_answers(self.machine)
+        self.assert_answers(self.machine, self.link_dir())
 
     def test_no_carrier_is_empty_and_exit_zero(self) -> None:
         """Nothing anywhere: no output, exit 0 (#569)."""
-        self.assert_answers(None)
+        self.assert_answers(None, self.repo)
 
     def test_no_git_is_still_total(self) -> None:
         """Without git (Renovate's container): falls to the machine, exit 0."""
@@ -228,7 +244,7 @@ class WhereTheBeltIs(unittest.TestCase):
             found = shutil.which(name)
             if found is not None:
                 (bare / name).symlink_to(found)
-        done = self.resolve(path=str(bare))
+        done = self.resolve(self.link_dir(), path=str(bare))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{self.machine}\n")
 

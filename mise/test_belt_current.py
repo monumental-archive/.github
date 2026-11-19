@@ -155,8 +155,11 @@ class TheBeltIsThePinned(unittest.TestCase):
             The run.
 
         """
-        env = self.env(ORG_CANON_DIR=str(belt), PATH=self.path, **extra)
-        return run([tool(BASH, "bash"), str(SCRIPT)], self.repo, env)
+        return run(
+            [tool(BASH, "bash"), str(SCRIPT)],
+            self.repo,
+            self.env(ORG_CANON_DIR=str(belt), PATH=self.path, **extra),
+        )
 
     def assert_red(self, belt: Path, why: str) -> None:
         """Assert the run is red naming `belt`, the pinned tree and `why`."""
@@ -236,16 +239,32 @@ class TheBeltIsThePinned(unittest.TestCase):
             "  MISE_GLOBAL_CONFIG_FILE, which is the one carrier ranked above it.\n",
         )
 
-    def test_ci_is_silent_on_the_belt(self) -> None:
-        """In CI the canon action delivers the pin's belt: no local check."""
+    def test_a_belt_named_by_the_carrier_passes_with_one_line(self) -> None:
+        """MISE_GLOBAL_CONFIG_FILE named the belt: said, and green."""
         self.pin()
         tree = plant_canon(self.tmp / "org-canon", "1.2.0")
-        done = self.check(tree, GITHUB_ACTIONS="true")
+        named = str(tree / "mise" / "config.toml")
+        done = self.check(tree, MISE_GLOBAL_CONFIG_FILE=named)
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(
             done.stdout,
-            f"lint:belt-current: mise {MISE_VERSION}; in CI the canon action"
-            " delivers the belt at the pin\n",
+            f"lint:belt-current: mise {MISE_VERSION}; the belt arrived by"
+            f" MISE_GLOBAL_CONFIG_FILE ({named}), named on purpose\n",
+        )
+
+    def test_github_actions_alone_does_not_excuse_a_wrong_link(self) -> None:
+        """A variable anyone can set is not a carrier: the link is judged."""
+        self.pin()
+        other = self.cached(OTHER, "1.3.0")
+        self.link(other)
+        done = self.check(other, GITHUB_ACTIONS="true")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertEqual(
+            done.stderr,
+            f"belt-current: the belt answering is {other}; this repository's gate\n"
+            f"  pins {PIN} (v1.2.0), whose belt is {self.cache / 'org-belt' / PIN}.\n"
+            "  This clone's link names another tree. Run:\n"
+            "    lefthook run post-checkout\n",
         )
 
 
