@@ -65,7 +65,9 @@ case "$2" in
     printf '<!-- badges:begin -->\\n[![s](%s)](x)\\n<!-- badges:end -->\\n' \\
       "${SHIELD//@REPO@/${r##*/}}" | base64 | tr -d '\\n'
     ;;
-  repos/*/commits/*) printf 'abc1234\\t%s\\n' "$(date +%s)" ;;
+  repos/*/commits/*) printf 'abc1234\\t%s\\n' "${HEAD_AT:-$(date +%s)}" ;;
+  repos/*/contents/*) exit 1 ;;
+  repos/*) echo main ;;
   *) exit 1 ;;
 esac
 """
@@ -443,7 +445,12 @@ AGED = ("age: 45495", "cache-control: max-age=600")
 OLD = ("age: 700000", "cache-control: max-age=600")
 WEEK = "answered from a cache 700000 seconds old, older than the audit's week"
 NOT_ANSWERED = ", a question unanswered, not an absence)"
-COVERED = '{"results": [{"totals": {"coverage": 90.5}, "commitid": "abc1234"}]}'
+# Codecov's branch route, as it answered for .github's main (#1668).
+COVERED = (
+    '{"name": "main",'
+    ' "head_commit": {"commitid": "abc1234", "totals": {"coverage": 90.5}}}'
+)
+CODECOV = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
 
 # Each leg that asks an issuer: its shield, the suffix its question's
 # last path component carries, how `unanswered` names the issuer for
@@ -515,9 +522,9 @@ LEGS = (
     ),
     (
         "codecov",
-        f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg",
+        CODECOV,
         "",
-        "Codecov, about alpha,",
+        "Codecov, about alpha's main,",
         lambda _r: '{"branch": "main"}',
         lambda r: f"audit:badges: {r}: codecov holds 90.5% for {r} at abc1234",
     ),
@@ -536,14 +543,13 @@ class StaleAnswer(Planted):
     def plant(
         self, suffix: str, body: Callable[[str], str], headers: tuple[str, ...]
     ) -> None:
-        """Plant both repositories' answers, and Codecov's commits read."""
+        """Plant both repositories' answers, and Codecov's branch route."""
         self.org((200, body("alpha")), (200, body("beta")), suffix)
         for name in ("alpha", "beta"):
             self.headers(f"{name}{suffix}", *headers)
-        commits = "commits?branch=main"
-        (self.stubs / f"{commits}.code").write_text("200", encoding="utf-8")
-        (self.stubs / f"{commits}.body").write_text(COVERED, encoding="utf-8")
-        self.headers(commits, *headers)
+        (self.stubs / "main.code").write_text("200", encoding="utf-8")
+        (self.stubs / "main.body").write_text(COVERED, encoding="utf-8")
+        self.headers("main", *headers)
 
     def test_a_stale_404_is_a_question_unanswered(self) -> None:
         """The measured stale 404 names the cache, never an absence."""
@@ -625,7 +631,7 @@ class StaleAnswer(Planted):
                 (self.stubs / "curl.log").unlink(missing_ok=True)
                 self.env["SHIELD"] = shield
                 self.plant(suffix, body, AGED)
-                asks = 4 if leg == "codecov" else 2
+                asks = 2
                 self.verdict(0, [note("alpha"), note("beta")], asks=asks)
 
     def test_every_leg_reads_the_week_bound(self) -> None:
@@ -639,31 +645,125 @@ class StaleAnswer(Planted):
                 beta = said.replace("alpha", "beta")
                 self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
 
-    def test_codecov_commits_read_reads_the_week_bound(self) -> None:
-        """The leg's second question, the branch head, is held the same."""
-        self.env["SHIELD"] = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
-        self.plant("", lambda _r: '{"branch": "main"}', ())
-        self.headers("commits?branch=main", *OLD)
+    def test_codecov_stale_empty_branch_is_unanswered(self) -> None:
+        """No coverage in a stale branch answer is an absence: unanswered."""
+        self.env["SHIELD"] = CODECOV
+        self.plant("", lambda _r: "", ())
+        (self.stubs / "main.body").write_text('{"name": "main"}', encoding="utf-8")
+        self.headers("main", *STALE)
         said = (
-            "(codecov: Codecov, about alpha's commits, did not answer"
-            f" — HTTP 200, {WEEK}{NOT_ANSWERED}"
-        )
-        beta = said.replace("alpha", "beta")
-        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}", asks=4)
-
-    def test_codecov_stale_empty_commits_is_unanswered(self) -> None:
-        """No coverage in a stale commits answer is an absence: unanswered."""
-        self.env["SHIELD"] = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
-        self.plant("", lambda _r: '{"branch": "main"}', ())
-        commits = "commits?branch=main"
-        (self.stubs / f"{commits}.body").write_text("{}", encoding="utf-8")
-        self.headers(commits, *STALE)
-        said = (
-            "(codecov: Codecov, about alpha's commits, did not answer"
+            "(codecov: Codecov, about alpha's main, did not answer"
             f" — HTTP 200, {PAST}{NOT_ANSWERED}"
         )
         beta = said.replace("alpha", "beta")
-        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}", asks=4)
+        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
+
+
+def both(said: str) -> str:
+    """Build the defects line naming alpha and then beta.
+
+    Returns:
+        The line, beta's entry the same as alpha's by name.
+
+    """
+    return f"{DEFECTS}alpha{said} beta{said.replace('alpha', 'beta')}"
+
+
+class CodecovRead(Planted):
+    """One question to Codecov, its branch route (#1668).
+
+    The stub's GitHub says each repository's default branch is `main`
+    at `abc1234`, committed at HEAD_AT (now, unless a row says).
+    """
+
+    def setUp(self) -> None:
+        """Wear the Codecov shield."""
+        super().setUp()
+        self.env["SHIELD"] = CODECOV
+
+    def branch(self, code: int, text: str) -> None:
+        """Plant what Codecov's branch route answers for `main`."""
+        (self.stubs / "main.code").write_text(str(code), encoding="utf-8")
+        (self.stubs / "main.body").write_text(text, encoding="utf-8")
+
+    def asked(self) -> list[str]:
+        """Read the URLs the audit asked, in order.
+
+        Returns:
+            One URL per request.
+
+        """
+        log = (self.stubs / "curl.log").read_text(encoding="utf-8").splitlines()
+        return [line.split(" ", 1)[0] for line in log]
+
+    def test_the_detail_route_is_never_asked(self) -> None:
+        """A 404 on /repos/<name> is not asked about; the branch is judged."""
+        self.org((404, '{"detail": "Not found."}'), (404, '{"detail": "Not found."}'))
+        self.branch(200, COVERED)
+        self.verdict(
+            0,
+            [
+                "audit:badges: alpha: codecov holds 90.5% for alpha at abc1234",
+                "audit:badges: beta: codecov holds 90.5% for beta at abc1234",
+            ],
+        )
+        api = f"https://api.codecov.io/api/v2/github/{OWNER}/repos"
+        self.assertEqual(
+            self.asked(), [f"{api}/alpha/branches/main", f"{api}/beta/branches/main"]
+        )
+
+    def test_branch_route_404_is_no_record(self) -> None:
+        """Codecov knows neither the repository nor the branch."""
+        self.branch(404, '{"detail": "Not found."}')
+        self.verdict(1, [], both("(codecov: issuer has no record of alpha)"))
+
+    def test_no_coverage_is_a_shield_reading_unknown(self) -> None:
+        """The branch is known and its head has no report."""
+        self.branch(200, '{"name": "main", "head_commit": {"commitid": "abc1234"}}')
+        self.verdict(
+            1,
+            [],
+            both(
+                "(codecov: no coverage report for alpha's main — the shield reads"
+                " unknown; the gate stub must pass codecov-token)"
+            ),
+        )
+
+    def test_a_head_behind_the_forge_after_an_hour_is_stale(self) -> None:
+        """Codecov's head is not GitHub's, and GitHub's is over an hour old."""
+        self.branch(200, COVERED.replace("abc1234", "0ld0000"))
+        self.env["HEAD_AT"] = "1000000000"
+        self.verdict(
+            1,
+            [],
+            both(
+                "(codecov: stale — Codecov last heard about 0ld0000, main is at"
+                " abc1234; the upload job is not running)"
+            ),
+        )
+
+    def test_a_head_behind_the_forge_within_the_hour_is_in_flight(self) -> None:
+        """An upload still in flight: the figure Codecov holds is noted."""
+        self.branch(200, COVERED.replace("abc1234", "0ld0000"))
+        self.verdict(
+            0,
+            [
+                "audit:badges: alpha: codecov holds 90.5% for alpha at 0ld0000",
+                "audit:badges: beta: codecov holds 90.5% for beta at 0ld0000",
+            ],
+        )
+
+    def test_503_is_a_question_unanswered(self) -> None:
+        """An outage is never reported as a missing record."""
+        self.branch(503, "down")
+        self.verdict(
+            1,
+            [],
+            both(
+                "(codecov: Codecov, about alpha's main, did not answer — HTTP 503,"
+                " a question unanswered, not an absence)"
+            ),
+        )
 
 
 class BareCurl(unittest.TestCase):
