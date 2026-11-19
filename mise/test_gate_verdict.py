@@ -94,14 +94,16 @@ class EveryPartPassed(unittest.TestCase):
         done = self.verdict("success", "success", "success")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
-            done.stdout, "ci: plan, gate and every pgrx leg ([16, 17]) passed\n"
+            done.stdout, "ci: plan, gate and every pgrx leg (\\[16\\,\\ 17\\]) passed\n"
         )
 
     def test_no_legs_planned_and_none_ran(self) -> None:
         """A tree with no extension skips the legs, and that is green."""
         done = self.verdict("success", "success", "skipped", "[]")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, "ci: plan, gate and every pgrx leg ([]) passed\n")
+        self.assertEqual(
+            done.stdout, "ci: plan, gate and every pgrx leg (\\[\\]) passed\n"
+        )
 
     def test_planned_legs_that_were_skipped(self) -> None:
         """A skipped required leg must not count as passing."""
@@ -110,7 +112,7 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(
             done.stdout,
             "::error::pgrx legs were skipped although majors were planned\n"
-            "  planned: [16, 17]\n",
+            "  planned: \\[16\\,\\ 17\\]\n",
         )
 
     def test_a_failed_plan(self) -> None:
@@ -122,7 +124,7 @@ class EveryPartPassed(unittest.TestCase):
             "::error::a job the gate needs did not succeed\n  plan: failure\n"
             "::error::a job the gate needs did not succeed\n  gate: skipped\n"
             "::error::pgrx legs were skipped although majors were planned\n"
-            "  planned: \n",
+            "  planned: ''\n",
         )
 
     def test_a_cancelled_gate(self) -> None:
@@ -140,7 +142,7 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "::error::a job the gate needs did not succeed\n  pgrx legs: failure\n",
+            "::error::a job the gate needs did not succeed\n  pgrx\\ legs: failure\n",
         )
 
 

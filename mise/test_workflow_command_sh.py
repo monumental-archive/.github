@@ -14,11 +14,14 @@ at a decoy repository), the function file excepted:
    double quotes, no `{` in a Python f-string, no jq interpolation or printf
    `%s` in single quotes. Outside text goes through `org_error` and its
    siblings, which escape it.
-2. In a script, step or task that prints a workflow command, no plain
-   `echo` or `printf` begins its text with an expansion (`echo
-   "${REF} …"`): a line of outside text must never begin a log line,
-   where its first characters could be a command. Text written to a
-   file or a pipe is not the log and is not held.
+2. In a script, step or task that prints a workflow command, text with
+   an expansion in it reaches the log only through the functions, or as
+   an argument to a `printf` whose format is a literal whose conversions
+   are all `%q` (bash writes the value as one shell word: a newline
+   comes out escaped, on the same line). A raw value with a
+   newline would begin a line of its own, which the runner reads as a
+   command if it looks like one. Text written to a file, a pipe, a
+   command substitution or a `{ … } >> file` group is not the log.
 
 stdlib `unittest`, matching the rest of mise/.
 """
@@ -39,17 +42,20 @@ SKIP = {".git", "node_modules", "target", "vendor", "__pycache__", ".venv", "tes
 
 # Where a command begins: a quote, `::`, a name, then `::` or a space.
 COMMAND = re.compile(r"""(f?)(["'])::[A-Za-z][A-Za-z0-9_-]*(?:::| )""")
-# A unit prints a command when it writes one or calls the writer.
+# A unit prints a command when it writes one or calls the writer. The
+# command's `::` opens the printed text: `clippy::all` is no command.
 PRINTS = re.compile(
-    r"::[A-Za-z][A-Za-z0-9_-]*(?:::| )"
+    r"(?:^|[\"'\s])::[A-Za-z][A-Za-z0-9_-]*(?:::| )"
     r"|\borg_(?:error|warning|notice|mask|group|endgroup)\b"
 )
-# An echo or printf, at a command position, whose text begins with `$`.
-LEADING = re.compile(
-    r"""(?:^|&&|\|\||;|\bthen\b|\belse\b|\bdo\b|[{(])\s*(?:echo|printf)(?:\s+-[a-zA-Z]+)*\s+"?\$"""
+# An echo or printf at a command position, and what follows it.
+PRINTER = re.compile(
+    r"""(?:^|&&|\|\||;|\bthen\b|\belse\b|\bdo\b|[{(])\s*(echo|printf)\b(.*)$"""
 )
-# Output that goes to a file or into a pipe is not the log.
+# Output that goes to a file, a pipe or a substitution is not the log.
 NOT_THE_LOG = re.compile(r""">>?\s*["$/\w]|\|\s*[\w$"]""")
+# A printf conversion, `%%` aside.
+CONVERSION = re.compile(r"%(?!%)[-+ #0-9.*]*[a-zA-Z]")
 
 
 def bash(script: str) -> str:
@@ -115,16 +121,68 @@ def rule_one(line: str) -> bool:
     return False
 
 
-def rule_two(line: str) -> bool:
-    """Say whether a line begins its log text with an expansion.
+def literal_format(rest: str) -> tuple[str, str] | None:
+    """Split a printf's arguments into a literal format and the rest.
 
     Returns:
-        True when the line breaks rule 2.
+        The format's text and the arguments after it, or None when the
+        format is not one quoted literal.
 
     """
-    return bool(LEADING.search(line)) and not NOT_THE_LOG.search(
-        line[LEADING.search(line).end() :]
-    )
+    rest = rest.lstrip()
+    if rest[:1] not in {"'", '"'}:
+        return None
+    text = quoted(rest, 0, rest[0])
+    after = rest[len(text) + 2 :]
+    if rest[0] == '"' and ("$" in text or "`" in text):
+        return None
+    return text, after
+
+
+def rule_two(line: str) -> bool:
+    """Say whether a line writes outside text to the log unguarded.
+
+    Returns:
+        True when an echo, or a printf with anything but a literal
+        all-`%q` format, prints an expansion to the log.
+
+    """
+    found = PRINTER.search(line)
+    if not found:
+        return False
+    if "$(" in line[: found.start() + 1]:
+        return False
+    verb, rest = found.groups()
+    if NOT_THE_LOG.search(rest) or not ("$" in rest or "`" in rest):
+        return False
+    if verb == "echo":
+        return True
+    split = literal_format(rest)
+    if split is None:
+        return True
+    fmt, _ = split
+    return any(c[-1] != "q" for c in CONVERSION.findall(fmt))
+
+
+def grouped(unit: list[tuple[int, str]]) -> set[int]:
+    """Find the lines inside `{ … } > file` groups: a file, not the log.
+
+    Returns:
+        The line numbers inside each such group.
+
+    """
+    inside: set[int] = set()
+    opened: list[int] = []
+    for n, line in unit:
+        text = line.strip()
+        if text == "{":
+            opened.append(n)
+        elif opened and re.match(r"^\}\s*>>?\s*\S", text):
+            start = opened.pop()
+            inside.update(m for m, _ in unit if start < m < n)
+        elif opened and text.startswith("}"):
+            opened.pop()
+    return inside
 
 
 def units(path: Path, text: str) -> list[list[tuple[int, str]]]:
@@ -196,10 +254,11 @@ def findings(root: Path) -> list[str]:
         for unit in units(rel, text):
             code = [(n, ln) for n, ln in unit if not ln.lstrip().startswith("#")]
             prints = any(PRINTS.search(ln) for _, ln in code)
+            to_a_file = grouped(code)
             for n, line in code:
                 if rule_one(line):
                     out.append(f"{rel}:{n} 1")
-                elif prints and rule_two(line):
+                elif prints and n not in to_a_file and rule_two(line):
                     out.append(f"{rel}:{n} 2")
     return out
 
@@ -264,19 +323,25 @@ class TheLaw(unittest.TestCase):
             with self.subTest(green=line):
                 self.assertFalse(rule_one(line))
 
-    def test_rule_two_refuses_a_leading_expansion(self) -> None:
-        """Outside text may follow a fixed prefix, never begin the line."""
+    def test_rule_two_allows_only_percent_q_for_outside_text(self) -> None:
+        """An expansion reaches the log as a `%q` argument, or not at all."""
         red = [
+            'echo "  ref: ${REF}"',
             'echo "${REF} resolves"',
-            'echo "$x"',
+            "printf '  ref: %s\\n' \"${REF}\"",
+            'printf "  ref: ${REF}\\n"',
+            'printf \'  %q and %s\\n\' "${a}" "${b}"',
             '[[ -n ${x} ]] || echo "${x}"',
             'echo "${refusals}" >&2',
         ]
         green = [
-            'echo "  ref: ${REF}"',
+            "printf '  ref: %q\\n' \"${REF}\"",
+            'printf \'  %q: %q\\n\' "${name}" "${result}" >&2',
+            'echo "  a literal"',
             'echo "${x}" >> "${GITHUB_OUTPUT}"',
             'echo "${x}" | jq .',
-            'echo "deriving ${name}"',
+            'flags=$(printf " -A %s" "${lint}")',
+            "printf '100%% done\\n'",
         ]
         for line in red:
             with self.subTest(red=line):
@@ -284,6 +349,33 @@ class TheLaw(unittest.TestCase):
         for line in green:
             with self.subTest(green=line):
                 self.assertFalse(rule_two(line))
+
+    def test_a_group_written_to_a_file_is_not_the_log(self) -> None:
+        """`{ echo "X=${x}"; } >> "${GITHUB_ENV}"` writes a file."""
+        unit = [
+            (1, "{"),
+            (2, '  echo "SA_WORK=${work}"'),
+            (3, '} >> "${GITHUB_ENV}"'),
+            (4, 'echo "${x}"'),
+        ]
+        self.assertEqual(grouped(unit), {2})
+
+    def test_clippy_lint_names_are_no_command(self) -> None:
+        """`clippy::all` holds `::` and a name, but opens nothing."""
+        self.assertIsNone(PRINTS.search('" -D clippy::all -D clippy::pedantic"'))
+        self.assertIsNotNone(PRINTS.search('echo "::error::x"'))
+
+    def test_percent_q_keeps_a_newline_and_a_command_on_one_line(self) -> None:
+        """End to end: a literal command, then a detail line, is two lines."""
+        out = bash(
+            "v=$'a\\n::error::x'\n"
+            'echo "::error::a literal command"\n'
+            "printf '  planned: %q\\n' \"${v}\""
+        )
+        self.assertEqual(
+            out.splitlines(),
+            ["::error::a literal command", "  planned: $'a\\n::error::x'"],
+        )
 
     def test_rule_two_reads_only_units_that_print_a_command(self) -> None:
         """A step that prints no command may echo its text as it likes."""

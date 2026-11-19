@@ -182,12 +182,12 @@ jobs:
             # No canon tree in this job: the command is a literal, and the
             # outside text follows on a plain line, never at its start (#1660).
             echo "::error::stele level failed — the board was not measured, so nothing here is asserted"
-            echo "  stele level exit: ${rc}"
+            printf '  stele level exit: %q\n' "${rc}"
             exit "${rc}"
           fi
           if [[ ${rc} -ne 0 ]]; then
             echo "::error::the board comparison is red — its findings are named above"
-            echo "  stele level exit: ${rc}"
+            printf '  stele level exit: %q\n' "${rc}"
           fi
           echo "board=${rc}" >> "${GITHUB_ENV}"
       - name: Assert every levels branch still moves
@@ -220,12 +220,12 @@ jobs:
             # No canon tree in this job: the command is a literal, and the
             # outside text follows on a plain line, never at its start (#1660).
             echo "::error::a repository has no levels branch — the stub has never run there"
-            echo "  missing: ${absent}"
+            printf '  missing: %q\n' "${absent}"
             bad=1
           fi
           if [[ -n ${stale} ]]; then
             echo "::error::a levels branch has not moved within the stale limit — the stub stopped running"
-            echo "  limit: ${STALE_AFTER_DAYS} days; stale:${stale}"
+            printf '  limit: %q days; stale:%q\n' "${STALE_AFTER_DAYS}" "${stale}"
             bad=1
           fi
           [[ ${board} -eq 0 ]] || bad=1

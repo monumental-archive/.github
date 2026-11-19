@@ -151,7 +151,7 @@ jobs:
           # No canon tree in this job: the command is a literal, and the
           # outside text follows on a plain line, never at its start (#1660).
           echo "::notice::the base image resolves"
-          echo "  ref: ${REF}"
+          printf '  ref: %q\n' "${REF}"
       - name: Verify the upstream provenance names this source (#212)
         # Docker Official Images carry BuildKit in-toto provenance
         # (slsa.dev/provenance/v0.2) as attestation manifests — unsigned,

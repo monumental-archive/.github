@@ -31,4 +31,4 @@ su postgres -c "
   ${root}/usr/lib/postgresql/*/bin/pg_ctl -D /tmp/pgdata -o \"-c listen_addresses=\" -w start > /dev/null
   psql -c \"CREATE EXTENSION ${ext};\"
 "
-echo "created extension ${ext} from the COPY recipe"
+printf 'created extension %q from the COPY recipe\n' "${ext}"

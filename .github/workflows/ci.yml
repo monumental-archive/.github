@@ -763,15 +763,15 @@ jobs:
               # No canon tree in this job: the command is a literal, and the
               # outside text follows on a plain line, never at its start (#1660).
               echo "::error::pgrx legs were skipped although majors were planned"
-              echo "  planned: ${MAJORS}"
+              printf '  planned: %q\n' "${MAJORS}"
             else
               echo "::error::a job the gate needs did not succeed"
-              echo "  ${name}: ${result}"
+              printf '  %q: %q\n' "${name}" "${result}"
             fi
             status=1
           done
           [[ ${status} -eq 0 ]] || exit 1
-          echo "ci: plan, gate and every pgrx leg (${MAJORS}) passed"
+          printf 'ci: plan, gate and every pgrx leg (%q) passed\n' "${MAJORS}"
   # The badge feed, never the gate: uploads the coverage reports the
   # gate's own coverage:check wrote to Codecov, on pushes to main.
   # Separate job so the required check stays deterministic; skips clean
@@ -839,7 +839,7 @@ jobs:
               echo "::error::the gate's coverage-reports artifact holds no report"
               exit 1
             fi
-            echo "upload ${files}"
+            printf 'upload %q\n' "${files}"
           fi
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
       # fail_ci_if_error: TRUE, deliberately. The job is

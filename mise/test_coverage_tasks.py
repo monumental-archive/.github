@@ -871,7 +871,7 @@ class UploadStep(unittest.TestCase):
         done = run_upload_step(["coverage.xml", "lcov.info", "coverage.txt"])
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "upload lcov.info,coverage.txt,coverage.xml\n"
+            "upload lcov.info\\,coverage.txt\\,coverage.xml\n"
             "files=lcov.info,coverage.txt,coverage.xml\n",
             done.stdout,
         )

@@ -134,11 +134,11 @@ jobs:
             # No canon tree in this job: the command is a literal, and the
             # outside text follows on a plain line, never at its start (#1660).
             echo "::error::continuous publishes from branches and schedules only"
-            echo "  ref: ${GITHUB_REF}"
+            printf '  ref: %q\n' "${GITHUB_REF}"
             exit 1
           fi
           echo "::notice::continuous publish"
-          echo "  ref: ${GITHUB_REF}"
+          printf '  ref: %q\n' "${GITHUB_REF}"
   # Same resolver, same rules as the versioned facts job in publish.yml —
   # the archetype difference is one flag: the continuous map simply never
   # contains `version`, because this stream has none. It runs no caller

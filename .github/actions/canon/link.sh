@@ -26,7 +26,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # so its one command is a literal and the path follows on a plain line.
 if [[ ! -f "${root}/mise/config.toml" || ! -f "${root}/mise/workflow-command.sh" ]]; then
   echo "::error::the resolved canon tree has no mise/config.toml or mise/workflow-command.sh — not a canon tree"
-  echo "  resolved: ${root}"
+  printf '  resolved: %q\n' "${root}"
   exit 1
 fi
 # The canon's one writer of workflow commands (#1660), in this tree.
@@ -52,5 +52,5 @@ case "${root}" in
     ;;
 esac
 ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
-echo "canon resolved: ${ref} at ${root}"
+printf 'canon resolved: %q at %q\n' "${ref}" "${root}"
 echo "ref=${ref}" >> "${GITHUB_OUTPUT}"

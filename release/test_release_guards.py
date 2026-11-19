@@ -1512,7 +1512,8 @@ class TagReleaseRefusals(unittest.TestCase):
             result = self._run(repo)
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn("HEAD is not the release commit", result.stderr)
-        self.assertIn("expected: chore: release v", result.stderr)
+        # The subject is printed with %q (#1660): one shell word.
+        self.assertIn("expected: chore:\\ release\\ v", result.stderr)
 
     def test_a_commit_already_tagged_is_a_resume_not_a_failure(self) -> None:
         """A re-dispatch onto a tagged commit is a resume, not a failure.
@@ -1534,8 +1535,8 @@ class TagReleaseRefusals(unittest.TestCase):
             first = self._run(repo)
             tag = ""
             for line in first.stderr.splitlines():
-                if "expected: chore: release v" in line:
-                    tag = "v" + line.rsplit("release v", 1)[1].strip()
+                if "expected: chore:\\ release\\ v" in line:
+                    tag = "v" + line.rsplit("release\\ v", 1)[1].strip()
             self.assertTrue(tag, first.stderr)
             # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(

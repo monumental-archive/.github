@@ -98,7 +98,7 @@ for control in "${controls[@]}"; do
   done < <(git ls-files "${sql_dir}/${name}--*--*.sql")
 
   if ((${#scripts[@]} == 0)); then
-    echo "lint:pg-upgrade-path: ${name} has no upgrade scripts; first publish has no predecessor to strand"
+    printf 'lint:pg-upgrade-path: %q has no upgrade scripts; first publish has no predecessor to strand\n' "${name}"
     continue
   fi
 
@@ -272,4 +272,4 @@ PY
   checked=$((checked + 1))
 done
 
-echo "lint:pg-upgrade-path: ${checked} extension(s) checked"
+printf 'lint:pg-upgrade-path: %q extension(s) checked\n' "${checked}"

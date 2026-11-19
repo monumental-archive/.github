@@ -90,7 +90,7 @@ jobs:
               # No canon tree in this job: the command is a literal, and the
               # outside text follows on a plain line, never at its start (#1660).
               echo "::error::audit: no group is declared for this trigger — add it to the plan job"
-              echo "  trigger: ${SCHEDULE:-dispatch:${LEGS}}"
+              printf '  trigger: %q\n' "${SCHEDULE:-dispatch:${LEGS}}"
               exit 1
               ;;
           esac

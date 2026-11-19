@@ -66,4 +66,4 @@ if [[ ! -x ${python} ]]; then
   exit 1
 fi
 echo "ORG_PYTHON=${python}" >> "${GITHUB_ENV}"
-echo "the belt's python ${version}: ${python}"
+printf 'the belt'\''s python %q: %q\n' "${version}" "${python}"

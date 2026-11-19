@@ -223,6 +223,6 @@ jobs:
           # No canon tree in this job: the command is a literal, and the
           # outside text follows on a plain line, never at its start (#1660).
           echo "::error::signed nothing for, and refused to guess about, the decisions below"
-          echo "  refused:${REFUSALS}"
+          printf '  refused:%q\n' "${REFUSALS}"
           exit 1
 ...
