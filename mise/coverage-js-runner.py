@@ -248,6 +248,11 @@ def collect(stream: str) -> tuple[list[tuple[str, list[str]]], list[str]]:
         task = json.loads(raw)
         run = task.get("run") or []
         for script in [run] if isinstance(run, str) else run:
+            # A `{ task = … }` entry runs another task, and mise reports
+            # it as an object (#1555: it raised AttributeError here). It
+            # holds no script of this task's to read.
+            if not isinstance(script, str):
+                continue
             for line in logical_lines(script):
                 args, reason = read_line(line)
                 if reason is not None:

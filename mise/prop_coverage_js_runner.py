@@ -13,12 +13,20 @@ over generated lockfile entries and task run scripts:
   comments are dropped.
 - Invariance (V): `read_line` reads the arguments after vitest behind
   any launcher the leg knows, and refuses vitest behind any other.
+- Refusal (R): `--vitest-command` answers any task stream `mise tasks
+  info --json` can give (a run script, or a list of scripts and
+  `{ task = … }` / `{ tasks = […] }` references) with 0 and the
+  command or 1 and its refusal, never a traceback (#1555: a task
+  reference raised AttributeError until this found it).
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import contextlib
 import importlib.util
+import io
+import json
 import unittest
 from pathlib import Path
 
@@ -135,6 +143,41 @@ class ReadLine(unittest.TestCase):
         got, reason = cj.read_line(line)
         self.assertIsNone(got)
         self.assertIn("does not read", reason)
+
+
+SCRIPT = st.one_of(
+    st.text(max_size=40),
+    st.sampled_from(["vitest run", "pnpm exec vitest --run x", "npx vitest watch"]),
+)
+REFERENCE = st.one_of(
+    st.fixed_dictionaries({"task": WORD}),
+    st.fixed_dictionaries({"tasks": st.lists(WORD, max_size=2)}),
+)
+TASK = st.fixed_dictionaries(
+    {"name": WORD},
+    optional={
+        "run": st.one_of(SCRIPT, st.lists(st.one_of(SCRIPT, REFERENCE), max_size=3)),
+        "dir": st.sampled_from(["", ".", "web"]),
+    },
+)
+
+
+class VitestCommand(unittest.TestCase):
+    """Any task stream: the command, or the refusal."""
+
+    @given(st.lists(TASK, max_size=3))
+    @example([{"name": "test", "run": [{"task": "build"}, "vitest run"]}])
+    def test_any_stream_is_answered(self, tasks: list[dict]) -> None:
+        """0 with JSON on stdout, or 1 with the refusal on stderr."""
+        stream = "".join(json.dumps(t) + "\n" for t in tasks)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = cj.vitest_command("coverage:check", stream)
+        self.assertIn(status, (0, 1))
+        if status == 0:
+            self.assertEqual(json.loads(out.getvalue())["args"][0], "run")
+        else:
+            self.assertIn("coverage:check: typescript:", err.getvalue())
 
 
 if __name__ == "__main__":
