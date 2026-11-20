@@ -7,13 +7,15 @@ d46ae3b (2026-11-17), and the hash is that commit's mise/config.toml then
 mise.toml, digested as @actions/glob does — reproduced before this was
 written. If these rows pass and the first run after #1406 still misses,
 the reproduction is wrong, not the fixture. #1414 appends the belt
-lockfile's digest to that key; the rows hold both halves.
+lockfile's digest to that key; the rows hold both halves. #1864 adds the
+cargo caches' compiler digest, read from `rustc -vV`.
 """
 
 import hashlib
 import io
 import os
 import platform
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -191,7 +193,7 @@ def run(canon: Path) -> dict[str, str]:
             mock.patch.object(platform, "machine", return_value="x86_64"),
             redirect_stdout(io.StringIO()),
         ):
-            code = gate_cache_key.main(["mise-v2", str(canon)], now=WHEN)
+            code = gate_cache_key.main(["tool", "mise-v2", str(canon)], now=WHEN)
         if code != 0:
             msg = f"gate-cache-key exited {code}"
             raise AssertionError(msg)
@@ -233,7 +235,8 @@ class Main(unittest.TestCase):
         """A canon tree without its files is a red step, not a key."""
         err = io.StringIO()
         with redirect_stderr(err):
-            self.assertEqual(1, gate_cache_key.main(["mise-v2", "/nonexistent"]))
+            code = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
+            self.assertEqual(1, code)
         self.assertIn("gate-cache-key:", err.getvalue())
 
     def test_a_tree_without_a_belt_lockfile_is_red(self) -> None:
@@ -243,7 +246,7 @@ class Main(unittest.TestCase):
             (tree / "mise" / "mise.lock").unlink()
             err = io.StringIO()
             with redirect_stderr(err):
-                self.assertEqual(1, gate_cache_key.main(["mise-v2", str(tree)]))
+                self.assertEqual(1, gate_cache_key.main(["tool", "mise-v2", str(tree)]))
         self.assertIn("mise.lock", err.getvalue())
 
 
@@ -347,12 +350,130 @@ class InstallList(unittest.TestCase):
                 mock.patch.object(platform, "machine", return_value="x86_64"),
                 redirect_stdout(io.StringIO()),
             ):
-                argv = ["mise-pgrx-v1-pg18", str(tree), "--install", "jq rust@1"]
+                argv = ["tool", "mise-pgrx-v1-pg18", str(tree)]
+                argv += ["--install", "jq rust@1"]
                 self.assertEqual(0, gate_cache_key.main(argv, now=WHEN))
             written = out.read_text("utf-8")
         digest = gate_cache_key.install_digest("jq rust@1")
         self.assertIn(f"-i{digest}-b", written)
         self.assertIn("prefix=mise-pgrx-v1-pg18-linux-x64-ubuntu26-\n", written)
+
+
+# `rustc -vV` as Rust 1.97.1 prints it on the gate's runner. The rows
+# below vary one line of it at a time.
+RUSTC = """rustc 1.97.1 (6b00bc388 2026-08-05)
+binary: rustc
+commit-hash: 6b00bc3880198600130e1cf62b8f8a93494488cc
+commit-date: 2026-08-05
+host: x86_64-unknown-linux-gnu
+release: 1.97.1
+LLVM version: 21.1.2
+"""
+
+
+def rustc_on_path(tmp: Path, script: str) -> str:
+    """Write a `rustc` that runs `script`, in a directory of its own.
+
+    Returns:
+        A PATH holding only that directory.
+
+    """
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir()
+    rustc = bin_dir / "rustc"
+    rustc.write_text(f"#!/bin/sh\n{script}\n", "utf-8")
+    rustc.chmod(rustc.stat().st_mode | stat.S_IXUSR)
+    return str(bin_dir)
+
+
+def cargo_main(path: str) -> tuple[int, str, str]:
+    """Run `cargo` with PATH set to `path`, as the workflow step does.
+
+    Returns:
+        The exit code, what it wrote to GITHUB_OUTPUT and its stderr.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "out"
+        out.touch()
+        env = {**RUNNER, "GITHUB_OUTPUT": str(out), "PATH": path}
+        err = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(err),
+        ):
+            code = gate_cache_key.main(["cargo"])
+        return code, out.read_text("utf-8"), err.getvalue()
+
+
+class Compiler(unittest.TestCase):
+    """The cargo caches' key names the compiler that fills them (#1864)."""
+
+    def test_the_same_compiler_gives_the_same_digest(self) -> None:
+        """One `rustc -vV`, one digest: a rerun hits."""
+        self.assertEqual(
+            gate_cache_key.rustc_digest(RUSTC), gate_cache_key.rustc_digest(RUSTC)
+        )
+
+    def test_each_line_moves_the_digest(self) -> None:
+        """A change to any one line of `rustc -vV` names a new cache."""
+        rows = [
+            ("release", "release: 1.97.1", "release: 1.100.0"),
+            ("LLVM", "LLVM version: 21.1.2", "LLVM version: 22.1.0"),
+            ("commit", "6b00bc3880198600130e1cf62b8f8a93494488cc", "0" * 40),
+            ("host", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"),
+        ]
+        before = gate_cache_key.rustc_digest(RUSTC)
+        for label, old, new in rows:
+            with self.subTest(row=label):
+                self.assertIn(old, RUSTC)
+                after = gate_cache_key.rustc_digest(RUSTC.replace(old, new))
+                self.assertNotEqual(before, after)
+
+    def test_text_naming_no_compiler_is_red(self) -> None:
+        """Empty output is refused, never digested into a key."""
+        for text in ("", "binary: rustc\n"):
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(ValueError, "printed no release line"),
+            ):
+                gate_cache_key.rustc_digest(text)
+
+    def test_main_writes_the_digest_of_the_rustc_on_path(self) -> None:
+        """`cargo` asks PATH's rustc and writes `digest` for the key."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = rustc_on_path(Path(tmp), f"printf '%s' '{RUSTC}'")
+            code, written, _ = cargo_main(path)
+        self.assertEqual(0, code)
+        self.assertEqual(f"digest={gate_cache_key.rustc_digest(RUSTC)}\n", written)
+
+    def test_two_releases_on_path_give_two_keys(self) -> None:
+        """Two toolchains differing only in release write two digests."""
+        bumped = RUSTC.replace("release: 1.97.1", "release: 1.100.0")
+        written = []
+        for text in (RUSTC, bumped):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = rustc_on_path(Path(tmp), f"printf '%s' '{text}'")
+                written.append(cargo_main(path)[1])
+        self.assertNotEqual(written[0], written[1])
+
+    def test_no_rustc_is_red(self) -> None:
+        """A job with a cargo cache and no compiler fails by name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            code, written, err = cargo_main(tmp)
+        self.assertEqual(1, code)
+        self.assertEqual("", written)
+        self.assertIn("no rustc on PATH", err)
+
+    def test_a_failing_rustc_is_red(self) -> None:
+        """A rustup proxy with no toolchain installed fails by its message."""
+        with tempfile.TemporaryDirectory() as tmp:
+            script = "echo 'toolchain 1.100.0 is not installed' >&2; exit 1"
+            code, written, err = cargo_main(rustc_on_path(Path(tmp), script))
+        self.assertEqual(1, code)
+        self.assertEqual("", written)
+        self.assertIn("-vV exited 1: toolchain 1.100.0 is not installed", err)
 
 
 if __name__ == "__main__":

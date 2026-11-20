@@ -20,7 +20,10 @@ use. These rows hold each cache step in ci.yml to the shape that fixes it:
   restore's own primary key, and only the gate's three jobs hold caches;
 - in the gate's matrix (#1740), the lint and test legs each keep their
   own cargo and Go caches, keyed by leg, and the test leg alone saves
-  the tool cache every leg restores.
+  the tool cache every leg restores;
+- every cargo cache in every workflow names the compiler that fills it
+  (#1864): its key and fallback prefix carry the `rustc -vV` digest
+  before Cargo.lock's hash, from a step after the job's install.
 
 The planted rows each break one property on the real file and assert the
 message that names it.
@@ -393,7 +396,10 @@ LEG_KEYS = {
 }
 LEG_PREFIXES = {
     "go-cache": "format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os)",
-    "cargo-cache": "format('gate-cargo-{0}-{1}-', matrix.leg, runner.os)",
+    "cargo-cache": (
+        "format('gate-cargo-{0}-{1}-{2}-', matrix.leg, runner.os,"
+        " steps.rustc.outputs.digest)"
+    ),
 }
 
 
@@ -464,8 +470,11 @@ class LegCaches(unittest.TestCase):
             (
                 "the properties leg restores cargo",
                 (
-                    "if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock')",
-                    "if: ${{ hashFiles('Cargo.lock')",
+                    (
+                        "id: cargo-cache\n        if: ${{ matrix.leg != 'properties'"
+                        " && hashFiles('Cargo.lock')"
+                    ),
+                    "id: cargo-cache\n        if: ${{ hashFiles('Cargo.lock')",
                 ),
                 (
                     "gate: 'Restore the cargo caches (unsigned gate only)' runs on"
@@ -485,6 +494,164 @@ class LegCaches(unittest.TestCase):
             with self.subTest(row=label):
                 want: list[str] = [message]
                 self.assertEqual(want, leg_cache_findings(plant(old, new)))
+
+
+# THE CARGO CACHES NAME THEIR COMPILER (#1864). `target` is what the
+# compiler that built it made, so a key on Cargo.lock alone restored the
+# previous toolchain's objects after a bump and coverage read both. Every
+# cache holding a cargo path, in any workflow, keys on the digest
+# `gate_cache_key.py cargo` writes, before Cargo.lock's hash, and its
+# fallback prefix carries the digest too. The step runs after the job's
+# install, so the `rustc` it reads is the one the tasks build with, and
+# under the restore's own condition, so it runs wherever the restore does.
+CARGO_PATHS = ("target", "~/.cargo/registry")
+DIGEST = "steps.rustc.outputs.digest"
+COMPILER_KEY = f"${{{{ {DIGEST} }}}}-${{{{ hashFiles('Cargo.lock') }}}}"
+WORKFLOWS = CANON / ".github" / "workflows"
+
+
+def holds_cargo(step: Step) -> bool:
+    """Say whether a cache step holds a cargo path.
+
+    Returns:
+        True for an actions/cache step whose paths include one.
+
+    """
+    if "actions/cache" not in field(step, "uses"):
+        return False
+    paths = inputs(step).get("path", "").split()
+    return any(p in CARGO_PATHS for p in paths)
+
+
+def compiler_findings(text: str, where: str = "ci.yml") -> list[str]:
+    """Hold each cargo cache restore to the compiler's digest.
+
+    Returns:
+        One line per restore whose key or fallback omits the digest, and
+        per job whose digest step is missing, misplaced or conditioned
+        otherwise than the restore.
+
+    """
+    out = []
+    for job_id, job in workflow_yaml.jobs(parsed(text)).items():
+        steps = workflow_yaml.steps(job)
+        restores = [
+            (i, s)
+            for i, s in enumerate(steps)
+            if holds_cargo(s) and "/save@" not in field(s, "uses")
+        ]
+        if not restores:
+            continue
+        name = f"{where}: {job_id}"
+        installs = [i for i, s in enumerate(steps) if s in job_installs.mise_steps(job)]
+        named = [(i, s) for i, s in enumerate(steps) if field(s, "id") == "rustc"]
+        if not named or "gate_cache_key.py cargo" not in field(named[0][1], "run"):
+            out.append(f"{name}: no `gate_cache_key.py cargo` step with id rustc")
+            continue
+        at, digest_step = named[0]
+        if not installs or at < installs[0]:
+            out.append(f"{name}: the rustc digest is read before the install")
+        for i, restore in restores:
+            label = f"{name}: '{field(restore, 'name')}'"
+            if COMPILER_KEY not in inputs(restore).get("key", ""):
+                out.append(f"{label} key does not end {COMPILER_KEY}")
+            if DIGEST not in flat(inputs(restore).get("restore-keys", "")):
+                out.append(f"{label} fallback does not carry {DIGEST}")
+            if at > i:
+                out.append(f"{label} restores before the rustc digest is read")
+            if flat(field(digest_step, "if")) != flat(field(restore, "if")):
+                out.append(f"{label} runs under another condition than its digest")
+    return out
+
+
+class Compiler(unittest.TestCase):
+    """Every cargo cache names the compiler that fills it (#1864)."""
+
+    def test_the_real_gate_conforms(self) -> None:
+        """Both jobs' cargo caches key on the digest."""
+        self.assertEqual(NONE, compiler_findings(real()))
+
+    def test_every_workflow_conforms(self) -> None:
+        """No workflow holds a cargo cache keyed otherwise."""
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            with self.subTest(workflow=path.name):
+                text = path.read_text("utf-8")
+                self.assertEqual(NONE, compiler_findings(text, path.name))
+
+    def test_the_gate_and_pgrx_hold_the_cargo_caches(self) -> None:
+        """The surface today: one restore in each of two jobs."""
+        held = {
+            job_id
+            for job_id, job in workflow_yaml.jobs(parsed(real())).items()
+            for s in workflow_yaml.steps(job)
+            if holds_cargo(s)
+        }
+        self.assertEqual({"gate", "pgrx"}, held)
+
+    def test_planted_breaches_are_named(self) -> None:
+        """Each property broken once on the real file, by its message."""
+        gate = "ci.yml: gate: 'Restore the cargo caches (unsigned gate only)'"
+        pgrx = "ci.yml: pgrx: 'Restore the cargo caches (unsigned gate only)'"
+        rows = [
+            (
+                "a key on Cargo.lock alone",
+                (
+                    "${{ runner.os }}-${{ steps.rustc.outputs.digest }}-",
+                    "${{ runner.os }}-",
+                ),
+                f"{gate} key does not end {COMPILER_KEY}",
+            ),
+            (
+                "a fallback across compilers",
+                (
+                    (
+                        "format('gate-pgrx-{0}-{1}-{2}-', matrix.major, runner.os,"
+                        " steps.rustc.outputs.digest)"
+                    ),
+                    "format('gate-pgrx-{0}-{1}-', matrix.major, runner.os)",
+                ),
+                f"{pgrx} fallback does not carry {DIGEST}",
+            ),
+            (
+                "the digest on the properties leg too",
+                (
+                    (
+                        "        id: rustc\n"
+                        "        if: ${{ matrix.leg != 'properties'"
+                        " && hashFiles('Cargo.lock') != '' }}\n"
+                    ),
+                    "        id: rustc\n",
+                ),
+                f"{gate} runs under another condition than its digest",
+            ),
+            (
+                "no digest step",
+                (
+                    "'\"${ORG_PYTHON}\" .org-canon/mise/gate_cache_key.py cargo'",
+                    "'true'",
+                ),
+                "ci.yml: gate: no `gate_cache_key.py cargo` step with id rustc",
+            ),
+        ]
+        for label, (old, new), message in rows:
+            with self.subTest(row=label):
+                self.assertEqual([message], compiler_findings(plant(old, new)))
+
+    def test_a_digest_read_before_the_install_is_named(self) -> None:
+        """Planted: the step moved above mise-action reads no toolchain."""
+        step = (
+            "      - name: Name the compiler the cargo caches hold\n"
+            "        id: rustc\n"
+            "        run: '\"${ORG_PYTHON}\" .org-canon/mise/gate_cache_key.py cargo'\n"
+            "\n"
+        )
+        install = "      - name: Install mise and the leg's tools\n"
+        text = plant(step, "")
+        text = text.replace(install, step + install, 1)
+        self.assertEqual(
+            ["ci.yml: pgrx: the rustc digest is read before the install"],
+            compiler_findings(text),
+        )
 
 
 def install_key_findings(text: str) -> list[str]:

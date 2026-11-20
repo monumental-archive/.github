@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Name the gate's tool cache: mise-action's key, plus the belt it installs.
+"""Name the gate's caches: the tool cache, and the compiler in the cargo caches.
 
 The gate's tool cache used to be restored and saved by mise-action itself
 (`cache: true`). That action restores by EXACT key only — its
@@ -73,6 +73,21 @@ moved. So a tree that leaves tools out ends the key in
 prefix, so a pull request whose set differs still falls back to the
 default branch's entry and installs only what it adds. A tree that
 leaves nothing out (the canon) sets no digest and no suffix.
+
+THE CARGO CACHES NAME THEIR COMPILER (#1864). The gate's cargo caches
+hold `target`, whose meaning depends on the compiler that built it, and
+were keyed on Cargo.lock alone. A toolchain bump that left Cargo.lock
+unchanged restored the old compiler's objects, cargo built the new ones
+beside them, and llvm-cov read both: edtf's Rust 1.100 bump measured
+70.1% over a target 1.97.1 had filled, 99.3% over a clean one. So
+`cargo` prints the sha256 of the full `rustc -vV` output of the `rustc`
+the job's PATH resolves after its install step (mise-action exports the
+mise environment, so that is the toolchain the tasks build with). The
+release, commit hash, LLVM version and host are all in it. The workflow
+places the digest before the Cargo.lock hash, in the key and in the
+fallback prefix alike: a toolchain change misses, and a fallback only
+ever restores an entry the same compiler filled. No `rustc` is red,
+never an empty digest: the step runs only where a cargo cache does.
 """
 
 import argparse
@@ -80,6 +95,8 @@ import hashlib
 import os
 import platform
 import re
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -206,35 +223,121 @@ def names(
     return {"key": key, "prefix": prefix, "dir": data_dir(env)}
 
 
+RELEASE = re.compile(r"^release: \S+$", re.MULTILINE)
+
+
+def rustc_digest(verbose: str) -> str:
+    """Digest a compiler's `rustc -vV` output, whole (#1864).
+
+    Returns:
+        Its sha256, in hex.
+
+    Raises:
+        ValueError: the text has no `release:` line, so it does not name
+            a compiler and a key built from it would name nothing.
+
+    """
+    if not RELEASE.search(verbose):
+        msg = f"`rustc -vV` printed no release line: {verbose.strip()!r}"
+        raise ValueError(msg)
+    return hashlib.sha256(verbose.encode()).hexdigest()
+
+
+def rustc_verbose() -> str:
+    """Ask the `rustc` on PATH for its full version.
+
+    Returns:
+        What `rustc -vV` printed.
+
+    Raises:
+        ValueError: no `rustc` on PATH, or one that fails — a rustup
+            proxy whose toolchain is not installed, say.
+
+    """
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        msg = (
+            "no rustc on PATH: a job that restores a cargo cache must name"
+            " the compiler that fills it"
+        )
+        raise ValueError(msg)
+    done = subprocess.run([rustc, "-vV"], capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        msg = f"{rustc} -vV exited {done.returncode}: {done.stderr.strip()}"
+        raise ValueError(msg)
+    return done.stdout
+
+
 class Args(argparse.Namespace):
     """The command line, typed where argparse writes it."""
 
+    cache: str
     name: str
     canon: Path
     install: str
 
 
-def main(argv: list[str] | None = None, now: float | None = None) -> int:
-    """Write the tool cache's names to GITHUB_OUTPUT.
+def parse(argv: list[str] | None) -> Args:
+    """Read the command line.
+
+    Returns:
+        The parsed arguments.
+
+    """
+    parser = argparse.ArgumentParser(prog=NAME, description=__doc__.splitlines()[0])
+    caches = parser.add_subparsers(dest="cache", required=True)
+    tool = caches.add_parser("tool", help="name the tool cache (#1406)")
+    tool.add_argument("name", help="the cache's hand-moved name (#1165)")
+    tool.add_argument(
+        "canon",
+        type=Path,
+        help="the canon tree: its ci.yml pins mise, its mise/mise.lock the belt",
+    )
+    tool.add_argument(
+        "--install",
+        default="",
+        help="the job's install_args, for a job that installs a list (#1408)",
+    )
+    caches.add_parser("cargo", help="digest the compiler the cargo caches hold")
+    return parser.parse_args(argv, namespace=Args())
+
+
+def write_outputs(env: dict[str, str], out: dict[str, str]) -> None:
+    """Append a step's outputs to GITHUB_OUTPUT."""
+    lines = "".join(f"{k}={v}\n" for k, v in out.items())
+    with Path(env["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
+        fh.write(lines)
+
+
+def cargo(env: dict[str, str]) -> int:
+    """Write the compiler's digest, for the cargo caches' keys (#1864).
 
     Returns:
         0, or 1 with the reason on stderr.
 
     """
-    parser = argparse.ArgumentParser(prog=NAME, description=__doc__.splitlines()[0])
-    parser.add_argument("name", help="the cache's hand-moved name (#1165)")
-    parser.add_argument(
-        "canon",
-        type=Path,
-        help="the canon tree: its ci.yml pins mise, its mise/mise.lock the belt",
-    )
-    parser.add_argument(
-        "--install",
-        default="",
-        help="the job's install_args, for a job that installs a list (#1408)",
-    )
-    args = parser.parse_args(argv, namespace=Args())
+    try:
+        verbose = rustc_verbose()
+        digest = rustc_digest(verbose)
+    except (OSError, ValueError) as err:
+        print(f"{NAME}: {err}", file=sys.stderr)
+        return 1
+    write_outputs(env, {"digest": digest})
+    print(f"{NAME}: {digest} for {verbose.splitlines()[0]}")
+    return 0
+
+
+def main(argv: list[str] | None = None, now: float | None = None) -> int:
+    """Write a cache's names to GITHUB_OUTPUT.
+
+    Returns:
+        0, or 1 with the reason on stderr.
+
+    """
+    args = parse(argv)
     env = dict(os.environ)
+    if args.cache == "cargo":
+        return cargo(env)
     try:
         workflow = args.canon / ".github" / "workflows" / "ci.yml"
         version = mise_version(workflow.read_text("utf-8"))
@@ -245,9 +348,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         return 1
     clock = time.time() if now is None else now
     out = names(args.name, env, Facts(version, plat, clock, belt), args.install)
-    lines = "".join(f"{k}={v}\n" for k, v in out.items())
-    with Path(env["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
-        fh.write(lines)
+    write_outputs(env, out)
     print(f"{NAME}: {out['key']} (fallback {out['prefix']}, path {out['dir']})")
     return 0
 
