@@ -13,7 +13,7 @@
 #   - a line mypy prints about the config file: an unknown key or an
 #     unparsable file is a warning and exit 0 under mypy's defaults;
 #   - a seam in a source file that lowers the org's level for itself
-#     (inline `# mypy:`, a bare `# type: ignore`, `no_type_check`),
+#     (inline `# mypy:`, any `# type: ignore`, `no_type_check`),
 #     named by python_types_seams.py.
 # A mypy that is not the belt's pin is red by name: a stale install
 # would check against another version's rules.
@@ -76,7 +76,6 @@ if [[ -n ${seams} ]]; then
   while IFS= read -r line; do
     echo "  ${line}" >&2
   done <<< "${seams}"
-  echo "  suppress one line with '# type: ignore[<code>]', which names its rule" >&2
 fi
 
 # The import roots, derived from the tracked files (python_roots.py,

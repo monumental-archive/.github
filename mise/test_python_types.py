@@ -34,6 +34,8 @@ BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 LABEL = "audit:python-types"
+# What the seam guard says of every type-ignore comment, coded or bare.
+IGNORED = "`# type: ignore` hides a finding; type the code instead"
 
 STUB = """\
 #!/usr/bin/env bash
@@ -247,7 +249,7 @@ class TheWiring(unittest.TestCase):
         """`# type: ignore` with no code is named, even at the module's top."""
         done = run({"a.py": "# type: ignore\nX: int = 1\n"}, stub={})
         self.assertEqual(1, done.returncode)
-        self.assertIn("  a.py:1: `# type: ignore` names no error code\n", done.stderr)
+        self.assertIn(f"  a.py:1: {IGNORED}\n", done.stderr)
 
     def test_an_inline_config_is_red(self) -> None:
         """A `# mypy:` comment lowering its file's level is named."""
@@ -280,10 +282,11 @@ class TheWiring(unittest.TestCase):
         self.assertIn(f"{LABEL}: rename one of each pair above", done.stderr)
         self.assertEqual(list[str](), done.args)
 
-    def test_a_coded_ignore_is_not_a_seam(self) -> None:
-        """`# type: ignore[<code>]` names its rule and passes the helper."""
-        done = run({"a.py": "X: int = 1  # type: ignore[misc]\n"}, stub={})
-        self.assertEqual(0, done.returncode, done.stderr)
+    def test_a_coded_ignore_is_red(self) -> None:
+        """`# type: ignore[<code>]` hides its finding too (owner, #1604)."""
+        done = run({"a.py": "f(1)  # type: ignore[arg-type]\n"}, stub={})
+        self.assertEqual(1, done.returncode)
+        self.assertIn(f"  a.py:1: {IGNORED}\n", done.stderr)
 
 
 def seams(text: str) -> hermetic.Called:
@@ -320,10 +323,7 @@ class TheHelpers(unittest.TestCase):
     def test_a_bare_ignore_is_a_seam(self) -> None:
         """`# type: ignore` with no code is named, even at the module's top."""
         done = seams("# type: ignore\nX: int = 1\n")
-        self.assertEqual(
-            (1, "a.py:1: `# type: ignore` names no error code\n"),
-            (done.returncode, done.stdout),
-        )
+        self.assertEqual((1, f"a.py:1: {IGNORED}\n"), (done.returncode, done.stdout))
 
     def test_an_inline_config_is_a_seam(self) -> None:
         """A `# mypy:` comment lowering its file's level is named."""
@@ -347,10 +347,10 @@ class TheHelpers(unittest.TestCase):
         done = seams('S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n')
         self.assertEqual((0, ""), (done.returncode, done.stdout))
 
-    def test_a_coded_ignore_is_not_a_seam(self) -> None:
-        """`# type: ignore[<code>]` names its rule."""
-        done = seams("X: int = 1  # type: ignore[misc]\n")
-        self.assertEqual((0, ""), (done.returncode, done.stdout))
+    def test_a_coded_ignore_is_a_seam(self) -> None:
+        """`# type: ignore[arg-type]` is named: it hides its finding."""
+        done = seams("f(1)  # type: ignore[arg-type]\n")
+        self.assertEqual((1, f"a.py:1: {IGNORED}\n"), (done.returncode, done.stdout))
 
     def test_the_roots_are_printed(self) -> None:
         """Each file's root, then the belt's, joined for MYPYPATH."""
@@ -389,10 +389,7 @@ class TheHelpers(unittest.TestCase):
                 text=True,
                 check=False,
             )
-        self.assertEqual(
-            (1, "a.py:1: `# type: ignore` names no error code\n"),
-            (done.returncode, done.stdout),
-        )
+        self.assertEqual((1, f"a.py:1: {IGNORED}\n"), (done.returncode, done.stdout))
 
     def test_the_roots_script_contract(self) -> None:
         """python_roots started as a process: no file is exit 2 and the usage."""
@@ -433,10 +430,12 @@ class TheConfig(unittest.TestCase):
             'a.py:1: error: Unused "type: ignore" comment  [unused-ignore]', done.stdout
         )
 
-    def test_a_used_coded_suppression_passes(self) -> None:
-        """The one escape: a coded ignore that suppresses its finding."""
+    def test_a_used_coded_suppression_is_red(self) -> None:
+        """No escape is left: mypy is satisfied, and the seam guard reds it."""
         done = run({"a.py": 'X: int = "s"  # type: ignore[assignment]\n'})
-        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertEqual(1, done.returncode)
+        self.assertNotIn("a.py:1: error", done.stdout)
+        self.assertIn(f"  a.py:1: {IGNORED}\n", done.stderr)
 
     def test_a_neighbour_and_a_sibling_root_are_imported_typed(self) -> None:
         """Both imports are read from the derived roots (#1634).
