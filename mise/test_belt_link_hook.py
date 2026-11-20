@@ -323,6 +323,20 @@ class TheCacheAndTheLinks(HookFixture):
             )
             self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"], pair)
 
+    def test_a_killed_hooks_temporary_name_is_removed(self) -> None:
+        """A `<link>.<pid>` whose hook is gone is removed by the next run."""
+        self.assertEqual(self.hook().returncode, 0)
+        conf = self.consumer / ".config" / "mise"
+        sh = hermetic.tool("sh")
+        gone = run([sh, "-c", "echo $$"], self.tmp, self.env()).stdout.strip()
+        for rel in ("conf.d/belt.toml", "mise.lock"):
+            (conf / f"{rel}.{gone}").symlink_to(conf / rel)
+        done = self.hook()
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.links(), self.linked(self.shas[0]))
+        left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
+        self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"])
+
     def test_a_fetch_that_is_not_the_pin_is_refused(self) -> None:
         """The remote answers with another commit: red, nothing linked."""
         stubs = self.tmp / "stubs"
