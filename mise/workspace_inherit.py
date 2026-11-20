@@ -28,12 +28,22 @@ the task runs the tool and the helper consumes, so this script starts no
 processes.
 """
 
-import json
 import os
 import sys
-import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
+
+from decoded import (
+    UndecodableError,
+    as_array,
+    as_object,
+    as_str,
+    is_strings,
+    load_json,
+    load_toml,
+)
+from typed_std import stdin_text
 
 # The [workspace.package] keys cargo reports per package, and the field
 # each is reported under.
@@ -108,6 +118,34 @@ UNRESOLVABLE = {
 # which is what made this class invisible in the first place.
 
 
+@dataclass(frozen=True)
+class Member:
+    """One workspace member, as cargo metadata reports it."""
+
+    name: str
+    manifest_path: str
+    # Each REPORTED field cargo gives for this package, None where absent:
+    # opaque values, only ever compared with a declaration.
+    reported: dict[str, object]
+
+
+def read_member(package: object, where: str) -> Member:
+    """Decode one package of cargo metadata into a member.
+
+    Returns:
+        The member. A package that is not an object, or whose name or
+        manifest_path is not a string, is refused by `decoded`'s
+        readers, naming where.
+
+    """
+    raw = as_object(package, where)
+    return Member(
+        name=as_str(raw.get("name"), f"{where}.name"),
+        manifest_path=as_str(raw.get("manifest_path"), f"{where}.manifest_path"),
+        reported={field: raw.get(field) for field in REPORTED.values()},
+    )
+
+
 class Finding(NamedTuple):
     """A declared key that reaches no member of the workspace."""
 
@@ -116,7 +154,7 @@ class Finding(NamedTuple):
     takers: list[str]
 
 
-def workspace_package(root: Path) -> dict:
+def workspace_package(root: Path) -> dict[str, object]:
     """Read the [workspace.package] table of a workspace root manifest.
 
     Returns:
@@ -125,10 +163,11 @@ def workspace_package(root: Path) -> dict:
     """
     manifest = root / "Cargo.toml"
     try:
-        doc = tomllib.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        doc = load_toml(manifest.read_text(encoding="utf-8"))
+        workspace = as_object(doc.get("workspace", {}), "workspace")
+        return as_object(workspace.get("package", {}), "workspace.package")
+    except (OSError, UndecodableError) as exc:
         sys.exit(f"lint:workspace-inherit: {manifest} is unreadable ({exc})")
-    return doc.get("workspace", {}).get("package", {})
 
 
 def same_file(declared: str, reported: str, root: Path, manifest: Path) -> bool:
@@ -148,7 +187,7 @@ def same_file(declared: str, reported: str, root: Path, manifest: Path) -> bool:
     return at_root == at_member
 
 
-def inherits(key: str, declared: object, package: dict, root: Path) -> bool | None:
+def inherits(key: str, declared: object, package: Member, root: Path) -> bool | None:
     """Test whether one package takes the workspace's declaration of a key.
 
     Returns:
@@ -157,7 +196,7 @@ def inherits(key: str, declared: object, package: dict, root: Path) -> bool | No
         the two are indistinguishable in cargo's account.
 
     """
-    reported = package.get(REPORTED[key])
+    reported = package.reported[REPORTED[key]]
     if reported == declared:
         return True
     if key == "readme" and declared is False:
@@ -165,13 +204,13 @@ def inherits(key: str, declared: object, package: dict, root: Path) -> bool | No
     if key == "readme" and declared is True:
         return reported is not None
     if key in PATH_KEYS and isinstance(declared, str) and isinstance(reported, str):
-        return same_file(declared, reported, root, Path(package["manifest_path"]))
+        return same_file(declared, reported, root, Path(package.manifest_path))
     return False
 
 
 def judge(
-    table: dict,
-    members: list[dict],
+    table: dict[str, object],
+    members: list[Member],
     root: Path,
     report: list[str],
 ) -> list[Finding]:
@@ -195,7 +234,7 @@ def judge(
         if any(v is None for v in verdicts):
             report.append(f"{key}: its declared value is not decidable per member")
             continue
-        findings.append(Finding(key, declared, [m["name"] for m in members]))
+        findings.append(Finding(key, declared, [m.name for m in members]))
     return findings
 
 
@@ -219,6 +258,33 @@ def explain(findings: list[Finding], root: Path) -> None:
     )
 
 
+def metadata(document: object) -> tuple[Path, list[Member]]:
+    """Decode the cargo metadata document this check reads.
+
+    Returns:
+        The workspace root, and every package that is a workspace member.
+
+    Raises:
+        UndecodableError: the document is not that shape, naming where.
+
+    """
+    data = as_object(document, "the document")
+    root = Path(as_str(data.get("workspace_root"), "workspace_root"))
+    listed = data.get("workspace_members", [])
+    if not is_strings(listed):
+        msg = "workspace_members is not a list of strings"
+        raise UndecodableError(msg)
+    ids = set(listed)
+    members: list[Member] = []
+    packages = as_array(data.get("packages", []), "packages")
+    for index, package in enumerate(packages):
+        where = f"packages[{index}]"
+        package_id = as_object(package, where).get("id")
+        if isinstance(package_id, str) and package_id in ids:
+            members.append(read_member(package, where))
+    return root, members
+
+
 def main() -> int:
     """Run the check over one cargo metadata document on stdin.
 
@@ -227,18 +293,15 @@ def main() -> int:
 
     """
     try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError as exc:
+        root, members = metadata(load_json(stdin_text()))
+    except UndecodableError as exc:
         sys.exit(f"lint:workspace-inherit: cargo metadata is unreadable ({exc})")
 
-    root = Path(data["workspace_root"])
     table = workspace_package(root)
     if not table:
         print("lint:workspace-inherit: no [workspace.package] table, skipped")
         return 0
 
-    ids = set(data.get("workspace_members", []))
-    members = [p for p in data.get("packages", []) if p.get("id") in ids]
     if not members:
         print(
             "lint:workspace-inherit: [workspace.package] is declared and cargo "

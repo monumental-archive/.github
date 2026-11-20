@@ -198,6 +198,24 @@ class LicenceTexts(unittest.TestCase):
             err.startswith("lint:licence: REUSE.toml does not parse: "), err
         )
 
+    def test_a_wrong_shape_is_red_by_where(self) -> None:
+        """An annotation of the wrong shape is refused, naming where."""
+        for reuse, where in (
+            ("annotations = 1\n", "annotations is not a list"),
+            ("annotations = [1]\n", "annotations[0] is not an object"),
+            (
+                "[[annotations]]\nSPDX-License-Identifier = 1\n",
+                (
+                    "annotations[0].SPDX-License-Identifier is not a string or"
+                    " a list of strings"
+                ),
+            ),
+        ):
+            with self.subTest(where=where):
+                status, err = run({"REUSE.toml": reuse})
+                self.assertEqual(1, status)
+                self.assertEqual(f"lint:licence: REUSE.toml: {where}\n", err)
+
     def test_no_reuse_toml_is_green(self) -> None:
         """A repository that has not declared yet has nothing to check."""
         self.assertEqual((0, ""), run({"LICENSE": "0BSD\n"}))

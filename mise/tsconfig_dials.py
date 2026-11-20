@@ -45,6 +45,9 @@ import json
 import sys
 from pathlib import Path
 
+from decoded import UndecodableError, is_object, load_json
+from typed_std import stdin_text
+
 NAME = "tsconfig-dials"
 
 # A bare flag turns its dial on; `--flag false` is how tsc-flags.txt
@@ -53,6 +56,13 @@ NAME = "tsconfig-dials"
 # rather than be guessed at — a dial nobody compared is a dial nobody
 # enforced.
 LITERALS = {"true": True, "false": False}
+
+
+class Args(argparse.Namespace):
+    """The parsed command line, typed."""
+
+    flags: Path
+    name: str
 
 
 def dials(flags_file: Path) -> tuple[dict[str, bool], list[str]]:
@@ -86,7 +96,7 @@ def dials(flags_file: Path) -> tuple[dict[str, bool], list[str]]:
     return required, unreadable
 
 
-def judge(stated: dict, required: dict[str, bool]) -> list[str]:
+def judge(stated: dict[str, object], required: dict[str, bool]) -> list[str]:
     """Compare one resolved config against the org's level.
 
     Returns:
@@ -118,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="the org's TypeScript level")
     parser.add_argument("--flags", type=Path, required=True)
     parser.add_argument("--name", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
 
     required, unreadable = dials(args.flags)
     if unreadable:
@@ -134,17 +144,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        resolved = json.loads(sys.stdin.read())
-    except json.JSONDecodeError as bad:
+        resolved = load_json(stdin_text())
+    except UndecodableError as bad:
         print(f"{NAME}: {args.name}: tsc did not resolve to JSON", file=sys.stderr)
         print(f"  {bad}", file=sys.stderr)
         return 1
 
     # tsc --showConfig prints an object; anything else is not a config
     # this can judge (#1555: an array raised AttributeError).
-    whole = isinstance(resolved, dict)
-    stated = resolved.get("compilerOptions", {}) if whole else None
-    if not isinstance(stated, dict):
+    whole = is_object(resolved)
+    stated = resolved.get("compilerOptions", {}) if is_object(resolved) else None
+    if not is_object(stated):
         what = "compilerOptions is not" if whole else "tsc did not resolve to"
         print(f"{NAME}: {args.name}: {what} an object", file=sys.stderr)
         return 1

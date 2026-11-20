@@ -76,6 +76,25 @@ class Reader(unittest.TestCase):
         self.assertEqual((1, ""), (status, out))
         self.assertTrue(err.startswith("fix:test: REUSE.toml does not parse: "), err)
 
+    def test_a_wrong_shape_is_red_by_where(self) -> None:
+        """An annotation of the wrong shape is refused, naming where."""
+        for reuse, where in (
+            ("annotations = 1\n", "annotations is not a list"),
+            ("annotations = [1]\n", "annotations[0] is not an object"),
+            (
+                "[[annotations]]\nSPDX-License-Identifier = [1]\n",
+                (
+                    "annotations[0].SPDX-License-Identifier is not a string or"
+                    " a list of strings"
+                ),
+            ),
+        ):
+            with self.subTest(where=where):
+                status, out, err = run({"REUSE.toml": reuse})
+                self.assertEqual(
+                    (1, "", f"fix:test: REUSE.toml: {where}\n"), (status, out, err)
+                )
+
     def test_usage(self) -> None:
         """No caller is a usage error, not a pass."""
         status, out, err = run({}, ["project_licence.py"])

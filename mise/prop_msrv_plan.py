@@ -69,6 +69,16 @@ def workspace(draw: st.DrawFn) -> list[dict[str, str | None]]:
     return out
 
 
+def typed(members: list[dict[str, str | None]]) -> list[mp.Package]:
+    """Decode drawn members the way the check decodes cargo metadata.
+
+    Returns:
+        The packages.
+
+    """
+    return [mp.package(m, str(m["name"])) for m in members]
+
+
 class Promises(unittest.TestCase):
     """Grouping does not depend on order."""
 
@@ -78,8 +88,8 @@ class Promises(unittest.TestCase):
     ) -> None:
         """The same members per promise, in any order."""
         shuffled = data.draw(st.permutations(members))
-        one, unreachable_one, _ = mp.promises(members, exclude)
-        two, unreachable_two, _ = mp.promises(shuffled, exclude)
+        one, unreachable_one, _ = mp.promises(typed(members), exclude)
+        two, unreachable_two, _ = mp.promises(typed(shuffled), exclude)
         self.assertEqual(
             {k: sorted(v) for k, v in one.items()},
             {k: sorted(v) for k, v in two.items()},
@@ -107,7 +117,7 @@ class Promises(unittest.TestCase):
     )
     def test_only_active_installed_toolchains_pin(self, listing: list[dict]) -> None:
         """Pins are the active and installed; absent the active, uninstalled."""
-        pinned, absent = mp.pins(listing)
+        pinned, absent = mp.pins(mp.toolchains(listing))
         self.assertEqual(
             set(pinned),
             {

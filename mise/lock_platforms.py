@@ -34,7 +34,9 @@ import argparse
 import pathlib
 import re
 import sys
-import tomllib
+
+from decoded import UndecodableError, as_object, is_array, is_object, load_toml
+from typed_std import stdin_text
 
 NAME = "lint:lock-platforms"
 
@@ -73,6 +75,14 @@ COMMENT = re.compile(r"\s+#.*$")
 
 Span = tuple[int, int, str]
 Rows = list[tuple[str | None, list[str] | None]]
+
+
+class Args(argparse.Namespace):
+    """The parsed command line, typed."""
+
+    defaults: pathlib.Path
+    config: pathlib.Path
+    lock: pathlib.Path
 
 
 class UnreadableError(ValueError):
@@ -269,20 +279,23 @@ def configured(path: pathlib.Path) -> dict[str, Rows]:
     a table's `os` restricts where mise installs it at all.
 
     Returns:
-        tool -> one row per configured element.
+        tool -> one row per configured element. A document that is not
+        TOML, or whose `tools` is not a table, is refused by `decoded`.
 
     """
-    tools = tomllib.loads(path.read_text(encoding="utf-8")).get("tools", {})
+    doc = load_toml(path.read_text(encoding="utf-8"))
+    tools = as_object(doc.get("tools", {}), "tools")
     out: dict[str, Rows] = {}
     for tool, value in tools.items():
         rows: Rows = []
-        for element in value if isinstance(value, list) else [value]:
-            if not isinstance(element, dict):
+        elements: list[object] = value if is_array(value) else [value]
+        for element in elements:
+            if not is_object(element):
                 rows.append((str(element), None))
                 continue
             os_list = element.get("os")
             version = str(element["version"]) if "version" in element else None
-            if isinstance(os_list, list):
+            if is_array(os_list):
                 rows.append((version, [str(o) for o in os_list]))
             else:
                 rows.append((version, None))
@@ -315,24 +328,30 @@ def lock_entries(path: pathlib.Path) -> list[tuple[str, str, set[str]]]:
     """Read every lock entry that carries platform tables.
 
     Returns:
-        (tool, version, platform keys) per entry.
+        (tool, version, platform keys) per entry. A document that is not
+        TOML, or whose `tools` or an entry is not a table, is refused by
+        `decoded`, naming which.
 
     """
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    out = []
-    for tool, entries in data.get("tools", {}).items():
-        for entry in entries if isinstance(entries, list) else [entries]:
+    data = load_toml(path.read_text(encoding="utf-8"))
+    out: list[tuple[str, str, set[str]]] = []
+    for tool, entries in as_object(data.get("tools", {}), "tools").items():
+        listed: list[object] = entries if is_array(entries) else [entries]
+        for index, raw in enumerate(listed):
+            entry = as_object(raw, f"tools.{tool}[{index}]")
             prefix = "platforms."
             keys = {k.removeprefix(prefix) for k in entry if k.startswith(prefix)}
             nested = entry.get("platforms")
-            if isinstance(nested, dict):
+            if is_object(nested):
                 keys |= set(nested)
             if keys:
                 out.append((tool, str(entry.get("version", "?")), keys))
     return out
 
 
-def report(lock: pathlib.Path, platforms: dict, missing: dict[str, list[str]]) -> None:
+def report(
+    lock: pathlib.Path, platforms: dict[str, list[str]], missing: dict[str, list[str]]
+) -> None:
     """Print the missing entries, their sources and the resolve commands."""
     err = sys.stderr
     print(f"{NAME}: {lock} lacks platforms the release builds on:", file=err)
@@ -350,6 +369,30 @@ def report(lock: pathlib.Path, platforms: dict, missing: dict[str, list[str]]) -
         print(f"    mise lock --platform {key} {' '.join(tools)}", file=err)
 
 
+def read_documents(
+    config: pathlib.Path, lock: pathlib.Path
+) -> tuple[dict[str, Rows], list[tuple[str, str, set[str]]]] | None:
+    """Read the mise config and its lock, or refuse the one that cannot be.
+
+    Returns:
+        The configured tools and the lock's entries, or None having said
+        on stderr which file was refused and why.
+
+    """
+    path = config
+    try:
+        tools = configured(config)
+        path = lock
+        return tools, lock_entries(lock)
+    except UndecodableError as err:
+        print(
+            f"{NAME}: cannot read {path} — {err}\n"
+            "  a file this cannot read is not one it may pass",
+            file=sys.stderr,
+        )
+        return None
+
+
 def main(argv: list[str]) -> int:
     """Run the check; see the module docstring for the exit contract.
 
@@ -361,8 +404,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--defaults", required=True, type=pathlib.Path)
     parser.add_argument("--config", required=True, type=pathlib.Path)
     parser.add_argument("--lock", required=True, type=pathlib.Path)
-    args = parser.parse_args(argv)
-    workflows = [pathlib.Path(line) for line in sys.stdin.read().splitlines() if line]
+    args = parser.parse_args(argv, namespace=Args())
+    workflows = [pathlib.Path(line) for line in stdin_text().splitlines() if line]
     try:
         platforms, stubs = declared(workflows, canon_defaults(args.defaults))
     except UnreadableError as err:
@@ -384,8 +427,11 @@ def main(argv: list[str]) -> int:
     # longer names is stale and never installed — edtf v1.3.0's lock
     # carried nine such entries without macos-x64, and the leg named only
     # the two configured ones.
-    tools = configured(args.config)
-    entries = [e for e in lock_entries(args.lock) if e[0] in tools]
+    documents = read_documents(args.config, args.lock)
+    if documents is None:
+        return 2
+    tools, locked = documents
+    entries = [e for e in locked if e[0] in tools]
     missing: dict[str, list[str]] = {}
     for tool, version, keys in entries:
         for key in sorted(platforms):

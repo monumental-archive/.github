@@ -69,6 +69,16 @@ def workspace(
     return table, members, taken
 
 
+def typed(members: list[dict[str, str]]) -> list[wi.Member]:
+    """Decode drawn packages the way the check decodes cargo metadata.
+
+    Returns:
+        The members.
+
+    """
+    return [wi.read_member(m, m["name"]) for m in members]
+
+
 class Judge(unittest.TestCase):
     """A key nobody takes, and only that, is a finding."""
 
@@ -79,7 +89,7 @@ class Judge(unittest.TestCase):
         """Findings are the declared keys no member reports."""
         table, members, taken = drawn
         report: list[str] = []
-        found = wi.judge(table, members, ROOT, report)
+        found = wi.judge(table, typed(members), ROOT, report)
         self.assertEqual({f.key for f in found}, set(table) - taken)
         self.assertEqual(report, [])
 
@@ -90,8 +100,8 @@ class Judge(unittest.TestCase):
         """The same members in any order, the same keys found."""
         table, members, _ = drawn
         shuffled = data.draw(st.permutations(members))
-        one = [f.key for f in wi.judge(table, members, ROOT, [])]
-        two = [f.key for f in wi.judge(table, shuffled, ROOT, [])]
+        one = [f.key for f in wi.judge(table, typed(members), ROOT, [])]
+        two = [f.key for f in wi.judge(table, typed(shuffled), ROOT, [])]
         self.assertEqual(one, two)
 
     @given(st.sampled_from(sorted(wi.UNRESOLVABLE)), workspace())
@@ -101,7 +111,7 @@ class Judge(unittest.TestCase):
         """Named in the report, never a finding."""
         table, members, _ = drawn
         report: list[str] = []
-        found = wi.judge({**table, key: False}, members, ROOT, report)
+        found = wi.judge({**table, key: False}, typed(members), ROOT, report)
         self.assertNotIn(key, {f.key for f in found})
         self.assertIn(f"{key}: {wi.UNRESOLVABLE[key]}", report)
 

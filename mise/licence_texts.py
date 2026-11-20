@@ -26,7 +26,9 @@ with every finding on stderr, 0 with nothing to say.
 import pathlib
 import re
 import sys
-import tomllib
+
+from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
+from typed_std import group, stdin_text
 
 PLACEHOLDER = "<SPDX expression>"
 
@@ -47,7 +49,8 @@ def identifiers(expression: str) -> list[str]:
 
     """
     found: list[str] = []
-    for token in TOKEN.findall(expression):
+    for found_token in TOKEN.finditer(expression):
+        token = group(found_token) or ""
         if token.upper() in OPERATORS:
             continue
         name = token.removesuffix("+")
@@ -56,7 +59,7 @@ def identifiers(expression: str) -> list[str]:
     return found
 
 
-def expressions(config: dict) -> list[str]:
+def expressions(config: dict[str, object]) -> list[str]:
     """Collect every licence expression a REUSE.toml declares.
 
     `SPDX-License-Identifier` may be one string or a list of them.
@@ -64,11 +67,24 @@ def expressions(config: dict) -> list[str]:
     Returns:
         The expressions, in annotation order.
 
+    Raises:
+        UndecodableError: an annotation is not that shape, naming where.
+
     """
     found: list[str] = []
-    for annotation in config.get("annotations", []):
-        value = annotation.get("SPDX-License-Identifier", [])
-        found.extend([value] if isinstance(value, str) else value)
+    annotations = as_array(config.get("annotations", []), "annotations")
+    for index, item in enumerate(annotations):
+        where = f"annotations[{index}]"
+        value = as_object(item, where).get("SPDX-License-Identifier", [])
+        if isinstance(value, str):
+            found.append(value)
+        elif is_strings(value):
+            found.extend(value)
+        else:
+            msg = (
+                f"{where}.SPDX-License-Identifier is not a string or a list of strings"
+            )
+            raise UndecodableError(msg)
     return found
 
 
@@ -96,12 +112,17 @@ def findings(root: pathlib.Path, tracked: list[str]) -> list[str]:
             )
             continue
         try:
-            config = tomllib.loads(raw)
-        except tomllib.TOMLDecodeError as error:
+            config = load_toml(raw)
+        except UndecodableError as error:
             out.append(f"{path} does not parse: {error}")
             continue
+        try:
+            declared = expressions(config)
+        except UndecodableError as error:
+            out.append(f"{path}: {error}")
+            continue
         named: list[str] = []
-        for expression in expressions(config):
+        for expression in declared:
             named.extend(i for i in identifiers(expression) if i not in named)
         out.extend(
             f"{path} names {name}, and LICENSES/{name}.txt is not tracked"
@@ -121,7 +142,7 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: git ls-files -z | licence_texts.py", file=sys.stderr)
         return 2
-    tracked = [path for path in sys.stdin.read().split("\0") if path]
+    tracked = [path for path in stdin_text().split("\0") if path]
     out = findings(pathlib.Path.cwd(), tracked)
     for message in out:
         print(f"lint:licence: {message}", file=sys.stderr)

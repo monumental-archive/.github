@@ -683,6 +683,36 @@ class RunTest(unittest.TestCase):
             status = biome_config.run(args, paths)
         return status, stdout.getvalue(), stderr.getvalue(), out
 
+    def test_an_org_config_it_cannot_read_is_refused_by_name(self) -> None:
+        """Not JSON, or a linter / rules / nursery not an object: named."""
+        for text, said in (
+            ("{", "Expecting property name enclosed in double quotes"),
+            ("[]", "the document is not an object"),
+            ('{"linter": []}', "linter is not an object"),
+            ('{"linter": {"rules": {"nursery": 1}}}', "linter.rules.nursery is not"),
+        ):
+            with self.subTest(said=said):
+                tree = Path(tempfile.mkdtemp())
+                args = biome_config.Args()
+                args.org = tree / "biome-org.json"
+                args.org.write_text(text, encoding="utf-8")
+                args.domains = DOMAINS_FILE
+                args.nursery = NURSERY_FILE
+                args.out = tree / "generated.json"
+                args.declaration = tree / "biome.json"
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    status = biome_config.run(args, [])
+                lines = err.getvalue().splitlines()
+                self.assertEqual(1, status)
+                self.assertEqual(f"biome-config: {args.org} cannot be read", lines[0])
+                self.assertTrue(lines[1].startswith(f"  {said}"), lines[1])
+                self.assertEqual(
+                    "  it is the belt's delivered config; restore it from the canon",
+                    lines[2],
+                )
+                self.assertFalse(args.out.exists())
+
     def test_a_conforming_react_repository_generates(self) -> None:
         """The MA shape: one claim, one matching dependency."""
         status, out, _err, path = self.invoke(

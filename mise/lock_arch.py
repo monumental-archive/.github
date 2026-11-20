@@ -27,7 +27,9 @@ Prints nothing when every entry agrees.
 
 import pathlib
 import sys
-import tomllib
+
+from decoded import UndecodableError, as_object, is_object, load_toml
+from typed_std import stdin_text
 
 # Architecture tokens as they appear in release asset names, longest
 # first so `x86_64` is decided before `x86` and `aarch64` before `arm`.
@@ -166,7 +168,7 @@ def entry_line(
         download that is not a GitHub release.
 
     """
-    if not key.startswith("platforms.") or not isinstance(value, dict):
+    if not key.startswith("platforms.") or not is_object(value):
         return None
     url = value.get("url")
     if not isinstance(url, str) or not url:
@@ -206,15 +208,16 @@ def candidates(lock_path: pathlib.Path) -> list[str]:
 
     """
     try:
-        data = tomllib.loads(lock_path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        data = load_toml(lock_path.read_text(encoding="utf-8"))
+        tools = as_object(data.get("tools", {}), "tools")
+    except (OSError, UndecodableError) as exc:
         print(f"lock-arch: cannot read {lock_path}: {exc}", file=sys.stderr)
         return []
     lines: list[str] = []
-    for tool, entries in sorted(data.get("tools", {}).items()):
-        blocks = entries if isinstance(entries, list) else [entries]
+    for tool, entries in sorted(tools.items()):
+        blocks: list[object] = entries if isinstance(entries, list) else [entries]
         for block in blocks:
-            if not isinstance(block, dict):
+            if not is_object(block):
                 continue
             for key, value in sorted(block.items()):
                 line = entry_line(lock_path, tool, key, value)
@@ -231,7 +234,7 @@ def main() -> int:
         caller decides, once it has asked the release what it publishes.
 
     """
-    for raw in sys.stdin:
+    for raw in stdin_text().splitlines():
         name = raw.strip()
         if not name:
             continue

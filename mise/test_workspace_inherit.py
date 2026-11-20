@@ -45,7 +45,17 @@ DISCOVER = True
 NO_README = False
 
 
-def member(name: str, **fields: object) -> dict:
+def member(name: str, **fields: object) -> wi.Member:
+    """Build one member as the check decodes it from cargo metadata.
+
+    Returns:
+        The decoded member of `raw_member`'s package.
+
+    """
+    return wi.read_member(raw_member(name, **fields), name)
+
+
+def raw_member(name: str, **fields: object) -> dict:
     """Build one package as cargo metadata reports it.
 
     Returns:
@@ -255,7 +265,7 @@ class TestMain(unittest.TestCase):
         """Nothing is declared here, so nothing can be inert."""
         status, out, _ = self._run(
             '[workspace]\nmembers = ["crates/*"]\n',
-            [member("a")],
+            [raw_member("a")],
         )
         self.assertEqual(status, 0)
         self.assertIn("no [workspace.package] table, skipped", out)
@@ -264,7 +274,7 @@ class TestMain(unittest.TestCase):
         """The green path counts the keys and the members."""
         status, out, _ = self._run(
             '[workspace.package]\nrust-version = "1.82"\n',
-            [member("a", rust_version="1.82")],
+            [raw_member("a", rust_version="1.82")],
         )
         self.assertEqual(status, 0)
         self.assertIn("1 [workspace.package] key", out)
@@ -273,7 +283,7 @@ class TestMain(unittest.TestCase):
         """The red path names the key, the members and the fix."""
         status, _, err = self._run(
             '[workspace.package]\nrust-version = "1.97"\n',
-            [member("a", rust_version=None), member("b", rust_version=None)],
+            [raw_member("a", rust_version=None), raw_member("b", rust_version=None)],
         )
         self.assertEqual(status, 1)
         self.assertIn("reach no member", err)
@@ -289,6 +299,52 @@ class TestMain(unittest.TestCase):
         status, _, err = self._run('[workspace.package]\nversion = "0.1.0"\n', [])
         self.assertEqual(status, 1)
         self.assertIn("names no workspace member", err)
+
+    def test_metadata_of_the_wrong_shape_stops_the_task_by_where(self) -> None:
+        """A wrong-shaped account is refused naming where, never a crash."""
+        said = "lint:workspace-inherit: cargo metadata is unreadable"
+        for document, where in (
+            ([], "the document is not an object"),
+            ({"workspace_root": 1}, "workspace_root is not a string"),
+            (
+                {"workspace_root": "/ws", "workspace_members": [1]},
+                "workspace_members is not a list of strings",
+            ),
+            ({"workspace_root": "/ws", "packages": {}}, "packages is not a list"),
+            (
+                {"workspace_root": "/ws", "packages": [1]},
+                "packages[0] is not an object",
+            ),
+            (
+                {
+                    "workspace_root": "/ws",
+                    "workspace_members": ["a"],
+                    "packages": [{"id": "a", "name": 1}],
+                },
+                "packages[0].name is not a string",
+            ),
+        ):
+            stdin = io.StringIO(json.dumps(document))
+            with (
+                self.subTest(where=where),
+                mock.patch.object(wi.sys, "stdin", stdin),
+                self.assertRaises(SystemExit) as stopped,
+            ):
+                wi.main()
+            self.assertEqual(f"{said} ({where})", stopped.exception.code)
+
+    def test_a_manifest_of_the_wrong_shape_stops_the_task(self) -> None:
+        """`[workspace]` that is not a table is named, never a crash."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
+            with self.assertRaises(SystemExit) as stopped:
+                wi.workspace_package(root)
+        self.assertEqual(
+            f"lint:workspace-inherit: {root}/Cargo.toml is unreadable"
+            " (workspace is not an object)",
+            stopped.exception.code,
+        )
 
     def test_unreadable_metadata_stops_the_task(self) -> None:
         """A broken account is refused, never read as an empty one."""

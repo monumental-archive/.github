@@ -46,8 +46,8 @@ class Pinned(unittest.TestCase):
     ) -> None:
         """Served majors and absent versions, whatever the order."""
         shuffled = data.draw(st.permutations(listing))
-        found, absent = pp.pinned(listing)
-        found_two, absent_two = pp.pinned(shuffled)
+        found, absent = pp.pinned(pp.entries(listing))
+        found_two, absent_two = pp.pinned(pp.entries(shuffled))
         majors = {
             int(e["version"].split(".")[0])
             for e in listing
@@ -78,7 +78,7 @@ class Refusal(unittest.TestCase):
     @example([{"version": "²", "active": True, "installed": True}])
     def test_any_versions(self, listing: list[dict]) -> None:
         """Majors are ints; nothing raises."""
-        found, _ = pp.pinned(listing)
+        found, _ = pp.pinned(pp.entries(listing))
         self.assertTrue(all(isinstance(m, int) for m in found))
 
 
@@ -100,7 +100,7 @@ class Plan(unittest.TestCase):
                     "installed": True,
                     "install_path": str(root),
                 })
-            records, findings = pp.plan(sorted(declared), listing)
+            records, findings = pp.plan(sorted(declared), pp.entries(listing))
         missing = declared - served
         if missing:
             self.assertEqual(records, [])

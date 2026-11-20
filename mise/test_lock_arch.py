@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Tests for lock_arch.py, the lock architecture-agreement check."""
 
+import contextlib
+import io
 import pathlib
 import re
 import tempfile
@@ -163,6 +165,22 @@ class TestCandidates(unittest.TestCase):
             'download/v0.11.0/shellcheck-v0.11.0.zip"\n'
         )
         self.assertEqual(lock_arch.candidates(path), [])
+
+    def test_an_unreadable_lock_is_named_and_skipped(self) -> None:
+        """Not TOML, or `tools` not a table: said by name, no candidate."""
+        for body, said in (
+            ("[tools\n", "Expected ']' at the end of a table"),
+            ("tools = 1\n", "tools is not an object"),
+        ):
+            with self.subTest(said=said):
+                path = self._lock(body)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    self.assertEqual(lock_arch.candidates(path), [])
+                self.assertTrue(
+                    err.getvalue().startswith(f"lock-arch: cannot read {path}: {said}"),
+                    err.getvalue(),
+                )
 
     def test_empty_lock_is_clean(self) -> None:
         """A lock with no tools is not an error."""
