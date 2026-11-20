@@ -45,6 +45,20 @@ not k/n with k < n is refused by name; a shard that holds no file says
 so and exits 0. The audit runs n legs with one seed, each a shard, so a
 week's properties finish in the time of the slowest leg.
 
+With no shard named, more than one file and more than one worker, the
+runner fans out over that same form (#1741): it starts n children of
+itself, child k with ORG_PROPERTY_SHARD=k/n, n the smaller of the worker
+count and the file count, and so uses every core its job has. The
+worker count is the test runner's, `workers()` from unittest_guarded.py:
+ORG_TEST_WORKERS sets it, and 1 runs every file in this one process.
+Each child's output is printed whole, in shard order, once it has
+ended, so nothing interleaves; the run is red when any child is; the
+last line totals the tests and files across the children. The audit's
+children share one seed: ORG_PROPERTY_SEED, or one drawn here and
+handed to each. A named shard never fans out. The gate's profile
+derives each test's examples from the test itself, so a file is given
+the same examples whichever process runs it.
+
 Usage:
   python_properties.py gate|audit FILE...
 
@@ -57,14 +71,17 @@ import inspect
 import os
 import random
 import re
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import time
 import traceback
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, seed, settings
+from unittest_guarded import workers
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -80,6 +97,10 @@ BELT = Path(__file__).resolve().parent
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
 # k/n in ASCII digits, n at least one; k < n is checked on the numbers.
 SHARD = re.compile(r"([0-9]+)/([1-9][0-9]*)")
+# Fewer files or workers than this run in one process.
+MIN_FANOUT = 2
+# One test's line as `run` prints it, after its file's name.
+RESULT = re.compile(r".+: \S+ \.\.\. (?:ok|skipped|FAIL)")
 # Typed here: register_profile takes its settings as `**kwargs: Any`.
 SUPPRESSED: list[HealthCheck] = [HealthCheck.too_slow]
 
@@ -280,6 +301,75 @@ def shard_of(files: list[Path], spec: str) -> list[Path]:
     return sorted(files, key=str)[int(found[1]) :: int(found[2])]
 
 
+def children(spec: str, files: list[Path], cores: int) -> int:
+    """Say how many children of this runner take the files.
+
+    Returns:
+        1, run here, when a shard is named, one file is given or one
+        worker is; else the smaller of the workers and the files.
+
+    """
+    if spec or len(files) < MIN_FANOUT or cores < MIN_FANOUT:
+        return 1
+    return min(cores, len(files))
+
+
+def tested(output: str, files: list[Path]) -> int:
+    """Count the result lines one child printed.
+
+    Returns:
+        The lines `run` prints per test, `FILE: TEST ... STATUS`, whose
+        FILE is one this run was given.
+
+    """
+    names = tuple(f"{f}: " for f in files)
+    return sum(
+        1
+        for line in output.splitlines()
+        if line.startswith(names) and RESULT.fullmatch(line)
+    )
+
+
+def fan_out(profile_name: str, files: list[Path], count: int) -> int:
+    """Run `count` children of this runner, child k on shard k/count.
+
+    Returns:
+        0 when every child held, 1 otherwise.
+
+    """
+    label = LABELS[profile_name]
+    environ = dict(os.environ)
+    if profile_name == "audit" and not environ.get("ORG_PROPERTY_SEED"):
+        environ["ORG_PROPERTY_SEED"] = str(random.SystemRandom().getrandbits(64))
+    argv = [sys.executable, str(Path(__file__).resolve()), profile_name]
+    argv += [str(f) for f in files]
+
+    def child(k: int) -> subprocess.CompletedProcess[str]:
+        shard = {"ORG_PROPERTY_SHARD": f"{k}/{count}"}
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            argv, env=environ | shard, capture_output=True, text=True, check=False
+        )
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        done = list(pool.map(child, range(count)))
+    red: list[str] = []
+    tests = 0
+    for k, result in enumerate(done):
+        sys.stdout.write(result.stdout)
+        sys.stdout.flush()
+        sys.stderr.write(result.stderr)
+        sys.stderr.flush()
+        tests += tested(result.stdout, files)
+        if result.returncode:
+            red.append(f"{k}/{count}")
+    total = f"{label}: {tests} test(s) in {len(files)} file(s)"
+    if red:
+        print(f"{total}; shard(s) {', '.join(red)} red", file=sys.stderr)
+        return 1
+    print(f"{total} held")
+    return 0
+
+
 def run(profile_name: str, files: list[Path]) -> int:
     """Load the profile, import every file, run every test.
 
@@ -345,6 +435,9 @@ def main(argv: list[str]) -> int:
         return 0
     if spec:
         print(f"{label}: shard {spec}, {len(chosen)} of {len(files)} file(s)")
+    count = children(spec, files, workers())
+    if count > 1:
+        return fan_out(args[0], files, count)
     return run(args[0], chosen)
 
 

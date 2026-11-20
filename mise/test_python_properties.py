@@ -415,6 +415,184 @@ class Shards(unittest.TestCase):
         )
 
 
+# A property file that takes SLEEP seconds to import and says which
+# process imported it, so a row can tell one process from four, and
+# when its sleep began and ended, on the clock every process shares.
+SLEEP = 1.5
+SLEEPS = f"""\
+import os
+import sys
+import time
+import unittest
+from hypothesis import strategies as st
+from typed_hypothesis import given
+
+print("pid", os.getpid(), file=sys.stderr)
+began = time.time()
+time.sleep({SLEEP})
+print("slept", began, time.time(), file=sys.stderr)
+
+
+class Sleeps(unittest.TestCase):
+    @given(st.integers())
+    def test_double_is_even(self, n):
+        self.assertEqual((2 * n) % 2, 0)
+"""
+FOUR = {f"{d}/prop_{d}.py": SLEEPS for d in "abcd"}
+
+
+def ran(name: str, index: int) -> str:
+    """One file's result line, as the runner prints it.
+
+    Returns:
+        The line for prop_NAME.py loaded at `index`, with its newline.
+
+    """
+    return (
+        f"{name}/prop_{name}.py:"
+        f" prop_{index}_prop_{name}.Sleeps.test_double_is_even ... ok\n"
+    )
+
+
+def pids(stderr: str) -> set[str]:
+    """Read the processes the SLEEPS files were imported in.
+
+    Returns:
+        Each distinct pid printed.
+
+    """
+    return {line for line in stderr.splitlines() if line.startswith("pid ")}
+
+
+def span(stderr: str) -> float:
+    """Measure the wall time the SLEEPS files' sleeps took together.
+
+    Process start-up is left out: on a loaded machine it can outweigh
+    the sleeps, and it says nothing about whether the files overlapped.
+    Run in turn, the span is at least the sleeps' sum.
+
+    Returns:
+        From the first sleep's start to the last sleep's end, seconds.
+
+    """
+    slept = [
+        [float(word) for word in line.split()[1:]]
+        for line in stderr.splitlines()
+        if line.startswith("slept ")
+    ]
+    return max(end for _, end in slept) - min(began for began, _ in slept)
+
+
+class FanOut(unittest.TestCase):
+    """No shard named: the runner fans out over its own shards (#1741)."""
+
+    def test_four_files_run_side_by_side_in_shard_order(self) -> None:
+        """Four sleeping files: less wall time than their sum, in order."""
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env={"ORG_TEST_WORKERS": "8"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr.count("slept "), 4, done.stderr)
+        self.assertLess(span(done.stderr), 4 * SLEEP, done.stderr)
+        self.assertEqual(len(pids(done.stderr)), 4, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "".join(
+                f"test:python-properties: shard {k}/4, 1 of 4 file(s)\n"
+                + ran(name, 0)
+                + "test:python-properties: 1 test(s) in 1 file(s) held\n"
+                for k, name in enumerate("abcd")
+            )
+            + "test:python-properties: 4 test(s) in 4 file(s) held\n",
+        )
+
+    def test_one_worker_runs_every_file_in_one_process(self) -> None:
+        """ORG_TEST_WORKERS=1: no shard, one pid, files loaded in turn."""
+        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env={"ORG_TEST_WORKERS": "1"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(len(pids(done.stderr)), 1, done.stderr)
+        self.assertGreaterEqual(span(done.stderr), 4 * SLEEP, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "".join(ran(name, i) for i, name in enumerate("abcd"))
+            + "test:python-properties: 4 test(s) in 4 file(s) held\n",
+        )
+
+    def test_a_named_shard_starts_no_child(self) -> None:
+        """ORG_PROPERTY_SHARD=0/1 with workers to spare: one process."""
+        done = run(
+            GATE,
+            FOUR,
+            tool_dir=real_tool_dir(),
+            env={"ORG_TEST_WORKERS": "8", "ORG_PROPERTY_SHARD": "0/1"},
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(len(pids(done.stderr)), 1, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "test:python-properties: shard 0/1, 4 of 4 file(s)\n"
+            + "".join(ran(name, i) for i, name in enumerate("abcd"))
+            + "test:python-properties: 4 test(s) in 4 file(s) held\n",
+        )
+
+    def test_fewer_workers_than_files_take_one_shard_each(self) -> None:
+        """Three files, two workers: two children, 2/3 and 1/3 of the files."""
+        done = run(
+            GATE, SHARD_FILES, tool_dir=real_tool_dir(), env={"ORG_TEST_WORKERS": "2"}
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "test:python-properties: shard 0/2, 2 of 3 file(s)\n"
+            "a/prop_one.py: prop_0_prop_one.Holds.test_double_is_even ... ok\n"
+            "prop_three.py: prop_1_prop_three.Holds.test_double_is_even ... ok\n"
+            "test:python-properties: 2 test(s) in 2 file(s) held\n"
+            "test:python-properties: shard 1/2, 1 of 3 file(s)\n"
+            "b/prop_two.py: prop_0_prop_two.Holds.test_double_is_even ... ok\n"
+            "test:python-properties: 1 test(s) in 1 file(s) held\n"
+            "test:python-properties: 3 test(s) in 3 file(s) held\n",
+        )
+
+    def test_a_failing_child_is_red_with_its_example_and_seed(self) -> None:
+        """One child fails: exit 1, its example, its seed line, the total."""
+        done = run(
+            AUDIT,
+            {"prop_bad.py": FAILS, "prop_ok.py": HOLDS},
+            tool_dir=real_tool_dir(),
+            env={"ORG_TEST_WORKERS": "2", "ORG_PROPERTY_SEED": "7"},
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("prop_0_prop_bad.Fails.test_small ... FAIL\n", done.stdout)
+        self.assertIn("prop_0_prop_ok.Holds.test_double_is_even ... ok\n", done.stdout)
+        self.assertIn("    n=10,\n", done.stderr)
+        self.assertIn(
+            "audit:python-properties: seed 7 — commit each falsifying example above"
+            " as an @example row with its fix\n",
+            done.stderr,
+        )
+        self.assertTrue(
+            done.stderr.endswith(
+                "audit:python-properties: 2 test(s) in 2 file(s); shard(s) 0/2 red\n"
+            ),
+            done.stderr,
+        )
+
+    def test_the_audit_children_share_one_drawn_seed(self) -> None:
+        """No seed given: every child prints the one the runner drew."""
+        done = run(
+            AUDIT,
+            {"prop_one.py": HOLDS, "prop_two.py": HOLDS},
+            tool_dir=real_tool_dir(),
+            env={"ORG_TEST_WORKERS": "2"},
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        seeds = [
+            line
+            for line in done.stdout.splitlines()
+            if line.startswith("audit:python-properties: seed ")
+        ]
+        self.assertEqual(len(seeds), 2, done.stdout)
+        self.assertEqual(seeds[0], seeds[1])
+
+
 def job_block(workflow: str, job: str) -> str:
     """Cut one job's lines out of a workflow, by its key's indentation.
 

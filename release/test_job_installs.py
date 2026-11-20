@@ -224,6 +224,8 @@ DYNAMIC = {
     "mise/with_lock.py": "runs its caller's command under the lock",
     "mise/unittest_guarded.py": "starts itself as a worker under the"
     " interpreter it runs on (#1623)",
+    "mise/python_properties.py": "starts itself on each shard under the"
+    " interpreter it runs on (#1741)",
     "mise/security_config.py": "builds its gh argv in a variable",
 }
 
