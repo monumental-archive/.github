@@ -32,6 +32,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 import mutants_python as helper
 
@@ -296,12 +297,17 @@ class Planted(unittest.TestCase):
 
         """
         shutil.copytree(SHARED["tree"], self.tree, symlinks=True)
-        document = json.loads(SHARED["plan"].read_text(encoding="utf-8"))
+        document = decoded.as_object(
+            decoded.load_json(SHARED["plan"].read_bytes()), "the shared plan"
+        )
         wanted = {f"{p} {o} {n}" for p, o, n in keys}
-        document["mutants"] = [
-            m for m in document["mutants"] if f"{m[0]} {m[1]} {m[2]}" in wanted
+        kept = [
+            row
+            for row in decoded.as_array(document.get("mutants"), "mutants")
+            if " ".join(map(str, decoded.as_array(row, "a mutant")[:3])) in wanted
         ]
-        self.assertEqual(len(document["mutants"]), len(keys))
+        self.assertEqual(len(kept), len(keys))
+        document["mutants"] = kept
         plan = self.tmp / "plan"
         plan.mkdir()
         (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
@@ -565,7 +571,8 @@ class Exclusions(Planted):
         """A mutant in a file `tests` matches is a leaked exclusion."""
         item = work_item("pkg/test_mod.py", ADD, 0, 1, "")
         self.plant([ITEM_KILLED, item])
-        done, log = self.run_leg()
+        done = self.call("plan", "cosmic-ray.toml", str(self.tmp / "plan"))
+        log = self.log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stderr,
@@ -591,7 +598,8 @@ class Exclusions(Planted):
         self.track(".github/tool/test_tool.py", "import unittest\n")
         item = work_item(".github/tool/test_tool.py", ADD, 0, 1, "")
         self.plant([ITEM_KILLED, item], config=config)
-        done, log = self.run_leg()
+        done = self.call("plan", "cosmic-ray.toml", str(self.tmp / "plan"))
+        log = self.log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stderr,
