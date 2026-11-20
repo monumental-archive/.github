@@ -20,10 +20,11 @@ run through the gate as `mise run test`, which `ci` collects.
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -39,13 +40,16 @@ def body() -> str:
         The bash the task runs.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)["tasks"]["lint:audit-scheduled"]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "tasks")
+    task = decoded.as_object(tasks["lint:audit-scheduled"], "lint:audit-scheduled")
+    return decoded.as_str(task["run"], "lint:audit-scheduled.run")
 
 
 class Scheduled(unittest.TestCase):
     """A planted belt config and workflows; the lint's verdict on them."""
 
+    @override
     def setUp(self) -> None:
         """Plant a tree with two belt audit tasks and a stub belt."""
         self.tmp = Path(tempfile.mkdtemp())
@@ -88,31 +92,27 @@ class Scheduled(unittest.TestCase):
         self.workflow("repo-mutants.yml", "mutants")
         done = self.run_lint()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                "lint:audit-scheduled: 2 belt audit task(s), every one scheduled",
-                "lint:audit-scheduled: this repository defines no audit:* of its own",
-            ],
-        )
+        expected = [
+            "lint:audit-scheduled: 2 belt audit task(s), every one scheduled",
+            "lint:audit-scheduled: this repository defines no audit:* of its own",
+        ]
+        self.assertEqual(done.stdout.splitlines(), expected)
 
     def test_unscheduled_task_is_red_and_names_the_schedulers(self) -> None:
         """No workflow runs audit:mutants: red, and repo-mutants.yml named."""
         self.workflow("repo-audit.yml", "fuzz")
         done = self.run_lint()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    "lint:audit-scheduled: belt audit task(s) no workflow ever runs:"
-                    " audit:mutants"
-                ),
-                "  schedule each in .github/workflows/ (audit.yml, publish.yml,",
-                "  repo-audit.yml or repo-mutants.yml) or delete the task — a check",
-                "  nobody runs is a claim, not a check (#358 seam 1).",
-            ],
-        )
+        expected = [
+            (
+                "lint:audit-scheduled: belt audit task(s) no workflow ever runs:"
+                " audit:mutants"
+            ),
+            "  schedule each in .github/workflows/ (audit.yml, publish.yml,",
+            "  repo-audit.yml or repo-mutants.yml) or delete the task — a check",
+            "  nobody runs is a claim, not a check (#358 seam 1).",
+        ]
+        self.assertEqual(done.stderr.splitlines(), expected)
 
 
 if __name__ == "__main__":

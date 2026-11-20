@@ -26,19 +26,22 @@ import json
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import bestpractices_drift as drift
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
-ANSWERS = json.loads((CANON / ".bestpractices.json").read_text(encoding="utf-8"))
+ANSWERS = decoded.as_object(
+    decoded.load_json((CANON / ".bestpractices.json").read_text(encoding="utf-8")),
+    ".bestpractices.json",
+)
 REPO = "monumental-archive/example"
 ID = "14058"
 URL = f"https://www.bestpractices.dev/projects/{ID}.json"
@@ -68,14 +71,16 @@ def body() -> str:
         The task body; it carries no Tera, so it renders as written.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    return config["tasks"]["audit:bestpractices"]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "tasks")
+    task = decoded.as_object(tasks["audit:bestpractices"], "audit:bestpractices")
+    return decoded.as_str(task["run"], "audit:bestpractices.run")
 
 
 BODY = body()
 
 
-def published(edit: dict | None = None) -> dict:
+def published(edit: dict[str, object] | None = None) -> dict[str, object]:
     """Return the canon's answers as the site serves them, edited.
 
     Returns:
@@ -83,7 +88,7 @@ def published(edit: dict | None = None) -> dict:
         fields the site carries that the file does not.
 
     """
-    entry = {drift.site_key(k): v for k, v in ANSWERS.items()}
+    entry: dict[str, object] = {drift.site_key(k): v for k, v in ANSWERS.items()}
     entry |= {"id": int(ID), "name": "example", "badge_percentage_0": 100}
     entry |= {drift.site_key(k): v for k, v in (edit or {}).items()}
     return entry
@@ -91,7 +96,7 @@ def published(edit: dict | None = None) -> dict:
 
 def run(
     *,
-    entry: dict | str | None = None,
+    entry: dict[str, object] | str | None = None,
     code: str = "200",
     readme: str | None = README,
     answers: bool = True,
@@ -229,15 +234,16 @@ class Green(unittest.TestCase):
     def test_a_null_justification_equals_an_empty_one(self) -> None:
         """The site's null and the file's empty string are one answer."""
         key = next(k for k in ANSWERS if k.endswith("_justification"))
-        answers = dict(ANSWERS)
+        words: dict[str, str | None] = {
+            k: decoded.as_str(v, k) for k, v in ANSWERS.items()
+        }
+        answers = dict(words)
         answers[key] = ""
         site = drift.published(published({key: None}), list(ANSWERS))
-        self.assertEqual(drift.drift(answers, site), [])
+        self.assertEqual(drift.drift(answers, site), list[str]())
         # And only then: against the file's real words, null is a drift.
-        self.assertEqual(
-            drift.drift(ANSWERS, site),
-            [f"{key.removesuffix('_justification')}: justification differs"],
-        )
+        expected = [f"{key.removesuffix('_justification')}: justification differs"]
+        self.assertEqual(drift.drift(words, site), expected)
 
     def test_a_repository_with_no_badge_is_skipped_by_name(self) -> None:
         """No shield names an entry, so there is nothing to compare."""
@@ -279,9 +285,16 @@ class Green(unittest.TestCase):
 class Red(unittest.TestCase):
     """Each red row is red when planted, with the stated message."""
 
-    def assert_red(self, message: str, **kwargs: object) -> None:
+    def assert_red(
+        self,
+        message: str,
+        *,
+        entry: dict[str, object] | str | None = None,
+        code: str = "200",
+        readme: str | None = README,
+    ) -> None:
         """Assert exit 1 and exactly this message on stderr."""
-        done, _ = run(**kwargs)
+        done, _ = run(entry=entry, code=code, readme=readme)
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertEqual(done.stderr, message)
 
@@ -410,9 +423,9 @@ class Helper(unittest.TestCase):
 
     def test_keys_that_are_not_answers_are_ignored(self) -> None:
         """Only `_status` and `_justification` keys are compared."""
-        self.assertEqual(
-            drift.answers({"name": "x", "a_status": "Met"}, "f"), {"a_status": "Met"}
-        )
+        document: dict[str, object] = {"name": "x", "a_status": "Met"}
+        expected: dict[str, str | None] = {"a_status": "Met"}
+        self.assertEqual(drift.answers(document, "f"), expected)
 
     def test_an_empty_readme_names_no_entry(self) -> None:
         """No README text, no shield."""

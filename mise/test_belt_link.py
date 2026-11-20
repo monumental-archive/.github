@@ -20,6 +20,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import decoded
 import hermetic
@@ -68,6 +69,7 @@ def body() -> str:
 class TheBeltClaimsItsDirectory(unittest.TestCase):
     """Each row: what the repository tracks under .config/mise/."""
 
+    @override
     def setUp(self) -> None:
         """Plant an empty repository."""
         self.tmp = Path(tempfile.mkdtemp()).resolve()

@@ -30,6 +30,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import decoded
 import hermetic
@@ -86,6 +87,7 @@ def pin(key: str) -> str:
 class LockedFromTheLinkedLock(unittest.TestCase):
     """Each row: which locks hold which tool, and what a locked install says."""
 
+    @override
     def setUp(self) -> None:
         """Plant the cache tree, the linked clone and its root lock.
 

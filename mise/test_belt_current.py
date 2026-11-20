@@ -25,6 +25,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 
@@ -77,6 +78,7 @@ def plant_canon(tree: Path, version: str) -> Path:
 class TheBeltIsThePinned(unittest.TestCase):
     """Each row: a belt planted where ORG_CANON_DIR points, and the verdict."""
 
+    @override
     def setUp(self) -> None:
         """Plant a consumer pinning PIN at v1.2.0, a cache and a stub mise."""
         self.tmp = Path(tempfile.mkdtemp()).resolve()
