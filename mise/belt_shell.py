@@ -89,17 +89,15 @@ SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 # was free to discover $HOME/.shellcheckrc and quietly lower the level.
 ORG_RCFILE = Path(__file__).resolve().parent / "shellcheckrc"
 
-# What the belt sets as mise's default inline shell
-# (`[settings] unix_default_inline_shell_args`, #700), and therefore what a
-# body runs under when its own file pins nothing.
+# The shell an unpinned file's bodies are linted under while that file
+# is red. A repository pins its own task shell in the file that defines
+# its tasks, and `unpinned()` below reds a file that does not; the belt
+# sets no default for them (#1745), because mise refuses a shell setting
+# from a clone's conf.d link and the pin already holds every repo task.
 #
 # NOT mise's own default, which is `sh -c -o errexit` — dash on an Ubuntu
-# runner. This constant used to claim otherwise, and the claim was load
-# bearing: an unpinned repo's bodies were modelled with pipefail and
-# nounset they did not get, so the linter judged them against a stricter
-# shell than the runner gave them. The belt setting is what makes the
-# optimistic model true; `unpinned()` below is what keeps it true when the
-# belt is not the layer in play.
+# runner. Modelling the pinned shell keeps the findings about the body
+# rather than about the missing pin, which `unpinned()` reports once.
 DEFAULT_SHELL = "bash -euo pipefail -c"
 
 # The remedy `unpinned()` names, verbatim, so the message hands over the
@@ -554,10 +552,9 @@ def unpinned(configs: dict[Path, Config]) -> list[str]:
 
     The assertion that makes the strict shell true rather than advisory
     (#700). `[task_config]` governs the file it is written in and layers
-    nowhere, so a repo that defines a task and restates nothing is relying
-    on the belt's default being the layer in play — true in the gate and on
-    a belt-wearing machine, false in a clone that has neither. The pin costs
-    two lines and removes the dependency.
+    nowhere, so a repo that defines a task and restates nothing runs it
+    under mise's own `sh`. The repo's pin is the one mechanism: the belt
+    sets no default shell (#1745).
 
     Only files being CHECKED are asserted on: an `--env-from` config is read
     for its `[env]`, and a config that declares no tasks has nothing to run
