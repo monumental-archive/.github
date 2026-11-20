@@ -91,7 +91,7 @@ import base64
 import json
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -267,7 +267,7 @@ def psql(conninfo: str, sql: str) -> list[list[str]]:
 
     """
     # The repository's own psql, by name on PATH: the belt pins no client.
-    # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
+    # ruff: ignore[start-process-with-partial-path]
     done = subprocess.run(
         [
             "psql",

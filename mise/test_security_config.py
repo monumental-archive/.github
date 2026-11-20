@@ -31,7 +31,7 @@ stdlib `unittest`, the belt's one test idiom.
 
 import copy
 import io
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout

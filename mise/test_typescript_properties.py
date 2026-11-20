@@ -25,7 +25,7 @@ import io
 import json
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from dataclasses import dataclass
@@ -133,15 +133,13 @@ _GIT_ENV = {
 
 def plant(root: Path, files: dict[str, str], *, runner: bool) -> None:
     """Make `root` a git tree tracking `files`, with the stub installed."""
-    subprocess.run([GIT, "init", "-q", str(root)], check=True, env=_GIT_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run([GIT, "init", "-q", str(root)], check=True, env=_GIT_ENV)
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     if files:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV
-        )
+        subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV)
     if runner:
         stub = root / "node_modules" / ".bin" / "vitest"
         stub.parent.mkdir(parents=True)
@@ -220,7 +218,7 @@ def run(
             STUB_OUT=str(out),
             **env or {},
         )
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body],
             cwd=root,
             env=environ,

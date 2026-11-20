@@ -21,8 +21,6 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import unittest
@@ -140,7 +138,6 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
             "STUB_FILES": str(files),
             **outputs,
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [BASH, "-c", step_body()],
             env=env,

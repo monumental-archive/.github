@@ -20,8 +20,6 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
 import unittest
@@ -118,7 +116,6 @@ class InstallTheBeltsPython(unittest.TestCase):
             The run.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash(), str(self.script)],
             env=hermetic.env(
@@ -263,7 +260,6 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
         env.pop("ORG_PYTHON", None)
         if value is not None:
             env["ORG_PYTHON"] = value
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             argv,
             cwd=tmp,

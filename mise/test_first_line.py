@@ -17,7 +17,7 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,13 +59,10 @@ class FirstLineOfALongListing(unittest.TestCase):
             (tree / "LICENSE").write_text("0BSD\n", encoding="utf-8")
             for i in range(FILES):
                 (tree / f"{NAME}{i:05}").touch()
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
             listing = "".join(f"{name}\n" for name in hermetic.tracked(tree))
             self.assertGreater(len(listing.encode()), 8 * 65536)
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [BASH, "-euo", "pipefail", "-c", body()],
                 cwd=tree,

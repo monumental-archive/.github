@@ -28,8 +28,6 @@ stdlib `unittest`, matching the rest of mise/.
 """
 
 import re
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import unittest
 from pathlib import Path
@@ -70,7 +68,6 @@ def bash(script: str) -> str:
         Its standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [BASH, "-c", f'. "{WRITER}"\n{script}'],
         capture_output=True,

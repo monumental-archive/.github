@@ -34,7 +34,7 @@ import contextlib
 import io
 import os
 import posixpath
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - PIPE only; the run is faked
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path

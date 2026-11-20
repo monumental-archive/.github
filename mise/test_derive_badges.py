@@ -23,7 +23,7 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -138,12 +138,12 @@ def render(
         if not canon:
             env.pop("ORG_CANON_DIR")
         git = [GIT, "-C", str(root)]
-        subprocess.run([*git, "init", "-q"], check=True, env=env)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([*git, "init", "-q"], check=True, env=env)
         tracked = [n for n in planted if n not in untracked]
-        subprocess.run([*git, "add", "--", *tracked], check=True, env=env)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([*git, "add", "--", *tracked], check=True, env=env)
         out = Path(tmp) / "block.md"
         env["BADGES_OUT"] = str(out)
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=root,
             env=env,

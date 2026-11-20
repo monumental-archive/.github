@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import unittest
 
@@ -77,7 +75,6 @@ class EveryPartPassed(unittest.TestCase):
 
         """
         bash = hermetic.tool("bash")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, "-c", step_script()],
             env=hermetic.env(

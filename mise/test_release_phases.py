@@ -26,7 +26,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -176,7 +176,7 @@ def lint(workflow: str, name: str = "publish.yml") -> subprocess.CompletedProces
         (flows / name).write_text(workflow, encoding="utf-8")
         env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", BODY],
             cwd=tmp,
             env=env,

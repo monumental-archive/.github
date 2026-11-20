@@ -14,8 +14,6 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import tempfile
@@ -95,7 +93,6 @@ class SquashMessage(unittest.TestCase):
 
     def test_the_script_contract(self) -> None:
         """Started as a process, it reads the step's variables and exits 0."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [sys.executable, str(HELPER)],
             env=self.step_env("fix: a thing (#700)", "", 0),

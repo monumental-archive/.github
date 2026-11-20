@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - the script row runs the helper as the workflow does
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -181,7 +181,7 @@ class Rows(unittest.TestCase):
 
         """
         argv = [sys.executable, str(HELPER), *self.arguments("true")]
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
+        return subprocess.run(
             argv,
             env={**self.env, "STUB_LIST": "[]", **env},
             capture_output=True,

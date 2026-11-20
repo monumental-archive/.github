@@ -18,7 +18,7 @@ run through the gate as `mise run test`, which `ci` collects.
 """
 
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,7 +77,7 @@ class Scheduled(unittest.TestCase):
             The finished process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=self.tree,
             env=self.env,

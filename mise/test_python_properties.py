@@ -23,7 +23,7 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,15 +136,13 @@ _GIT_ENV = {
 
 def plant(root: Path, files: dict[str, str]) -> None:
     """Make `root` a git tree tracking `files`."""
-    subprocess.run([GIT, "init", "-q", str(root)], check=True, env=_GIT_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run([GIT, "init", "-q", str(root)], check=True, env=_GIT_ENV)
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     if files:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV
-        )
+        subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV)
 
 
 def run(
@@ -173,7 +171,7 @@ def run(
             ORG_PYTHON=str(PYTHON),
             **env or {},
         )
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body],
             cwd=root,
             env=environ,
@@ -357,7 +355,6 @@ class Script(unittest.TestCase):
     def test_the_runner_runs_as_a_script(self) -> None:
         """No file named: the usage line on stderr, exit 2."""
         venv = Path(os.path.realpath(hermetic.tool("hypothesis"))).parent
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [str(venv / "python"), str(BELT / "python_properties.py"), "gate"],
             env=hermetic.env(),

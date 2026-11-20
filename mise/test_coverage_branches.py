@@ -22,7 +22,7 @@ gate as `mise run test`, which `ci` collects.
 
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from decimal import Decimal
@@ -195,14 +195,10 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     }
     if toolchain is not None:
         env["FUZZ_TOOLCHAIN"] = toolchain
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [GIT, "init", "-q"], cwd=tree, env=env, check=True
-    )
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
     if tracked:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "add", *tracked], cwd=tree, env=env, check=True
-        )
-    done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
+    done = subprocess.run(
         [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
         cwd=tree,
         env=env,

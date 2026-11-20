@@ -50,7 +50,7 @@ import hashlib
 import json
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import textwrap
 import unittest
@@ -219,7 +219,6 @@ def git(args: list[str], cwd: Path, home: Path) -> str:
         by not knowing it exists.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [GIT, *args],
         cwd=cwd,
@@ -319,7 +318,6 @@ class Repo:
             GH_PREV_TARBALL=str(prev_tarball or ""),
         )
         env.pop("GITHUB_OUTPUT", None)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.root,
@@ -530,7 +528,6 @@ class LeavesTheCallersGitAlone(NeedsJq):
                 "GIT_DIR": str(gitdir),
                 "GIT_INDEX_FILE": str(index),
             })
-            # ruff: ignore[subprocess-without-shell-equals-true]
             run = subprocess.run(
                 [sys.executable, str(Path(__file__).resolve()), "-v"],
                 cwd=linked,
@@ -661,7 +658,7 @@ class WritesTheInstallableSet(NeedsJq):
                 GH_FIXTURE=str(TESTDATA / "stele-releases.json"),
                 GITHUB_OUTPUT=str(out),
             )
-            result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            result = subprocess.run(
                 [BASH, str(SCRIPT)],
                 cwd=repo.root,
                 env=env,
@@ -711,7 +708,7 @@ class WritesTheInstallableSet(NeedsJq):
                 RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
                 MISE_DATA_DIR=mise_data_dir(),
             )
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run(
                 [
                     hermetic.tool("cargo"),
                     "generate-lockfile",
@@ -724,7 +721,7 @@ class WritesTheInstallableSet(NeedsJq):
                 check=True,
                 capture_output=True,
             )
-            linted = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            linted = subprocess.run(
                 [BASH, str(LINT)],
                 cwd=repo.root,
                 env=env,
@@ -909,7 +906,6 @@ def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("")
     archive = dest / "prev.tar.gz"
-    # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run(
         [hermetic.tool("tar"), "-czf", str(archive), "-C", str(stage), top],
         check=True,
@@ -1060,7 +1056,7 @@ def run_header_install(
             STUB_ARGS=str(tmp / "args"),
             STUB_MOVE_TO=move_to,
         )
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        result = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", block],
             env=env,
             capture_output=True,
@@ -1270,10 +1266,8 @@ class LiveServer(unittest.TestCase):
         cls.data = tmp / "data"
         cls.sock = tmp
         run = [str(cls.bindir / "initdb"), "-D", str(cls.data), "-A", "trust"]
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([*run, "-U", "postgres", "-N"], check=True, capture_output=True)
         opts = f"-c listen_addresses= -k {cls.sock}"
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [
                 str(cls.bindir / "pg_ctl"),
@@ -1306,7 +1300,6 @@ class LiveServer(unittest.TestCase):
         """Stop the server and drop its directory."""
         if not cls.running:
             return
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [
                 str(cls.bindir / "pg_ctl"),
@@ -1333,7 +1326,6 @@ class LiveServer(unittest.TestCase):
             The completed process; stderr carries any WARNING.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [
                 str(cls.bindir / "psql"),
@@ -1597,7 +1589,6 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
                 STUB_ERROR=PSQL_ERROR,
                 STUB_COUNT="2",
             )
-            # ruff: ignore[subprocess-without-shell-equals-true]
             result = subprocess.run(
                 [BASH, "-c", script],
                 env=env,

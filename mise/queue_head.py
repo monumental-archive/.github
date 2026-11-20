@@ -49,8 +49,6 @@ import base64
 import os
 import re
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 
@@ -78,7 +76,6 @@ def git(
         The run.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [GIT, *args],
         env=env,

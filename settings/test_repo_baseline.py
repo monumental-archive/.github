@@ -25,7 +25,7 @@ import base64
 import json
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -229,7 +229,6 @@ class Forge:
             "GH_TOKEN": "audit-token",
             "PACKAGES_TOKEN": "packages-token",
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(SCRIPT), "check"],
             cwd=self.root,

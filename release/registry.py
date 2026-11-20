@@ -40,8 +40,6 @@ import hashlib
 import json
 import os
 import re
-
-# ruff: ignore[suspicious-subprocess-import] - docker is the one command run
 import subprocess
 import sys
 import urllib.error
@@ -164,7 +162,6 @@ class Registry:
             RefusedError: the command exited non-zero.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true] - argv, no shell
         done = subprocess.run(
             # ruff: ignore[start-process-with-partial-path] - docker from the runner's PATH
             ["docker", *args],

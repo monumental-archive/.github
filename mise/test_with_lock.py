@@ -12,7 +12,7 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import time
@@ -49,7 +49,6 @@ class LockCase(unittest.TestCase):
             The running helper.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.Popen(
             [
                 sys.executable,
@@ -82,7 +81,6 @@ class LockCase(unittest.TestCase):
             "pathlib.Path(sys.argv[2]).touch()\n"
             "time.sleep(float(sys.argv[3]))\n"
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.Popen(
             [sys.executable, "-c", script, str(self.lock), str(held), str(seconds)],
             cwd=self.root,

@@ -29,7 +29,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -105,7 +105,7 @@ def run(script: str, tree: Path) -> subprocess.CompletedProcess[str]:
         "ORG_PYTHON": sys.executable,
         "ORG_PYTHON_UNSET": "unset",
     }
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
         cwd=tree,
         env=env,
@@ -139,7 +139,7 @@ def canon_name() -> str:
     script = (
         f'. "{BELT}/identity.sh"; echo "$(org_identity owner)/$(org_identity repo)"'
     )
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
         env=hermetic.env(ORG_CANON_DIR=str(CANON)),
         capture_output=True,
@@ -185,7 +185,7 @@ def started(workflow: str) -> tuple[subprocess.CompletedProcess[str], str]:
         flows.mkdir(parents=True)
         caller = flows / "gate.yml"
         caller.write_text(workflow, encoding="utf-8")
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [
                 *(sys.executable, str(BELT / "gate_stub_fix.py")),
                 *(CANON_NAME, ".github/workflows/gate.yml"),

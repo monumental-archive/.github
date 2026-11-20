@@ -20,7 +20,7 @@ gate as `mise run test`.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -121,15 +121,12 @@ class EveryMemberIsLinted(unittest.TestCase):
                 (bindir / name).chmod(0o755)
             log = root / "clippy.log"
             env = hermetic.env(root / "home", ORG_BELT_DIR=str(BELT))
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env["STUB_METADATA"] = str(METADATA)
             env["CLIPPY_LOG"] = str(log)
             env |= stub
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [BASH, "-euo", "pipefail", "-c", body()],
                 cwd=tree,
@@ -198,7 +195,6 @@ class TheStubOutlivesItsReader(unittest.TestCase):
             read, write = os.pipe()
             os.close(read)
             try:
-                # ruff: ignore[subprocess-without-shell-equals-true]
                 done = subprocess.run(
                     [BASH, str(stub), "component", "list", "--installed"],
                     stdout=write,

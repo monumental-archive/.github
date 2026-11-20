@@ -20,7 +20,7 @@ gate as `mise run test`.
 """
 
 import ast
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -154,7 +154,6 @@ def run_user(*, own: bool) -> str:
             "print(shared.WHERE)\n",
             "utf-8",
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [sys.executable, str(root / "release" / "user.py")],
             capture_output=True,

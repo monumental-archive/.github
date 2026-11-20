@@ -5,7 +5,7 @@ import contextlib
 import io
 import pathlib
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -230,7 +230,7 @@ class TestMain(unittest.TestCase):
     def test_the_script_contract(self) -> None:
         """Started as a process, it reads stdin and exits 0 with a finding."""
         path = planted_lock(DEFECT)
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [sys.executable, str(pathlib.Path(lock_arch.__file__))],
             env=hermetic.env(),
             input=f"{path}\n",

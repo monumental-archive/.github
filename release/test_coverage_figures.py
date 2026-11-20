@@ -22,7 +22,7 @@ the gate as `mise run test`.
 import contextlib
 import io
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -468,7 +468,6 @@ class Derive(unittest.TestCase):
         self.tree.mkdir()
         (self.tree / "a.py").write_text("", encoding="utf-8")
         env = hermetic.env(self.base / "home")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [
                 sys.executable,
@@ -490,9 +489,7 @@ class Derive(unittest.TestCase):
             [GIT, "add", "-A"],
             [GIT, "commit", "-qm", "plant"],
         ):
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(argv, cwd=self.tree, env=env, check=True)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         self.sha = subprocess.run(
             [GIT, "rev-parse", "HEAD"],
             cwd=self.tree,
@@ -561,7 +558,6 @@ class Derive(unittest.TestCase):
         env["PATH"] = f"{self.stubs}:{env['PATH']}"
         if not measure:
             env["STUB_NO_MEASURE"] = "1"
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(self.script)],
             cwd=self.tree,

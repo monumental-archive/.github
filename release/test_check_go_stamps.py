@@ -19,8 +19,6 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import unittest
@@ -103,7 +101,6 @@ def git(cwd: Path, *args: str) -> str:
         Its standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - the runner's git
         ["git", *args],
@@ -156,7 +153,6 @@ def run_helper(
         }
         result: subprocess.CompletedProcess[str] | hermetic.Called
         if script:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             result = subprocess.run(
                 [str(HELPER)],
                 env=env,

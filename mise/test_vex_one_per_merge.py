@@ -16,7 +16,7 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -69,7 +69,6 @@ class Tree:
             git's standard output.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [GIT, *args],
             cwd=self.dir,
@@ -143,7 +142,6 @@ class Tree:
             The finished process, output captured.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [sys.executable, str(HELPER)],
             cwd=self.dir,

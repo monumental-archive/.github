@@ -18,7 +18,7 @@ stdlib `unittest`, matching the rest of mise/; run through the gate as
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,7 +42,7 @@ def run(
         The finished process.
 
     """
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [BASH, str(script), *args],
         cwd=cwd,
         env=hermetic.env(**env),
@@ -75,7 +75,7 @@ class VexDecisions(unittest.TestCase):
             Its standard output.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [GIT, *args],
             cwd=self.tree,
             env=hermetic.env(),

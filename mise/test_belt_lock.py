@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,7 +49,7 @@ def run(
         The run.
 
     """
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         argv,
         cwd=cwd,
         env=env,

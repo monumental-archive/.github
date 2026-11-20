@@ -58,7 +58,7 @@ as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import unittest
 from dataclasses import dataclass
@@ -294,7 +294,7 @@ def steps(job: Job, *, script: bool) -> Run:
 
                 result = hermetic.call_main(call, env=env, cwd=work)
             else:
-                result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                result = subprocess.run(
                     argv,
                     env=env,
                     capture_output=True,

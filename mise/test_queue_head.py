@@ -23,8 +23,6 @@ from __future__ import annotations
 import gzip
 import pathlib
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import tempfile
@@ -81,7 +79,6 @@ def git(repo: pathlib.Path, *args: str) -> str:
         Its stripped stdout.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [GIT, "-C", str(repo), *args],
         env=scrubbed(),
@@ -212,7 +209,6 @@ def start_helper(
         "ORG_QUEUE_GROUP": group,
         "ORG_QUEUE_TOKEN": "not-a-real-token",
     })
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [sys.executable, str(HELPER)],
         cwd=cwd,

@@ -69,6 +69,17 @@ ignore = [
   # T201 exists to catch strays in library code; the belt's Python is a
   # CLI check that emits its findings on stdout and stderr by design.
   "T201",
+  # Two ports of bandit's audit prompts (B404, B603): "a process starts
+  # here, have someone look". Neither is a finding code can fix. S404
+  # fires on `import subprocess` itself; S603 on any process call whose
+  # argv is not all string literals, and ruff does not trace where an
+  # argument came from, so it cannot tell a trusted one from an
+  # untrusted one: a module constant or a path is enough to fire it.
+  # Every site answered with a comment, 460 of the tree's 534 (#1838).
+  # The rules code CAN pass stay on: shell=True (S602, S604, S605) and
+  # the partial-path pair (S606, S607).
+  "S404",
+  "S603",
 ]
 
 [lint.per-file-ignores]

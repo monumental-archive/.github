@@ -11,7 +11,7 @@ import contextlib
 import io
 import os
 import pathlib
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from typing import ClassVar, override
@@ -45,7 +45,6 @@ def run_git(cwd: pathlib.Path | str, *args: str) -> str:
         git's standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [GIT, "-C", str(cwd), *args],
         capture_output=True,

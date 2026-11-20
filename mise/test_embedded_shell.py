@@ -18,7 +18,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import io
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import unittest
 import unittest.mock
@@ -918,7 +918,7 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
 
     """
     env = {**CLEAN_ENV, "ORG_BELT_DIR": str(_HERE)}
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", task_body(name)],
         cwd=root,
         env=env,
@@ -941,7 +941,7 @@ class Task(unittest.TestCase):
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)
         return root
 
     def test_no_workflows_skips_clean(self) -> None:
@@ -965,7 +965,7 @@ class Task(unittest.TestCase):
         wf = root / ".github" / "workflows" / "w.yml"
         wf.parent.mkdir(parents=True)
         wf.write_text(workflow(step("Big", 16)), encoding="utf-8")
-        subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)
         r = run_task(root, "lint:workflow-shell")
         self.assertEqual(r.returncode, 1)
         self.assertIn(
@@ -1235,14 +1235,14 @@ class TaskShellTask(unittest.TestCase):
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)
         return root
 
     @staticmethod
     def track(root: Path, text: str) -> None:
         """Write and stage a root mise.toml."""
         (root / "mise.toml").write_text(text, encoding="utf-8")
-        subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)
 
     def test_tracked_long_body_is_red_then_generated(self) -> None:
         """The lint reaches the helper; fix generates; the lint goes green."""
@@ -1319,15 +1319,11 @@ class Cli(unittest.TestCase):
                 str(debt),
                 str(cfg),
             ]
-            red = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                argv, capture_output=True, text=True, check=False
-            )
+            red = subprocess.run(argv, capture_output=True, text=True, check=False)
             debt.write_text(
                 f"{cfg}\tlint:a\t16\t# #1544 unassigned\n", encoding="utf-8"
             )
-            green = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                argv, capture_output=True, text=True, check=False
-            )
+            green = subprocess.run(argv, capture_output=True, text=True, check=False)
         self.assertEqual(red.returncode, 1)
         self.assertIn("task 'lint:a' holds a body of 16 lines", red.stderr)
         self.assertEqual(green.returncode, 0, green.stderr)

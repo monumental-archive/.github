@@ -15,7 +15,7 @@ edits a copy in code and says which field.
 from __future__ import annotations
 
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - the script row runs the helper as the workflow does
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -221,9 +221,7 @@ class Verdict(unittest.TestCase):
             sys.executable, str(HELPER), "--exit-code", "0",
             "--report", str(self.report), "--saved", "true",
         ]  # fmt: skip
-        proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
-            argv, capture_output=True, text=True, check=False
-        )
+        proc = subprocess.run(argv, capture_output=True, text=True, check=False)
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertEqual(proc.stderr, "")
         self.assertEqual(

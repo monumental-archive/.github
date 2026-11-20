@@ -20,7 +20,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import io
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -56,7 +56,6 @@ def bash_version(shell: Path = BASH) -> str:
     """
     if not shell.is_file():
         return ""
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [str(shell), "-c", 'echo "${BASH_VERSION:-}"'],
         capture_output=True,
@@ -282,7 +281,6 @@ def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
     with TemporaryDirectory() as scratch:
         path = Path(scratch) / "s.sh"
         path.write_text(script("tmp=$(mktemp)", *body, **head), encoding="utf-8")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [shell, str(path)],
             capture_output=True,

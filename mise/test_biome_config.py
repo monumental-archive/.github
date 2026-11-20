@@ -17,7 +17,7 @@ refuse looks precisely like success.
 
 import io
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -751,7 +751,7 @@ class RunTest(unittest.TestCase):
         """Started as a process, it reads its flags and stdin and writes."""
         tree = Path(tempfile.mkdtemp())
         out = tree / "generated.json"
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [
                 *(sys.executable, str(BELT / "biome_config.py")),
                 *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),

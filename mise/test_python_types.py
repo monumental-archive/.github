@@ -16,7 +16,7 @@ gate as `mise run test`.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -104,7 +104,6 @@ def real_mypy() -> str | None:
     found = hermetic.optional_tool("mypy")
     if found is None:
         return None
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [found, "--version"], capture_output=True, text=True, check=False
     )
@@ -157,9 +156,7 @@ def run(
         for name in missing:
             (belt / name).unlink()
         env = hermetic.env(ORG_BELT_DIR=str(belt), ORG_PYTHON=sys.executable)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "add", "-A"], cwd=tree, env=env, check=True)
         log = root / "stub.log"
         if stub is not None:
@@ -172,7 +169,6 @@ def run(
                 (bindir / "hypothesis").chmod(0o755)
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env |= {"STUB_LOG": str(log), "STUB_VERSION": pinned(), **stub}
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=tree,
@@ -399,7 +395,7 @@ class TheHelpers(unittest.TestCase):
         """python_types_seams started as a process: arguments in, exit 1."""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "a.py").write_text("# type: ignore\n", encoding="utf-8")
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [sys.executable, str(BELT / "python_types_seams.py"), "a.py"],
                 cwd=tmp,
                 env=hermetic.env(),
@@ -411,7 +407,7 @@ class TheHelpers(unittest.TestCase):
 
     def test_the_roots_script_contract(self) -> None:
         """python_roots started as a process: no file is exit 2 and the usage."""
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [sys.executable, str(BELT / "python_roots.py"), str(BELT)],
             env=hermetic.env(),
             capture_output=True,

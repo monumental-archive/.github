@@ -18,7 +18,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,7 +71,7 @@ def typos(text: str, *, belt: bool = True) -> subprocess.CompletedProcess[str]:
         args = [TYPOS, "--isolated"]
         if belt:
             args += ["-c", str(CONFIG)]
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [*args, str(target)],
             capture_output=True,
             text=True,

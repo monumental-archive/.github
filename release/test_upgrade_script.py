@@ -53,7 +53,7 @@ framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -149,7 +149,6 @@ class Derivation:
         env = hermetic.env(
             EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v, ORG_MISE_DIR=str(CANON / "mise")
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [hermetic.tool("python3"), str(self.source), *args],
             env=env,

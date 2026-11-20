@@ -103,7 +103,7 @@ import http.client
 import io
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import threading
 import unittest
@@ -661,7 +661,7 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         )
         out = io.StringIO()
         if script:
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [sys.executable, str(HELPER), "--pipeline", PIPELINE],
                 env=env,
                 stdout=subprocess.PIPE,
