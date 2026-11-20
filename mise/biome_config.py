@@ -171,16 +171,6 @@ def declaration(
     return set(domains), problems
 
 
-def declaration_problems(document: object, identity: dict[str, list[str]]) -> list[str]:
-    """Judge a repository's `biome.json` against what a repo may say.
-
-    Returns:
-        One line per refusal, empty when the declaration is admissible.
-
-    """
-    return declaration(document, identity)[1]
-
-
 def declared_packages(manifests: list[Path]) -> dict[str, list[str]]:
     """Collect every dependency the repository's own manifests name.
 

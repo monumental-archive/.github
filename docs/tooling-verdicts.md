@@ -3829,6 +3829,34 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   lockfile changed, the shape #1414 fixed. *Reopen:* a repository's
   gate red on a belt tool its own task calls and the guess did not
   see.
+- **vulture, for Python defined and never called** (#1831,
+  2026-11-20) — counted with vulture 2.14 at `origin/main` `cfcffe29`
+  over the canon's 269 tracked `.py`. With the test files in: 798
+  hits, every one at 60% confidence and every one in a test file, 787
+  of them `unittest` classes and `test_*` methods the framework calls,
+  none in the 76 helpers. Over the 76 helpers alone, so a name only
+  tests call shows: 8 hits. Two were names only tests called,
+  `biome_config.declaration_problems` and `gate_tools.python_calls`
+  (21 lines), and #1831 removed them; the six left are test support
+  (`call_names.qualifier`, `hermetic.call_main`), fixture text three
+  test files share (`exit_trap.BASH_GUARD`), a field one test reads
+  (`embedded_shell.Run.commented`) and framework overrides
+  (`shortDescription`, `redirect_request`). Not a `lint:` task: it
+  rates every unused function, class and method at 60% by design, so
+  a name a framework calls looks the same to it as a dead one, and
+  its two ways to excuse a name — a file of names per repository, or
+  a `# noqa: V103` comment the delivered ruff config refuses twice
+  (`noqa-comments`, `invalid-rule-code`) unless `V` is declared
+  external — are each a list of exceptions every repository keeps,
+  which the belt does not carry. It does treat `__all__` as use, so a
+  library's declared API is not the objection. Not an `audit:`
+  either: an audit red on six names it cannot be told about is red
+  for ever. `deadcode` 2.6.2 is worse on the same 76 files: 48 of its
+  54 hits are "commented out code" (DC12) in a tree that passes
+  ruff's `ERA001`. And scanning with the tests in makes a helper only
+  tests call alive by definition, the one case worth finding.
+  *Reopen:* a release that tells a framework-called name from a dead
+  one without a per-repository list.
 
 ## Watched, as filed issues
 
