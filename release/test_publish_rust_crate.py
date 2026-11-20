@@ -60,6 +60,7 @@ import os
 import shutil
 import sys
 import unittest
+import urllib.request
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,7 +74,9 @@ import publish_crates
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
+import workflow_command
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -136,7 +139,11 @@ class Fetch:
     requests: list[tuple[str, str]] = field(default_factory=list)
 
     def __call__(
-        self, method: str, url: str, headers: dict[str, str], data: bytes | None = None
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        data: bytes | None = None,
     ) -> publish_crates.Response:
         """Answer one request and record it as the old curl stub logged it.
 
@@ -218,8 +225,10 @@ def run_publish(
             else:
                 shutil.copy(INDEX / answer, dest)
         metadata = tmp / "metadata.json"
-        captured = json.loads(METADATA.read_text())
-        for package in captured["packages"]:
+        document = decoded.load_json(METADATA.read_text())
+        captured = decoded.as_object(document, "metadata")
+        for listed in decoded.as_array(captured["packages"], "packages"):
+            package = decoded.as_object(listed, "a package")
             if package["name"] in unpublished:
                 package["publish"] = []
         metadata.write_text(json.dumps(captured))
@@ -246,7 +255,7 @@ def run_publish(
             try:
                 code = publish_crates.run(env, tmp, fetch)
             except publish_crates.RefusalError as e:
-                publish_crates.workflow_command.error(str(e))
+                workflow_command.error(str(e))
                 code = 1
 
         def read(name: str) -> list[str]:
@@ -265,7 +274,10 @@ def index_lines(rel: str) -> list[dict[str, object]]:
         One object per published version, in the file's order.
 
     """
-    return [json.loads(x) for x in (INDEX / rel).read_text().splitlines()]
+    return [
+        decoded.as_object(decoded.load_json(x), f"a line of {rel}")
+        for x in (INDEX / rel).read_text().splitlines()
+    ]
 
 
 CORE = {"ed/tf/edtf-core": "ed/tf/edtf-core"}
@@ -279,14 +291,16 @@ class TheFixturesAreTheRealShapes(unittest.TestCase):
         """edtf-core 1.3.3's index line names this crate file's sha256."""
         lines = index_lines("ed/tf/edtf-core")
         sums = [x["cksum"] for x in lines if x["vers"] == "1.3.3"]
-        self.assertEqual([CORE_CKSUM], sums)
+        want: list[object] = [CORE_CKSUM]
+        self.assertEqual(want, sums)
         self.assertEqual(CORE_CKSUM, hashlib.sha256(CRATE.read_bytes()).hexdigest())
 
     def test_wasm_has_a_file_but_no_1_3_3(self) -> None:
         """The burn's shape: the crate exists, the version does not."""
         lines = index_lines("ed/tf/edtf-wasm")
         self.assertTrue(lines)
-        self.assertNotIn("1.3.3", [x["vers"] for x in lines])
+        versions = [x["vers"] for x in lines]
+        self.assertNotIn("1.3.3", versions)
 
 
 class PublishResumes(unittest.TestCase):
@@ -296,19 +310,21 @@ class PublishResumes(unittest.TestCase):
         """404s and a file without the version leave cargo's flags alone."""
         run = run_publish(WASM)
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual([PUBLISH], run.publishes())
+        want: list[str] = [PUBLISH]
+        self.assertEqual(want, run.publishes())
         self.assertNotIn("skipped", run.stdout)
-        self.assertFalse([c for c in run.cargo if c.startswith("package")])
+        packaged = [c for c in run.cargo if c.startswith("package")]
+        self.assertFalse(packaged)
 
     def test_some_published_excludes_exactly_those_and_names_them(self) -> None:
         """The v1.3.3 re-run: edtf-core is there, the rest are not."""
         run = run_publish(CORE | WASM)
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual([f"{PUBLISH} --exclude edtf-core"], run.publishes())
-        self.assertEqual(
-            ["edtf-core: already on crates.io at 1.3.3, skipped"],
-            [x for x in run.stdout.splitlines() if "skipped" in x],
-        )
+        want: list[str] = [f"{PUBLISH} --exclude edtf-core"]
+        self.assertEqual(want, run.publishes())
+        skipped = [x for x in run.stdout.splitlines() if "skipped" in x]
+        said: list[str] = ["edtf-core: already on crates.io at 1.3.3, skipped"]
+        self.assertEqual(said, skipped)
         self.assertIn("package --locked --no-verify -p edtf-core", run.cargo)
 
     def test_all_published_runs_no_cargo_publish_and_exits_0(self) -> None:
@@ -316,16 +332,16 @@ class PublishResumes(unittest.TestCase):
         others = ("calendars", "normalize", "wasm", "cli", "postgres")
         run = run_publish(CORE, unpublished=tuple(f"edtf-{m}" for m in others))
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual([], run.publishes())
+        self.assertEqual(list[str](), run.publishes())
         self.assertEqual(
             "edtf-core: already on crates.io at 1.3.3, skipped\n"
             "every crate this release publishes is already on crates.io"
             " at its version; nothing to publish\n",
             run.stdout,
         )
-        self.assertEqual(
-            ["https://index.crates.io/ed/tf/edtf-core"], [u for u, _ in run.curl]
-        )
+        urls = [u for u, _ in run.curl]
+        want: list[str] = ["https://index.crates.io/ed/tf/edtf-core"]
+        self.assertEqual(want, urls)
 
     def test_a_checksum_mismatch_fails_naming_both(self) -> None:
         """A resume must be resuming the same bytes."""
@@ -337,7 +353,7 @@ class PublishResumes(unittest.TestCase):
             f" but this tree packages {hashlib.sha256(planted).hexdigest()}\n",
             run.stdout,
         )
-        self.assertEqual([], run.publishes())
+        self.assertEqual(list[str](), run.publishes())
 
     def test_an_index_503_fails_naming_the_status(self) -> None:
         """An unread index is never read as "not published"."""
@@ -349,19 +365,17 @@ class PublishResumes(unittest.TestCase):
             ' is not "not published"\n',
             run.stdout,
         )
-        self.assertEqual([], run.publishes())
+        self.assertEqual(list[str](), run.publishes())
 
     def test_every_index_read_names_the_org_and_the_layout(self) -> None:
         """One read per member that publishes, each with the UA."""
         run = run_publish(WASM)
         reads = [(u, a) for u, a in run.curl if u.startswith("https://index.")]
-        self.assertEqual(
-            [
-                (f"https://index.crates.io/ed/tf/edtf-{m}", USER_AGENT)
-                for m in ("core", "calendars", "normalize", "wasm", "cli", "postgres")
-            ],
-            reads,
-        )
+        want = [
+            (f"https://index.crates.io/ed/tf/edtf-{m}", USER_AGENT)
+            for m in ("core", "calendars", "normalize", "wasm", "cli", "postgres")
+        ]
+        self.assertEqual(want, reads)
 
 
 class AnUnreadableIndexIsUnread(unittest.TestCase):
@@ -375,13 +389,19 @@ class AnUnreadableIndexIsUnread(unittest.TestCase):
         """Not an object, not UTF-8, our record with no cksum."""
         for body in (b"0", b"\x80", b'{"vers": "1.3.3"}\n'):
             with self.subTest(body=body):
+
+                def fetch(
+                    method: str,
+                    url: str,
+                    headers: Mapping[str, str],
+                    data: bytes | None = None,
+                    body: bytes = body,
+                ) -> publish_crates.Response:
+                    del method, url, headers, data
+                    return publish_crates.Response(200, body)
+
                 with self.assertRaises(publish_crates.RefusalError) as refused:
-                    publish_crates.published_checksum(
-                        "edtf-core",
-                        "1.3.3",
-                        "ua",
-                        lambda *_, b=body: publish_crates.Response(200, b),
-                    )
+                    publish_crates.published_checksum("edtf-core", "1.3.3", "ua", fetch)
                 self.assertEqual(
                     str(refused.exception),
                     "the crates.io index for edtf-core"
@@ -401,21 +421,22 @@ class PublishFollowsCargo(unittest.TestCase):
         self.assertIn(
             ("https://index.crates.io/ed/tf/edtf-postgres", USER_AGENT), run.curl
         )
-        self.assertEqual([PUBLISH], run.publishes())
+        want: list[str] = [PUBLISH]
+        self.assertEqual(want, run.publishes())
         self.assertNotIn("--exclude", run.publishes()[0])
 
     def test_a_publish_false_member_is_not_in_the_set(self) -> None:
         """`publish = false` is the one way out, and it is the manifest's."""
         run = run_publish(CORE, unpublished=("edtf-postgres",))
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(
-            [
-                f"https://index.crates.io/ed/tf/edtf-{m}"
-                for m in ("core", "calendars", "normalize", "wasm", "cli")
-            ],
-            [u for u, _ in run.curl if u.startswith("https://index.")],
-        )
-        self.assertEqual([f"{PUBLISH} --exclude edtf-core"], run.publishes())
+        want = [
+            f"https://index.crates.io/ed/tf/edtf-{m}"
+            for m in ("core", "calendars", "normalize", "wasm", "cli")
+        ]
+        reads = [u for u, _ in run.curl if u.startswith("https://index.")]
+        self.assertEqual(want, reads)
+        published: list[str] = [f"{PUBLISH} --exclude edtf-core"]
+        self.assertEqual(published, run.publishes())
 
 
 class PublishMintsItsOwnToken(unittest.TestCase):
@@ -426,14 +447,14 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         run = run_publish(WASM)
         self.assertEqual(0, run.returncode, run.stdout)
         self.assertIn("::add-mask::stub\n", run.stdout)
-        self.assertEqual(["token=stub"], run.tokens)
-        self.assertEqual(
-            [
-                (f"{OIDC_URL}&audience=crates.io", ""),
-                ("https://crates.io/api/v1/trusted_publishing/tokens", USER_AGENT),
-            ],
-            [r for r in run.curl if not r[0].startswith("https://index.")],
-        )
+        tokens: list[str] = ["token=stub"]
+        self.assertEqual(tokens, run.tokens)
+        want: list[tuple[str, str]] = [
+            (f"{OIDC_URL}&audience=crates.io", ""),
+            ("https://crates.io/api/v1/trusted_publishing/tokens", USER_AGENT),
+        ]
+        others = [r for r in run.curl if not r[0].startswith("https://index.")]
+        self.assertEqual(want, others)
 
     def test_a_refused_exchange_names_the_status_and_the_header(self) -> None:
         """The 403 a missing UA draws is named, with where to look first."""
@@ -444,7 +465,7 @@ class PublishMintsItsOwnToken(unittest.TestCase):
             " the User-Agent before the publisher config (#907)\n",
             run.stdout,
         )
-        self.assertEqual([], run.publishes())
+        self.assertEqual(list[str](), run.publishes())
 
     def test_a_refused_oidc_request_names_the_status(self) -> None:
         """No OIDC token, no exchange, no publish."""
@@ -453,7 +474,8 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         self.assertEqual(
             "::error::the runner's OIDC token endpoint answered 500\n", run.stdout
         )
-        self.assertNotIn(publish_crates.EXCHANGE, [u for u, _ in run.curl])
+        urls = [u for u, _ in run.curl]
+        self.assertNotIn(publish_crates.EXCHANGE, urls)
 
     def test_an_oidc_answer_with_no_token_is_refused(self) -> None:
         """An OIDC answer that is not an object holding a string value (#1682)."""
@@ -510,9 +532,7 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         """What answered is not an HTTP response: refused by name (#1682)."""
         url = "https://index.crates.io/ed/tf/edtf-core"
         with (
-            mock.patch.object(
-                publish_crates.typed_std.urllib.request, "urlopen", return_value=None
-            ),
+            mock.patch.object(urllib.request, "urlopen", return_value=None),
             self.assertRaises(publish_crates.RefusalError) as caught,
         ):
             publish_crates.http("GET", url, {})
@@ -548,7 +568,7 @@ class Main(unittest.TestCase):
         out = io.StringIO()
         with (
             mock.patch.object(publish_crates, "run", side_effect=failure),
-            mock.patch.object(publish_crates.sys, "stdout", out),
+            mock.patch.object(sys, "stdout", out),
         ):
             code = publish_crates.main()
         return code, out.getvalue()
@@ -571,7 +591,7 @@ class Main(unittest.TestCase):
         """Without a failure, main returns what run returned."""
         with (
             mock.patch.object(publish_crates, "run", return_value=0),
-            mock.patch.object(publish_crates.sys, "stdout", io.StringIO()),
+            mock.patch.object(sys, "stdout", io.StringIO()),
         ):
             self.assertEqual(0, publish_crates.main())
 
