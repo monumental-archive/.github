@@ -51,12 +51,22 @@
       "commitMessageTopic": "cargo-semver-checks"
     },
     {
-      "description": "35 as minted, 8 past (#916).",
+      "description": "35 as minted, 8 past (#916). Grouped (#1773): a pgrx repository pins one Postgres build per major as an array, the native manager moves the first entry and the regex manager below the rest, and the group lands them in one pull request, so the set never splits across ICU majors (#1747). The group name is the topic, so the subject is the one measured.",
       "matchPackageNames": [
         "aqua:theseus-rs/postgresql-binaries",
         "theseus-rs/postgresql-binaries"
       ],
-      "commitMessageTopic": "postgresql-binaries"
+      "commitMessageTopic": "postgresql-binaries",
+      "groupName": "postgresql-binaries"
+    },
+    {
+      "description": "A new Postgres major is a new array entry, added by hand with the crate feature that declares it, so a major is never an update here; each entry moves inside its own major (#1773), as ICU does below.",
+      "matchPackageNames": [
+        "aqua:theseus-rs/postgresql-binaries",
+        "theseus-rs/postgresql-binaries"
+      ],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     },
     {
       "description": "39 as minted, 10 past: #1334's prebuilt key, which every Rust repository adopts from the scaffold (#1393).",
@@ -206,6 +216,31 @@
       ],
       "depNameTemplate": "monumental-archive/.github",
       "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "description": "Every Postgres build after the first in a multi-version mise pin (#1773). Renovate's mise manager updates only an array's first entry (its readme: secondary versions require manual updates), and that one keeps it, with the `mise lock` artifact step; this claims the rest, each the entry preceded by a comma. RE2, so no lookbehind. A regex manager has no lock step: a pull request that leaves mise.lock behind is red at lint:toolbelt-lock, and `mise lock` on Renovate's branch is the fix. mise/test_renovate_preset.py runs these patterns.",
+      "managerFilePatterns": ["/(^|/)mise\\.toml$/"],
+      "matchStringsStrategy": "recursive",
+      "matchStrings": [
+        "\"aqua:theseus-rs/postgresql-binaries\" = \\[[^\\]]*\\]",
+        ",\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "depNameTemplate": "theseus-rs/postgresql-binaries",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Every ICU table after the first in a multi-version mise pin (#1773, the array form #1774 allows), on the Postgres manager's terms above. The outer pattern admits one level of nested array, a table's `os = [...]`. ICU tags `release-79.1`.",
+      "managerFilePatterns": ["/(^|/)mise\\.toml$/"],
+      "matchStringsStrategy": "recursive",
+      "matchStrings": [
+        "\"github:unicode-org/icu\" = \\[(?:[^\\[\\]]|\\[[^\\]]*\\])*\\]",
+        ",\\s*\\{ version = \"(?<currentValue>[0-9.]+)\""
+      ],
+      "depNameTemplate": "unicode-org/icu",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^release-(?<version>.+)$"
     }
   ],
   "lockFileMaintenance": {
