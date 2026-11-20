@@ -55,7 +55,6 @@ framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import json
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -63,11 +62,13 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -296,7 +297,7 @@ class Tree:
             emitted[key] = value
         return result, emitted
 
-    def plan(self) -> dict:
+    def plan(self) -> dict[str, object]:
         """Read the plan document the step handed its executor.
 
         Returns:
@@ -304,11 +305,18 @@ class Tree:
             the release commit will carry.
 
         """
-        return json.loads((self.root / ".rt" / "release-plan.json").read_text())
+        text = (self.root / ".rt" / "release-plan.json").read_text()
+        return decoded.as_object(decoded.load_json(text), "the plan")
 
 
-@unittest.skipUnless(STELE, "stele is the belt's release engine and derives the plan")
-@unittest.skipUnless(CARGO, "cargo refreshes the lockfiles the plan declares")
+def require_engine(case: unittest.TestCase) -> None:
+    """Skip a row when a tool the prepare step runs is not installed."""
+    if not STELE:
+        case.skipTest("stele is the belt's release engine and derives the plan")
+    if not CARGO:
+        case.skipTest("cargo refreshes the lockfiles the plan declares")
+
+
 class TheChangelogContract(unittest.TestCase):
     """Decide, from a changelog's text, whether a version has a section.
 
@@ -316,6 +324,11 @@ class TheChangelogContract(unittest.TestCase):
     names the version in an h2 two different ways, or it names no
     version at all.
     """
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless stele and cargo are installed."""
+        require_engine(self)
 
     def test_a_missing_changelog_refuses_and_names_the_file(self) -> None:
         """#742's first data point: edtf carried no root CHANGELOG.md."""
@@ -370,10 +383,13 @@ class TheChangelogContract(unittest.TestCase):
         self.assertIn("add a helper", written)
 
 
-@unittest.skipUnless(STELE, "stele is the belt's release engine and derives the plan")
-@unittest.skipUnless(CARGO, "cargo refreshes the lockfiles the plan declares")
 class TheTreeDecisions(unittest.TestCase):
     """The decisions phase 1 step 1 still owns after stele took the rest."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless stele and cargo are installed."""
+        require_engine(self)
 
     def test_the_lockfiles_are_declared_to_the_plan_not_appended_after(self) -> None:
         """`--also` carries both cargo workspaces into the plan's file list.
@@ -386,12 +402,19 @@ class TheTreeDecisions(unittest.TestCase):
             tree = Tree(d)
             tree.add_fuzz_workspace()
             result, _ = tree.prepare()
-            additions = tree.plan()["commit"]["additions"]
+            commit = decoded.as_object(tree.plan()["commit"], "the plan's commit")
+            additions = sorted(
+                decoded.as_str(a, "an addition")
+                for a in decoded.as_array(commit["additions"], "commit.additions")
+            )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(
-            ["CHANGELOG.md", "Cargo.lock", "Cargo.toml", "fuzz/Cargo.lock"],
-            sorted(additions),
-        )
+        want: list[str] = [
+            "CHANGELOG.md",
+            "Cargo.lock",
+            "Cargo.toml",
+            "fuzz/Cargo.lock",
+        ]
+        self.assertEqual(want, additions)
 
     def test_a_silent_range_releases_nothing_and_says_so(self) -> None:
         """chore/ci/docs/style/test release nothing; the step is not a failure."""
@@ -417,7 +440,8 @@ class TheTreeDecisions(unittest.TestCase):
         with TemporaryDirectory() as d:
             tree = Tree(d)
             result, releasing = tree.prepare()
-            planned = tree.plan()["branch"]["name"]
+            branch = decoded.as_object(tree.plan()["branch"], "the plan's branch")
+            planned = decoded.as_str(branch["name"], "branch.name")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("true", releasing["release"])
         self.assertTrue(planned)
