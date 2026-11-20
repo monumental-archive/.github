@@ -11,7 +11,7 @@
 # leg leaves it only through a line `dropped: <leg> <why>`.
 #
 # band: 2
-# measured: 94.1
-# derived: v1.70.4
+# measured: 94.3
+# derived: v1.70.5
 # legs: python python-branches
-92.1
+92.3
