@@ -32,15 +32,23 @@ if TYPE_CHECKING:
 
 YQ = shutil.which("yq") or "yq"
 
-# Every mapping holding a scalar `run` value, wherever it sits: a
-# workflow's step, a composite action's step, in block or flow style,
-# under a quoted key or through an alias. A `run` holding a mapping is
-# `defaults: run:`, not a command, and is left out.
+# Every step holding a scalar `run` value: a workflow job's step, a
+# composite action's step, in block or flow style, under a quoted key
+# or through an alias. A step is a mapping two below a `steps` key, so
+# `defaults: run:` (a mapping, not a command) and an action input named
+# `run` under `with:` are left out (#1861). GitHub runs a scalar as the
+# text written, so one YAML reads as a boolean or a number (`run: true`,
+# `run: 1.10`) is read through to_string, which keeps that text, after
+# its style is read (to_string marks it double-quoted); only a scalar
+# is, since to_string on an alias gives `*name`.
 RUNS = """[.. | select(tag == "!!map" and has("run"))
+  | select((path | length) >= 2) | select((path | .[-2]) == "steps")
   | select((.run | kind) == "scalar" or (.run | kind) == "alias")
   | {"line": (.run | line), "style": (.run | style), "run": .run,
      "kind": (.run | kind), "shell": .shell, "name": .name,
-     "path": (path | join("/"))}]"""
+     "path": (path | join("/"))}
+  | with(select(.kind == "scalar" and (.run | tag) != "!!str");
+      .run |= to_string)]"""
 
 
 @dataclass(frozen=True)

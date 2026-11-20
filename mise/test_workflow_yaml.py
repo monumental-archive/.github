@@ -61,6 +61,11 @@ jobs:
         with:
           path: one
           key: two
+          run: echo $x
+      - name: boolean
+        run: true
+      - name: number
+        run: 1.10
   flush:
     steps:
     - name: at its key's indent
@@ -122,6 +127,8 @@ class Steps(Fixture):
             "anchored",
             "alias",
             "inputs",
+            "boolean",
+            "number",
         ]
         self.assertEqual(want, names)
 
@@ -148,13 +155,15 @@ class Steps(Fixture):
             "echo anchored\n",
             "echo anchored\n",
             None,
+            True,
+            1.1,
         ]
         self.assertEqual(want, runs)
 
     def test_with_is_a_mapping(self) -> None:
         """A step's inputs are nested, in file order."""
         (step,) = [s for s in self.first() if s.get("name") == "inputs"]
-        want: dict[str, object] = {"path": "one", "key": "two"}
+        want: dict[str, object] = {"path": "one", "key": "two", "run": "echo $x"}
         self.assertEqual(want, step["with"])
 
     def test_a_step_list_at_its_key_indent_is_read(self) -> None:
@@ -310,7 +319,9 @@ class Runs(Fixture):
                 alias=False),
             run(33, "", "echo anchored\n", "alias", None, f"{steps}/7",
                 alias=True),
-            run(42, "", "echo flush", "at its key's indent", None,
+            run(41, "", "true", "boolean", None, f"{steps}/9", alias=False),
+            run(43, "", "1.10", "number", None, f"{steps}/10", alias=False),
+            run(47, "", "echo flush", "at its key's indent", None,
                 "jobs/flush/steps/0", alias=False),
         ]  # fmt: skip
         self.assertEqual(want, workflow_yaml.runs(self.workflow))
@@ -320,6 +331,32 @@ class Runs(Fixture):
         paths = [r.path for r in workflow_yaml.runs(self.workflow)]
         self.assertNotIn("defaults", paths)
         self.assertTrue(all(p.startswith("jobs/") for p in paths), paths)
+
+    def test_an_input_named_run_is_no_command(self) -> None:
+        """`with: run:` is an input to the action; no record names it (#1861)."""
+        inputs = self.dir / "inputs.yml"
+        inputs.write_text(
+            "jobs:\n  j:\n    steps:\n      - uses: a/b@c\n        with:\n"
+            "          run: echo $x\n      - {uses: a/b@c, with: {run: echo $y}}\n"
+            "      - run: echo step\n",
+            encoding="utf-8",
+        )
+        texts = [r.text for r in workflow_yaml.runs(inputs)]
+        want: list[str] = ["echo step"]
+        self.assertEqual(want, texts)
+
+    def test_a_run_yaml_reads_as_no_string_is_its_text(self) -> None:
+        """`run: true` and `run: 1.10` are what GitHub runs, as written (#1861)."""
+        found = {
+            r.name: (r.text, r.style)
+            for r in workflow_yaml.runs(self.workflow)
+            if r.name in {"boolean", "number"}
+        }
+        want: dict[str | None, tuple[str, str]] = {
+            "boolean": ("true", ""),
+            "number": ("1.10", ""),
+        }
+        self.assertEqual(want, found)
 
     def test_an_action_run_is_placed(self) -> None:
         """A composite action's step is read with its shell."""
