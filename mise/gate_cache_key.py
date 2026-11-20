@@ -225,6 +225,9 @@ def names(
 
 RELEASE = re.compile(r"^release: \S+$", re.MULTILINE)
 
+# The compiler the cargo caches hold, run by name from PATH (#1864).
+RUSTC = "rustc"
+
 
 def rustc_digest(verbose: str) -> str:
     """Digest a compiler's `rustc -vV` output, whole (#1864).
@@ -254,16 +257,15 @@ def rustc_verbose() -> str:
             proxy whose toolchain is not installed, say.
 
     """
-    rustc = shutil.which("rustc")
-    if rustc is None:
+    if shutil.which(RUSTC) is None:
         msg = (
             "no rustc on PATH: a job that restores a cargo cache must name"
             " the compiler that fills it"
         )
         raise ValueError(msg)
-    done = subprocess.run([rustc, "-vV"], capture_output=True, text=True, check=False)
+    done = subprocess.run([RUSTC, "-vV"], capture_output=True, text=True, check=False)
     if done.returncode != 0:
-        msg = f"{rustc} -vV exited {done.returncode}: {done.stderr.strip()}"
+        msg = f"{RUSTC} -vV exited {done.returncode}: {done.stderr.strip()}"
         raise ValueError(msg)
     return done.stdout
 
