@@ -12,7 +12,7 @@ imports, nothing a child process must be handed (#1771).
 - `paths CONFIG`: the adoption file's `module-path`, one per line, for
   the shell's exit trap.
 - `pragmas PRAGMAS`: every `# pragma: no mutate` the tokenizer found
-  (mutmut_pragmas.py) carries its reason after ` -- `, and is the line
+  (mutation_pragmas.py) carries its reason after ` -- `, and is the line
   form: `block`, `start` and `end` are red by name.
 - `plan CONFIG PLAN`: once per run. Refuses a dirty tracked tree under
   `module-path`; lists every mutant (`cosmic-ray init`, `dump`) of the

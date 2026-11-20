@@ -26,9 +26,8 @@ environment (#1618):
     names = hermetic.tracked(CANON, "*.py")        # relative to CANON
 
 A test that lists the canon's own tree calls `tracked`, never `git
-ls-files` in the tree: mutmut runs the suite in `mutants/`, a gitignored
-copy of the tree, where git lists nothing under the copy and every such
-test failed the statistics pass (self-mutants run 44597898554).
+ls-files` itself, so every listing runs under the same environment and
+an empty one is red by name.
 
 A test finds the tools it runs here too (#1684):
 
@@ -76,8 +75,7 @@ from unittest import mock
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
-# The canon this module is part of: its checkout, or mutmut's copy of
-# it (`mutants/`), whose tracked files `tracked` names (#1618).
+# The canon this module is part of: its checkout.
 CANON = Path(__file__).resolve().parent.parent
 
 # What every fixture inherits, by name, and why.
@@ -107,16 +105,6 @@ INHERITED: dict[str, str] = {
     # under and refuses to run without (#1543): the canon action exports
     # it in CI, the belt's [env] locally.
     "ORG_PYTHON": "the interpreter a script starts its helpers under",
-    # Mutation reaches a child process through the environment and
-    # nothing else (#1542): mutmut 3.8.1's trampoline selects the mutant
-    # from MUTANT_UNDER_TEST (mutation/trampoline.py:54) and bounds its
-    # statistics by MUTMUT_DEPENDENCY_DEPTH (trampoline.py:95), and the
-    # leg's start-up hook loads mutmut's configuration only under
-    # MUTANT_UNDER_TEST (mutants_python.py's CHILD_CONFIG). Its path
-    # rides on PYTHONPATH, above. Dropped, a child runs the ORIGINAL
-    # function for every mutant, and the mutant survives untested.
-    "MUTANT_UNDER_TEST": "the mutant a child process runs",
-    "MUTMUT_DEPENDENCY_DEPTH": "how deep the statistics pass records calls",
 }
 
 # What a tool needs beyond INHERITED, per tool, each with why. A row
@@ -209,33 +197,11 @@ def env(
     return out
 
 
-def top(pathspec: str) -> str:
-    """Anchor one pathspec at the repository's top, keeping its magic.
-
-    Returns:
-        `:(top)` added to the pathspec: `*.py` is `:(top)*.py`, the
-        short exclude `:!x` is `:(top,exclude)x`, and a long-form
-        `:(glob)x` is `:(top,glob)x`.
-
-    """
-    if pathspec.startswith((":!", ":^")):
-        return f":(top,exclude){pathspec[2:]}"
-    if pathspec.startswith(":("):
-        return f":(top,{pathspec[2:]}"
-    return f":(top){pathspec}"
-
-
 def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
     """Name the files a tree tracks, relative to the tree's root (#1618).
 
-    `root` is a checkout's top, or a copy of the whole tree inside it
-    (mutmut's `mutants/`). git is asked from the repository's top, with
-    every pathspec anchored there and the names in full, so a copy gets
-    the tracked names; a name is kept when the file exists under `root`,
-    so a copy is judged on what was copied into it. In a checkout that
-    is exactly `git ls-files` at its top. The listing runs under `env`,
-    with the row's `overrides`. A law that READS the files to judge them
-    lists `source(root)` instead (#1726): in a copy, those are mutmut's.
+    `root` is a checkout's top: the listing is `git ls-files` there,
+    for the pathspecs given, under `env` with the row's `overrides`.
 
     Returns:
         The names, in git's order.
@@ -257,16 +223,15 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
             str(root),
             "ls-files",
             "-z",
-            "--full-name",
             "--",
-            *(top(spec) for spec in pathspecs),
+            *pathspecs,
         ],
         env=env(**overrides),
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    names = [n for n in listed.split("\0") if n and os.path.lexists(Path(root, n))]
+    names = [n for n in listed.split("\0") if n]
     if not names:
         msg = (
             f"hermetic.tracked: git lists no tracked file under {root}"
@@ -274,44 +239,6 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
         )
         raise RuntimeError(msg)
     return names
-
-
-def source(root: Path | str) -> Path:
-    """Name the directory whose files a source-reading law judges (#1726).
-
-    A law about the repository's source reads the repository's source.
-    In a checkout, or a scratch repository a row built, that is `root`.
-    In a copy of the tree inside the repository, such as mutmut's
-    `mutants/`, it is the repository's top, where the files are as their
-    authors wrote them: in the copy mutmut has rewritten every helper,
-    and a law reading it judges mutmut's generated code. `tracked`
-    answers a different question: what a copy holds, for rows that run
-    the copied files.
-
-    Returns:
-        `root`, or the top of the repository it sits in when that is
-        another directory.
-
-    Raises:
-        RuntimeError: git is not on PATH, or `root` is in no repository.
-
-    """
-    git = shutil.which("git")
-    if git is None:
-        msg = "hermetic.source: git is not on PATH"
-        raise RuntimeError(msg)
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    asked = subprocess.run(
-        [git, "-C", str(root), "rev-parse", "--show-toplevel"],
-        env=env(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if asked.returncode != 0:
-        msg = f"hermetic.source: {root} is in no git repository: {asked.stderr.strip()}"
-        raise RuntimeError(msg)
-    return Path(asked.stdout.strip()).resolve()
 
 
 @dataclass(frozen=True)

@@ -348,8 +348,7 @@ class Law(Case):
 
     def test_the_canon_keeps_the_law(self) -> None:
         """Every helper function is reached in-process, or listed as debt."""
-        # The repository's source, never mutmut's rewritten copy (#1726).
-        root = hermetic.source(CANON)
+        root = CANON
         paths = [
             p for p in hermetic.tracked(root, "*.py") if not p.startswith("vendor/")
         ]

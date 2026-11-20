@@ -362,7 +362,7 @@ class TheLaw(unittest.TestCase):
 
     def test_the_tree_keeps_both_rules(self) -> None:
         """Every finding is a site to route through the writer."""
-        self.assertEqual(findings(hermetic.source(CANON)), list[str]())
+        self.assertEqual(findings(CANON), list[str]())
 
     def test_rule_one_sees_each_shape(self) -> None:
         """Expanding commands are refused; literal ones are not."""
