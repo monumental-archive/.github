@@ -14,6 +14,12 @@ the rest of this run keeps the bounds it was started with.
 
 - Refusal (R): any argument list that names no profile and a file is
   a usage error, exit 2, never a traceback.
+- Invariance (V): with no shard named, the files are run as given; for
+  any n, the shards 0/n to (n-1)/n partition the files: every file in
+  exactly one, sizes within one of each other, whatever order the
+  files were listed in (#1631).
+- Refusal (R): any ORG_PROPERTY_SHARD that is not k/n with k < n, in
+  ASCII digits, is refused with ShardError naming it (#1631).
 """
 
 import sys
@@ -23,7 +29,7 @@ from pathlib import Path
 
 import hermetic
 import python_properties as pp
-from hypothesis import settings
+from hypothesis import example, settings
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
@@ -204,6 +210,54 @@ class Usage(unittest.TestCase):
         """R: exit 2 with the usage line, and nothing run."""
         done = hermetic.call_main(lambda: pp.main(argv))
         self.assertEqual(done, hermetic.Called(2, "", USAGE))
+
+
+NAME = st.from_regex(
+    r"[a-z]{1,4}(/[a-z]{1,4}){0,2}/prop_[a-z]{1,6}\.py", fullmatch=True
+)
+FILES = st.lists(NAME, unique=True, max_size=20).map(
+    lambda names: [Path(n) for n in names]
+)
+
+
+class ShardPartition(unittest.TestCase):
+    """Every file in exactly one shard."""
+
+    @given(FILES)
+    def test_unset_is_every_file_as_given(self, files: list[Path]) -> None:
+        """No shard named: the list, unchanged."""
+        self.assertEqual(pp.shard_of(files, ""), files)
+
+    @given(FILES, st.integers(1, 9), st.permutations(range(20)))
+    def test_the_shards_partition_the_files(
+        self, files: list[Path], n: int, order: list[int]
+    ) -> None:
+        """Disjoint, complete, balanced, and independent of listing order."""
+        shuffled = [files[i] for i in order if i < len(files)]
+        shards = [pp.shard_of(files, f"{k}/{n}") for k in range(n)]
+        self.assertEqual(shards, [pp.shard_of(shuffled, f"{k}/{n}") for k in range(n)])
+        flat = [f for shard in shards for f in shard]
+        self.assertEqual(sorted(flat, key=str), sorted(files, key=str))
+        sizes = [len(shard) for shard in shards]
+        self.assertLessEqual(max(sizes) - min(sizes), 1)
+
+
+class ShardRefusal(unittest.TestCase):
+    """Anything but k/n with k < n is refused by name."""
+
+    @given(FILES, st.text(max_size=8))
+    @example([], "8/8")
+    @example([], "0/0")
+    @example([], "²/8")
+    @example([], "1/8 ")
+    def test_any_value_is_read_or_refused(self, files: list[Path], spec: str) -> None:
+        """A shard, or ShardError naming the value."""
+        try:
+            got = pp.shard_of(files, spec)
+        except pp.ShardError as bad:
+            self.assertIn(f"ORG_PROPERTY_SHARD='{spec}'", str(bad))
+            return
+        self.assertLessEqual(len(got), len(files))
 
 
 if __name__ == "__main__":

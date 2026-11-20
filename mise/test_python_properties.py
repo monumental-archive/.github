@@ -345,5 +345,116 @@ class Script(unittest.TestCase):
         )
 
 
+SHARD_FILES = {"a/prop_one.py": HOLDS, "b/prop_two.py": HOLDS, "prop_three.py": HOLDS}
+
+
+class Shards(unittest.TestCase):
+    """ORG_PROPERTY_SHARD=k/n runs one shard of the files (#1631)."""
+
+    def test_a_shard_runs_every_nth_sorted_file(self) -> None:
+        """1/2 of three sorted files is the second: named, then run."""
+        done = run(
+            GATE,
+            SHARD_FILES,
+            tool_dir=real_tool_dir(),
+            env={"ORG_PROPERTY_SHARD": "1/2"},
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "test:python-properties: shard 1/2, 1 of 3 file(s)\n"
+            "b/prop_two.py: prop_0_prop_two.Holds.test_double_is_even ... ok\n"
+            "test:python-properties: 1 test(s) in 1 file(s) held\n",
+        )
+
+    def test_a_malformed_shard_is_refused_by_name(self) -> None:
+        """A k not below n, or not digits: exit 2, the value named."""
+        for spec in ("2/2", "x/8", "1/0", "\u00b2/8"):
+            with self.subTest(spec=spec):
+                done = run(
+                    GATE,
+                    SHARD_FILES,
+                    tool_dir=real_tool_dir(),
+                    env={"ORG_PROPERTY_SHARD": spec},
+                )
+                self.assertEqual(done.returncode, 2)
+                self.assertIn(
+                    f"test:python-properties: ORG_PROPERTY_SHARD='{spec}'"
+                    " is not k/n with k < n",
+                    done.stderr,
+                )
+
+    def test_an_empty_shard_says_so_and_passes(self) -> None:
+        """More shards than files: the empty one is named and exits 0."""
+        done = run(
+            GATE,
+            SHARD_FILES,
+            tool_dir=real_tool_dir(),
+            env={"ORG_PROPERTY_SHARD": "7/8"},
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "test:python-properties: shard 7/8 holds none of the 3 file(s), skipped\n",
+        )
+
+    def test_the_audit_times_each_file_as_it_finishes(self) -> None:
+        """Each file's line, then its count and elapsed seconds."""
+        done = run(
+            AUDIT,
+            {"prop_ok.py": HOLDS},
+            tool_dir=real_tool_dir(),
+            env={"ORG_PROPERTY_SEED": "7"},
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertRegex(
+            done.stdout,
+            r"prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
+            r"prop_ok.py: 1 test\(s\) in [0-9]+\.[0-9]s\n"
+            r"audit:python-properties: 1 test\(s\) in 1 file\(s\) held\n$",
+        )
+
+
+def job_block(workflow: str, job: str) -> str:
+    """Cut one job's lines out of a workflow, by its key's indentation.
+
+    Returns:
+        The job's text, from its key to the next job's.
+
+    """
+    text = (CANON / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+    lines = text.splitlines()
+    start = lines.index(f"  {job}:")
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith("  ")
+            and not lines[i].startswith("   ")
+            and lines[i].rstrip().endswith(":")
+        ),
+        len(lines),
+    )
+    return "\n".join(lines[start:end])
+
+
+class WorkflowShape(unittest.TestCase):
+    """Both property jobs are bounded, sharded and share one seed (#1631)."""
+
+    def test_both_jobs_carry_a_bound_eight_shards_and_one_seed(self) -> None:
+        """A timeout, shards 0..7 as k/8, and the seed from a planning job."""
+        seeds = {
+            "audit.yml": "needs.plan.outputs.property-seed",
+            "repo-audit.yml": "needs.python-properties-seed.outputs.seed",
+        }
+        for workflow, seed in seeds.items():
+            with self.subTest(workflow=workflow):
+                job = job_block(workflow, "python-properties")
+                self.assertRegex(job, r"\n    timeout-minutes: [0-9]+\n")
+                self.assertIn("shard: [0, 1, 2, 3, 4, 5, 6, 7]", job)
+                self.assertIn("ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8", job)
+                self.assertIn(f"ORG_PROPERTY_SEED: ${{{{ {seed} }}}}", job)
+
+
 if __name__ == "__main__":
     unittest.main()

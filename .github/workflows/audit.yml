@@ -71,7 +71,17 @@ jobs:
     permissions: {}
     outputs:
       legs: ${{ steps.pick.outputs.legs }}
+      property-seed: ${{ steps.seed.outputs.seed }}
     steps:
+      # One seed for every leg of the property job (#1631), drawn once
+      # here so a finding in any shard reruns with one ORG_PROPERTY_SEED.
+      - name: Draw the property seed
+        id: seed
+        run: |
+          set -euo pipefail
+          seed=$(od -An -N8 -tu8 /dev/urandom)
+          echo "seed=${seed// /}" >> "${GITHUB_OUTPUT}"
+
       - name: Name the group, or fail by name
         id: pick
         env:
@@ -289,14 +299,24 @@ jobs:
         run: mise run audit:regression-tests
 
   python-properties:
-    name: audit / python properties at a random seed
+    name: audit / python properties at a random seed (${{ matrix.shard }}/8)
     needs: plan
     if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
+    # Eight legs by position, one seed (#1631): measured 2026-11-19 at
+    # 1 h 13 min for 191 properties in one job (run 44628248927). The
+    # bound is provisional until this shape's own run is read.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+      ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8
+      ORG_PROPERTY_SEED: ${{ needs.plan.outputs.property-seed }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

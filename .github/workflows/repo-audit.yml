@@ -476,13 +476,42 @@ jobs:
       - name: Report fixes with and without a regression test
         run: mise run audit:regression-tests
 
-  python-properties:
-    name: audit / python properties at a random seed
+  # One seed for every leg of the property job (#1631), drawn once so a
+  # finding in any shard reruns with one ORG_PROPERTY_SEED.
+  python-properties-seed:
+    name: audit / python properties seed
     runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      seed: ${{ steps.seed.outputs.seed }}
+    steps:
+      - name: Draw the property seed
+        id: seed
+        run: |
+          set -euo pipefail
+          seed=$(od -An -N8 -tu8 /dev/urandom)
+          echo "seed=${seed// /}" >> "${GITHUB_OUTPUT}"
+
+  python-properties:
+    name: audit / python properties at a random seed (${{ matrix.shard }}/8)
+    needs: python-properties-seed
+    runs-on: ubuntu-26.04
+    # Eight legs by position, not by directory: a repository may keep
+    # every property under one (#1631). Measured 2026-11-19 at 1 h 13 min
+    # for the canon's 191 properties in one job (run 44628248927); the
+    # bound is provisional until this shape's own run is read.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8
+      ORG_PROPERTY_SEED: ${{ needs.python-properties-seed.outputs.seed }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
