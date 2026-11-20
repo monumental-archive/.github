@@ -10,6 +10,90 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.4](https://github.com/monumental-archive/.github/compare/v1.70.3...v1.70.4) - 2026-11-20
+
+### Changed
+
+- move the badge walk into a delivered script (#1633) ([#1639](https://github.com/monumental-archive/.github/pull/1639))
+
+### Fixed
+
+- update ruff to 0.17.5 ([#1620](https://github.com/monumental-archive/.github/pull/1620))
+- update jdx/mise-action to v5.2.8 ([#1619](https://github.com/monumental-archive/.github/pull/1619))
+- stage mypy as audit:python-types (#1604) ([#1625](https://github.com/monumental-archive/.github/pull/1625))
+- measure coverage once, in the gate ([#1566](https://github.com/monumental-archive/.github/pull/1566))
+- ask scorecard through the audit's one asker (#1621) ([#1630](https://github.com/monumental-archive/.github/pull/1630))
+- group a push gate by its commit (#1617) ([#1626](https://github.com/monumental-archive/.github/pull/1626))
+- refuse two vex decisions on the pull request (#1603) ([#1611](https://github.com/monumental-archive/.github/pull/1611))
+- deliver a typed given for property files (#1604) ([#1642](https://github.com/monumental-archive/.github/pull/1642))
+- list a tree's tracked files from a copy of it ([#1632](https://github.com/monumental-archive/.github/pull/1632))
+- hold a go condition floor with gobco (#1546) ([#1597](https://github.com/monumental-archive/.github/pull/1597))
+- sign a decision a merge renamed (#1615) ([#1644](https://github.com/monumental-archive/.github/pull/1644))
+- ask every badge issuer through one asker (#1633) ([#1647](https://github.com/monumental-archive/.github/pull/1647))
+- read first-match probes to the end (#1637) ([#1648](https://github.com/monumental-archive/.github/pull/1648))
+- run the suite's test files in parallel (#1623) ([#1635](https://github.com/monumental-archive/.github/pull/1635))
+- read a stale cached answer as unanswered (#1649) ([#1650](https://github.com/monumental-archive/.github/pull/1650))
+- measure PL/pgSQL coverage with plpgsql_check (#1547) ([#1607](https://github.com/monumental-archive/.github/pull/1607))
+- test captured listings, not grep -q on a pipe (#1637) ([#1654](https://github.com/monumental-archive/.github/pull/1654))
+- escape pack-wasm's refusal as one workflow command ([#1658](https://github.com/monumental-archive/.github/pull/1658))
+- read the environment law from the syntax tree ([#1657](https://github.com/monumental-archive/.github/pull/1657))
+- read the test task through one walk in every leg (#1608) ([#1645](https://github.com/monumental-archive/.github/pull/1645))
+- keep an x_ method name in mutants-python (#1555) ([#1664](https://github.com/monumental-archive/.github/pull/1664))
+- run test once where the measurement already runs it (#1623) ([#1663](https://github.com/monumental-archive/.github/pull/1663))
+- write coverage reports outside the working tree (#1628) ([#1646](https://github.com/monumental-archive/.github/pull/1646))
+- update rumdl to 0.3.4 ([#1672](https://github.com/monumental-archive/.github/pull/1672))
+- import every helper as a module (#1634) ([#1643](https://github.com/monumental-archive/.github/pull/1643))
+- judge a stale presence, bound answers by the week (#1649) ([#1669](https://github.com/monumental-archive/.github/pull/1669))
+- measure a pgrx extension through test:pgrx (#1656) ([#1665](https://github.com/monumental-archive/.github/pull/1665))
+- ask codecov one question, its branch route (#1668) ([#1671](https://github.com/monumental-archive/.github/pull/1671))
+- hand a child the mutation leg's environment ([#1674](https://github.com/monumental-archive/.github/pull/1674))
+- record the legs a coverage floor holds (#1666) ([#1675](https://github.com/monumental-archive/.github/pull/1675))
+- write workflow commands through one escaping module ([#1685](https://github.com/monumental-archive/.github/pull/1685))
+- parse every document through one strict typed loader (#1676) ([#1687](https://github.com/monumental-archive/.github/pull/1687))
+- test the default branch by its name in the gate (#1693) ([#1700](https://github.com/monumental-archive/.github/pull/1700))
+- scan load_json's depth in one linear pass (#1676) ([#1706](https://github.com/monumental-archive/.github/pull/1706))
+- look test tools up by name, type results (#1684) ([#1690](https://github.com/monumental-archive/.github/pull/1690))
+- decode subject_budget's documents once, typed (#1677) ([#1691](https://github.com/monumental-archive/.github/pull/1691))
+- decode the shell and badge-audit helpers, typed (#1681) ([#1704](https://github.com/monumental-archive/.github/pull/1704))
+- chain every start-up hook to the next on the path ([#1689](https://github.com/monumental-archive/.github/pull/1689))
+- check PL/pgSQL bodies with plpgsql_check (#1605) ([#1694](https://github.com/monumental-archive/.github/pull/1694))
+- decode gate and security-config documents (#1678) ([#1695](https://github.com/monumental-archive/.github/pull/1695))
+- type the mutation, coverage and runner helpers (#1679) ([#1707](https://github.com/monumental-archive/.github/pull/1707))
+- type the rekor-monitor helpers' documents (#1683) ([#1702](https://github.com/monumental-archive/.github/pull/1702))
+- load each clone's belt from its own pin (#1686) ([#1703](https://github.com/monumental-archive/.github/pull/1703))
+- read the gate's coverage figures (#1622) ([#1688](https://github.com/monumental-archive/.github/pull/1688))
+- decode the cargo, lockfile and tool-config helpers (#1680) ([#1701](https://github.com/monumental-archive/.github/pull/1701))
+- test helper logic in-process, per function (#1673) ([#1705](https://github.com/monumental-archive/.github/pull/1705))
+- refuse every plain ls-files, whatever the root ([#1716](https://github.com/monumental-archive/.github/pull/1716))
+- type the release/ helpers clean under mypy (#1682) ([#1709](https://github.com/monumental-archive/.github/pull/1709))
+- read each pgrx job's coverage figure (#1692) ([#1708](https://github.com/monumental-archive/.github/pull/1708))
+- declare the audit environment for vex-attest's plan (#1602) ([#1721](https://github.com/monumental-archive/.github/pull/1721))
+- measure coverage in the one test run (#1667) ([#1712](https://github.com/monumental-archive/.github/pull/1712))
+- update monumental-archive/signer to 5edff31 ([#1723](https://github.com/monumental-archive/.github/pull/1723))
+- write the shell's workflow commands through one writer ([#1710](https://github.com/monumental-archive/.github/pull/1710))
+- run the weekly properties in eight timed shards (#1631) ([#1724](https://github.com/monumental-archive/.github/pull/1724))
+- measure go coverage in the test task's run (#1651) ([#1729](https://github.com/monumental-archive/.github/pull/1729))
+- tell shellcheck where .org-canon is, on every machine ([#1720](https://github.com/monumental-archive/.github/pull/1720))
+
+### Documentation
+
+- record the exhaustruct_v5 measurement (stele#317) ([#1627](https://github.com/monumental-archive/.github/pull/1627))
+
+### Testing
+
+- vary the inputs of mutants-python (#1555) ([#1613](https://github.com/monumental-archive/.github/pull/1613))
+- hold the debt round trip to the umbrella rule (#1555) ([#1624](https://github.com/monumental-archive/.github/pull/1624))
+- state the hookless child's PYTHONPATH ([#1655](https://github.com/monumental-archive/.github/pull/1655))
+- compare, not subtract, in the quantise property (#1555) ([#1662](https://github.com/monumental-archive/.github/pull/1662))
+- take the untested helper branches (#1659) ([#1661](https://github.com/monumental-archive/.github/pull/1661))
+- take the coverage helpers' untaken branches (#1659) ([#1670](https://github.com/monumental-archive/.github/pull/1670))
+- call plpgsql_coverage in-process (#1711) ([#1713](https://github.com/monumental-archive/.github/pull/1713))
+- call the remaining mise helpers in-process (#1697) ([#1722](https://github.com/monumental-archive/.github/pull/1722))
+- plant whole belts and canons through hermetic (#1714) ([#1718](https://github.com/monumental-archive/.github/pull/1718))
+- test the mutation and runner helpers in-process (#1696) ([#1725](https://github.com/monumental-archive/.github/pull/1725))
+- test the rekor-monitor helpers in-process (#1699) ([#1717](https://github.com/monumental-archive/.github/pull/1717))
+- hold the squash properties to the committer guard (#1727) ([#1730](https://github.com/monumental-archive/.github/pull/1730))
+
 ## [1.70.3](https://github.com/monumental-archive/.github/compare/v1.70.2...v1.70.3) - 2026-11-19
 
 ### Fixed
