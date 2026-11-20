@@ -146,10 +146,11 @@ def unfollowed(path: Path, lineno: int, src: str, *, folded: bool) -> list[str]:
     out: list[str] = []
     for offset, line in enumerate(src.splitlines()):
         found = CANON_SOURCE_RE.match(line)
-        if found and not (canon / found.group(1)).is_file():
+        sourced = group(found, 1) if found else None
+        if sourced and not (canon / sourced).is_file():
             at = lineno if folded else lineno + offset
             out.append(
-                f"{path}:{at}: sources .org-canon/{found.group(1)}, which the"
+                f"{path}:{at}: sources .org-canon/{sourced}, which the"
                 f" canon tree ({canon}) does not hold: shellcheck cannot"
                 " follow it, and SC1091 is not shown (#1715)"
             )
