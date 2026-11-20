@@ -35,9 +35,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+import decoded
 import workspace_inherit as wi
 
 ROOT = Path("/ws")
+# What a row expects when no key is inert.
+NO_FINDINGS: list[wi.Finding] = []
 
 # `readme = true` and `readme = false` as TOML hands them over: a
 # declared VALUE the check resolves, never a flag on the call.
@@ -55,7 +58,7 @@ def member(name: str, **fields: object) -> wi.Member:
     return wi.read_member(raw_member(name, **fields), name)
 
 
-def raw_member(name: str, **fields: object) -> dict:
+def raw_member(name: str, **fields: object) -> dict[str, object]:
     """Build one package as cargo metadata reports it.
 
     Returns:
@@ -96,10 +99,11 @@ class TestInherits(unittest.TestCase):
         would call this key taken and never fire.
         """
         rows = [member("bare", keywords=[]), member("taker", keywords=["k"])]
-        self.assertEqual(
-            [wi.inherits("keywords", ["k"], row, ROOT) for row in rows],
-            [False, True],
-        )
+        got: list[bool | None] = [
+            wi.inherits("keywords", ["k"], row, ROOT) for row in rows
+        ]
+        want: list[bool | None] = [False, True]
+        self.assertEqual(got, want)
 
     def test_a_path_key_is_rebased_by_cargo_and_still_counts(self) -> None:
         """THE row that value equality gets wrong.
@@ -123,10 +127,11 @@ class TestInherits(unittest.TestCase):
         whether the member reports a readme at all.
         """
         rows = [member("taker", readme="../../README.md"), member("bare", readme=None)]
-        self.assertEqual(
-            [wi.inherits("readme", DISCOVER, row, ROOT) for row in rows],
-            [True, False],
-        )
+        got: list[bool | None] = [
+            wi.inherits("readme", DISCOVER, row, ROOT) for row in rows
+        ]
+        want: list[bool | None] = [True, False]
+        self.assertEqual(got, want)
 
     def test_a_false_readme_is_undecidable(self) -> None:
         """A readme declared false and "no readme" are one account.
@@ -145,7 +150,9 @@ class TestJudge(unittest.TestCase):
     def test_a_key_every_member_takes_is_not_reported(self) -> None:
         """Every member inheriting, which is edtf's live shape."""
         members = [member("a", rust_version="1.82"), member("b", rust_version="1.82")]
-        self.assertEqual(wi.judge({"rust-version": "1.82"}, members, ROOT, []), [])
+        self.assertEqual(
+            wi.judge({"rust-version": "1.82"}, members, ROOT, []), NO_FINDINGS
+        )
 
     def test_a_key_only_one_member_takes_is_not_reported(self) -> None:
         """THE branch a stricter rule would get wrong.
@@ -154,7 +161,9 @@ class TestJudge(unittest.TestCase):
         One taker is a reader, and a key with a reader is not inert.
         """
         members = [member("a", rust_version="1.82"), member("b", rust_version=None)]
-        self.assertEqual(wi.judge({"rust-version": "1.82"}, members, ROOT, []), [])
+        self.assertEqual(
+            wi.judge({"rust-version": "1.82"}, members, ROOT, []), NO_FINDINGS
+        )
 
     def test_a_key_no_member_takes_is_reported_with_every_member(self) -> None:
         """release-lab's live case: the remedy names who could take it."""
@@ -162,7 +171,8 @@ class TestJudge(unittest.TestCase):
         findings = wi.judge({"rust-version": "1.97"}, members, ROOT, [])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].key, "rust-version")
-        self.assertEqual(findings[0].takers, ["a", "b"])
+        takers: list[str] = ["a", "b"]
+        self.assertEqual(findings[0].takers, takers)
 
     def test_publish_is_reported_unjudged_rather_than_guessed(self) -> None:
         """Measured: an inherited and an own publish are one account.
@@ -172,27 +182,35 @@ class TestJudge(unittest.TestCase):
         """
         report: list[str] = []
         members = [member("a", publish=[])]
-        self.assertEqual(wi.judge({"publish": False}, members, ROOT, report), [])
+        self.assertEqual(
+            wi.judge({"publish": False}, members, ROOT, report), NO_FINDINGS
+        )
         self.assertTrue(any("publish" in line for line in report))
 
     def test_a_key_cargo_does_not_report_is_named_not_skipped(self) -> None:
         """`exclude` and `include` have no per-package value at all."""
         report: list[str] = []
         members = [member("a")]
-        self.assertEqual(wi.judge({"exclude": ["x"]}, members, ROOT, report), [])
+        self.assertEqual(
+            wi.judge({"exclude": ["x"]}, members, ROOT, report), NO_FINDINGS
+        )
         self.assertTrue(any("exclude" in line for line in report))
 
     def test_an_unknown_key_is_named_not_skipped(self) -> None:
         """A key this task cannot model is stated, never passed quietly."""
         report: list[str] = []
-        self.assertEqual(wi.judge({"invented": 1}, [member("a")], ROOT, report), [])
+        self.assertEqual(
+            wi.judge({"invented": 1}, [member("a")], ROOT, report), NO_FINDINGS
+        )
         self.assertTrue(any("invented" in line for line in report))
 
     def test_an_undecidable_key_is_not_red(self) -> None:
         """No taker plus no verdict is a note, not a finding."""
         report: list[str] = []
         members = [member("a", readme=None)]
-        self.assertEqual(wi.judge({"readme": False}, members, ROOT, report), [])
+        self.assertEqual(
+            wi.judge({"readme": False}, members, ROOT, report), NO_FINDINGS
+        )
         self.assertTrue(report)
 
 
@@ -212,7 +230,8 @@ class TestWorkspacePackage(unittest.TestCase):
                 '[workspace.package]\nrust-version = "1.82"\n',
                 encoding="utf-8",
             )
-            self.assertEqual(wi.workspace_package(root), {"rust-version": "1.82"})
+            want: dict[str, object] = {"rust-version": "1.82"}
+            self.assertEqual(wi.workspace_package(root), want)
 
     def test_a_workspace_without_the_table_reads_empty(self) -> None:
         """The skip-clean branch's input."""
@@ -222,7 +241,8 @@ class TestWorkspacePackage(unittest.TestCase):
                 '[workspace]\nmembers = ["crates/*"]\n',
                 encoding="utf-8",
             )
-            self.assertEqual(wi.workspace_package(root), {})
+            none: dict[str, object] = {}
+            self.assertEqual(wi.workspace_package(root), none)
 
     def test_an_unreadable_manifest_stops_the_task(self) -> None:
         """A manifest missing where cargo named the root is broken."""
@@ -234,7 +254,7 @@ class TestMain(unittest.TestCase):
     """The guards, driven end to end over a real metadata document."""
 
     @staticmethod
-    def _run(manifest: str, packages: list[dict]) -> tuple[int, str, str]:
+    def _run(manifest: str, packages: list[dict[str, object]]) -> tuple[int, str, str]:
         """Lay out a workspace root, feed cargo's account, capture all.
 
         Returns:
@@ -245,16 +265,16 @@ class TestMain(unittest.TestCase):
             root = Path(tmp)
             (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
             for package in packages:
-                crate = root / "crates" / package["name"]
+                crate = root / "crates" / decoded.as_str(package["name"], "name")
                 package["manifest_path"] = str(crate / "Cargo.toml")
-            document = {
+            document: dict[str, object] = {
                 "workspace_root": str(root),
                 "workspace_members": [p["id"] for p in packages],
                 "packages": packages,
             }
             out, err = io.StringIO(), io.StringIO()
             with (
-                mock.patch.object(wi.sys, "stdin", io.StringIO(json.dumps(document))),
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(document))),
                 redirect_stdout(out),
                 redirect_stderr(err),
             ):
@@ -303,7 +323,7 @@ class TestMain(unittest.TestCase):
     def test_metadata_of_the_wrong_shape_stops_the_task_by_where(self) -> None:
         """A wrong-shaped account is refused naming where, never a crash."""
         said = "lint:workspace-inherit: cargo metadata is unreadable"
-        for document, where in (
+        shapes: tuple[tuple[object, str], ...] = (
             ([], "the document is not an object"),
             ({"workspace_root": 1}, "workspace_root is not a string"),
             (
@@ -323,11 +343,12 @@ class TestMain(unittest.TestCase):
                 },
                 "packages[0].name is not a string",
             ),
-        ):
+        )
+        for document, where in shapes:
             stdin = io.StringIO(json.dumps(document))
             with (
                 self.subTest(where=where),
-                mock.patch.object(wi.sys, "stdin", stdin),
+                mock.patch.object(sys, "stdin", stdin),
                 self.assertRaises(SystemExit) as stopped,
             ):
                 wi.main()
@@ -349,7 +370,7 @@ class TestMain(unittest.TestCase):
     def test_unreadable_metadata_stops_the_task(self) -> None:
         """A broken account is refused, never read as an empty one."""
         with (
-            mock.patch.object(wi.sys, "stdin", io.StringIO("not json")),
+            mock.patch.object(sys, "stdin", io.StringIO("not json")),
             self.assertRaises(SystemExit),
         ):
             wi.main()

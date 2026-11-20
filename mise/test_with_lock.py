@@ -18,6 +18,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 import with_lock
@@ -33,6 +34,7 @@ class LockCase(unittest.TestCase):
     must not reach these rows' exact-stderr assertions.
     """
 
+    @override
     def setUp(self) -> None:
         """Make a scratch directory for the lock and the markers."""
         tmp = tempfile.TemporaryDirectory()
@@ -140,7 +142,8 @@ class HeldLockMakesTheNextCallerWait(LockCase):
         second = self.start("sh", "-c", f'echo start >> "{log}"; echo end >> "{log}"')
         self.assertEqual((0, ""), self.finish(first))
         self.assertEqual((0, ""), self.finish(second))
-        self.assertEqual(["start", "end", "start", "end"], log.read_text().split())
+        want: list[str] = ["start", "end", "start", "end"]
+        self.assertEqual(want, log.read_text().split())
 
 
 class TimeoutSaysSoAndRunsNothing(LockCase):
