@@ -32,15 +32,24 @@ if TYPE_CHECKING:
 
 YQ = shutil.which("yq") or "yq"
 
-# Every mapping holding a scalar `run` value, wherever it sits: a
-# workflow's step, a composite action's step, in block or flow style,
-# under a quoted key or through an alias. A `run` holding a mapping is
-# `defaults: run:`, not a command, and is left out.
+# Every step holding a scalar `run` value: a workflow job's step, a
+# composite action's step, in block or flow style, under a quoted key
+# or through an alias. A step is a mapping two below a `steps` key, so
+# `defaults: run:` (a mapping, not a command) and an action input named
+# `run` under `with:` are left out (#1861). The text is the value with
+# its aliases resolved (explode) and read through to_string, so a value
+# YAML reads as a boolean or a number (`run: true`, `run: 1.10`, or an
+# alias of one) is the text written, as GitHub runs it; a null (`run:`,
+# `run: ~`) is no command, and its text is empty. `style` and `kind`
+# are the node as written, read before the text.
 RUNS = """[.. | select(tag == "!!map" and has("run"))
+  | select((path | length) >= 2) | select((path | .[-2]) == "steps")
   | select((.run | kind) == "scalar" or (.run | kind) == "alias")
-  | {"line": (.run | line), "style": (.run | style), "run": .run,
+  | {"line": (.run | line), "style": (.run | style),
      "kind": (.run | kind), "shell": .shell, "name": .name,
-     "path": (path | join("/"))}]"""
+     "path": (path | join("/")),
+     "run": (.run | explode(.)
+       | if tag == "!!null" then "" else to_string end)}]"""
 
 
 @dataclass(frozen=True)
