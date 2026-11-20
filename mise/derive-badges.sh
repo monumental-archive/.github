@@ -257,7 +257,8 @@ done
 # rule (`ghcr.io/<lowercased GITHUB_REPOSITORY>`), read from the same
 # fact the build reads. The canon itself matches nothing: its
 # continuous.yml is the callee and calls no continuous.yml.
-policy="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}/slsa/assert-policy.json"
+: "${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
+policy="${ORG_CANON_DIR}/slsa/assert-policy.json"
 cont_path=$(jq -r '.evidence.continuous.stubPath // empty' "${policy}")
 cont_uses=$(jq -r '.evidence.continuous.stubUses // empty' "${policy}")
 if [[ -z ${cont_path} || -z ${cont_uses} ]]; then

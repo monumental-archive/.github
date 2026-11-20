@@ -243,7 +243,7 @@ org_pgrx_provision() { # usage: org_pgrx_provision
   #
   # A workspace with no extension returns before sourcing anything else,
   # so it pays for one `cargo metadata` and nothing more.
-  local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+  local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
   local metadata surface installed plan record _spec kind crate_majors _dir
   local majors=""
   # One step per assignment, never a pipeline inside `$(...)`: this file

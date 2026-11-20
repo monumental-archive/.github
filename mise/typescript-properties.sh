@@ -43,7 +43,7 @@ case "${profile}" in
     exit 2
     ;;
 esac
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # The lockfile decides, as for the coverage leg (#1357): no fast-check
 # in it, nothing here can be a property.

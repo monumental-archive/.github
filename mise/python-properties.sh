@@ -31,7 +31,7 @@ case "${profile}" in
     exit 2
     ;;
 esac
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # git's default pathspec lets `*` cross a slash, so this lists every
 # `prop_*.py` at any depth; awk keeps the ones whose NAME starts prop_.

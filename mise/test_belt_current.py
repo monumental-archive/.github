@@ -181,7 +181,7 @@ class TheBeltIsThePinned(unittest.TestCase):
         )
 
     def test_the_pinned_tree_is_green(self) -> None:
-        """The link's tree is the pin's; no machine belt, so no note."""
+        """The link's tree is the pin's: green, in one line."""
         self.pin()
         tree = self.cached(PIN, "1.2.0")
         self.link(tree)
@@ -189,31 +189,6 @@ class TheBeltIsThePinned(unittest.TestCase):
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(
             done.stdout,
-            f"lint:belt-current: mise {MISE_VERSION}; the belt is the pinned"
-            f" {PIN} (v1.2.0)\n",
-        )
-
-    def test_a_machine_belt_beside_the_link_is_named(self) -> None:
-        """Both belts load: a note naming the checkout and the owner step."""
-        self.pin()
-        tree = self.cached(PIN, "1.2.0")
-        self.link(tree)
-        checkout = plant_canon(self.tmp / "checkout", "1.3.0")
-        (checkout / "mise").mkdir()
-        (checkout / "mise" / "config.toml").write_text("", encoding="utf-8")
-        (checkout / "mise" / "clippy.toml").write_text("", encoding="utf-8")
-        conf = self.tmp / "xdg" / "mise"
-        (conf / "conf.d").mkdir(parents=True)
-        toolbelt = conf / "conf.d" / "toolbelt.toml"
-        toolbelt.symlink_to(checkout / "mise" / "config.toml")
-        done = self.check(tree, XDG_CONFIG_HOME=str(self.tmp / "xdg"))
-        self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(
-            done.stdout,
-            f"belt-current: note — the machine's own belt ({checkout}) loads beside"
-            " the pinned one; a task only it defines runs here and not in CI."
-            f" Owner step, once per machine: rm {toolbelt}"
-            f" {conf / 'conf.d' / 'mise.lock'} {conf / 'mise.lock'}\n"
             f"lint:belt-current: mise {MISE_VERSION}; the belt is the pinned"
             f" {PIN} (v1.2.0)\n",
         )

@@ -20,7 +20,7 @@
 set -euo pipefail
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 [[ -n ${manifests} ]] || exit 0
