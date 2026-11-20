@@ -167,11 +167,7 @@ class Planted(unittest.TestCase):
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = self.tmp / "belt"
-        belt.mkdir()
-        (belt / "gate_surface.py").symlink_to(BELT / "gate_surface.py")
-        (belt / "mutants_rust.py").symlink_to(BELT / "mutants_rust.py")
-        (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
+        belt = hermetic.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
         self.log = self.tmp / "log"
         self.log.touch()
         self.files = {

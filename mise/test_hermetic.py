@@ -492,6 +492,144 @@ def which_calls(source: str) -> list[int]:
     )
 
 
+# What copies or links a file, by its module's dotted name (#1714):
+# the first argument, or `src=`, is what is planted.
+PLANTERS = frozenset({
+    "shutil.copy",
+    "shutil.copy2",
+    "shutil.copyfile",
+    "shutil.copytree",
+    "os.symlink",
+    "os.link",
+})
+# The Path methods that plant: `link.symlink_to(target)`.
+PATH_PLANTERS = frozenset({"symlink_to", "hardlink_to"})
+# A fixture directory: what a test keeps under it is the test's own.
+FIXTURES = "testdata"
+
+
+def from_tree(value: ast.AST, rooted: set[str]) -> bool:
+    """Say whether an expression is a path in the canon's own tree.
+
+    Returns:
+        True when it reads `__file__` or a rooted name, and names no
+        fixture directory on the way.
+
+    """
+    names = {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
+    fixture = any(
+        isinstance(n, ast.Constant) and n.value == FIXTURES for n in ast.walk(value)
+    )
+    return bool(names & (rooted | {"__file__"})) and not fixture
+
+
+def bindings(scope: ast.AST) -> list[tuple[str, ast.AST]]:
+    """Read what one scope binds to a plain name, and from what.
+
+    A module's are its own statements; a function's are every
+    assignment or `for` in its body, nested blocks included.
+
+    Returns:
+        Each (name, value) pair, a `for` target bound to its iterable.
+
+    """
+    nodes = scope.body if isinstance(scope, ast.Module) else list(ast.walk(scope))
+    out: list[tuple[str, ast.AST]] = []
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            out += [(t.id, node.value) for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Name):
+                out.append((node.target.id, node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [n for n in ast.walk(node.target) if isinstance(n, ast.Name)]
+            out += [(t.id, node.iter) for t in targets]
+    return out
+
+
+def tree_names(scope: ast.AST, outer: set[str]) -> set[str]:
+    """Name what is a path in the canon's tree, in one scope.
+
+    `outer` is what the module roots; a name the scope binds itself is
+    rooted only by its own bindings.
+
+    Returns:
+        The rooted names visible in the scope.
+
+    """
+    bound = bindings(scope)
+    own = {name for name, _ in bound}
+    rooted = outer - own
+    grew = True
+    while grew:
+        grew = False
+        for name, value in bound:
+            if name not in rooted and from_tree(value, rooted):
+                rooted.add(name)
+                grew = True
+    return rooted
+
+
+def planted_source(call: ast.Call, spelled: str | None) -> ast.AST | None:
+    """Find what a call copies or links, when it is a planting call.
+
+    Returns:
+        The source path expression, or None for any other call.
+
+    """
+    func = call.func
+    if spelled in PLANTERS:
+        keyword = "src"
+    elif isinstance(func, ast.Attribute) and func.attr in PATH_PLANTERS:
+        keyword = "target"
+    else:
+        return None
+    given = [*call.args[:1], *(k.value for k in call.keywords if k.arg == keyword)]
+    return given[0] if given else None
+
+
+def plants_from_tree(source: str) -> list[int]:
+    """Find every line where a test links or copies the belt or canon (#1714).
+
+    A planting call is `shutil.copy`, `copy2`, `copyfile`, `copytree`,
+    `os.symlink` or `os.link` however imported (call_names.qualifier),
+    or `Path.symlink_to` / `hardlink_to`. Its source is from the tree
+    when it reads `__file__` or a name bound from it, in the module or
+    in the call's own function; a fixture under `testdata/`, and a file
+    the test wrote itself, are the test's own.
+
+    Returns:
+        The line of each such call, sorted.
+
+    """
+    module = ast.parse(source)
+    qualify = call_names.qualifier(module)
+    rooted = tree_names(module, set())
+    parent = {
+        child: node for node in ast.walk(module) for child in ast.iter_child_nodes(node)
+    }
+
+    def scope_of(node: ast.AST) -> ast.AST:
+        while node in parent:
+            node = parent[node]
+            if isinstance(node, FUNCTIONS):
+                return node
+        return module
+
+    scopes: dict[ast.AST, set[str]] = {}
+    lines: list[int] = []
+    for call in (n for n in ast.walk(module) if isinstance(n, ast.Call)):
+        planted = planted_source(call, qualify(call.func))
+        if planted is None:
+            continue
+        scope = scope_of(call)
+        if scope not in scopes:
+            scopes[scope] = rooted if scope is module else tree_names(scope, rooted)
+        if from_tree(planted, scopes[scope]):
+            lines.append(call.lineno)
+    return sorted(lines)
+
+
 # Excepted by name: the helper itself, and this file, which plants and
 # names the spellings it looks for.
 EXCEPTED = frozenset({"mise/hermetic.py", "mise/test_hermetic.py"})
@@ -686,6 +824,93 @@ class Tool(unittest.TestCase):
                 str(self.bin / "planted-tool"),
                 hermetic.optional_tool("planted-tool"),
             )
+
+
+class Belt(unittest.TestCase):
+    """hermetic.belt and hermetic.canon (#1714)."""
+
+    @override
+    def setUp(self) -> None:
+        """Give each row a scratch directory."""
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_every_tracked_belt_file_is_a_link_to_it(self) -> None:
+        """The whole belt, nothing more, each file the real one by link."""
+        belt = hermetic.belt(self.tmp / "belt")
+        names = {n.removeprefix("mise/") for n in hermetic.tracked(CANON, "mise/")}
+        planted = {str(p.relative_to(belt)) for p in belt.rglob("*") if not p.is_dir()}
+        self.assertEqual(names, planted)
+        unlinked = [
+            n
+            for n in sorted(names)
+            if not (belt / n).is_symlink()
+            or (belt / n).resolve() != (CANON / "mise" / n).resolve()
+        ]
+        self.assertEqual(list[str](), unlinked)
+
+    def test_a_stub_replaces_its_link_and_keeps_the_mode(self) -> None:
+        """A stub is a file of its own, executable where the real one is."""
+        name = "action-files.sh"
+        real = CANON / "mise" / name
+        mode = real.stat().st_mode & 0o7777
+        self.assertTrue(mode & 0o100, f"{name} is not executable in the belt")
+        belt = hermetic.belt(
+            self.tmp / "belt", stubs={name: "stub\n", "new.txt": "new\n"}
+        )
+        self.assertFalse((belt / name).is_symlink())
+        self.assertEqual("stub\n", (belt / name).read_text(encoding="utf-8"))
+        self.assertEqual(mode, (belt / name).stat().st_mode & 0o7777)
+        self.assertNotEqual("stub\n", real.read_text(encoding="utf-8"))
+        self.assertEqual("new\n", (belt / "new.txt").read_text(encoding="utf-8"))
+
+    def test_a_file_added_to_the_belt_appears_unasked(self) -> None:
+        """A new helper, or a new sibling a script starts, needs no row change."""
+        scratch = self.tmp / "canon"
+        (scratch / "mise").mkdir(parents=True)
+        (scratch / "mise" / "a.py").write_text("x\n", encoding="utf-8")
+        self.git(scratch, "init", "-q")
+        self.git(scratch, "add", ".")
+        with mock.patch.object(hermetic, "CANON", scratch):
+            before = hermetic.belt(self.tmp / "before")
+            (scratch / "mise" / "sub").mkdir()
+            (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
+            self.git(scratch, "add", ".")
+            after = hermetic.belt(self.tmp / "after")
+        found: list[str] = sorted(
+            str(p.relative_to(before)) for p in before.rglob("*.*")
+        )
+        grown: list[str] = sorted(str(p.relative_to(after)) for p in after.rglob("*.*"))
+        once: list[str] = ["a.py"]
+        both: list[str] = ["a.py", "sub/b.sh"]
+        self.assertEqual(once, found)
+        self.assertEqual(both, grown)
+        self.assertEqual(
+            scratch / "mise" / "sub" / "b.sh", (after / "sub" / "b.sh").readlink()
+        )
+
+    def test_a_canon_holds_mise_release_and_what_the_row_names(self) -> None:
+        """`mise/` and `release/` always; anything else only when named."""
+        tree = hermetic.canon(
+            self.tmp / "canon",
+            "security/identity.toml",
+            stubs={"release/planted.py": "x\n"},
+        )
+        for name in (
+            "mise/hermetic.py",
+            "release/caller_pins.py",
+            "security/identity.toml",
+        ):
+            with self.subTest(name):
+                self.assertEqual(CANON / name, (tree / name).readlink())
+        self.assertFalse((tree / "slsa").exists())
+        self.assertFalse((tree / "release" / "planted.py").is_symlink())
+
+    @staticmethod
+    def git(cwd: Path, *args: str) -> None:
+        """Run git in a scratch canon."""
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, *args], cwd=cwd, env=hermetic.env(), check=True)
 
 
 class TheLaw(unittest.TestCase):
@@ -935,6 +1160,73 @@ class TheLaw(unittest.TestCase):
         for name, source in allowed.items():
             with self.subTest(name):
                 self.assertEqual(list[int](), which_calls(source))
+
+    def test_no_test_file_plants_the_belt_or_canon_itself(self) -> None:
+        """Every planted belt or canon is hermetic.belt or hermetic.canon (#1714)."""
+        offenders = [
+            f"{path}:{line}"
+            for path in listed_test_files()
+            if path not in EXCEPTED
+            for line in plants_from_tree((CANON / path).read_text(encoding="utf-8"))
+        ]
+        self.assertEqual(list[str](), offenders)
+
+    def test_every_spelling_of_a_plant_is_found(self) -> None:
+        """Planted: each way to link or copy the tree, at its line."""
+        head = "import shutil\nfrom pathlib import Path\nBELT = Path(__file__).parent\n"
+        planted = {
+            "symlink_to": (head + "Path('x').symlink_to(BELT / 'a.py')\n", [4]),
+            "hardlink_to": (head + "Path('x').hardlink_to(BELT / 'a.py')\n", [4]),
+            "copy": (head + "shutil.copy(BELT / 'a.py', 'x')\n", [4]),
+            "copy2": (head + "shutil.copy2(BELT / 'a.py', 'x')\n", [4]),
+            "copyfile": (head + "shutil.copyfile(BELT / 'a.py', 'x')\n", [4]),
+            "copytree": (head + "shutil.copytree(BELT, 'x')\n", [4]),
+            "src=": (head + "shutil.copy(src=BELT / 'a', dst='x')\n", [4]),
+            "os.symlink": (head + "import os\nos.symlink(BELT / 'a', 'x')\n", [5]),
+            "from shutil import copy as c": (
+                (
+                    "from shutil import copy as c\nfrom pathlib import Path\n"
+                    "HERE = Path(__file__).parent\nc(HERE / 'a', 'x')\n"
+                ),
+                [4],
+            ),
+            "a constant": (head + "S = BELT / 'a.sh'\nshutil.copy2(S, 'x')\n", [5]),
+            "a local in a row": (
+                head + "def f():\n    canon = Path(__file__).parent.parent\n"
+                "    shutil.copyfile(canon / 'REUSE.toml', 'x')\n",
+                [6],
+            ),
+            "a loop over the tree": (
+                head + "def f():\n    for p in BELT.iterdir():\n"
+                "        Path('x').symlink_to(p)\n",
+                [6],
+            ),
+        }
+        for name, (source, lines) in planted.items():
+            with self.subTest(name):
+                self.assertEqual(lines, plants_from_tree(source))
+
+    def test_the_fixture_and_the_tests_own_files_are_allowed(self) -> None:
+        """The fixture's planting, a file the row wrote, a fixture, a tool."""
+        head = "import shutil\nfrom pathlib import Path\nBELT = Path(__file__).parent\n"
+        allowed = {
+            "belt": head + "import hermetic\nhermetic.belt('x', stubs={})\n",
+            "a file the row wrote": (
+                head + "def f(tmp):\n    src = tmp / 'a'\n    src.write_text('x')\n"
+                "    shutil.copy(src, tmp / 'b')\n"
+            ),
+            "a fixture": (
+                head + "DATA = BELT / 'testdata' / 'x'\nshutil.copy(DATA / 'a', 'y')\n"
+            ),
+            "a tool": head
+            + "import hermetic\nPath('x').symlink_to(hermetic.tool('git'))\n",
+            "a local of the same name": (
+                head + "def f(tmp):\n    BELT = tmp\n    shutil.copy(BELT / 'a', 'x')\n"
+            ),
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual(list[int](), plants_from_tree(source))
 
     def test_no_test_file_asks_git_for_a_plain_listing(self) -> None:
         """Every listing of what a tree tracks goes through tracked (#1618)."""

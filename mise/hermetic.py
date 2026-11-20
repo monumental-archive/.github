@@ -50,6 +50,16 @@ The environment, working directory and standard input a script row
 handed the child are this process's for the call, then restored, so
 mutation, coverage and the type checker see the helper run. `done`
 carries the status and both streams, as a finished process does.
+
+A test that needs a belt or a canon tree of its own gets the whole one
+(#1714), every tracked file a link, with only what it stubs replaced:
+
+    belt = hermetic.belt(tmp / "belt", stubs={"pgrx-env.sh": STUB})
+    hermetic.canon(work / ".org-canon")
+
+A hand-kept list of the files a helper reads goes stale the day it
+gains an import or starts a sibling. No test links or copies a path
+from the belt or the canon itself; `test_hermetic.py` holds them to it.
 """
 
 import contextlib
@@ -64,7 +74,11 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
+
+# The canon this module is part of: its checkout, or mutmut's copy of
+# it (`mutants/`), whose tracked files `tracked` names (#1618).
+CANON = Path(__file__).resolve().parent.parent
 
 # What every fixture inherits, by name, and why.
 INHERITED: dict[str, str] = {
@@ -309,3 +323,67 @@ def call_main(
             if isinstance(code, str):
                 print(code, file=sys.stderr)
     return Called(status, out.getvalue(), err.getvalue())
+
+
+def plant(dest: Path, names: list[str], prefix: str, stubs: Mapping[str, str]) -> Path:
+    """Link each tracked name into `dest`, then write each stub over its link.
+
+    `prefix` is stripped from each name: `mise/` for a belt, nothing for
+    a canon. A stub replaces its link with a file of its own, so a row
+    that edits it never writes through to the canon; it keeps the real
+    file's mode, and a stub with no real file has the default mode.
+
+    Returns:
+        `dest`.
+
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        link = dest / name.removeprefix(prefix)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(CANON / name)
+    for name, text in stubs.items():
+        path = dest / name
+        real = CANON / f"{prefix}{name}"
+        if path.is_symlink():
+            path.unlink()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        if real.exists():
+            path.chmod(real.stat().st_mode & 0o7777)
+    return dest
+
+
+def belt(dest: Path | str, *, stubs: Mapping[str, str] | None = None) -> Path:
+    """Make `dest` a whole belt: every tracked file of the canon's `mise/` (#1714).
+
+    Each file is a symbolic link to the real one, so a helper that gains
+    an import, or a script that starts a new sibling, finds it with no
+    change to the row. `stubs` (a name under `mise/` to its text) are
+    what the row means to replace; a row whose point is a file MISSING
+    removes it after planting.
+
+        belt = hermetic.belt(tmp / "belt", stubs={"pgrx-env.sh": STUB})
+
+    Returns:
+        `dest`, as a Path.
+
+    """
+    names = tracked(CANON, "mise/")
+    return plant(Path(dest), names, "mise/", stubs or {})
+
+
+def canon(dest: Path | str, *also: str, stubs: Mapping[str, str] | None = None) -> Path:
+    """Make `dest` a canon tree: `mise/`, `release/`, and what `also` names (#1714).
+
+    `also` are pathspecs from the canon's top (an action directory,
+    `security/identity.toml`), for a row that plants `.org-canon` or a
+    canon checkout. Every file is a link, and `stubs` (a path from the
+    canon's top to its text) replace theirs, as `belt` does.
+
+    Returns:
+        `dest`, as a Path.
+
+    """
+    names = tracked(CANON, "mise/", "release/", *also)
+    return plant(Path(dest), names, "", stubs or {})

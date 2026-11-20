@@ -45,7 +45,6 @@ import belt_shell as bs
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-CANON = BELT.parent
 SCRIPT = BELT / "audit-badges.sh"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
@@ -153,11 +152,10 @@ class Planted(unittest.TestCase):
         """Plant the canon tree, the floors and the stub tools."""
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp)
-        self.tree = tmp / "tree"
-        (self.tree / "security").mkdir(parents=True)
-        shutil.copy(CANON / "security" / "identity.toml", self.tree / "security")
-        (self.tree / "security" / "scorecard-floors.txt").write_text(
-            "alpha 5.0\nbeta 5.0\n", encoding="utf-8"
+        self.tree = hermetic.canon(
+            tmp / "tree",
+            "security/identity.toml",
+            stubs={"security/scorecard-floors.txt": "alpha 5.0\nbeta 5.0\n"},
         )
         self.env = hermetic.env(
             tmp,

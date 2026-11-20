@@ -111,7 +111,7 @@ def run_helper(
             p.mkdir()
         (stubs / "git").write_text(GIT_STUB)
         (stubs / "git").chmod(0o755)
-        (work / ".org-canon").symlink_to(CANON)
+        hermetic.canon(work / ".org-canon")
         for i, data in enumerate(archives):
             (planted / f"{i}.tar.gz").write_bytes(data)
         log = tmp / "git.log"

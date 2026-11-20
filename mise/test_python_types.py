@@ -17,7 +17,6 @@ gate as `mise run test`.
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -34,14 +33,6 @@ BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 LABEL = "audit:python-types"
-BELT_FILES = (
-    "python-types.sh",
-    "python_types_seams.py",
-    "python_roots.py",
-    "mypy.ini",
-    "config.toml",
-    "typed_hypothesis.py",
-)
 
 STUB = """\
 #!/usr/bin/env bash
@@ -132,13 +123,14 @@ class Run:
 def run(
     files: dict[str, str],
     *,
-    belt_files: tuple[str, ...] = BELT_FILES,
+    missing: tuple[str, ...] = (),
     stub: dict[str, str] | None = None,
 ) -> Run:
     """Run the task in a planted tree.
 
-    `files` are written and tracked. With `stub`, a stub mypy leads
-    PATH and `stub` is its environment; without, PATH is the suite's.
+    `files` are written and tracked. The belt is the whole one, less
+    the files `missing` names. With `stub`, a stub mypy leads PATH and
+    `stub` is its environment; without, PATH is the suite's.
 
     Returns:
         The run's exit status, output and the stub's arguments.
@@ -151,10 +143,9 @@ def run(
         for name, text in files.items():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_text(text, encoding="utf-8")
-        belt = root / "belt"
-        belt.mkdir()
-        for name in belt_files:
-            shutil.copy(BELT / name, belt / name)
+        belt = hermetic.belt(root / "belt")
+        for name in missing:
+            (belt / name).unlink()
         env = hermetic.env(ORG_BELT_DIR=str(belt), ORG_PYTHON=sys.executable)
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
@@ -201,8 +192,7 @@ class TheWiring(unittest.TestCase):
 
     def test_the_delivered_config_missing_is_red(self) -> None:
         """No mypy.ini in the belt: red by name, mypy never asked."""
-        files = tuple(f for f in BELT_FILES if f != "mypy.ini")
-        done = run(CLEAN, belt_files=files, stub={})
+        done = run(CLEAN, missing=("mypy.ini",), stub={})
         self.assertEqual(1, done.returncode)
         self.assertIn(
             f"{LABEL}: <belt>/mypy.ini is missing — the belt did not arrive\n",

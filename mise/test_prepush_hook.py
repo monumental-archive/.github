@@ -31,7 +31,6 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
@@ -39,9 +38,6 @@ from pathlib import Path
 
 import hermetic
 
-CANON = Path(__file__).resolve().parent.parent
-HOOKS = CANON / "lefthook" / "org-hooks.yml"
-IDENTITY = CANON / "security" / "identity.toml"
 LEFTHOOK = hermetic.optional_tool("lefthook")
 GIT = hermetic.optional_tool("git")
 
@@ -80,16 +76,9 @@ def consumer_config(
     )
 
 
-def plant_canon(tree: Path) -> None:
-    """Copy the canon's hook config into `tree`."""
-    (tree / "lefthook").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(HOOKS, tree / "lefthook" / "org-hooks.yml")
-
-
-def plant_identity(tree: Path) -> None:
-    """Copy the canon's identity declaration into `tree`."""
-    (tree / "security").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(IDENTITY, tree / "security" / "identity.toml")
+def plant_canon(tree: Path, *also: str) -> None:
+    """Plant the canon in `tree`: its hook config, and what `also` names."""
+    hermetic.canon(tree, "lefthook/org-hooks.yml", *also)
 
 
 def write(cwd: Path, name: str) -> None:
@@ -297,8 +286,7 @@ class PrePushGate(unittest.TestCase):
         """The canon consumes its own hooks and runs the gate once."""
         clone = self.consumer()
         self.git(clone, "switch", "-q", "-c", "canon")
-        plant_canon(clone)
-        plant_identity(clone)
+        plant_canon(clone, "security/identity.toml")
         self.commit(clone, "be the canon")
         self.assert_gated(self.push(clone, "origin", "canon"))
 

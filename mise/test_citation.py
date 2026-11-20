@@ -14,7 +14,6 @@ directory. stdlib `unittest`, matching the other mise/test_*.py; run
 through the gate as `mise run test`.
 """
 
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
@@ -174,12 +173,11 @@ class TheRenderMatchesTheStamp(unittest.TestCase):
         canon = Path(__file__).resolve().parent.parent
         stamped = (canon / "CITATION.cff").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            shutil.copyfile(canon / "REUSE.toml", root / "REUSE.toml")
             # The canon's REUSE.toml names two expressions (#1589), so
             # its licence is the `licence` line beside it.
-            shutil.copyfile(canon / ".badge-states", root / ".badge-states")
-            (root / "CITATION.cff").write_text(stamped, encoding="utf-8")
+            root = hermetic.canon(
+                tmp, "REUSE.toml", ".badge-states", stubs={"CITATION.cff": stamped}
+            )
             env = hermetic.env()
             env["CITATION_OUT"] = str(root / "out.cff")
             # ruff: ignore[subprocess-without-shell-equals-true]

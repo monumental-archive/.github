@@ -232,7 +232,7 @@ def run_steps(
             p.mkdir()
         (stubs / "cargo").write_text(CARGO_STUB)
         (stubs / "cargo").chmod(0o755)
-        (work / ".org-canon").symlink_to(CANON)
+        hermetic.canon(work / ".org-canon")
         keys = {m: (publish or {}).get(m) for m in members}
         (tmp / "metadata.json").write_text(json.dumps(metadata(keys)))
         for m in members:

@@ -84,7 +84,7 @@ def run_helper(manifest: object, mode: str = "ok") -> Run:
             p.mkdir(parents=True)
         (stubs / "npm").write_text(NPM_STUB)
         (stubs / "npm").chmod(0o755)
-        (work / ".org-canon").symlink_to(CANON)
+        hermetic.canon(work / ".org-canon")
         (pkg / "package.json").write_text(json.dumps(manifest))
         log, outputs = tmp / "npm.log", tmp / "github_output"
         outputs.touch()
