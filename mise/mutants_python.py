@@ -22,7 +22,10 @@ imports, nothing a child process must be handed (#1771).
   records its time and the lines it executes, child processes
   included. A test file that fails alone is red, every one named.
 - `judge PLAN PRAGMAS SHARD OUT`: judges this shard's mutants, one at
-  a time, and states the verdict.
+  a time, and states the verdict. After each mutant, every tracked file
+  under `module-path` that differs from git is restored and red by
+  name with the mutant, so no mutant is judged against another's
+  writes (#1832).
 
 The adoption file is `cosmic-ray.toml` at the repository's root:
 cosmic-ray's own `[cosmic-ray]` table (`module-path`, `excluded-modules`,
@@ -711,6 +714,7 @@ def write_plan(
     document = {
         "head": git("rev-parse", "HEAD").stdout.strip(),
         "command": found.command,
+        "paths": found.paths,
         "mutants": [
             [m.path, m.operator, m.occurrence, m.line, m.function, m.statement]
             for m in mutants
@@ -738,6 +742,8 @@ class Plan:
     head: str
     command: str
     mutants: list[Mutant]
+    # `module-path`: what is checked against git after every mutant.
+    paths: list[str]
     # (test file, planned milliseconds), by index.
     tests: list[tuple[str, int]]
     # (path, line) -> the indices of the test files that execute it.
@@ -792,6 +798,10 @@ def read_plan(text: str) -> Plan:
         decoded.as_str(document.get("head"), "head"),
         decoded.as_str(document.get("command"), "command"),
         sorted(mutants),
+        [
+            decoded.as_str(path, "a module path")
+            for path in decoded.as_array(document.get("paths"), "paths")
+        ],
         tests,
         lines,
     )
@@ -955,7 +965,9 @@ class Judged:
     mutant: Mutant
     outcome: str
     diff: str = ""
-    restored: bool = False
+    # The tracked files under `module-path` that differed from git after
+    # it, each restored (#1832).
+    restored: list[str] = field(default_factory=list)
 
 
 def mutate_and_test(mutant: Mutant, command: str) -> tuple[str, str]:
@@ -1016,10 +1028,12 @@ def judge_one(the_plan: Plan, mutant: Mutant, scratch: Path, index: int) -> Judg
     command = shlex.join([sys.executable, str(scratch / "run.py"), str(runs)])
     uncache(mutant.path)
     outcome, diff = mutate_and_test(mutant, command)
-    restored = False
-    if git("diff", "--quiet", "--", mutant.path).returncode != 0:
-        git("restore", "--", mutant.path)
-        restored = True
+    # The whole tree under `module-path`, not only the mutated file: a
+    # mutant's tests can write another tracked file, and every later
+    # mutant would be judged against it (#1832).
+    restored = dirty(the_plan.paths)
+    if restored:
+        git("restore", "--", *restored)
     uncache(mutant.path)
     return Judged(mutant, outcome, diff, restored)
 
@@ -1068,7 +1082,9 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
 
     Returns:
         0 when green, EXIT_RED for a survivor, a mutant never judged or
-        a file left mutated.
+        a file left changed. The counts are written whenever every
+        mutant reached an outcome: a restored file is red by name but
+        withholds nothing (#1832).
 
     """
     killed = [j for j in judged if j.outcome in KILLED]
@@ -1086,16 +1102,13 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
         f"{LABEL}: {len(judged)} mutants, {len(killed)} killed,"
         f" {len(survivors)} survived, {excluded} excluded"
     )
-    status = 0
     for j in unjudged:
         red(f"never judged: {where(j.mutant)}: worker outcome '{j.outcome}'")
-        status = EXIT_RED
     for j in judged:
-        if j.restored:
-            red(f"{j.mutant.path} differed from git after {where(j.mutant)} — restored")
-            status = EXIT_RED
-    if status:
-        return status
+        for path in j.restored:
+            red(f"{path} differed from git after {where(j.mutant)} — restored")
+    if unjudged:
+        return EXIT_RED
     summary_dir = os.environ.get("MUTANTS_SUMMARY_DIR", "")
     if summary_dir:
         Path(summary_dir).mkdir(parents=True, exist_ok=True)
@@ -1103,6 +1116,7 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
             f"{shard}\t{len(judged)}\t{len(killed)}\t{len(survivors)}\t{excluded}\n",
             encoding="utf-8",
         )
+    status = EXIT_RED if any(j.restored for j in judged) else 0
     if survivors:
         red("red — kill each survivor with an assertion, or exclude it at its site")
         print(
@@ -1110,7 +1124,7 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
             file=sys.stderr,
         )
         return EXIT_RED
-    return 0
+    return status
 
 
 def judge(plan_dir: Path, pragma_file: Path, shard: str, scratch: Path) -> int:

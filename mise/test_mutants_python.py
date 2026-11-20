@@ -46,8 +46,9 @@ LABEL = "audit:mutants: python"
 # The stand-in, in cosmic-ray 8.9.0's shape. PLANT_MUTANTS maps
 # "PATH OPERATOR OCCURRENCE" to what the mutant does: `replace` (the old
 # and new text), `worker` (a worker outcome other than normal), `leave`
-# (the file is not restored), `kill_parent` (the judge dies mid-
-# mutant) and `silent` (cosmic-ray exits 3 and prints nothing).
+# (the file is not restored), `write` (files the test command writes,
+# path to text), `kill_parent` (the judge dies mid-mutant) and
+# `silent` (cosmic-ray exits 3 and prints nothing).
 # PLANT_INIT_FAILS makes `init` fail. The command runs as cosmic-ray
 # runs it: split with shlex, PYTHONDONTWRITEBYTECODE set,
 # PLANT_UNDER_MUTANT set for the tests.
@@ -90,6 +91,8 @@ if mutant.get("kill_parent"):
     sys.exit(0)
 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PLANT_UNDER_MUTANT="1")
 done = subprocess.run(shlex.split(command), env=env, capture_output=True, text=True)
+for name, text in mutant.get("write", {}).items():
+    Path(name).write_text(text, encoding="utf-8")
 if not mutant.get("leave"):
     Path(path).write_text(original, encoding="utf-8")
 head = f"--- mutation diff ---\\n--- a/{path}\\n+++ b/{path}\\n"
@@ -719,6 +722,70 @@ class Safety(Planted):
         self.assertEqual(
             (self.tree / "pkg" / "mod.py").read_text(encoding="utf-8"), MODULE
         )
+
+    def test_tracked_files_a_mutant_writes_are_restored_before_the_next(
+        self,
+    ) -> None:
+        """Every file under module-path a mutant left: restored, red, by name.
+
+        The first mutant's tests rewrite the test file to one that kills
+        nothing, and its own file is left mutated; the second mutant is
+        killed only if it runs against the original test (#1832).
+        """
+        passes = "import unittest\n\n\nclass P(unittest.TestCase):\n    pass\n"
+        first, second = FOUR[:2]
+        plan = self.shared(
+            [first, second],
+            {
+                f"pkg/mod.py {ADD} 0": {
+                    **KILLS,
+                    "leave": True,
+                    "write": {"pkg/test_mod.py": passes},
+                },
+                f"pkg/mod.py {ADD} 1": KILLS,
+            },
+        )
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
+        self.assertEqual(done.returncode, 1)
+        after = f"pkg/mod.py:2: {ADD} #0 (answer) — restored\n"
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: pkg/mod.py differed from git after {after}"
+            f"{LABEL}: pkg/test_mod.py differed from git after {after}",
+        )
+        self.assertTrue(
+            done.stdout.endswith(
+                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 excluded\n"
+            ),
+            done.stdout,
+        )
+        self.assertEqual(log, judged(first, second))
+        self.assertEqual(self.ran.read_text(encoding="utf-8"), "test_mod\n" * 2)
+        self.assertEqual(
+            (self.tree / "pkg" / "test_mod.py").read_text(encoding="utf-8"),
+            TEST.format(sleep=0, name="test_mod"),
+        )
+        self.assertEqual(git_out(self.tree, "status", "--porcelain", "-uno"), "")
+
+    def test_restored_file_is_red_and_the_counts_are_written(self) -> None:
+        """A restore reds the run by name, but every outcome is still counted."""
+        plan = self.shared(
+            [KILLED, SURVIVOR],
+            {
+                f"pkg/mod.py {ADD} 0": {**KILLS, "leave": True},
+                f"pkg/mod.py {NUM} 0": SURVIVES,
+            },
+        )
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
+        self.assertEqual(done.returncode, 1)
+        restored = (
+            f"{LABEL}: pkg/mod.py differed from git after pkg/mod.py:2:"
+            f" {ADD} #0 (answer) — restored"
+        )
+        want = [restored, *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, judged(SURVIVOR, KILLED))
+        self.assertEqual(self.counts(), "0/1\t2\t1\t1\t0\n")
 
     def test_run_killed_mid_mutant_is_restored_by_the_trap(self) -> None:
         """The judge dies with a mutant applied: the exit trap restores it."""

@@ -203,15 +203,17 @@ class Plan(unittest.TestCase):
     @given(
         MUTANTS,
         st.lists(st.tuples(IDENT, st.integers(0, 10**6)), max_size=5),
+        st.lists(IDENT, max_size=3),
         st.data(),
     )
     def test_round_trip(
         self,
         mutants: list[mp.Mutant],
         tests: list[tuple[str, int]],
+        paths: list[str],
         data: st.DataObject,
     ) -> None:
-        """Mutants, tests and the line map come back as they went."""
+        """Mutants, tests, module paths and the line map come back as they went."""
         lines: dict[str, dict[str, list[int]]] = {}
         for m in mutants:
             if tests:
@@ -227,6 +229,7 @@ class Plan(unittest.TestCase):
                 for m in mutants
             ],
             "tests": [list(t) for t in tests],
+            "paths": paths,
             "lines": lines,
         })
         got = mp.read_plan(text)
@@ -234,6 +237,7 @@ class Plan(unittest.TestCase):
         ordered = sorted(mutants)
         self.assertEqual(got.mutants, ordered)
         self.assertEqual(got.tests, tests)
+        self.assertEqual(got.paths, paths)
         mapped = {(p, int(n)): v for p, per in lines.items() for n, v in per.items()}
         self.assertEqual(got.lines, mapped)
 
