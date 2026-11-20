@@ -949,6 +949,7 @@ def task_ceiling(files: list[str], debt: Path, *, write: bool) -> int:
     if write:
         if not debt.is_file():
             if over:
+                debt.parent.mkdir(parents=True, exist_ok=True)
                 debt.write_text(generated(over), encoding="utf-8")
             print(
                 f"fix:task-shell: no debt file; generated {debt} with "
