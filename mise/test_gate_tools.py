@@ -229,6 +229,12 @@ def _source(name: str) -> str:
     return _SOURCES[name]
 
 
+# The belt's venv check (#1788): `tool_python.py LABEL COMMAND` finds
+# COMMAND on PATH and runs the venv's interpreter beside it, so the line
+# uses COMMAND's tool though COMMAND is an argument there.
+TOOL_PYTHON = re.compile(r'tool_python\.py"?\s+(?:"[^"]*"|\S+)\s+"?([\w.-]+)')
+
+
 def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
     """Find where an expanded body first calls one of the commands.
 
@@ -244,6 +250,13 @@ def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
         if kind.startswith("py:"):
             src = _source(kind[3:])
             if gate_tools.python_calls(src, cmds) or "python3" in cmds:
+                return i
+            ran = (
+                found(TOOL_PYTHON, lines[i - 1][1])
+                if kind == "py:tool_python.py"
+                else []
+            )
+            if any(cmd in cmds for cmd in ran):
                 return i
     return at
 
@@ -481,6 +494,21 @@ class Table(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertEqual(0, first_call(expand(text, set()), [cmd]))
+
+    def test_the_venv_check_uses_its_command(self) -> None:
+        """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""
+        for text in (
+            'v=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis)',
+            '"${ORG_PYTHON}" "${belt}/tool_python.py" x hypothesis --site hypothesis',
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(1, first_call(expand(text, set()), ["hypothesis"]))
+        self.assertIsNone(
+            first_call(
+                expand('"${ORG_PYTHON}" "${belt}/tool_python.py" x coverage', set()),
+                ["hypothesis"],
+            )
+        )
 
     def test_jq_the_gate_calls_is_a_pinned_belt_tool(self) -> None:
         """Jq was a gate dependency that was never pinned (#390).
