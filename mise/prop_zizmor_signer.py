@@ -41,8 +41,10 @@ SHA = st.from_regex(r"[0-9a-f]{40}", fullmatch=True)
 IDENT = st.sampled_from([*zs.AUDITS, "unpinned-uses", "excessive-permissions"])
 
 
-@st.composite
-def finding(draw: st.DrawFn) -> tuple[dict[str, object], bool]:
+Drawn = tuple[dict[str, object], bool]
+
+
+def draw_finding(draw: st.DrawFn) -> Drawn:
     """Draw a finding and whether it is on the signer.
 
     Returns:
@@ -52,7 +54,7 @@ def finding(draw: st.DrawFn) -> tuple[dict[str, object], bool]:
     ident = draw(IDENT)
     kind = zs.AUDITS[ident][0] if ident in zs.AUDITS else "Primary"
     repos = draw(st.lists(REPO, min_size=1, max_size=3))
-    locations = []
+    locations: list[dict[str, object]] = []
     for repo in repos:
         ref = f"{repo}/.github/workflows/x.yml@{draw(SHA)}"
         feature = draw(
@@ -69,13 +71,14 @@ def finding(draw: st.DrawFn) -> tuple[dict[str, object], bool]:
     return {"ident": ident, "locations": locations}, on
 
 
+finding = st.composite(draw_finding)
+
+
 class Exemption(unittest.TestCase):
     """Dropped exactly when every reference is the signer's."""
 
     @given(finding())
-    def test_on_signer_exactly_when_every_reference_is(
-        self, drawn: tuple[dict, bool]
-    ) -> None:
+    def test_on_signer_exactly_when_every_reference_is(self, drawn: Drawn) -> None:
         """Case of owner and repository does not matter."""
         found, on = drawn
         signer = zs.signer_repository(WORKFLOW)
@@ -83,7 +86,7 @@ class Exemption(unittest.TestCase):
 
     @given(st.data(), st.lists(finding(), max_size=6))
     def test_order_does_not_matter(
-        self, data: st.DataObject, drawn: list[tuple[dict, bool]]
+        self, data: st.DataObject, drawn: list[Drawn]
     ) -> None:
         """The same findings in any order: same status, same counts."""
         findings = [f for f, _ in drawn]
@@ -111,37 +114,50 @@ def run(stdin: str) -> tuple[int, str]:
     return status, out.getvalue()
 
 
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=10),
-    lambda inner: (
-        st.lists(inner, max_size=4)
-        | st.dictionaries(st.text(max_size=10), inner, max_size=4)
-    ),
-    max_leaves=15,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=10)
 )
-SHAPED = st.lists(
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=4)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=10), inner, max_size=4
+    )
+    return arrays | objects
+
+
+def dumped(value: object) -> str:
+    """Serialise a value as JSON.
+
+    Returns:
+        The document.
+
+    """
+    return json.dumps(value)
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=15)
+SYMBOLIC: st.SearchStrategy[object] = st.one_of(
+    JSON, st.fixed_dictionaries({"kind": JSON})
+)
+CONCRETE: st.SearchStrategy[object] = st.one_of(
+    JSON, st.fixed_dictionaries({"feature": JSON})
+)
+LOCATION: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {}, optional={"symbolic": SYMBOLIC, "concrete": CONCRETE}
+)
+LOCATIONS: st.SearchStrategy[object] = st.one_of(JSON, st.lists(LOCATION, max_size=3))
+ANY_IDENT: st.SearchStrategy[object] = st.one_of(IDENT, JSON)
+SHAPED: st.SearchStrategy[list[dict[str, object]]] = st.lists(
     st.fixed_dictionaries(
-        {"ident": st.one_of(IDENT, JSON)},
-        optional={
-            "locations": st.one_of(
-                JSON,
-                st.lists(
-                    st.fixed_dictionaries(
-                        {},
-                        optional={
-                            "symbolic": st.one_of(
-                                JSON, st.fixed_dictionaries({"kind": JSON})
-                            ),
-                            "concrete": st.one_of(
-                                JSON, st.fixed_dictionaries({"feature": JSON})
-                            ),
-                        },
-                    ),
-                    max_size=3,
-                ),
-            ),
-            "ignored": JSON,
-        },
+        {"ident": ANY_IDENT}, optional={"locations": LOCATIONS, "ignored": JSON}
     ),
     max_size=3,
 )
@@ -150,9 +166,7 @@ SHAPED = st.lists(
 class Refusal(unittest.TestCase):
     """Any stdin is answered, never a traceback."""
 
-    @given(
-        st.one_of(JSON.map(json.dumps), SHAPED.map(json.dumps), st.text(max_size=40))
-    )
+    @given(st.one_of(JSON.map(dumped), SHAPED.map(dumped), st.text(max_size=40)))
     @example('[{"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]}]')
     @example('[{"ident": []}]')
     def test_main_answers_any_stdin(self, stdin: str) -> None:

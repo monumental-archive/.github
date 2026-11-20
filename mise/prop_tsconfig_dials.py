@@ -33,27 +33,29 @@ from typed_hypothesis import given
 
 KEY = st.from_regex(r"[a-z][A-Za-z]{0,15}", fullmatch=True)
 LEVEL = st.dictionaries(KEY, st.booleans(), min_size=1, max_size=8)
-OTHER = st.dictionaries(
+OTHER: st.SearchStrategy[dict[str, object]] = st.dictionaries(
     st.from_regex(r"_[A-Za-z]{0,8}", fullmatch=True),  # never a KEY
     st.one_of(st.booleans(), st.integers(), st.text(max_size=5)),
     max_size=4,
 )
 
 
-@st.composite
-def flags_file(draw: st.DrawFn, level: dict[str, bool]) -> str:
+def draw_flags_file(draw: st.DrawFn, level: dict[str, bool]) -> str:
     """Write a level as tsc-flags.txt lines.
 
     Returns:
         The file's text.
 
     """
-    lines = []
+    lines: list[str] = []
     for key, on in level.items():
         lines.append(draw(st.sampled_from(["", "# a note", "   "])))
         flag = f"--{key}" if on else f"--{key} false"
         lines.append(flag + draw(st.sampled_from(["", "  # why", " "])))
     return "\n".join(lines) + "\n"
+
+
+flags_file = st.composite(draw_flags_file)
 
 
 class Level(unittest.TestCase):
@@ -67,7 +69,7 @@ class Level(unittest.TestCase):
             path.write_text(data.draw(flags_file(level)), encoding="utf-8")
             required, unreadable = td.dials(path)
         self.assertEqual(required, level)
-        self.assertEqual(unreadable, [])
+        self.assertEqual(unreadable, list[str]())
 
 
 class Judge(unittest.TestCase):
@@ -75,11 +77,12 @@ class Judge(unittest.TestCase):
 
     @given(st.data(), LEVEL, OTHER)
     def test_stated_level_in_any_order_passes(
-        self, data: st.DataObject, level: dict[str, bool], other: dict
+        self, data: st.DataObject, level: dict[str, bool], other: dict[str, object]
     ) -> None:
         """Key order and other keys change nothing."""
-        items = data.draw(st.permutations(list(level.items()) + list(other.items())))
-        self.assertEqual(td.judge(dict(items), level), [])
+        pairs: list[tuple[str, object]] = [*level.items(), *other.items()]
+        items = data.draw(st.permutations(pairs))
+        self.assertEqual(td.judge(dict(items), level), list[str]())
 
     @given(st.data(), LEVEL, st.sampled_from(["drop", "flip"]))
     def test_one_weaker_dial_is_one_finding(
@@ -87,7 +90,7 @@ class Judge(unittest.TestCase):
     ) -> None:
         """Absent or flipped, it is named, once."""
         key = data.draw(st.sampled_from(sorted(level)))
-        stated = dict(level)
+        stated: dict[str, object] = dict(level)
         if how == "drop":
             del stated[key]
         else:
@@ -97,27 +100,40 @@ class Judge(unittest.TestCase):
         self.assertTrue(found[0].startswith(f'"{key}"'))
 
 
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=8),
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=8), inner, max_size=3)
-    ),
-    max_leaves=10,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=8)
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=8), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=10)
+OPTIONS: st.SearchStrategy[dict[str, object]] = st.dictionaries(KEY, JSON)
+RESOLVED: st.SearchStrategy[object] = st.one_of(
+    JSON,
+    st.fixed_dictionaries({"compilerOptions": JSON}),
+    st.fixed_dictionaries({"compilerOptions": OPTIONS}),
+)
+NO_CONFIG: list[object] = []
 
 
 class Refusal(unittest.TestCase):
     """Any resolved config is judged, never a traceback."""
 
-    @given(
-        st.one_of(
-            JSON,
-            st.fixed_dictionaries({"compilerOptions": JSON}),
-            st.fixed_dictionaries({"compilerOptions": st.dictionaries(KEY, JSON)}),
-        )
-    )
-    @example([])
+    @given(RESOLVED)
+    @example(NO_CONFIG)
     def test_main_answers_any_config(self, resolved: object) -> None:
         """0, or 1 with the reason on stderr."""
         with tempfile.TemporaryDirectory() as scratch:

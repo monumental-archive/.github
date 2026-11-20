@@ -31,10 +31,11 @@ import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import gate_tools
 import hermetic
 
@@ -52,8 +53,19 @@ def body(task: str) -> str:
         The bash the task runs.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)["tasks"][task]["run"]
+    return decoded.as_str(task_table(task)["run"], f"{task}.run")
+
+
+def task_table(task: str) -> dict[str, object]:
+    """Read a task's table from the belt's config.
+
+    Returns:
+        The task's keys as the config writes them.
+
+    """
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "tasks")
+    return decoded.as_object(tasks[task], task)
 
 
 def owner() -> str:
@@ -63,8 +75,8 @@ def owner() -> str:
         The owner from security/identity.toml.
 
     """
-    with (BELT.parent / "security" / "identity.toml").open("rb") as handle:
-        return tomllib.load(handle)["owner"]
+    identity = (BELT.parent / "security" / "identity.toml").read_bytes()
+    return decoded.as_str(decoded.load_toml(identity)["owner"], "owner")
 
 
 def workflow(*uses: str) -> str:
@@ -127,6 +139,7 @@ CEILING = (
 class Planted(unittest.TestCase):
     """A planted, tracked tree; a lint's verdict on it."""
 
+    @override
     def setUp(self) -> None:
         """Make an empty git repository and a scrubbed environment."""
         tmp = Path(tempfile.mkdtemp())
@@ -228,7 +241,8 @@ class ActionsAllowed(Planted):
             f"  allowed: GitHub-owned plus actions/* github/* {owner()}/*"
             " jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
         )
-        self.assertEqual(done.stderr.splitlines()[:2], [forbids, allowed])
+        expected = [forbids, allowed]
+        self.assertEqual(done.stderr.splitlines()[:2], expected)
 
     def test_no_workflow_and_no_action_skips_clean(self) -> None:
         """Applicability unchanged: nothing to read is a clean skip."""
@@ -279,6 +293,7 @@ class ActionPins(Planted):
 class Zizmor(Planted):
     """lint:zizmor, with zizmor stubbed to record its arguments."""
 
+    @override
     def setUp(self) -> None:
         """Put a recording zizmor first on PATH."""
         super().setUp()
@@ -298,17 +313,15 @@ class Zizmor(Planted):
         })
         done = self.run_task("lint:zizmor")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            self.args.read_text("utf-8").splitlines(),
-            [
-                "--offline",
-                "--persona=auditor",
-                ".github/actions/y/action.yaml",
-                ".github/workflows/ci.yml",
-                "action.yml",
-                "actions/x/action.yml",
-            ],
-        )
+        expected = [
+            "--offline",
+            "--persona=auditor",
+            ".github/actions/y/action.yaml",
+            ".github/workflows/ci.yml",
+            "action.yml",
+            "actions/x/action.yml",
+        ]
+        self.assertEqual(self.args.read_text("utf-8").splitlines(), expected)
 
     def test_no_workflow_and_no_action_skips_clean(self) -> None:
         """Applicability unchanged, and zizmor is never run."""
@@ -409,8 +422,8 @@ def task_env(task: str) -> dict[str, str]:
         The variables `mise run` would set for it.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return dict(tomllib.load(handle)["tasks"][task].get("env", {}))
+    env = decoded.as_object(task_table(task).get("env", {}), f"{task}.env")
+    return {name: decoded.as_str(value, name) for name, value in env.items()}
 
 
 class CanonSources(Planted):
@@ -484,7 +497,8 @@ class WorkflowShell(Planted):
             " security/workflow-shell-debt.txt does not list it — move the"
             " logic out (CONTRIBUTING.md)"
         )
-        self.assertEqual(done.stderr.splitlines(), [finding, CEILING])
+        expected = [finding, CEILING]
+        self.assertEqual(done.stderr.splitlines(), expected)
 
     def test_the_workflow_templates_are_still_read(self) -> None:
         """The selection is added to, never narrowed: templates stay."""
@@ -536,17 +550,15 @@ class Selection(Planted):
         })
         (self.tree / "untracked").mkdir()
         (self.tree / "untracked" / "action.yml").write_text("", "utf-8")
-        self.assertEqual(
-            self.selected(),
-            [
-                ".github/actions/y/action.yml",
-                ".github/workflows/ci.yml",
-                ".github/workflows/release.yaml",
-                "a/b/c/action.yaml",
-                "action.yml",
-                "actions/x/action.yml",
-            ],
-        )
+        expected = [
+            ".github/actions/y/action.yml",
+            ".github/workflows/ci.yml",
+            ".github/workflows/release.yaml",
+            "a/b/c/action.yaml",
+            "action.yml",
+            "actions/x/action.yml",
+        ]
+        self.assertEqual(self.selected(), expected)
 
 
 def belt_patterns() -> list[str]:
@@ -581,11 +593,12 @@ class AllowlistAudit(Planted):
             The finished process.
 
         """
-        live = json.dumps({
+        answer: dict[str, object] = {
             "github_owned_allowed": True,
             "verified_allowed": False,
             "patterns_allowed": patterns,
-        })
+        }
+        live = json.dumps(answer)
         stub = self.bin / "gh"
         stub.write_text("#!/usr/bin/env bash\nprintf '%s' \"${STUB_LIVE}\"\n", "utf-8")
         stub.chmod(0o755)

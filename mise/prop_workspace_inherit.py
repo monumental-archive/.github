@@ -19,6 +19,7 @@ import os
 import unittest
 from pathlib import Path
 
+import decoded
 import workspace_inherit as wi
 from hypothesis import strategies as st
 from typed_hypothesis import given
@@ -27,12 +28,10 @@ ROOT = Path("/ws")
 VALUE_KEYS = sorted(set(wi.REPORTED) - set(wi.PATH_KEYS))
 VALUE = st.one_of(st.text(max_size=6), st.lists(st.text(max_size=4), max_size=2))
 DIR = st.lists(st.from_regex(r"[a-z]{1,5}", fullmatch=True), max_size=2).map("/".join)
+Drawn = tuple[dict[str, object], list[dict[str, object]], set[str]]
 
 
-@st.composite
-def workspace(
-    draw: st.DrawFn,
-) -> tuple[dict[str, str | list[str]], list[dict[str, str]], set[str]]:
+def draw_workspace(draw: st.DrawFn) -> Drawn:
     """Draw a declaration, members, and which keys some member takes.
 
     Returns:
@@ -42,22 +41,27 @@ def workspace(
     keys = draw(
         st.lists(st.sampled_from([*VALUE_KEYS, "readme"]), unique=True, max_size=5)
     )
-    table = {}
+    table: dict[str, object] = {}
     for key in keys:
         table[key] = "README.md" if key == "readme" else draw(VALUE)
     count = draw(st.integers(1, 4))
-    members = []
+    members: list[dict[str, object]] = []
     taken: set[str] = set()
     for index in range(count):
         where = draw(DIR)
         manifest = ROOT / where / f"m{index}" / "Cargo.toml"
-        package = {"name": f"m{index}", "manifest_path": str(manifest)}
+        package: dict[str, object] = {
+            "name": f"m{index}",
+            "manifest_path": str(manifest),
+        }
         for key, declared in table.items():
             field = wi.REPORTED[key]
             if draw(st.booleans()):
                 taken.add(key)
                 package[field] = (
-                    os.path.relpath(ROOT / declared, manifest.parent)
+                    os.path.relpath(
+                        ROOT / decoded.as_str(declared, key), manifest.parent
+                    )
                     if key == "readme"
                     else declared
                 )
@@ -69,33 +73,36 @@ def workspace(
     return table, members, taken
 
 
-def typed(members: list[dict[str, str]]) -> list[wi.Member]:
+workspace = st.composite(draw_workspace)
+
+
+def typed(members: list[dict[str, object]]) -> list[wi.Member]:
     """Decode drawn packages the way the check decodes cargo metadata.
 
     Returns:
         The members.
 
     """
-    return [wi.read_member(m, m["name"]) for m in members]
+    return [wi.read_member(m, decoded.as_str(m["name"], "name")) for m in members]
 
 
 class Judge(unittest.TestCase):
     """A key nobody takes, and only that, is a finding."""
 
     @given(workspace())
-    def test_a_finding_exactly_when_nobody_takes_it(
-        self, drawn: tuple[dict, list[dict], set[str]]
-    ) -> None:
+    def test_a_finding_exactly_when_nobody_takes_it(self, drawn: Drawn) -> None:
         """Findings are the declared keys no member reports."""
         table, members, taken = drawn
         report: list[str] = []
         found = wi.judge(table, typed(members), ROOT, report)
-        self.assertEqual({f.key for f in found}, set(table) - taken)
-        self.assertEqual(report, [])
+        keys = {f.key for f in found}
+        untaken = set(table) - taken
+        self.assertEqual(keys, untaken)
+        self.assertEqual(report, list[str]())
 
     @given(st.data(), workspace())
     def test_member_order_does_not_matter(
-        self, data: st.DataObject, drawn: tuple[dict, list[dict], set[str]]
+        self, data: st.DataObject, drawn: Drawn
     ) -> None:
         """The same members in any order, the same keys found."""
         table, members, _ = drawn
@@ -105,14 +112,13 @@ class Judge(unittest.TestCase):
         self.assertEqual(one, two)
 
     @given(st.sampled_from(sorted(wi.UNRESOLVABLE)), workspace())
-    def test_unjudgeable_keys_are_reported(
-        self, key: str, drawn: tuple[dict, list[dict], set[str]]
-    ) -> None:
+    def test_unjudgeable_keys_are_reported(self, key: str, drawn: Drawn) -> None:
         """Named in the report, never a finding."""
         table, members, _ = drawn
         report: list[str] = []
         found = wi.judge({**table, key: False}, typed(members), ROOT, report)
-        self.assertNotIn(key, {f.key for f in found})
+        keys = {f.key for f in found}
+        self.assertNotIn(key, keys)
         self.assertIn(f"{key}: {wi.UNRESOLVABLE[key]}", report)
 
 
