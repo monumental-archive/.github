@@ -24,11 +24,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import decoded
 import findings
 import hermetic
 
@@ -57,7 +59,7 @@ if sys.argv[1:3] == ["issue", "create"] and os.environ.get("STUB_CREATE_FAIL"):
 """
 
 
-def finding(index: int, condition: str, why: str) -> dict:
+def finding(index: int, condition: str, why: str) -> dict[str, object]:
     """Write one finding as stele records it.
 
     Returns:
@@ -85,6 +87,7 @@ def search(index: int) -> list[str]:
 class Harness(unittest.TestCase):
     """A stub gh, its call log and the real report, for each row."""
 
+    @override
     def setUp(self) -> None:
         """Lay out a stub gh, its call log, and the real report."""
         tmp = tempfile.TemporaryDirectory()
@@ -97,7 +100,10 @@ class Harness(unittest.TestCase):
         stub.chmod(0o755)
         self.calls = self.dir / "calls.jsonl"
         self.report = self.dir / "report.json"
-        self.doc = json.loads((DATA / "report-budget.json").read_text(encoding="utf-8"))
+        text = (DATA / "report-budget.json").read_text(encoding="utf-8")
+        self.doc = decoded.as_object(decoded.load_json(text), "the report")
+        # False: the row writes the report file itself (or none at all).
+        self.write_report = True
         self.env = hermetic.env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             GITHUB_REPOSITORY=REPO,
@@ -116,7 +122,7 @@ class Harness(unittest.TestCase):
             Its exit status and output, captured.
 
         """
-        if self.doc is not None:
+        if self.write_report:
             self.report.write_text(json.dumps(self.doc), encoding="utf-8")
         argv = ["--report", str(self.report), "--run-url", RUN]
         return hermetic.call_main(lambda: findings.main(argv), env={**self.env, **env})
@@ -128,7 +134,7 @@ class Harness(unittest.TestCase):
             The finished process.
 
         """
-        if self.doc is not None:
+        if self.write_report:
             self.report.write_text(json.dumps(self.doc), encoding="utf-8")
         argv = [
             sys.executable, str(HELPER), "--report", str(self.report), "--run-url", RUN,
@@ -147,7 +153,13 @@ class Harness(unittest.TestCase):
         if not self.calls.exists():
             return []
         lines = self.calls.read_text(encoding="utf-8").splitlines()
-        return [json.loads(line) for line in lines]
+        return [
+            [
+                decoded.as_str(arg, "an argument")
+                for arg in decoded.as_array(decoded.load_json(line), "a call")
+            ]
+            for line in lines
+        ]
 
 
 class Findings(Harness):
@@ -157,7 +169,7 @@ class Findings(Harness):
         """The real report, no findings: exit 0, gh never called."""
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
             proc.stdout.strip(), "findings: 0 certificate(s) did not reconcile"
         )
@@ -173,16 +185,15 @@ class Findings(Harness):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         calls = self.gh_calls()
         pairs = [["issue", "list"], ["issue", "create"]] * 2
-        self.assertEqual([c[:2] for c in calls], pairs)
+        heads = [c[:2] for c in calls]
+        self.assertEqual(heads, pairs)
         self.assertEqual(calls[0], search(448199999))
         self.assertEqual(calls[2], search(448200001))
-        self.assertEqual(
-            calls[1][:6],
-            [
-                "issue", "create", "--repo", REPO, "--title",
-                f"{PREFIX} 448199999 did not reconcile (run)",
-            ],
-        )  # fmt: skip
+        create: list[str] = [
+            "issue", "create", "--repo", REPO, "--title",
+            f"{PREFIX} 448199999 did not reconcile (run)",
+        ]  # fmt: skip
+        self.assertEqual(calls[1][:6], create)
         self.assertEqual(
             calls[3][5],
             f"{PREFIX} 448200001 did not reconcile (foreign, chain)",
@@ -228,7 +239,8 @@ class Findings(Harness):
         ]
         proc = self.run_helper(STUB_LIST=json.dumps(listing))
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [search(448200001)])
+        searched: list[list[str]] = [search(448200001)]
+        self.assertEqual(self.gh_calls(), searched)
         self.assertIn("findings: CT index 448200001: already filed as #6", proc.stdout)
 
     def test_a_longer_index_is_not_this_one(self) -> None:
@@ -239,14 +251,16 @@ class Findings(Harness):
         ]
         proc = self.run_helper(STUB_LIST=json.dumps(listing))
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls()[1][:2], ["issue", "create"])
+        create: list[str] = ["issue", "create"]
+        self.assertEqual(self.gh_calls()[1][:2], create)
 
     def test_search_failure_saves_nothing(self) -> None:
         """The dedupe search failing: exit 2 by name, nothing created."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
         proc = self.run_helper(STUB_LIST_FAIL="1")
         self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [search(448200001)])
+        searched: list[list[str]] = [search(448200001)]
+        self.assertEqual(self.gh_calls(), searched)
         self.assertEqual(
             proc.stderr.strip(),
             "findings: gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
@@ -266,11 +280,11 @@ class Findings(Harness):
 
     def test_no_report(self) -> None:
         """Stele refused before judging (empty stdout): exit 2 by name."""
-        self.doc = None
+        self.write_report = False
         self.report.write_text("", encoding="utf-8")
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
             proc.stderr.strip(),
             "findings: stele wrote no report: it refused before judging (its reason"
@@ -279,7 +293,7 @@ class Findings(Harness):
 
     def test_report_not_json(self) -> None:
         """A report that is not JSON: exit 2 by name."""
-        self.doc = None
+        self.write_report = False
         text = "stele assert: the run could not see enough\n"
         self.report.write_text(text, encoding="utf-8")
         proc = self.run_helper()
@@ -292,7 +306,7 @@ class Findings(Harness):
 
         prop_findings.py's shrunk example (#1557): the one byte 0x80.
         """
-        self.doc = None
+        self.write_report = False
         self.report.write_bytes(b"\x80")
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2, proc.stderr)
@@ -302,7 +316,7 @@ class Findings(Harness):
 
     def test_report_nested_past_the_parser(self) -> None:
         """JSON nested past the parser's depth: exit 2 by name (#1557)."""
-        self.doc = None
+        self.write_report = False
         self.report.write_bytes(b"[" * 100_000)
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2, proc.stderr)
@@ -328,7 +342,7 @@ class Findings(Harness):
         ]
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
             proc.stderr.strip(),
             "findings: a finding's subject is not a CT index: 'population';"
@@ -343,7 +357,7 @@ class Findings(Harness):
         """
         proc = self.run_script(GITHUB_REPOSITORY="")
         self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(proc.stderr.strip(), "findings: GITHUB_REPOSITORY is not set")
 
 
@@ -385,7 +399,8 @@ class Decoded(Harness):
 
     def test_findings_that_are_not_a_list(self) -> None:
         """Findings of another kind, falsy or not: exit 2 by name (#1683)."""
-        for value in ("", 0, {}, "ab"):
+        values: tuple[object, ...] = ("", 0, dict[str, object](), "ab")
+        for value in values:
             with self.subTest(findings=value):
                 self.doc["findings"] = value
                 proc = self.run_helper()
@@ -398,7 +413,7 @@ class Decoded(Harness):
 
     def test_report_with_a_key_twice(self) -> None:
         """A report that is not strict JSON is not JSON here: exit 2 by name."""
-        self.doc = None
+        self.write_report = False
         self.report.write_text('{"target": "x", "target": "y"}', encoding="utf-8")
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2)

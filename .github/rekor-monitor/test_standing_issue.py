@@ -23,11 +23,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import decoded
 import hermetic
 import standing_issue as standing
 
@@ -51,8 +53,8 @@ if sys.argv[1:3] == ["issue", "list"]:
     print(os.environ["STUB_LIST"])
 """
 
-CREATE = ["issue", "create", "--repo", REPO, "--title", TITLE]
-LIST = [
+CREATE: list[str] = ["issue", "create", "--repo", REPO, "--title", TITLE]
+LIST: list[str] = [
     "issue", "list", "--repo", REPO, "--state", "open",
     "--limit", "1000", "--json", "number,title,body",
 ]  # fmt: skip
@@ -65,19 +67,30 @@ BEHIND_NEXT = 448196522
 BEHIND_SIZE = 448222427
 
 
-def checkpoint(name: str = "checkpoint-budget.json", **edits: int) -> dict:
+def checkpoint(name: str = "checkpoint-budget.json", **edits: int) -> dict[str, object]:
     """Read a captured checkpoint, `next` or `size` edited.
 
     Returns:
         The checkpoint document.
 
     """
-    doc = json.loads((DATA / name).read_text(encoding="utf-8"))
+    text = (DATA / name).read_text(encoding="utf-8")
+    doc = decoded.as_object(decoded.load_json(text), name)
     if "next" in edits:
         doc["next"] = edits["next"]
     if "size" in edits:
-        doc["treeHead"]["treeSize"] = edits["size"]
+        tree_head(doc)["treeSize"] = edits["size"]
     return doc
+
+
+def tree_head(doc: dict[str, object]) -> dict[str, object]:
+    """Reach a checkpoint's signed tree head, to edit it in place.
+
+    Returns:
+        The `treeHead` object.
+
+    """
+    return decoded.as_object(doc["treeHead"], "treeHead")
 
 
 def previous_body(since: str, runs: int) -> str:
@@ -99,6 +112,7 @@ def previous_body(since: str, runs: int) -> str:
 class Rows(unittest.TestCase):
     """A stub gh, the run's two checkpoints, and the helper run."""
 
+    @override
     def setUp(self) -> None:
         """Lay out a stub gh and a run that did not advance."""
         tmp = tempfile.TemporaryDirectory()
@@ -122,7 +136,7 @@ class Rows(unittest.TestCase):
         )
 
     @staticmethod
-    def write(path: Path, doc: dict) -> None:
+    def write(path: Path, doc: dict[str, object]) -> None:
         """Write a checkpoint where the helper reads it."""
         path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -140,7 +154,7 @@ class Rows(unittest.TestCase):
 
     def run_helper(
         self,
-        listing: list[dict] | None = None,
+        listing: list[dict[str, object]] | None = None,
         kept: str = "true",
         **env: str,
     ) -> hermetic.Called:
@@ -185,7 +199,13 @@ class Rows(unittest.TestCase):
         if not self.calls.exists():
             return []
         lines = self.calls.read_text(encoding="utf-8").splitlines()
-        return [json.loads(line) for line in lines]
+        return [
+            [
+                decoded.as_str(arg, "an argument")
+                for arg in decoded.as_array(decoded.load_json(line), "a call")
+            ]
+            for line in lines
+        ]
 
 
 class StandingIssue(Rows):
@@ -225,13 +245,15 @@ class StandingIssue(Rows):
         self.assertEqual(proc.returncode, 1, proc.stderr)
         calls = self.gh_calls()
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[1][:5], ["issue", "edit", "42", "--repo", REPO])
+        edit: list[str] = ["issue", "edit", "42", "--repo", REPO]
+        self.assertEqual(calls[1][:5], edit)
         self.assertEqual(calls[1][5], "--body")
         text = calls[1][6]
         self.assertIn(f"- Behind since: {FIRST_RUN}\n", text)
         self.assertIn(f"- Latest run behind: {RUN}\n", text)
         self.assertIn("- Runs behind since it opened: 4\n", text)
-        self.assertNotIn("create", [c[1] for c in calls])
+        verbs = [c[1] for c in calls]
+        self.assertNotIn("create", verbs)
         self.assertIn("updated the standing issue #42 (4 runs behind)", proc.stdout)
 
     def test_resembling_title_is_ignored(self) -> None:
@@ -252,7 +274,8 @@ class StandingIssue(Rows):
         """Gh issue list failing: exit 2 by name, nothing created."""
         proc = self.run_helper(STUB_LIST_FAIL="1")
         self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [LIST])
+        listed: list[list[str]] = [LIST]
+        self.assertEqual(self.gh_calls(), listed)
         self.assertEqual(
             proc.stderr.strip(),
             "standing-issue: gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
@@ -265,19 +288,17 @@ class StandingIssue(Rows):
         listing = [{"number": 42, "title": TITLE, "body": previous_body(FIRST_RUN, 3)}]
         proc = self.run_helper(listing)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(
-            self.gh_calls(),
+        closed: list[list[str]] = [
+            LIST,
             [
-                LIST,
-                [
-                    "issue", "close", "42", "--repo", REPO, "--comment",
-                    (
-                        f"Caught up: {RUN} judged the log to its head,"
-                        " tree size 448,221,522."
-                    ),
-                ],
+                "issue", "close", "42", "--repo", REPO, "--comment",
+                (
+                    f"Caught up: {RUN} judged the log to its head,"
+                    " tree size 448,221,522."
+                ),
             ],
-        )  # fmt: skip
+        ]  # fmt: skip
+        self.assertEqual(self.gh_calls(), closed)
         self.assertIn("standing-issue: closed #42", proc.stdout)
         newest = "standing-issue: the newest checkpoint: next index 448221522"
         self.assertIn(newest, proc.stdout)
@@ -289,7 +310,8 @@ class StandingIssue(Rows):
         self.write(self.end, checkpoint("checkpoint-pass.json"))
         proc = self.run_helper([{"number": 7, "title": "x", "body": ""}])
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [LIST])
+        listed: list[list[str]] = [LIST]
+        self.assertEqual(self.gh_calls(), listed)
         self.assertIn("no standing issue open", proc.stdout)
 
     def test_no_checkpoint_is_named(self) -> None:
@@ -336,7 +358,7 @@ class StandingIssue(Rows):
         timestamp 9.223372036854776e+21.
         """
         doc = checkpoint()
-        doc["treeHead"]["timestamp"] = 9.223372036854776e21
+        tree_head(doc)["timestamp"] = 9.223372036854776e21
         self.write(self.start, doc)
         proc = self.run_helper([])
         self.assertEqual(proc.returncode, 1, proc.stderr)
@@ -385,7 +407,7 @@ class StandingIssue(Rows):
         """
         proc = self.run_script(GITHUB_REPOSITORY="")
         self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
             proc.stderr.strip(), "standing-issue: GITHUB_REPOSITORY is not set"
         )
@@ -399,7 +421,7 @@ class Gaining(Rows):
         self.write(self.end, checkpoint(next=BEHIND_NEXT + 10000))
         proc = self.run_helper([])
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertIn(
             "standing-issue: green: gaining: outstanding 25,905 at the start,"
             " 15,905 now",
@@ -436,7 +458,7 @@ class Gaining(Rows):
         self.start.unlink()
         proc = self.run_helper([], kept="false")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertIn(
             "standing-issue: green: advanced to 448196522; no earlier count,"
             " this run founded it",
@@ -473,7 +495,7 @@ class Decoded(Rows):
                 if field == "next":
                     doc["next"] = value
                 else:
-                    doc["treeHead"][field] = value
+                    tree_head(doc)[field] = value
                 self.write(self.end, doc)
                 proc = self.run_helper([])
                 self.assertEqual(proc.returncode, 1, proc.stderr)

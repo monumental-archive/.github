@@ -20,11 +20,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import decoded
 import hermetic
 import verdict
 
@@ -40,17 +42,18 @@ STOPPED = (
 )
 
 
-def load(name: str) -> dict:
+def load(name: str) -> dict[str, object]:
     """Read one captured report.
 
     Returns:
         The report.
 
     """
-    return json.loads((DATA / name).read_text(encoding="utf-8"))
+    text = (DATA / name).read_text(encoding="utf-8")
+    return decoded.as_object(decoded.load_json(text), name)
 
 
-def advanced() -> dict:
+def advanced() -> dict[str, object]:
     """Make the budget run's report one whose leg advanced one chunk.
 
     Edits `judged` of the real CANNOT_JUDGE report: no live run advanced
@@ -61,13 +64,14 @@ def advanced() -> dict:
 
     """
     doc = load("report-budget.json")
-    for fact in doc["facts"]:
+    for listed in decoded.as_array(doc["facts"], "facts"):
+        fact = decoded.as_object(listed, "a fact")
         if fact["name"] == "judged":
             fact["value"] = "448196522..448206521"
     return doc
 
 
-def finding(index: int, condition: str) -> dict:
+def finding(index: int, condition: str) -> dict[str, object]:
     """Write one finding as stele records it (internal/assert/reconcile.go).
 
     Returns:
@@ -80,6 +84,7 @@ def finding(index: int, condition: str) -> dict:
 class Verdict(unittest.TestCase):
     """One row per branch of verdict.judge()."""
 
+    @override
     def setUp(self) -> None:
         """Lay out a report file."""
         tmp = tempfile.TemporaryDirectory()
@@ -87,7 +92,7 @@ class Verdict(unittest.TestCase):
         self.report = Path(tmp.name) / "report.json"
 
     def run_helper(
-        self, code: str, doc: dict | None, saved: str = "true"
+        self, code: str, doc: dict[str, object] | None, saved: str = "true"
     ) -> hermetic.Called:
         """Write the report (None: stele wrote none) and call the helper.
 

@@ -15,8 +15,16 @@ The workflow is read as text, line by line under each job: stdlib only.
 from __future__ import annotations
 
 import re
+import sys
 import unittest
 from pathlib import Path
+from typing import override
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import typed_std
 
 HERE = Path(__file__).resolve().parent
 WORKFLOW = HERE.parent / "workflows" / "rekor-monitor.yml"
@@ -67,7 +75,11 @@ def legs(job: str) -> list[int]:
 
     """
     block = re.search(r"\n        leg:\n((?:          - \d+\n)+)", job)
-    return [int(n) for n in re.findall(r"\d+", block.group(1))] if block else []
+    listed = typed_std.group(block, 1) if block else None
+    if not listed:
+        return []
+    numbers = (typed_std.group(m) for m in re.finditer(r"\d+", listed))
+    return [int(n) for n in numbers if n is not None]
 
 
 def run_wide(text: str) -> list[str]:
@@ -244,6 +256,7 @@ ROWS = [
 class Shape(unittest.TestCase):
     """The workflow as built, and one planted copy per rule."""
 
+    @override
     def setUp(self) -> None:
         """Read the workflow."""
         self.text = WORKFLOW.read_text(encoding="utf-8")
@@ -254,14 +267,15 @@ class Shape(unittest.TestCase):
         The alert's `always()` is #1149's: a leg ended by its timeout is
         cancelled, which `failure()` does not match, and nothing was filed.
         """
-        self.assertEqual(problems(self.text), [])
+        self.assertEqual(problems(self.text), list[str]())
 
     def test_rows(self) -> None:
         """Each planted change is named by its own message, and only it."""
         for old, new, message in ROWS:
             with self.subTest(message=message, old=old):
                 self.assertEqual(self.text.count(old), 1)
-                self.assertEqual(problems(self.text.replace(old, new)), [message])
+                named: list[str] = [message]
+                self.assertEqual(problems(self.text.replace(old, new)), named)
 
 
 if __name__ == "__main__":
