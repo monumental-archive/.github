@@ -767,6 +767,26 @@ class Safety(Planted):
         )
         self.assertEqual(git_out(self.tree, "status", "--porcelain", "-uno"), "")
 
+    def test_restored_file_is_red_and_the_counts_are_written(self) -> None:
+        """A restore reds the run by name, but every outcome is still counted."""
+        plan = self.shared(
+            [KILLED, SURVIVOR],
+            {
+                f"pkg/mod.py {ADD} 0": {**KILLS, "leave": True},
+                f"pkg/mod.py {NUM} 0": SURVIVES,
+            },
+        )
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
+        self.assertEqual(done.returncode, 1)
+        restored = (
+            f"{LABEL}: pkg/mod.py differed from git after pkg/mod.py:2:"
+            f" {ADD} #0 (answer) — restored"
+        )
+        want = [restored, *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, judged(SURVIVOR, KILLED))
+        self.assertEqual(self.counts(), "0/1\t2\t1\t1\t0\n")
+
     def test_run_killed_mid_mutant_is_restored_by_the_trap(self) -> None:
         """The judge dies with a mutant applied: the exit trap restores it."""
         plan = self.shared(

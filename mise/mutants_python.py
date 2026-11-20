@@ -1082,7 +1082,9 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
 
     Returns:
         0 when green, EXIT_RED for a survivor, a mutant never judged or
-        a file left mutated.
+        a file left changed. The counts are written whenever every
+        mutant reached an outcome: a restored file is red by name but
+        withholds nothing (#1832).
 
     """
     killed = [j for j in judged if j.outcome in KILLED]
@@ -1100,16 +1102,13 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
         f"{LABEL}: {len(judged)} mutants, {len(killed)} killed,"
         f" {len(survivors)} survived, {excluded} excluded"
     )
-    status = 0
     for j in unjudged:
         red(f"never judged: {where(j.mutant)}: worker outcome '{j.outcome}'")
-        status = EXIT_RED
     for j in judged:
         for path in j.restored:
             red(f"{path} differed from git after {where(j.mutant)} — restored")
-            status = EXIT_RED
-    if status:
-        return status
+    if unjudged:
+        return EXIT_RED
     summary_dir = os.environ.get("MUTANTS_SUMMARY_DIR", "")
     if summary_dir:
         Path(summary_dir).mkdir(parents=True, exist_ok=True)
@@ -1117,6 +1116,7 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
             f"{shard}\t{len(judged)}\t{len(killed)}\t{len(survivors)}\t{excluded}\n",
             encoding="utf-8",
         )
+    status = EXIT_RED if any(j.restored for j in judged) else 0
     if survivors:
         red("red — kill each survivor with an assertion, or exclude it at its site")
         print(
@@ -1124,7 +1124,7 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
             file=sys.stderr,
         )
         return EXIT_RED
-    return 0
+    return status
 
 
 def judge(plan_dir: Path, pragma_file: Path, shard: str, scratch: Path) -> int:
