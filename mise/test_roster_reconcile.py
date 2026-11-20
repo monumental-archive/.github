@@ -15,7 +15,7 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -55,7 +55,7 @@ def run(roster: list[str] | None, listing: str) -> tuple[int, str]:
         if roster is not None:
             body = {"population": {"repositories": [{"repo": r} for r in roster]}}
             path.write_text(json.dumps(body), encoding="utf-8")
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(SCRIPT), CALLER, str(path)],
             input=listing,
             capture_output=True,

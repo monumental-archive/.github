@@ -23,8 +23,6 @@ from __future__ import annotations
 import pathlib
 import re
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
 import unittest
@@ -313,7 +311,6 @@ class AScratchRepositoryPinningItsOwnPython(unittest.TestCase):
             (bindir / "python3").write_text(STUB.format(who=who), encoding="utf-8")
             (bindir / "python3").chmod(0o755)
         env = hermetic.env(self.tmp)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([git(), "init", "-q", "."], cwd=self.repo, env=env, check=True)
 
     def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
@@ -337,7 +334,6 @@ class AScratchRepositoryPinningItsOwnPython(unittest.TestCase):
             MISE_TASK_RUN_AUTO_INSTALL="0",
             MISE_YES="1",
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [mise(), "run", "--output", "interleave", task],
             cwd=self.repo,

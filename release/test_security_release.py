@@ -35,7 +35,7 @@ gate as `mise run test`, which `ci` collects.
 import json
 import os
 import stat
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import textwrap
 import unittest
@@ -262,7 +262,6 @@ class Repo:
             ORG_CANON_DIR=str(self.canon),
         )
         env.update(overrides)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.tree,

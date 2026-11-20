@@ -21,7 +21,7 @@ appending the `mise` root to `sys.path`, as it reaches `hermetic`.
 """
 
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -72,7 +72,6 @@ def _yq(expression: str, path: Path | str) -> object:
         ValueError: yq could not read the file, with yq's own message.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [YQ, "-o=json", "-I=0", expression, str(path)],
         capture_output=True,

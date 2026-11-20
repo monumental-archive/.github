@@ -42,8 +42,6 @@ so the masking cannot eat the evidence.
 
 import os
 import re
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from pathlib import Path
@@ -92,7 +90,6 @@ def npm(
         The finished process; its stdout when captured by the caller.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - npm is the caller's pin, on PATH
         ["npm", *args],

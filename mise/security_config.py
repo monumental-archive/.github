@@ -42,7 +42,7 @@ import argparse
 import json
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,7 +169,6 @@ def gh_fetch(endpoint: str, *, paginate: bool = False) -> tuple[int, object]:
     args = [GH, "api", endpoint]
     if paginate:
         args += ["--paginate", "--slurp"]
-    # ruff: ignore[subprocess-without-shell-equals-true]
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         match = re.search(r"\(HTTP (\d{3})\)", result.stderr)

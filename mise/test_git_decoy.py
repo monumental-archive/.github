@@ -19,7 +19,7 @@ the very hook they are about.
 import os
 import pathlib
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -122,7 +122,6 @@ def throwaway(root: pathlib.Path) -> pathlib.Path:
     root.mkdir()
     env = {**CLEAN, **IDENTITY}
     for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "real"]):
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "-C", str(root), *args], env=env, check=True)
     return root
 
@@ -134,7 +133,6 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
         The index file's bytes and the refs.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     refs = subprocess.run(
         [GIT, "-C", str(repo), "for-each-ref"],
         env={**CLEAN, **IDENTITY},
@@ -181,7 +179,6 @@ class Task(unittest.TestCase):
             The finished process.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=tree,
@@ -254,7 +251,6 @@ class Helper(unittest.TestCase):
 
     def test_the_script_contract(self) -> None:
         """Started as a process, `run` hands back its command's status."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         r = subprocess.run(
             [
                 *(sys.executable, str(_HERE / "git_decoy.py")),

@@ -1132,6 +1132,26 @@ Three settings are not preferences:
   lose, and drift is exactly how an MIT header reached a 0BSD tree
   (#316). The scaffold sharpens it — those files are copied into repos
   deliberately licensed differently.
+- **`S404` and `S603` are off** (#1838). Both port bandit's audit
+  prompts (B404, B603), "a process starts here, have someone look",
+  and neither is a finding code can fix. `S404` fires on the line
+  `import subprocess`; `S603` on any process call whose argument is
+  not a string literal. Probed on ruff 0.17.5 under the delivered
+  config: `subprocess.run(["/usr/bin/git", "status"], check=True)`
+  passes, and `subprocess.run([GIT, "status"], check=True)` with
+  `GIT` a module constant fires, as does a call passing
+  `str(path)`. Ruff does not trace where an argument came from, so
+  it cannot tell a trusted one from an untrusted one, and a call
+  that takes any input cannot pass. Every site answered with a
+  comment: 460 of the tree's 534 `# ruff: ignore[...]` (141 `S404`,
+  319 `S603`), so reading the tree for "what did we waive" returned
+  the pair six times in seven. All 460 were deleted with the switch:
+  a comment left behind is itself red (`unused-noqa`), so there is
+  no state between "rules on" and "comments gone". The rules code
+  CAN pass stay on — `shell=True` (`S602`, `S604`, `S605`) and the
+  partial-path pair (`S606`, `S607`) — and `mise/test_ruff_config.py`
+  plants a red row for `S602` and `S607` by rule name, and a clean
+  one for a helper passing a constant and a given path.
 - **`target-version = "py39"` is a fact, not an aspiration.** The belt
   does not pin Python, so the script runs on whatever `python3` a machine
   has, and this repo's own maintainer machine resolves macOS's 3.9.6.

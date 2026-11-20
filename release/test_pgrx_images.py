@@ -19,7 +19,7 @@ import io
 import os
 import shutil
 import stat
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -96,7 +96,6 @@ def run(
         The finished process, output captured as text.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         args, cwd=cwd, capture_output=True, text=True, check=False, env=env
     )

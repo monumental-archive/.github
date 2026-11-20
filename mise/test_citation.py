@@ -14,7 +14,7 @@ directory. stdlib `unittest`, matching the other mise/test_*.py; run
 through the gate as `mise run test`.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,7 +50,6 @@ def run(
             (root / ".badge-states").write_text(states, encoding="utf-8")
         env = hermetic.env()
         env["CITATION_OUT"] = str(root / "out.cff")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=root,
@@ -180,7 +179,6 @@ class TheRenderMatchesTheStamp(unittest.TestCase):
             )
             env = hermetic.env()
             env["CITATION_OUT"] = str(root / "out.cff")
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [BASH, str(SCRIPT)],
                 cwd=root,

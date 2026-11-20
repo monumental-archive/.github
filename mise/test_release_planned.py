@@ -17,7 +17,7 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -84,7 +84,7 @@ class History:
             Its stdout, stripped.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [hermetic.tool("git"), *args],
             cwd=self.root,
             env=self.env,
@@ -110,7 +110,7 @@ class History:
             The finished process, stdout and stderr captured as text.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [hermetic.tool("bash"), "-euo", "pipefail", "-c", BODY],
             cwd=self.root,
             env=self.env,

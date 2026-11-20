@@ -16,7 +16,7 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,10 +67,10 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
-            subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", BODY],
             cwd=root,
             env=env,
@@ -141,9 +141,9 @@ class CodecovYml(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = hermetic.env()
-            subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
             (root / "codecov.yml").write_text(EDTF, encoding="utf-8")
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [BASH, "-euo", "pipefail", "-c", BODY],
                 cwd=root,
                 env=env,

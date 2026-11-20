@@ -23,7 +23,7 @@ as `mise run test`, which `ci` collects.
 import os
 import pathlib
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -110,7 +110,7 @@ class FileAnIssue(unittest.TestCase):
         )
         proc: subprocess.CompletedProcess[str] | hermetic.Called
         if script:
-            proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            proc = subprocess.run(
                 [sys.executable, str(HELPER)],
                 env=env,
                 capture_output=True,

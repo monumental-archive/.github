@@ -33,8 +33,6 @@ import json
 import os
 import pathlib
 import re
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 
@@ -67,7 +65,6 @@ def gh(*args: str, capture: bool = False, quiet: bool = False) -> str:
         SystemExit: `gh` failed, with its exit status.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path]
         ["gh", *args],

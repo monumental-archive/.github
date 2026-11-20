@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - the script row runs the helper as the workflow does
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -139,7 +139,7 @@ class Harness(unittest.TestCase):
         argv = [
             sys.executable, str(HELPER), "--report", str(self.report), "--run-url", RUN,
         ]  # fmt: skip
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
+        return subprocess.run(
             argv, env={**self.env, **env}, capture_output=True, text=True, check=False
         )
 

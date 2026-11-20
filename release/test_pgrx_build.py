@@ -23,7 +23,7 @@ import json
 import os
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tarfile
 import unittest
@@ -68,7 +68,6 @@ def run(
         The completed process, output captured as text.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         argv,
         env=hermetic.env(**env),
@@ -951,7 +950,6 @@ def elf_tools_present() -> bool:
         raise AssertionError(msg)
     if MISSING:
         return False
-    # ruff: ignore[subprocess-without-shell-equals-true]
     probe = subprocess.run(
         [hermetic.tool("readelf"), "--version"], capture_output=True, check=False
     )
@@ -981,13 +979,11 @@ def build_library(
     src = path.with_suffix(".c")
     src.write_text(source)
     flags = ["-g", "-O0", "-shared", "-fPIC"] + ([] if libc else ["-nostdlib"])
-    # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run([hermetic.tool("cc"), *flags, "-o", str(path), str(src)], check=True)
     src.unlink()
     if dep:
         payload = path.with_suffix(".dep")
         payload.write_bytes(b"\x78\x9c\x03\x00\x00\x00\x00\x01")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [
                 hermetic.tool("objcopy"),
@@ -1085,7 +1081,6 @@ class DebugSplit(unittest.TestCase):
             readelf -S output.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [hermetic.tool("readelf"), "-S", "--wide", str(path)],
             capture_output=True,

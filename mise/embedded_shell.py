@@ -22,18 +22,13 @@ Deterministic and offline: shfmt and shellcheck both read only the bytes
 handed to them.
 """
 
-# Running shfmt and shellcheck IS this file's job, so the subprocess rules
-# have nothing to warn about here: every argv is a fixed tool name plus a
-# temporary path this file just wrote, nothing from the repository reaches
-# a command line, and the tools resolve through the belt's PATH, which
-# activate_aggressive puts ahead of anything a machine happens to ship.
 from __future__ import annotations
 
 import argparse
 import contextlib
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -424,7 +419,6 @@ def shfmt_body(run: Run, lines: list[str]) -> list[str] | None:
         The new body lines, or None when shfmt fails or changes nothing.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     r = subprocess.run(
         [*SHFMT, "-"],
         input="#!/usr/bin/env bash\n" + run.source,
@@ -525,7 +519,6 @@ def check(
             name = tmp.name
         try:
             if fmt and not folded:
-                # ruff: ignore[subprocess-without-shell-equals-true]
                 r = subprocess.run(
                     [*SHFMT, "-d", name],
                     capture_output=True,
@@ -535,7 +528,7 @@ def check(
                 if r.stdout.strip():
                     out.append(f"{path}:{lineno}: run: block is not shfmt-formatted")
             if lint:
-                # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
+                # ruff: ignore[start-process-with-partial-path]
                 r = subprocess.run(
                     [
                         "shellcheck",

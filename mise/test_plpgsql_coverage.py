@@ -25,7 +25,7 @@ import io
 import json
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -226,7 +226,6 @@ def run(
         The finished process.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         argv, cwd=cwd, env=env, capture_output=True, text=True, check=False
     )

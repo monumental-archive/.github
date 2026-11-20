@@ -16,7 +16,7 @@ gate as `mise run test`.
 import contextlib
 import io
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -207,7 +207,6 @@ class Script(unittest.TestCase):
     def test_the_helper_runs_as_a_script(self) -> None:
         """No tracked package.json: it starts, prints nothing and exits 0."""
         with tempfile.TemporaryDirectory() as tmp:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [sys.executable, str(HERE / "coverage_js_runner.py"), "yarn.lock"],
                 cwd=tmp,

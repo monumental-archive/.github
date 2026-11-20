@@ -25,7 +25,7 @@ gate as `mise run test`, which `ci` collects.
 import json
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -226,15 +226,11 @@ def init_tree(
 
     `commit` commits it, so `git status` reads what the run changed.
     """
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [GIT, "init", "-q"], cwd=tree, env=env, check=True
-    )
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
     if tracked:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "add", *tracked], cwd=tree, env=env, check=True
-        )
+        subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
     if commit:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
             [GIT, "-c", "commit.gpgsign=false", "commit", "-qm", "planted"],
             cwd=tree,
             env=env,
@@ -389,7 +385,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if measured:
         plant_run(tmp / "run", python=python_measured)
     init_tree(tree, env, tracked, commit=commit)
-    done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    done = subprocess.run(
         [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
         cwd=tree,
         env=env,
@@ -883,7 +879,6 @@ def run_upload_step(
             HAS_TOKEN="true" if has_token else "false",
             GITHUB_OUTPUT=str(out),
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-e", "-c", upload_step()],
             cwd=tmp,
@@ -1006,7 +1001,7 @@ class CheckLeavesTheTree(CoverageTaskCase):
             The status, empty for a tree as it was planted.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [GIT, "status", "--porcelain"],
             cwd=tree,
             env=hermetic.env(),
@@ -1237,7 +1232,7 @@ class MeasureSelectors(unittest.TestCase):
                 "STUB_FILES": "a.rs:13:8 b.rs:0:0",
             }
             env["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
                 cwd=tree,
                 env=env,
@@ -1277,7 +1272,7 @@ class MeasureSelectors(unittest.TestCase):
                 "STUB_FILES": "a.rs:200:123",
                 "STUB_GO": "93.0",
             }
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "all"],
                 cwd=tree,
                 env=env,
@@ -1335,7 +1330,7 @@ class RustLegGuards(unittest.TestCase):
         if metadata is not None:
             (base / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
             env["STUB_METADATA"] = str(base / "metadata.json")
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:check", "rust"],
             cwd=tree,
             env=env,
@@ -1420,7 +1415,7 @@ class ReportsSelector(CoverageTaskCase):
             "ORG_BELT_DIR": str(BELT),
             "ORG_COVERAGE_REPORTS": str(tree.parent / "reports"),
         }
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "reports"],
             cwd=tree,
             env=env,
@@ -1463,7 +1458,7 @@ class ReportsSelector(CoverageTaskCase):
             tree.mkdir()
             (Path(tmp) / "reports").mkdir()
             (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run(
                 [GIT, "init", "-q"], cwd=tree, env=hermetic.env(), check=True
             )
             done = self.reports(tree)
@@ -1520,17 +1515,15 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
             "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
         }
         for args in (["init", "-q"], ["add", "sub/helper.py"]):
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [GIT, *args], cwd=tree, env=env, check=True
-            )
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run([GIT, *args], cwd=tree, env=env, check=True)
+        subprocess.run(
             [str(BELT / "measured"), BASH, "-c", test_run],
             cwd=tree,
             env=env,
             capture_output=True,
             check=True,
         )
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "python"],
             cwd=tree,
             env=env,
@@ -1677,9 +1670,7 @@ class GoOneRun(unittest.TestCase):
         )
         env = hermetic.env()
         for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                argv, cwd=tree, env=env, check=True
-            )
+            subprocess.run(argv, cwd=tree, env=env, check=True)
         self.stubs = stubs
         return tree
 
@@ -1709,7 +1700,7 @@ class GoOneRun(unittest.TestCase):
             **given,
         )
         env["PATH"] = f"{self.stubs}{os.pathsep}{env['PATH']}"
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [hermetic.tool("mise"), "run", "coverage:check"],
             cwd=tree,
             env=env,
@@ -1839,9 +1830,7 @@ class RustOneRun(unittest.TestCase):
         )
         env = hermetic.env()
         for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                argv, cwd=tree, env=env, check=True
-            )
+            subprocess.run(argv, cwd=tree, env=env, check=True)
         self.stubs = stubs
         return tree
 
@@ -1870,7 +1859,7 @@ class RustOneRun(unittest.TestCase):
             **({"STUB_FILES": "crates/core/src/lib.rs:20:18"} | given),
         )
         env["PATH"] = f"{self.stubs}{os.pathsep}{env['PATH']}"
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [hermetic.tool("mise"), "run", "coverage:check"],
             cwd=tree,
             env=env,

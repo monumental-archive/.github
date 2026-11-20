@@ -17,7 +17,7 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import hashlib
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -102,7 +102,7 @@ class Tree:
 
     def git(self, *args: str) -> None:
         """Run one git command against this tree, and nothing else (#857)."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
             [GIT, *args],
             cwd=self.root,
             env=clean_env(),
@@ -117,7 +117,7 @@ class Tree:
             The completed process; rows assert on output and status.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.root,
             env=clean_env(),

@@ -22,7 +22,7 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - only stubbed
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path

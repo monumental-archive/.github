@@ -16,7 +16,6 @@ one binary name, the second over the first.
 Exit status: 0 built, 1 refused, else go's own failing status.
 """
 
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from pathlib import Path
@@ -54,7 +53,6 @@ def go(*args: str) -> str:
         GoFailedError: go exited non-zero.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - the caller's pinned go, on PATH
         ["go", *args],

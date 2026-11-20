@@ -11,7 +11,7 @@ print the arguments they receive, one per line, so a row reads exactly
 what the program handed on.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,7 +50,7 @@ def run(argv: list[str], **env: str) -> subprocess.CompletedProcess[str]:
         The finished process, text mode.
 
     """
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [str(EXEC), *argv],
         env=hermetic.env(**env),
         capture_output=True,

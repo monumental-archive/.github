@@ -6,7 +6,7 @@ Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
 
 import os
 import signal
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -51,9 +51,7 @@ def plant(root: Path, *, floor: bool) -> Path:
     """
     tree = root / "tree"
     tree.mkdir()
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [GIT, "init", "-q", str(tree)], check=True, env=hermetic.env()
-    )
+    subprocess.run([GIT, "init", "-q", str(tree)], check=True, env=hermetic.env())
     if floor:
         (tree / ".coverage-floor").write_text("python 50.0\n")
     return tree
@@ -79,7 +77,7 @@ def run(tree: Path, argv: list[str], **env: str) -> subprocess.CompletedProcess[
         The finished process, text mode.
 
     """
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [str(MEASURED), *argv],
         cwd=tree,
         env=hermetic.env(**env),
@@ -197,7 +195,7 @@ class FloorMergesNeverReplaces(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tree = plant(Path(tmp), floor=True)
             line = f'"{MEASURED}" sh -c \'printf %s "$PYTHONPATH"\''
-            out = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            out = subprocess.run(
                 [SH, "-c", line],
                 cwd=tree,
                 env=hermetic.env(
@@ -219,7 +217,7 @@ def dead_pid() -> int:
         A pid no process holds any more.
 
     """
-    done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    done = subprocess.run(
         [SH, "-c", "echo $$"], capture_output=True, text=True, check=True
     )
     return int(done.stdout)

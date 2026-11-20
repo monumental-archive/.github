@@ -20,7 +20,7 @@ import json
 import os
 import pathlib
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -403,7 +403,6 @@ class Planted(unittest.TestCase):
             ORG_TEST_WORKERS=workers,
             PIDS=str(pids or ""),
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [
                 *command,
@@ -630,7 +629,7 @@ class Runner(Planted):
         for body in ("{", '{"module": 1}'):
             with self.subTest(spec=body):
                 spec.write_text(body, encoding="utf-8")
-                r = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                r = subprocess.run(
                     [sys.executable, str(RUNNER), "--worker", str(spec)],
                     cwd=start,
                     env=hermetic.env(),
@@ -984,13 +983,11 @@ class Measured(unittest.TestCase):
         env.pop("COVERAGE_PROCESS_START", None)
         env["PATH"] = f"{stubs}:{env.get('PATH', '')}"
         for argv in ([GIT, "init", "-q"], [GIT, "add", "."]):
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(argv, cwd=tree, env=env, check=True)
         # The suite runs once, through `measured`, as the repository's
         # test task runs it (#1667); the leg then reads that run.
         (tree / ".coverage-floor").write_text("", encoding="utf-8")
         env["ORG_COVERAGE_RUN"] = str(base / "run")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [str(MEASURE.parent / "measured"), BASH, "-c", run],
             cwd=tree,
@@ -998,7 +995,6 @@ class Measured(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(MEASURE), "coverage:test", "python"],
             cwd=tree,

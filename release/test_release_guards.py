@@ -40,7 +40,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -102,7 +102,6 @@ def _parses(script: str) -> bool:
         True when `bash -n` accepts the script.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return (
         subprocess.run(
             [BASH, "-n", str(RELEASE / script)], capture_output=True, check=False
@@ -187,7 +186,6 @@ def run_script(name: str, root: Path, **env: str) -> subprocess.CompletedProcess
     # in the tree is invisible to the `git ls-files` reads they do make.
     home = root / ".home"
     home.mkdir(exist_ok=True)
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [BASH, str(RELEASE / name)],
         cwd=root,
@@ -1326,7 +1324,6 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         home.mkdir()
 
         def git(*args: str) -> str:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             return subprocess.run(
                 [hermetic.tool("git"), *args],
                 cwd=repo,
@@ -1507,7 +1504,6 @@ class TagReleaseRefusals(unittest.TestCase):
         (repo / "a.txt").write_text("x\n")
 
         def git(*args: str) -> None:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(
                 [hermetic.tool("git"), *args],
                 cwd=repo,
@@ -1590,7 +1586,6 @@ class TagReleaseRefusals(unittest.TestCase):
                 if "expected: chore: release v" in line:
                     tag = "v" + line.rsplit("release v", 1)[1].strip()
             self.assertTrue(tag, first.stderr)
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(
                 [hermetic.tool("git"), "tag", "-a", tag, "-m", tag],
                 cwd=repo,
@@ -1663,7 +1658,6 @@ class TagReleasePush(unittest.TestCase):
         repo.mkdir()
 
         def git(cwd: Path, *args: str) -> str:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             return subprocess.run(
                 [hermetic.tool("git"), *args],
                 cwd=cwd,
@@ -1828,7 +1822,6 @@ class TagReleaseUpgradePath(unittest.TestCase):
         sql.mkdir(parents=True)
 
         def git(cwd: Path, *args: str) -> str:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             return subprocess.run(
                 [hermetic.tool("git"), *args],
                 cwd=cwd,
@@ -2001,7 +1994,6 @@ class InventoryStepWiring(unittest.TestCase):
             GITHUB_OUTPUT=str(root / ".output"),
             **extra,
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [BASH, str(script)],
             cwd=root,

@@ -21,7 +21,7 @@ gate as `mise run test`.
 
 import shlex
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,7 +52,6 @@ class TasksFailOnError(unittest.TestCase):
         """No body reaches its last line, and each run is red."""
         for what, body in BODIES.items():
             with self.subTest(body=what):
-                # ruff: ignore[subprocess-without-shell-equals-true]
                 done = subprocess.run(
                     [*shlex.split(SHELL), body],
                     env=hermetic.env(),
@@ -82,7 +81,6 @@ class ALinkedCloneThatPinsItsShell(unittest.TestCase):
             encoding="utf-8",
         )
         (tmp / "config").mkdir()
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [hermetic.tool("git"), "init", "-q", "."],
             cwd=repo,
@@ -99,7 +97,6 @@ class ALinkedCloneThatPinsItsShell(unittest.TestCase):
             MISE_AUTO_INSTALL="0",
             MISE_TASK_RUN_AUTO_INSTALL="0",
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [hermetic.tool("mise"), "run", "t"],
             cwd=repo,

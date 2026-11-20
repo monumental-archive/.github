@@ -15,7 +15,7 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,7 +54,7 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
         env = hermetic.env(root / "home")
 
         def git(*args: str, stdin: str | None = None) -> None:
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run(
                 [GIT, *args], cwd=root, env=env, input=stdin, text=True, check=True
             )
 
@@ -62,7 +62,7 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
         git("commit", "-q", "--allow-empty", "-m", "base")
         git("update-ref", "refs/remotes/origin/main", "HEAD")
         git("commit", "-q", "--allow-empty", "-F", "-", stdin=message)
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=root,
             env=env,

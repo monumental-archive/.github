@@ -24,7 +24,7 @@ import contextlib
 import io
 import json
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -139,20 +139,16 @@ def run(
             "PLANT_CODE": code,
             "PLANT_LOG": str(log),
         }
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "init", "-q"], cwd=tree, env=env, check=True
-        )
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
         if answers:
             (tree / ".bestpractices.json").write_text(
                 json.dumps(ANSWERS, indent=2) + "\n", encoding="utf-8"
             )
         if readme is not None:
             (tree / "README.md").write_text(readme, encoding="utf-8")
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "add", "-A"], cwd=tree, env=env, check=True
-        )
+        subprocess.run([GIT, "add", "-A"], cwd=tree, env=env, check=True)
         if bulk:
-            blob = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            blob = subprocess.run(
                 [GIT, "hash-object", "-w", "--stdin"],
                 cwd=tree,
                 env=env,
@@ -163,7 +159,7 @@ def run(
             ).stdout.strip()
             names = [*(f"p/{n:0>72}.txt" for n in range(bulk)), "readme.md"]
             index = "".join(f"100644 {blob}\t{name}\n" for name in names)
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run(
                 [GIT, "update-index", "--index-info"],
                 cwd=tree,
                 env=env,
@@ -171,7 +167,7 @@ def run(
                 text=True,
                 check=True,
             )
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", BODY],
             cwd=tree,
             env=env,

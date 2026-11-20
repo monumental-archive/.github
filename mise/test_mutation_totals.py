@@ -12,7 +12,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 """
 
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,7 +48,7 @@ class Totals(unittest.TestCase):
             The finished process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, str(SCRIPT), str(self.dir), lang],
             cwd=self.dir.parent,
             capture_output=True,
@@ -158,7 +158,7 @@ class Totals(unittest.TestCase):
 
     def test_language_is_required(self) -> None:
         """No language named: refused, never a total of everything."""
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(SCRIPT), str(self.dir)],
             cwd=self.dir.parent,
             capture_output=True,

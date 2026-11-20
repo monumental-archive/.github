@@ -25,8 +25,6 @@ Exit status: 0 packed, 1 refused, else npm's own failing status.
 import hashlib
 import json
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -68,7 +66,6 @@ def npm(cwd: Path, *args: str) -> str:
         NpmFailedError: npm exited non-zero.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - the caller's pinned node, on PATH
         ["npm", *args],

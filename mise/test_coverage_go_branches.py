@@ -27,7 +27,7 @@ gate as `mise run test`, which `ci` collects.
 
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from decimal import Decimal
@@ -261,14 +261,10 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     }
     if silent:
         env["STUB_SILENT"] = "1"
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [GIT, "init", "-q"], cwd=tree, env=env, check=True
-    )
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
     if tracked:
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "add", *tracked], cwd=tree, env=env, check=True
-        )
-    done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
+    done = subprocess.run(
         [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
         cwd=tree,
         env=env,
@@ -457,7 +453,7 @@ class AuditRows(GoBranchCase):
         """The leg writes nothing into the tree it measures."""
         done, tmp, _ = self.run_task()
         self.assertEqual(0, done.returncode, done.stderr)
-        status = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        status = subprocess.run(
             [GIT, "ls-files", "--others", "--modified", "--exclude-standard"],
             cwd=tmp / "tree",
             env=hermetic.env(),

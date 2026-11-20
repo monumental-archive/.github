@@ -61,8 +61,6 @@ ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN.
 import hashlib
 import json
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import urllib.error
@@ -185,7 +183,6 @@ def checked(
         CommandError: it exited non-zero.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         argv, env=dict(env), cwd=cwd, capture_output=capture, text=True, check=False
     )
@@ -412,7 +409,6 @@ def run(env: Mapping[str, str], cwd: Path, fetch: Fetch = http) -> int:
     token = exchange_token(env, fetch)
     workflow_command.mask(token)
     publish = ["cargo", "publish", "--workspace", "--locked", "--no-verify", *excludes]
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         publish, env={**env, "CARGO_REGISTRY_TOKEN": token}, cwd=cwd, check=False
     ).returncode

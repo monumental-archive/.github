@@ -31,7 +31,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -194,7 +194,6 @@ class FuzzBuild(unittest.TestCase):
             "PLANT_LOG": str(self.log),
             "PLANT_REFUSAL": str(self.refusal),
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", task_body("lint:fuzz-build")],
             cwd=self.root,

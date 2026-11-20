@@ -19,7 +19,7 @@ as `mise run test`, which `ci` collects.
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -72,7 +72,7 @@ def run_helper(
             "workspace_members": [ids[n] for n in members],
         }
         (tmp / "metadata.json").write_text(json.dumps(metadata))
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        result = subprocess.run(
             [BASH, str(HELPER)],
             env=hermetic.env(
                 PATH=f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
@@ -137,7 +137,7 @@ class TheWholeWorkspace(unittest.TestCase):
                 "exit 101\n"
             )
             stub.chmod(0o755)
-            result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            result = subprocess.run(
                 [BASH, str(HELPER)],
                 env=hermetic.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
                 capture_output=True,

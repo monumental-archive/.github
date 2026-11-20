@@ -45,7 +45,7 @@ import os
 import re
 import shutil
 import signal
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -270,7 +270,6 @@ def scrubbed() -> dict[str, str]:
 
 def git(root: Path, *args: str) -> None:
     """Run git in a fixture repository, never the caller's."""
-    # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run(
         [GIT, *args],
         cwd=root,
@@ -611,7 +610,6 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
             "PLANT_SQLFLUFF": hermetic.tool("sqlfluff"),
             "PLANT_SQLFLUFF_LOG": str(self.log),
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", task_body(task)],
             cwd=self.root,
@@ -631,7 +629,6 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         """Precondition: without the skip, the snapshot row would be red."""
         path = self.root / "snapshot.sql"
         path.write_text(LAB_SNAPSHOT, encoding="utf-8")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [
                 hermetic.tool("sqlfluff"),
@@ -795,7 +792,6 @@ class AbsentSqlfluffFailsByName(unittest.TestCase):
         # the python coverage leg a child records its files relative to
         # its own directory, and one run from mise/ left `hermetic.py`
         # where `coverage xml` could not find it (#1528).
-        # ruff: ignore[subprocess-without-shell-equals-true]
         child = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), row],
             cwd=BELT.parent,

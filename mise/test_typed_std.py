@@ -15,7 +15,7 @@ gate as `mise run test`.
 import ast
 import io
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import unittest
 import urllib.request
@@ -110,7 +110,6 @@ class StdinText(unittest.TestCase):
             "except typed_std.NoStdinError as err:\n"
             "    print(err)\n"
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-c", 'exec 0<&-; exec "$0" -c "$1"', sys.executable, program],
             capture_output=True,

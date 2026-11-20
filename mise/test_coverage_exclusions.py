@@ -12,7 +12,7 @@ with a scrubbed environment (#857). The last row is the canon itself.
 
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -127,7 +127,6 @@ class Markers(unittest.TestCase):
     def test_the_helper_runs_as_a_script(self) -> None:
         """The script contract: it reads stdin, reports, and exits 1 on a marker."""
         name, body, rule = MARKERS[0]
-        # ruff: ignore[subprocess-without-shell-equals-true]
         r = subprocess.run(
             [sys.executable, str(HELPER)],
             input=f"{name}\n",
@@ -170,7 +169,6 @@ class Task(unittest.TestCase):
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text(body, encoding="utf-8")
         for args in (["init", "-q"], ["add", "."]):
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(
                 [GIT, *args], cwd=root, env=hermetic.env(**GIT_CONFIG), check=True
             )
@@ -184,7 +182,6 @@ class Task(unittest.TestCase):
             The finished process.
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", task_body()],
             cwd=root,
@@ -241,7 +238,6 @@ class MissingSibling(unittest.TestCase):
         target = Path(tmp.name) / relative
         target.parent.mkdir(parents=True)
         shutil.copy(source, target)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [sys.executable, str(target), "--help"],
             capture_output=True,
