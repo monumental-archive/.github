@@ -33,6 +33,7 @@ GATE_NONE holds it to measuring nothing.
 """
 
 import ast
+import copy
 import io
 import re
 import shlex
@@ -53,11 +54,15 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import call_names
 import decoded
-import embedded_shell
 import hermetic
+import workflow_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# A job and a step, as workflow_yaml reads them.
+Job = dict[str, object]
+Step = dict[str, object]
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
@@ -193,9 +198,6 @@ STELE_EXECS = {
 # A cargo subcommand runs the `cargo-<sub>` binary.
 CARGO_SUB = re.compile(r"(?<![\w./-])cargo\s+([a-z][\w-]*)")
 
-# The indent of a step's own keys in every workflow here.
-STEP = 8
-
 # The subprocess calls whose first argument is the command (#1499).
 SUBPROCESS_CALLS = {"run", "check_output", "check_call", "Popen"}
 
@@ -270,83 +272,146 @@ def belt_tools() -> dict[str, str]:
     return {caller_pins.tool_name(key): key for key in belt_table("tools")}
 
 
-def jobs(text: str) -> dict[str, list[str]]:
-    """Split a workflow's text into its jobs.
+def scalar(value: object, where: str) -> str:
+    """Spell a decoded scalar as the YAML text a law compares.
 
     Returns:
-        Job id to the job's lines, in file order.
+        The string; a bool as YAML writes it; "" where it is absent.
+
+    Raises:
+        UndecodableError: the value is a mapping or a list.
 
     """
-    lines = text.splitlines()
-    top = lines.index("jobs:")
-    starts = [
-        i for i in range(top + 1, len(lines)) if re.match(r"^  [\w-]+:\s*$", lines[i])
-    ]
-    return {
-        lines[a].strip().rstrip(":"): lines[a:b]
-        for a, b in zip(starts, [*starts[1:], len(lines)], strict=True)
-    }
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    msg = f"{where} is not a scalar"
+    raise decoded.UndecodableError(msg)
 
 
-def steps(job: list[str]) -> list[dict[str, str]]:
-    """Split a job into its steps.
+def field(mapping: dict[str, object], key: str) -> str:
+    """Read one scalar of a job or a step.
 
     Returns:
-        One mapping per step: each `key: value` at the step's own level,
-        `with.<key>` for its inputs, and `run` as the whole body.
+        Its text, "" where it is absent.
 
     """
-    out: list[dict[str, str]] = []
-    block, depth, section = "", 0, ""
-    for raw in job:
-        line = raw
-        if line.startswith("      - "):
-            out.append({})
-            line = "        " + line[8:]
-        if not out or not line.strip():
-            if out and block:
-                out[-1][block] += "\n"
-            continue
-        indent = len(line) - len(line.lstrip())
-        if block and indent > depth:
-            out[-1][block] += line.strip() + "\n"
-            continue
-        block = ""
-        key, _, value = line.strip().partition(":")
-        value = value.strip()
-        if key.startswith("#") or indent not in {STEP, STEP + 2}:
-            continue
-        if indent == STEP:
-            section = key
-        name = key if indent == STEP else f"{section}.{key}"
-        if re.fullmatch(embedded_shell.BLOCK_HEADER, value):
-            out[-1][name], block, depth = "", name, indent
-        else:
-            out[-1][name] = value + "\n" if key == "run" else value
-    return out
+    return scalar(mapping.get(key), key)
 
 
-def mise_steps(job: list[str]) -> list[dict[str, str]]:
+def table(mapping: dict[str, object], key: str) -> dict[str, str]:
+    """Read one mapping of scalars of a job or a step: `with` or `env`.
+
+    Returns:
+        Each key to its text; empty where the mapping is absent.
+
+    """
+    found = decoded.as_object(mapping.get(key) or {}, key)
+    return {k: scalar(v, f"{key}.{k}") for k, v in found.items()}
+
+
+def scalars(node: object) -> Iterator[str]:
+    """Walk every scalar value under a node, keys left out.
+
+    Yields:
+        Each value's text.
+
+    """
+    if isinstance(node, dict):
+        for value in node.values():
+            yield from scalars(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from scalars(value)
+    else:
+        yield scalar(node, "a value")
+
+
+def inputs(step: Step) -> dict[str, str]:
+    """Read a step's `with:` inputs.
+
+    Returns:
+        Each input to its text.
+
+    """
+    return table(step, "with")
+
+
+def whole(path: Path) -> dict[str, object]:
+    """Read a workflow, once per file for the run.
+
+    Returns:
+        The document, as workflow_yaml reads it; a copy, so a planted
+        change never reaches another row.
+
+    """
+    key = str(path)
+    if key not in READ:
+        READ[key] = workflow_yaml.document(path)
+    return copy.deepcopy(READ[key])
+
+
+def documents(path: Path) -> dict[str, Job]:
+    """Read a workflow's jobs, once per file for the run.
+
+    Returns:
+        Job id to the job.
+
+    """
+    return workflow_yaml.jobs(whole(path))
+
+
+def parsed(text: str) -> dict[str, object]:
+    """Read YAML text through workflow_yaml, by a scratch file, once per text.
+
+    Returns:
+        The document; a copy, as `whole()` returns one.
+
+    """
+    if text not in PARSED:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "planted.yml"
+            path.write_text(text, "utf-8")
+            PARSED[text] = workflow_yaml.document(path)
+    return copy.deepcopy(PARSED[text])
+
+
+def appended(job: Job, *added: Step) -> Job:
+    """Plant steps after a job's own.
+
+    Returns:
+        A copy of the job with the steps added.
+
+    """
+    return {**job, "steps": [*workflow_yaml.steps(job), *added]}
+
+
+def mise_steps(job: Job) -> list[Step]:
     """Name a job's mise-action steps.
 
     Returns:
         Each step whose `uses:` is jdx/mise-action.
 
     """
-    return [s for s in steps(job) if "jdx/mise-action" in s.get("uses", "")]
+    return [
+        s for s in workflow_yaml.steps(job) if "jdx/mise-action" in field(s, "uses")
+    ]
 
 
-def uncached(step: dict[str, str]) -> bool:
+def uncached(step: Step) -> bool:
     """Say whether a mise-action step runs without the tool cache.
 
     Returns:
         True unless the step sets `cache: true`.
 
     """
-    return step.get("with.cache", "true") != "true"
+    return inputs(step).get("cache", "true") != "true"
 
 
-def tool_cache_restored(job: list[str]) -> bool:
+def tool_cache_restored(job: Job) -> bool:
     """Say whether a job restores its tool cache around the install (#1406).
 
     The gate's jobs install with `cache: false` because `actions/cache`
@@ -358,13 +423,13 @@ def tool_cache_restored(job: list[str]) -> bool:
 
     """
     return any(
-        "actions/cache/restore@" in s.get("uses", "")
-        and "tool-key.outputs.dir" in s.get("with.path", "")
-        for s in steps(job)
+        "actions/cache/restore@" in field(s, "uses")
+        and "tool-key.outputs.dir" in inputs(s).get("path", "")
+        for s in workflow_yaml.steps(job)
     )
 
 
-def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
+def installs(job: Job) -> tuple[list[str], list[str], list[str]]:
     """Read what a job installs.
 
     Returns:
@@ -377,7 +442,7 @@ def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
 
     """
     (step,) = mise_steps(job)
-    args = step.get("with.install_args", "")
+    args = inputs(step).get("install_args", "")
     if not args:
         msg = "the job's mise-action step names no install_args"
         raise ValueError(msg)
@@ -386,8 +451,10 @@ def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
     needed: list[str] = []
     optional: list[str] = []
     if ref:
-        (pins,) = [s for s in steps(job) if s.get("id") == ref.group(1)]
-        call = pins["run"].replace("\\\n", " ").split("caller_pins.py", 1)[1]
+        (pins,) = [
+            s for s in workflow_yaml.steps(job) if field(s, "id") == ref.group(1)
+        ]
+        call = field(pins, "run").replace("\\\n", " ").split("caller_pins.py", 1)[1]
         words = shlex.split(call.split(">", 1)[0])
         it = iter(words[1:])
         for word in it:
@@ -412,6 +479,9 @@ RUNS = frozenset({"CmdSubst", "ProcSubst"})
 # dict, not functools.cache, whose signature is `Callable[..., _T]`,
 # an Any expression the belt's mypy refuses.
 REDUCED: dict[str, str] = {}
+# One read per workflow file, for the same reason: `documents()`.
+READ: dict[str, dict[str, object]] = {}
+PARSED: dict[str, dict[str, object]] = {}
 
 
 def code(text: str) -> str:
@@ -814,7 +884,30 @@ def word(name: str, text: str) -> bool:
     return bool(re.search(rf"(?<![\w./$'\"-]){re.escape(name)}(?![\w./-])", text))
 
 
-def carries_belt(workflow: str, job: list[str]) -> bool:
+def envs(job: Job) -> dict[str, str]:
+    """Read every `env:` a job sets, its own and its steps'.
+
+    Returns:
+        Each variable to its value; a step's wins over the job's.
+
+    """
+    found = table(job, "env")
+    for step in workflow_yaml.steps(job):
+        found.update(table(step, "env"))
+    return found
+
+
+def bodies(job: Job) -> str:
+    """Read a job's `run:` values, comment lines dropped.
+
+    Returns:
+        Every step's run, joined.
+
+    """
+    return uncommented("\n".join(field(s, "run") for s in workflow_yaml.steps(job)))
+
+
+def carries_belt(workflow: str, job: Job) -> bool:
     """Say whether a job has the belt in scope.
 
     Returns:
@@ -823,13 +916,12 @@ def carries_belt(workflow: str, job: list[str]) -> bool:
         `mise/config.toml` IS the belt.
 
     """
-    text = (WORKFLOWS / workflow).read_text("utf-8")
-    return "MISE_GLOBAL_CONFIG_FILE" in uncommented("\n".join(job)) or (
-        "workflow_call:" not in text
-    )
+    on = whole(WORKFLOWS / workflow).get("on")
+    called = isinstance(on, dict) and "workflow_call" in on
+    return "MISE_GLOBAL_CONFIG_FILE" in envs(job) or not called
 
 
-def calls(job: list[str], *, carries: bool) -> tuple[set[str], set[str]]:
+def calls(job: Job, *, carries: bool) -> tuple[set[str], set[str]]:
     """Name every tool a job's run steps call.
 
     Returns:
@@ -837,7 +929,7 @@ def calls(job: list[str], *, carries: bool) -> tuple[set[str], set[str]]:
         tool's name is then the runner's copy) and the caller tools.
 
     """
-    body = "\n".join(code(s.get("run", "")) for s in steps(job))
+    body = "\n".join(code(field(s, "run")) for s in workflow_yaml.steps(job))
     body += "\n" + scripts(body, set())
     commands = {m.group(1) for m in CARGO_SUB.finditer(body)}
     commands = {f"cargo-{c}" for c in commands}
@@ -852,7 +944,7 @@ def calls(job: list[str], *, carries: bool) -> tuple[set[str], set[str]]:
     return keys, caller
 
 
-def uninstalled(workflow: str, job_id: str, job: list[str]) -> list[str]:
+def uninstalled(workflow: str, job_id: str, job: Job) -> list[str]:
     """Name each tool a job calls and does not install.
 
     Returns:
@@ -867,7 +959,7 @@ def uninstalled(workflow: str, job_id: str, job: list[str]) -> list[str]:
     return [f"{workflow} {job_id}: calls {t} and does not install it" for t in missing]
 
 
-def auto_installs(workflow: str, job_id: str, job: list[str]) -> list[str]:
+def auto_installs(workflow: str, job_id: str, job: Job) -> list[str]:
     """Name a listed job whose `mise run` would install the rest anyway.
 
     Measured on mise 2026.11.6 (#1408): `mise run` installs every tool
@@ -879,10 +971,9 @@ def auto_installs(workflow: str, job_id: str, job: list[str]) -> list[str]:
         MISE_TASK_RUN_AUTO_INSTALL to "false"; none otherwise.
 
     """
-    text = "\n".join(job)
-    if not re.search(r"(?<![\w-])mise\s+run\b", uncommented(text)):
+    if not re.search(r"(?<![\w-])mise\s+run\b", bodies(job)):
         return []
-    if re.search(r'^\s+MISE_TASK_RUN_AUTO_INSTALL: "false"$', text, re.MULTILINE):
+    if envs(job).get("MISE_TASK_RUN_AUTO_INSTALL") == "false":
         return []
     return [
         (
@@ -892,17 +983,34 @@ def auto_installs(workflow: str, job_id: str, job: list[str]) -> list[str]:
     ]
 
 
-def load(workflow: str) -> dict[str, list[str]]:
+def load(workflow: str) -> dict[str, Job]:
     """Read one workflow's jobs.
 
     Returns:
-        Job id to the job's lines.
+        Job id to the job.
 
     """
-    return jobs((WORKFLOWS / workflow).read_text("utf-8"))
+    return documents(WORKFLOWS / workflow)
 
 
-def whole_config(workflow: str, job_id: str, job: list[str]) -> list[str]:
+def planted_job(workflow: str, job_id: str, old: str, new: str = "") -> Job:
+    """Plant a change in a real workflow's text and read one job of it.
+
+    Returns:
+        The job, read from the changed text.
+
+    Raises:
+        AssertionError: `old` is not in the file, so the plant proves
+            nothing.
+
+    """
+    source = (WORKFLOWS / workflow).read_text("utf-8")
+    if old not in source:
+        raise AssertionError(old)
+    return workflow_yaml.jobs(parsed(source.replace(old, new)))[job_id]
+
+
+def whole_config(workflow: str, job_id: str, job: Job) -> list[str]:
     """Name a job in scope that installs the whole config unexempted.
 
     Returns:
@@ -911,7 +1019,7 @@ def whole_config(workflow: str, job_id: str, job: list[str]) -> list[str]:
 
     """
     (step,) = mise_steps(job)
-    if step.get("with.install_args") or (workflow, job_id) in WHOLE_CONFIG:
+    if inputs(step).get("install_args") or (workflow, job_id) in WHOLE_CONFIG:
         return []
     return [
         (
@@ -949,7 +1057,7 @@ class Coverage(unittest.TestCase):
             (path.name, job_id)
             for path in (CANON / ".github" / "workflows").glob("*.yml")
             if path.name not in OUT_OF_SCOPE
-            for job_id, job in jobs(path.read_text("utf-8")).items()
+            for job_id, job in documents(path).items()
             if any(uncached(s) for s in mise_steps(job))
             and not tool_cache_restored(job)
         )
@@ -972,15 +1080,13 @@ class Coverage(unittest.TestCase):
             with self.subTest(workflow=workflow, job=job_id):
                 self.assertIn((workflow, job_id), IN_SCOPE)
                 (step,) = mise_steps(load(workflow)[job_id])
-                self.assertNotIn("with.install_args", step)
+                self.assertNotIn("install_args", inputs(step))
 
     def test_a_second_whole_config_job_is_named(self) -> None:
         """Planted: a job loses its list and is not the exempt one."""
-        job = [
-            ln
-            for ln in load("attach-release.yml")["attach"]
-            if "install_args:" not in ln
-        ]
+        job = load("attach-release.yml")["attach"]
+        (step,) = mise_steps(job)
+        decoded.as_object(step["with"], "with").pop("install_args")
         self.assertEqual(
             strings(
                 "attach-release.yml attach: installs the whole mise config;"
@@ -1008,7 +1114,7 @@ class Coverage(unittest.TestCase):
                 self.assertTrue(keys and (needed or optional))
         for workflow, job_id in GATE_WHOLE:
             (step,) = mise_steps(load(workflow)[job_id])
-            self.assertNotIn("with.install_args", step)
+            self.assertNotIn("install_args", inputs(step))
 
     def test_every_belt_key_is_a_belt_key(self) -> None:
         """A misspelt key would install nothing and say nothing."""
@@ -1045,10 +1151,7 @@ class JobInstalls(unittest.TestCase):
 
     def test_a_dropped_install_is_named(self) -> None:
         """Planted: the tag job without gitsign, which signs the tag."""
-        job = [
-            ln.replace(" aqua:sigstore/gitsign", "")
-            for ln in load("release.yml")["tag"]
-        ]
+        job = planted_job("release.yml", "tag", " aqua:sigstore/gitsign")
         self.assertEqual(
             strings(
                 "release.yml tag: calls aqua:sigstore/gitsign and does not install it"
@@ -1058,10 +1161,9 @@ class JobInstalls(unittest.TestCase):
 
     def test_a_dropped_caller_input_is_named(self) -> None:
         """Planted: the binary build without cargo-auditable."""
-        job = [
-            ln.replace("rust cargo-auditable >>", "rust >>")
-            for ln in load("build-rust-binary.yml")["build"]
-        ]
+        job = planted_job(
+            "build-rust-binary.yml", "build", "rust cargo-auditable >>", "rust >>"
+        )
         self.assertEqual(
             strings(
                 "build-rust-binary.yml build: calls cargo-auditable and does not"
@@ -1072,11 +1174,10 @@ class JobInstalls(unittest.TestCase):
 
     def test_a_new_call_is_named(self) -> None:
         """Planted: a step starts calling a belt tool the job lacks."""
-        job = [
-            *load("attach-release.yml")["attach"],
-            "      - name: Planted",
-            "        run: cosign verify-blob dist/checksums.txt",
-        ]
+        job = appended(
+            load("attach-release.yml")["attach"],
+            {"name": "Planted", "run": "cosign verify-blob dist/checksums.txt"},
+        )
         self.assertEqual(
             strings(
                 "attach-release.yml attach: calls aqua:sigstore/cosign and does not"
@@ -1087,11 +1188,10 @@ class JobInstalls(unittest.TestCase):
 
     def test_a_new_indirect_call_is_named(self) -> None:
         """Planted: stele's VEX derivation execs osv-scanner."""
-        job = [
-            *load("attach-release.yml")["attach"],
-            "      - name: Planted",
-            "        run: stele derive vex --out dist/x.json",
-        ]
+        job = appended(
+            load("attach-release.yml")["attach"],
+            {"name": "Planted", "run": "stele derive vex --out dist/x.json"},
+        )
         self.assertEqual(
             strings(
                 "attach-release.yml attach: calls aqua:google/osv-scanner and does"
@@ -1102,13 +1202,10 @@ class JobInstalls(unittest.TestCase):
 
     def test_a_tool_named_only_in_a_comment_is_not_a_call(self) -> None:
         """Prose about a tool installs nothing and needs nothing."""
-        job = [
-            *load("attach-release.yml")["attach"],
-            "      - name: Planted",
-            "        run: |",
-            "          # cosign could verify this one day",
-            "          true",
-        ]
+        job = appended(
+            load("attach-release.yml")["attach"],
+            {"name": "Planted", "run": "# cosign could verify this one day\ntrue\n"},
+        )
         self.assertEqual(strings(), uninstalled("attach-release.yml", "attach", job))
 
 
@@ -1133,11 +1230,8 @@ class GateInstalls(unittest.TestCase):
 
     def test_a_leg_that_lets_mise_run_install_is_named(self) -> None:
         """Planted: the setting gone, `mise run test:pgrx` installs it all."""
-        job = [
-            ln
-            for ln in load("ci.yml")["pgrx"]
-            if "MISE_TASK_RUN_AUTO_INSTALL" not in ln
-        ]
+        job = load("ci.yml")["pgrx"]
+        decoded.as_object(job["env"], "env").pop("MISE_TASK_RUN_AUTO_INSTALL")
         self.assertEqual(
             strings(
                 "ci.yml pgrx: runs `mise run`, which installs every tool the"
@@ -1156,10 +1250,9 @@ class GateInstalls(unittest.TestCase):
         each followed file's whole source, comments included, so a step
         sourcing it seemed to reach coverage-measure.sh and call Go.
         """
-        job = [
-            "      - name: Planted",
-            '        run: . "${ORG_BELT_DIR}/pgrx-env.sh"',
-        ]
+        job: Job = {
+            "steps": [{"name": "Planted", "run": '. "${ORG_BELT_DIR}/pgrx-env.sh"'}]
+        }
         self.assertEqual(
             ({"jq"}, {"rust", "cargo-pgrx", "postgresql-binaries"}),
             calls(job, carries=True),
@@ -1178,9 +1271,7 @@ class GateInstalls(unittest.TestCase):
 
     def test_a_leg_that_drops_cargo_pgrx_is_named(self) -> None:
         """Planted: cargo-pgrx gone from the leg, which runs `cargo pgrx`."""
-        job = [
-            ln.replace("rust cargo-pgrx >>", "rust >>") for ln in load("ci.yml")["pgrx"]
-        ]
+        job = planted_job("ci.yml", "pgrx", "rust cargo-pgrx >>", "rust >>")
         self.assertEqual(
             strings("ci.yml pgrx: calls cargo-pgrx and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
@@ -1188,7 +1279,11 @@ class GateInstalls(unittest.TestCase):
 
     def test_a_leg_that_drops_its_postgres_is_named(self) -> None:
         """Planted: no `--major`, so no Postgres for pgrx_postgres.py."""
-        job = [ln for ln in load("ci.yml")["pgrx"] if "--major" not in ln]
+        job = planted_job(
+            "ci.yml",
+            "pgrx",
+            '            --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \\\n',
+        )
         self.assertEqual(
             strings("ci.yml pgrx: calls postgresql-binaries and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
@@ -1196,11 +1291,10 @@ class GateInstalls(unittest.TestCase):
 
     def test_a_new_call_in_a_leg_is_named(self) -> None:
         """Planted: a leg starts building the fuzz targets."""
-        job = [
-            *load("ci.yml")["pgrx"],
-            "      - name: Planted",
-            "        run: cargo fuzz build --sanitizer none",
-        ]
+        job = appended(
+            load("ci.yml")["pgrx"],
+            {"name": "Planted", "run": "cargo fuzz build --sanitizer none"},
+        )
         self.assertEqual(
             strings("ci.yml pgrx: calls cargo-fuzz and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
@@ -1208,18 +1302,16 @@ class GateInstalls(unittest.TestCase):
 
     def test_a_new_belt_call_in_a_leg_is_named(self) -> None:
         """Planted: a leg starts running a belt linter."""
-        job = [
-            *load("ci.yml")["pgrx"],
-            "      - name: Planted",
-            "        run: typos --format brief",
-        ]
+        job = appended(
+            load("ci.yml")["pgrx"], {"name": "Planted", "run": "typos --format brief"}
+        )
         self.assertEqual(
             strings("ci.yml pgrx: calls typos and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
         )
 
 
-def measures(workflow: str, job_id: str, job: list[str]) -> list[str]:
+def measures(workflow: str, job_id: str, job: Job) -> list[str]:
     """Name every way a job that must measure nothing installs or runs a tool.
 
     Returns:
@@ -1232,33 +1324,35 @@ def measures(workflow: str, job_id: str, job: list[str]) -> list[str]:
         f"{workflow} {job_id}: installs tools with jdx/mise-action"
         for _ in mise_steps(job)
     ]
-    text = uncommented("\n".join(job))
-    if "caller_pins.py" in text:
+    body = bodies(job)
+    if "caller_pins.py" in body:
         found.append(f"{workflow} {job_id}: installs the caller's build inputs")
-    if re.search(r"(?<![\w-])mise\s+run\b", text):
+    if re.search(r"(?<![\w-])mise\s+run\b", body):
         found.append(f"{workflow} {job_id}: runs a mise task")
     keys, caller = calls(job, carries=True)
     found += [f"{workflow} {job_id}: calls {t}" for t in sorted(keys | caller)]
     return found
 
 
-def step(job: list[str], name: str) -> str:
-    """Read one step of a job, from its `- name:` line to the next step.
+def step(job: Job, name: str) -> Step:
+    """Read one step of a job by its name.
 
     Returns:
-        The step's lines, joined; empty when the job has no such step.
+        The step; empty when the job has no such step.
 
     """
-    start = next(
-        (i for i, line in enumerate(job) if line.strip() == f"- name: {name}"), None
-    )
-    if start is None:
-        return ""
-    end = next(
-        (i for i in range(start + 1, len(job)) if job[i].strip().startswith("- name:")),
-        len(job),
-    )
-    return "\n".join(job[start:end])
+    found = [s for s in workflow_yaml.steps(job) if field(s, "name") == name]
+    return found[0] if found else {}
+
+
+def names(job: Job) -> list[str]:
+    """Name a job's steps, in order.
+
+    Returns:
+        Each step's `name`, "" where it has none.
+
+    """
+    return [field(s, "name") for s in workflow_yaml.steps(job)]
 
 
 class CoverageFigures(unittest.TestCase):
@@ -1267,27 +1361,29 @@ class CoverageFigures(unittest.TestCase):
     def test_the_gate_keeps_the_figures_for_the_commit_that_lands(self) -> None:
         """Merge group and default-branch push only, named for the commit."""
         kept = step(load("ci.yml")["gate"], "Keep the coverage figures for the release")
-        self.assertIn("github.event_name == 'merge_group'", kept)
-        self.assertIn("github.event_name == 'push'", kept)
+        when = flat(field(kept, "if"))
+        self.assertIn("github.event_name == 'merge_group'", when)
+        self.assertIn("github.event_name == 'push'", when)
         self.assertIn(
             "github.ref == format('refs/heads/{0}',"
             " github.event.repository.default_branch)",
-            kept,
+            when,
         )
-        self.assertNotIn("refs/heads/main", kept)
-        self.assertNotIn("pull_request", kept)
-        self.assertIn("name: coverage-figures-${{ github.sha }}", kept)
-        self.assertIn(
-            "path: ${{ runner.temp }}/coverage-reports/coverage-figures.txt", kept
+        self.assertNotIn("refs/heads/main", when)
+        self.assertNotIn("pull_request", when)
+        self.assertEqual("coverage-figures-${{ github.sha }}", inputs(kept)["name"])
+        self.assertEqual(
+            "${{ runner.temp }}/coverage-reports/coverage-figures.txt",
+            inputs(kept)["path"],
         )
 
     def test_the_release_job_reads_with_a_token_that_can(self) -> None:
         """The floor step has a token, and its job may read artifacts."""
         job = load("release.yml")["release-pr"]
         floor = step(job, "Re-derive the coverage floor")
-        self.assertIn("run: .org-canon/release/derive-coverage-floor.sh", floor)
-        self.assertIn("GH_TOKEN: ${{ github.token }}", floor)
-        self.assertIn("      actions: read", "\n".join(job))
+        self.assertEqual(".org-canon/release/derive-coverage-floor.sh", floor["run"])
+        self.assertEqual("${{ github.token }}", table(floor, "env")["GH_TOKEN"])
+        self.assertEqual("read", table(job, "permissions").get("actions"))
 
     def test_every_caller_grants_the_read(self) -> None:
         """The template and the canon's own caller grant `actions: read`."""
@@ -1302,33 +1398,35 @@ class CoverageFigures(unittest.TestCase):
         """The pgrx job: the two events, the name with major and commit (#1692)."""
         job = load("ci.yml")["pgrx"]
         kept = step(job, "Keep the leg's coverage figure for the release")
-        self.assertIn("github.event_name == 'merge_group'", kept)
-        self.assertIn("github.event_name == 'push'", kept)
+        when = flat(field(kept, "if"))
+        self.assertIn("github.event_name == 'merge_group'", when)
+        self.assertIn("github.event_name == 'push'", when)
         self.assertIn(
             "github.ref == format('refs/heads/{0}',"
             " github.event.repository.default_branch)",
-            kept,
+            when,
         )
-        self.assertNotIn("pull_request", kept)
-        self.assertIn(
-            "name: coverage-figures-pgrx-pg${{ matrix.major }}-${{ github.sha }}", kept
+        self.assertNotIn("pull_request", when)
+        self.assertEqual(
+            "coverage-figures-pgrx-pg${{ matrix.major }}-${{ github.sha }}",
+            inputs(kept)["name"],
         )
-        self.assertIn(
-            "path: ${{ runner.temp }}/coverage-reports/coverage-figures.txt", kept
+        self.assertEqual(
+            "${{ runner.temp }}/coverage-reports/coverage-figures.txt",
+            inputs(kept)["path"],
         )
-        names = [line.strip() for line in job if line.strip().startswith("- name:")]
+        order = names(job)
         self.assertLess(
-            names.index("- name: Run the extension's suite at this major"),
-            names.index("- name: Keep the leg's coverage figure for the release"),
+            order.index("Run the extension's suite at this major"),
+            order.index("Keep the leg's coverage figure for the release"),
         )
 
     def test_the_figures_step_follows_the_gate(self) -> None:
         """Kept only after `mise run ci` passed: a red gate keeps nothing."""
-        job = load("ci.yml")["gate"]
-        names = [line.strip() for line in job if line.strip().startswith("- name:")]
+        order = names(load("ci.yml")["gate"])
         self.assertLess(
-            names.index("- name: Run the gate"),
-            names.index("- name: Keep the coverage figures for the release"),
+            order.index("Run the gate"),
+            order.index("Keep the coverage figures for the release"),
         )
 
 
@@ -1345,16 +1443,19 @@ class GateUploadMeasuresNothing(unittest.TestCase):
 
     def test_the_upload_that_hung_on_main_is_named(self) -> None:
         """Planted: the job as it was, re-measuring with five tools."""
-        job = [
-            *load("ci.yml")["coverage-upload"],
-            "      - name: Install mise and the report's tools",
-            "        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b",
-            "        with:",
-            "          install_args: >-",
-            "            jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv",
-            "      - name: Generate the report",
-            "        run: report=$(mise run coverage:check)",
-        ]
+        job = appended(
+            load("ci.yml")["coverage-upload"],
+            {
+                "name": "Install mise and the report's tools",
+                "uses": "jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b",
+                "with": {
+                    "install_args": (
+                        "jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv"
+                    )
+                },
+            },
+            {"name": "Generate the report", "run": "report=$(mise run coverage:check)"},
+        )
         found = measures("ci.yml", "coverage-upload", job)
         self.assertEqual(
             strings(
@@ -1369,11 +1470,13 @@ class GateUploadMeasuresNothing(unittest.TestCase):
 
     def test_a_measuring_call_in_the_upload_is_named(self) -> None:
         """Planted: the upload starts rendering a report itself."""
-        job = [
-            *load("ci.yml")["coverage-upload"],
-            "      - name: Planted",
-            "        run: cargo llvm-cov --workspace --lcov --output-path lcov.info",
-        ]
+        job = appended(
+            load("ci.yml")["coverage-upload"],
+            {
+                "name": "Planted",
+                "run": "cargo llvm-cov --workspace --lcov --output-path lcov.info",
+            },
+        )
         self.assertEqual(
             strings(
                 "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov",
@@ -1388,14 +1491,14 @@ class GateUploadMeasuresNothing(unittest.TestCase):
         self.assertEqual(none, set(GATE_NONE) & {*GATE_LISTS, *GATE_WHOLE})
 
 
-# The line a named-list job carries at job level (#1412). mise's
-# task_run_auto_install is on by default, so without it `mise run`
+# The variable a named-list job sets "false" in its own env (#1412).
+# mise's task_run_auto_install is on by default, so without it `mise run`
 # installs every other tool in scope before the task starts, and the
 # list saves nothing in the jobs that run a task.
-NO_TASK_INSTALL = '      MISE_TASK_RUN_AUTO_INSTALL: "false"'
+NO_TASK_INSTALL = "MISE_TASK_RUN_AUTO_INSTALL"
 
 
-def task_auto_install(workflow: str, job_id: str, job: list[str]) -> list[str]:
+def task_auto_install(workflow: str, job_id: str, job: Job) -> list[str]:
     """Name a named-list job that leaves mise's task auto-install on.
 
     Returns:
@@ -1404,7 +1507,9 @@ def task_auto_install(workflow: str, job_id: str, job: list[str]) -> list[str]:
 
     """
     (step,) = mise_steps(job)
-    if not step.get("with.install_args") or NO_TASK_INSTALL in job:
+    if not inputs(step).get("install_args"):
+        return []
+    if table(job, "env").get(NO_TASK_INSTALL) == "false":
         return []
     return [
         (
@@ -1427,7 +1532,8 @@ class TaskAutoInstall(unittest.TestCase):
 
     def test_a_job_without_the_setting_is_named(self) -> None:
         """Planted: the SBOM job, which runs audit:deny, loses the line."""
-        job = [ln for ln in load("publish.yml")["sbom"] if ln != NO_TASK_INSTALL]
+        job = load("publish.yml")["sbom"]
+        decoded.as_object(job["env"], "env").pop(NO_TASK_INSTALL)
         self.assertEqual(
             strings(
                 "publish.yml sbom: installs a named list but leaves mise's task"
@@ -1439,10 +1545,7 @@ class TaskAutoInstall(unittest.TestCase):
 
     def test_a_tool_only_a_task_calls_must_be_listed(self) -> None:
         """Planted: cargo-deny is reached only through `mise run audit:deny`."""
-        job = [
-            ln.replace(" aqua:EmbarkStudios/cargo-deny", "")
-            for ln in load("publish.yml")["sbom"]
-        ]
+        job = planted_job("publish.yml", "sbom", " aqua:EmbarkStudios/cargo-deny")
         self.assertEqual(
             strings(
                 "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does"
@@ -1504,11 +1607,13 @@ def planted_uninstalled(helper: str) -> list[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = hermetic.canon(tmp, stubs={"release/planted-call.py": helper})
-        job = [
-            *load("attach-release.yml")["attach"],
-            "      - name: Planted",
-            '        run: python3 "${GITHUB_WORKSPACE}/release/planted-call.py"',
-        ]
+        job = appended(
+            load("attach-release.yml")["attach"],
+            {
+                "name": "Planted",
+                "run": 'python3 "${GITHUB_WORKSPACE}/release/planted-call.py"',
+            },
+        )
         with mock.patch(f"{__name__}.CANON", root):
             return uninstalled("attach-release.yml", "attach", job)
 
@@ -1525,11 +1630,13 @@ def planted_shell(helper: str) -> list[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = hermetic.canon(tmp, stubs={"release/planted-call.sh": helper})
-        job = [
-            *load("attach-release.yml")["attach"],
-            "      - name: Planted",
-            '        run: bash "${GITHUB_WORKSPACE}/release/planted-call.sh"',
-        ]
+        job = appended(
+            load("attach-release.yml")["attach"],
+            {
+                "name": "Planted",
+                "run": 'bash "${GITHUB_WORKSPACE}/release/planted-call.sh"',
+            },
+        )
         with mock.patch(f"{__name__}.CANON", root):
             return uninstalled("attach-release.yml", "attach", job)
 
@@ -1794,21 +1901,7 @@ def tracked_helpers() -> set[str]:
     return {Path(p).name for p in hermetic.tracked(CANON, "*.py")}
 
 
-def action_job(text: str) -> list[str]:
-    """Read an action file's steps at a workflow job's indent.
-
-    Returns:
-        The action's lines from `runs:` on, indented as a job's are, so
-        `steps()` reads them.
-
-    """
-    lines = text.splitlines()
-    return ["  " + ln for ln in lines[lines.index("runs:") :]]
-
-
-def helper_starts(
-    rel: str, job_id: str, job: list[str], tracked: set[str]
-) -> list[str]:
+def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[str]:
     """Name each step that starts a tracked helper but not as `"${ORG_PYTHON}"`.
 
     A helper path is a start where it stands in a command's place (a
@@ -1820,8 +1913,8 @@ def helper_starts(
 
     """
     out = []
-    for step in steps(job):
-        body = re.sub(r"\$\{\{.*?\}\}", "${{expr}}", step.get("run", ""))
+    for step in workflow_yaml.steps(job):
+        body = re.sub(r"\$\{\{.*?\}\}", "${{expr}}", field(step, "run"))
         body = code(body.replace("\\\n", " "))
         for line in body.splitlines():
             for token in re.finditer(r"\S*\.py\b[\"']?", line):
@@ -1839,13 +1932,13 @@ def helper_starts(
                 else:
                     continue
                 out.append(
-                    f"{rel} {job_id}: step '{step.get('name', '?')}' starts"
+                    f"{rel} {job_id}: step '{field(step, 'name') or '?'}' starts"
                     f' {name} {how}; run it as "${{ORG_PYTHON}}" {name} (#1543)'
                 )
     return out
 
 
-def uncanoned(rel: str, job_id: str, job: list[str]) -> list[str]:
+def uncanoned(rel: str, job_id: str, job: Job) -> list[str]:
     """Name a job that uses ORG_PYTHON before the canon action exports it.
 
     Returns:
@@ -1854,15 +1947,15 @@ def uncanoned(rel: str, job_id: str, job: list[str]) -> list[str]:
 
     """
     canon = False
-    for step in steps(job):
-        if step.get("uses", "") == "$/.github/actions/canon":
+    for step in workflow_yaml.steps(job):
+        if field(step, "uses") == "$/.github/actions/canon":
             canon = True
-        elif "ORG_PYTHON" in "\n".join(step.values()) and not canon:
+        elif any("ORG_PYTHON" in v for v in scalars(step)) and not canon:
             return [
                 (
-                    f"{rel} {job_id}: step '{step.get('name', '?')}' uses ORG_PYTHON"
-                    " and no step before it runs $/.github/actions/canon, which"
-                    " exports it (#1543)"
+                    f"{rel} {job_id}: step '{field(step, 'name') or '?'}' uses"
+                    " ORG_PYTHON and no step before it runs"
+                    " $/.github/actions/canon, which exports it (#1543)"
                 )
             ]
     return []
@@ -1876,11 +1969,13 @@ def interpreter_findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
 
     """
     out = []
-    for rel, text in texts.items():
+    for rel, source in texts.items():
+        document = parsed(source)
         if rel.startswith(".github/actions/"):
-            out += helper_starts(rel, "runs", action_job(text), tracked)
+            runs = decoded.as_object(document["runs"], f"{rel} runs")
+            out += helper_starts(rel, "runs", runs, tracked)
             continue
-        for job_id, job in jobs(text).items():
+        for job_id, job in workflow_yaml.jobs(document).items():
             out += helper_starts(rel, job_id, job, tracked)
             out += uncanoned(rel, job_id, job)
     return out
@@ -2036,62 +2131,25 @@ ORG_FLAG = re.compile(r"(?<![\w-])--org\b")
 
 
 class StepHeaders(unittest.TestCase):
-    """A block header is read by one grammar, embedded_shell's (#1837)."""
+    """A commented block header hides no body from these laws (#1837).
 
-    def test_each_header_form_opens_a_block(self) -> None:
-        """Every chomping and indentation form, commented or not."""
-        for header in (
-            "|",
-            "|-",
-            "|+",
-            ">",
-            ">-",
-            ">2",
-            "|2-",
-            "|-2",
-            "| # note",
-            ">- # note",
-        ):
-            with self.subTest(header=header):
-                job = [
-                    "      - name: s",
-                    f"        run: {header}",
-                    "          a: b",
-                    "          echo x",
-                ]
-                want: list[dict[str, str]] = [{"name": "s", "run": "a: b\necho x\n"}]
-                self.assertEqual(want, steps(job))
-
-    def test_an_input_header_opens_a_block(self) -> None:
-        """`with:` `script: | # note` is read as its body too."""
-        job = [
-            "      - name: s",
-            "        with:",
-            "          script: | # note",
-            "            a: b",
-            "            echo x",
-        ]
-        want: list[dict[str, str]] = [
-            {"name": "s", "with": "", "with.script": "a: b\necho x\n"}
-        ]
-        self.assertEqual(want, steps(job))
-
-    def test_a_value_that_is_not_a_header_is_one_line(self) -> None:
-        """A pipe and a comment inside a command are not a header."""
-        job = ["      - name: s", "        run: echo a | cat # note"]
-        want: list[dict[str, str]] = [{"name": "s", "run": "echo a | cat # note\n"}]
-        self.assertEqual(want, steps(job))
+    Each header form is read by workflow_yaml, whose own rows hold them;
+    these hold the tree's commented header and a start beneath one.
+    """
 
     def test_the_commented_header_in_the_tree_is_read(self) -> None:
         """source-attest's `run: | # zizmor: ...` step is read whole."""
-        text = (CANON / ".github/actions/source-attest/action.yml").read_text("utf-8")
+        action = workflow_yaml.document(
+            CANON / ".github/actions/source-attest/action.yml"
+        )
+        runs = decoded.as_object(action["runs"], "runs")
         found = [
             s
-            for s in steps(action_job(text))
-            if s.get("name") == "Install the belt's cosign and stele"
+            for s in workflow_yaml.steps(runs)
+            if field(s, "name") == "Install the belt's cosign and stele"
         ]
         self.assertEqual(1, len(found))
-        self.assertIn("set -euo pipefail", found[0]["run"])
+        self.assertIn("set -euo pipefail", field(found[0], "run"))
 
     def test_a_start_under_a_commented_header_is_named(self) -> None:
         """Planted: a helper started in a commented-header body is red."""
@@ -2111,24 +2169,6 @@ class StepHeaders(unittest.TestCase):
         )
 
 
-def env_token(lines: list[str], indent: int) -> str | None:
-    """Read `GH_TOKEN` from the `env:` block at an indent, if any.
-
-    Returns:
-        The value, or None where the block or the key is absent.
-
-    """
-    pad, inside = " " * indent, False
-    for line in lines:
-        if line.startswith(pad + "env:"):
-            inside = True
-        elif inside and line.startswith(pad + "  GH_TOKEN:"):
-            return line.partition(":")[2].strip()
-        elif inside and line.strip() and not line.startswith(pad + "  "):
-            inside = False
-    return None
-
-
 def population_reads_on_job_token(texts: dict[str, str]) -> list[str]:
     """Name each stele `--org` step whose GH_TOKEN is the job token (#1602).
 
@@ -2142,20 +2182,21 @@ def population_reads_on_job_token(texts: dict[str, str]) -> list[str]:
 
     """
     found = []
-    for rel, text in sorted(texts.items()):
-        top = text.splitlines()
-        top = top[: top.index("jobs:")]
-        for job_id, job in jobs(text).items():
-            for step in steps(job):
-                body = step.get("run", "").splitlines()
+    for rel, source in sorted(texts.items()):
+        document = parsed(source)
+        for job_id, job in workflow_yaml.jobs(document).items():
+            for step in workflow_yaml.steps(job):
+                body = field(step, "run").splitlines()
                 run = "\n".join(ln for ln in body if not ln.startswith("#"))
                 if not (STELE_VERB.search(run) and ORG_FLAG.search(run)):
                     continue
                 token = (
-                    step.get("env.GH_TOKEN") or env_token(job, 4) or env_token(top, 0)
+                    table(step, "env").get("GH_TOKEN")
+                    or table(job, "env").get("GH_TOKEN")
+                    or table(document, "env").get("GH_TOKEN")
                 )
                 if token and any(t in token for t in JOB_TOKENS):
-                    found.append(f"{rel}: {job_id} / {step.get('name', '?')}")
+                    found.append(f"{rel}: {job_id} / {field(step, 'name') or '?'}")
     return found
 
 
@@ -2224,7 +2265,7 @@ class PopulationToken(unittest.TestCase):
         )
 
 
-def mint_step(workflow: str, job_id: str) -> tuple[int, dict[str, str]]:
+def mint_step(workflow: str, job_id: str) -> tuple[int, Step]:
     """Find a job's audit App mint step.
 
     Returns:
@@ -2233,16 +2274,16 @@ def mint_step(workflow: str, job_id: str) -> tuple[int, dict[str, str]]:
     """
     found = [
         (i, s)
-        for i, s in enumerate(steps(load(workflow)[job_id]))
-        if "actions/create-github-app-token" in s.get("uses", "")
+        for i, s in enumerate(workflow_yaml.steps(load(workflow)[job_id]))
+        if "actions/create-github-app-token" in field(s, "uses")
     ]
     return found[0] if found else (-1, {})
 
 
 VEX_GRANTS = {
-    "with.permission-contents": "read",
-    "with.permission-metadata": "read",
-    "with.permission-attestations": "read",
+    "permission-contents": "read",
+    "permission-metadata": "read",
+    "permission-attestations": "read",
 }
 
 
@@ -2253,7 +2294,7 @@ class PopulationGrants(unittest.TestCase):
         """Contents, metadata and attestations: no review history."""
         _, mint = mint_step("vex-attest.yml", "plan")
         grants: dict[str, str] = {
-            k: v for k, v in mint.items() if k.startswith("with.perm")
+            k: v for k, v in inputs(mint).items() if k.startswith("perm")
         }
         self.assertEqual(VEX_GRANTS, grants)
 
@@ -2264,22 +2305,24 @@ class VexAttestToken(unittest.TestCase):
     def test_the_plan_mints_before_the_step_that_reads(self) -> None:
         """The mint precedes the derivation, which holds its output."""
         at, mint = mint_step("vex-attest.yml", "plan")
-        plan = steps(load("vex-attest.yml")["plan"])
-        reads = [i for i, s in enumerate(plan) if s.get("id") == "collect"]
+        plan = workflow_yaml.steps(load("vex-attest.yml")["plan"])
+        reads = [i for i, s in enumerate(plan) if field(s, "id") == "collect"]
         self.assertEqual(1, len(reads))
-        self.assertEqual("token", mint.get("id"))
+        self.assertEqual("token", field(mint, "id"))
         self.assertLess(at, reads[0])
         self.assertEqual(
-            "${{ steps.token.outputs.token }}", plan[reads[0]]["env.GH_TOKEN"]
+            "${{ steps.token.outputs.token }}",
+            table(plan[reads[0]], "env")["GH_TOKEN"],
         )
 
     def test_the_mint_mirrors_the_audit_walks(self) -> None:
         """Same pin, same client and key, owner scope as the audit's mint."""
         _, mint = mint_step("vex-attest.yml", "plan")
         _, audit = mint_step("audit.yml", "blast-radius")
-        keys = ("uses", "with.client-id", "with.private-key", "with.owner")
-        audits: dict[str, str | None] = {k: audit.get(k) for k in keys}
-        mints: dict[str, str | None] = {k: mint.get(k) for k in keys}
+        self.assertEqual(field(audit, "uses"), field(mint, "uses"))
+        keys = ("client-id", "private-key", "owner")
+        audits: dict[str, str | None] = {k: inputs(audit).get(k) for k in keys}
+        mints: dict[str, str | None] = {k: inputs(mint).get(k) for k in keys}
         self.assertEqual(audits, mints)
 
     def test_the_signing_jobs_never_see_the_token(self) -> None:
@@ -2287,9 +2330,9 @@ class VexAttestToken(unittest.TestCase):
         for job_id, job in load("vex-attest.yml").items():
             if job_id == "plan":
                 continue
-            text = "\n".join(job)
-            self.assertNotIn("AUDIT_APP", text, job_id)
-            self.assertNotIn("steps.token", text, job_id)
+            values = "\n".join(scalars(job))
+            self.assertNotIn("AUDIT_APP", values, job_id)
+            self.assertNotIn("steps.token", values, job_id)
 
 
 # Each environment's secrets, as the forge issues them (measured
@@ -2300,25 +2343,17 @@ ENVIRONMENT_SECRETS = {
 }
 
 
-def declared_environment(job: list[str]) -> str | None:
+def environment(job: Job) -> str | None:
     """Read a job's `environment:`, in either of its two forms.
 
     Returns:
         The environment's name, or None where the job declares none.
 
     """
-    for i, line in enumerate(job):
-        key, _, value = line.partition(":")
-        if key != "    environment":
-            continue
-        if value.strip():
-            return value.split("#")[0].strip()
-        for inner in job[i + 1 :]:
-            if inner.startswith("      name:"):
-                return inner.partition(":")[2].split("#")[0].strip()
-            if not inner.startswith("      "):
-                break
-    return None
+    declared = job.get("environment")
+    if isinstance(declared, dict):
+        return field(decoded.as_object(declared, "environment"), "name") or None
+    return field(job, "environment") or None
 
 
 def secrets_outside_environment(texts: dict[str, str]) -> list[str]:
@@ -2332,10 +2367,10 @@ def secrets_outside_environment(texts: dict[str, str]) -> list[str]:
 
     """
     found: list[str] = []
-    for rel, text in sorted(texts.items()):
-        for job_id, job in jobs(text).items():
-            body = "\n".join(ln for ln in job if not ln.strip().startswith("#"))
-            has = declared_environment(job)
+    for rel, source in sorted(texts.items()):
+        for job_id, job in workflow_yaml.jobs(parsed(source)).items():
+            body = uncommented("\n".join(scalars(job)))
+            has = environment(job)
             found.extend(
                 f"{rel}: {job_id} reads {name} outside environment {env}"
                 for env, names in ENVIRONMENT_SECRETS.items()
@@ -2414,32 +2449,36 @@ class GateCoverageReports(unittest.TestCase):
 
     def test_the_gate_names_the_directory_its_artifact_keeps(self) -> None:
         """The run step's variable is the artifact step's path."""
-        gate = steps(load("ci.yml")["gate"])
-        runs = [s for s in gate if s.get("run", "").strip() == RUN_LEG]
-        keeps = [s for s in gate if s.get("with.name") == "coverage-reports"]
+        gate = workflow_yaml.steps(load("ci.yml")["gate"])
+        runs = [s for s in gate if field(s, "run").strip() == RUN_LEG]
+        keeps = [s for s in gate if inputs(s).get("name") == "coverage-reports"]
         self.assertEqual(1, len(runs))
         self.assertEqual(1, len(keeps))
-        self.assertEqual(self.REPORTS, runs[0].get("env.ORG_COVERAGE_REPORTS"))
-        self.assertEqual(self.REPORTS, keeps[0].get("with.path"))
+        self.assertEqual(
+            self.REPORTS, table(runs[0], "env").get("ORG_COVERAGE_REPORTS")
+        )
+        self.assertEqual(self.REPORTS, inputs(keeps[0]).get("path"))
 
     def test_each_pgrx_leg_names_the_directory_its_artifact_keeps(self) -> None:
         """The leg's suite writes where its artifact step reads (#1656)."""
-        leg = steps(load("ci.yml")["pgrx"])
-        runs = [s for s in leg if s.get("run", "").strip() == "mise run test:pgrx"]
+        leg = workflow_yaml.steps(load("ci.yml")["pgrx"])
+        runs = [s for s in leg if field(s, "run").strip() == "mise run test:pgrx"]
         # The badge's report upload; the figures the release reads are
         # kept by a step of their own (#1692), held in CoverageFigures.
         keeps = [
             s
             for s in leg
-            if "upload-artifact" in s.get("uses", "")
-            and s.get("with.name", "").startswith("coverage-reports")
+            if "upload-artifact" in field(s, "uses")
+            and inputs(s).get("name", "").startswith("coverage-reports")
         ]
         self.assertEqual(1, len(runs))
         self.assertEqual(1, len(keeps))
-        self.assertEqual(self.REPORTS, runs[0].get("env.ORG_COVERAGE_REPORTS"))
-        self.assertEqual(self.REPORTS, keeps[0].get("with.path"))
         self.assertEqual(
-            "coverage-reports-pgrx-pg${{ matrix.major }}", keeps[0].get("with.name")
+            self.REPORTS, table(runs[0], "env").get("ORG_COVERAGE_REPORTS")
+        )
+        self.assertEqual(self.REPORTS, inputs(keeps[0]).get("path"))
+        self.assertEqual(
+            "coverage-reports-pgrx-pg${{ matrix.major }}", inputs(keeps[0]).get("name")
         )
 
     def test_the_badge_job_downloads_beside_the_checkout(self) -> None:
@@ -2448,12 +2487,12 @@ class GateCoverageReports(unittest.TestCase):
         The gate's and each pgrx leg's (#1656), merged: their file names
         never collide.
         """
-        upload = steps(load("ci.yml")["coverage-upload"])
-        fetch = [s for s in upload if "download-artifact" in s.get("uses", "")]
+        upload = workflow_yaml.steps(load("ci.yml")["coverage-upload"])
+        fetch = [s for s in upload if "download-artifact" in field(s, "uses")]
         self.assertEqual(1, len(fetch))
-        self.assertEqual("coverage-reports*", fetch[0].get("with.pattern"))
-        self.assertEqual("true", fetch[0].get("with.merge-multiple"))
-        self.assertNotIn("with.path", fetch[0])
+        self.assertEqual("coverage-reports*", inputs(fetch[0]).get("pattern"))
+        self.assertEqual("true", inputs(fetch[0]).get("merge-multiple"))
+        self.assertNotIn("path", inputs(fetch[0]))
 
 
 # THE GATE'S THREE LEGS (#1740). One job, a matrix over the legs, its
@@ -2494,32 +2533,31 @@ def leg_findings(text: str) -> list[str]:
         `ci` not needing the gate, and the badge job reading its output.
 
     """
-    found = jobs(text)
-    gate = "\n".join(found["gate"])
+    found = workflow_yaml.jobs(parsed(text))
+    gate = found["gate"]
+    strategy = decoded.as_object(gate.get("strategy") or {}, "strategy")
+    matrix = decoded.as_object(strategy.get("matrix") or {}, "matrix")
     out = []
-    legs = "".join(f"          - {leg}\n" for leg in GATE_LEGS)
-    if f"\n      matrix:\n        leg:\n{legs}" not in gate:
+    if matrix.get("leg") != list(GATE_LEGS):
         out.append(f"gate: not a matrix of the legs {list(GATE_LEGS)}")
-    if "\n    strategy:\n      fail-fast: false\n" not in gate:
+    if strategy.get("fail-fast") is not False:
         out.append("gate: fail-fast is not false, so one red leg cancels the others")
-    if "\n    name: gate (${{ matrix.leg }})\n" not in gate:
+    if field(gate, "name") != "gate (${{ matrix.leg }})":
         out.append("gate: its name does not carry the leg")
-    if "\n    outputs:\n" in gate:
+    if "outputs" in gate:
         out.append("gate: declares a job output, which one leg's result overwrites")
-    gate_steps = steps(found["gate"])
-    runs = [s for s in gate_steps if s.get("run", "").strip() == RUN_LEG]
-    if len(runs) != 1 or runs[0].get("env.LEG") != "${{ matrix.leg }}":
+    gate_steps = workflow_yaml.steps(gate)
+    runs = [s for s in gate_steps if field(s, "run").strip() == RUN_LEG]
+    if len(runs) != 1 or table(runs[0], "env").get("LEG") != "${{ matrix.leg }}":
         out.append(f"gate: no step runs `{RUN_LEG}` with LEG from the matrix")
-    by_name = {s.get("name", ""): s for s in gate_steps}
+    by_name = {field(s, "name"): s for s in gate_steps}
     for name, leg in LEG_BOUND.items():
-        if leg not in flat(by_name.get(name, {}).get("if", "")):
+        if leg not in flat(field(by_name.get(name, {}), "if")):
             out.append(f"gate: '{name}' runs on every leg, not only where {leg}")
-    if not re.search(
-        r"\n    needs:\n(      - [\w-]+\n)*      - gate\n",
-        "\n".join(found["ci"]) + "\n",
-    ):
+    needs = found["ci"].get("needs")
+    if not (needs == "gate" or (isinstance(needs, list) and "gate" in needs)):
         out.append("ci: does not need gate, so a red leg would not red ci / ci")
-    if "needs.gate." in "\n".join(found["coverage-upload"]):
+    if any("needs.gate." in v for v in scalars(found["coverage-upload"])):
         out.append("coverage-upload: reads a gate output, which a matrix cannot keep")
     return out
 
@@ -2560,7 +2598,7 @@ class GateLegs(unittest.TestCase):
 
     def test_one_job_and_no_copies(self) -> None:
         """One matrix job, not three copied ones."""
-        found = jobs(ci_text())
+        found = workflow_yaml.jobs(parsed(ci_text()))
         copies: list[str] = [j for j in found if j.startswith("gate-")]
         self.assertEqual(strings(), copies)
 

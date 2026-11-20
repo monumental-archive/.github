@@ -37,6 +37,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
 import source_archive
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
@@ -173,15 +174,17 @@ class BuildStepIsTheHelper(unittest.TestCase):
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The canon tree is linked first, and the run: is the call alone."""
-        text = WORKFLOW.read_text("utf-8")
-        before, step = text.split(
-            "- name: Build the archive twice and prove determinism"
-        )
-        step = step.split("      - name:")[0]
-        # Under the belt's Python (#1543).
-        self.assertIn(f"        run: '\"${{ORG_PYTHON}}\" {HELPER}'\n", step)
-        self.assertNotIn("run: |", step)
-        self.assertIn("uses: $/.github/actions/canon", before.split("steps:")[-1])
+        document = workflow_yaml.document(WORKFLOW)
+        ((before, step),) = [
+            (job[:i], s)
+            for job in map(workflow_yaml.steps, workflow_yaml.jobs(document).values())
+            for i, s in enumerate(job)
+            if s.get("name") == "Build the archive twice and prove determinism"
+        ]
+        # Under the belt's Python (#1543), on one line.
+        self.assertEqual(f'"${{ORG_PYTHON}}" {HELPER}', step["run"])
+        used: list[object] = [s.get("uses") for s in before]
+        self.assertIn("$/.github/actions/canon", used)
 
 
 class Builds(unittest.TestCase):

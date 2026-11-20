@@ -27,10 +27,18 @@ message that names it.
 """
 
 import re
+import sys
 import unittest
 from pathlib import Path
 
 import test_job_installs as job_installs
+from test_job_installs import Job, Step, field, inputs, parsed, table
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 CI = CANON / ".github" / "workflows" / "ci.yml"
@@ -67,31 +75,7 @@ def flat(value: str) -> str:
     return " ".join(value.split())
 
 
-def workflow_env(text: str) -> dict[str, str]:
-    """Read the workflow-level `env:` block.
-
-    Returns:
-        Each variable to its value, folded onto one line.
-
-    """
-    lines = text.splitlines()
-    out: dict[str, str] = {}
-    if "env:" not in lines:
-        return out
-    name = ""
-    for line in lines[lines.index("env:") + 1 :]:
-        if line and not line.startswith(" "):
-            break
-        m = re.match(r"^  ([A-Z_]+):\s*(.*)$", line)
-        if m:
-            name = m.group(1)
-            out[name] = "" if m.group(2) in {">-", "|-", "|", ">"} else m.group(2)
-        elif name and line.startswith("    "):
-            out[name] += " " + line.strip()
-    return {k: flat(v) for k, v in out.items()}
-
-
-def writes(step: dict[str, str]) -> str | None:
+def writes(step: Step) -> str | None:
     """Say how a step writes a cache, if it does.
 
     Returns:
@@ -99,26 +83,27 @@ def writes(step: dict[str, str]) -> str | None:
         on its own, or None for a step that writes nothing.
 
     """
-    uses = step.get("uses", "")
+    uses = field(step, "uses")
+    cache = inputs(step).get("cache")
     if "actions/cache/save@" in uses:
         return "save"
     if "actions/cache@" in uses:
         return "combined actions/cache saves from every ref"
-    if "jdx/mise-action@" in uses and step.get("with.cache", "true") != "false":
+    if "jdx/mise-action@" in uses and cache != "false":
         return "mise-action with its cache on saves from every ref"
-    if "actions/setup-" in uses and step.get("with.cache") not in {None, "false"}:
+    if "actions/setup-" in uses and cache not in {None, "false"}:
         return "a setup action's cache saves from every ref"
     return None
 
 
-def env_findings(text: str) -> list[str]:
+def env_findings(document: dict[str, object]) -> list[str]:
     """Hold the two predicates to their decided text.
 
     Returns:
         One message per predicate that is not the decided one.
 
     """
-    env = workflow_env(text)
+    env = {k: flat(v) for k, v in table(document, "env").items()}
     out = []
     if env.get("ORG_GATE_CACHE_SAVE") != SAVE:
         out.append(f"ORG_GATE_CACHE_SAVE is not {SAVE}")
@@ -127,27 +112,27 @@ def env_findings(text: str) -> list[str]:
     return out
 
 
-def step_findings(job_id: str, step: dict[str, str]) -> list[str]:
+def step_findings(job_id: str, step: Step) -> list[str]:
     """Hold one step: where its cache is, how it writes, how it falls back.
 
     Returns:
         One message per breach in the step.
 
     """
-    where = f"{job_id}: '{step.get('name', '?')}'"
+    where = f"{job_id}: '{field(step, 'name') or '?'}'"
     kind = writes(step)
-    restore = "actions/cache/restore@" in step.get("uses", "")
+    restore = "actions/cache/restore@" in field(step, "uses")
     out = []
     if (kind or restore) and job_id not in CACHE_JOBS:
         out.append(f"{where} is a cache outside {sorted(CACHE_JOBS)}")
     if kind and kind != "save":
         out.append(f"{where} writes a cache from every ref: {kind}")
-    if kind == "save" and not SAVE_IF.match(flat(step.get("if", ""))):
+    if kind == "save" and not SAVE_IF.match(flat(field(step, "if"))):
         out.append(
             f"{where} saves a cache without the default-branch condition"
             " (env.ORG_GATE_CACHE_SAVE == 'true' && ...)"
         )
-    keys = flat(step.get("with.restore-keys", ""))
+    keys = flat(inputs(step).get("restore-keys", ""))
     if restore and not keys:
         out.append(f"{where} restores off the default branch with no fallback")
     elif restore and not FALLBACK_KEYS.match(keys):
@@ -158,7 +143,7 @@ def step_findings(job_id: str, step: dict[str, str]) -> list[str]:
     return out
 
 
-def pair_findings(job_id: str, job: list[str]) -> list[str]:
+def pair_findings(job_id: str, job: Job) -> list[str]:
     """Pair each save with the restore whose key it writes.
 
     Returns:
@@ -166,23 +151,25 @@ def pair_findings(job_id: str, job: list[str]) -> list[str]:
         per restore nothing saves.
 
     """
-    steps = job_installs.steps(job)
-    uses = [(s, s.get("uses", "")) for s in steps]
-    restores = {s.get("id", ""): s for s, u in uses if "actions/cache/restore@" in u}
+    steps = workflow_yaml.steps(job)
+    uses = [(s, field(s, "uses")) for s in steps]
+    restores = {field(s, "id"): s for s, u in uses if "actions/cache/restore@" in u}
     out = []
     paired = set()
     for save in (s for s, u in uses if "actions/cache/save@" in u):
-        where = f"{job_id}: '{save.get('name', '?')}'"
-        m = PRIMARY.match(flat(save.get("with.key", "")))
+        where = f"{job_id}: '{field(save, 'name') or '?'}'"
+        m = PRIMARY.match(flat(inputs(save).get("key", "")))
         src = restores.get(m.group("id")) if m else None
         if m is None or src is None:
             out.append(f"{where} saves under a key no restore in the job computed")
             continue
         paired.add(m.group("id"))
-        if flat(src.get("with.path", "")) != flat(save.get("with.path", "")):
-            out.append(f"{where} saves other paths than '{src.get('name')}' restores")
+        if flat(inputs(src).get("path", "")) != flat(inputs(save).get("path", "")):
+            out.append(
+                f"{where} saves other paths than '{field(src, 'name')}' restores"
+            )
     out.extend(
-        f"{job_id}: '{src.get('name', '?')}' is restored and never saved,"
+        f"{job_id}: '{field(src, 'name') or '?'}' is restored and never saved,"
         " even on the default branch"
         for sid, src in restores.items()
         if sid not in paired
@@ -197,9 +184,10 @@ def findings(text: str) -> list[str]:
         One message per breach; empty when the workflow conforms.
 
     """
-    out = env_findings(text)
-    for job_id, job in job_installs.jobs(text).items():
-        for step in job_installs.steps(job):
+    document = parsed(text)
+    out = env_findings(document)
+    for job_id, job in workflow_yaml.jobs(document).items():
+        for step in workflow_yaml.steps(job):
             out.extend(step_findings(job_id, step))
         out.extend(pair_findings(job_id, job))
     return out
@@ -263,8 +251,8 @@ class Real(unittest.TestCase):
     def test_every_job_has_its_caches(self) -> None:
         """The two jobs each restore and save their tool cache."""
         for job_id in CACHE_JOBS:
-            job = job_installs.jobs(real())[job_id]
-            names = [s.get("name") for s in job_installs.steps(job)]
+            job = workflow_yaml.jobs(parsed(real()))[job_id]
+            names = job_installs.names(job)
             with self.subTest(job=job_id):
                 self.assertIn(TOOL_RESTORE.strip("'"), names)
                 self.assertIn(TOOL_SAVE.strip("'"), names)
@@ -418,20 +406,20 @@ def leg_cache_findings(text: str) -> list[str]:
         tool cache restored on fewer than every leg.
 
     """
-    gate = job_installs.steps(job_installs.jobs(text)["gate"])
-    by_name = {s.get("name", ""): s for s in gate}
-    by_id = {s.get("id", ""): s for s in gate if s.get("id")}
+    gate = workflow_yaml.steps(workflow_yaml.jobs(parsed(text))["gate"])
+    by_name = {field(s, "name"): s for s in gate}
+    by_id = {field(s, "id"): s for s in gate if field(s, "id")}
     out = []
     for name, leg in LEG_CACHES.items():
-        if leg not in flat(by_name.get(name, {}).get("if", "")):
+        if leg not in flat(field(by_name.get(name, {}), "if")):
             out.append(f"gate: '{name}' runs on every leg, not only where {leg}")
     for sid, key in LEG_KEYS.items():
         step = by_id.get(sid, {})
-        if not step.get("with.key", "").startswith(key):
+        if not inputs(step).get("key", "").startswith(key):
             out.append(f"gate: the {sid} key does not start {key}")
-        if LEG_PREFIXES[sid] not in flat(step.get("with.restore-keys", "")):
+        if LEG_PREFIXES[sid] not in flat(inputs(step).get("restore-keys", "")):
             out.append(f"gate: the {sid} fallback is not {LEG_PREFIXES[sid]}")
-    if "matrix.leg" in by_name.get(TOOL_RESTORE.strip("'"), {}).get("if", ""):
+    if "matrix.leg" in field(by_name.get(TOOL_RESTORE.strip("'"), {}), "if"):
         out.append(f"gate: {TOOL_RESTORE} is not restored by every leg")
     return out
 
@@ -512,14 +500,14 @@ def install_key_findings(text: str) -> list[str]:
 
     """
     out = []
-    for job_id, job in job_installs.jobs(text).items():
-        steps = job_installs.steps(job)
-        named = [s for s in steps if s.get("id") == "tool-key"]
+    for job_id, job in workflow_yaml.jobs(parsed(text)).items():
+        steps = workflow_yaml.steps(job)
+        named = [s for s in steps if field(s, "id") == "tool-key"]
         installs = job_installs.mise_steps(job)
         if not named or not installs:
             continue
-        listed = flat(installs[0].get("with.install_args", ""))
-        keyed = flat(named[0].get("env.ORG_TOOL_INSTALL", ""))
+        listed = flat(inputs(installs[0]).get("install_args", ""))
+        keyed = flat(table(named[0], "env").get("ORG_TOOL_INSTALL", ""))
         if listed != keyed:
             out.append(
                 f"{job_id}: the cache key digests '{keyed}' and the job"
@@ -537,17 +525,19 @@ class InstallKeys(unittest.TestCase):
 
     def test_the_listed_jobs_pass_their_list(self) -> None:
         """The listed job names a list; the gate names none."""
-        jobs = job_installs.jobs(real())
+        jobs = workflow_yaml.jobs(parsed(real()))
         for job_id, wanted in (("pgrx", True),):
             (named,) = [
-                s for s in job_installs.steps(jobs[job_id]) if s.get("id") == "tool-key"
+                s
+                for s in workflow_yaml.steps(jobs[job_id])
+                if field(s, "id") == "tool-key"
             ]
-            self.assertEqual(wanted, bool(named.get("env.ORG_TOOL_INSTALL")))
-            self.assertIn("--install", named["run"])
+            self.assertEqual(wanted, bool(table(named, "env").get("ORG_TOOL_INSTALL")))
+            self.assertIn("--install", field(named, "run"))
         (gate,) = [
-            s for s in job_installs.steps(jobs["gate"]) if s.get("id") == "tool-key"
+            s for s in workflow_yaml.steps(jobs["gate"]) if field(s, "id") == "tool-key"
         ]
-        self.assertNotIn("--install", gate["run"])
+        self.assertNotIn("--install", field(gate, "run"))
 
     def test_a_list_the_key_does_not_carry_is_named(self) -> None:
         """Planted: the leg installs a tool its key's list leaves out."""

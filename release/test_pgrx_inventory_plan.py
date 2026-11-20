@@ -28,7 +28,10 @@ from tempfile import TemporaryDirectory
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
+import plan_producers
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
@@ -103,15 +106,21 @@ def run_helper(
         )
 
 
-def step() -> str:
-    """Cut the plan step's text out of the shipped workflow.
+def step() -> dict[str, object]:
+    """Read the plan step of the shipped workflow.
 
     Returns:
-        From its `- name:` line to the next step or upload.
+        The step, as workflow_yaml reads it.
 
     """
-    text = WORKFLOW.read_text("utf-8")
-    return text.split(f"      - name: {STEP}\n")[1].split("      - ")[0]
+    document = workflow_yaml.document(WORKFLOW)
+    (found,) = [
+        s
+        for job in workflow_yaml.jobs(document).values()
+        for s in workflow_yaml.steps(job)
+        if s.get("name") == STEP
+    ]
+    return found
 
 
 class PlanStepIsTheHelper(unittest.TestCase):
@@ -119,20 +128,18 @@ class PlanStepIsTheHelper(unittest.TestCase):
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The run: is the call alone, from the canon tree."""
-        body = step()
-        self.assertIn(
-            "        run: |\n"
-            '          "${ORG_PYTHON}" .org-canon/release/pgrx/inventory_plan.py'
+        self.assertEqual(
+            '"${ORG_PYTHON}" .org-canon/release/pgrx/inventory_plan.py'
             ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n',
-            body,
+            step()["run"],
         )
-        self.assertNotIn("jq", body)
 
     def test_the_step_states_its_prefix_and_its_marker(self) -> None:
         """mise/plan_producers.py joins the marker to PLAN_DOC_PREFIX."""
-        body = step()
-        self.assertIn("# plan-producer: pgrx-extension sbom-pgrx-\n", body)
-        self.assertIn("          PLAN_DOC_PREFIX: sbom-pgrx-\n", body)
+        declared, _ = plan_producers.markers(WORKFLOW.read_text("utf-8"))
+        self.assertIn(("pgrx-extension", "sbom-pgrx-"), declared)
+        env = decoded.as_object(step()["env"], "env")
+        self.assertEqual("sbom-pgrx-", env["PLAN_DOC_PREFIX"])
 
 
 class Writes(unittest.TestCase):

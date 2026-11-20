@@ -276,6 +276,10 @@ lychee = "0.24.2"
 # is not bad luck: nothing checks. See docs/tooling-verdicts.md for the
 # check that was attempted for that class and why it was abandoned (#82).
 jq = "1.8.2"
+# YAML as JSON, for the laws that read a workflow or an action (#1840).
+# They read it through mise/workflow_yaml.py, one parser in one module,
+# where each test file once carried a hand-written guess at the grammar.
+yq = "4.54.3"
 # The other half of the pinning convention (#82). CLAUDE.md requires every
 # `uses:` to carry a full SHA AND a trailing version comment; zizmor's
 # unpinned-uses proves the SHA and cannot see the comment, and

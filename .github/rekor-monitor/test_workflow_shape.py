@@ -6,16 +6,18 @@ mechanism, the Actions cache. That only works if every leg restores the
 newest save by one prefix and saves under a key no other leg uses, the
 legs run one at a time, the run's starting checkpoint is kept aside
 before the first leg, and the alert runs once after the last. None of it
-can run here, so this reads the workflow's text and names each part that
-is not as built; a planted copy per rule proves the message.
+can run here, so this reads the workflow and names each part that is not
+as built; a planted copy per rule proves the message.
 
-The workflow is read as text, line by line under each job: stdlib only.
+The workflow is read through mise/workflow_yaml.py (#1840), the belt's
+one YAML parser; a planted copy is written to a scratch file and read
+the same way.
 """
 
 from __future__ import annotations
 
-import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import override
@@ -24,65 +26,84 @@ from typing import override
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
-import typed_std
+import decoded
+import workflow_yaml
 
 HERE = Path(__file__).resolve().parent
 WORKFLOW = HERE.parent / "workflows" / "rekor-monitor.yml"
 
 RUN = "${{ github.run_id }}-${{ github.run_attempt }}"
-LEG_KEY = f"key: ct-watch-{RUN}-${{{{ matrix.leg }}}}"
-START_KEY = f"key: ct-start-{RUN}"
-NEWEST = "restore-keys: ct-watch-"
+LEG_KEY = f"ct-watch-{RUN}-${{{{ matrix.leg }}}}"
+START_KEY = f"ct-start-{RUN}"
+NEWEST = "ct-watch-"
 LEGS = 14
-ALERT_NEEDS = "    needs:\n      - start\n      - watch\n"
-IDENTITY = re.compile(r"actions:\s*write|gh workflow run|id-token:\s*write")
+# A leg's bound, longer than its 40-minute read and inside its token's hour.
+TIMEOUT = 50
+WRITES = ("actions", "id-token")
+
+Mapping = dict[str, object]
 
 
-def jobs(text: str) -> dict[str, str]:
-    """Split the workflow into its jobs.
+def mapping(node: Mapping, key: str) -> Mapping:
+    """Read one mapping under a node.
 
     Returns:
-        Job id to the job's text.
+        The mapping; empty where the key is absent or null.
 
     """
-    lines = text.splitlines(keepends=True)
-    top = lines.index("jobs:\n")
-    starts = [
-        i for i in range(top + 1, len(lines)) if re.match(r"^  [\w-]+:\s*$", lines[i])
+    return decoded.as_object(node.get(key) or {}, key)
+
+
+def inputs(step: Mapping) -> Mapping:
+    """Read a step's `with:` inputs.
+
+    Returns:
+        The inputs; empty where there are none.
+
+    """
+    return mapping(step, "with")
+
+
+def using(job: Mapping, action: str) -> list[Mapping]:
+    """Name a job's steps that use an action.
+
+    Returns:
+        Each step whose `uses:` names the action, in order.
+
+    """
+    return [s for s in workflow_yaml.steps(job) if action in str(s.get("uses", ""))]
+
+
+def runs(job: Mapping) -> str:
+    """Read every `run:` value in a job.
+
+    Returns:
+        The values, joined.
+
+    """
+    return "\n".join(str(s.get("run", "")) for s in workflow_yaml.steps(job))
+
+
+def mints(document: Mapping) -> bool:
+    """Say whether any job can start workflows or mint an identity.
+
+    Returns:
+        True where the workflow or a job grants `actions` or `id-token`
+        write, or a step runs `gh workflow run`.
+
+    """
+    granted = [mapping(document, "permissions")]
+    granted += [
+        mapping(j, "permissions") for j in workflow_yaml.jobs(document).values()
     ]
-    ends = [*starts[1:], len(lines)]
-    return {
-        lines[a].strip().rstrip(":"): "".join(lines[a:b])
-        for a, b in zip(starts, ends, strict=True)
-    }
+    if any(g.get(scope) == "write" for g in granted for scope in WRITES):
+        return True
+    return any(
+        "gh workflow run" in runs(j) for j in workflow_yaml.jobs(document).values()
+    )
 
 
-def steps(job: str) -> list[str]:
-    """Split a job into its steps.
-
-    Returns:
-        Each step's text.
-
-    """
-    return re.split(r"\n      - ", job)[1:]
-
-
-def legs(job: str) -> list[int]:
-    """Read the matrix's legs, written one per line.
-
-    Returns:
-        The legs, in order; none when the list is not there.
-
-    """
-    block = re.search(r"\n        leg:\n((?:          - \d+\n)+)", job)
-    listed = typed_std.group(block, 1) if block else None
-    if not listed:
-        return []
-    numbers = (typed_std.group(m) for m in re.finditer(r"\d+", listed))
-    return [int(n) for n in numbers if n is not None]
-
-
-def run_wide(text: str) -> list[str]:
+def run_wide(document: Mapping) -> list[str]:
     """Name what is wrong across the whole workflow.
 
     Returns:
@@ -90,16 +111,14 @@ def run_wide(text: str) -> list[str]:
 
     """
     found = []
-    lines = text.splitlines(keepends=True)
-    code = "".join(line for line in lines if not line.lstrip().startswith("#"))
-    if IDENTITY.search(code):
+    if mints(document):
         found.append("a job can start workflows or mint an identity")
-    if "cancel-in-progress: false" not in text:
+    if mapping(document, "concurrency").get("cancel-in-progress") is not False:
         found.append("a delivered run can overlap a running one")
     return found
 
 
-def leg_wide(watch: str) -> list[str]:
+def leg_wide(watch: Mapping) -> list[str]:
     """Name what is wrong with the legs.
 
     Returns:
@@ -107,30 +126,38 @@ def leg_wide(watch: str) -> list[str]:
 
     """
     found = []
-    if "max-parallel: 1" not in watch or "fail-fast: false" not in watch:
+    strategy = mapping(watch, "strategy")
+    if strategy.get("max-parallel") != 1 or strategy.get("fail-fast") is not False:
         found.append("the legs do not run one at a time to the last")
-    if legs(watch) != list(range(1, LEGS + 1)):
+    if mapping(strategy, "matrix").get("leg") != list(range(1, LEGS + 1)):
         found.append(f"the legs are not 1 to {LEGS}")
-    if "    needs: start\n" not in watch:
+    if watch.get("needs") != "start":
         found.append("a leg can start before the run's checkpoint is kept aside")
-    if "create-github-app-token" not in watch:
+    if not using(watch, "actions/create-github-app-token"):
         found.append("a leg reads with a token it did not mint")
-    if "--budget 40m" not in watch or "timeout-minutes: 50" not in watch:
+    if "--budget 40m" not in runs(watch) or watch.get("timeout-minutes") != TIMEOUT:
         found.append("a leg reads longer than its token lives")
-    if "matrix.leg == 1 && inputs.start-at" not in watch:
+    envs = [mapping(s, "env") for s in workflow_yaml.steps(watch)]
+    if not any(
+        "matrix.leg == 1 && inputs.start-at" in str(v) for e in envs for v in e.values()
+    ):
         found.append("start-at reaches a leg other than the first")
-    restores = [s for s in steps(watch) if "actions/cache/restore" in s]
-    saves = [s for s in steps(watch) if "actions/cache/save" in s]
-    if not (restores and LEG_KEY in restores[0] and NEWEST in restores[0]):
+    restores = [inputs(s) for s in using(watch, "actions/cache/restore")]
+    saves = using(watch, "actions/cache/save")
+    if not (
+        restores
+        and restores[0].get("key") == LEG_KEY
+        and restores[0].get("restore-keys") == NEWEST
+    ):
         found.append("a leg does not restore the newest save by its prefix")
-    if not (saves and LEG_KEY in saves[0]):
+    if not (saves and inputs(saves[0]).get("key") == LEG_KEY):
         found.append("a leg does not save under its own key")
-    elif "steps.findings.outcome == 'success'" not in saves[0]:
+    elif "steps.findings.outcome == 'success'" not in str(saves[0].get("if", "")):
         found.append("a leg saves before its findings are filed")
     return found
 
 
-def ends(start: str, alert: str) -> list[str]:
+def ends(start: Mapping, alert: Mapping) -> list[str]:
     """Name what is wrong with the start job and the alert job.
 
     Returns:
@@ -138,15 +165,21 @@ def ends(start: str, alert: str) -> list[str]:
 
     """
     found = []
-    if not (START_KEY in start and NEWEST in start):
+    kept = [inputs(s).get("key") for s in using(start, "actions/cache/save")]
+    newest = [
+        inputs(s).get("restore-keys") for s in using(start, "actions/cache/restore")
+    ]
+    if not (START_KEY in kept and NEWEST in newest):
         found.append("the run's starting checkpoint is not kept aside")
-    if ALERT_NEEDS not in alert or "if: ${{ always() }}" not in alert:
+    if alert.get("needs") != ["start", "watch"] or alert.get("if") != "${{ always() }}":
         found.append("the alert does not run once after the last leg")
-    restores = [s for s in steps(alert) if "actions/cache/restore" in s]
-    kept = [s for s in restores if START_KEY in s and "restore-keys" not in s]
-    if not kept or not any(NEWEST in s for s in restores):
+    restores = [inputs(s) for s in using(alert, "actions/cache/restore")]
+    aside = [
+        r for r in restores if r.get("key") == START_KEY and "restore-keys" not in r
+    ]
+    if not aside or not any(r.get("restore-keys") == NEWEST for r in restores):
         found.append("the alert does not read both checkpoints")
-    if "actions/cache/save" in alert:
+    if using(alert, "actions/cache/save"):
         found.append("the alert saves a checkpoint")
     return found
 
@@ -158,8 +191,12 @@ def problems(text: str) -> list[str]:
         One line per problem; none when the shape holds.
 
     """
-    found = run_wide(text)
-    by_id = jobs(text)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "rekor-monitor.yml"
+        path.write_text(text, encoding="utf-8")
+        document = workflow_yaml.document(path)
+    found = run_wide(document)
+    by_id = workflow_yaml.jobs(document)
     if sorted(by_id) != ["alert", "start", "watch"]:
         return [*found, f"the jobs are {sorted(by_id)}, not start, watch and alert"]
     found += leg_wide(by_id["watch"])
@@ -211,12 +248,12 @@ ROWS = [
         "start-at reaches a leg other than the first",
     ),
     (
-        f"{NEWEST}\n\n      # Read-only",
+        f"restore-keys: {NEWEST}\n\n      # Read-only",
         "\n      # Read-only",
         "a leg does not restore the newest save by its prefix",
     ),
     (
-        f"{LEG_KEY}\n\n      # The leg's colour",
+        f"key: {LEG_KEY}\n\n      # The leg's colour",
         f"key: ct-watch-{RUN}\n\n      # The leg's colour",
         "a leg does not save under its own key",
     ),
@@ -226,17 +263,17 @@ ROWS = [
         "a leg saves before its findings are filed",
     ),
     (
-        f"{START_KEY}\n\n  watch:",
+        f"key: {START_KEY}\n\n  watch:",
         "key: x\n\n  watch:",
         "the run's starting checkpoint is not kept aside",
     ),
     (
-        ALERT_NEEDS,
+        "    needs:\n      - start\n      - watch\n",
         "    needs:\n      - watch\n",
         "the alert does not run once after the last leg",
     ),
     (
-        f"{START_KEY}\n\n      # unattested-path: the newest checkpoint, the last",
+        f"key: {START_KEY}\n\n      # unattested-path: the newest checkpoint, the last",
         "key: x\n\n      # unattested-path: the newest checkpoint, the last",
         "the alert does not read both checkpoints",
     ),

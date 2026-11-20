@@ -39,6 +39,7 @@ honestly blocked on.
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
+| yq (`aqua:mikefarah/yq`) | The one YAML parser the canon's laws read a workflow or an action through, by `mise/workflow_yaml.py` (#1840) |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Three more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), and `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
@@ -896,6 +897,45 @@ empty value and a green line — the vacuous-success class the
 audit-claims contract exists to forbid. Not blanket-fixable, since many
 of those filters legitimately yield nothing and are checked by the
 surrounding bash; it wants a per-site pass.
+
+**yq, the one reader of workflow YAML** (#1840). The canon's laws read
+workflow and action files by hand, line by line from indentation, and
+each hand reader was a guess at the grammar patched shape by shape
+(#1352, #1396, #1431, #1837). Measured 2026-11-20 at `cfcffe29` against
+a real parser over the canon's 49 workflows, 181 jobs and 562 steps:
+`release/test_job_installs.py`'s `steps()` missed no real step, and
+returned 184 things that were not steps, in 50 jobs (every entry of a
+`needs:` list sits at a step's indent), and 13 single-quoted `run:`
+values with their quotes on. #1837 was a 40-line step body no law read,
+because its block header carried a comment. No parser was available:
+the belt pinned `jq`, `taplo`, `actionlint` and `yamllint`, and no YAML
+reader.
+
+yq 4.54.3 is pinned from the aqua registry (`mise tool yq` resolves the
+short name to `aqua:mikefarah/yq`), its release publishes `checksums`
+with a signature bundle, and the lock records cosign provenance for all
+seven platforms. `mise/workflow_yaml.py` reads through it and nothing
+else does: `document(path)` is `yq -o=json '.'` decoded by
+`mise/decoded.py`, a file yq cannot parse is a `ValueError` carrying
+yq's message, and `runs(path)` places every `run:` value (line, style,
+the text after folding and chomping, name, shell, path, alias) by one
+expression. The probe, on a scratch workflow holding a commented block
+header, a flow mapping, a quoted `"run"` key, a folded block, an
+anchored block, an alias and a quoted value, returned all of them; `on`
+stays the string `on`; all 65 tracked YAML files in one call took
+0.12 s. The module's own fixture holds every one of those shapes.
+
+Rejected, recorded so they are not re-proposed:
+
+- **PyYAML.** On the machine only inside yamllint's install, as a
+  dependency no lockfile pins; a law cannot read through a parser whose
+  version nobody chose.
+- **actionlint or zizmor as the reader.** Both parse workflows; neither
+  prints what it parsed.
+- **stele.** It parses workflows in Go, but it is the release engine,
+  not a belt helper a test can call.
+- **Patching the hand readers shape by shape.** That is the four issues
+  named above.
 
 **`lint:belt-available` — deleted; the disposal is the record** (#658,
 2026-08-21). The belt's availability canary is gone. It is written up
