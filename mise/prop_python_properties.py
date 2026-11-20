@@ -16,16 +16,12 @@ the rest of this run keeps the bounds it was started with.
   a usage error, exit 2, never a traceback.
 """
 
-import contextlib
-import io
-import os
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
-from unittest import mock
 
+import hermetic
 import python_properties as pp
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -81,19 +77,13 @@ class Bounded(unittest.TestCase):
 """
 
 
-@dataclass(frozen=True)
-class Done:
-    """What an in-process call to the runner returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-def call(argv: list[str], files: dict[str, str], env: dict[str, str]) -> Done:
+def call(
+    argv: list[str], files: dict[str, str], env: dict[str, str]
+) -> hermetic.Called:
     """Plant `files` in a scratch directory and call main from it.
 
-    The profile in force before the call is loaded again after it, and
+    `env` adds to the environment a child would have had (`hermetic.env`);
+    the profile in force before the call is loaded again after it, and
     the planted modules leave `sys.modules`.
 
     Returns:
@@ -101,23 +91,17 @@ def call(argv: list[str], files: dict[str, str], env: dict[str, str]) -> Done:
 
     """
     before = settings.get_current_profile_name()
-    out, err = io.StringIO(), io.StringIO()
     with tempfile.TemporaryDirectory() as scratch:
         for name, text in files.items():
             Path(scratch, name).write_text(text, encoding="utf-8")
         try:
-            with (
-                mock.patch.dict(os.environ, env),
-                contextlib.chdir(scratch),
-                contextlib.redirect_stdout(out),
-                contextlib.redirect_stderr(err),
-            ):
-                status = pp.main(argv)
+            return hermetic.call_main(
+                lambda: pp.main(argv), env=hermetic.env(**env), cwd=scratch
+            )
         finally:
             settings.load_profile(before)
             for index, name in enumerate(argv[1:]):
                 sys.modules.pop(f"prop_{index}_{Path(name).stem}", None)
-    return Done(status, out.getvalue(), err.getvalue())
 
 
 class Gate(unittest.TestCase):
@@ -128,7 +112,7 @@ class Gate(unittest.TestCase):
         done = call(["gate", "prop_ok.py"], {"prop_ok.py": HOLDS}, {})
         self.assertEqual(
             done,
-            Done(
+            hermetic.Called(
                 0,
                 "prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
                 "test:python-properties: 1 test(s) in 1 file(s) held\n",
@@ -218,10 +202,8 @@ class Usage(unittest.TestCase):
     )
     def test_a_usage_error_is_two(self, argv: list[str]) -> None:
         """R: exit 2 with the usage line, and nothing run."""
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = pp.main(argv)
-        self.assertEqual((status, out.getvalue(), err.getvalue()), (2, "", USAGE))
+        done = hermetic.call_main(lambda: pp.main(argv))
+        self.assertEqual(done, hermetic.Called(2, "", USAGE))
 
 
 if __name__ == "__main__":

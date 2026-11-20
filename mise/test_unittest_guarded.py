@@ -12,7 +12,6 @@ same failures in full, the same summary and status as one process, and
 under coverage the same figure.
 """
 
-import contextlib
 import io
 import json
 import os
@@ -22,7 +21,6 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
 from unittest import mock
 
 import hermetic
@@ -226,15 +224,6 @@ exit 1
 """
 
 
-@dataclass(frozen=True)
-class Done:
-    """What an in-process call to the runner returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
 def planted(module: object) -> bool:
     """Say whether a module was imported from outside this canon and Python.
 
@@ -250,46 +239,28 @@ def planted(module: object) -> bool:
     ))
 
 
-def call(argv: list[str], env: dict[str, str]) -> Done:
+def call(argv: list[str], env: dict[str, str]) -> hermetic.Called:
     """Call the runner's `main` in this process (#1696).
 
-    The environment a script row handed the runner is this process's for
-    the call (`mock.patch.dict`, cleared and restored), so the workers it
-    starts inherit it as they did, and `sys.argv` is the script's, which a
-    planted module may read. The search path is put back after, and
-    the planted modules leave `sys.modules`, so the next row's tree
-    imports its own. A worker's refusal, `sys.exit(message)`, is read as
-    Python reports it: the message on stderr, exit 1.
+    `hermetic.call_main` makes `env` the process environment for the call,
+    so the workers the runner starts inherit it as they did, and reads a
+    worker's refusal, `sys.exit(message)`, as Python reports it. Beside
+    it, `sys.argv` is the script's, which a planted module may read; the
+    search path is put back after, and the planted modules leave
+    `sys.modules`, so the next row's tree imports its own.
 
     Returns:
         The status, and what the runner wrote to each stream.
 
-    Raises:
-        SystemExit: an exit that is not a message, as Python would not
-            print it either.
-
     """
-    out, err = io.StringIO(), io.StringIO()
     search = sys.path[:]
     try:
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(sys, "argv", [str(RUNNER), *argv]),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            try:
-                status = ug.main(argv)
-            except SystemExit as stop:
-                if not isinstance(stop.code, str):
-                    raise
-                err.write(f"{stop.code}\n")
-                status = 1
+        with mock.patch.object(sys, "argv", [str(RUNNER), *argv]):
+            return hermetic.call_main(lambda: ug.main(argv), env=env)
     finally:
         sys.path[:] = search
         for name in [n for n, m in sys.modules.items() if planted(m)]:
             del sys.modules[name]
-    return Done(status, out.getvalue(), err.getvalue())
 
 
 class Runner(unittest.TestCase):
@@ -354,7 +325,7 @@ class Runner(unittest.TestCase):
         *flags: str,
         workers: str = "3",
         pids: pathlib.Path | None = None,
-    ) -> Done:
+    ) -> hermetic.Called:
         """Run the planted tree through the guarded runner, in this process.
 
         The discovery the script rows ran from `start` with a relative
@@ -603,7 +574,7 @@ def write_spec(start: pathlib.Path, **fields: object) -> pathlib.Path:
     return spec
 
 
-def run_worker(spec: pathlib.Path) -> Done:
+def run_worker(spec: pathlib.Path) -> hermetic.Called:
     """Run one worker over a spec, as the parent would, in this process.
 
     Returns:

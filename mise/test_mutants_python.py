@@ -17,8 +17,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import contextlib
-import io
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -323,17 +321,12 @@ class Planted(unittest.TestCase):
         """Run the leg's `hook` step in this process, from WHERE (#1696).
 
         The environment the leg hands the step is this process's for the
-        call (`mock.patch.dict`, cleared and restored).
+        call (`hermetic.call_main`, restored after).
         """
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            mock.patch.dict(os.environ, self.env, clear=True),
-            contextlib.chdir(where),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            status = helper.main(["hook", str(hook)])
-        self.assertEqual(status, 0, err.getvalue())
+        done = hermetic.call_main(
+            lambda: helper.main(["hook", str(hook)]), env=self.env, cwd=where
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.

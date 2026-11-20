@@ -10,8 +10,6 @@ decoded from the belt's config in a scratch repository, every git call
 with a scrubbed environment (#857). The last row is the canon itself.
 """
 
-import contextlib
-import io
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -19,9 +17,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
-from unittest import mock
 
 import coverage_exclusions as ce
 import hermetic
@@ -67,31 +63,16 @@ QUOTED = [
 ]
 
 
-@dataclass(frozen=True)
-class Done:
-    """What an in-process call to the helper returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-def helper(root: Path, *paths: str) -> Done:
+def helper(root: Path, *paths: str) -> hermetic.Called:
     """Call the helper's `main` in this process over `paths`, from `root` (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    with (
-        mock.patch("sys.stdin", io.StringIO("\n".join(paths) + "\n")),
-        contextlib.chdir(root),
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(err),
-    ):
-        status = ce.main([])
-    return Done(status, out.getvalue(), err.getvalue())
+    return hermetic.call_main(
+        lambda: ce.main([]), cwd=root, stdin="\n".join(paths) + "\n"
+    )
 
 
 class Markers(unittest.TestCase):

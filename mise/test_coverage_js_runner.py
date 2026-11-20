@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 import coverage_js_runner as cj
+import hermetic
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
@@ -170,14 +171,11 @@ class VitestCommand(unittest.TestCase):
                 raise walked
             return walked
 
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            mock.patch.object(cj.task_walk, "walk_mise", walk_mise),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            status = cj.main(["--vitest-command", "coverage:check", "test"])
-        return status, out.getvalue(), err.getvalue()
+        with mock.patch.object(cj.task_walk, "walk_mise", walk_mise):
+            done = hermetic.call_main(
+                lambda: cj.main(["--vitest-command", "coverage:check", "test"])
+            )
+        return done.returncode, done.stdout, done.stderr
 
     def test_the_walked_vitest_command_is_printed(self) -> None:
         """The one vitest run of the walked steps, as JSON."""

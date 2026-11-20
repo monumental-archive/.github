@@ -30,8 +30,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import contextlib
-import io
 import json
 import os
 import shutil
@@ -39,7 +37,6 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
 
 import hermetic
@@ -849,26 +846,14 @@ class BuildGo(unittest.TestCase):
         self.assertTrue(mutants_go.older("devel +abc123", "go1.27.4"))
 
 
-@dataclass(frozen=True)
-class Done:
-    """What an in-process call to the helper returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-def call(argv: list[str]) -> Done:
+def call(argv: list[str]) -> hermetic.Called:
     """Call the helper's `main` in this process (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        status = mutants_go.main(argv)
-    return Done(status, out.getvalue(), err.getvalue())
+    return hermetic.call_main(lambda: mutants_go.main(argv))
 
 
 class Main(unittest.TestCase):
@@ -917,7 +902,7 @@ class Main(unittest.TestCase):
         }
         self.write("reports/1.json", json.dumps(body))
 
-    def judge(self) -> Done:
+    def judge(self) -> hermetic.Called:
         """Call main as the shell half does, its summary directory planted.
 
         Returns:
@@ -956,7 +941,9 @@ class Main(unittest.TestCase):
     def test_a_clean_shard_is_green_and_writes_its_counts(self) -> None:
         """Every mutant killed: exit 0, the summary, go.tsv."""
         self.results(("KILLED", 4, "arithmetic"), ("TIMED_OUT", 5, "branch"))
-        self.assertEqual(self.judge(), Done(0, self.line(2, 2, 0, 0, 0, 0), ""))
+        self.assertEqual(
+            self.judge(), hermetic.Called(0, self.line(2, 2, 0, 0, 0, 0), "")
+        )
         self.assertEqual(
             (self.summary / "go.tsv").read_text(encoding="utf-8"), "whole\t2\t2\t0\t0\n"
         )
@@ -980,7 +967,9 @@ class Main(unittest.TestCase):
             "records.txt",
             "a/a.go:4:\treturn x + y //mutants:equivalent arithmetic same value\n",
         )
-        self.assertEqual(self.judge(), Done(0, self.line(2, 1, 0, 0, 0, 1), ""))
+        self.assertEqual(
+            self.judge(), hermetic.Called(0, self.line(2, 1, 0, 0, 0, 1), "")
+        )
 
     def test_a_malformed_and_a_stale_record_are_red_by_name(self) -> None:
         """No reason is malformed; a sound record over nothing is stale."""
@@ -1039,7 +1028,9 @@ class Main(unittest.TestCase):
     def test_build_go_passes_an_equal_gomu_silently(self) -> None:
         """The same release: exit 0, nothing printed."""
         argv = ["build-go", "--label", LABEL, "--gomu", "g", "--built", "go1.27"]
-        self.assertEqual(call([*argv, "--running", "go1.27.0"]), Done(0, "", ""))
+        self.assertEqual(
+            call([*argv, "--running", "go1.27.0"]), hermetic.Called(0, "", "")
+        )
 
 
 class Script(unittest.TestCase):

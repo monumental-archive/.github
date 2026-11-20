@@ -28,7 +28,6 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
 
 import hermetic
@@ -684,26 +683,16 @@ class Shapes(unittest.TestCase):
                 )
 
 
-@dataclass(frozen=True)
-class Done:
-    """What an in-process call to the helper returned and wrote."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-def call(argv: list[str]) -> Done:
+def call(argv: list[str]) -> hermetic.Called:
     """Call the helper's `main` in this process (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        status = mutants_typescript.main(["--label", LABEL, *argv])
-    return Done(status, out.getvalue(), err.getvalue())
+    return hermetic.call_main(
+        lambda: mutants_typescript.main(["--label", LABEL, *argv])
+    )
 
 
 class Main(unittest.TestCase):
@@ -725,7 +714,7 @@ class Main(unittest.TestCase):
     def test_a_sound_config_passes_silently(self) -> None:
         """No refused setting: exit 0, nothing printed."""
         done = call(["config", str(self.write("stryker.config.json", CONFIG))])
-        self.assertEqual(done, Done(0, "", ""))
+        self.assertEqual(done, hermetic.Called(0, "", ""))
 
     def test_each_refused_setting_is_red_by_name(self) -> None:
         """Each Refusals row's setting, named with the site mark."""
@@ -775,7 +764,7 @@ class Main(unittest.TestCase):
         done = call(["verdict", str(path), "--summary-dir", str(summary)])
         self.assertEqual(
             done,
-            Done(
+            hermetic.Called(
                 0,
                 f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
                 " 0 not viable, 0 excluded\n",
