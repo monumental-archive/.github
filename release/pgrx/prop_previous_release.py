@@ -38,12 +38,16 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import] - PIPE only; the
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from typing import TYPE_CHECKING
+from unittest import mock
 
 import previous_release as previous
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # A small pool, so graphs and listings meet: 1.0.10 beside 1.0.2 is the
 # order a string sort gets wrong.
@@ -53,8 +57,20 @@ TAG = st.one_of(
     VERSION.map("v{}".format),
     st.from_regex(r"[a-z-]{1,8}v[0-9.]{1,6}", fullmatch=True),
 )
+
+
+def not_dots(segment: str) -> bool:
+    """Say whether a path segment is anything but `.` or `..`.
+
+    Returns:
+        True for a segment that names an entry.
+
+    """
+    return segment not in {".", ".."}
+
+
 SEGMENT = st.from_regex(r"[A-Za-z0-9_.][A-Za-z0-9_.-]{0,8}", fullmatch=True).filter(
-    lambda s: s not in {".", ".."}
+    not_dots
 )
 CRATE = st.lists(SEGMENT, min_size=1, max_size=3).map("/".join)
 # Numerically 1.0.10 is newer; as text it sorts first.
@@ -65,12 +81,25 @@ CARRIES_1_3_0 = "demo-1.3.0-pg18-linux-amd64.tar.gz"
 EDGES = st.lists(st.tuples(VERSION, VERSION), max_size=5)
 
 
-@st.composite
-def rows(draw: st.DrawFn, name: str) -> list[tuple[str, str]]:
+# A listing that lists the newer of two carried targets first, and one
+# whose newest carried target is above the version released.
+STRING_SORTED: list[tuple[str, str]] = [
+    ("v1.0.10", CARRIES_1_0_10),
+    ("v1.0.2", CARRIES_1_0_2),
+]
+NEWER_FIRST: list[tuple[str, str]] = [
+    ("v1.3.0", CARRIES_1_3_0),
+    ("v1.0.10", CARRIES_1_0_10),
+]
+TO_1_0_10: list[tuple[str, str]] = [("0.2.0", "1.0.2"), ("1.0.2", "1.0.10")]
+TO_1_3_0: list[tuple[str, str]] = [("1.0.2", "1.0.10"), ("1.0.10", "1.3.0")]
+
+
+def rows(name: str) -> st.SearchStrategy[list[tuple[str, str]]]:
     """Draw a listing: this extension's tarballs, another's, and noise.
 
     Returns:
-        `(tag, asset)` per asset, in listing order.
+        The strategy of `(tag, asset)` per asset, in listing order.
 
     """
     asset = st.one_of(
@@ -78,7 +107,7 @@ def rows(draw: st.DrawFn, name: str) -> list[tuple[str, str]]:
         VERSION.map(lambda v: f"other-{v}-pg18-linux-amd64.tar.gz"),
         st.sampled_from(["checksums.txt", f"{name}.cdx.json"]),
     )
-    return draw(st.lists(st.tuples(TAG, asset), max_size=8))
+    return st.lists(st.tuples(TAG, asset), max_size=8)
 
 
 def model(
@@ -93,7 +122,7 @@ def model(
         `(version, tag)`, or None.
 
     """
-    carried = {}
+    carried: dict[str, str] = {}
     for tag, asset in listing:
         for _, to in edges:
             if asset.startswith(f"{name}-{to}-pg"):
@@ -118,22 +147,24 @@ def lay(sql: Path, name: str, edges: list[tuple[str, str]]) -> None:
         (sql / f"{name}--{frm}--{to}.sql").write_text("", encoding="utf-8")
 
 
-def fake(listing: str, list_rc: int, tar_rc: int = 0, dl_rc: int = 0) -> object:
+def fake(
+    listing: str, list_rc: int, tar_rc: int = 0, dl_rc: int = 0
+) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
     """Answer gh and tar as the row says.
 
     Returns:
-        A stand-in for the subprocess module.
+        A stand-in for `subprocess.run`.
 
     """
 
-    def run(argv: list[str], **_: object) -> SimpleNamespace:
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         if argv[0] == previous.TAR:
-            return SimpleNamespace(returncode=tar_rc, stdout="")
+            return subprocess.CompletedProcess(argv, tar_rc, stdout="")
         if "api" in argv:
-            return SimpleNamespace(returncode=list_rc, stdout=listing)
-        return SimpleNamespace(returncode=dl_rc, stdout="")
+            return subprocess.CompletedProcess(argv, list_rc, stdout=listing)
+        return subprocess.CompletedProcess(argv, dl_rc, stdout="")
 
-    return SimpleNamespace(run=run, PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL)
+    return run
 
 
 def served(listing: list[tuple[str, str]]) -> str:
@@ -146,16 +177,23 @@ def served(listing: list[tuple[str, str]]) -> str:
     return "".join(f"{tag}\t{asset}\n" for tag, asset in listing)
 
 
-def quietly(call: object, *args: object) -> tuple[int, str]:
-    """Run a mode with its output captured.
+def quietly(
+    run: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    call: Callable[[], int],
+) -> tuple[int, str]:
+    """Run a mode with its output captured, `subprocess.run` faked.
 
     Returns:
         Its status and stdout.
 
     """
     out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-        code = call(*args)
+    with (
+        mock.patch.object(subprocess, "run", run),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        code = call()
     return code, out.getvalue()
 
 
@@ -163,18 +201,8 @@ class OneAnswer(unittest.TestCase):
     """V: the predecessor is the definition's, in any order."""
 
     @given(rows("demo"), EDGES, VERSION, st.booleans())
-    @example(
-        listing=[("v1.0.10", CARRIES_1_0_10), ("v1.0.2", CARRIES_1_0_2)],
-        edges=[("0.2.0", "1.0.2"), ("1.0.2", "1.0.10")],
-        version="1.2.3",
-        backwards=False,
-    )
-    @example(
-        listing=[("v1.3.0", CARRIES_1_3_0), ("v1.0.10", CARRIES_1_0_10)],
-        edges=[("1.0.2", "1.0.10"), ("1.0.10", "1.3.0")],
-        version="1.2.3",
-        backwards=False,
-    )
+    @example(listing=STRING_SORTED, edges=TO_1_0_10, version="1.2.3", backwards=False)
+    @example(listing=NEWER_FIRST, edges=TO_1_3_0, version="1.2.3", backwards=False)
     def test_the_greatest_carried_target(
         self,
         listing: list[tuple[str, str]],
@@ -188,7 +216,7 @@ class OneAnswer(unittest.TestCase):
             sql = Path(tmp) / "sql"
             lay(sql, "demo", edges[::-1] if backwards else edges)
             got = previous.predecessor(listing, sql, "demo", version)
-        self.assertEqual(want, None if got is None else tuple(got))
+        self.assertEqual(want, None if got is None else (got.version, got.tag))
 
 
 class GuardRefusesExactly(unittest.TestCase):
@@ -207,7 +235,7 @@ class GuardRefusesExactly(unittest.TestCase):
         """The model's verdict is the guard's."""
         name = posixpath.basename(crate).replace("-", "_")
         listing = data.draw(rows(name))
-        previous.subprocess = fake(served(listing), list_rc)
+        run = fake(served(listing), list_rc)
         rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
         prev = model(listing, edges, name, version)
         here = Path.cwd()
@@ -220,7 +248,7 @@ class GuardRefusesExactly(unittest.TestCase):
                     script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
                     if scripted:
                         Path(script).write_text("", encoding="utf-8")
-                code, out = quietly(previous.guard, "o/r", version, crate)
+                code, out = quietly(run, lambda: previous.guard("o/r", version, crate))
             finally:
                 os.chdir(here)
         if list_rc:
@@ -230,7 +258,8 @@ class GuardRefusesExactly(unittest.TestCase):
         else:
             want = 1
         self.assertEqual(code, want, out)
-        if want == 1:
+        # 1 is the model's refusal alone, which needs a predecessor.
+        if want == 1 and prev is not None:
             self.assertIn(
                 f"::error::no upgrade path {script} from published {prev[0]}"
                 f" ({prev[1]})",
@@ -264,15 +293,16 @@ class AnyListing(unittest.TestCase):
         self, listing: str, rc: int, dl_rc: int, tar_rc: int, version: str
     ) -> None:
         """A status, never a raise."""
-        previous.subprocess = fake(listing, rc, tar_rc, dl_rc)
+        run = fake(listing, rc, tar_rc, dl_rc)
         here = Path.cwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
                 lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
-                code, _ = quietly(previous.guard, "o/r", version, "crate")
-                self.assertIn(code, {0, 1, rc})
-                args = SimpleNamespace(
+                code, _ = quietly(run, lambda: previous.guard("o/r", version, "crate"))
+                guarded: set[int] = {0, 1, rc}
+                self.assertIn(code, guarded)
+                args = previous.Args(
                     repo="o/r",
                     version=version,
                     crate_dir="crate",
@@ -281,8 +311,9 @@ class AnyListing(unittest.TestCase):
                     tarball="prev.tar.gz",
                     dest="prev",
                 )
-                code, _ = quietly(previous.fetch, args)
-                self.assertIn(code, {0, rc, tar_rc})
+                code, _ = quietly(run, lambda: previous.fetch(args))
+                fetched: set[int] = {0, rc, tar_rc}
+                self.assertIn(code, fetched)
             finally:
                 os.chdir(here)
 

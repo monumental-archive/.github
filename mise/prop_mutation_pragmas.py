@@ -54,12 +54,17 @@ def written(path: Path, data: bytes) -> Path:
     return path
 
 
+# Two picks the shrinker once found, kept as examples.
+PICK_SIX: list[int] = [6]
+PICK_SEVEN_ONE: list[int] = [7, 1]
+
+
 class Invariance(unittest.TestCase):
     """A comment is a pragma; a string never is."""
 
     @given(st.lists(st.sampled_from(range(len(PIECES))), max_size=8))
-    @example([6])
-    @example([7, 1])
+    @example(PICK_SIX)
+    @example(PICK_SEVEN_ONE)
     def test_exactly_the_comment_lines(self, picks: list[int]) -> None:
         """Every pragma comment, at its line, and nothing else."""
         lines: list[str] = []
@@ -71,7 +76,8 @@ class Invariance(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             path = written(Path(scratch) / "m.py", ("\n".join(lines) + "\n").encode())
             found = mp.pragmas(path)
-        self.assertEqual([line for line, _ in found], expected, lines)
+        found_lines = [line for line, _ in found]
+        self.assertEqual(found_lines, expected, lines)
         for _, text in found:
             self.assertTrue(text.startswith("#"))
 

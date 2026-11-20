@@ -33,8 +33,7 @@ NOISE = st.sampled_from(["", "    # a comment", "  "])
 PUBLISH = "monumental-archive/.github/.github/workflows/publish.yml@0123abcd # v1.0.0"
 
 
-@st.composite
-def workflow(draw: st.DrawFn) -> tuple[str, list[dict[str, str]]]:
+def draw_workflow(draw: st.DrawFn) -> tuple[str, list[dict[str, str]]]:
     """Write a workflow with some jobs calling publish.yml.
 
     Returns:
@@ -58,6 +57,9 @@ def workflow(draw: st.DrawFn) -> tuple[str, list[dict[str, str]]]:
         if publish:
             calls.append(inputs)
     return "\n".join(lines) + "\n", calls
+
+
+workflow = st.composite(draw_workflow)
 
 
 def read(text: str) -> list[dict[str, str]]:
@@ -117,7 +119,7 @@ class InstallsOn(unittest.TestCase):
     )
     def test_restriction(self, allowed: list[str], os_name: str, arch: str) -> None:
         """Installs exactly where the restriction names the OS."""
-        rows = [("1.0", allowed)]
+        rows: list[tuple[str | None, list[str] | None]] = [("1.0", allowed)]
         self.assertEqual(
             lp.installs_on(rows, "1.0", f"{os_name}-{arch}"), os_name in allowed
         )

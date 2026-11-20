@@ -34,15 +34,28 @@ from hypothesis import strategies as st
 from typed_hypothesis import given
 
 TEXT = st.from_regex(r"[a-z][a-z0-9 =$\"'_./-]{0,20}", fullmatch=True).map(str.rstrip)
+
+
+def well_ended(lines: list[str]) -> bool:
+    """Tell whether a script starts unindented and ends on a non-blank line.
+
+    Returns:
+        True when it does.
+
+    """
+    return lines[0][:1] not in {"", " "} and bool(lines[-1].strip())
+
+
 SCRIPT = st.lists(
     st.one_of(TEXT, st.just(""), TEXT.map("  {}".format)), min_size=1, max_size=5
-).filter(lambda lines: lines[0][:1] not in {"", " "} and bool(lines[-1].strip()))
+).filter(well_ended)
+# A block whose body is a blank line, then text.
+BLANK_THEN_TEXT: list[str] = ["run: |", "   ", "x"]
 NAME = st.from_regex(r"[A-Za-z][A-Za-z0-9 ]{0,12}", fullmatch=True).map(str.strip)
 Block = tuple[int, str, str | None, str]
 
 
-@st.composite
-def workflow(draw: st.DrawFn) -> tuple[list[str], list[Block]]:
+def draw_workflow(draw: st.DrawFn) -> tuple[list[str], list[Block]]:
     """Write a job's steps, each a `run:` block.
 
     Returns:
@@ -82,6 +95,9 @@ def workflow(draw: st.DrawFn) -> tuple[list[str], list[Block]]:
     return lines, expected
 
 
+workflow = st.composite(draw_workflow)
+
+
 class Runs(unittest.TestCase):
     """A workflow's blocks, as written."""
 
@@ -93,7 +109,7 @@ class Runs(unittest.TestCase):
         self.assertEqual(got, expected, "\n".join(lines))
 
     @given(st.lists(st.text(max_size=30), max_size=12))
-    @example(["run: |", "   ", "x"])
+    @example(BLANK_THEN_TEXT)
     def test_any_text_is_read(self, lines: list[str]) -> None:
         """Blocks or none, never a traceback."""
         for run in es.runs_in(lines):
@@ -131,7 +147,7 @@ class Rewrite(unittest.TestCase):
             path = Path(scratch) / "ci.yml"
             path.write_text(text, encoding="utf-8")
             with mock.patch.object(
-                es.subprocess, "run", formatter(change=how == "changed")
+                subprocess, "run", formatter(change=how == "changed")
             ):
                 count = es.rewrite(path)
             after = path.read_text(encoding="utf-8")
@@ -145,7 +161,8 @@ class Rewrite(unittest.TestCase):
             for r in es.runs_in(after.splitlines())
             if r.shell in {"bash", "sh"}
         }
-        self.assertEqual(got, {b[1] + "echo formatted\n" for b in literal})
+        formatted = {b[1] + "echo formatted\n" for b in literal}
+        self.assertEqual(got, formatted)
         kept = [line for line in after.splitlines() if "echo formatted" not in line]
         self.assertEqual(kept, lines)
 

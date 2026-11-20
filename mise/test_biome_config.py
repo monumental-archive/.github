@@ -23,9 +23,10 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, override
 
 import biome_config
+import decoded
 import hermetic
 
 BELT = Path(__file__).parent
@@ -38,7 +39,49 @@ DELIVERED = biome_config.read_domains(DOMAINS_FILE)
 NURSERY = biome_config.read_nursery(NURSERY_FILE)
 
 
-def declaration(body: dict) -> str:
+# What a row expects, named so each carries its element type.
+NO_PROBLEMS: list[str] = []
+NO_PACKAGES: dict[str, list[str]] = {}
+NO_NAMES: set[str] = set()
+EMPTY_BLOCK: dict[str, object] = {}
+CLAIMS: tuple[set[str], ...] = (set(), {"react"})
+
+
+def org_config() -> dict[str, object]:
+    """Read the delivered org config.
+
+    Returns:
+        biome-org.json, decoded.
+
+    """
+    text = ORG_FILE.read_text(encoding="utf-8")
+    return decoded.as_object(decoded.load_json(text), ORG_FILE.name)
+
+
+def table(document: object, *keys: str) -> dict[str, object]:
+    """Walk nested objects key by key.
+
+    Returns:
+        The object at the end of `keys`.
+
+    """
+    node = decoded.as_object(document, "the document")
+    for depth, key in enumerate(keys):
+        node = decoded.as_object(node[key], ".".join(keys[: depth + 1]))
+    return node
+
+
+def table_or_empty(block: dict[str, object], key: str) -> dict[str, object]:
+    """Read one member object, an absent one as empty.
+
+    Returns:
+        The member, or an empty object when `block` has no `key`.
+
+    """
+    return decoded.as_object(block[key], key) if key in block else {}
+
+
+def declaration(body: object) -> str:
     """Render a repository declaration.
 
     Returns:
@@ -58,7 +101,9 @@ class ReadDomainsTest(unittest.TestCase):
 
     def test_org_domains_are_the_three_with_no_dependency_trigger(self) -> None:
         """project, types and test are org strictness, never repo identity."""
-        self.assertEqual(sorted(DELIVERED.org), ["project", "test", "types"])
+        org: list[str] = ["project", "test", "types"]
+        delivered = sorted(DELIVERED.org)
+        self.assertEqual(delivered, org)
 
     def test_every_identity_domain_names_at_least_one_trigger(self) -> None:
         """An identity domain with no trigger could never be checked for."""
@@ -68,7 +113,8 @@ class ReadDomainsTest(unittest.TestCase):
 
     def test_react_carries_its_measured_trigger(self) -> None:
         """The fixture domain, spot-checked against `biome explain`."""
-        self.assertEqual(DELIVERED.identity["react"], ["react"])
+        triggers: list[str] = ["react"]
+        self.assertEqual(DELIVERED.identity["react"], triggers)
 
     def test_comments_and_blank_lines_are_not_rows(self) -> None:
         """The file is commented heavily; none of it may become a domain."""
@@ -91,7 +137,7 @@ class DeclarationProblemsTest(unittest.TestCase):
 
     def test_admissible_declarations(self) -> None:
         """Everything a conforming repository is allowed to write."""
-        for document in (
+        documents: tuple[object, ...] = (
             {},
             {"linter": {}},
             {"linter": {"domains": {}}},
@@ -100,7 +146,8 @@ class DeclarationProblemsTest(unittest.TestCase):
             {"linter": {"domains": {"react": "all", "next": "all"}}},
             # Over-claiming is legal on purpose: it turns rules ON.
             {"linter": {"domains": {"vue": "all"}}},
-        ):
+        )
+        for document in documents:
             with self.subTest(document=document):
                 self.check(document, admissible=True)
 
@@ -146,7 +193,13 @@ class DeclarationProblemsTest(unittest.TestCase):
 
     def test_wrong_shapes_are_refused_rather_than_crashing(self) -> None:
         """A malformed file must produce a refusal, never a traceback."""
-        for document in ([], "react", {"linter": []}, {"linter": {"domains": []}}):
+        shapes: tuple[object, ...] = (
+            [],
+            "react",
+            {"linter": []},
+            {"linter": {"domains": []}},
+        )
+        for document in shapes:
             with self.subTest(document=document):
                 self.check(document, admissible=False)
 
@@ -173,14 +226,14 @@ class OmissionsTest(unittest.TestCase):
                 DELIVERED.identity,
                 {"react": ["apps/web/package.json"]},
             ),
-            [],
+            NO_PROBLEMS,
         )
 
     def test_an_unrelated_dependency_demands_nothing(self) -> None:
         """Only trigger packages carry the obligation."""
         self.assertEqual(
             biome_config.omissions(set(), DELIVERED.identity, {"hono": ["p.json"]}),
-            [],
+            NO_PROBLEMS,
         )
 
     def test_either_trigger_of_a_two_package_domain_counts(self) -> None:
@@ -230,30 +283,30 @@ class DeclaredPackagesTest(unittest.TestCase):
         broken.write_text("{not json", encoding="utf-8")
         self.assertEqual(
             biome_config.declared_packages([broken, Path("/nonexistent/package.json")]),
-            {},
+            NO_PACKAGES,
         )
 
 
 class GenerateTest(unittest.TestCase):
     """The arithmetic the repository is not allowed to do for itself."""
 
+    @override
     def setUp(self) -> None:
         """Generate against the real org config and the real tables."""
-        self.org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        self.org = org_config()
         self.config, self.silenced = biome_config.generate(
             self.org,
             {"react"},
             DELIVERED,
             NURSERY,
         )
-        self.written = self.config["linter"]["domains"]
+        self.written = table(self.config, "linter", "domains")
 
     def test_every_domain_is_written_explicitly(self) -> None:
         """Nothing is left to biome's auto-detection or to preset: all."""
-        self.assertEqual(
-            sorted(self.written),
-            sorted([*DELIVERED.identity, *DELIVERED.org]),
-        )
+        written = sorted(self.written)
+        every = sorted([*DELIVERED.identity, *DELIVERED.org])
+        self.assertEqual(written, every)
 
     def test_the_claimed_domain_is_all(self) -> None:
         """What the repository said it is."""
@@ -274,27 +327,25 @@ class GenerateTest(unittest.TestCase):
 
     def test_the_org_rules_survive_untouched(self) -> None:
         """The merge adds identity and silences nursery; nothing else moves."""
-        generated = self.config["linter"]["rules"]
-        original = self.org["linter"]["rules"]
+        generated = table(self.config, "linter", "rules")
+        original = table(self.org, "linter", "rules")
         self.assertEqual(generated["preset"], original["preset"])
-        self.assertEqual(
-            {k: v for k, v in generated.items() if k != "nursery"},
-            {k: v for k, v in original.items() if k != "nursery"},
-        )
+        kept = {k: v for k, v in generated.items() if k != "nursery"}
+        before = {k: v for k, v in original.items() if k != "nursery"}
+        self.assertEqual(kept, before)
         self.assertEqual(self.config["assist"], self.org["assist"])
 
     def test_the_org_config_is_not_mutated_in_place(self) -> None:
         """Two runs in one process must not accumulate."""
-        self.assertNotIn("domains", self.org.get("linter", {}))
+        self.assertNotIn("domains", table_or_empty(self.org, "linter"))
 
     def test_a_repository_claiming_nothing_gets_every_identity_off(self) -> None:
         """The canon's own case: no framework, no framework rules."""
         config, _silenced = biome_config.generate(self.org, set(), DELIVERED, NURSERY)
-        written = config["linter"]["domains"]
-        self.assertEqual(
-            {d for d, v in written.items() if v == "all"},
-            set(DELIVERED.org),
-        )
+        written = table(config, "linter", "domains")
+        claimed = {d for d, v in written.items() if v == "all"}
+        org = set(DELIVERED.org)
+        self.assertEqual(claimed, org)
 
 
 class ContradictionTest(unittest.TestCase):
@@ -314,7 +365,7 @@ class ContradictionTest(unittest.TestCase):
             Every flag named in tsc-flags.txt, without its leading dashes.
 
         """
-        dials = set()
+        dials: set[str] = set()
         for raw in TSC_FLAGS_FILE.read_text(encoding="utf-8").splitlines():
             line = raw.split("#", 1)[0].strip()
             if line.startswith("--"):
@@ -329,8 +380,8 @@ class ContradictionTest(unittest.TestCase):
             The setting, or None when the group does not name the rule.
 
         """
-        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
-        return org["linter"]["rules"].get(group, {}).get(rule)
+        rules = table(org_config(), "linter", "rules")
+        return table_or_empty(rules, group).get(rule)
 
     def test_useliteralkeys_is_off_while_the_tsc_dial_is_forced(self) -> None:
         """The #759 pair, pinned so it cannot silently re-open.
@@ -346,12 +397,11 @@ class ContradictionTest(unittest.TestCase):
 
     def test_naming_that_rule_does_not_disable_its_whole_group(self) -> None:
         """Only the one rule is named; the preset still carries the rest."""
-        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
-        self.assertEqual(org["linter"]["rules"]["preset"], "all")
-        self.assertEqual(
-            set(org["linter"]["rules"]["complexity"]),
-            {"useLiteralKeys"},
-        )
+        rules = table(org_config(), "linter", "rules")
+        self.assertEqual(rules["preset"], "all")
+        named: set[str] = {"useLiteralKeys"}
+        complexity = set(table(rules, "complexity"))
+        self.assertEqual(complexity, named)
 
 
 class TestFileOverrideTest(unittest.TestCase):
@@ -382,20 +432,21 @@ class TestFileOverrideTest(unittest.TestCase):
         "style": "noMagicNumbers",
     }
 
+    @override
     def setUp(self) -> None:
         """Read the delivered config, not a copy of it."""
-        self.org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        self.org = org_config()
 
-    def entry(self) -> dict:
+    def entry(self) -> dict[str, object]:
         """Return the single override entry.
 
         Returns:
             The delivered override pattern.
 
         """
-        overrides = self.org["overrides"]
+        overrides = decoded.as_array(self.org["overrides"], "overrides")
         self.assertEqual(len(overrides), 1, msg="biome uses only the FIRST match")
-        return overrides[0]
+        return decoded.as_object(overrides[0], "overrides[0]")
 
     def test_the_glob_list_is_exactly_the_closed_list(self) -> None:
         """Widening the list is an edit to this test as well as the config."""
@@ -403,30 +454,34 @@ class TestFileOverrideTest(unittest.TestCase):
 
     def test_the_shapes_the_org_does_not_have_are_absent(self) -> None:
         """`*.spec.*` and `__tests__/**` exist in no org repo, so are unnamed."""
-        joined = " ".join(self.entry()["includes"])
+        includes = decoded.as_array(self.entry()["includes"], "includes")
+        joined = " ".join(decoded.as_str(glob, "a glob") for glob in includes)
         for absent in ("spec", "__tests__", "tsx", ".js"):
             with self.subTest(absent=absent):
                 self.assertNotIn(absent, joined)
 
     def test_both_rules_are_off_against_the_literal(self) -> None:
         """Asserted against "off" itself; a mutant value must not survive."""
-        rules = self.entry()["linter"]["rules"]
+        rules = table(self.entry(), "linter", "rules")
         for group, rule in self.SILENCED.items():
             with self.subTest(rule=rule):
-                self.assertEqual(rules[group][rule], "off")
+                self.assertEqual(table(rules, group)[rule], "off")
 
     def test_the_override_silences_those_three_rules_and_no_others(self) -> None:
         """A fourth rule arriving here is a decision, not a drive-by."""
-        rules = self.entry()["linter"]["rules"]
-        self.assertEqual(
-            {(g, r) for g, block in rules.items() for r in block},
-            set(self.SILENCED.items()),
-        )
+        rules = table(self.entry(), "linter", "rules")
+        named: set[tuple[str, str]] = {(g, r) for g in rules for r in table(rules, g)}
+        silenced = set(self.SILENCED.items())
+        self.assertEqual(named, silenced)
 
     def test_the_override_carries_nothing_but_those_rules(self) -> None:
         """No `linter.enabled: false`, no formatter, no files — rules only."""
-        self.assertEqual(set(self.entry()), {"includes", "linter"})
-        self.assertEqual(set(self.entry()["linter"]), {"rules"})
+        keys: set[str] = {"includes", "linter"}
+        carried = set(self.entry())
+        self.assertEqual(carried, keys)
+        linter: set[str] = {"rules"}
+        sections = set(table(self.entry(), "linter"))
+        self.assertEqual(sections, linter)
 
     def test_neither_rule_is_switched_off_at_the_top_level(self) -> None:
         """The other direction: a magic number in production still reds.
@@ -435,11 +490,11 @@ class TestFileOverrideTest(unittest.TestCase):
         proof that production is untouched is that none appears in the
         top-level rule block at all.
         """
-        top = self.org["linter"]["rules"]
+        top = table(self.org, "linter", "rules")
         self.assertEqual(top["preset"], "all")
         for group, rule in self.SILENCED.items():
             with self.subTest(rule=rule):
-                self.assertNotIn(rule, top.get(group, {}))
+                self.assertNotIn(rule, table_or_empty(top, group))
 
     def test_the_other_two_structural_rules_stay_on_in_tests(self) -> None:
         """#804 turns off the line-count rule only.
@@ -448,8 +503,10 @@ class TestFileOverrideTest(unittest.TestCase):
         body's branching is real, so `noExcessiveLinesPerFile` and
         `noExcessiveCognitiveComplexity` are judged in tests as anywhere.
         """
-        complexity = self.entry()["linter"]["rules"]["complexity"]
-        self.assertEqual(set(complexity), {"noExcessiveLinesPerFunction"})
+        complexity = table(self.entry(), "linter", "rules", "complexity")
+        named: set[str] = {"noExcessiveLinesPerFunction"}
+        rules = set(complexity)
+        self.assertEqual(rules, named)
 
     def test_nomisplacedassertion_is_not_in_the_override(self) -> None:
         """#783's ruling: its 8 false positives are not a file-type question.
@@ -459,13 +516,13 @@ class TestFileOverrideTest(unittest.TestCase):
         would remove the class it guards — an `expect` stranded outside
         `it`/`test`, which reports nothing and passes green.
         """
-        rules = self.entry()["linter"]["rules"]
-        self.assertNotIn("noMisplacedAssertion", rules.get("suspicious", {}))
-        self.assertNotIn("suspicious", self.org["linter"]["rules"])
+        rules = table(self.entry(), "linter", "rules")
+        self.assertNotIn("noMisplacedAssertion", table_or_empty(rules, "suspicious"))
+        self.assertNotIn("suspicious", table(self.org, "linter", "rules"))
 
     def test_the_override_survives_generation_untouched(self) -> None:
         """A repository's identity moves domains and nursery, never this."""
-        for claimed in (set(), {"react"}):
+        for claimed in CLAIMS:
             with self.subTest(claimed=claimed):
                 config, _silenced = biome_config.generate(
                     self.org,
@@ -496,10 +553,11 @@ class ConditionalExpectTest(unittest.TestCase):
 
     RULE = "noConditionalExpect"
 
+    @override
     def setUp(self) -> None:
         """Read the delivered config, not a copy of it."""
-        self.org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
-        self.nursery = self.org["linter"]["rules"]["nursery"]
+        self.org = org_config()
+        self.nursery = table(self.org, "linter", "rules", "nursery")
 
     def test_the_rule_is_off_against_the_literal(self) -> None:
         """Asserted against "off" itself, never against a constant."""
@@ -522,15 +580,16 @@ class ConditionalExpectTest(unittest.TestCase):
 
     def test_no_repository_identity_turns_it_back_on(self) -> None:
         """The generator only ever writes "off"; assert it never writes "on"."""
-        for claimed in (set(), {"react"}, set(DELIVERED.identity)):
-            with self.subTest(claimed=sorted(claimed)):
+        for claimed in (*CLAIMS, set(DELIVERED.identity)):
+            names = sorted(claimed)
+            with self.subTest(claimed=names):
                 config, _silenced = biome_config.generate(
                     self.org,
                     claimed,
                     DELIVERED,
                     NURSERY,
                 )
-                rule = config["linter"]["rules"]["nursery"][self.RULE]
+                rule = table(config, "linter", "rules", "nursery")[self.RULE]
                 self.assertEqual(rule, "off")
 
     def test_it_is_not_in_the_test_file_override(self) -> None:
@@ -539,10 +598,11 @@ class ConditionalExpectTest(unittest.TestCase):
         `apps/door/src/submit.ts:176` — a local `assert` verb, not a test
         assertion. #783's globs would never have reached it.
         """
-        for entry in self.org["overrides"]:
+        for item in decoded.as_array(self.org["overrides"], "overrides"):
+            entry = decoded.as_object(item, "an override")
             with self.subTest(includes=entry["includes"]):
-                rules = entry.get("linter", {}).get("rules", {})
-                self.assertNotIn(self.RULE, rules.get("nursery", {}))
+                rules = table_or_empty(table_or_empty(entry, "linter"), "rules")
+                self.assertNotIn(self.RULE, table_or_empty(rules, "nursery"))
 
 
 class NurseryTableTest(unittest.TestCase):
@@ -550,14 +610,13 @@ class NurseryTableTest(unittest.TestCase):
 
     def test_every_enforced_nursery_rule_is_mapped(self) -> None:
         """An unmapped rule escapes its domain — the whole #720 defect."""
-        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
-        enforced = set(org["linter"]["rules"]["nursery"])
-        self.assertEqual(enforced - set(NURSERY), set())
+        enforced = set(table(org_config(), "linter", "rules", "nursery"))
+        self.assertEqual(enforced - set(NURSERY), NO_NAMES)
 
     def test_the_table_maps_nothing_the_org_does_not_enforce(self) -> None:
         """A mapped rule nobody enables is a row that means nothing."""
-        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
-        self.assertEqual(set(NURSERY) - set(org["linter"]["rules"]["nursery"]), set())
+        enforced = set(table(org_config(), "linter", "rules", "nursery"))
+        self.assertEqual(set(NURSERY) - enforced, NO_NAMES)
 
     def test_no_domain_is_stated_rather_than_left_blank(self) -> None:
         """`-` is a statement; an empty column is a field someone forgot."""
@@ -585,16 +644,20 @@ class SilenceNurseryTest(unittest.TestCase):
     """Which nursery rules a repository's identity switches off."""
 
     @staticmethod
-    def build(claimed: set[str], table: dict[str, str]) -> tuple:
+    def build(
+        claimed: set[str], table_: dict[str, str]
+    ) -> tuple[dict[str, object], int]:
         """Silence one small nursery block.
 
         Returns:
             The resulting block and the count reported.
 
         """
-        config = {"linter": {"rules": {"nursery": dict.fromkeys(table, "on")}}}
-        silenced = biome_config.silence_nursery(config, claimed, DELIVERED, table)
-        return config["linter"]["rules"]["nursery"], silenced
+        config: dict[str, object] = {
+            "linter": {"rules": {"nursery": dict.fromkeys(table_, "on")}}
+        }
+        silenced = biome_config.silence_nursery(config, claimed, DELIVERED, table_)
+        return table(config, "linter", "rules", "nursery"), silenced
 
     def test_the_silencing_value_is_the_literal_biome_understands(self) -> None:
         """Asserted against "off" itself, never against the constant.
@@ -634,12 +697,12 @@ class SilenceNurseryTest(unittest.TestCase):
     def test_a_rule_missing_from_the_table_stays_on(self) -> None:
         """Fail OPEN here: the gate's own guard is what catches an omission."""
         block, silenced = self.build(set(), {})
-        self.assertEqual(block, {})
+        self.assertEqual(block, EMPTY_BLOCK)
         self.assertEqual(silenced, 0)
 
     def test_the_delivered_tables_silence_the_measured_counts(self) -> None:
         """34 for a repo claiming nothing, 28 for one claiming react."""
-        org = json.loads(ORG_FILE.read_text(encoding="utf-8"))
+        org = org_config()
         _config, none = biome_config.generate(org, set(), DELIVERED, NURSERY)
         _config, react = biome_config.generate(org, {"react"}, DELIVERED, NURSERY)
         self.assertEqual(none, 34)
@@ -654,7 +717,9 @@ class RunTest(unittest.TestCase):
     """End to end, through the same entry point the belt task calls."""
 
     @staticmethod
-    def invoke(body: object | None, manifests: dict[str, object]) -> tuple:
+    def invoke(
+        body: object, manifests: dict[str, object]
+    ) -> tuple[int, str, str, Path]:
         """Run the generator in a temporary tree.
 
         Returns:
@@ -665,7 +730,7 @@ class RunTest(unittest.TestCase):
         declared = tree / "biome.json"
         if body is not None:
             declared.write_text(declaration(body), encoding="utf-8")
-        paths = []
+        paths: list[Path] = []
         for name, content in manifests.items():
             path = tree / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -740,7 +805,8 @@ class RunTest(unittest.TestCase):
         )
         self.assertEqual(status, 0)
         self.assertIn("react", out)
-        written = json.loads(path.read_text(encoding="utf-8"))["linter"]["domains"]
+        generated = decoded.load_json(path.read_text(encoding="utf-8"))
+        written = table(generated, "linter", "domains")
         self.assertEqual(written["react"], "all")
         self.assertEqual(written["qwik"], "none")
 
@@ -777,12 +843,10 @@ class RunTest(unittest.TestCase):
         declared = tree / "biome.json"
         declared.write_text("{", encoding="utf-8")
 
-        class Args:
-            org = ORG_FILE
-            domains = DOMAINS_FILE
-            nursery = NURSERY_FILE
-
-        args = Args()
+        args = biome_config.Args()
+        args.org = ORG_FILE
+        args.domains = DOMAINS_FILE
+        args.nursery = NURSERY_FILE
         args.out = tree / "generated.json"
         args.declaration = declared
         stderr = io.StringIO()

@@ -15,11 +15,11 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
 import coverage_exclusions as ce
+import decoded
 import hermetic
 
 _HERE = Path(__file__).resolve().parent
@@ -147,8 +147,10 @@ def task_body() -> str:
         The bash source mise runs.
 
     """
-    config = tomllib.loads((_HERE / "config.toml").read_text(encoding="utf-8"))
-    return config["tasks"]["lint:coverage-exclusions"]["run"]
+    config = decoded.load_toml((_HERE / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    name = "lint:coverage-exclusions"
+    return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
 class Task(unittest.TestCase):

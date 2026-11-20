@@ -25,6 +25,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
 import exit_trap as et
 import hermetic
@@ -130,10 +131,8 @@ class Lint(unittest.TestCase):
         """A bare trap owes the guard, and the mark it reads."""
         status, lines, shaped = lint(("a.sh", script("tmp=$(mktemp)", BARE, "echo ok")))
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(
-            lines,
-            [f"a.sh:4: {NOT_GUARDED}", f"a.sh:5: {NOT_MARKED}"],
-        )
+        want: list[str] = [f"a.sh:4: {NOT_GUARDED}", f"a.sh:5: {NOT_MARKED}"]
+        self.assertEqual(lines, want)
 
     def test_guarded_without_the_mark_reds(self) -> None:
         """The guard alone turns every clean run into a failure."""
@@ -142,7 +141,8 @@ class Lint(unittest.TestCase):
             script("tmp=$(mktemp)", GUARDED, "echo ok"),
         ))
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(lines, [f"a.sh:5: {NOT_MARKED}"])
+        want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
+        self.assertEqual(lines, want)
 
     def test_mark_not_last_reds(self) -> None:
         """A mark followed by more script is not the last statement."""
@@ -150,7 +150,8 @@ class Lint(unittest.TestCase):
             ("a.sh", script(GUARDED, "org_done=1", 'exit "${status}"')),
         )
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(lines, [f"a.sh:5: {NOT_MARKED}"])
+        want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
+        self.assertEqual(lines, want)
 
     def test_guard_on_a_combined_signal_list_reds(self) -> None:
         """The shape is EXIT alone; `EXIT INT` is a different trap."""
@@ -158,7 +159,8 @@ class Lint(unittest.TestCase):
             ("a.sh", script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1")),
         )
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(lines, [f"a.sh:3: {NOT_GUARDED}"])
+        want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
+        self.assertEqual(lines, want)
 
     def test_guarded_and_marked_is_clean(self) -> None:
         """The two lines, with comments and blanks after the mark."""
@@ -208,7 +210,8 @@ class Lint(unittest.TestCase):
             ("a.sh", script(BARE, "org_done=1", shebang="#!/bin/sh")),
         )
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(lines, [f"a.sh:3: {NOT_GUARDED}"])
+        want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
+        self.assertEqual(lines, want)
 
     def test_task_body_takes_either_form(self) -> None:
         """A task body runs under the belt's bash: both forms are clean."""
@@ -249,13 +252,11 @@ class Lint(unittest.TestCase):
         )
         status, lines, shaped = lint(("mise.toml", config))
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(
-            lines,
-            [
-                f"mise.toml:4: task lint:a: {NOT_GUARDED}",
-                f"mise.toml:5: task lint:a: {NOT_MARKED}",
-            ],
-        )
+        want: list[str] = [
+            f"mise.toml:4: task lint:a: {NOT_GUARDED}",
+            f"mise.toml:5: task lint:a: {NOT_MARKED}",
+        ]
+        self.assertEqual(lines, want)
 
     def test_one_line_body_is_its_run_line(self) -> None:
         """A `run = "…"` body starts on the `run =` line itself."""
@@ -263,13 +264,11 @@ class Lint(unittest.TestCase):
             ("mise.toml", "[tasks.a]\nrun = \"trap 'rm -f x' EXIT\"\n"),
         )
         self.assertEqual((status, shaped), (1, True))
-        self.assertEqual(
-            lines,
-            [
-                f"mise.toml:2: task a: {NOT_GUARDED}",
-                f"mise.toml:2: task a: {NOT_MARKED}",
-            ],
-        )
+        want: list[str] = [
+            f"mise.toml:2: task a: {NOT_GUARDED}",
+            f"mise.toml:2: task a: {NOT_MARKED}",
+        ]
+        self.assertEqual(lines, want)
 
 
 def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
@@ -293,9 +292,14 @@ def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
         return done.returncode
 
 
-@unittest.skipUnless(IS_32, "/bin/bash is not 3.2; the defect is 3.2's (macOS)")
 class Pattern(unittest.TestCase):
     """The defect, then the guard, on the shell that has the defect."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip every row unless /bin/bash is the shell with the defect."""
+        if not IS_32:
+            self.skipTest("/bin/bash is not 3.2; the defect is 3.2's (macOS)")
 
     def test_bare_trap_reproduces_the_defect(self) -> None:
         """The issue's four rows, as measured on 3.2.57."""
@@ -388,20 +392,19 @@ def run_sh(shell: str, body: str) -> int:
 class Posix(unittest.TestCase):
     """The printed guard under the shells a `#!/bin/sh` script meets."""
 
-    @unittest.skipUnless(
-        SH_IS_32 or SH_IS_DASH,
-        "/bin/sh is neither bash 3.2 nor dash",
-    )
     def test_under_bin_sh(self) -> None:
         """`/bin/sh` gives the row for the shell it is."""
+        if not (SH_IS_32 or SH_IS_DASH):
+            self.skipTest("/bin/sh is neither bash 3.2 nor dash")
         for body, as_32, as_dash in POSIX_ROWS:
             with self.subTest(body=body):
                 want = as_32 if SH_IS_32 else as_dash
                 self.assertEqual(run_sh(str(SH), body), want)
 
-    @unittest.skipUnless(DASH, "dash is not installed")
     def test_under_dash(self) -> None:
         """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
+        if not DASH:
+            self.skipTest("dash is not installed")
         for body, _, as_dash in POSIX_ROWS:
             with self.subTest(body=body):
                 self.assertEqual(run_sh(hermetic.tool("dash"), body), as_dash)

@@ -31,8 +31,7 @@ PINS = {
 SEGMENT = st.from_regex(r"[a-z][a-z0-9_-]{0,6}", fullmatch=True)
 
 
-@st.composite
-def pinned_line(draw: st.DrawFn) -> list[tuple[str | None, str]]:
+def draw_pinned_line(draw: st.DrawFn) -> list[tuple[str | None, str]]:
     """Draw a line of words with pins among them.
 
     Returns:
@@ -41,6 +40,9 @@ def pinned_line(draw: st.DrawFn) -> list[tuple[str | None, str]]:
     """
     kinds = draw(st.lists(st.sampled_from([None, *PINS]), min_size=1, max_size=6))
     return [(k, draw(PINS[k]) if k else draw(WORD)) for k in kinds]
+
+
+pinned_line = st.composite(draw_pinned_line)
 
 
 class Pins(unittest.TestCase):

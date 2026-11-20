@@ -35,20 +35,23 @@ NAME = st.one_of(
     st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True),
 )
 VALUE = st.text(
-    st.characters(blacklist_characters="\x00", blacklist_categories=("Cs",)),
+    st.characters(blacklist_characters="\x00", blacklist_categories=["Cs"]),
     max_size=10,
 )
 ENVIRON = st.dictionaries(NAME, VALUE, max_size=10)
 OVERRIDES = st.dictionaries(
     st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True), VALUE, max_size=3
 )
+# A repository's git variables in the caller's environment, no override.
+LEAKING: dict[str, str] = {"GIT_DIR": "/real/.git", "VERSION": "1.0"}
+NO_OVERRIDE: dict[str, str] = {}
 
 
 class Env(unittest.TestCase):
     """Nothing reaches a fixture that the allow-list does not name."""
 
     @given(ENVIRON, OVERRIDES, st.one_of(st.none(), st.just("/fixture/home")))
-    @example({"GIT_DIR": "/real/.git", "VERSION": "1.0"}, {}, None)
+    @example(LEAKING, NO_OVERRIDE, None)
     def test_only_the_allow_list_reaches_it(
         self, environ: dict[str, str], overrides: dict[str, str], home: str | None
     ) -> None:

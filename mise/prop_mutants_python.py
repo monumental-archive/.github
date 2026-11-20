@@ -33,10 +33,12 @@ from hypothesis import strategies as st
 from typed_hypothesis import given
 
 IDENT = st.from_regex(r"[a-z][a-z0-9_]{0,8}", fullmatch=True)
+MODULE: st.SearchStrategy[str] = IDENT.map("{}.py".format)
+OPERATOR: st.SearchStrategy[str] = IDENT.map("core/{}".format)
 MUTANT = st.builds(
     mp.Mutant,
-    path=IDENT.map("{}.py".format),
-    operator=IDENT.map("core/{}".format),
+    path=MODULE,
+    operator=OPERATOR,
     occurrence=st.integers(0, 50),
     line=st.integers(1, 500),
     function=IDENT,
@@ -63,7 +65,8 @@ def dump_line(m: mp.Mutant) -> str:
         "operator_args": {},
         "definition_name": m.function,
     }
-    return json.dumps([{"job_id": "j", "mutations": [spec]}, None])
+    line: list[object] = [{"job_id": "j", "mutations": [spec]}, None]
+    return json.dumps(line)
 
 
 def bare(m: mp.Mutant) -> mp.Mutant:
@@ -92,9 +95,11 @@ class Dump(unittest.TestCase):
         """Lines in any order read back sorted by (path, operator, occurrence)."""
         mutants, lines = drawn
         got = mp.read_dump("\n".join(lines) + "\n")
-        self.assertEqual(got, sorted(bare(m) for m in mutants))
+        expected = sorted(bare(m) for m in mutants)
+        self.assertEqual(got, expected)
         keys = [(m.path, m.operator, m.occurrence) for m in got]
-        self.assertEqual(keys, sorted(keys))
+        sorted_keys = sorted(keys)
+        self.assertEqual(keys, sorted_keys)
 
     @given(st.text(max_size=200))
     def test_any_text_is_read_or_refused_by_name(self, text: str) -> None:
@@ -111,9 +116,11 @@ class Shards(unittest.TestCase):
         """The shards' union is the list, each mutant in one shard."""
         ordered = sorted(mutants)
         shards = [mp.shard_of(ordered, k, n) for k in range(n)]
-        self.assertEqual(sorted(m for s in shards for m in s), ordered)
+        union = sorted(m for s in shards for m in s)
+        self.assertEqual(union, ordered)
         for shard in shards:
-            self.assertEqual(shard, sorted(shard))
+            in_order = sorted(shard)
+            self.assertEqual(shard, in_order)
 
     @given(st.integers(0, 40), st.integers(0, 40))
     def test_spelling_round_trips(self, k: int, n: int) -> None:
@@ -146,9 +153,8 @@ class Pragmas(unittest.TestCase):
             for f, n, word, reason in rows
         )
         got = mp.read_pragmas(text)
-        self.assertEqual(
-            got.reasoned, {(f"{f}.py", n) for f, n, w, r in rows if not w and r}
-        )
+        reasoned = {(f"{f}.py", n) for f, n, w, r in rows if not w and r}
+        self.assertEqual(got.reasoned, reasoned)
         refused = [(f, n, w, r) for f, n, w, r in rows if w or not r]
         self.assertEqual(len(got.refused), len(refused))
         for (f, n, w, _), message in zip(refused, got.refused, strict=True):
@@ -225,12 +231,11 @@ class Plan(unittest.TestCase):
         })
         got = mp.read_plan(text)
         self.assertEqual((got.head, got.command), ("abc", "t {test}"))
-        self.assertEqual(got.mutants, sorted(mutants))
+        ordered = sorted(mutants)
+        self.assertEqual(got.mutants, ordered)
         self.assertEqual(got.tests, tests)
-        self.assertEqual(
-            got.lines,
-            {(p, int(n)): v for p, per in lines.items() for n, v in per.items()},
-        )
+        mapped = {(p, int(n)): v for p, per in lines.items() for n, v in per.items()}
+        self.assertEqual(got.lines, mapped)
 
 
 if __name__ == "__main__":

@@ -18,9 +18,9 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import json
 import unittest
 
+import decoded
 import mint_doi as mint
 from hypothesis import example
 from hypothesis import strategies as st
@@ -35,14 +35,34 @@ DOI = st.from_regex(r"10\.[0-9]{4,5}/zenodo\.[0-9]{1,9}", fullmatch=True)
 NOISE = st.lists(
     st.text(st.characters(exclude_characters="\n\r"), max_size=20), max_size=4
 )
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(),
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
-    ),
-    max_leaves=12,
+# A JSON scalar the canon could write: no NaN, no infinity, which the
+# strict reader refuses.
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(),
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+# Two ids, to be reordered.
+TWO_IDS: list[str] = ["MIT", "Apache-2.0"]
 
 
 def ids_or_refusal(licence: str) -> list[str] | None:
@@ -115,7 +135,7 @@ class LicenceOrder(unittest.TestCase):
     """V: reordering the ids moves nothing but their order."""
 
     @given(st.lists(WORD, min_size=1, max_size=4), st.data())
-    @example(["MIT", "Apache-2.0"], None)
+    @example(TWO_IDS, None)
     def test_order_insensitive(
         self, words: list[str], data: st.DataObject | None
     ) -> None:
@@ -138,9 +158,12 @@ class LicenceOrder(unittest.TestCase):
             ids_or_refusal(expression(moved)),
         )
         self.assertEqual(first is None, second is None, (words, moved))
-        if first is not None:
-            self.assertEqual(sorted(first), sorted(second))
-            self.assertEqual(first, [w.lower() for w in words])
+        if first is not None and second is not None:
+            sorted_first: list[str] = sorted(first)
+            sorted_second: list[str] = sorted(second)
+            self.assertEqual(sorted_first, sorted_second)
+            lowered: list[str] = [w.lower() for w in words]
+            self.assertEqual(first, lowered)
 
 
 class CompactIdempotent(unittest.TestCase):
@@ -150,8 +173,8 @@ class CompactIdempotent(unittest.TestCase):
     def test_compact_twice(self, value: object) -> None:
         """compact(parse(compact(v))) == compact(v), and parses to v."""
         once = mint.compact(value)
-        self.assertEqual(mint.compact(json.loads(once)), once)
-        self.assertEqual(json.loads(once), value)
+        self.assertEqual(mint.compact(decoded.load_json(once)), once)
+        self.assertEqual(decoded.load_json(once), value)
 
 
 if __name__ == "__main__":

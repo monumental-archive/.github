@@ -24,8 +24,7 @@ from hypothesis import strategies as st
 from typed_hypothesis import given
 
 
-@st.composite
-def python_marker(draw: st.DrawFn) -> str:
+def draw_python_marker(draw: st.DrawFn) -> str:
     """Spell a Python coverage pragma the way its rule accepts.
 
     Returns:
@@ -39,6 +38,9 @@ def python_marker(draw: st.DrawFn) -> str:
     return "".join(c.swapcase() if f else c for c, f in zip(text, flips, strict=True))
 
 
+python_marker = st.composite(draw_python_marker)
+
+
 # Per by-line language: a marker comment, and a code line it may follow.
 LINE_MARKERS = {
     ".rs": (["#[coverage(off)]", "#![cfg_attr(coverage, x)]"], "let x = 1;"),
@@ -48,6 +50,9 @@ LINE_MARKERS = {
     ),
     ".go": (["//go:build !coverage", "// coverage:ignore"], "x := 1"),
 }
+# A pragma inside a string, and a marker quoted in code.
+QUOTED_PRAGMA: list[tuple[str, str]] = [("string", "# pragma: no cover")]
+QUOTED_MARKER: list[tuple[str, int]] = [("string", 0)]
 
 
 class Python(unittest.TestCase):
@@ -59,7 +64,7 @@ class Python(unittest.TestCase):
             max_size=8,
         )
     )
-    @example([("string", "# pragma: no cover")])
+    @example(QUOTED_PRAGMA)
     def test_comments_count_strings_do_not(self, rows: list[tuple[str, str]]) -> None:
         """Every comment marker at its line; no string marker at all."""
         lines, expected = [], []
@@ -72,7 +77,8 @@ class Python(unittest.TestCase):
             else:
                 lines.append("x = 1")
         found = ce.python("m.py", "\n".join(lines) + "\n")
-        self.assertEqual([f.line for f in found], expected, lines)
+        found_lines = [f.line for f in found]
+        self.assertEqual(found_lines, expected, lines)
 
 
 class ByLine(unittest.TestCase):
@@ -87,7 +93,7 @@ class ByLine(unittest.TestCase):
             max_size=8,
         ),
     )
-    @example(".ts", [("string", 0)])
+    @example(".ts", QUOTED_MARKER)
     def test_quoted_markers_never_count(
         self, suffix: str, rows: list[tuple[str, int]]
     ) -> None:
@@ -107,7 +113,8 @@ class ByLine(unittest.TestCase):
             else:
                 lines.append(code)
         found = ce.by_line(f"m{suffix}", "\n".join(lines), rules)
-        self.assertEqual([f.line for f in found], expected, lines)
+        found_lines = [f.line for f in found]
+        self.assertEqual(found_lines, expected, lines)
 
 
 class Refusal(unittest.TestCase):

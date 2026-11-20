@@ -150,7 +150,8 @@ class Refusals(unittest.TestCase):
             " — bump the pin in this repository's mise config\n",
             run.stdout,
         )
-        self.assertEqual(["--version"], run.npm)
+        want: list[str] = ["--version"]
+        self.assertEqual(want, run.npm)
 
     def test_versions_compare_as_numbers(self) -> None:
         """11.10.0 is newer than 11.5.1, which a string compare gets wrong."""
@@ -182,7 +183,8 @@ class Refusals(unittest.TestCase):
                     ),
                     run.stdout,
                 )
-                self.assertFalse([c for c in run.npm if c.startswith("publish")])
+                published: list[str] = [c for c in run.npm if c.startswith("publish")]
+                self.assertFalse(published)
 
     def test_a_hidden_tarball_is_not_a_tarball(self) -> None:
         """The shell's `dist/*.tgz` matched no dotfile; neither does this."""
@@ -202,7 +204,8 @@ class Publishes(unittest.TestCase):
             f"::notice::{PACKAGE} already on the registry; publish is complete\n",
             run.stdout,
         )
-        self.assertEqual(["--version", f"view {PACKAGE} version"], run.npm)
+        want: list[str] = ["--version", f"view {PACKAGE} version"]
+        self.assertEqual(want, run.npm)
 
     def test_the_one_tarball_is_published_by_its_relative_path(self) -> None:
         """`./dist/<name>.tgz`, never `dist/...`, which npm reads as owner/repo."""
@@ -248,9 +251,8 @@ class AFailedPublishShowsItsLog(unittest.TestCase):
     def test_only_the_last_300_lines_survive(self) -> None:
         """The tail, as the step's `tail -300`."""
         log = "\n".join(f"{i} verb line" for i in range(400))
-        self.assertEqual(
-            [f"{i} verb line" for i in range(100, 400)], publish_npm.masked(log)
-        )
+        want: list[str] = [f"{i} verb line" for i in range(100, 400)]
+        self.assertEqual(want, publish_npm.masked(log))
 
 
 class Main(unittest.TestCase):

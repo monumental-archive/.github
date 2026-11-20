@@ -24,6 +24,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import decoded
 import pgrx_images as images
 from hypothesis import example
 from hypothesis import strategies as st
@@ -40,15 +41,31 @@ PARSE = re.compile(
     r"(?P<name>[^-]*)-(?P<version>.+)-pg(?P<pg>[0-9]+)-linux-(?P<arch>amd64|arm64)\.tar\.gz"
 )
 # TOML has no null, and floats add nothing the reader branches on.
-SCALAR = st.booleans() | st.integers() | st.text(max_size=8)
-VALUE = st.recursive(
-    SCALAR,
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=4), inner, max_size=3)
-    ),
-    max_leaves=8,
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.booleans(), st.integers(), st.text(max_size=8)
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or a table.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    tables: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=4), inner, max_size=3
+    )
+    return arrays | tables
+
+
+VALUE: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=8)
+# A crate path with a dash in its last segment.
+DASHED: list[str] = ["crates", "edtf-pg"]
+# A table that is an array, and one whose major is not a string.
+AN_ARRAY: list[str] = ["16"]
+NOT_A_STRING: dict[str, object] = {"16": 1}
 
 
 def toml_value(value: object) -> str:
@@ -64,10 +81,11 @@ def toml_value(value: object) -> str:
         text = str(value)
     elif isinstance(value, str):
         text = json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
-    elif isinstance(value, list):
+    elif decoded.is_array(value):
         text = "[" + ", ".join(toml_value(v) for v in value) + "]"
     else:
-        pairs = (f"{toml_value(str(k))} = {toml_value(v)}" for k, v in value.items())
+        table = decoded.as_object(value, "a drawn value")
+        pairs = (f"{toml_value(str(k))} = {toml_value(v)}" for k, v in table.items())
         text = "{" + ", ".join(pairs) + "}"
     return text
 
@@ -106,23 +124,24 @@ class TarballNameParsesBack(unittest.TestCase):
         MAJOR,
         st.sampled_from(images.ARCHES),
     )
-    @example(["crates", "edtf-pg"], "1.3.4-rc.1", "16", "arm64")
+    @example(DASHED, "1.3.4-rc.1", "16", "arm64")
     def test_parses_back(
         self, segments: list[str], version: str, pg: str, arch: str
     ) -> None:
         """Read back from the name alone."""
         name = images.tarball_name("/".join(segments), version, pg, arch)
         found = PARSE.fullmatch(name)
-        self.assertIsNotNone(found, name)
-        self.assertEqual(
-            found.groupdict(),
-            {
-                "name": segments[-1].replace("-", "_"),
-                "version": version,
-                "pg": pg,
-                "arch": arch,
-            },
-        )
+        if found is None:
+            self.fail(name)
+        # Every group is required, so the default is never used.
+        groups: dict[str, str] = found.groupdict("")
+        want: dict[str, str] = {
+            "name": segments[-1].replace("-", "_"),
+            "version": version,
+            "pg": pg,
+            "arch": arch,
+        }
+        self.assertEqual(groups, want)
 
 
 class AnyTable(unittest.TestCase):
@@ -136,8 +155,8 @@ class AnyTable(unittest.TestCase):
         MAJOR,
     )
     @example("x16", "16")
-    @example(["16"], "16")
-    @example({"16": 1}, "16")
+    @example(AN_ARRAY, "16")
+    @example(NOT_A_STRING, "16")
     def test_base_image(self, build: object, pg: str) -> None:
         """One reference, or the step's own refusal."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -23,14 +23,15 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tarfile
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 RELEASE = Path(__file__).resolve().parent
@@ -87,7 +88,7 @@ def cell(pg: str, *, lib: bool = True, share: bool = True) -> dict[str, bytes]:
 
 
 def run(
-    args: list[str], cwd: Path, env: dict | None = None
+    args: list[str], cwd: Path, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run a helper the way the workflow step does.
 
@@ -104,6 +105,7 @@ def run(
 class Stage(unittest.TestCase):
     """`pgrx_images.py stage`: every branch, messages asserted."""
 
+    @override
     def setUp(self) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
         self.root = Path(tempfile.mkdtemp(prefix="pgrx-stage-"))
@@ -160,15 +162,13 @@ class Stage(unittest.TestCase):
                     for p in image.rglob("*")
                     if not p.is_dir()
                 )
-                self.assertEqual(
-                    [
-                        "lib/edtf.so",
-                        "lib/edtf_postgres.so",
-                        "share/extension/edtf_postgres--1.2.3.sql",
-                        "share/extension/edtf_postgres.control",
-                    ],
-                    found,
-                )
+                want: list[str] = [
+                    "lib/edtf.so",
+                    "lib/edtf_postgres.so",
+                    "share/extension/edtf_postgres--1.2.3.sql",
+                    "share/extension/edtf_postgres.control",
+                ]
+                self.assertEqual(want, found)
                 so = image / "lib" / "edtf_postgres.so"
                 self.assertEqual(0o755, stat.S_IMODE(so.stat().st_mode))
                 self.assertTrue((image / "lib" / "edtf.so").is_symlink())
@@ -219,12 +219,24 @@ class Stage(unittest.TestCase):
         )
 
 
+def build_rows() -> dict[str, str]:
+    """Read the table's [build] rows.
+
+    Returns:
+        Postgres major to its digest-pinned build image.
+
+    """
+    table = decoded.load_toml(TABLE.read_text("utf-8"))
+    rows = decoded.as_object(table.get("build"), "[build]")
+    return {pg: decoded.as_str(ref, f"[build].{pg}") for pg, ref in rows.items()}
+
+
 class BaseImage(unittest.TestCase):
     """`pgrx_images.py base-image`: the [build] row, or a refusal."""
 
     def test_every_major_names_its_build_image(self) -> None:
         """Each [build] row is what the verb prints."""
-        rows = tomllib.loads(TABLE.read_text("utf-8"))["build"]
+        rows = build_rows()
         for pg, ref in rows.items():
             with self.subTest(pg=pg):
                 result = run(
@@ -301,7 +313,7 @@ def build_image(pg: str) -> str:
         The digest-pinned reference.
 
     """
-    return tomllib.loads(TABLE.read_text("utf-8"))["build"][pg]
+    return build_rows()[pg]
 
 
 IMAGE = "ghcr.io/example/edtf-postgres"
@@ -363,7 +375,7 @@ class ConsumerDockerfile(unittest.TestCase):
 
     def test_every_rendered_from_is_pinned(self) -> None:
         """Every recipe on every [build] row: each FROM carries a digest."""
-        rows = tomllib.loads(TABLE.read_text("utf-8"))["build"]
+        rows = build_rows()
         for pg, base in rows.items():
             for recipe in ("copy", "path"):
                 with self.subTest(pg=pg, recipe=recipe):
@@ -414,6 +426,7 @@ done
 class Proof(unittest.TestCase):
     """`pgrx-image-proof.sh`: the recipes it runs, per Postgres major."""
 
+    @override
     def setUp(self) -> None:
         """Put a recording docker first on PATH, beside a digest record."""
         self.root = Path(tempfile.mkdtemp(prefix="pgrx-proof-"))
@@ -477,15 +490,13 @@ class Proof(unittest.TestCase):
             r"^buildx build --file \S+/copy\.Dockerfile --load"
             r" --tag consumer-proof:pg17 \S+$",
         )
-        self.assertEqual(
-            [
-                f"FROM {PINNED} AS ext",
-                f"FROM {build_image('17')}",
-                "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/",
-                "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/",
-            ],
-            built,
-        )
+        want: list[str] = [
+            f"FROM {PINNED} AS ext",
+            f"FROM {build_image('17')}",
+            "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/",
+            "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/",
+        ]
+        self.assertEqual(want, built)
         docker_dir = (CANON / "docker").resolve()
         self.assertEqual(
             f"run --rm -v {docker_dir}:/proof:ro {WRITER_MOUNT} consumer-proof:pg17"
@@ -506,14 +517,12 @@ class Proof(unittest.TestCase):
             r"^buildx build --file \S+/path\.Dockerfile --load"
             r" --tag consumer-path-proof:pg18 \S+$",
         )
-        self.assertEqual(
-            [
-                f"FROM {PINNED} AS ext",
-                f"FROM {build_image('18')}",
-                "COPY --from=ext / /extensions/ext/",
-            ],
-            built[4:],
-        )
+        want: list[str] = [
+            f"FROM {PINNED} AS ext",
+            f"FROM {build_image('18')}",
+            "COPY --from=ext / /extensions/ext/",
+        ]
+        self.assertEqual(want, built[4:])
         docker_dir = (CANON / "docker").resolve()
         self.assertEqual(
             f"run --rm --user postgres -v {docker_dir}:/proof:ro {WRITER_MOUNT}"
@@ -526,7 +535,7 @@ class Proof(unittest.TestCase):
         result, lines = self.prove("13")
         self.assertEqual(1, result.returncode)
         self.assertIn("::error::pg13 has no build image in", result.stderr)
-        self.assertEqual([], lines)
+        self.assertEqual(list[str](), lines)
 
     def test_a_record_without_a_digest_builds_nothing(self) -> None:
         """An empty digest renders no Dockerfile, so docker never runs."""
@@ -536,7 +545,7 @@ class Proof(unittest.TestCase):
             f"::error::the extension image {IMAGE}@ is not pinned by digest",
             result.stderr,
         )
-        self.assertEqual([], lines)
+        self.assertEqual(list[str](), lines)
 
     def test_the_in_image_scripts_are_tracked(self) -> None:
         """What runs inside the images is files a person can read and run."""
@@ -550,13 +559,13 @@ class Proof(unittest.TestCase):
         result, lines = self.prove("17")
         self.assertEqual(1, result.returncode)
         self.assertIn("holds no extension control file", result.stderr)
-        self.assertEqual([], lines)
+        self.assertEqual(list[str](), lines)
         (self.staged / "a.control").write_text("")
         (self.staged / "b.control").write_text("")
         result, lines = self.prove("17")
         self.assertEqual(1, result.returncode)
         self.assertIn("holds 2 extension control files (a, b)", result.stderr)
-        self.assertEqual([], lines)
+        self.assertEqual(list[str](), lines)
 
 
 def extension_name(tree: Path) -> subprocess.CompletedProcess[str]:
@@ -574,6 +583,7 @@ def extension_name(tree: Path) -> subprocess.CompletedProcess[str]:
 class ExtensionName(unittest.TestCase):
     """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
+    @override
     def setUp(self) -> None:
         """Make an empty staged share/extension tree, removed after."""
         self.tree = Path(tempfile.mkdtemp(prefix="pgrx-ext-"))
@@ -624,6 +634,7 @@ printf '%s\\n' "$*" >> "${PSQL_LOG}"
 class CopyProof(unittest.TestCase):
     """docker/pgrx-copy-proof.sh, run for real against a planted root."""
 
+    @override
     def setUp(self) -> None:
         """Plant a stock postgres's directories and stub su and psql."""
         self.root = Path(tempfile.mkdtemp(prefix="pgrx-copy-"))
@@ -658,9 +669,8 @@ class CopyProof(unittest.TestCase):
         """Create edtf_postgres, though amcheck sorts first in the destination."""
         result = run([BASH, str(COPY_PROOF), "edtf_postgres"], self.root, self.env)
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(
-            ["-c CREATE EXTENSION edtf_postgres;"], self.log.read_text().splitlines()
-        )
+        want: list[str] = ["-c CREATE EXTENSION edtf_postgres;"]
+        self.assertEqual(want, self.log.read_text().splitlines())
         self.assertEqual(
             "created extension edtf_postgres from the COPY recipe\n", result.stdout
         )

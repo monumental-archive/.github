@@ -30,25 +30,41 @@ from typed_hypothesis import given
 
 DIGEST = st.from_regex(r"[0-9a-f]{64}", fullmatch=True)
 NAME = st.from_regex(r"[A-Za-z0-9._+-]{1,24}", fullmatch=True)
-SCALAR = (
-    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text()
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.none(), st.booleans(), st.integers(), st.floats(allow_nan=False), st.text()
 )
-JSON = st.recursive(
-    SCALAR,
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
-    ),
-    max_leaves=12,
-)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
 # A manifest shaped like one, with any value where a field goes.
-ENTRY = st.fixed_dictionaries(
+TYPE: st.SearchStrategy[object] = st.sampled_from(["build-subject", "sbom"])
+ENTRY: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
     {},
-    optional={"type": st.sampled_from(["build-subject", "sbom"]) | JSON, "name": JSON},
+    optional={"type": TYPE | JSON, "name": JSON},
 )
-MANIFEST = st.fixed_dictionaries(
-    {}, optional={"entries": st.lists(ENTRY | JSON, max_size=4) | SCALAR | JSON}
+ENTRIES: st.SearchStrategy[object] = st.lists(ENTRY | JSON, max_size=4)
+MANIFEST: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {}, optional={"entries": ENTRIES | SCALAR | JSON}
 )
+# A digest for a name and one for its signature.
+SIGNED: list[tuple[str, str]] = [("a" * 64, "tool"), ("b" * 64, "tool.sig")]
+# Entries that are not a list.
+ENTRIES_TRUE: dict[str, object] = {"entries": True}
+ENTRIES_ONE: dict[str, object] = {"entries": 1}
 
 
 def written(text: str) -> Path:
@@ -69,7 +85,7 @@ class DigestsReadBack(unittest.TestCase):
     """T: what the list records for a name is what `digests` reads."""
 
     @given(st.lists(st.tuples(DIGEST, NAME), max_size=8), NAME)
-    @example([("a" * 64, "tool"), ("b" * 64, "tool.sig")], "tool")
+    @example(SIGNED, "tool")
     def test_every_name_reads_back(
         self, records: list[tuple[str, str]], probe: str
     ) -> None:
@@ -96,8 +112,8 @@ class AnyInput(unittest.TestCase):
             path.unlink()
 
     @given(MANIFEST | JSON)
-    @example({"entries": True})
-    @example({"entries": 1})
+    @example(ENTRIES_TRUE)
+    @example(ENTRIES_ONE)
     def test_build_subjects_answers_or_refuses(self, doc: object) -> None:
         """Any JSON: a list of names, or the step's own refusal."""
         self.read_manifest(json.dumps(doc))
