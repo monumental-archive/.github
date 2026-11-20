@@ -131,12 +131,16 @@ def run(
     *,
     missing: tuple[str, ...] = (),
     stub: dict[str, str] | None = None,
+    stale_venv: bool = False,
 ) -> Run:
     """Run the task in a planted tree.
 
     `files` are written and tracked. The belt is the whole one, less
     the files `missing` names. With `stub`, a stub mypy leads PATH and
-    `stub` is its environment; without, PATH is the suite's.
+    `stub` is its environment; without, PATH is the suite's. With
+    `stale_venv` (and `stub`), a `hypothesis` entry point with no
+    interpreter beside it leads PATH too: a venv left on a removed
+    Python.
 
     Returns:
         The run's exit status, output and the stub's arguments.
@@ -163,6 +167,9 @@ def run(
             bindir.mkdir()
             (bindir / "mypy").write_text(STUB, encoding="utf-8")
             (bindir / "mypy").chmod(0o755)
+            if stale_venv:
+                (bindir / "hypothesis").write_text("#!/bin/sh\n", encoding="utf-8")
+                (bindir / "hypothesis").chmod(0o755)
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env |= {"STUB_LOG": str(log), "STUB_VERSION": pinned(), **stub}
         # ruff: ignore[subprocess-without-shell-equals-true]
@@ -194,6 +201,18 @@ class TheWiring(unittest.TestCase):
         done = run({"README.md": "x\n"}, stub={})
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(f"{LABEL}: no Python tracked, skipped\n", done.stdout)
+        self.assertEqual(list[str](), done.args)
+
+    def test_a_hypothesis_venv_with_no_interpreter_is_red(self) -> None:
+        """The Hypothesis venv mypy would read has no python: refused (#1788)."""
+        done = run(CLEAN, stub={}, stale_venv=True)
+        self.assertEqual(1, done.returncode)
+        self.assertRegex(
+            done.stderr,
+            rf"\A{LABEL}: hypothesis runs on 'no interpreter' but the suite's"
+            r" python3 is '3\.[^']+' — the tool venv must be built on the"
+            r" belt's python pin \(reinstall: mise install -f pipx:hypothesis\)\n\Z",
+        )
         self.assertEqual(list[str](), done.args)
 
     def test_the_delivered_config_missing_is_red(self) -> None:

@@ -76,24 +76,13 @@ if [[ ${profile} == gate ]]; then
   fi
 fi
 
-command -v hypothesis > /dev/null || {
-  echo "${label}: prop_*.py tracked but hypothesis is missing —" >&2
-  echo "  the belt pins pipx:hypothesis; run: mise install" >&2
-  exit 1
-}
-# The venv's interpreter sits beside its `hypothesis` entry point; mise
-# puts a symlink to that entry point on PATH, so resolve it first.
-on_path=$(command -v hypothesis)
-entry=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${on_path}")
-venv_python="$(dirname "${entry}")/python"
-hyp_version=$("${venv_python}" -c 'import hypothesis, sys; print(sys.version)' 2> /dev/null) || hyp_version=""
-run_version=$(python3 -c 'import sys; print(sys.version)' 2> /dev/null) || run_version=""
-if [[ -z ${hyp_version} || ${hyp_version} != "${run_version}" ]]; then
-  echo "${label}: hypothesis runs on '${hyp_version:-no interpreter}'" >&2
-  echo "  but the repository's python3 is '${run_version:-missing}' — the tool venv" >&2
-  echo "  must be built on the belt's python pin (reinstall: mise install -f pipx:hypothesis)" >&2
-  exit 1
-fi
+# The venv must sit on the belt's Python, and import Hypothesis: the
+# belt's one check asks both (tool_python.py, #1788). The first call
+# names the interpreter the properties run on; the second, with
+# `--site`, has that venv import the package, and its directory is not
+# needed here.
+venv_python=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis) || exit 1
+"${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis --site hypothesis > /dev/null || exit 1
 
 args=()
 while IFS= read -r f; do

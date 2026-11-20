@@ -53,6 +53,7 @@ from pathlib import Path
 
 import decoded
 import startup_hook
+import tool_python
 
 LABEL = "audit:mutants: python"
 EXIT_RED = 1
@@ -403,44 +404,14 @@ def coverage_site() -> str | None:
     """Find the directory coverage's package is imported from.
 
     The tool venv's interpreter must be the one the suite runs on: the
-    tracer is a compiled extension (mise/measured, the same check).
+    tracer is a compiled extension. The belt's one check asks it
+    (tool_python.py, #1788).
 
     Returns:
         The directory, or None with the refusal printed.
 
     """
-    tool = shutil.which("coverage")
-    if tool is None:
-        red("coverage missing — the belt pins it; the plan measures each test file")
-        return None
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    shown = subprocess.run(
-        [tool, "debug", "sys"], capture_output=True, text=True, check=False
-    ).stdout
-    found = {}
-    for line in shown.splitlines():
-        key, _, value = line.strip().partition(": ")
-        found[key] = value.strip()
-    module = found.get("coverage_module", "")
-    versions = []
-    for python in (found.get("executable", ""), "python3"):
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        asked = subprocess.run(
-            [python or "false", "-c", "import sys; print(sys.version)"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        versions.append(asked.stdout.strip() if asked.returncode == 0 else "")
-    if not module or not versions[0] or versions[0] != versions[1]:
-        red(
-            f"coverage runs on '{versions[0] or 'no interpreter'}' but the"
-            f" suite's python3 is '{versions[1] or 'missing'}' — the tool venv"
-            " must be built on the belt's python pin"
-            " (reinstall: mise install -f pipx:coverage)"
-        )
-        return None
-    return str(Path(module).parent.parent)
+    return tool_python.check(LABEL, "coverage", "coverage")
 
 
 # One rc file per test file, all writing into one data directory: the

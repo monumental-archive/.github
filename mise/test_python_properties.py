@@ -214,10 +214,15 @@ class Refusals(unittest.TestCase):
     def test_a_prop_file_without_hypothesis_is_red(self) -> None:
         """A property file and no tool: red, with the remedy."""
         done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=None)
-        self.assertEqual(done.returncode, 1)
-        self.assertIn(
-            "test:python-properties: prop_*.py tracked but hypothesis is missing",
-            done.stderr,
+        self.assertEqual(
+            (done.returncode, done.stderr),
+            (
+                1,
+                (
+                    "test:python-properties: hypothesis missing — the belt pins"
+                    " pipx:hypothesis; run: mise install\n"
+                ),
+            ),
         )
 
     def test_an_ordinary_test_importing_hypothesis_is_red(self) -> None:
@@ -251,7 +256,11 @@ class Refusals(unittest.TestCase):
         done = run(GATE, {"prop_x.py": HOLDS, "test_x.py": fixture}, tool_dir=None)
         self.assertEqual(done.returncode, 1)
         self.assertNotIn("import Hypothesis", done.stderr)
-        self.assertIn("prop_*.py tracked but hypothesis is missing", done.stderr)
+        self.assertIn(
+            "test:python-properties: hypothesis missing — the belt pins"
+            " pipx:hypothesis; run: mise install\n",
+            done.stderr,
+        )
 
     def test_a_venv_on_another_interpreter_is_red(self) -> None:
         """The tool venv's python is not the belt's: red, both named."""
@@ -263,11 +272,13 @@ class Refusals(unittest.TestCase):
                 (bin_dir / name).chmod(0o755)
             done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=str(bin_dir))
         self.assertEqual(done.returncode, 1)
-        self.assertIn(
-            "test:python-properties: hypothesis runs on '3.0.0 (stub interpreter)'",
+        self.assertRegex(
             done.stderr,
+            r"\Atest:python-properties: hypothesis runs on '3\.0\.0 \(stub"
+            r" interpreter\)' but the suite's python3 is '3\.[^']+' — the tool"
+            r" venv must be built on the belt's python pin \(reinstall: mise"
+            r" install -f pipx:hypothesis\)\n\Z",
         )
-        self.assertIn("mise install -f pipx:hypothesis", done.stderr)
 
 
 class Properties(unittest.TestCase):

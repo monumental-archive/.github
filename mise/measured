@@ -82,7 +82,9 @@ mkdir -p "${run}"
 #
 # The tool venv's interpreter must be the one the suite runs on: the
 # tracer is a compiled extension, and a venv built on another Python
-# would load in no child, silently. Asked once per run (about 0.2 s).
+# would load in no child, silently. Asked once per run, of the belt's
+# one check (tool_python.py, #1788), which also names the directory the
+# coverage package is imported from.
 #
 # Each file is written whole and renamed into place, the rc file last,
 # so a call running beside the first reads complete files or writes
@@ -90,18 +92,8 @@ mkdir -p "${run}"
 if command -v coverage > /dev/null; then
   if [[ ! -f ${run}/coverage.rc ]]; then
     : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-    cov_sys=$(coverage debug sys 2> /dev/null) || cov_sys=""
-    cov_module=$(awk '$1 == "coverage_module:" { print $2 }' <<< "${cov_sys}")
-    cov_python=$(awk '$1 == "executable:" { print $2 }' <<< "${cov_sys}")
-    cov_version=$("${cov_python:-false}" -c 'import sys; print(sys.version)' 2> /dev/null) || cov_version=""
-    run_version=$(python3 -c 'import sys; print(sys.version)' 2> /dev/null) || run_version=""
-    if [[ -z ${cov_module} || -z ${cov_version} || ${cov_version} != "${run_version}" ]]; then
-      echo "measured: coverage runs on '${cov_version:-no interpreter}'" >&2
-      echo "  but the suite's python3 is '${run_version:-missing}' — the tool venv" >&2
-      echo "  must be built on the belt's python pin (reinstall: mise install -f pipx:coverage)" >&2
-      exit 1
-    fi
-    site=$("${ORG_PYTHON}" -c 'import sys; print(repr(sys.argv[1]))' "$(dirname "$(dirname "${cov_module}")")")
+    cov_site=$("${ORG_PYTHON}" "${belt}/tool_python.py" measured coverage --site coverage) || exit 1
+    site=$("${ORG_PYTHON}" -c 'import sys; print(repr(sys.argv[1]))' "${cov_site}")
     mkdir -p "${run}/hook" "${run}/python"
     printf 'import sys\nsys.path.append(%s)\nimport coverage\ncoverage.process_startup()\n' \
       "${site}" | "${ORG_PYTHON}" "${belt}/startup_hook.py" "${run}/hook.$$"

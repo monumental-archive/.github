@@ -244,10 +244,13 @@ class EarlierRunsAreSwept(unittest.TestCase):
             self.assertTrue(this.is_dir(), "this run's directory was not made")
 
 
+# The venv's interpreter, beside the `coverage` entry point: it counts
+# its starts and runs the suite's python3 over a planted coverage
+# package, so the belt's one check (tool_python.py, #1788) passes and
+# names `{site}` as the directory coverage is imported from.
 STUB = """#!/bin/sh
 echo call >> "{counter}"
-echo "  executable: {python}"
-echo "  coverage_module: {site}/coverage/__init__.py"
+PYTHONPATH="{site}" exec "{python}" "$@"
 """
 
 
@@ -255,14 +258,19 @@ class CoverageIsAskedOncePerRun(unittest.TestCase):
     """Where coverage lives is asked once per run, then read from the run."""
 
     def test_two_calls_in_one_run_start_coverage_once(self) -> None:
-        """A counting `coverage` stub is started by the first call only."""
+        """A counting venv interpreter is started by the first call only."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = plant(Path(tmp), floor=True)
             bin_dir, counter = Path(tmp) / "bin", Path(tmp) / "calls"
             bin_dir.mkdir()
             python = hermetic.tool("python3")
             site = Path(tmp) / "site"
-            stub = bin_dir / "coverage"
+            (site / "coverage").mkdir(parents=True)
+            (site / "coverage" / "__init__.py").write_text("")
+            entry = bin_dir / "coverage"
+            entry.write_text("#!/bin/sh\n")
+            entry.chmod(0o755)
+            stub = bin_dir / "python"
             stub.write_text(STUB.format(counter=counter, python=python, site=site))
             stub.chmod(0o755)
             path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
@@ -283,6 +291,29 @@ class CoverageIsAskedOncePerRun(unittest.TestCase):
                     str(Path(tmp) / "run" / "coverage.rc"),
                     environment(out.stdout)["COVERAGE_PROCESS_START"],
                 )
+
+
+class CoverageOnAnotherPython(unittest.TestCase):
+    """A coverage venv with no interpreter: refused in the one wording (#1788)."""
+
+    def test_a_venv_with_no_interpreter_is_refused(self) -> None:
+        """No `python` beside the entry point: red, the remedy named."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = plant(Path(tmp), floor=True)
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            entry = bin_dir / "coverage"
+            entry.write_text("#!/bin/sh\n")
+            entry.chmod(0o755)
+            path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+            done = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), PATH=path)
+            self.assertEqual(1, done.returncode)
+            self.assertRegex(
+                done.stderr,
+                r"\Ameasured: coverage runs on 'no interpreter' but the suite's"
+                r" python3 is '3\.[^']+' — the tool venv must be built on the"
+                r" belt's python pin \(reinstall: mise install -f pipx:coverage\)\n\Z",
+            )
 
 
 GO_COVER = "-cover -coverpkg=./... -covermode=atomic -exec={belt}/go-test-exec"

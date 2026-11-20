@@ -221,6 +221,8 @@ DYNAMIC = {
     "mise/python_properties.py": "starts itself on each shard under the"
     " interpreter it runs on (#1741)",
     "mise/security_config.py": "builds its gh argv in a variable",
+    "mise/tool_python.py": "asks a tool venv's interpreter and python3"
+    " found on PATH (#1788)",
 }
 
 # Scripts that run before any tool is installed, so call nothing a list

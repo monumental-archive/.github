@@ -36,6 +36,7 @@ from typing import override
 import decoded
 import hermetic
 import mutants_python as helper
+import tool_python
 
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-python.sh"
@@ -1046,8 +1047,8 @@ class Refusals(Planted):
             (
                 1,
                 (
-                    f"{LABEL}: coverage missing — the belt pins it; the plan"
-                    " measures each test file\n"
+                    f"{LABEL}: coverage missing — the belt pins pipx:coverage;"
+                    " run: mise install\n"
                 ),
             ),
         )
@@ -1087,6 +1088,27 @@ class Refusals(Planted):
             ),
         )
 
+    def test_coverage_on_a_gone_interpreter_is_named(self) -> None:
+        """Coverage's shebang names a missing interpreter: red by name (#1788)."""
+        self.plant([ITEM_KILLED])
+        stub = self.bins / "coverage"
+        stub.write_text("#!/nowhere/python\n", encoding="utf-8")
+        stub.chmod(0o755)
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
+        suite = tool_python.ask(python3, tool_python.VERSION)
+        done, _ = self.plan_in_process()
+        self.assertEqual(
+            (done.returncode, done.stderr),
+            (
+                1,
+                (
+                    f"{LABEL}: coverage runs on 'no interpreter' but the suite's"
+                    f" python3 is '{suite}' — the tool venv must be built on the"
+                    " belt's python pin (reinstall: mise install -f pipx:coverage)\n"
+                ),
+            ),
+        )
+
     def test_suite_that_writes_no_coverage_reaches_nothing(self) -> None:
         """A test command coverage never sees: every mutant is "no tests"."""
         self.plant(
@@ -1113,6 +1135,12 @@ class Refusals(Planted):
             encoding="utf-8",
         )
         stub.chmod(0o755)
+        # The wrapper stands in the venv, so the real venv's interpreter
+        # is started from beside it, where the belt's check looks (#1788).
+        venv_python = Path(os.path.realpath(real)).parent / "python"
+        beside = self.bins / "python"
+        beside.write_text(f'#!/bin/sh\nexec {venv_python} "$@"\n', encoding="utf-8")
+        beside.chmod(0o755)
         done, _ = self.plan_in_process()
         self.assertEqual(done.returncode, 0, done.stderr)
         plan = decoded.as_object(
