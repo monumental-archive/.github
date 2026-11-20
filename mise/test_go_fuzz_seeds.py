@@ -29,10 +29,11 @@ import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -113,8 +114,9 @@ def task_body(name: str) -> str:
         The body with any `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"][name]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the [tasks] table")
+    run = decoded.as_str(decoded.as_object(tasks[name], name)["run"], "the run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)
@@ -125,6 +127,7 @@ def task_body(name: str) -> str:
 class GoFuzzSeeds(unittest.TestCase):
     """lint:go-fuzz-seeds runs exactly the packages the listing names."""
 
+    @override
     def setUp(self) -> None:
         """Plant an empty git checkout, the go stub, and the tool links."""
         self.root = Path(tempfile.mkdtemp()).resolve()
@@ -201,13 +204,11 @@ class GoFuzzSeeds(unittest.TestCase):
         self.module(".", FIVE)
         code, out, err, calls = self.run_lint()
         self.assertEqual(code, 0, err)
-        self.assertEqual(
-            calls,
-            [
-                f".|{LIST}",
-                f".|{RUN} example.com/probe/a example.com/probe/b",
-            ],
-        )
+        want: list[str] = [
+            f".|{LIST}",
+            f".|{RUN} example.com/probe/a example.com/probe/b",
+        ]
+        self.assertEqual(calls, want)
         self.assertTrue(
             out.endswith("lint:go-fuzz-seeds: 2 target(s) built, seed corpora clean\n"),
             out,
@@ -219,14 +220,12 @@ class GoFuzzSeeds(unittest.TestCase):
         self.module("tools/gen", FIVE)
         code, out, err, calls = self.run_lint()
         self.assertEqual(code, 0, err)
-        self.assertEqual(
-            calls,
-            [
-                f".|{LIST}",
-                f"tools/gen|{LIST}",
-                f"tools/gen|{RUN} example.com/probe/a example.com/probe/b",
-            ],
-        )
+        want: list[str] = [
+            f".|{LIST}",
+            f"tools/gen|{LIST}",
+            f"tools/gen|{RUN} example.com/probe/a example.com/probe/b",
+        ]
+        self.assertEqual(calls, want)
         self.assertTrue(out.endswith("2 target(s) built, seed corpora clean\n"), out)
 
     def test_no_fuzz_target_skips(self) -> None:
@@ -234,7 +233,8 @@ class GoFuzzSeeds(unittest.TestCase):
         self.module(".", NONE)
         code, out, err, calls = self.run_lint()
         self.assertEqual((code, out, err), (0, SKIPPED, ""))
-        self.assertEqual(calls, [f".|{LIST}"])
+        want: list[str] = [f".|{LIST}"]
+        self.assertEqual(calls, want)
 
     def test_a_failing_seed_is_red_and_names_the_package(self) -> None:
         """A seed that fails reds the task, go's FAIL line and ours naming it."""
@@ -260,7 +260,8 @@ class GoFuzzSeeds(unittest.TestCase):
             BROKEN + "lint:go-fuzz-seeds: go test -list failed in . — "
             "the fuzz targets cannot be enumerated\n",
         )
-        self.assertEqual(calls, [f".|{LIST}"])
+        want: list[str] = [f".|{LIST}"]
+        self.assertEqual(calls, want)
 
     def test_go_missing_with_go_mod_tracked_is_refused(self) -> None:
         """The existing refusal, unchanged."""

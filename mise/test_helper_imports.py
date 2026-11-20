@@ -89,7 +89,8 @@ class TheLaw(unittest.TestCase):
 
     def test_no_tracked_file_loads_another_by_path(self) -> None:
         """Every helper is imported by name, in tests and helpers alike."""
-        self.assertEqual([], offenders(CANON))
+        none: list[str] = []
+        self.assertEqual(none, offenders(CANON))
 
     def test_the_excepted_file_still_loads(self) -> None:
         """An exception that no longer applies is removed, not kept."""
@@ -108,11 +109,13 @@ class TheLaw(unittest.TestCase):
             "c = runpy.run_module('c')\n"
             "d = SourceFileLoader('d', 'd.py')\n"
         )
-        self.assertEqual([3, 4, 5, 6], loads(text))
+        lines: list[int] = [3, 4, 5, 6]
+        self.assertEqual(lines, loads(text))
 
     def test_a_name_in_a_string_is_not_a_load(self) -> None:
         """A fixture naming a loader in its text loads nothing."""
-        self.assertEqual([], loads("X = 'runpy.run_path(\"a.py\")'\nimport b\n"))
+        none: list[int] = []
+        self.assertEqual(none, loads("X = 'runpy.run_path(\"a.py\")'\nimport b\n"))
 
 
 def sibling_line() -> str:

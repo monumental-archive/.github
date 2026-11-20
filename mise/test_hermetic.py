@@ -21,11 +21,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, override
 from unittest import mock
 
 import call_names
 import hermetic
+import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -130,11 +131,26 @@ def copies(source: str) -> list[int]:
     def env(node: ast.AST | None) -> bool:
         return node is not None and is_environment(node, modules, environs)
 
-    return sorted(
-        node.iter.lineno if isinstance(node, ast.comprehension) else node.lineno
-        for node in ast.walk(module)
-        if reads_whole(node, env)
-    )
+    return sorted(line_of(node) for node in ast.walk(module) if reads_whole(node, env))
+
+
+def line_of(node: ast.AST) -> int:
+    """Name the line a node `reads_whole` accepts stands on.
+
+    Returns:
+        A comprehension's iterable's line; any other node's own.
+
+    Raises:
+        TypeError: a node that carries no line, which `reads_whole`
+            never accepts.
+
+    """
+    if isinstance(node, ast.comprehension):
+        return node.iter.lineno
+    if isinstance(node, (ast.expr, ast.stmt)):
+        return node.lineno
+    msg = f"{type(node).__name__} carries no line"
+    raise TypeError(msg)
 
 
 def reads_whole(node: ast.AST, env: Callable[[ast.AST | None], bool]) -> bool:
@@ -181,6 +197,11 @@ STARTS = frozenset({
 STARTS_BY_PREFIX = ("os.exec", "os.spawn", "os.posix_spawn")
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
+# What a row expects, named so each carries its element type.
+NOTHING: list[object] = []
+LINE_TWO: list[int] = [2]
+NO_NAMES: set[str] = set()
+
 
 def dotted(node: ast.AST) -> str | None:
     """Spell a name or one attribute of a name: `env`, `self.env`.
@@ -206,7 +227,7 @@ def starts_process(spelled: str | None) -> bool:
     return spelled in STARTS or (spelled or "").startswith(STARTS_BY_PREFIX)
 
 
-def given_environment(call: ast.Call, spelled: str) -> list[ast.AST]:
+def given_environment(call: ast.Call, spelled: str) -> list[ast.expr]:
     """Find the environment a process-starting call is handed.
 
     Returns:
@@ -315,7 +336,7 @@ class Environments:
         return all(self.hermetic(v, seen | {name}) for v in found)
 
     @staticmethod
-    def start(node: ast.AST) -> ast.AST | bool | None:
+    def start(node: ast.AST) -> ast.AST | Literal[False] | None:
         """Find the environment a composite expression starts from.
 
         Returns:
@@ -333,10 +354,9 @@ class Environments:
             return node.values[0] if first else False
         if isinstance(node, ast.DictComp):
             source = node.generators[0].iter
-            called = isinstance(source, ast.Call) and isinstance(
-                source.func, ast.Attribute
-            )
-            return source.func.value if called else False
+            if isinstance(source, ast.Call) and isinstance(source.func, ast.Attribute):
+                return source.func.value
+            return False
         return None
 
     def called(self, call: ast.Call, seen: frozenset[str]) -> bool:
@@ -359,7 +379,9 @@ class Environments:
                 self.hermetic(r, seen | {function}) for r in found
             )
         aliases = self.values(name, call) if name else None
-        return bool(aliases) and all(dotted(a) == "hermetic.env" for a in aliases)
+        if not aliases:
+            return False
+        return all(dotted(a) == "hermetic.env" for a in aliases)
 
     def built_by_hand(self) -> list[int]:
         """Find every child environment not taken from hermetic.env.
@@ -372,7 +394,7 @@ class Environments:
         pending: list[tuple[str, str]] = []
         done: set[tuple[str, str]] = set()
 
-        def judge(value: ast.AST, at: ast.AST) -> None:
+        def judge(value: ast.expr, at: ast.AST) -> None:
             verdict = self.hermetic(value, frozenset())
             function = self.scope(at)
             if verdict is None and isinstance(function, FUNCTIONS):
@@ -398,7 +420,7 @@ class Environments:
 
     def passed(
         self, function: str, param: str, calls: list[ast.Call]
-    ) -> list[tuple[ast.AST, ast.Call]]:
+    ) -> list[tuple[ast.expr, ast.Call]]:
         """Find what each call of a file's own function passes a parameter.
 
         Returns:
@@ -407,7 +429,7 @@ class Environments:
         """
         names = self.params[function]
         bound = 1 if names[:1] in (["self"], ["cls"]) else 0
-        out = []
+        out: list[tuple[ast.expr, ast.Call]] = []
         for call in calls:
             if (dotted(call.func) or "").rpartition(".")[2] != function:
                 continue
@@ -652,7 +674,8 @@ class Env(unittest.TestCase):
         """The job's inputs and git's own variables stay with the suite."""
         with mock.patch.dict(os.environ, PLANTED):
             env = hermetic.env("/fixture-home")
-        self.assertEqual([], sorted(set(PLANTED) & set(env)))
+        reached = sorted(set(PLANTED) & set(env))
+        self.assertEqual(NOTHING, reached)
 
     def test_only_the_allow_list_is_inherited(self) -> None:
         """Every inherited name is INHERITED's, or one the helper sets."""
@@ -666,7 +689,8 @@ class Env(unittest.TestCase):
         }
         with mock.patch.dict(os.environ, PLANTED):
             env = hermetic.env()
-        self.assertEqual(set(), set(env) - set(hermetic.INHERITED) - set_here)
+        extra = set(env) - set(hermetic.INHERITED) - set_here
+        self.assertEqual(NO_NAMES, extra)
 
     def test_a_rows_override_reaches_the_fixture(self) -> None:
         """A row states its own input, and that wins over the suite's."""
@@ -676,7 +700,8 @@ class Env(unittest.TestCase):
 
     def test_home_is_the_fixtures_or_the_suites(self) -> None:
         """A given home wins; without one the suite's HOME is kept."""
-        with mock.patch.dict(os.environ, {"HOME": "/suite-home"}):
+        suite: dict[str, str] = {"HOME": "/suite-home"}
+        with mock.patch.dict(os.environ, suite):
             self.assertEqual("/fixture-home", hermetic.env("/fixture-home")["HOME"])
             self.assertEqual("/suite-home", hermetic.env()["HOME"])
 
@@ -701,6 +726,7 @@ class Env(unittest.TestCase):
 class Tracked(unittest.TestCase):
     """hermetic.tracked, in a checkout (#1618)."""
 
+    @override
     def setUp(self) -> None:
         """Plant a repository with tracked files in and out of `vendor/`."""
         self.root = Path(tempfile.mkdtemp()).resolve()
@@ -719,10 +745,8 @@ class Tracked(unittest.TestCase):
     def test_a_checkout_lists_what_git_tracks(self) -> None:
         """The pathspecs select from the tracked files, excludes kept."""
         specs = (":!vendor/**", "*.py", "*.sh")
-        self.assertEqual(
-            hermetic.tracked(self.root, *specs),
-            ["a.py", "d.py", "pkg/b.py", "pkg/c.sh"],
-        )
+        selected: list[str] = ["a.py", "d.py", "pkg/b.py", "pkg/c.sh"]
+        self.assertEqual(hermetic.tracked(self.root, *specs), selected)
 
     def test_an_empty_listing_is_red_by_name(self) -> None:
         """Files asked for and none listed is never a pass."""
@@ -912,7 +936,7 @@ class TheLaw(unittest.TestCase):
             if path not in EXCEPTED
             for line in copies(source_text(path))
         ]
-        self.assertEqual([], offenders)
+        self.assertEqual(NOTHING, offenders)
 
     def test_no_test_builds_a_child_environment_by_hand(self) -> None:
         """Every child environment starts from hermetic.env (#1542)."""
@@ -922,7 +946,7 @@ class TheLaw(unittest.TestCase):
             if path not in EXCEPTED
             for line in Environments(source_text(path)).built_by_hand()
         ]
-        self.assertEqual([], offenders)
+        self.assertEqual(NOTHING, offenders)
 
     def test_each_way_to_build_an_environment_is_judged(self) -> None:
         """Planted: hand-built environments refused by line; derived ones pass."""
@@ -973,7 +997,7 @@ class TheLaw(unittest.TestCase):
         }
         for name, source in allowed.items():
             with self.subTest(name):
-                self.assertEqual([], Environments(source).built_by_hand())
+                self.assertEqual(NOTHING, Environments(source).built_by_hand())
 
     def test_every_spelling_of_a_process_start_is_judged(self) -> None:
         """Planted: each import form and each starter, refused at its line."""
@@ -1002,7 +1026,7 @@ class TheLaw(unittest.TestCase):
         }
         for name, source in refused.items():
             with self.subTest(name):
-                self.assertEqual([2], Environments(source).built_by_hand())
+                self.assertEqual(LINE_TWO, Environments(source).built_by_hand())
         allowed = {
             "import as": "import subprocess as sp\nsp.run(a, env=hermetic.env())\n",
             "posix_spawn": "import os\nos.posix_spawn(p, a, hermetic.env())\n",
@@ -1010,7 +1034,7 @@ class TheLaw(unittest.TestCase):
         }
         for name, source in allowed.items():
             with self.subTest(name):
-                self.assertEqual([], Environments(source).built_by_hand())
+                self.assertEqual(NOTHING, Environments(source).built_by_hand())
 
     def test_every_spelling_of_a_copy_is_found(self) -> None:
         """Planted: each way to read the environment whole, at its line."""
@@ -1086,7 +1110,7 @@ class TheLaw(unittest.TestCase):
         }
         for name, source in allowed.items():
             with self.subTest(name):
-                self.assertEqual([], copies(source))
+                self.assertEqual(NOTHING, copies(source))
 
     def test_no_test_file_looks_a_tool_up_itself(self) -> None:
         """Every lookup is hermetic.tool or hermetic.optional_tool (#1684)."""
@@ -1221,7 +1245,7 @@ class TheLaw(unittest.TestCase):
             for path in listed_test_files()
             for line in plain_listings(source_text(path))
         ]
-        self.assertEqual([], offenders)
+        self.assertEqual(NOTHING, offenders)
 
     def test_each_plain_listing_is_refused_whatever_the_root(self) -> None:
         """Planted: the parameter that leaked, cwd=, -C, a scratch tree, a wrapper."""
@@ -1264,9 +1288,8 @@ def _echo_main(argv: list[str]) -> int:
         SystemExit: when the row asks the stand-in to exit.
 
     """
-    print(
-        f"cwd={Path.cwd().name} env={os.environ.get('PLANTED')} in={sys.stdin.read()}"
-    )
+    given = typed_std.stdin_text()
+    print(f"cwd={Path.cwd().name} env={os.environ.get('PLANTED')} in={given}")
     print("to stderr", file=sys.stderr)
     if argv[:1] == ["exit"]:
         raise SystemExit(int(argv[1]))
@@ -1307,7 +1330,8 @@ class CallMain(unittest.TestCase):
 
     def test_no_env_leaves_the_environment_as_it_is(self) -> None:
         """Without `env`, the call sees this process's own variables."""
-        with mock.patch.dict(os.environ, {"PLANTED": "kept"}):
+        kept: dict[str, str] = {"PLANTED": "kept"}
+        with mock.patch.dict(os.environ, kept):
             done = hermetic.call_main(lambda: _echo_main(["0"]))
         self.assertIn("env=kept", done.stdout)
 

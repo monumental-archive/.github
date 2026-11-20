@@ -71,8 +71,14 @@ class Identifiers(unittest.TestCase):
 
     def test_operators_and_parentheses_are_not_identifiers(self) -> None:
         """OR, AND and WITH in either case, and brackets, name nothing."""
+        named: list[str] = [
+            "MIT",
+            "Apache-2.0",
+            "GPL-2.0-only",
+            "Classpath-exception-2.0",
+        ]
         self.assertEqual(
-            ["MIT", "Apache-2.0", "GPL-2.0-only", "Classpath-exception-2.0"],
+            named,
             lt.identifiers(
                 "(MIT or Apache-2.0) AND GPL-2.0-only WITH Classpath-exception-2.0"
             ),
@@ -80,18 +86,20 @@ class Identifiers(unittest.TestCase):
 
     def test_or_later_needs_the_base_text(self) -> None:
         """`GPL-2.0+` is GPL-2.0's text with the or-later operator."""
-        self.assertEqual(["GPL-2.0"], lt.identifiers("GPL-2.0+"))
+        base: list[str] = ["GPL-2.0"]
+        self.assertEqual(base, lt.identifiers("GPL-2.0+"))
 
     def test_a_list_of_expressions_is_read_whole(self) -> None:
         """SPDX-License-Identifier may be a list of strings."""
-        config = {
+        config: dict[str, object] = {
             "annotations": [
                 {"SPDX-License-Identifier": ["MIT", "CC0-1.0"]},
                 {"SPDX-License-Identifier": "0BSD"},
                 {"path": "no-licence"},
             ]
         }
-        self.assertEqual(["MIT", "CC0-1.0", "0BSD"], lt.expressions(config))
+        every: list[str] = ["MIT", "CC0-1.0", "0BSD"]
+        self.assertEqual(every, lt.expressions(config))
 
 
 class LicenceTexts(unittest.TestCase):
@@ -225,15 +233,16 @@ class LicenceTexts(unittest.TestCase):
         tracked = ["REUSE.toml"] + [
             f"LICENSES/{path.name}" for path in (ROOT / "LICENSES").iterdir()
         ]
-        self.assertEqual([], lt.findings(ROOT, tracked))
+        clean: list[str] = []
+        self.assertEqual(clean, lt.findings(ROOT, tracked))
         # The relabel is what makes this row mean something: the canon
         # names licences other than its own, and drops either text red.
         for name in ("MIT", "Apache-2.0"):
             without = [p for p in tracked if p != f"LICENSES/{name}.txt"]
-            self.assertEqual(
-                [f"REUSE.toml names {name}, and LICENSES/{name}.txt is not tracked"],
-                lt.findings(ROOT, without),
-            )
+            want: list[str] = [
+                f"REUSE.toml names {name}, and LICENSES/{name}.txt is not tracked"
+            ]
+            self.assertEqual(want, lt.findings(ROOT, without))
 
     def test_usage(self) -> None:
         """An argument is a usage error, not a pass."""

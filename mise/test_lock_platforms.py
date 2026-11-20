@@ -25,10 +25,10 @@ import io
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 import lock_platforms
 
@@ -110,8 +110,9 @@ def body() -> str:
         The task body with any `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"][NAME]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the [tasks] table")
+    run = decoded.as_str(decoded.as_object(tasks[NAME], NAME)["run"], "the run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)
