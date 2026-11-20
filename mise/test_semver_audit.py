@@ -32,6 +32,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import json
 import os
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -65,8 +66,20 @@ printf '%s' "${code}"
 """
 SEMVER_STUB = """#!/usr/bin/env bash
 printf 'cargo-semver-checks %s\\n' "$*" >> "${PLANT_LOG}"
+printf '%s|%s|%s\\n' "${6:-}" "${BINDGEN_EXTRA_CLANG_ARGS:-}" "${CFLAGS:-}" \\
+  >> "${PLANT_LOG}.icu"
 [[ " ${PLANT_RED:-} " != *" $3 "* ]] || exit 1
 """
+# The real org_pgrx_with_icu, read out of pgrx-env.sh rather than
+# written again here: its subshell is the property the rows rely on.
+WITH_ICU = re.search(
+    r"^org_pgrx_with_icu\(\) \{.*?^\}\n",
+    (BELT / "pgrx-env.sh").read_text(encoding="utf-8"),
+    re.MULTILINE | re.DOTALL,
+)
+if WITH_ICU is None:
+    msg = "org_pgrx_with_icu is gone from pgrx-env.sh"
+    raise LookupError(msg)
 PGRX_ENV_STUB = """
 org_pgrx_provision() {
   {
@@ -76,7 +89,19 @@ org_pgrx_provision() {
   } >> "${PLANT_LOG}"
   return "${PLANT_PROVISION:-0}"
 }
-"""
+# The per-major ICU headers (#1774), as the real ones behave on a Mac:
+# the check logs what it was asked and answers PLANT_ICU_CHECK; each
+# major adds its own marker to both flags, so a compile that saw another
+# major's would show it.
+org_pgrx_darwin_icu_check() {
+  printf 'icu-check [%s]\\n' "$1" >> "${PLANT_LOG}.icu"
+  return "${PLANT_ICU_CHECK:-0}"
+}
+org_pgrx_darwin_icu() {
+  export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1 ${BINDGEN_EXTRA_CLANG_ARGS:-}"
+  export CFLAGS="-Iicu-pg$1 ${CFLAGS:-}"
+}
+""" + WITH_ICU.group(0)
 
 MAJORS = [14, 15, 16, 17, 18]
 # The one major the red-at-one-major row plants red.
@@ -338,6 +363,41 @@ class Judgment(Planted):
         self.assertEqual(
             self.verdicts(done),
             [f"{LABEL}: edtf-postgres at pg{m}: judged clean" for m in MAJORS],
+        )
+
+    def test_each_major_compiles_with_its_own_icu_only(self) -> None:
+        """No major's ICU include path reaches the next major's compile (#1774).
+
+        Each judgment runs in a subshell with its own major's headers,
+        and the parent's flags are what every subshell started from.
+        """
+        self.plant(package("ext", str(self.tree), pgrx=True))
+        done, _ = self.run_helper(
+            BINDGEN_EXTRA_CLANG_ARGS="parent-b", CFLAGS="parent-c"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        icu = Path(f"{self.log}.icu").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(
+            icu,
+            [
+                f"icu-check [{','.join(map(str, MAJORS))}]",
+                *[f"pg{m}|-Iicu-pg{m} parent-b|-Iicu-pg{m} parent-c" for m in MAJORS],
+            ],
+        )
+
+    def test_missing_icu_headers_red_the_majors_and_go_on(self) -> None:
+        """A failed ICU check reds that crate by name; nothing is compiled."""
+        self.plant(package("ext", str(self.tree), pgrx=True))
+        done, log = self.run_helper(PLANT_ICU_CHECK="1")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(self.semver_calls(log), [])
+        self.assertEqual(
+            self.verdicts(done),
+            [
+                f"{LABEL}: ext at pg{m}:"
+                " no ICU headers pinned for every major (above), red"
+                for m in MAJORS
+            ],
         )
 
     def test_pgrx_major_red_is_its_own_verdict(self) -> None:

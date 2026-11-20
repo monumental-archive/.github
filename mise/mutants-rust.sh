@@ -175,8 +175,15 @@ for c in ${pgrx[@]+"${pgrx[@]}"}; do
     printf 'red\t%s\n' "${c} at ${major}: no Postgres could be provisioned" >> "${runs}"
     continue
   fi
+  # shellcheck disable=SC2310  # deliberate: a missing pin reds this crate
+  # and the run still reports the rest
+  if ! org_pgrx_darwin_icu_check "${major#pg}"; then
+    printf 'red\t%s\n' "${c} at ${major}: no ICU headers for it are pinned (above)" >> "${runs}"
+    continue
+  fi
   echo "${label}: ${c} is a pgrx extension, mutated under its default major, ${major}"
-  mutate "${c}-${major}" --package "${c}" --features pg_test
+  # In a subshell holding that major's ICU headers (#1774).
+  org_pgrx_with_icu "${major#pg}" mutate "${c}-${major}" --package "${c}" --features pg_test
 done
 
 if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then

@@ -3419,15 +3419,17 @@ echo "fix:rust:${fixing:- none} rewritten where clippy could"
 # they will fix by hand or not at all.
 if [[ -n ${extensions} ]]; then
   . "${ORG_BELT_DIR}/pgrx-env.sh"
-  org_pgrx_darwin_flags
+  # The SDK, and the ICU headers of the major it builds (#1774).
+  org_pgrx_darwin_prepare "${ext_majors##*,}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
     | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${ext_majors}" \
     | org_pgrx_init
   for name in ${extensions}; do
     # shellcheck disable=SC2086  # ${ladder} holds whole flag words
     # --allow-dirty for the reason the workspace pass carries it, and
-    # doubly so here: the workspace pass ran first and wrote.
-    cargo clippy --fix --allow-dirty -p "${name}" --no-deps --all-targets \
+    # doubly so here: the workspace pass ran first and wrote. In a
+    # subshell holding its major's ICU headers (#1774).
+    org_pgrx_with_icu "${ext_majors##*,}" cargo clippy --fix --allow-dirty -p "${name}" --no-deps --all-targets \
       --locked --no-default-features --features "pg${ext_majors##*,}" \
       -- ${ladder}
   done
@@ -3552,7 +3554,8 @@ plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" \
 # plan, so a repo without an extension pays nothing.
 if [[ -n ${extensions} && ${plan} == *"--features pg"* ]]; then
   . "${ORG_BELT_DIR}/pgrx-env.sh"
-  org_pgrx_darwin_flags
+  # The SDK, and every extension's ICU headers checked (#1774).
+  org_pgrx_darwin_prepare "${pgrx}"
   majors="${pgrx##*:}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
     | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
@@ -3580,8 +3583,11 @@ while IFS=$'\t' read -r kind first own rest; do
       [[ ${own} == "default" ]] || use="${own}"
       echo "lint:msrv: compiling at ${first}: ${rest}"
       # shellcheck disable=SC2086  # ${use} and ${flags} hold whole flag
-      # WORDS, which cargo must receive as separate arguments
-      RUSTUP_TOOLCHAIN="${first}" cargo check --locked ${use} ${flags}
+      # WORDS, which cargo must receive as separate arguments. A pgrx
+      # group's own flags are `--no-default-features --features pgNN`, so
+      # their digits are its one major, compiled in a subshell holding
+      # that major's ICU headers (#1774); `default` has none and adds none.
+      RUSTUP_TOOLCHAIN="${first}" org_pgrx_with_icu "${own//[!0-9]/}" cargo check --locked ${use} ${flags}
       ;;
     *)
       echo "lint:msrv: unreadable plan record from msrv_plan.py: ${kind}" >&2
@@ -3675,7 +3681,8 @@ export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 ladder=$(org_clippy_pgrx_ladder)
 contradiction_count=$(org_clippy_pgrx_contradiction_count)
 . "${ORG_BELT_DIR}/pgrx-env.sh"
-org_pgrx_darwin_flags
+# The SDK, and every major's ICU headers checked (#1774).
+org_pgrx_darwin_prepare "${majors}"
 mise ls "aqua:theseus-rs/postgresql-binaries" --json \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
   | org_pgrx_init > /dev/null
@@ -3687,8 +3694,9 @@ for entry in ${specs}; do
   count=$((count + 1))
   linted="${linted} ${spec%@*}(pg${major})"
   # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
-  # clippy must receive as separate arguments
-  cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
+  # clippy must receive as separate arguments. In a subshell holding its
+  # own major's ICU headers (#1774), so none reaches the next major.
+  org_pgrx_with_icu "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
     --no-default-features --features "pg${major}" -- ${ladder}
 done
 echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"

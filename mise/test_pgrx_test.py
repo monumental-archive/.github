@@ -96,6 +96,8 @@ case "$1 $2" in
   "llvm-cov clean") ;;
   "llvm-cov report") lcov ;;
   "pgrx test")
+    printf '%s|%s|%s\n' "$3" "${BINDGEN_EXTRA_CLANG_ARGS:-}" "${CFLAGS:-}" \
+      >> "${PLANT_LOG}.icu"
     [[ -z ${PLANT_FAIL:-} ]] || exit 101
     if [[ -z ${PLANT_NO_PROFILE:-} && -n ${LLVM_PROFILE_FILE:-} ]]; then
       mkdir -p "$(dirname "${LLVM_PROFILE_FILE}")"
@@ -113,10 +115,27 @@ MISE_STUB = """#!/usr/bin/env bash
 [[ $1 == ls ]] && echo '{}' && exit 0
 exit 1
 """
+# The real org_pgrx_with_icu, read out of pgrx-env.sh rather than
+# written again here: its subshell is the property the rows rely on.
+WITH_ICU = re.search(
+    r"^org_pgrx_with_icu\(\) \{.*?^\}\n",
+    (BELT / "pgrx-env.sh").read_text(encoding="utf-8"),
+    re.MULTILINE | re.DOTALL,
+)
+if WITH_ICU is None:
+    msg = "org_pgrx_with_icu is gone from pgrx-env.sh"
+    raise LookupError(msg)
 PGRX_ENV_STUB = """
-org_pgrx_darwin_flags() { :; }
 org_pgrx_init() { cat > /dev/null; }
-"""
+# The SDK and the check (#1774): logs the majors it was asked for. Each
+# run adds its own major's mark to both flags, which the stub cargo
+# logs, so a run that saw another major's would show it.
+org_pgrx_darwin_prepare() { printf 'icu-check [%s]\\n' "$1" >> "${PLANT_LOG}.icu"; }
+org_pgrx_darwin_icu() {
+  export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1 ${BINDGEN_EXTRA_CLANG_ARGS:-}"
+  export CFLAGS="-Iicu-pg$1 ${CFLAGS:-}"
+}
+""" + WITH_ICU.group(0)
 PGRX_POSTGRES_STUB = "print('plan')\n"
 
 MAJORS = [17, 18]
@@ -367,6 +386,55 @@ class MeasuredRun(Planted):
             str(self.tree / "target" / "llvm-cov-pgrx-pg18"),
         ]
         self.assertEqual(want, targets)
+
+
+class IcuPerMajor(Planted):
+    """Every suite run compiles with its own major's ICU headers (#1774)."""
+
+    def icu(self) -> list[str]:
+        """Read what the ICU stubs and the stub suite recorded.
+
+        Returns:
+            The check's line first, then each suite's flags, sorted: the
+            side-by-side runs finish in any order.
+
+        """
+        lines = Path(f"{self.log}.icu").read_text(encoding="utf-8").splitlines()
+        return lines[:1] + sorted(lines[1:])
+
+    @staticmethod
+    def flags(*majors: int) -> list[str]:
+        """Spell what each major's suite saw, with the parent's flags behind.
+
+        Returns:
+            One line per major.
+
+        """
+        return [f"pg{m}|-Iicu-pg{m} parent-b|-Iicu-pg{m} parent-c" for m in majors]
+
+    def test_every_run_shape_sees_its_own_major_only(self) -> None:
+        """Side by side plain, side by side measured, and one major alone."""
+        parent = {
+            "BINDGEN_EXTRA_CLANG_ARGS": "parent-b",
+            "CFLAGS": "parent-c",
+            "PLANT_LH": "18",
+        }
+        shapes = (
+            ("plain, side by side", {"ORG_PGRX_MAJOR": ""}, "17,18", (17, 18)),
+            ("one major", {}, "18", (18,)),
+        )
+        for name, env, checked, majors in shapes:
+            for floor in (False, True):
+                with self.subTest(shape=name, measured=floor):
+                    if floor:
+                        self.floor()
+                    Path(f"{self.log}.icu").unlink(missing_ok=True)
+                    done, _ = self.run_pgrx(**(parent | env))
+                    self.assertEqual(0, done.returncode, done.stderr)
+                    self.assertEqual(
+                        [f"icu-check [{checked}]", *self.flags(*majors)], self.icu()
+                    )
+                    (self.tree / ".coverage-floor").unlink(missing_ok=True)
 
 
 class PlainOrRefused(Planted):
