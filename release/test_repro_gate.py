@@ -154,26 +154,24 @@ class TheCall(unittest.TestCase):
         """--classes is the guard's list; repo, tag and policy are named."""
         run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
         self.assertEqual(0, run.returncode, run.stderr)
-        self.assertEqual(
-            [
-                "verify",
-                "repro",
-                "--repo",
-                "monumental-archive/edtf",
-                "--tag",
-                "v1.3.5",
-                "--classes",
-                "rust-crate",
-                "--assert-policy",
-                ".org-canon/slsa/assert-policy.json",
-                "--rehearsal=false",
-                "--first",
-                "rust-crate=first-rust-crate",
-                "--rebuild",
-                "rust-crate=rebuild-rust-crate",
-            ],
-            run.argv,
-        )
+        want: list[str] = [
+            "verify",
+            "repro",
+            "--repo",
+            "monumental-archive/edtf",
+            "--tag",
+            "v1.3.5",
+            "--classes",
+            "rust-crate",
+            "--assert-policy",
+            ".org-canon/slsa/assert-policy.json",
+            "--rehearsal=false",
+            "--first",
+            "rust-crate=first-rust-crate",
+            "--rebuild",
+            "rust-crate=rebuild-rust-crate",
+        ]
+        self.assertEqual(want, run.argv)
 
     def test_a_failing_verdict_fails_the_step(self) -> None:
         """Stele's status is the step's."""
@@ -205,10 +203,11 @@ class Inputs(unittest.TestCase):
             FIRST_oci_image_crate="oci-a",
             REBUILD_oci_image_crate="oci-b",
         )
-        self.assertEqual(
-            ["--first oci-image-crate=oci-a", "--rebuild oci-image-crate=oci-b"],
-            run.inputs(),
-        )
+        want: list[str] = [
+            "--first oci-image-crate=oci-a",
+            "--rebuild oci-image-crate=oci-b",
+        ]
+        self.assertEqual(want, run.inputs())
         self.assertEqual("", run.files)
 
     def test_only_the_declared_classes_reach_the_call(self) -> None:
@@ -220,15 +219,17 @@ class Inputs(unittest.TestCase):
             FIRST_rust_crate=CRATES,
             REBUILD_rust_crate=CRATES,
         )
-        self.assertEqual(
-            ["--first wasm-npm=first-wasm-npm", "--rebuild wasm-npm=rebuild-wasm-npm"],
-            run.inputs(),
-        )
+        want: list[str] = [
+            "--first wasm-npm=first-wasm-npm",
+            "--rebuild wasm-npm=rebuild-wasm-npm",
+        ]
+        self.assertEqual(want, run.inputs())
 
     def test_an_empty_side_is_not_named(self) -> None:
         """Stele refuses the class by name; no empty file stands in."""
         run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate="")
-        self.assertEqual(["--first rust-crate=first-rust-crate"], run.inputs())
+        want: list[str] = ["--first rust-crate=first-rust-crate"]
+        self.assertEqual(want, run.inputs())
 
     def test_every_class_in_the_expanded_list_is_wired(self) -> None:
         """The lab's real expansion: five classes, ten inputs, in order."""
@@ -247,22 +248,20 @@ class Inputs(unittest.TestCase):
             "FIRST_pgrx_extension_image": "pgrx-a",
             "REBUILD_pgrx_extension_image": "pgrx-b",
         }
-        run = run_step(classes, **outputs)
-        self.assertEqual(
-            [
-                "--first rust-binary=first-rust-binary",
-                "--rebuild rust-binary=rebuild-rust-binary",
-                "--first oci-image-crate=oci-a",
-                "--rebuild oci-image-crate=oci-b",
-                "--first wasm-npm=first-wasm-npm",
-                "--rebuild wasm-npm=rebuild-wasm-npm",
-                "--first pgrx-extension=first-pgrx-extension",
-                "--rebuild pgrx-extension=rebuild-pgrx-extension",
-                "--first pgrx-extension-image=pgrx-a",
-                "--rebuild pgrx-extension-image=pgrx-b",
-            ],
-            run.inputs(),
-        )
+        run = run_step(classes, dry_run=False, **outputs)
+        want: list[str] = [
+            "--first rust-binary=first-rust-binary",
+            "--rebuild rust-binary=rebuild-rust-binary",
+            "--first oci-image-crate=oci-a",
+            "--rebuild oci-image-crate=oci-b",
+            "--first wasm-npm=first-wasm-npm",
+            "--rebuild wasm-npm=rebuild-wasm-npm",
+            "--first pgrx-extension=first-pgrx-extension",
+            "--rebuild pgrx-extension=rebuild-pgrx-extension",
+            "--first pgrx-extension-image=pgrx-a",
+            "--rebuild pgrx-extension-image=pgrx-b",
+        ]
+        self.assertEqual(want, run.inputs())
 
 
 class Rehearsal(unittest.TestCase):
@@ -279,19 +278,17 @@ class Rehearsal(unittest.TestCase):
             REBUILD_oci_image="",
         )
         self.assertIn("--rehearsal=true", run.argv)
-        self.assertEqual(
-            [
-                "--first rust-crate=first-rust-crate",
-                "--rebuild rust-crate=rebuild-rust-crate",
-            ],
-            run.inputs(),
-        )
+        want: list[str] = [
+            "--first rust-crate=first-rust-crate",
+            "--rebuild rust-crate=rebuild-rust-crate",
+        ]
+        self.assertEqual(want, run.inputs())
 
     def test_a_rehearsal_of_images_alone_still_calls_stele(self) -> None:
         """No inputs at all: the call is made, and stele refuses it."""
         run = run_step("oci-image", dry_run=True)
         self.assertEqual(0, run.returncode, run.stderr)
-        self.assertEqual([], run.inputs())
+        self.assertEqual(list[str](), run.inputs())
         self.assertIn("--rehearsal=true", run.argv)
 
     def test_the_workflow_empties_the_registry_values_on_a_dry_run(self) -> None:

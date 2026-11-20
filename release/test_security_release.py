@@ -41,12 +41,35 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
+
+
+def dumps(value: object) -> str:
+    """Encode a planted document as JSON.
+
+    Returns:
+        The JSON text.
+
+    """
+    return json.dumps(value)
+
+
+def report_of(text: str) -> dict[str, object]:
+    """Read a stele report, to plant a changed copy of it.
+
+    Returns:
+        The report's object.
+
+    """
+    return decoded.as_object(decoded.load_json(text), "the report")
+
 
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "release" / "security-release.sh"
@@ -77,7 +100,7 @@ golang.org/x/text@v0.40.0
 google.golang.org/grpc@v1.82.1
 """
 
-PLAN = {
+PLAN: dict[str, object] = {
     "release": True,
     "version": "0.20.1",
     "bump": {"applied": "patch", "requested": "patch", "declared": False},
@@ -85,7 +108,7 @@ PLAN = {
     "branch": {"name": "release/next"},
 }
 
-PR = {
+PR: dict[str, object] = {
     "number": 274,
     "title": "chore: release v0.20.1",
     "labels": [],
@@ -183,7 +206,7 @@ class Repo:
             path.write_text(textwrap.dedent(body))
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
         (self.canon / "slsa" / "assert-policy.json").write_text(
-            json.dumps({
+            dumps({
                 "blastRadius": {
                     "supported": "latest-release",
                     "canary": {
@@ -203,13 +226,13 @@ class Repo:
         (self.fake / "go-modules").write_text(GO_FIXED)
         (self.tree / "go.mod").write_text("module example.invalid/stele\n")
 
-    def plan(self, doc: dict) -> None:
+    def plan(self, doc: dict[str, object]) -> None:
         """Write the release plan prepare-release.sh would have."""
-        (self.root / "plan.json").write_text(json.dumps(doc))
+        (self.root / "plan.json").write_text(dumps(doc))
 
-    def pr(self, doc: dict | None) -> None:
+    def pr(self, doc: dict[str, object] | None) -> None:
         """Script what `gh pr list` answers; None is no open Release PR."""
-        (self.fake / "pr.json").write_text(json.dumps(doc) if doc else "")
+        (self.fake / "pr.json").write_text(dumps(doc) if doc else "")
 
     def report(self, body: str, rc: int) -> None:
         """Script stele's report document and its exit status."""
@@ -280,6 +303,7 @@ ISSUE_TITLE = "the supported release carries an advisory and main does not remed
 class DecisionCase(unittest.TestCase):
     """A fresh passing case per row; each row breaks exactly one input."""
 
+    @override
     def setUp(self) -> None:
         """Build the passing case."""
         self._tmp = TemporaryDirectory()
@@ -303,14 +327,12 @@ class TheYes(DecisionCase):
         """The real report against the real main: twenty remedied, a yes."""
         done = self.repo.run()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            self.repo.outputs(),
-            {
-                "merge": "true",
-                "pr": "274",
-                "reason": "stele@v0.20.0 is affected and main remedies it",
-            },
-        )
+        want: dict[str, str] = {
+            "merge": "true",
+            "pr": "274",
+            "reason": "stele@v0.20.0 is affected and main remedies it",
+        }
+        self.assertEqual(self.repo.outputs(), want)
         # All twenty findings of the real report are remedied by the real
         # main, and the report says which.
         self.assertIn("GO-2026-6603:golang.org/x/net@v0.57.0", done.stdout)
@@ -322,9 +344,11 @@ class TheYes(DecisionCase):
     def test_the_org_canary_is_not_asked_of_one_repository(self) -> None:
         """The canary lives in another repository's history; it is dropped."""
         self.repo.run()
-        seen = json.loads((self.repo.fake / "policy-seen.json").read_text())
-        self.assertNotIn("canary", seen["blastRadius"])
-        self.assertEqual(seen["blastRadius"]["supported"], "latest-release")
+        text = (self.repo.fake / "policy-seen.json").read_text()
+        seen = decoded.as_object(decoded.load_json(text), "the policy")
+        blast = decoded.as_object(seen["blastRadius"], "blastRadius")
+        self.assertNotIn("canary", blast)
+        self.assertEqual(blast["supported"], "latest-release")
 
 
 class TheReleaseIsNotOneToCut(DecisionCase):
@@ -386,9 +410,9 @@ class TheSupportedReleaseIsNotAffected(DecisionCase):
 
     def test_no_support_window_declared(self) -> None:
         """A policy with no window yields no fact, and the run says so."""
-        bare = json.loads(AFFECTED)
+        bare = report_of(AFFECTED)
         bare["facts"] = []
-        self.repo.report(json.dumps(bare), 1)
+        self.repo.report(dumps(bare), 1)
         self.declines(
             "no supported release could be named for stele:"
             " the policy declares no support window"
@@ -400,12 +424,12 @@ class TheSupportedReleaseIsNotAffected(DecisionCase):
         No release of this repository is in the fact, so the reader
         prints nothing and succeeds, and the run says no window.
         """
-        decoy = json.loads(AFFECTED)
+        decoy = report_of(AFFECTED)
         decoy["facts"] = [
             {"name": "supportedReleases", "value": "axb@v0.20.0"},
             {"name": "supportedReleasesAffected", "value": "axb@v0.20.0"},
         ]
-        self.repo.report(json.dumps(decoy), 1)
+        self.repo.report(dumps(decoy), 1)
         done = self.repo.run(GITHUB_REPOSITORY="monumental-archive/a.b")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
@@ -416,10 +440,10 @@ class TheSupportedReleaseIsNotAffected(DecisionCase):
 
     def test_a_withheld_window_is_said_in_the_engines_words(self) -> None:
         """A newest release not read whole: stele's reason is passed on."""
-        withheld = json.loads(AFFECTED)
+        withheld = report_of(AFFECTED)
         why = "stele@v0.20.0(not read whole)"
         withheld["facts"] = [{"name": "supersessionWithheld", "value": why}]
-        self.repo.report(json.dumps(withheld), 1)
+        self.repo.report(dumps(withheld), 1)
         self.declines(f"no supported release could be named for stele: {why}")
 
     def test_a_scan_that_cannot_judge_releases_nothing(self) -> None:
@@ -470,18 +494,19 @@ class MainDoesNotRemedyIt(DecisionCase):
 
     def test_findings_only_in_an_ecosystem_this_tree_does_not_resolve(self) -> None:
         """An image red only in its OS layer: the rebuild is the remedy."""
-        os_only = json.loads(AFFECTED)
-        for finding in os_only["findings"]:
+        os_only = report_of(AFFECTED)
+        for listed in decoded.as_array(os_only["findings"], "findings"):
+            finding = decoded.as_object(listed, "a finding")
             finding["assertion"] = "CVE-2026-0001:libssl3@3.5.1-1"
             finding["detail"] = "CVE-2026-0001 affects libssl3@3.5.1-1 (Debian:13)"
-        self.repo.report(json.dumps(os_only), 1)
+        self.repo.report(dumps(os_only), 1)
         done = self.repo.run()
         self.assertEqual(self.repo.outputs().get("merge"), "true", done.stdout)
         self.assertIn("a rebuild is the remedy", done.stdout)
 
     def test_a_cargo_lock_is_read_for_crates(self) -> None:
         """The same question asked of a Rust tree, both answers."""
-        crates = json.loads(AFFECTED)
+        crates = report_of(AFFECTED)
         crates["findings"] = [
             {
                 "subject": "stele@v0.20.0",
@@ -489,7 +514,7 @@ class MainDoesNotRemedyIt(DecisionCase):
                 "detail": "RUSTSEC-2026-0386 affects tokio@1.53.1 (crates.io)",
             }
         ]
-        self.repo.report(json.dumps(crates), 1)
+        self.repo.report(dumps(crates), 1)
         (self.repo.tree / "go.mod").unlink()
         lock = '[[package]]\nname = "tokio"\nversion = "{}"\nsource = "registry"\n'
         (self.repo.tree / "Cargo.lock").write_text(lock.format("1.53.1"))

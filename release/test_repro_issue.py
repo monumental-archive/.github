@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -70,6 +71,7 @@ for arg in "$@"; do printf '%s\\0' "${arg}"; done > "${GH_ARGS}"
 class FileAnIssue(unittest.TestCase):
     """Each row: the compare outcome, and the exact issue filed."""
 
+    @override
     def setUp(self) -> None:
         """Give each row its own directory and stub `gh`."""
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -124,9 +126,8 @@ class FileAnIssue(unittest.TestCase):
             proc = hermetic.call_main(call, env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
-        self.assertEqual(
-            args[:4], ["issue", "create", "--repo", "monumental-archive/lab"]
-        )
+        create: list[str] = ["issue", "create", "--repo", "monumental-archive/lab"]
+        self.assertEqual(args[:4], create)
         self.assertEqual(args[4], "--title")
         self.assertEqual(args[6], "--body")
         self.assertEqual(len(args), 8, args)
