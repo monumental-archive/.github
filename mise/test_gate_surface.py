@@ -21,19 +21,26 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import override
+from unittest import mock
 
+import decoded
 import gate_surface
 
 ROOT = "/w"
+
+# What a row expects, named so each carries its element type.
+NOTHING: list[object] = []
+NONE_BUILT: set[str] = set()
 
 
 def member(
     name: str,
     *,
-    features: dict | None = None,
+    features: dict[str, list[str]] | None = None,
     pgrx: bool = False,
     directory: str | None = None,
-) -> dict:
+) -> dict[str, object]:
     """Build one workspace member as cargo metadata reports it.
 
     Returns:
@@ -53,21 +60,23 @@ def member(
     }
 
 
-def metadata(*packages: dict, foreign: dict | None = None) -> dict:
+def metadata(
+    *packages: dict[str, object], foreign: dict[str, object] | None = None
+) -> dict[str, object]:
     """Build a cargo metadata document whose members are the packages given.
 
     Returns:
         The document, optionally carrying a package that is NOT a member.
 
     """
-    doc = {
+    every: list[object] = list(packages)
+    if foreign is not None:
+        every.append(foreign)
+    return {
         "workspace_root": ROOT,
         "workspace_members": [pkg["id"] for pkg in packages],
-        "packages": list(packages),
+        "packages": every,
     }
-    if foreign is not None:
-        doc["packages"].append(foreign)
-    return doc
 
 
 def stub(*lines: str) -> Path:
@@ -82,7 +91,7 @@ def stub(*lines: str) -> Path:
     return path
 
 
-def majors_of(pkg: dict) -> list[int]:
+def majors_of(pkg: dict[str, object]) -> list[int]:
     """Decode a package and read its majors.
 
     Returns:
@@ -92,7 +101,7 @@ def majors_of(pkg: dict) -> list[int]:
     return gate_surface.majors(gate_surface.package(pkg))
 
 
-def directory_of(pkg: dict, root: str) -> str:
+def directory_of(pkg: dict[str, object], root: str) -> str:
     """Decode a package and locate it.
 
     Returns:
@@ -112,7 +121,7 @@ def crate(name: str, majors: tuple[int, ...] = ()) -> gate_surface.Crate:
     return gate_surface.Crate(name, f"{name}@1.3.1", majors, f"crates/{name}")
 
 
-PG_FEATURES = {
+PG_FEATURES: dict[str, list[str]] = {
     "pg14": [],
     "pg15": [],
     "pg16": [],
@@ -127,47 +136,49 @@ class MajorsTest(unittest.TestCase):
 
     def test_the_dependency_and_the_features_together(self) -> None:
         """The org shape: edtf-postgres exactly."""
+        majors: list[int] = [14, 15, 16, 17, 18]
         self.assertEqual(
-            majors_of(member("ext", features=PG_FEATURES, pgrx=True)),
-            [14, 15, 16, 17, 18],
+            majors_of(member("ext", features=PG_FEATURES, pgrx=True)), majors
         )
 
     def test_features_without_the_dependency_are_not_pgrx(self) -> None:
         """A crate may name a feature `pg17` and never touch pgrx."""
         self.assertEqual(
-            majors_of(member("ext", features=PG_FEATURES, pgrx=False)),
-            [],
+            majors_of(member("ext", features=PG_FEATURES, pgrx=False)), NOTHING
         )
 
     def test_the_dependency_without_features_is_not_an_extension(self) -> None:
         """A crate that merely depends on pgrx declares no majors."""
-        self.assertEqual(majors_of(member("ext", pgrx=True)), [])
+        self.assertEqual(majors_of(member("ext", pgrx=True)), NOTHING)
 
     def test_pg_test_is_not_a_major(self) -> None:
         """Pgrx's own harness switch would otherwise become a Postgres."""
+        majors: list[int] = [17]
         self.assertEqual(
             majors_of(
                 member("ext", features={"pg17": [], "pg_test": []}, pgrx=True),
             ),
-            [17],
+            majors,
         )
 
     def test_only_the_majors_declared_are_returned(self) -> None:
         """A repo that drops a major must not have the gate keep it."""
+        majors: list[int] = [17, 18]
         self.assertEqual(
             majors_of(
                 member("ext", features={"pg17": [], "pg18": []}, pgrx=True),
             ),
-            [17, 18],
+            majors,
         )
 
     def test_the_majors_come_back_ascending(self) -> None:
         """Declaration order in a manifest is not a promise."""
+        majors: list[int] = [14, 16, 18]
         self.assertEqual(
             majors_of(
                 member("ext", features={"pg18": [], "pg14": [], "pg16": []}, pgrx=True),
             ),
-            [14, 16, 18],
+            majors,
         )
 
 
@@ -187,10 +198,9 @@ class MembersTest(unittest.TestCase):
                 "manifest_path": "/elsewhere/Cargo.toml",
             },
         )
-        self.assertEqual(
-            [pkg.name for pkg in gate_surface.members(gate_surface.metadata(doc))],
-            ["edtf-core"],
-        )
+        names = [pkg.name for pkg in gate_surface.members(gate_surface.metadata(doc))]
+        only: list[str] = ["edtf-core"]
+        self.assertEqual(names, only)
 
 
 class DirectoryTest(unittest.TestCase):
@@ -224,7 +234,7 @@ class StubInputsTest(unittest.TestCase):
             "      extension-crate-dir: crates/edtf-postgres\n"
             "      pg-majors: 14,15\n",
         )
-        self.assertEqual(unreadable, [])
+        self.assertEqual(unreadable, NOTHING)
         self.assertEqual(found["classes"], "rust-crate,pgrx-extension")
         self.assertEqual(found["exclude"], "edtf-postgres")
         self.assertEqual(found["pg-majors"], "14,15")
@@ -279,23 +289,25 @@ class PublishedTest(unittest.TestCase):
 
     def test_the_workspace_classes_take_every_member(self) -> None:
         """rust-crate publishes the workspace, not a named list."""
+        built: set[str] = {"core", "wasm", "ext"}
         self.assertEqual(
-            gate_surface.published({"classes": "rust-crate"}, self.surface()),
-            {"core", "wasm", "ext"},
+            gate_surface.published({"classes": "rust-crate"}, self.surface()), built
         )
 
     def test_the_stub_exclusion_removes_a_crate(self) -> None:
         """Edtf's own: the extension is not a crate-class artifact."""
+        built: set[str] = {"core", "wasm"}
         self.assertEqual(
             gate_surface.published(
                 {"classes": "rust-crate", "exclude": "ext"},
                 self.surface(),
             ),
-            {"core", "wasm"},
+            built,
         )
 
     def test_the_extension_class_puts_it_back(self) -> None:
         """Excluded from the crate jobs, built by the extension jobs."""
+        built: set[str] = {"core", "wasm", "ext"}
         self.assertEqual(
             gate_surface.published(
                 {
@@ -305,17 +317,18 @@ class PublishedTest(unittest.TestCase):
                 },
                 self.surface(),
             ),
-            {"core", "wasm", "ext"},
+            built,
         )
 
     def test_the_wasm_class_names_its_crate_by_directory(self) -> None:
         """crate-dir, not a package name."""
+        built: set[str] = {"wasm"}
         self.assertEqual(
             gate_surface.published(
                 {"classes": "wasm-npm", "crate-dir": "crates/wasm"},
                 self.surface(),
             ),
-            {"wasm"},
+            built,
         )
 
     def test_classes_that_build_no_crate_constrain_nothing(self) -> None:
@@ -325,13 +338,14 @@ class PublishedTest(unittest.TestCase):
                 {"classes": "oci-image,source-archive"},
                 self.surface(),
             ),
-            set(),
+            NONE_BUILT,
         )
 
 
 class InvariantTest(unittest.TestCase):
     """The check itself. Mutation: report a finding only when built is empty."""
 
+    @override
     def setUp(self) -> None:
         """Build the stub every row here shares."""
         self.surface = PublishedTest.surface()
@@ -352,7 +366,9 @@ class InvariantTest(unittest.TestCase):
 
     def test_the_same_tree_with_the_exclusion_gone_is_clean(self) -> None:
         """The other direction, which is what this PR leaves behind."""
-        self.assertEqual(gate_surface.invariant(self.stub, self.surface, set()), [])
+        self.assertEqual(
+            gate_surface.invariant(self.stub, self.surface, set()), NOTHING
+        )
 
     def test_an_unpublished_crate_may_be_held_out(self) -> None:
         """CLIPPY_EXCLUDE stays legal for a crate the release does not build.
@@ -370,7 +386,7 @@ class InvariantTest(unittest.TestCase):
             "      extension-crate-dir: crates/ext",
             "      pg-majors: 17",
         )
-        self.assertEqual(gate_surface.invariant(both, surface, {"bench"}), [])
+        self.assertEqual(gate_surface.invariant(both, surface, {"bench"}), NOTHING)
 
     def test_a_stub_claiming_fewer_majors_than_the_crate_is_a_finding(self) -> None:
         """The features are what cargo compiles; the stub is the copy."""
@@ -392,7 +408,7 @@ class InvariantTest(unittest.TestCase):
             "      extension-crate-dir: crates/ext",
             "      pg-majors: 17",
         )
-        self.assertEqual(gate_surface.invariant(spaced, self.surface, set()), [])
+        self.assertEqual(gate_surface.invariant(spaced, self.surface, set()), NOTHING)
 
     def test_a_missing_stub_is_a_finding(self) -> None:
         """Silence about a publish surface is not a clean publish surface."""
@@ -409,7 +425,9 @@ class MainTest(unittest.TestCase):
     """The whole check. Mutation: emit the plan even when a finding stands."""
 
     @staticmethod
-    def invoke(doc: object, exclude: str = "", publish: Path | None = None) -> tuple:
+    def invoke(
+        doc: object, exclude: str = "", publish: Path | None = None
+    ) -> tuple[int, str, str]:
         """Run the derivation over one workspace.
 
         Returns:
@@ -420,28 +438,24 @@ class MainTest(unittest.TestCase):
         if publish is not None:
             argv += ["--publish", str(publish)]
         out, err = io.StringIO(), io.StringIO()
-        original = gate_surface.sys.stdin
-        gate_surface.sys.stdin = io.StringIO(
-            json.dumps(doc) if doc is not None else "{",
-        )
-        try:
-            with redirect_stdout(out), redirect_stderr(err):
-                status = gate_surface.main(argv)
-        finally:
-            gate_surface.sys.stdin = original
+        stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
+        with (
+            mock.patch("sys.stdin", stdin),
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
+            status = gate_surface.main(argv)
         return status, out.getvalue(), err.getvalue()
 
     def test_a_plain_workspace_is_all_crate_records(self) -> None:
         """Every repo in the org that is not edtf or release-lab."""
         status, out, err = self.invoke(metadata(member("a"), member("b")))
         self.assertEqual(status, 0, msg=err)
-        self.assertEqual(
-            out.splitlines(),
-            [
-                "crate\ta@1.3.1\tplain\t-\tcrates/a",
-                "crate\tb@1.3.1\tplain\t-\tcrates/b",
-            ],
-        )
+        records: list[str] = [
+            "crate\ta@1.3.1\tplain\t-\tcrates/a",
+            "crate\tb@1.3.1\tplain\t-\tcrates/b",
+        ]
+        self.assertEqual(out.splitlines(), records)
 
     def test_an_extension_carries_its_majors(self) -> None:
         """What test:pgrx iterates and lint:pg-clippy picks from."""
@@ -498,7 +512,8 @@ class MainTest(unittest.TestCase):
 
     def test_metadata_that_is_not_an_object_is_red(self) -> None:
         """The shrunk example, `[]`: refused by name, not raised (#1555)."""
-        status, out, err = self.invoke([])
+        not_an_object: list[object] = []
+        status, out, err = self.invoke(not_an_object)
         self.assertEqual(status, 1)
         self.assertEqual(out, "")
         self.assertIn("is not a JSON object", err)
@@ -506,10 +521,12 @@ class MainTest(unittest.TestCase):
     def test_fields_of_the_wrong_type_read_as_absent(self) -> None:
         """A package, member id or field of the wrong type is no crate (#1555)."""
         good = metadata(member("a"))
-        doc = {
+        packages = decoded.as_array(good["packages"], "packages")
+        ids = decoded.as_array(good["workspace_members"], "workspace_members")
+        doc: dict[str, object] = {
             **good,
-            "packages": [1, *good["packages"], {"id": [], "name": 2}],
-            "workspace_members": [[], *good["workspace_members"]],
+            "packages": [1, *packages, {"id": [], "name": 2}],
+            "workspace_members": [[], *ids],
             "workspace_root": 5,
         }
         status, out, err = self.invoke(doc)
@@ -519,13 +536,12 @@ class MainTest(unittest.TestCase):
     def test_no_standard_input_is_red(self) -> None:
         """A process started with no stdin is refused by name, not raised."""
         err = io.StringIO()
-        original = gate_surface.sys.stdin
-        gate_surface.sys.stdin = None
-        try:
-            with redirect_stderr(err), redirect_stdout(io.StringIO()):
-                status = gate_surface.main([])
-        finally:
-            gate_surface.sys.stdin = original
+        with (
+            mock.patch("sys.stdin", None),
+            redirect_stderr(err),
+            redirect_stdout(io.StringIO()),
+        ):
+            status = gate_surface.main([])
         self.assertEqual(status, 1)
         self.assertEqual(
             err.getvalue(),

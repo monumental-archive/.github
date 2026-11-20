@@ -33,10 +33,11 @@ import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -137,8 +138,9 @@ def task_body(name: str) -> str:
         The body with any `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"][name]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    run = decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)
@@ -146,9 +148,15 @@ def task_body(name: str) -> str:
     )
 
 
+# What a row expects of the cargo log, named with its element type.
+NO_CALLS: list[str] = []
+ONE_PROBE: list[str] = [PROBE]
+
+
 class FuzzBuild(unittest.TestCase):
     """lint:fuzz-build says "stale" only when cargo says the lock is."""
 
+    @override
     def setUp(self) -> None:
         """Plant a fuzz crate with a committed lock, and the stubs."""
         self.root = Path(tempfile.mkdtemp()).resolve()
@@ -230,14 +238,14 @@ class FuzzBuild(unittest.TestCase):
                 status, out, err, calls = self.run_lint()
                 self.assertEqual((status, out), (1, ""))
                 self.assertEqual(err, STALE_HEAD + text + STALE_REMEDY)
-                self.assertEqual(calls, [PROBE])
+                self.assertEqual(calls, ONE_PROBE)
 
     def test_no_workspace_table_reds_before_the_probe(self) -> None:
         """Resolution must not depend on where the checkout sits."""
         self.manifest(MANIFEST)
         status, out, err, calls = self.run_lint()
         self.assertEqual((status, out, err), (1, "", NO_WORKSPACE))
-        self.assertEqual(calls, [])
+        self.assertEqual(calls, NO_CALLS)
 
     def test_another_probe_failure_passes_cargo_through(self) -> None:
         """Cargo's own error, with no lockfile remedy that cannot help."""
@@ -249,7 +257,7 @@ class FuzzBuild(unittest.TestCase):
         self.assertEqual(err, UNRESOLVED_HEAD + text)
         self.assertNotIn("stale", err)
         self.assertNotIn("cargo update", err)
-        self.assertEqual(calls, [PROBE])
+        self.assertEqual(calls, ONE_PROBE)
 
     def test_an_unparsable_manifest_is_left_to_cargo(self) -> None:
         """The table check never claims a parse error as a missing table."""
@@ -259,7 +267,7 @@ class FuzzBuild(unittest.TestCase):
         status, _, err, calls = self.run_lint()
         self.assertEqual(status, 1)
         self.assertEqual(err, UNRESOLVED_HEAD + text)
-        self.assertEqual(calls, [PROBE])
+        self.assertEqual(calls, ONE_PROBE)
 
 
 if __name__ == "__main__":
