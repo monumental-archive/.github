@@ -180,20 +180,16 @@ def check(
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         plant(root, files, untracked or {})
-        listing = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [
-                GIT,
-                "ls-files",
+        try:
+            names = hermetic.tracked(
+                root,
                 ":!vendor/**",
                 ".github/workflows/*.yml",
                 ".github/workflows/*.yaml",
-            ],
-            cwd=root,
-            env=hermetic.env(),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+            )
+        except RuntimeError:
+            names = []  # the body's listing is empty here too
+        listing = "".join(f"{name}\n" for name in names)
         return hermetic.call_main(
             lambda: lock_platforms.main([
                 "--defaults",
