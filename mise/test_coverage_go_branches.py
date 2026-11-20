@@ -5,10 +5,10 @@
 `.coverage-floor` on the Monday cron, measured by
 `mise/coverage-go-branches.sh` with gobco;
 `coverage:adopt` writes that line. The bodies under test are the tasks'
-own `run` strings, read out of mise/config.toml with tomllib and run by
-bash in a planted git tree, and they call the real measurement script
-and the real `coverage_floor.py`. Only `go` and `gobco` are stubs, and
-no row runs gobco or a Go suite.
+own `run` strings, read out of mise/config.toml with decoded.load_toml
+and run by bash in a planted git tree, and they call the real
+measurement script and the real `coverage_floor.py`. Only `go` and
+`gobco` are stubs, and no row runs gobco or a Go suite.
 
 The `go` stub answers what the leg asks of it (GOROOT, GOVERSION, the
 build version of a binary, the package list, and the gate leg's
@@ -29,7 +29,6 @@ import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -43,7 +42,9 @@ BELT = CANON / "mise"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
+# What a row expects of the call log (or of the parse's problems),
+# named so the expected list carries its element type.
+EMPTY: list[str] = []
 
 
 TASK = "audit:coverage-go-branches"
@@ -322,35 +323,37 @@ class AuditRows(GoBranchCase):
         done, tmp, calls = self.run_task()
         self.assertEqual(0, done.returncode, done.stderr)
         go = tmp / "goroot" / "bin" / "go"
-        self.assertEqual([f"a [] go={go}", f"b [] go={go}"], calls)
+        both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
+        self.assertEqual(both, calls)
 
     def test_a_shim_is_resolved_to_the_binary(self) -> None:
         """A gobco found as a mise shim runs as the binary `mise which` names."""
         done, tmp, calls = self.run_task(gobco="shim")
         self.assertEqual(0, done.returncode, done.stderr)
         go = tmp / "goroot" / "bin" / "go"
-        self.assertEqual([f"a [] go={go}", f"b [] go={go}"], calls)
+        both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
+        self.assertEqual(both, calls)
 
     def test_no_go_module_skips_clean(self) -> None:
         """A tree with no go.mod has no Go condition to measure."""
         done, _, calls = self.run_task(go_mod=False)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(f"{TASK}: no go.mod, skipped\n", done.stdout)
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_no_such_line_skips_clean(self) -> None:
         """A floor with no go-branches line measures nothing at all."""
         done, _, calls = self.run_task(floor=MAIN)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(SKIP, done.stdout)
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_no_floor_file_skips_clean(self) -> None:
         """A repository that adopted no floor owes no condition figure either."""
         done, _, calls = self.run_task(floor=None)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(SKIP, done.stdout)
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_a_build_go_older_than_the_running_go_is_refused(self) -> None:
         """A gobco built with Go 1.24.13 under Go 1.27.4 is red, unrun."""
@@ -363,14 +366,14 @@ class AuditRows(GoBranchCase):
             "  rebuild it with the repository's go:\n" + REMEDY,
             done.stderr,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_an_older_patch_release_is_refused(self) -> None:
         """go1.27.3 under go1.27.4 is older too."""
         done, _, calls = self.run_task(built="go1.27.3")
         self.assertEqual(1, done.returncode)
         self.assertIn("was built with go1.27.3, older than the go1.27.4", done.stderr)
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_an_unreadable_build_go_is_refused(self) -> None:
         """No build version reads as older, never as fine."""
@@ -379,7 +382,7 @@ class AuditRows(GoBranchCase):
         self.assertIn(
             "was built with an unreadable Go, older than the go1.27.4", done.stderr
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_a_newer_build_go_runs(self) -> None:
         """A build Go later than the running one reads its syntax."""
@@ -433,7 +436,7 @@ class AuditRows(GoBranchCase):
             " 82.0 under band 2 and the cap 90 derives 80.0.",
             done.stderr,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_the_tree_is_left_untouched(self) -> None:
         """The leg writes nothing into the tree it measures."""
@@ -462,7 +465,7 @@ class GateRows(GoBranchCase):
             f"coverage:check: upload {tmp / 'reports' / 'coverage.txt'}\n",
             done.stdout,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
 
 class AdoptRows(GoBranchCase):
@@ -480,10 +483,13 @@ class AdoptRows(GoBranchCase):
         parsed, problems = cf.parse(
             (tmp / "tree" / ".coverage-floor").read_text(encoding="utf-8")
         )
-        self.assertEqual([], problems)
-        self.assertEqual(
-            {"go-branches": (Decimal("82.0"), Decimal("84.0"))}, parsed.separate
-        )
+        self.assertEqual(EMPTY, problems)
+        if parsed is None:
+            self.fail("the adopted .coverage-floor did not parse")
+        held: dict[str, tuple[Decimal, Decimal]] = {
+            "go-branches": (Decimal("82.0"), Decimal("84.0"))
+        }
+        self.assertEqual(held, parsed.separate)
         self.assertEqual(2, len(calls))
 
     def test_adopt_cannot_lower_the_go_branches_line(self) -> None:

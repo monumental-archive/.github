@@ -28,6 +28,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -36,8 +37,15 @@ SCRIPT = BELT / "derive-badges.sh"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 
-POLICY = json.loads((CANON / "slsa" / "assert-policy.json").read_text(encoding="utf-8"))
-CONT_PATH = POLICY["evidence"]["continuous"]["stubPath"]
+POLICY = decoded.as_object(
+    decoded.load_json((CANON / "slsa" / "assert-policy.json").read_text("utf-8")),
+    "assert-policy.json",
+)
+CONTINUOUS = decoded.as_object(
+    decoded.as_object(POLICY["evidence"], "evidence")["continuous"],
+    "evidence.continuous",
+)
+CONT_PATH = decoded.as_str(CONTINUOUS["stubPath"], "evidence.continuous.stubPath")
 CONT_STUB = (CANON / "workflow-templates" / "continuous.yml").read_text(
     encoding="utf-8"
 )
@@ -92,7 +100,7 @@ def render(
     files: dict[str, str],
     repo: str = DB,
     untracked: tuple[str, ...] = (),
-    policy: dict | None = None,
+    policy: dict[str, object] | None = None,
     *,
     canon: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
@@ -147,6 +155,10 @@ def render(
         return done, block
 
 
+# A block that wears no ghcr shield, named so the list carries its type.
+NO_LINES: list[str] = []
+
+
 def ghcr_lines(block: str) -> list[str]:
     """Return the block's ghcr shield lines.
 
@@ -160,14 +172,20 @@ def ghcr_lines(block: str) -> list[str]:
 class Images(unittest.TestCase):
     """Which ghcr shields a tree's stubs imply."""
 
-    def assert_block(self, files: dict[str, str], **kw: object) -> str:
+    def assert_block(
+        self,
+        files: dict[str, str],
+        *,
+        repo: str = DB,
+        untracked: tuple[str, ...] = (),
+    ) -> str:
         """Assert a clean render and hand back the block.
 
         Returns:
             The rendered block.
 
         """
-        done, block = render(files, **kw)
+        done, block = render(files, repo, untracked)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stderr, "")
         return block
@@ -175,7 +193,9 @@ class Images(unittest.TestCase):
     def test_continuous_stub_alone_renders_the_image_once(self) -> None:
         """A continuous publisher with no publish stub wears its image."""
         block = self.assert_block({CONT_PATH: CONT_STUB})
-        self.assertEqual(ghcr_lines(block), [shield(DB)])
+        want: list[str] = [shield(DB)]
+        lines = ghcr_lines(block)
+        self.assertEqual(lines, want)
         self.assertEqual(
             block.count("ghcr.io-monumental--archive%2Fmonumental--archive--db"), 1
         )
@@ -188,12 +208,16 @@ class Images(unittest.TestCase):
             CONT_PATH: CONT_STUB,
             ".github/workflows/publish.yml": publish("oci-image"),
         })
-        self.assertEqual(ghcr_lines(block), [shield(DB)])
+        want: list[str] = [shield(DB)]
+        lines = ghcr_lines(block)
+        self.assertEqual(lines, want)
 
     def test_continuous_image_is_the_repository_lowercased(self) -> None:
         """continuous.yml lowercases GITHUB_REPOSITORY; so does the shield."""
         block = self.assert_block({CONT_PATH: CONT_STUB}, repo="Mixed-Case")
-        self.assertEqual(ghcr_lines(block), [shield("mixed-case")])
+        want: list[str] = [shield("mixed-case")]
+        lines = ghcr_lines(block)
+        self.assertEqual(lines, want)
 
     def test_continuous_and_a_ghcr_state_render_both(self) -> None:
         """A `ghcr <name>` state still adds an image; the derived one once."""
@@ -201,7 +225,9 @@ class Images(unittest.TestCase):
             CONT_PATH: CONT_STUB,
             ".badge-states": f"ghcr {DB}\nghcr other-image\n",
         })
-        self.assertEqual(ghcr_lines(block), [shield(DB), shield("other-image")])
+        want: list[str] = [shield(DB), shield("other-image")]
+        lines = ghcr_lines(block)
+        self.assertEqual(lines, want)
 
     def test_an_extension_alone_renders_its_crate_image_not_the_repo(self) -> None:
         """A pgrx extension's image is named for its crate dir (#1172).
@@ -216,12 +242,14 @@ class Images(unittest.TestCase):
             "      extension-crate-dir: crates/edtf-postgres\n",
         )
         block = self.assert_block({".github/workflows/publish.yml": stub}, repo="edtf")
-        self.assertEqual([shield("edtf-postgres")], ghcr_lines(block))
+        want: list[str] = [shield("edtf-postgres")]
+        lines = ghcr_lines(block)
+        self.assertEqual(want, lines)
 
     def test_no_stub_renders_no_image(self) -> None:
         """A tree with neither stub wears no ghcr shield and no registry dot."""
         block = self.assert_block({})
-        self.assertEqual(ghcr_lines(block), [])
+        self.assertEqual(ghcr_lines(block), NO_LINES)
         self.assertIn("fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20", block)
 
     def test_stub_path_calling_another_workflow_renders_no_image(self) -> None:
@@ -229,24 +257,24 @@ class Images(unittest.TestCase):
         other = CONT_STUB.replace("workflows/continuous.yml@", "workflows/ci.yml@")
         self.assertNotEqual(other, CONT_STUB)
         block = self.assert_block({CONT_PATH: other})
-        self.assertEqual(ghcr_lines(block), [])
+        self.assertEqual(ghcr_lines(block), NO_LINES)
 
     def test_commented_call_renders_no_image(self) -> None:
         """A `uses:` behind a comment is prose, not a call."""
         commented = CONT_STUB.replace("    uses: ", "    # uses: ")
         self.assertNotEqual(commented, CONT_STUB)
         block = self.assert_block({CONT_PATH: commented})
-        self.assertEqual(ghcr_lines(block), [])
+        self.assertEqual(ghcr_lines(block), NO_LINES)
 
     def test_untracked_stub_renders_no_image(self) -> None:
         """An untracked continuous stub publishes nothing and wears nothing."""
         block = self.assert_block({CONT_PATH: CONT_STUB}, untracked=(CONT_PATH,))
-        self.assertEqual(ghcr_lines(block), [])
+        self.assertEqual(ghcr_lines(block), NO_LINES)
 
     def test_stub_elsewhere_renders_no_image(self) -> None:
         """The stub is located by the policy's path, not by any filename."""
         block = self.assert_block({".github/workflows/deploy.yml": CONT_STUB})
-        self.assertEqual(ghcr_lines(block), [])
+        self.assertEqual(ghcr_lines(block), NO_LINES)
 
 
 class Refusals(unittest.TestCase):
@@ -267,16 +295,17 @@ class Refusals(unittest.TestCase):
 
     def test_policy_without_continuous_block_refuses(self) -> None:
         """A policy that no longer declares the predicate is refused by name."""
-        policy = json.loads(json.dumps(POLICY))
-        del policy["evidence"]["continuous"]
+        policy = decoded.as_object(decoded.load_json(json.dumps(POLICY)), "the copy")
+        del decoded.as_object(policy["evidence"], "evidence")["continuous"]
         done, _ = render({CONT_PATH: CONT_STUB}, policy=policy)
         self.assertEqual(done.returncode, 1)
         self.assertRegex(done.stderr, POLICY_REFUSAL)
 
     def test_policy_missing_stub_uses_refuses(self) -> None:
         """Half a predicate is no predicate."""
-        policy = json.loads(json.dumps(POLICY))
-        del policy["evidence"]["continuous"]["stubUses"]
+        policy = decoded.as_object(decoded.load_json(json.dumps(POLICY)), "the copy")
+        evidence = decoded.as_object(policy["evidence"], "evidence")
+        del decoded.as_object(evidence["continuous"], "evidence.continuous")["stubUses"]
         done, _ = render({CONT_PATH: CONT_STUB}, policy=policy)
         self.assertEqual(done.returncode, 1)
         self.assertRegex(done.stderr, POLICY_REFUSAL)
