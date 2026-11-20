@@ -30,8 +30,7 @@ FILLER = st.lists(
 )
 
 
-@st.composite
-def script(draw: st.DrawFn) -> tuple[list[str], int, int]:
+def draw_script(draw: st.DrawFn) -> tuple[list[str], int, int]:
     """Draw a guarded script.
 
     Returns:
@@ -54,6 +53,9 @@ def script(draw: st.DrawFn) -> tuple[list[str], int, int]:
     return lines, trap, mark
 
 
+script = st.composite(draw_script)
+
+
 def judged(lines: list[str]) -> list[str]:
     """Judge a script as exit-trap does a file.
 
@@ -73,7 +75,7 @@ class Guard(unittest.TestCase):
     def test_guarded_is_clean(self, drawn: tuple[list[str], int, int]) -> None:
         """No finding."""
         lines, _, _ = drawn
-        self.assertEqual(judged(lines), [], lines)
+        self.assertEqual(judged(lines), list[str](), lines)
 
     @given(script())
     def test_no_mark_is_one_finding(self, drawn: tuple[list[str], int, int]) -> None:
@@ -95,9 +97,8 @@ class Guard(unittest.TestCase):
         lines, trap, _ = drawn
         lines[trap - 1] = f"trap '{cleanup}' EXIT"
         found = judged(lines)
-        self.assertEqual(
-            found, [f"s.sh:{trap}: EXIT trap without the completion guard"]
-        )
+        named = [f"s.sh:{trap}: EXIT trap without the completion guard"]
+        self.assertEqual(found, named)
 
     @given(script(), CLEANUP)
     def test_bash_guard_needs_bash(

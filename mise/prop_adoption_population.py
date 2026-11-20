@@ -19,37 +19,99 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import json
-import operator
 import sys
 import unittest
+from typing import TYPE_CHECKING, TypedDict
 
 import adoption_population as ap
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
-MEMBER = st.fixed_dictionaries({
-    "repo": st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True),
-    "tracks": st.lists(
-        st.sampled_from(["source", "build", "dependency", "x"]), max_size=3
-    ),
-    "visibility": st.sampled_from(["public", "private", "internal"]),
-    "releaseTags": st.booleans(),
-})
-MEMBERS = st.lists(
-    MEMBER, min_size=1, max_size=6, unique_by=operator.itemgetter("repo")
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
+class MemberDoc(TypedDict):
+    """One member as stele's population document carries it."""
+
+    repo: str
+    tracks: list[str]
+    visibility: str
+    releaseTags: bool
+
+
+REPO = st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True)
+TRACKS: st.SearchStrategy[list[str]] = st.lists(
+    st.sampled_from(["source", "build", "dependency", "x"]), max_size=3
 )
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=10),
-    lambda inner: (
-        st.lists(inner, max_size=4)
-        | st.dictionaries(st.text(max_size=10), inner, max_size=4)
-    ),
-    max_leaves=15,
+VISIBILITY: st.SearchStrategy[str] = st.sampled_from(["public", "private", "internal"])
+MEMBER: st.SearchStrategy[MemberDoc] = st.builds(
+    MemberDoc,
+    repo=REPO,
+    tracks=TRACKS,
+    visibility=VISIBILITY,
+    releaseTags=st.booleans(),
 )
 
 
-def printed(members: list[dict]) -> str:
+def repo_of(member: MemberDoc) -> str:
+    """Name the member, its key among the members.
+
+    Returns:
+        Its repository.
+
+    """
+    return member["repo"]
+
+
+MEMBERS: st.SearchStrategy[list[MemberDoc]] = st.lists(
+    MEMBER, min_size=1, max_size=6, unique_by=repo_of
+)
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=10)
+)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=4)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=10), inner, max_size=4
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=15)
+
+
+def dumped(value: object) -> str:
+    """Serialise a value as JSON.
+
+    Returns:
+        The document.
+
+    """
+    return json.dumps(value)
+
+
+def document(members: Sequence[object]) -> str:
+    """Wrap members in a population document.
+
+    Returns:
+        The document, serialised.
+
+    """
+    doc: dict[str, object] = {"schema": ap.SCHEMA, "members": members}
+    return json.dumps(doc)
+
+
+def printed(members: list[MemberDoc]) -> str:
     """Run main over a document holding the members.
 
     Returns:
@@ -59,7 +121,7 @@ def printed(members: list[dict]) -> str:
         AssertionError: main refused the document.
 
     """
-    doc = json.dumps({"schema": ap.SCHEMA, "members": members})
+    doc = document(members)
     out = io.StringIO()
     old = sys.stdin
     sys.stdin = io.StringIO(doc)
@@ -78,7 +140,7 @@ class Obligations(unittest.TestCase):
     """Membership derives the obligations."""
 
     @given(MEMBER)
-    def test_what_a_member_owes(self, member: dict) -> None:
+    def test_what_a_member_owes(self, member: MemberDoc) -> None:
         """Each artifact owed exactly when its condition holds."""
         owed = {artifact for artifact, _ in ap.obligations(ap.Member.of(member, "m"))}
         self.assertLessEqual({"ci", "audit"}, owed)
@@ -91,7 +153,7 @@ class Obligations(unittest.TestCase):
 
     @given(st.data(), MEMBERS)
     def test_member_order_does_not_matter(
-        self, data: st.DataObject, members: list[dict]
+        self, data: st.DataObject, members: list[MemberDoc]
     ) -> None:
         """The same members in any order print the same lines."""
         shuffled = data.draw(st.permutations(members))
@@ -103,10 +165,8 @@ class Refusal(unittest.TestCase):
 
     @given(
         st.one_of(
-            JSON.map(json.dumps),
-            st.lists(st.one_of(MEMBER, JSON), max_size=3).map(
-                lambda ms: json.dumps({"schema": ap.SCHEMA, "members": ms})
-            ),
+            JSON.map(dumped),
+            st.lists(st.one_of(MEMBER, JSON), max_size=3).map(document),
             st.text(max_size=40),
         )
     )
