@@ -10,7 +10,6 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import json
 import os
 import re
 import tempfile
@@ -24,7 +23,7 @@ import hermetic
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
-CAPTURE: object = json.loads(
+CAPTURE: object = decoded.load_json(
     (HERE / "testdata" / "task-references" / "tasks-info.json").read_text("utf-8")
 )
 
