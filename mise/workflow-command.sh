@@ -41,14 +41,27 @@ org_mask() { org__workflow_command add-mask "$@"; }
 org_group() { org__workflow_command group "$@"; }
 org_endgroup() { printf '::endgroup::\n'; }
 
-# A plain log line: every argument joined by one space, CR and LF
-# written as the two characters `\r` and `\n`, one line out, nothing
-# else changed. Outside text a unit prints to its log goes through here,
-# so a newline in it can never begin a line of its own (#1660), and the
-# line still reads as written: no `%q` quoting where the tree is present.
+# A plain log line: every argument joined by one space, one line out.
+# The runner reads two forms of command (actions/runner ActionCommand.cs):
+# a line whose first non-blank characters are `::`, and `##[name]`
+# anywhere in a line. So the text's CR and LF are written as the two
+# characters `\r` and `\n`, a `::` that would open the line gets a
+# backslash before it, and every `##[` is written `##\[`; nothing else
+# changes, so the line reads as written (#1660).
+#
+# The lead is everything before the first printable ASCII byte, under
+# the C locale: the runner trims Unicode whitespace (a no-break space,
+# an em space), and a bracket range collates by locale (under
+# en_US.UTF-8 `[\!-~]` matched nothing at all; measured on bash 3.2.57).
 org_say() {
-  local text="$*"
+  local LC_ALL=C
+  local text="$*" lead
   text=${text//$'\r'/\\r}
   text=${text//$'\n'/\\n}
+  text=${text//'##['/'##\['}
+  lead=${text%%[\!-~]*}
+  if [[ ${text:${#lead}:2} == "::" ]]; then
+    text="${lead}\\${text:${#lead}}"
+  fi
   printf '%s\n' "${text}"
 }

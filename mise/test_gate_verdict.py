@@ -121,8 +121,8 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "::error::a job the gate needs did not succeed\n  plan: failure\n"
-            "::error::a job the gate needs did not succeed\n  gate: skipped\n"
+            "::error::a job the gate needs did not succeed\n  job plan: failure\n"
+            "::error::a job the gate needs did not succeed\n  job gate: skipped\n"
             "::error::pgrx legs were skipped although majors were planned\n"
             "  planned: ''\n",
         )
@@ -133,7 +133,7 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "::error::a job the gate needs did not succeed\n  gate: cancelled\n",
+            "::error::a job the gate needs did not succeed\n  job gate: cancelled\n",
         )
 
     def test_a_failed_leg(self) -> None:
@@ -142,7 +142,8 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "::error::a job the gate needs did not succeed\n  pgrx\\ legs: failure\n",
+            "::error::a job the gate needs did not succeed\n"
+            "  job pgrx\\ legs: failure\n",
         )
 
 

@@ -766,7 +766,7 @@ jobs:
               printf '  planned: %q\n' "${MAJORS}"
             else
               echo "::error::a job the gate needs did not succeed"
-              printf '  %q: %q\n' "${name}" "${result}"
+              printf '  job %q: %q\n' "${name}" "${result}"
             fi
             status=1
           done

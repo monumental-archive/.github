@@ -141,6 +141,26 @@ def literal_format(rest: str) -> tuple[str, str] | None:
     return text, after
 
 
+def guarded_printf(rest: str) -> bool:
+    """Say whether a printf's arguments carry outside text safely.
+
+    Returns:
+        True when the format is a literal whose conversions are all
+        `%q` and which begins with a literal label: the runner trims
+        leading whitespace, so a value first on the line could open a
+        command.
+
+    """
+    split = literal_format(rest)
+    if split is None:
+        return False
+    fmt, _ = split
+    conversions = CONVERSION.findall(fmt)
+    if any(c[-1] != "q" for c in conversions):
+        return False
+    return not conversions or fmt.lstrip(" \t")[:1] not in {"", "%", ":", "#"}
+
+
 def rule_two(line: str) -> bool:
     """Say whether a line writes outside text to the log unguarded.
 
@@ -157,13 +177,7 @@ def rule_two(line: str) -> bool:
     verb, rest = found.groups()
     if NOT_THE_LOG.search(rest) or not ("$" in rest or "`" in rest):
         return False
-    if verb == "echo":
-        return True
-    split = literal_format(rest)
-    if split is None:
-        return True
-    fmt, _ = split
-    return any(c[-1] != "q" for c in CONVERSION.findall(fmt))
+    return verb == "echo" or not guarded_printf(rest)
 
 
 def grouped(unit: list[tuple[int, str]]) -> set[int]:
@@ -301,6 +315,30 @@ class Say(unittest.TestCase):
         self.assertEqual(out, "a\\n::error::x\\r\n")
         self.assertEqual(len(out.splitlines()), 1)
 
+    def test_a_leading_command_is_broken(self) -> None:
+        """`::` first on the line, after any blanks, gets a backslash."""
+        self.assertEqual(
+            bash(
+                "org_say '::error::x'; org_say '  ::error::x';"
+                " org_say $'\\t::error::x'; org_say $'\\xc2\\xa0::error::x'"
+            ),
+            "\\::error::x\n  \\::error::x\n\t\\::error::x\n\u00a0\\::error::x\n",
+        )
+
+    def test_the_legacy_form_is_broken_anywhere(self) -> None:
+        """Every `##[` is written with a backslash; a mid-line `::` is left alone."""
+        self.assertEqual(
+            bash("org_say 'see ##[error]x'; org_say 'see ::error:: below'"),
+            "see ##\\[error]x\nsee ::error:: below\n",
+        )
+
+    def test_the_callers_locale_is_kept(self) -> None:
+        """The function's C locale is its own."""
+        self.assertEqual(
+            bash('LC_ALL=en_US.UTF-8; org_say x > /dev/null; echo "${LC_ALL}"'),
+            "en_US.UTF-8\n",
+        )
+
     def test_readable_text_is_unchanged(self) -> None:
         """Spaces, brackets, commas and quotes print as they are."""
         self.assertEqual(
@@ -350,12 +388,15 @@ class TheLaw(unittest.TestCase):
             "printf '  ref: %s\\n' \"${REF}\"",
             'printf "  ref: ${REF}\\n"',
             'printf \'  %q and %s\\n\' "${a}" "${b}"',
+            "printf '%q\\n' \"${x}\"",
+            "printf '  %q\\n' \"${x}\"",
+            "printf '::%q\\n' \"${x}\"",
             '[[ -n ${x} ]] || echo "${x}"',
             'echo "${refusals}" >&2',
         ]
         green = [
             "printf '  ref: %q\\n' \"${REF}\"",
-            'printf \'  %q: %q\\n\' "${name}" "${result}" >&2',
+            'printf \'  job %q: %q\\n\' "${name}" "${result}" >&2',
             'echo "  a literal"',
             'echo "${x}" >> "${GITHUB_OUTPUT}"',
             'echo "${x}" | jq .',
