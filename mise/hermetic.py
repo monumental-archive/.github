@@ -309,8 +309,7 @@ def plant(dest: Path, names: list[str], prefix: str, stubs: Mapping[str, str]) -
     for name, text in stubs.items():
         path = dest / name
         real = CANON / f"{prefix}{name}"
-        if path.is_symlink():
-            path.unlink()
+        path.unlink(missing_ok=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         if real.exists():
