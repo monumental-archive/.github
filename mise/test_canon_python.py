@@ -29,7 +29,6 @@ import unittest
 import hermetic
 
 CANON = pathlib.Path(__file__).resolve().parent.parent
-SCRIPT = CANON / ".github" / "actions" / "canon" / "python.sh"
 VERSION = "3.15.2"
 # No apostrophe in it: bash removes one inside `${VAR:?...}`, even
 # within double quotes (measured: "belt's" printed as "belts").
@@ -74,11 +73,13 @@ class InstallTheBeltsPython(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp)
         self.root = self.tmp / "_actions" / "example-org" / ".github" / "v1.0.0"
-        action = self.root / ".github" / "actions" / "canon"
-        action.mkdir(parents=True)
-        self.script = action / "python.sh"
-        shutil.copy2(SCRIPT, self.script)
-        (self.root / "mise").mkdir()
+        # The belt config and lock are the row's own: plant() rewrites them.
+        hermetic.canon(
+            self.root,
+            ".github/actions/canon",
+            stubs={"mise/config.toml": "", "mise/mise.lock": ""},
+        )
+        self.script = self.root / ".github" / "actions" / "canon" / "python.sh"
         self.plant(config=VERSION, lock=VERSION)
         stubs = self.tmp / "stubs"
         stubs.mkdir()

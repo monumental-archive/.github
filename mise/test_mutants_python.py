@@ -920,12 +920,12 @@ class MutatedCopy(Planted):
 
         """
         self.track("pyproject.toml", CONFIG)
-        copy = self.tree / "mutants"
-        copy.mkdir()
-        (copy / "helper.py").write_text(MUTATED_HELPER, encoding="utf-8")
-        (copy / "test_helper.py").write_text(HELPER_TEST, encoding="utf-8")
-        shutil.copy(BELT / "hermetic.py", copy / "hermetic.py")
-        return copy
+        # The helper's test imports the fixture module, so the copy holds
+        # the belt beside the planted helper and its test.
+        return hermetic.belt(
+            self.tree / "mutants",
+            stubs={"helper.py": MUTATED_HELPER, "test_helper.py": HELPER_TEST},
+        )
 
     def test_the_statistics_environment_passes(self) -> None:
         """The helper's test, run as mutmut's statistics pass runs it, passes."""

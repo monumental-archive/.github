@@ -23,13 +23,6 @@ import unittest
 
 import hermetic
 
-SCRIPT = (
-    pathlib.Path(__file__).resolve().parent.parent
-    / ".github"
-    / "actions"
-    / "canon"
-    / "link.sh"
-)
 CANON = "example-org/.github"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -41,14 +34,12 @@ def plant(root: pathlib.Path, *, config: bool = True) -> pathlib.Path:
         The script's path inside the planted tree.
 
     """
-    action = root / ".github" / "actions" / "canon"
-    action.mkdir(parents=True)
-    script = action / "link.sh"
-    shutil.copy2(SCRIPT, script)
-    if config:
-        (root / "mise").mkdir()
-        (root / "mise" / "config.toml").write_text("[tools]\n", encoding="utf-8")
-    return script
+    hermetic.canon(
+        root, ".github/actions/canon", stubs={"mise/config.toml": "[tools]\n"}
+    )
+    if not config:
+        shutil.rmtree(root / "mise")
+    return root / ".github" / "actions" / "canon" / "link.sh"
 
 
 class LinkTheCanonTree(unittest.TestCase):

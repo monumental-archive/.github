@@ -219,13 +219,15 @@ class Selection(unittest.TestCase):
 
     def setUp(self) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
-        self.belt = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.belt)
-        shutil.copy2(BELT / "mutants.sh", self.belt / "mutants.sh")
-        for lang in leg_files():
-            (self.belt / f"mutants-{lang}.sh").write_text(
-                f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n', encoding="utf-8"
-            )
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        self.belt = hermetic.belt(
+            tmp / "belt",
+            stubs={
+                f"mutants-{lang}.sh": f'echo "ran {lang}"\n[[ -z ${{PLANT_RED:-}} ]]\n'
+                for lang in leg_files()
+            },
+        )
 
     def run_task(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Run audit:mutants' body against the stub legs.

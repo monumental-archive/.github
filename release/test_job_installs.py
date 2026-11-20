@@ -1302,12 +1302,7 @@ def planted_uninstalled(helper: str) -> list[str]:
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "mise").symlink_to(CANON / "mise")
-        (root / "release").mkdir()
-        for path in (CANON / "release").iterdir():
-            (root / "release" / path.name).symlink_to(path)
-        (root / "release" / "planted-call.py").write_text(helper, "utf-8")
+        root = hermetic.canon(tmp, stubs={"release/planted-call.py": helper})
         job = [
             *load("attach-release.yml")["attach"],
             "      - name: Planted",

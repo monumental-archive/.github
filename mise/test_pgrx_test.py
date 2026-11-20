@@ -178,19 +178,13 @@ class Planted(unittest.TestCase):
         }.items():
             (bins / name).write_text(body, encoding="utf-8")
             (bins / name).chmod(0o755)
-        belt = self.tmp / "belt"
-        belt.mkdir()
-        for real in (
-            "pgrx-test.sh",
-            "coverage-measure.sh",
-            "coverage-run.sh",
-            "coverage_floor.py",
-            "gate_surface.py",
-        ):
-            (belt / real).symlink_to(BELT / real)
-        (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
-        (belt / "pgrx_postgres.py").write_text(PGRX_POSTGRES_STUB, encoding="utf-8")
-        self.belt = belt
+        self.belt = hermetic.belt(
+            self.tmp / "belt",
+            stubs={
+                "pgrx-env.sh": PGRX_ENV_STUB,
+                "pgrx_postgres.py": PGRX_POSTGRES_STUB,
+            },
+        )
         self.log = self.tmp / "log"
         self.log.touch()
         metadata = self.tmp / "metadata.json"
@@ -207,7 +201,7 @@ class Planted(unittest.TestCase):
         metadata.write_text(json.dumps(document), encoding="utf-8")
         self.env = hermetic.env() | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
-            "ORG_BELT_DIR": str(belt),
+            "ORG_BELT_DIR": str(self.belt),
             "ORG_PYTHON": sys.executable,
             "PLANT_LOG": str(self.log),
             "PLANT_METADATA": str(metadata),

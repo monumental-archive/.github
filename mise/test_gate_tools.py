@@ -39,7 +39,6 @@ import dataclasses
 import functools
 import io
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -638,10 +637,10 @@ class Helper(unittest.TestCase):
     def test_the_helper_refuses_a_table_out_of_step(self) -> None:
         """A belt key with no row is refused by name, not left out."""
         with tempfile.TemporaryDirectory() as d:
-            table = Path(d) / "gate-tools.toml"
             text = (BELT / "gate-tools.toml").read_text("utf-8")
-            table.write_text(text.replace('[tools."aqua:hadolint/hadolint"]', "[x]"))
-            shutil.copy(BELT / "config.toml", Path(d) / "config.toml")
+            stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
+            belt = hermetic.belt(d, stubs={"gate-tools.toml": stub})
+            table = belt / "gate-tools.toml"
             # ruff: ignore[subprocess-without-shell-equals-true]
             result = subprocess.run(
                 [

@@ -167,12 +167,7 @@ class Planted(unittest.TestCase):
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = self.tmp / "belt"
-        belt.mkdir()
-        (belt / "gate_surface.py").symlink_to(BELT / "gate_surface.py")
-        # The one index rule, shared with the crates publisher (#1383).
-        (belt / "crates_index.py").symlink_to(BELT / "crates_index.py")
-        (belt / "pgrx-env.sh").write_text(PGRX_ENV_STUB, encoding="utf-8")
+        belt = hermetic.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
         self.index = self.tmp / "index"
         self.index.mkdir()
         self.log = self.tmp / "log"

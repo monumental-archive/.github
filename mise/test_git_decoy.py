@@ -19,7 +19,6 @@ the very hook they are about.
 import os
 import pathlib
 import re
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -142,14 +141,14 @@ class Task(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         base = pathlib.Path(tmp.name)
         tree = base / "tree"
+        # The runner and all it reads, as the tree's mise/: the whole
+        # belt, its own tests taken out, since the tree's tests are the
+        # ones planted here.
+        for test in hermetic.belt(tree / "mise").glob("test_*.py"):
+            test.unlink()
         for root in ROOT_RE.findall(body()):
             (tree / root).mkdir(parents=True, exist_ok=True)
             (tree / root / "test_ok.py").write_text(PASSING, encoding="utf-8")
-        # The runner, the module it reads its workers' outcomes through, and
-        # `measured`, which every command of the body runs through (#1667):
-        # with no floor in the tree it is a plain exec.
-        for helper in ("git_decoy.py", "unittest_guarded.py", "decoded.py", "measured"):
-            shutil.copy(_HERE / helper, tree / "mise" / helper)
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
         (tree / "mise" / "test_leaky.py").write_text(leaky, encoding="utf-8")
         return tree, throwaway(base / "real")

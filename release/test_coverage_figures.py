@@ -22,7 +22,6 @@ the gate as `mise run test`.
 import contextlib
 import io
 import json
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -39,7 +38,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 import hermetic
 
 HERE = Path(__file__).resolve().parent
-CANON = HERE.parent
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 
@@ -363,16 +361,6 @@ class CommandLine(unittest.TestCase):
                 self.assertIn("usage: coverage_figures.py", err)
 
 
-def no_cache(_directory: str, names: list[str]) -> set[str]:
-    """Leave Python's byte-code caches out of a copied tree.
-
-    Returns:
-        The names to skip.
-
-    """
-    return {name for name in names if name == "__pycache__"}
-
-
 # The forge: answers from files the row planted beside it, keyed by the
 # artifact's name, the run's id and the artifact's id, and records every
 # call. A path with no planted answer fails as gh does.
@@ -463,21 +451,16 @@ class Derive(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.base = Path(tmp.name)
-        canon = self.base / "canon"
-        (canon / "release").mkdir(parents=True)
-        for rel in ("release/derive-coverage-floor.sh", "release/coverage_figures.py"):
-            shutil.copy(CANON / rel, canon / rel)
-        # The belt whole, as the release job has it: a helper that comes
+        # The canon whole, as the release job has it: a helper that comes
         # to import another belt module finds it, and only the
-        # measurement below is a stub.
-        shutil.copytree(CANON / "mise", canon / "mise", ignore=no_cache)
+        # measurement is a stub.
+        canon = hermetic.canon(
+            self.base / "canon", stubs={"mise/coverage-measure.sh": MEASURE}
+        )
+        (canon / "mise" / "coverage-measure.sh").chmod(0o755)
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
-        for path, text in (
-            (self.stubs / "gh", GH),
-            (self.stubs / "mise", MISE),
-            (canon / "mise" / "coverage-measure.sh", MEASURE),
-        ):
+        for path, text in ((self.stubs / "gh", GH), (self.stubs / "mise", MISE)):
             path.write_text(text, encoding="utf-8")
             path.chmod(0o755)
         self.script = canon / "release" / "derive-coverage-floor.sh"

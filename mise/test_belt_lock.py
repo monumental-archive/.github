@@ -96,14 +96,15 @@ class LockedFromTheLinkedLock(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp)
         tree = self.tmp / "cache" / "org-belt" / ("a" * 40) / "mise"
-        tree.mkdir(parents=True)
         config = (BELT / "config.toml").read_text("utf-8")
         line = f'{UV_KEY} = "{pin(UV_KEY)}"\n'
         self.assertIn(line, config)
-        (tree / "config.toml").write_text(config.replace(line, ""), "utf-8")
-        for name in ("clippy.toml", "aqua-registry.yaml"):
-            shutil.copy2(BELT / name, tree / name)
         lock = (BELT / "mise.lock").read_text("utf-8")
+        # The whole belt; the config and the lock are the row's own, and
+        # locks() rewrites the lock in place.
+        hermetic.belt(
+            tree, stubs={"config.toml": config.replace(line, ""), "mise.lock": lock}
+        )
         uv = block(UV_KEY).search(lock)
         if uv is None:
             msg = "the belt's lock holds no uv"
