@@ -98,12 +98,27 @@ tasks = [
 ]
 
 [tools.yq]
-# No gate task calls it (#1840): the canon's own tests read workflows
-# through mise/workflow_yaml.py, and the canon's config pins yq, so its
-# gate installs it ("this repository pins yq itself"). #1846 gives it
-# its first gate task.
-tasks = []
-when = []
+# mise/embedded_shell.py reads every run: value through
+# mise/workflow_yaml.py (#1846), one yq call per selected file: the
+# action lints' selection (action-files.sh) and, for the ceiling, the
+# workflow templates. lint:task-shell runs the same helper, so the
+# derivation, which reads a helper whole, counts it too.
+tasks = [
+  "lint:scaffold-assembly",
+  "lint:shell-embedded",
+  "lint:task-shell",
+  "lint:workflow-shell",
+]
+when = [
+  "*action.y*ml",
+  "*mise.*.toml",
+  "*mise.toml",
+  "*mise/config.*.toml",
+  "*mise/config.toml",
+  ".github/workflows/*.y*ml",
+  "scaffold/",
+  "workflow-templates/*.y*ml",
+]
 
 [tools."aqua:suzuki-shunsuke/pinact"]
 tasks = ["lint:action-pins", "lint:scaffold-assembly"]

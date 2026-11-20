@@ -15,7 +15,8 @@ tools their steps call.
 A call is a tool's command at command position (line start, after a
 separator, behind `xargs`), with quoted literals blanked so a message
 naming a tool is not a call; a Python helper calls what it hands
-`subprocess` as a quoted list element; any Python helper calls python3.
+`subprocess` as a quoted list element, and what any belt module it
+imports does; any Python helper calls python3.
 
 A GUARD is what a task tests before its first "skipped" exit: the
 pathspecs it hands `git ls-files` (none at all is every file), `compgen
@@ -230,6 +231,30 @@ def _source(name: str) -> str:
     return _SOURCES[name]
 
 
+IMPORT = re.compile(r"^(?:import|from) (\w+)", re.MULTILINE)
+
+
+def belt_imports(name: str) -> list[str]:
+    """Name a Python helper and every belt module it imports, transitively.
+
+    A helper calls what a belt module it imports spawns: embedded_shell.py
+    reads `run:` values through workflow_yaml.py, which runs yq (#1846).
+
+    Returns:
+        File names in the belt, the helper's own first.
+
+    """
+    out = [name]
+    todo = [name]
+    while todo:
+        for module in found(IMPORT, _source(todo.pop())):
+            imported = f"{module}.py"
+            if imported not in out and (BELT / imported).is_file():
+                out.append(imported)
+                todo.append(imported)
+    return out
+
+
 # The belt's venv check (#1788): `tool_python.py LABEL COMMAND` finds
 # COMMAND on PATH and runs the venv's interpreter beside it, so the line
 # uses COMMAND's tool though COMMAND is an argument there.
@@ -296,8 +321,10 @@ def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
         if at is not None and i >= at:
             break
         if kind.startswith("py:"):
-            src = _source(kind[3:])
-            if python_calls(src, cmds) or "python3" in cmds:
+            helper = belt_imports(kind[3:])
+            if any(python_calls(_source(f), cmds) for f in helper):
+                return i
+            if "python3" in cmds:
                 return i
             if kind == f"py:{TOOL_PYTHON}" and venv_command(lines[i - 1][1]) in cmds:
                 return i
@@ -537,6 +564,16 @@ class Table(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertEqual(0, first_call(expand(text, set()), [cmd]))
+
+    def test_a_helper_calls_what_its_belt_import_spawns(self) -> None:
+        """embedded_shell.py runs yq through workflow_yaml.py (#1846).
+
+        Read alone, the helper names no yq; the table's yq row would be
+        stale and a consumer's gate would lack the parser.
+        """
+        text = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/embedded_shell.py" ${files}'
+        self.assertIn("workflow_yaml.py", belt_imports("embedded_shell.py"))
+        self.assertEqual(1, first_call(expand(text, set()), ["yq"]))
 
     def test_the_venv_check_uses_its_command(self) -> None:
         """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""

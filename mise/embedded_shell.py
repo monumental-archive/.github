@@ -18,6 +18,10 @@ which matters, because moving shell OUT of YAML would hide it from
 zizmor, whose github-env and template-injection audits read `run:`
 content and cannot follow a script call.
 
+The values are read by the parser (#1846): `workflow_yaml.runs()`, on
+the belt's pinned yq, so every `run:` value is read however the YAML
+spells it, and this file holds no YAML grammar.
+
 Deterministic and offline: shfmt and shellcheck both read only the bytes
 handed to them.
 """
@@ -35,34 +39,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import decoded
+import workflow_yaml
 from typed_std import group
 
-# Every block-scalar header of `run:`, at any indent, list item or not:
-# literal (`|`) or folded (`>`), any chomping or indentation indicator,
-# and an optional trailing comment (`run: | # zizmor: ...`). The line
-# ceiling counts all of them (#1352) — a header it could not read would
-# be an opt-out by punctuation. BLOCK_HEADER is the header alone, the
-# one grammar every reader of a step uses (#1837): its first group is
-# the indicator, its second the comment.
-BLOCK_HEADER = r"([|>](?:[+-]?[1-9]?|[1-9][+-]))(\s+#.*)?"
-RUN_RE = re.compile(rf"^(\s*)(- )?run: {BLOCK_HEADER}\s*$")
-# How each header is linted (#1396). A literal block (`|`, any chomping
-# or indentation indicator) is the script bash runs, so shfmt and
-# shellcheck both read it. A folded block (`>`) has its lines joined
-# before bash sees it: shellcheck reads the FOLDED text, and shfmt does
-# not apply, because the file's lines are not the script's lines. A
-# comment after the indicator (`run: | # zizmor: ...`) changes nothing:
-# the block is read by its indicator like any other.
-LITERAL = "|"
-FOLDED = ">"
+# How each value is linted (#1396, #1846), by the style yq reports. A
+# literal block (`|`, any chomping or indentation indicator, any header
+# comment) and a single-line value (plain, single- or double-quoted) are
+# the script bash runs, line for line, so shfmt and shellcheck both read
+# them. A folded block (`>`) has its lines joined before bash sees it:
+# shellcheck reads the FOLDED text, and shfmt does not apply, because
+# the file's lines are not the script's lines. Where the value sits —
+# anchored, in a flow mapping, under a quoted key — is the parser's
+# business, never this file's: it holds no YAML grammar.
+LITERAL = "literal"
+FOLDED = "folded"
 FOLDED_NOTE = (
     "folded block: shellcheck read the text bash receives; shfmt does not apply"
 )
-# A `shell:` key on the same step selects the interpreter. Only bash-family
-# blocks are shell at all — `shell: python` is a different language.
-SHELL_RE = re.compile(r"^(\s*)(- )?shell:\s*([a-z0-9 {}$.-]+)\s*$")
-# A step's `name:`, on its own line or as the list item's first key.
-NAME_RE = re.compile(r"^(\s*)(- )?name:\s*(.*?)\s*$")
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
@@ -133,7 +126,7 @@ def canon_source_path() -> Generator[Path]:
         yield Path(tmp)
 
 
-def unfollowed(path: Path, lineno: int, src: str, *, folded: bool) -> list[str]:
+def unfollowed(path: Path, run: Run, script: str) -> list[str]:
     """Refuse a step that sources a canon file the canon does not hold.
 
     Returns:
@@ -142,58 +135,28 @@ def unfollowed(path: Path, lineno: int, src: str, *, folded: bool) -> list[str]:
     """
     canon = canon_dir()
     out: list[str] = []
-    for offset, line in enumerate(src.splitlines()):
+    for offset, line in enumerate(script.splitlines()):
         found = CANON_SOURCE_RE.match(line)
         sourced = group(found, 1) if found else None
         if sourced and not (canon / sourced).is_file():
-            at = lineno if folded else lineno + offset
             out.append(
-                f"{path}:{at}: sources .org-canon/{sourced}, which the"
-                f" canon tree ({canon}) does not hold: shellcheck cannot"
+                f"{path}:{place(run, offset)}: sources .org-canon/{sourced}, which"
+                f" the canon tree ({canon}) does not hold: shellcheck cannot"
                 " follow it, and SC1091 is not shown (#1715)"
             )
     return out
 
 
-def step_shell(lines: list[str], run_idx: int, key_indent: int) -> str:
-    """Return the `shell:` of the step whose `run:` key sits at run_idx.
-
-    Read from the whole step, as `step_name` reads its name: GitHub
-    takes a step's keys in any order, so `shell:` may come first on the
-    `- ` line or after the block (#1555: both were read as bash, and a
-    `shell: python` block went to shfmt and shellcheck).
-
-    Returns:
-        The interpreter name, lowercased, with expressions left intact,
-        or 'bash' by default.
-
-    """
-    start = step_start(lines, run_idx, key_indent)
-    first = run_idx if start is None else start
-    for j in range(first, len(lines)):
-        cur = depth(lines[j])
-        if j > first and cur is not None and cur < key_indent:
-            break
-        m = SHELL_RE.match(lines[j])
-        if m and len(group(m, 1) or "") + (2 if group(m, 2) else 0) == key_indent:
-            return (group(m, 3) or "").strip().lower()
-        if start is None and j > run_idx:
-            break
-    return "bash"
-
-
 class Run(NamedTuple):
-    """One `run:` block scalar, literal or folded, as the file holds it."""
+    """One `run:` value, as the parser reads it (#1846)."""
 
-    line: int  # 1-based number of the block's first body line
-    source: str  # the body, dedented, newline-terminated, as the file holds it
-    shell: str  # the step's `shell:`, or 'bash'
-    header: str  # the block indicator: `|`, `|-`, `>-`, `|2`, ...
-    commented: bool  # the indicator line carries a trailing comment
+    line: int  # 1-based line of the value: a block's header, or the value
+    style: str  # yq's: literal, folded, single, double, or '' for plain
+    text: str  # what bash receives, folded and chomped
+    source: str  # the lines the ceiling counts: the file's, for a folded block
+    shell: str  # the step's `shell:`, lowercased, or 'bash'
     name: str | None  # the step's `name:`, or None when it has none
-    start: int  # 0-based index of the header line
-    end: int  # 0-based index of the first line after the body
-    pad: int  # the body's content indentation in the file
+    alias: bool  # the value is `*name`: its anchor's, read there
 
 
 def depth(line: str) -> int | None:
@@ -208,269 +171,199 @@ def depth(line: str) -> int | None:
     return len(line) - len(line.lstrip())
 
 
-def step_start(lines: list[str], run_idx: int, key_indent: int) -> int | None:
-    """Return the index of the `- ` line opening the step that holds run_idx.
+def script(text: str) -> str:
+    """Return a value's text as the script shfmt and shellcheck read.
+
+    Line breaks after the text are YAML layout under every chomping
+    indicator, never script to format (#1431): one ends the script.
 
     Returns:
-        The line index, or None when the key sits in no list item.
+        The text, ending in exactly one line break.
 
     """
-    for j in range(run_idx, -1, -1):
-        cur = depth(lines[j])
-        if cur is None:
-            continue
-        if cur == key_indent - 2 and lines[j].lstrip().startswith("- "):
-            return j
-        if cur < key_indent:
-            return None
-    return None
+    return text.rstrip("\n") + "\n"
 
 
-def step_name(lines: list[str], run_idx: int, key_indent: int) -> str | None:
-    """Return the `name:` of the step whose `run:` key sits at run_idx.
+def folded_lines(lines: list[str], header: int, text: str) -> list[str]:
+    """Return a folded block's lines as the file holds them, for the ceiling.
 
-    The step is the list item that holds the key: its `- ` sits two
-    columns left of its keys, and it ends at the first line indented less
-    than them. A `name:` inside the body or a `with:` map is deeper and is
-    never read.
+    Folding joins the block's lines, so the text bash receives is no
+    count of them, and a ceiling that counted it would be an opt-out by
+    punctuation (#1352). The lines are found from the parser's text, not
+    from indentation: from the line after the header, each line's content
+    is the next piece of that text, until the text is spent.
 
     Returns:
-        The name with YAML quoting removed, or None for an unnamed step.
+        The block's lines, stripped, blank lines as ''.
 
     """
-    start = step_start(lines, run_idx, key_indent)
-    if start is None:
-        return None
-    for j in range(start, len(lines)):
-        cur = depth(lines[j])
-        if j > start and cur is not None and cur < key_indent:
+    rest = text.strip()
+    out: list[str] = []
+    for raw in lines[header:]:
+        if not rest:
             break
-        m = NAME_RE.match(lines[j])
-        if m and len(m.group(1)) + (2 if m.group(2) else 0) == key_indent:
-            return unquote(m.group(3)) or None
-    return None
-
-
-def unquote(value: str) -> str:
-    """Strip one layer of YAML quoting, or a trailing comment if unquoted.
-
-    Returns:
-        The scalar as YAML reads it, for the names steps actually carry.
-
-    """
-    if value[:1] in {"'", '"'} and value.endswith(value[0]) and len(value) > 1:
-        return value[1:-1]
-    return value.split(" #", 1)[0].strip()
-
-
-def content_pad(body: list[str], header: str, key_indent: int) -> int:
-    """Return the column a block's content starts at.
-
-    An indentation indicator (`|2`) fixes it relative to the key, and
-    spaces beyond it are content; without one it is the least-indented
-    line, as YAML's auto-detection finds it.
-
-    Returns:
-        The number of leading spaces that belong to the YAML, not the text.
-
-    """
-    least = min(len(x) - len(x.lstrip()) for x in body if x.strip())
-    digits = "".join(c for c in header if c.isdigit())
-    if digits and key_indent + int(digits) <= least:
-        return key_indent + int(digits)
-    return least
-
-
-def trailing_blanks(body: list[str]) -> int:
-    """Count the blank lines that end a block's region.
-
-    Returns:
-        How many of the last lines hold nothing but whitespace.
-
-    """
-    n = 0
-    while n < len(body) and not body[-1 - n].strip():
-        n += 1
-    return n
-
-
-def runs_in(lines: list[str]) -> Iterator[Run]:
-    """Yield every `run:` block scalar in a file's lines.
-
-    Yields:
-        One Run per non-empty block, whatever its interpreter.
-
-    """
-    i = 0
-    while i < len(lines):
-        m = RUN_RE.match(lines[i])
-        if not m:
-            i += 1
+        content = raw.strip()
+        if not content:
+            out.append("")
             continue
-        indent = len(m.group(1))
-        key_indent = indent + (2 if m.group(2) else 0)
-        start = i
-        i += 1
-        body: list[str] = []
-        while i < len(lines) and (
-            not lines[i].strip() or (len(lines[i]) - len(lines[i].lstrip())) > indent
-        ):
-            body.append(lines[i])
-            i += 1
-        if not any(x.strip() for x in body):
-            continue
-        pad = content_pad(body, m.group(3), key_indent)
-        # Blank lines after the text are YAML layout under every chomping
-        # indicator, never script to format (#1431): the source stops at
-        # the last text line, and `end` still marks the region's end.
-        text = body[: len(body) - trailing_blanks(body)]
-        yield Run(
-            line=start + 2,
-            source="\n".join(x[pad:] if x.strip() else "" for x in text) + "\n",
-            shell=step_shell(lines, start, key_indent),
-            header=m.group(3),
-            commented=m.group(4) is not None,
-            name=step_name(lines, start, key_indent),
-            start=start,
-            end=i,
-            pad=pad,
-        )
+        if not rest.startswith(content):
+            break
+        rest = rest[len(content) :].lstrip()
+        out.append(content)
+    return out
 
 
 def runs(path: Path) -> Iterator[Run]:
-    """Yield every `run:` block scalar in a workflow or composite action.
+    """Yield every `run:` value in a workflow or composite action.
 
-    This is the one reader of `run:` blocks: shfmt, shellcheck and the
-    line ceiling all see the blocks it finds, and no others.
+    This is the one reader of `run:` values: shfmt, shellcheck and the
+    line ceiling all see the values it finds, and no others. It is
+    `workflow_yaml.runs()` (#1846), one record per value, whatever its
+    style and wherever it sits; a file yq cannot parse is a ValueError
+    naming it.
 
     Yields:
-        One Run per non-empty block, whatever its interpreter.
+        One Run per non-empty value, whatever its interpreter.
+
+    Raises:
+        ValueError: yq cannot read the file; the text names it.
 
     """
-    yield from runs_in(path.read_text(encoding="utf-8").splitlines())
-
-
-def fold(source: str) -> str:
-    """Fold a block's dedented text the way YAML hands it to bash.
-
-    A single line break between two text lines becomes a space; a run of
-    blank lines between them becomes that many line breaks; a break next
-    to a more-indented line is kept as written, blank lines included.
-
-    Returns:
-        The folded text, newline-terminated.
-
-    """
-    out: list[str] = []
-    prev: str | None = None
-    blanks = 0
-    for line in source.split("\n")[:-1]:
-        if not line:
-            if prev is None:
-                out.append("\n")
-            else:
-                blanks += 1
+    lines = path.read_text(encoding="utf-8").split("\n")
+    try:
+        values = workflow_yaml.runs(path)
+    except ValueError as err:
+        if str(err).startswith(f"{path}:"):
+            raise
+        msg = f"{path}: {err}"
+        raise ValueError(msg) from None
+    for found in values:
+        if not found.text.strip():
             continue
-        if prev is None:
-            out.append(line)
-        elif line[0] in " \t" or prev[0] in " \t":
-            out.append("\n" * (blanks + 1) + line)
-        elif blanks:
-            out.append("\n" * blanks + line)
+        if found.style == FOLDED and not found.alias:
+            source = "\n".join(folded_lines(lines, found.line, found.text)) + "\n"
         else:
-            out.append(" " + line)
-        prev, blanks = line, 0
-    return "".join(out) + "\n"
+            source = script(found.text)
+        yield Run(
+            line=found.line,
+            style=found.style,
+            text=found.text,
+            source=source,
+            shell=(found.shell or "bash").strip().lower(),
+            name=found.name,
+            alias=found.alias,
+        )
 
 
 def shell_family(run: Run) -> bool:
-    """Say whether a block runs under a bash-family interpreter.
+    """Say whether a value runs under a bash-family interpreter.
 
     Returns:
-        True for bash and sh blocks, the ones shfmt and shellcheck read.
+        True for bash and sh values, the ones shfmt and shellcheck read.
 
     """
     return any(s in run.shell for s in ("bash", "sh"))
 
 
-def blocks(path: Path) -> Iterator[tuple[int, str, bool]]:
-    """Yield (first_body_line_number, script, folded) per linted block.
+def linted(path: Path) -> Iterator[Run]:
+    """Yield every value shellcheck reads: bash-family, and not an alias.
 
-    A literal block's script is its text; a folded block's is the text
-    after folding, which is what bash runs.
+    An alias's text is its anchor's, linted where the anchor is, so it
+    adds no second finding.
 
     Yields:
-        One tuple per bash-family block shellcheck reads.
+        One Run per value linted.
 
     """
     for run in runs(path):
-        if not shell_family(run):
-            continue
-        if run.header.startswith(FOLDED):
-            yield run.line, fold(run.source), True
-        else:
-            yield run.line, run.source, False
+        if shell_family(run) and not run.alias:
+            yield run
 
 
-def shfmt_body(run: Run, lines: list[str]) -> list[str] | None:
-    """Return a literal block's body as shfmt formats it, at file indent.
+def place(run: Run, offset: int) -> int:
+    """Put a line of a value's script back on the file's line (#1846).
+
+    A literal block's script line `offset` (0-based) is that many lines
+    after its first body line; a folded block's lines are not the
+    script's, so every line lands on its first body line; a single-line
+    value has one line, the header's.
 
     Returns:
-        The new body lines, or None when shfmt fails or changes nothing.
+        The 1-based line in the file.
+
+    """
+    if run.style == LITERAL:
+        return run.line + 1 + offset
+    if run.style == FOLDED:
+        return run.line + 1
+    return run.line
+
+
+def shfmt(source: str) -> str | None:
+    """Format one script with the belt's shfmt flags.
+
+    Returns:
+        The formatted script, or None when shfmt cannot parse it.
 
     """
     r = subprocess.run(
         [*SHFMT, "-"],
-        input="#!/usr/bin/env bash\n" + run.source,
+        input="#!/usr/bin/env bash\n" + source,
         capture_output=True,
         text=True,
         check=False,
     )
     if r.returncode != 0 or not r.stdout:
         return None
-    body = lines[run.start + 1 : run.end]
-    # The blank lines after the text are not the script's (#1431): only
-    # the text is compared and replaced, and they go back as they were.
-    cut = len(body) - trailing_blanks(body)
-    formatted = r.stdout.splitlines()[1:]  # drop the shebang we added
-    if formatted == [x[run.pad :] if x.strip() else "" for x in body[:cut]]:
-        return None
-    return [(" " * run.pad + x) if x.strip() else "" for x in formatted] + body[cut:]
+    return r.stdout.split("\n", 1)[1]  # drop the shebang we added
 
 
 def rewrite(path: Path) -> int:
-    """Format every literal `run:` block in place, preserving YAML indentation.
+    """Format every literal `run:` block in place, preserving its indentation.
+
+    The parser locates each block (#1846): its body starts on the line
+    after the header yq reports and runs for as many lines as the value
+    has before its trailing line breaks, and the indent kept is the one
+    the body's first non-blank line carries ahead of its text. Every
+    other byte of the file is left as it was. A single-line value is
+    fixed by hand, and a folded one is not formatted.
 
     Returns:
         The number of blocks rewritten.
 
     """
-    lines = path.read_text(encoding="utf-8").splitlines()
-    out: list[str] = []
-    pos = 0
+    lines = path.read_text(encoding="utf-8").split("\n")
     changed = 0
-    for run in runs_in(lines):
-        if not shell_family(run) or not run.header.startswith(LITERAL):
+    # From the last block up, so a rewrite never moves a block not yet read.
+    for run in reversed(list(linted(path))):
+        if run.style != LITERAL:
             continue
-        new = shfmt_body(run, lines)
-        if new is None:
+        formatted = shfmt(run.source)
+        if formatted is None or formatted == run.source:
             continue
-        out.extend(lines[pos : run.start + 1])
-        out.extend(new)
-        pos = run.end
+        text = run.source.split("\n")[:-1]
+        start, stop = run.line, run.line + len(text)
+        first = next(i for i, x in enumerate(text) if x.strip())
+        held = lines[start + first]
+        if not held.endswith(text[first]):
+            continue  # not where the parser says: leave it to the lint
+        pad = len(held) - len(text[first])
+        lines[start:stop] = [
+            (" " * pad + x) if x.strip() else "" for x in formatted.split("\n")[:-1]
+        ]
         changed += 1
     if changed:
-        out.extend(lines[pos:])
-        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        path.write_text("\n".join(lines), encoding="utf-8")
     return changed
 
 
-def findings(gcc: str, path: Path, lineno: int, *, folded: bool) -> list[str]:
+def findings(gcc: str, path: Path, run: Run) -> list[str]:
     """Map shellcheck's gcc-format output back onto the YAML file.
 
-    A literal block's findings land on their own lines. A folded block's
-    lines are not the script's lines, so its findings land on the block's
-    first line, and the first of them says why, once.
+    A literal block's findings land on their own lines, a single-line
+    value's on its line. A folded block's lines are not the script's
+    lines, so its findings land on the block's first line, and the first
+    of them says why, once.
 
     Returns:
         One line per finding.
@@ -482,20 +375,41 @@ def findings(gcc: str, path: Path, lineno: int, *, folded: bool) -> list[str]:
         parts = line.split(":", 3)
         if len(parts) < GCC_FIELDS or not parts[1].isdigit():
             continue
-        if folded:
-            note = "" if out else f" [{FOLDED_NOTE}]"
-            out.append(f"{path}:{lineno}:{parts[3].strip()}{note}")
-        else:
-            # -1 for the shebang this wrapper added.
-            real = lineno + int(parts[1]) - 2
-            out.append(f"{path}:{real}:{parts[3].strip()}")
+        note = f" [{FOLDED_NOTE}]" if run.style == FOLDED and not out else ""
+        # -2: the shebang this wrapper added, and line 1 is offset 0.
+        at = place(run, int(parts[1]) - 2)
+        out.append(f"{path}:{at}:{parts[3].strip()}{note}")
     return out
+
+
+def unformatted(path: Path, run: Run) -> str | None:
+    """Say how a value shfmt would change is wrong, and where.
+
+    A literal block is rewritten by fix:workflow-shell; a single-line
+    value cannot be, so its finding carries shfmt's text to copy by hand.
+    A folded block is not format-checked.
+
+    Returns:
+        The finding, or None.
+
+    """
+    if run.style == FOLDED:
+        return None
+    formatted = shfmt(run.source)
+    if formatted is None or formatted == run.source:
+        return None
+    if run.style == LITERAL:
+        return f"{path}:{run.line + 1}: run: block is not shfmt-formatted"
+    return (
+        f"{path}:{run.line}: run: value is not shfmt-formatted, and only a "
+        f"literal block is rewritten — shfmt writes it as: {formatted.rstrip()}"
+    )
 
 
 def check(
     path: Path, *, fmt: bool, lint: bool, source_path: Path | None = None
 ) -> list[str]:
-    """Run shfmt and shellcheck over one file's embedded blocks.
+    """Run shfmt and shellcheck over one file's `run:` values.
 
     `source_path` is where shellcheck finds `.org-canon` (#1715).
 
@@ -504,46 +418,43 @@ def check(
 
     """
     out: list[str] = []
-    for lineno, src, folded in blocks(path):
+    for run in linted(path):
+        src = script(run.text)
         if lint:
-            out += unfollowed(path, lineno, src, folded=folded)
+            out += unfollowed(path, run, src)
+        if fmt:
+            finding = unformatted(path, run)
+            if finding:
+                out.append(finding)
+        if not lint:
+            continue
         with tempfile.NamedTemporaryFile(
             "w",
             suffix=".sh",
             delete=False,
             encoding="utf-8",
         ) as tmp:
-            # The shebang is what makes shfmt and shellcheck agree on the
-            # dialect; GitHub runs `run:` blocks under bash by default.
+            # The shebang is what makes shellcheck read the dialect GitHub
+            # runs `run:` values under by default: bash.
             tmp.write("#!/usr/bin/env bash\n" + src)
             name = tmp.name
         try:
-            if fmt and not folded:
-                r = subprocess.run(
-                    [*SHFMT, "-d", name],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if r.stdout.strip():
-                    out.append(f"{path}:{lineno}: run: block is not shfmt-formatted")
-            if lint:
-                # ruff: ignore[start-process-with-partial-path]
-                r = subprocess.run(
-                    [
-                        "shellcheck",
-                        f"--rcfile={ORG_RCFILE}",
-                        *([f"--source-path={source_path}"] if source_path else []),
-                        "--exclude",
-                        SHELLCHECK_EXCLUDE,
-                        "--format=gcc",
-                        name,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                out += findings(r.stdout, path, lineno, folded=folded)
+            # ruff: ignore[start-process-with-partial-path]
+            r = subprocess.run(
+                [
+                    "shellcheck",
+                    f"--rcfile={ORG_RCFILE}",
+                    *([f"--source-path={source_path}"] if source_path else []),
+                    "--exclude",
+                    SHELLCHECK_EXCLUDE,
+                    "--format=gcc",
+                    name,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            out += findings(r.stdout, path, run)
         finally:
             Path(name).unlink(missing_ok=True)
     return out
@@ -666,13 +577,21 @@ class Verdict(NamedTuple):
 
 
 def measure(files: list[str]) -> list[tuple[str, Run, int]]:
-    """Weigh every `run:` block in files.
+    """Weigh every `run:` value in files, whatever its style (#1846).
+
+    An alias is not weighed again: its text is its anchor's, held to
+    the ceiling where the anchor is.
 
     Returns:
-        (file, block, weight) for every block, in file order.
+        (file, value, weight) for every value, in file order.
 
     """
-    return [(f, run, weight(run.source)) for f in files for run in runs(Path(f))]
+    return [
+        (f, run, weight(run.source))
+        for f in files
+        for run in runs(Path(f))
+        if not run.alias
+    ]
 
 
 def over_block(
@@ -688,7 +607,7 @@ def over_block(
 
     """
     f, run, n = block
-    at = f"{f}:{run.line}"
+    at = f"{f}:{place(run, 0)}"
     over = f"a run: block of {n} lines, over the {CEILING}-line ceiling"
     keyed = "— the debt file keys on the step name"
     if run.name is None:
@@ -778,7 +697,11 @@ def ceiling(files: list[str], debt: Path, *, write: bool) -> int:
         The process exit status.
 
     """
-    verdict = judge(files, debt)
+    try:
+        verdict = judge(files, debt)
+    except ValueError as err:
+        print(f"{'fix:' if write else ''}workflow-shell: {err}", file=sys.stderr)
+        return 1
     if write:
         if verdict.lowered or verdict.stale:
             debt.write_text(
@@ -1034,11 +957,33 @@ def main(argv: list[str]) -> int:
         )
         return 1
 
-    if args.write:
-        total = sum(rewrite(Path(f)) for f in args.files)
-        print(f"embedded-shell: reformatted {total} run: block(s)")
-        return 0
+    try:
+        return rewrite_all(args.files) if args.write else lint_all(args)
+    except ValueError as err:
+        # A file yq cannot parse is refused by name, never read as empty.
+        print(f"embedded-shell: {err}", file=sys.stderr)
+        return 1
 
+
+def rewrite_all(files: list[str]) -> int:
+    """Format every literal `run:` block in files, in place.
+
+    Returns:
+        The process exit status.
+
+    """
+    total = sum(rewrite(Path(f)) for f in files)
+    print(f"embedded-shell: reformatted {total} run: block(s)")
+    return 0
+
+
+def lint_all(args: Args) -> int:
+    """Run shfmt and shellcheck over every `run:` value in the files.
+
+    Returns:
+        The process exit status.
+
+    """
     findings: list[str] = []
     with canon_source_path() as source_path:
         for f in args.files:
@@ -1052,12 +997,12 @@ def main(argv: list[str]) -> int:
         print(line, file=sys.stderr)
     if findings:
         print(
-            f"embedded-shell: {len(findings)} finding(s) in `run:` blocks — "
+            f"embedded-shell: {len(findings)} finding(s) in `run:` values — "
             "the same bar the belt applies to standalone scripts",
             file=sys.stderr,
         )
         return 1
-    print("embedded-shell: every run: block is shfmt-clean and shellcheck-clean")
+    print("embedded-shell: every run: value is shfmt-clean and shellcheck-clean")
     return 0
 
 
