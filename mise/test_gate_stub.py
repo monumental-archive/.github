@@ -14,9 +14,10 @@ pull request the group now names the ref and the commit, and the lint
 holds every gate caller to both lines.
 
 The body under test is the task's own `run` string, read out of
-mise/config.toml with tomllib and run by bash in a planted tree — not a
-copy of it — so a change to the lint has to face these rows. The Tera
-raw markers are dropped the way mise's render drops them.
+mise/config.toml with decoded.load_toml and run by bash in a planted
+tree — not a copy of it — so a change to the lint has to face these
+rows. The Tera raw markers are dropped the way mise's render drops
+them.
 
 Each red row is red-when-planted and asserts the message, not just the
 exit status: a planted row scored on exit alone can pass for the wrong
@@ -31,10 +32,10 @@ gate as `mise run test`, which `ci` collects.
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import gate_stub_fix
 import hermetic
 
@@ -76,8 +77,9 @@ def body(task: str = "lint:gate-stub") -> str:
         The task body with the `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"][task]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    run = decoded.as_str(decoded.as_object(tasks[task], task)["run"], f"{task}'s run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)

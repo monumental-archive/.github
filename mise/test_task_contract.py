@@ -28,7 +28,7 @@ floor measures nothing; coverage:check alone runs `test` once; a suite
 not run through `measured` is red by the floor's own record (#1666);
 and `measured` reaches a file task.
 
-stdlib `unittest` and `tomllib`, the belt's one test idiom. Run through
+stdlib `unittest`, the belt's one test idiom. Run through
 the gate as `mise run test`, which `ci` collects.
 """
 
@@ -36,12 +36,14 @@ import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
+import typed_std
 
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
@@ -49,28 +51,53 @@ GIT = hermetic.tool("git")
 CONFIG = BELT / "config.toml"
 
 
-def tasks() -> dict[str, dict]:
+def tasks() -> dict[str, dict[str, object]]:
     """Read every task the belt defines.
 
     Returns:
         Task name to its table.
 
     """
-    with CONFIG.open("rb") as handle:
-        return tomllib.load(handle)["tasks"]
+    config = decoded.load_toml(CONFIG.read_bytes())
+    table = decoded.as_object(config["tasks"], "tasks")
+    return {
+        name: decoded.as_object(task, f"tasks.{name}") for name, task in table.items()
+    }
 
 
-def named(entry: str | dict) -> str:
+def depends_of(task: dict[str, object]) -> list[object]:
+    """Read one task's `depends`, absent read as none.
+
+    Returns:
+        Its entries, each a name or a table.
+
+    """
+    return decoded.as_array(task.get("depends") or [], "depends")
+
+
+def run_of(name: str) -> str:
+    """Read one belt task's `run` body.
+
+    Returns:
+        The bash the task runs.
+
+    """
+    return decoded.as_str(tasks()[name]["run"], f"tasks.{name}.run")
+
+
+def named(entry: object) -> str:
     """Spell one `depends` entry as a task name or pattern.
 
     Returns:
         The name, from the bare string or the table's `task` key.
 
     """
-    return entry if isinstance(entry, str) else entry["task"]
+    if isinstance(entry, str):
+        return entry
+    return decoded.as_str(decoded.as_object(entry, "depends")["task"], "task")
 
 
-def matches(pattern: str, defined: dict[str, dict]) -> list[str]:
+def matches(pattern: str, defined: dict[str, dict[str, object]]) -> list[str]:
     """Resolve a `depends` entry the way mise does.
 
     `*` matches within ONE colon group (the config header's caveat for
@@ -90,7 +117,7 @@ def matches(pattern: str, defined: dict[str, dict]) -> list[str]:
     )
 
 
-def closure(root: str, defined: dict[str, dict]) -> set[str]:
+def closure(root: str, defined: dict[str, dict[str, object]]) -> set[str]:
     """Walk every task `root` reaches through `depends`.
 
     Returns:
@@ -104,7 +131,7 @@ def closure(root: str, defined: dict[str, dict]) -> set[str]:
         if name in seen:
             continue
         seen.add(name)
-        for entry in defined.get(name, {}).get("depends") or []:
+        for entry in depends_of(defined.get(name, {})):
             todo.extend(matches(named(entry), defined))
     return seen
 
@@ -117,7 +144,9 @@ class Gate(unittest.TestCase):
         defined = tasks()
         reached = closure("ci", defined)
         self.assertIn("lint:typos", reached, "the closure walk found no lint")
-        self.assertEqual(sorted(n for n in reached if n.startswith("audit")), [])
+        audits: list[str] = sorted(n for n in reached if n.startswith("audit"))
+        none: list[str] = []
+        self.assertEqual(audits, none)
 
     def test_ci_runs_no_mutation_leg(self) -> None:
         """No task the gate reaches names a leg or cargo-mutants."""
@@ -128,7 +157,8 @@ class Gate(unittest.TestCase):
             for name in closure("ci", defined)
             if leg.search(str(defined[name].get("run", "")))
         )
-        self.assertEqual(hits, [])
+        none: list[str] = []
+        self.assertEqual(hits, none)
 
     def test_ci_names_each_property_leg(self) -> None:
         """A belt test leg is named in the gate, never collected (#1332, #1549).
@@ -137,7 +167,7 @@ class Gate(unittest.TestCase):
         gate only by a line of its own in a leg's depends: the
         properties leg's since #1740.
         """
-        direct = [named(entry) for entry in tasks()["ci:properties"]["depends"]]
+        direct = [named(entry) for entry in depends_of(tasks()["ci:properties"])]
         for leg in ("test:python-properties", "test:typescript-properties"):
             with self.subTest(leg=leg):
                 self.assertIn(leg, direct)
@@ -155,7 +185,7 @@ LEGS = ("ci:lint", "ci:test", "ci:properties")
 
 # Everything `ci` named before it was split into legs, each entry spelt
 # as `depends` spells it. The legs together must name exactly these.
-GATE: tuple[str | dict, ...] = (
+GATE: tuple[str | dict[str, object], ...] = (
     "lint:*",
     {"task": "test", "optional": True},
     {"task": "build", "optional": True},
@@ -166,7 +196,7 @@ GATE: tuple[str | dict, ...] = (
 )
 
 
-def spelt(entry: str | dict) -> str:
+def spelt(entry: object) -> str:
     """Spell one `depends` entry whole, its optional flag included.
 
     Returns:
@@ -175,10 +205,12 @@ def spelt(entry: str | dict) -> str:
     """
     if isinstance(entry, str):
         return entry
-    return entry["task"] + (" (optional)" if entry.get("optional") else "")
+    table = decoded.as_object(entry, "depends")
+    task = decoded.as_str(table["task"], "task")
+    return task + (" (optional)" if table.get("optional") else "")
 
 
-def leg_findings(defined: dict[str, dict]) -> list[str]:
+def leg_findings(defined: dict[str, dict[str, object]]) -> list[str]:
     """Hold `ci` to the sum of its legs, and the legs to the gate's list.
 
     Returns:
@@ -187,13 +219,13 @@ def leg_findings(defined: dict[str, dict]) -> list[str]:
         one leg names twice, and an entry no gate ever ran.
 
     """
-    out = []
-    direct = [named(entry) for entry in defined["ci"].get("depends") or []]
+    out: list[str] = []
+    direct = [named(entry) for entry in depends_of(defined["ci"])]
     if direct != list(LEGS):
         out.append(f"ci depends on {direct}, not the three legs {list(LEGS)}")
     where: dict[str, list[str]] = {}
     for leg in LEGS:
-        for entry in defined.get(leg, {}).get("depends") or []:
+        for entry in depends_of(defined.get(leg, {})):
             where.setdefault(spelt(entry), []).append(leg)
     wanted = [spelt(entry) for entry in GATE]
     out.extend(f"no leg runs {name}" for name in wanted if name not in where)
@@ -215,28 +247,29 @@ class Legs(unittest.TestCase):
 
     def test_the_belt_conforms(self) -> None:
         """The real config: three legs, the gate's list split among them."""
-        self.assertEqual([], leg_findings(tasks()))
+        none: list[str] = []
+        self.assertEqual(none, leg_findings(tasks()))
 
     def test_each_leg_holds_its_share(self) -> None:
         """Coverage is judged on the leg that measures it."""
-        legs = {leg: [spelt(e) for e in tasks()[leg]["depends"]] for leg in LEGS}
-        self.assertEqual(["lint:*"], legs["ci:lint"])
-        self.assertEqual(
-            [
-                "test (optional)",
-                "build (optional)",
-                "coverage:check",
-                "test:pgrx",
-            ],
-            legs["ci:test"],
-        )
-        self.assertEqual(
-            ["test:python-properties", "test:typescript-properties"],
-            legs["ci:properties"],
-        )
+        legs = {leg: [spelt(e) for e in depends_of(tasks()[leg])] for leg in LEGS}
+        lint: list[str] = ["lint:*"]
+        test: list[str] = [
+            "test (optional)",
+            "build (optional)",
+            "coverage:check",
+            "test:pgrx",
+        ]
+        properties: list[str] = [
+            "test:python-properties",
+            "test:typescript-properties",
+        ]
+        self.assertEqual(lint, legs["ci:lint"])
+        self.assertEqual(test, legs["ci:test"])
+        self.assertEqual(properties, legs["ci:properties"])
 
     @staticmethod
-    def plant(leg: str, depends: list[str | dict]) -> list[str]:
+    def plant(leg: str, depends: list[object]) -> list[str]:
         """Replace one task's depends in the real config.
 
         Returns:
@@ -249,21 +282,20 @@ class Legs(unittest.TestCase):
 
     def test_a_fourth_line_in_ci_is_named(self) -> None:
         """Planted: `ci` names a task beside its legs."""
-        self.assertEqual(
-            [
-                (
-                    "ci depends on"
-                    " ['ci:lint', 'ci:test', 'ci:properties', 'test:pgrx'],"
-                    " not the three legs ['ci:lint', 'ci:test', 'ci:properties']"
-                ),
-            ],
-            self.plant("ci", [*LEGS, "test:pgrx"]),
-        )
+        want: list[str] = [
+            (
+                "ci depends on"
+                " ['ci:lint', 'ci:test', 'ci:properties', 'test:pgrx'],"
+                " not the three legs ['ci:lint', 'ci:test', 'ci:properties']"
+            ),
+        ]
+        self.assertEqual(want, self.plant("ci", [*LEGS, "test:pgrx"]))
 
     def test_a_dropped_entry_is_named(self) -> None:
         """Planted: the test leg loses the coverage ratchet."""
+        want: list[str] = ["no leg runs coverage:check"]
         self.assertEqual(
-            ["no leg runs coverage:check"],
+            want,
             self.plant(
                 "ci:test",
                 [
@@ -276,18 +308,22 @@ class Legs(unittest.TestCase):
 
     def test_an_entry_in_two_legs_is_named(self) -> None:
         """Planted: the lint leg runs the properties too."""
+        want: list[str] = [
+            "test:python-properties is run 2 times, by ['ci:lint', 'ci:properties']",
+        ]
         self.assertEqual(
-            ["test:python-properties is run 2 times, by ['ci:lint', 'ci:properties']"],
+            want,
             self.plant("ci:lint", ["lint:*", "test:python-properties"]),
         )
 
     def test_test_made_required_is_named(self) -> None:
         """Planted: `test` loses its optional flag, which every repo needs."""
+        want: list[str] = [
+            "no leg runs test (optional)",
+            "test is in ['ci:test'] and was never in the gate",
+        ]
         self.assertEqual(
-            [
-                "no leg runs test (optional)",
-                "test is in ['ci:test'] and was never in the gate",
-            ],
+            want,
             self.plant(
                 "ci:test",
                 [
@@ -303,7 +339,8 @@ class Legs(unittest.TestCase):
         """Before #1740 there was no `ci:lint`: every lint is unrun."""
         defined = tasks()
         del defined["ci:lint"]
-        self.assertEqual(["no leg runs lint:*"], leg_findings(defined))
+        want: list[str] = ["no leg runs lint:*"]
+        self.assertEqual(want, leg_findings(defined))
 
 
 LEG_LINE = re.compile(r"^leg ([a-z]+)$", re.MULTILINE)
@@ -334,8 +371,8 @@ class Mutants(unittest.TestCase):
         run = re.compile(r"mise run audit:mutants\b")
         own = (workflows / "repo-mutants.yml").read_text(encoding="utf-8")
         audit = (workflows / "repo-audit.yml").read_text(encoding="utf-8")
-        self.assertNotEqual(run.findall(own), [])
-        self.assertEqual(run.findall(audit), [])
+        self.assertIsNotNone(run.search(own))
+        self.assertIsNone(run.search(audit))
         stub = BELT.parent / "workflow-templates" / "mutants.yml"
         self.assertIn(
             "/.github/workflows/repo-mutants.yml@", stub.read_text(encoding="utf-8")
@@ -366,15 +403,18 @@ class Mutants(unittest.TestCase):
             tasks()["audit:mutants"]["run"], '"${ORG_BELT_DIR}/mutants.sh"'
         )
         body = (BELT / "mutants.sh").read_text(encoding="utf-8")
-        named = LEG_LINE.findall(body)
-        self.assertNotEqual(named, [])
-        self.assertEqual(sorted(named), leg_files())
+        named = [typed_std.group(m, 1) or "" for m in LEG_LINE.finditer(body)]
+        none: list[str] = []
+        self.assertNotEqual(named, none)
+        ordered: list[str] = sorted(named)
+        self.assertEqual(ordered, leg_files())
         self.assertEqual(len(named), len(set(named)))
 
 
 class Selection(unittest.TestCase):
     """MUTANTS_LEG selects one leg; unset, every leg runs."""
 
+    @override
     def setUp(self) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
         tmp = Path(tempfile.mkdtemp())
@@ -395,7 +435,7 @@ class Selection(unittest.TestCase):
 
         """
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [BASH, "-euo", "pipefail", "-c", tasks()["audit:mutants"]["run"]],
+            [BASH, "-euo", "pipefail", "-c", run_of("audit:mutants")],
             cwd=self.belt,
             env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env),
             capture_output=True,
@@ -407,34 +447,35 @@ class Selection(unittest.TestCase):
         """Locally, `mise run audit:mutants` runs every adopted leg."""
         done = self.run_task()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.splitlines(), [f"ran {g}" for g in leg_files()])
+        ran: list[str] = [f"ran {g}" for g in leg_files()]
+        self.assertEqual(done.stdout.splitlines(), ran)
 
     def test_named_leg_runs_alone(self) -> None:
         """A language's job runs only its own leg."""
         done = self.run_task(MUTANTS_LEG="rust")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.splitlines(), ["ran rust"])
+        want: list[str] = ["ran rust"]
+        self.assertEqual(done.stdout.splitlines(), want)
 
     def test_red_leg_is_named(self) -> None:
         """A red leg reds the task, by language."""
         done = self.run_task(MUTANTS_LEG="rust", PLANT_RED="1")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(done.stderr.splitlines(), ["audit:mutants: red leg(s): rust"])
+        want: list[str] = ["audit:mutants: red leg(s): rust"]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_unknown_leg_is_red_by_name(self) -> None:
         """A typo never runs nothing and passes."""
         done = self.run_task(MUTANTS_LEG="cobol")
         self.assertEqual(done.returncode, 1)
         self.assertEqual(done.stdout, "")
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    "audit:mutants: MUTANTS_LEG='cobol' names no leg"
-                    " (mise/mutants-<language>.sh)"
-                )
-            ],
-        )
+        want: list[str] = [
+            (
+                "audit:mutants: MUTANTS_LEG='cobol' names no leg"
+                " (mise/mutants-<language>.sh)"
+            ),
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
 
 # The planted repository's code: `half` takes one branch in the unittest

@@ -33,6 +33,38 @@ LINE = st.text(st.characters(exclude_characters="\n\r"), max_size=30)
 MODULE_PATH = st.from_regex(
     r"[a-z0-9.-]{1,10}(/[a-z0-9._~-]{1,8}){0,3}", fullmatch=True
 )
+
+
+def quoted_revision(rev: str) -> str:
+    """Spell a revision setting as go quotes it, with a space.
+
+    Returns:
+        The quoted `-X` value.
+
+    """
+    return f'"-X main.v=vcs.revision={rev}"'
+
+
+def bare_revision(rev: str) -> str:
+    """Spell a revision setting bare, as `-X=`.
+
+    Returns:
+        The bare `-X=` value.
+
+    """
+    return f"-X=main.v=vcs.revision={rev}"
+
+
+def bare_modified(modified: str) -> str:
+    """Spell a modified setting bare, as `-X=`.
+
+    Returns:
+        The bare `-X=` value.
+
+    """
+    return f"-X=main.m=vcs.modified={modified}"
+
+
 # The settings go stamps besides the VCS ones; their values are the
 # builder's own text, so they may say anything.
 SETTING = st.tuples(
@@ -49,11 +81,9 @@ SETTING = st.tuples(
         # go quotes a value only when it holds a space, a tab or a
         # quote, so `-X=` spells the setting bare.
         # HEAD stands for the released commit, filled in per example.
-        st.builds(lambda v: f'"-X main.v=vcs.revision={v}"', SHA | st.just(HEAD)),
-        st.builds("-X=main.v=vcs.revision={}".format, SHA | st.just(HEAD)),
-        st.builds(
-            "-X=main.m=vcs.modified={}".format, st.sampled_from(["false", "true"])
-        ),
+        (SHA | st.just(HEAD)).map(quoted_revision),
+        (SHA | st.just(HEAD)).map(bare_revision),
+        st.sampled_from(["false", "true"]).map(bare_modified),
     ),
 )
 
@@ -99,25 +129,33 @@ def verdict(info: str, head: str) -> str | None:
     return None
 
 
-@st.composite
-def stamped(draw: st.DrawFn) -> tuple[str, str, bool]:
-    """Draw a released commit and the build info of one binary.
+Drawn = tuple[
+    str, str | None, str | None, str | None, tuple[list[str], list[tuple[str, str]]]
+]
+
+
+def assemble(drawn: Drawn) -> tuple[str, str, bool]:
+    """Fill a drawn binary's released commit in and render its build info.
 
     Returns:
         The commit, the build info, and whether the model accepts it.
 
     """
-    head = draw(SHA)
-    rev = draw(st.one_of(st.none(), SHA, st.just(""), st.just(HEAD)))
+    head, rev, modified, module, (deps, drawn_settings) = drawn
     rev = head if rev == HEAD else rev
-    modified = draw(st.one_of(st.none(), st.sampled_from(["false", "true", ""])))
-    module = draw(st.one_of(st.none(), MODULE_PATH))
-    deps = draw(st.lists(MODULE_PATH, max_size=3))
-    settings = [
-        (k, v.replace(HEAD, head)) for k, v in draw(st.lists(SETTING, max_size=4))
-    ]
+    settings = [(k, v.replace(HEAD, head)) for k, v in drawn_settings]
     good = rev == head and modified == "false" and module is not None
     return head, render(rev, modified, module, deps, settings), good
+
+
+# A released commit and the build info of one binary.
+STAMPED = st.tuples(
+    SHA,
+    st.one_of(st.none(), SHA, st.just(""), st.just(HEAD)),
+    st.one_of(st.none(), st.sampled_from(["false", "true", ""])),
+    st.one_of(st.none(), MODULE_PATH),
+    st.tuples(st.lists(MODULE_PATH, max_size=3), st.lists(SETTING, max_size=4)),
+).map(assemble)
 
 
 HEAD_A, HEAD_B = "a" * 40, "b" * 40
@@ -126,7 +164,7 @@ HEAD_A, HEAD_B = "a" * 40, "b" * 40
 class AcceptedExactly(unittest.TestCase):
     """V: accepted exactly when revision is HEAD, clean, and stamped."""
 
-    @given(stamped())
+    @given(STAMPED)
     @example((
         HEAD_A,
         render(

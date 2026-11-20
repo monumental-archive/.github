@@ -20,17 +20,20 @@ import io
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
-import tomllib
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
+import decoded
 import embedded_shell as es
 import hermetic
 
 _HERE = Path(__file__).resolve().parent
+# An empty result, named so the expected list carries its type.
+NOTHING: list[object] = []
 
 ISSUE = "\t# canon helper: #1386"
 GIT = hermetic.tool("git")
@@ -323,17 +326,19 @@ class Headers(unittest.TestCase):
             with self.subTest(header=header), TemporaryDirectory() as tmp:
                 p = Path(tmp) / "w.yml"
                 p.write_text(workflow(folded("H", 3, header)), encoding="utf-8")
-                self.assertEqual([f for _, _, f in es.blocks(p)], folds)
+                read = [f for _, _, f in es.blocks(p)]
+                self.assertEqual(read, folds)
                 self.assertEqual(es.weight(next(es.runs(p)).source), 3)
 
     def test_mint_doi_folded_block_is_seen(self) -> None:
         """The canon's one `>-` block is read and counted (3 lines)."""
         path = _HERE.parent / ".github" / "workflows" / "mint-doi.yml"
         found = [r for r in es.runs(path) if r.header == ">-"]
-        self.assertEqual(
-            [(r.name, es.weight(r.source)) for r in found],
-            [("Deposit, then publish — the DOI names the released bytes", 3)],
-        )
+        weighed = [(r.name, es.weight(r.source)) for r in found]
+        want: list[tuple[str | None, int]] = [
+            ("Deposit, then publish — the DOI names the released bytes", 3)
+        ]
+        self.assertEqual(weighed, want)
 
 
 def action(header: str, body: str) -> str:
@@ -382,18 +387,20 @@ class Folded(unittest.TestCase):
         """Two findings in one folded block: the note rides on the first."""
         _, found = self.check(action(">", "echo ${A}\n\necho ${B}"))
         self.assertEqual(len(found), 2, found)
-        self.assertEqual([es.FOLDED_NOTE in f for f in found], [True, False])
+        noted = [es.FOLDED_NOTE in f for f in found]
+        first_only: list[bool] = [True, False]
+        self.assertEqual(noted, first_only)
         self.assertTrue(all(":8:" in f for f in found), found)
 
     def test_folding_is_what_shellcheck_judges(self) -> None:
         """A quoted string split across lines is one word once folded."""
         _, found = self.check(action(">-", 'printf "%s\\n" "a\nb"'))
-        self.assertEqual(found, [])
+        self.assertEqual(found, NOTHING)
 
     def test_a_clean_folded_block_passes_and_shfmt_does_not_read_it(self) -> None:
         """Text shfmt would reformat is not a finding in a folded block."""
         _, found = self.check(action(">", "if true;then echo x;fi"))
-        self.assertEqual(found, [])
+        self.assertEqual(found, NOTHING)
         _, literal = self.check(action("|", "if true;then echo x;fi"))
         self.assertTrue(any("not shfmt-formatted" in f for f in literal), literal)
 
@@ -566,7 +573,7 @@ class TrailingBlank(unittest.TestCase):
         as body, shfmt reported it, and lines 6 and 14 were red.
         """
         path = self.write(blank_after("echo one"))
-        self.assertEqual(es.check(path, fmt=True, lint=True), [])
+        self.assertEqual(es.check(path, fmt=True, lint=True), NOTHING)
 
     def test_rewrite_keeps_blank_lines_after_a_block(self) -> None:
         """`--write` on clean blocks rewrites none and changes no byte.
@@ -583,7 +590,8 @@ class TrailingBlank(unittest.TestCase):
         """The shell itself still reds, and the fix keeps the blank line."""
         path = self.write(blank_after("if true;then echo x;fi"))
         found = es.check(path, fmt=True, lint=True)
-        self.assertEqual(found, [f"{path}:6: run: block is not shfmt-formatted"])
+        want: list[str] = [f"{path}:6: run: block is not shfmt-formatted"]
+        self.assertEqual(found, want)
         self.assertEqual(es.rewrite(path), 1)
         self.assertEqual(
             path.read_text(encoding="utf-8"),
@@ -615,7 +623,7 @@ class DebtFile(unittest.TestCase):
                 debt = Path(tmp) / "debt.txt"
                 debt.write_text("# header\n\n" + line, encoding="utf-8")
                 entries, errors = es.read_debt(debt)
-                self.assertEqual(entries, [])
+                self.assertEqual(entries, NOTHING)
                 self.assertEqual(len(errors), 1)
                 self.assertTrue(errors[0].startswith(f"{debt}:3: "), errors[0])
                 self.assertIn(message, errors[0])
@@ -630,8 +638,10 @@ class DebtFile(unittest.TestCase):
                 encoding="utf-8",
             )
             entries, errors = es.read_debt(debt)
-        self.assertEqual(errors, [])
-        self.assertEqual([e.step for e in entries], ["A", "B"])
+        self.assertEqual(errors, NOTHING)
+        steps = [e.step for e in entries]
+        both: list[str] = ["A", "B"]
+        self.assertEqual(steps, both)
 
     def test_listed_twice(self) -> None:
         """The second copy of an entry is named."""
@@ -640,7 +650,8 @@ class DebtFile(unittest.TestCase):
             debt.write_text("w.yml\tBig\t16\t# #1\n" * 2, encoding="utf-8")
             entries, errors = es.read_debt(debt)
         self.assertEqual(len(entries), 1)
-        self.assertEqual(errors, [f"{debt}:2: step 'Big' in w.yml is listed twice"])
+        want: list[str] = [f"{debt}:2: step 'Big' in w.yml is listed twice"]
+        self.assertEqual(errors, want)
 
     def test_malformed_line_reds_the_lint(self) -> None:
         """A bad line reaches the verdict, not just the parser."""
@@ -651,7 +662,7 @@ class DebtFile(unittest.TestCase):
         self.assertIn("this line has 2 field(s)", err)
 
 
-def read_runs(text: str) -> list:
+def read_runs(text: str) -> list[es.Run]:
     """Read a workflow text through the shared reader.
 
     Returns:
@@ -731,7 +742,8 @@ class Reader(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             p = Path(tmp) / "w.yml"
             p.write_text(text, encoding="utf-8")
-            self.assertEqual(list(es.blocks(p)), [])
+            read = list(es.blocks(p))
+            self.assertEqual(read, NOTHING)
 
 
 def task_body(name: str) -> str:
@@ -741,8 +753,9 @@ def task_body(name: str) -> str:
         The bash source mise runs.
 
     """
-    config = tomllib.loads((_HERE / "config.toml").read_text(encoding="utf-8"))
-    return config["tasks"][name]["run"]
+    config = decoded.load_toml((_HERE / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
 def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
@@ -847,6 +860,7 @@ def config(**tasks: int | list[int]) -> str:
 class Tasks(unittest.TestCase):
     """The Done-when rows of #1544: task bodies under the same ceiling."""
 
+    @override
     def setUp(self) -> None:
         """Give each row a scratch directory for the config and the debt."""
         tmp = TemporaryDirectory()
@@ -885,10 +899,9 @@ class Tasks(unittest.TestCase):
 
     def test_a_config_that_is_not_toml_is_refused_by_name(self) -> None:
         """An undecodable config is a refusal naming it, in each mode (#1681)."""
-        try:
-            tomllib.loads("lint")
-        except tomllib.TOMLDecodeError as exc:
-            why = str(exc)
+        with self.assertRaises(decoded.UndecodableError) as refused:
+            decoded.load_toml("lint")
+        why = str(refused.exception)
         for write, label in ((False, "task-shell"), (True, "fix:task-shell")):
             rc, out, err = self.run_ceiling("lint", write=write)
             self.assertEqual((rc, out), (1, ""))
@@ -921,7 +934,9 @@ class Tasks(unittest.TestCase):
     def test_list_run_is_one_body(self) -> None:
         """A `run` list of 8 + 8 commands is a 16-line body, not two."""
         self.cfg.write_text(config(lint_a=[8, 8]), encoding="utf-8")
-        self.assertEqual(list(es.task_bodies(self.cfg)), [("lint:a", 16)])
+        bodies = list(es.task_bodies(self.cfg))
+        one_body: list[tuple[str, int]] = [("lint:a", 16)]
+        self.assertEqual(bodies, one_body)
         rc, _, err = self.run_ceiling(config(lint_a=[8, 8]))
         self.assertEqual(rc, 1)
         self.assertIn("task 'lint:a' holds a body of 16 lines", err)
@@ -1034,9 +1049,10 @@ class Tasks(unittest.TestCase):
         """A duplicate entry is named as a task, not a step."""
         self.debt.write_text(self.entry("lint:a", 20) * 2, encoding="utf-8")
         _, errors = es.read_debt(self.debt, es.TASKS)
-        self.assertEqual(
-            errors, [f"{self.debt}:2: task 'lint:a' in {self.cfg} is listed twice"]
-        )
+        want: list[str] = [
+            f"{self.debt}:2: task 'lint:a' in {self.cfg} is listed twice"
+        ]
+        self.assertEqual(errors, want)
 
     def test_non_bodies_are_not_weighed(self) -> None:
         """A `file =` task, a non-table task and a blank body carry nothing."""
@@ -1045,7 +1061,9 @@ class Tasks(unittest.TestCase):
             '[tasks.blank]\nrun = "  "\n[tasks.n]\nrun = [1, "echo"]\n',
             encoding="utf-8",
         )
-        self.assertEqual(list(es.task_bodies(self.cfg)), [("n", 1)])
+        bodies = list(es.task_bodies(self.cfg))
+        one_body: list[tuple[str, int]] = [("n", 1)]
+        self.assertEqual(bodies, one_body)
 
 
 class TaskShellTask(unittest.TestCase):

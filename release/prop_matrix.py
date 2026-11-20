@@ -21,10 +21,10 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import io
-import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
+import decoded
 import matrix
 from hypothesis import example
 from hypothesis import strategies as st
@@ -36,31 +36,52 @@ MAJOR = st.integers(10, 99).map(str)
 # A field nobody tabled: no comma, newline or space (those are the
 # splitter's), and not a known target.
 KNOWN = {t for runners, _ in matrix.TARGETS.values() for t in runners}
+
+
+def untabled(field: str) -> bool:
+    """Say whether no class tables the field as a target.
+
+    Returns:
+        True for a field nobody tabled.
+
+    """
+    return field not in KNOWN
+
+
+def not_digits(field: str) -> bool:
+    """Say whether the field is anything but ASCII digits.
+
+    Returns:
+        True for a field that is not a number.
+
+    """
+    return not (field.isascii() and field.isdigit())
+
+
 STRANGER = st.text(
     st.characters(exclude_characters=", \n"), min_size=1, max_size=12
-).filter(lambda f: f not in KNOWN)
+).filter(untabled)
 
 
-@st.composite
-def spaced(draw: st.DrawFn, fields: list[str]) -> str:
+def spaced(data: st.DataObject, fields: list[str]) -> str:
     """Write fields as a caller might: spaces anywhere, maybe a tail.
 
     Returns:
         The request text.
 
     """
-    out = []
+    out: list[str] = []
     for field in fields:
         text = field
-        cut = draw(st.lists(st.integers(0, len(field)), max_size=3))
+        cut = data.draw(st.lists(st.integers(0, len(field)), max_size=3))
         for i in sorted(cut, reverse=True):
-            text = f"{text[:i]}{' ' * draw(st.integers(1, 2))}{text[i:]}"
+            text = f"{text[:i]}{' ' * data.draw(st.integers(1, 2))}{text[i:]}"
         out.append(text)
     text = ",".join(out)
-    if draw(st.booleans()):
+    if data.draw(st.booleans()):
         text += ","
-    if draw(st.booleans()):
-        text += "\n" + draw(st.text(max_size=10))
+    if data.draw(st.booleans()):
+        text += "\n" + data.draw(st.text(max_size=10))
     return text
 
 
@@ -77,7 +98,7 @@ def run(argv: list[str]) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
-def expected(stdout: str) -> list[str]:
+def expected(stdout: str) -> list[object]:
     """Read the `expected=` output.
 
     Returns:
@@ -85,7 +106,9 @@ def expected(stdout: str) -> list[str]:
 
     """
     line = next(x for x in stdout.splitlines() if x.startswith("expected="))
-    return json.loads(line.removeprefix("expected="))
+    return decoded.as_array(
+        decoded.load_json(line.removeprefix("expected=")), "expected"
+    )
 
 
 class LegsFollowTheFields(unittest.TestCase):
@@ -97,7 +120,7 @@ class LegsFollowTheFields(unittest.TestCase):
         runners = sorted(matrix.TARGETS[cls][0])
         fields = data.draw(st.permutations(runners)).copy()
         fields = fields[: data.draw(st.integers(1, len(fields)))]
-        request = data.draw(spaced(fields))
+        request = spaced(data, fields)
         code, out, err = run(["targets", cls, request])
         self.assertEqual(code, 0, err)
         self.assertEqual(expected(out), fields)
@@ -105,7 +128,7 @@ class LegsFollowTheFields(unittest.TestCase):
     @given(st.lists(MAJOR, min_size=1, max_size=5, unique=True), st.data())
     def test_majors(self, majors: list[str], data: st.DataObject) -> None:
         """Every requested major is a cell, in the order requested."""
-        code, out, err = run(["pgrx-images", data.draw(spaced(majors))])
+        code, out, err = run(["pgrx-images", spaced(data, majors)])
         self.assertEqual(code, 0, err)
         self.assertEqual(expected(out), majors)
 
@@ -131,7 +154,7 @@ class StrangerRefusedByName(unittest.TestCase):
             (1, "", f"::error::unknown target {escaped(stranger)}; {hint}\n"),
         )
 
-    @given(STRANGER.filter(lambda f: not (f.isascii() and f.isdigit())), st.data())
+    @given(STRANGER.filter(not_digits), st.data())
     def test_a_major_that_is_not_a_number(
         self, stranger: str, data: st.DataObject
     ) -> None:

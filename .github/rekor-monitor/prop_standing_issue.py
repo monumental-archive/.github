@@ -27,6 +27,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import standing_issue as standing
 from hypothesis import example
@@ -36,37 +37,86 @@ from typed_hypothesis import given
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
 
-NUMBER = st.one_of(
+
+def numeral(number: int) -> str:
+    """Write a number as the string a hand-edited checkpoint might hold.
+
+    Returns:
+        Its decimal text.
+
+    """
+    return str(number)
+
+
+NUMERAL = st.integers().map(numeral)
+NUMBER: st.SearchStrategy[object] = st.one_of(
     st.integers(),
     st.floats(),
-    st.integers().map(str),
+    NUMERAL,
     st.booleans(),
     st.none(),
     st.text(max_size=6),
 )
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=12),
-    lambda inner: (
-        st.lists(inner, max_size=4)
-        | st.dictionaries(st.text(max_size=8), inner, max_size=4)
-    ),
-    max_leaves=12,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=12)
 )
-CHECKPOINT = st.one_of(
-    st.fixed_dictionaries({
-        "next": NUMBER,
-        "treeHead": st.fixed_dictionaries({"treeSize": NUMBER, "timestamp": NUMBER})
-        | JSON,
-    }),
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=4)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=8), inner, max_size=4
+    )
+    return arrays | objects
+
+
+def encoded(value: object) -> bytes:
+    """Write a drawn document as a checkpoint file's bytes.
+
+    Returns:
+        The JSON text, encoded.
+
+    """
+    return json.dumps(value).encode()
+
+
+def one_line(text: str) -> bool:
+    """Say whether a drawn text holds no newline.
+
+    Returns:
+        True for a single line.
+
+    """
+    return "\n" not in text
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+HEAD_FIELDS: dict[str, st.SearchStrategy[object]] = {
+    "treeSize": NUMBER,
+    "timestamp": NUMBER,
+}
+HEAD: st.SearchStrategy[object] = st.fixed_dictionaries(HEAD_FIELDS) | JSON
+CHECKPOINT_FIELDS: dict[str, st.SearchStrategy[object]] = {
+    "next": NUMBER,
+    "treeHead": HEAD,
+}
+CHECKPOINT: st.SearchStrategy[object] = st.one_of(
+    st.fixed_dictionaries(CHECKPOINT_FIELDS),
     JSON,
 )
 CONTENT = st.one_of(
     st.binary(max_size=64),
-    CHECKPOINT.map(lambda doc: json.dumps(doc).encode()),
+    CHECKPOINT.map(encoded),
 )
 KEPT = st.sampled_from(["true", "false", ""]) | st.text(max_size=5)
 # A line: what the workflow passes as a run URL or the legs' results.
-LINE = st.text(min_size=1, max_size=40).filter(lambda s: "\n" not in s)
+LINE = st.text(min_size=1, max_size=40).filter(one_line)
 POSITION = st.integers(0, 10**12)
 MILLIS = st.integers(0, 4 * 10**12)
 # A checkpoint stele could write: next index, tree size, head time (ms).
@@ -81,25 +131,28 @@ def doc(point: tuple[int, int, int]) -> bytes:
 
     """
     nxt, size, millis = point
-    head = {"treeSize": size, "timestamp": millis}
-    return json.dumps({"next": nxt, "treeHead": head}).encode()
+    head: dict[str, object] = {"treeSize": size, "timestamp": millis}
+    checkpoint: dict[str, object] = {"next": nxt, "treeHead": head}
+    return json.dumps(checkpoint).encode()
 
 
 class Scratch(unittest.TestCase):
     """Two scratch checkpoint files for a test's examples."""
 
+    @override
     def setUp(self) -> None:
         """Hold the scratch files."""
         self.scratch = tempfile.TemporaryDirectory()
         self.start = Path(self.scratch.name) / "run-start.json"
         self.end = Path(self.scratch.name) / "checkpoint.json"
 
+    @override
     def tearDown(self) -> None:
         """Remove the scratch files."""
         self.scratch.cleanup()
 
     @staticmethod
-    def read(path: Path, content: bytes) -> object:
+    def read(path: Path, content: bytes) -> standing.Checkpoint:
         """Write a checkpoint file and read it back.
 
         Returns:
@@ -222,8 +275,10 @@ class BodyRoundTrip(unittest.TestCase):
         text = standing.body(end, run, since, runs)
         since_match = standing.BEHIND_SINCE.search(text)
         runs_match = standing.RUNS_BEHIND.search(text)
-        self.assertIsNotNone(since_match)
-        self.assertIsNotNone(runs_match)
+        if since_match is None:
+            self.fail("the body carries no behind-since line")
+        if runs_match is None:
+            self.fail("the body carries no runs-behind line")
         self.assertEqual(since_match.group(1), since)
         self.assertEqual(int(runs_match.group(1)), runs)
 

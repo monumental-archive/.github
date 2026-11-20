@@ -23,6 +23,7 @@ import json
 import unittest
 
 import biome_config as bc
+import decoded
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
@@ -32,21 +33,49 @@ DOMAINS = bc.Domains(
     org=["project", "types", "test"],
 )
 DOMAIN = st.sampled_from([*DOMAINS.identity, *DOMAINS.org, "nope"])
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=6),
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
-    ),
-    max_leaves=10,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=6)
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=10)
+VALUE: st.SearchStrategy[object] = st.one_of(st.just("all"), JSON)
+# A linter that is a list, and domains that are a string.
+LINTER_LIST: dict[str, object] = {"linter": []}
+DOMAINS_STRING: dict[str, object] = {"linter": {"domains": "x"}}
 CLAIMED = st.sets(st.sampled_from(sorted(DOMAINS.identity)))
 RULE = st.from_regex(r"use[A-Z][a-z]{1,6}", fullmatch=True)
 NURSERY = st.dictionaries(RULE, st.sampled_from([*DOMAINS.identity, *DOMAINS.org, "-"]))
 
 
-@st.composite
-def admissible(draw: st.DrawFn) -> dict[str, object]:
+def table(document: dict[str, object], *path: str) -> dict[str, object]:
+    """Walk a document down a path of keys, each an object.
+
+    Returns:
+        The object at the end of the path.
+
+    """
+    node = document
+    for key in path:
+        node = decoded.as_object(node[key], key)
+    return node
+
+
+def draw_admissible(draw: st.DrawFn) -> dict[str, object]:
     """Draw a declaration a repository may write, keys in any order.
 
     Returns:
@@ -54,33 +83,37 @@ def admissible(draw: st.DrawFn) -> dict[str, object]:
 
     """
     domains = dict.fromkeys(draw(st.permutations(sorted(draw(CLAIMED)))), "all")
-    items = [("linter", {"domains": domains})]
+    items: list[tuple[str, object]] = [("linter", {"domains": domains})]
     if draw(st.booleans()):
         items.append(("$schema", "https://biomejs.dev/schemas/x/schema.json"))
     return dict(draw(st.permutations(items)))
+
+
+admissible = st.composite(draw_admissible)
 
 
 class Declaration(unittest.TestCase):
     """A repository states its domains and nothing else."""
 
     @given(admissible())
-    def test_admissible_has_no_problem(self, document: dict) -> None:
+    def test_admissible_has_no_problem(self, document: dict[str, object]) -> None:
         """Identity domains at "all", any order: nothing to say."""
-        self.assertEqual(bc.declaration_problems(document, DOMAINS.identity), [])
+        problems = bc.declaration_problems(document, DOMAINS.identity)
+        self.assertEqual(problems, list[str]())
 
-    @given(admissible(), DOMAIN, st.one_of(st.just("all"), JSON))
+    @given(admissible(), DOMAIN, VALUE)
     def test_anything_more_is_a_problem(
-        self, document: dict, domain: str, value: object
+        self, document: dict[str, object], domain: str, value: object
     ) -> None:
         """A non-identity domain, or a value other than "all", is named."""
-        document["linter"]["domains"][domain] = value
+        table(document, "linter", "domains")[domain] = value
         problems = bc.declaration_problems(document, DOMAINS.identity)
         allowed = domain in DOMAINS.identity and value == "all"
         self.assertEqual(problems == [], allowed, problems)
 
     @given(JSON)
-    @example({"linter": []})
-    @example({"linter": {"domains": "x"}})
+    @example(LINTER_LIST)
+    @example(DOMAINS_STRING)
     def test_any_json_is_judged(self, document: object) -> None:
         """A list of problems, never a traceback."""
         self.assertIsInstance(bc.declaration_problems(document, DOMAINS.identity), list)
@@ -106,7 +139,8 @@ class Omissions(unittest.TestCase):
             for d, triggers in DOMAINS.identity.items()
             if d not in claimed and any(t in packages for t in triggers)
         }
-        self.assertEqual({line.split('"')[1] for line in found}, expected)
+        named = {line.split('"')[1] for line in found}
+        self.assertEqual(named, expected)
 
 
 class Generate(unittest.TestCase):
@@ -115,7 +149,9 @@ class Generate(unittest.TestCase):
     @given(CLAIMED, NURSERY)
     def test_twice_is_once(self, claimed: set[str], nursery: dict[str, str]) -> None:
         """Generating over the output changes nothing; org untouched."""
-        org = {"linter": {"rules": {"nursery": dict.fromkeys(nursery, "on")}}}
+        org: dict[str, object] = {
+            "linter": {"rules": {"nursery": dict.fromkeys(nursery, "on")}}
+        }
         before = copy.deepcopy(org)
         once, _ = bc.generate(org, claimed, DOMAINS, nursery)
         twice, _ = bc.generate(once, claimed, DOMAINS, nursery)
@@ -126,9 +162,9 @@ class Generate(unittest.TestCase):
         for rule, domain in nursery.items():
             off = domain in DOMAINS.identity and domain not in claimed
             self.assertEqual(
-                once["linter"]["rules"]["nursery"][rule], "off" if off else "on"
+                table(once, "linter", "rules", "nursery")[rule], "off" if off else "on"
             )
-        written = once["linter"]["domains"]
+        written = table(once, "linter", "domains")
         for domain in DOMAINS.identity:
             self.assertEqual(written[domain], "all" if domain in claimed else "none")
         for domain in DOMAINS.org:

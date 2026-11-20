@@ -24,10 +24,10 @@ import math
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from operator import itemgetter
 from pathlib import Path
 
 import caller_pins
+import decoded
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
@@ -78,15 +78,16 @@ def toml_value(value: object) -> str:
         text = toml_float(value)
     elif isinstance(value, str):
         text = toml_string(value)
-    elif isinstance(value, list):
+    elif decoded.is_array(value):
         text = "[" + ", ".join(toml_value(v) for v in value) + "]"
     else:
-        pairs = (f"{toml_string(k)} = {toml_value(v)}" for k, v in value.items())
+        table = decoded.as_object(value, "a drawn value")
+        pairs = (f"{toml_string(k)} = {toml_value(v)}" for k, v in table.items())
         text = "{" + ", ".join(pairs) + "}"
     return text
 
 
-def toml_document(doc: dict) -> str:
+def toml_document(doc: dict[str, object]) -> str:
     """Render a top-level table, one `key = value` line per key.
 
     Returns:
@@ -96,32 +97,70 @@ def toml_document(doc: dict) -> str:
     return "".join(f"{toml_string(k)} = {toml_value(v)}\n" for k, v in doc.items())
 
 
-SCALAR = st.one_of(
+SCALAR: st.SearchStrategy[object] = st.one_of(
     st.text(max_size=8), st.integers(), st.booleans(), st.floats(width=64)
 )
-VALUE = st.recursive(
-    SCALAR,
-    lambda inner: st.one_of(
-        st.lists(inner, max_size=3),
-        st.dictionaries(st.text(max_size=6), inner, max_size=3),
-    ),
-    max_leaves=10,
-)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or a table.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    tables: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return st.one_of(arrays, tables)
+
+
+def github_key(owner: str, name: str) -> str:
+    """Spell a github-backend key.
+
+    Returns:
+        The key.
+
+    """
+    return f"github:{owner}/{name}"
+
+
+def document(tools: object, rest: dict[str, object]) -> dict[str, object]:
+    """Put `[tools]` beside other keys, unless there is none.
+
+    Returns:
+        The document.
+
+    """
+    return {**rest, "tools": tools} if tools is not None else rest
+
+
+def not_tools(key: str) -> bool:
+    """Say whether a top-level key is any but `tools`.
+
+    Returns:
+        True for a key that is not `tools`.
+
+    """
+    return key != "tools"
+
+
+VALUE: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=10)
 # A key mise reads as a tool, any backend form, or any text at all.
 KEY = st.one_of(
     NAME,
     st.builds("cargo:{}".format, NAME),
-    st.builds(lambda o, n: f"github:{o}/{n}", OWNER, NAME),
+    st.builds(github_key, OWNER, NAME),
     st.text(max_size=10),
 )
-TOOLS = st.one_of(VALUE, st.dictionaries(KEY, VALUE, max_size=4))
-DOCUMENT = st.builds(
-    lambda tools, rest: {**rest, "tools": tools} if tools is not None else rest,
-    st.none() | TOOLS,
-    st.dictionaries(
-        st.text(max_size=6).filter(lambda k: k != "tools"), VALUE, max_size=2
-    ),
+TABLES: st.SearchStrategy[object] = st.dictionaries(KEY, VALUE, max_size=4)
+TOOLS: st.SearchStrategy[object] = st.one_of(VALUE, TABLES)
+MAYBE_TOOLS: st.SearchStrategy[object] = st.none() | TOOLS
+REST: st.SearchStrategy[dict[str, object]] = st.dictionaries(
+    st.text(max_size=6).filter(not_tools), VALUE, max_size=2
 )
+DOCUMENT: st.SearchStrategy[dict[str, object]] = st.builds(document, MAYBE_TOOLS, REST)
 
 
 def run(config: str, argv: list[str]) -> tuple[int, str, str]:
@@ -140,44 +179,79 @@ def run(config: str, argv: list[str]) -> tuple[int, str, str]:
         return code, out.getvalue(), err.getvalue()
 
 
-@st.composite
-def pinned(draw: st.DrawFn) -> tuple[str, str, str, object]:
-    """Draw one tool pinned under some backend key, in some value form.
+# A tool written under some backend key, in some value form: the
+# tool name, the key written, the version on PATH, and the `[tools]`
+# value written for it.
+Pin = tuple[str, str, str, object]
+# What a pin is drawn from: the name, two owners, the key's backend,
+# and the version with its value form and that form's extras.
+Drawn = tuple[str, str, str, str, tuple[str, str, list[str], dict[str, str]]]
+
+
+def assemble(drawn: Drawn) -> Pin:
+    """Write one drawn tool's key and `[tools]` value.
 
     Returns:
         The tool name, the key written, the version on PATH, and the
         `[tools]` value written for it.
 
     """
-    name = draw(NAME)
-    key = draw(
-        st.sampled_from([
-            name,
-            f"cargo:{name}",
-            f"github:{draw(OWNER)}/{name}",
-            f"aqua:{draw(OWNER)}/{name}[bin={name}]",
-        ])
-    )
-    version = draw(VERSION)
-    form = draw(st.sampled_from(["string", "list", "table"]))
+    name, owner, other, backend, (version, form, more, extra) = drawn
+    key = {
+        "plain": name,
+        "cargo": f"cargo:{name}",
+        "github": f"github:{owner}/{name}",
+        "aqua": f"aqua:{other}/{name}[bin={name}]",
+    }[backend]
     if form == "list":
-        value: object = [version, *draw(st.lists(VERSION, max_size=2))]
+        value: object = [version, *more]
     elif form == "table":
-        value = {"version": version, **draw(st.dictionaries(NAME, VERSION, max_size=2))}
+        value = {"version": version, **extra}
     else:
         value = version
     return name, key, version, value
 
 
+# One tool pinned under some backend key, in some value form.
+PINNED = st.tuples(
+    NAME,
+    OWNER,
+    OWNER,
+    st.sampled_from(["plain", "cargo", "github", "aqua"]),
+    st.tuples(
+        VERSION,
+        st.sampled_from(["string", "list", "table"]),
+        st.lists(VERSION, max_size=2),
+        st.dictionaries(NAME, VERSION, max_size=2),
+    ),
+).map(assemble)
+# A `[tools]` value of each wrong shape.
+TOOLS_STRING: dict[str, object] = {"tools": "rust"}
+TOOLS_LIST: dict[str, object] = {"tools": ["rust"]}
+TOOLS_INT: dict[str, object] = {"tools": 1}
+TOOLS_TABLES: dict[str, object] = {"tools": [{"a": 1}]}
+RUST: list[str] = ["rust"]
+NONE: list[str] = []
+
+
+def first(pin: Pin) -> str:
+    """Name the tool a pin is for, to keep one pin per tool.
+
+    Returns:
+        The tool name.
+
+    """
+    return pin[0]
+
+
 class WrittenReadsBack(unittest.TestCase):
     """T: a pin written is read back as `key@version`."""
 
-    @given(st.lists(pinned(), min_size=1, max_size=4, unique_by=itemgetter(0)))
-    def test_install_and_env_read_the_pin(
-        self, pins: list[tuple[str, str, str, object]]
-    ) -> None:
+    @given(st.lists(PINNED, min_size=1, max_size=4, unique_by=first))
+    def test_install_and_env_read_the_pin(self, pins: list[Pin]) -> None:
         """Every tool, named in any order, answers with its own pin."""
-        config = toml_document({"tools": {key: value for _, key, _, value in pins}})
+        tools: dict[str, object] = {key: value for _, key, _, value in pins}
+        config = toml_document({"tools": tools})
         names = [name for name, _, _, _ in pins]
         code, out, err = run(config, ["install", "--input-of", INPUT_OF, *names])
         self.assertEqual((code, err), (0, ""), config)
@@ -194,11 +268,11 @@ class AnyToml(unittest.TestCase):
     """R: any TOML document is answered or refused by name."""
 
     @given(DOCUMENT, st.lists(NAME, max_size=3), st.lists(NAME, max_size=2))
-    @example({"tools": "rust"}, ["rust"], [])
-    @example({"tools": ["rust"]}, ["rust"], [])
-    @example({"tools": 1}, [], ["rust"])
+    @example(TOOLS_STRING, RUST, NONE)
+    @example(TOOLS_LIST, RUST, NONE)
+    @example(TOOLS_INT, NONE, RUST)
     def test_answers_or_refuses(
-        self, doc: dict, needed: list[str], optional: list[str]
+        self, doc: dict[str, object], needed: list[str], optional: list[str]
     ) -> None:
         """Exit 0 with a pin line, or 1 with `::error::` lines; never a raise."""
         config = toml_document(doc)
@@ -219,9 +293,9 @@ class AnyToml(unittest.TestCase):
                 self.assertTrue(line.startswith("::error::"), line)
 
     @given(DOCUMENT)
-    @example({"tools": 1})
-    @example({"tools": [{"a": 1}]})
-    def test_pinned_names_never_raises(self, doc: dict) -> None:
+    @example(TOOLS_INT)
+    @example(TOOLS_TABLES)
+    def test_pinned_names_never_raises(self, doc: dict[str, object]) -> None:
         """The gate's question, which tools are pinned, has an answer."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

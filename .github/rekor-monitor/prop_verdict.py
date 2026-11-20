@@ -27,6 +27,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypedDict, override
 
 import verdict
 from hypothesis import example
@@ -36,53 +37,154 @@ from typed_hypothesis import given
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
 
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=12),
-    lambda inner: (
-        st.lists(inner, max_size=4)
-        | st.dictionaries(st.text(max_size=8), inner, max_size=4)
-    ),
-    max_leaves=12,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=12)
 )
-FACT = st.one_of(
-    st.fixed_dictionaries(
-        {"name": st.sampled_from(["judged", "outstanding", "stopped"]) | JSON},
-        optional={"value": JSON},
-    ),
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=4)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=8), inner, max_size=4
+    )
+    return arrays | objects
+
+
+def encoded(value: object) -> bytes:
+    """Write a drawn document as a report file's bytes.
+
+    Returns:
+        The JSON text, encoded.
+
+    """
+    return json.dumps(value).encode()
+
+
+def numeral(number: int) -> str:
+    """Write an exit status as the step hands it on.
+
+    Returns:
+        Its decimal text.
+
+    """
+    return str(number)
+
+
+class Leg(TypedDict):
+    """One leg of the monitor, as verdict.py judges it.
+
+    Exit status, saved flag, finding count, the facts verdict.py reads,
+    and why the report could not be read (None: it could).
+    """
+
+    code: str
+    saved: bool
+    found: int
+    judged: str | None
+    stopped: str
+    missing: str | None
+
+
+class Reported(TypedDict):
+    """A leg whose report holds findings, with whatever facts."""
+
+    code: str
+    saved: bool
+    findings: list[object]
+    facts: list[object]
+
+
+def leg(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per drawn field
+    code: str,
+    saved: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - one field of the drawn leg
+    found: int,
+    judged: str | None,
+    stopped: str,
+    missing: str | None,
+) -> Leg:
+    """Assemble one drawn leg.
+
+    Returns:
+        The leg.
+
+    """
+    return {
+        "code": code,
+        "saved": saved,
+        "found": found,
+        "judged": judged,
+        "stopped": stopped,
+        "missing": missing,
+    }
+
+
+def reported(
+    code: str,
+    saved: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - one field of the drawn leg
+    findings: list[object],
+    facts: list[object],
+) -> Reported:
+    """Assemble one drawn leg with findings.
+
+    Returns:
+        The leg.
+
+    """
+    return {"code": code, "saved": saved, "findings": findings, "facts": facts}
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+NAME: st.SearchStrategy[object] = (
+    st.sampled_from(["judged", "outstanding", "stopped"]) | JSON
+)
+NAME_FIELD: dict[str, st.SearchStrategy[object]] = {"name": NAME}
+VALUE_FIELD: dict[str, st.SearchStrategy[object]] = {"value": JSON}
+FACT: st.SearchStrategy[object] = st.one_of(
+    st.fixed_dictionaries(NAME_FIELD, optional=VALUE_FIELD),
     JSON,
 )
-REPORT = st.one_of(
-    st.fixed_dictionaries(
-        {"target": st.just(verdict.TARGET)},
-        optional={
-            "facts": st.lists(FACT, max_size=4) | JSON,
-            "findings": st.lists(JSON, max_size=4) | JSON,
-        },
-    ),
+TARGET_FIELD: dict[str, st.SearchStrategy[object]] = {"target": st.just(verdict.TARGET)}
+REPORT_FIELDS: dict[str, st.SearchStrategy[object]] = {
+    "facts": st.lists(FACT, max_size=4) | JSON,
+    "findings": st.lists(JSON, max_size=4) | JSON,
+}
+REPORT: st.SearchStrategy[object] = st.one_of(
+    st.fixed_dictionaries(TARGET_FIELD, optional=REPORT_FIELDS),
     JSON,
 )
 CONTENT = st.one_of(
     st.binary(max_size=64),
-    REPORT.map(lambda doc: json.dumps(doc).encode()),
+    REPORT.map(encoded),
 )
-CODE = st.one_of(
+NUMERAL = st.integers(0, 300).map(numeral)
+CODE: st.SearchStrategy[str] = st.one_of(
     st.sampled_from(["", "0", "1", "2", "3", "4", "00", "04", " 4"]),
-    st.integers(0, 300).map(str),
+    NUMERAL,
     st.text(max_size=4),
 )
-JUDGED = st.one_of(st.none(), st.just("none"), st.text(max_size=12))
-# One leg: exit status, saved flag, finding count, the facts verdict.py
-# reads, and why the report could not be read (None: it could).
-LEG = st.fixed_dictionaries({
-    "code": CODE,
-    "saved": st.booleans(),
-    "found": st.integers(0, 5),
-    "judged": JUDGED,
-    "stopped": st.text(max_size=8),
-    "missing": st.none() | st.text(min_size=1, max_size=8),
-})
+JUDGED: st.SearchStrategy[str | None] = st.one_of(
+    st.none(), st.just("none"), st.text(max_size=12)
+)
+SAVED: st.SearchStrategy[bool] = st.booleans()
+FOUND: st.SearchStrategy[int] = st.integers(0, 5)
+STOPPED: st.SearchStrategy[str] = st.text(max_size=8)
+MISSING: st.SearchStrategy[str | None] = st.none() | st.text(min_size=1, max_size=8)
+LEG: st.SearchStrategy[Leg] = st.builds(
+    leg, CODE, SAVED, FOUND, JUDGED, STOPPED, MISSING
+)
+FINDINGS: st.SearchStrategy[list[object]] = st.lists(JSON, min_size=1, max_size=4)
+FACTS: st.SearchStrategy[list[object]] = st.lists(FACT, max_size=4)
+REPORTED: st.SearchStrategy[Reported] = st.builds(
+    reported, CODE, SAVED, FINDINGS, FACTS
+)
 # A leg every row starts from: saved, no finding, read, one range judged.
-ROW = {
+ROW: Leg = {
     "code": "4",
     "saved": True,
     "found": 0,
@@ -90,16 +192,30 @@ ROW = {
     "stopped": "x",
     "missing": None,
 }
+# The table's fixed rows, each one field off ROW.
+NOT_JUDGED: Leg = {**ROW, "code": "4", "judged": None}
+JUDGED_NONE: Leg = {**ROW, "code": "4", "judged": "none"}
+ONE_FOUND: Leg = {**ROW, "code": "4", "found": 1}
+UNREAD: Leg = {**ROW, "code": "0", "missing": "the report could not be read"}
+# Exit 0 and saved, with a finding and a fact that is no object.
+CLEAN_EXIT: Reported = {
+    "code": "0",
+    "saved": True,
+    "findings": [{"subject": "CT index 1"}],
+    "facts": [1],
+}
 
 
 class Scratch(unittest.TestCase):
     """One scratch report file for a test's examples."""
 
+    @override
     def setUp(self) -> None:
         """Hold the scratch file."""
         self.scratch = tempfile.TemporaryDirectory()
         self.path = Path(self.scratch.name) / "report.json"
 
+    @override
     def tearDown(self) -> None:
         """Remove the scratch file."""
         self.scratch.cleanup()
@@ -125,11 +241,11 @@ class Table(unittest.TestCase):
     """V: the docstring's table, for every combination."""
 
     @given(LEG)
-    @example({**ROW, "code": "4", "judged": None})
-    @example({**ROW, "code": "4", "judged": "none"})
-    @example({**ROW, "code": "4", "found": 1})
-    @example({**ROW, "code": "0", "missing": "the report could not be read"})
-    def test_table_holds(self, leg: dict) -> None:
+    @example(NOT_JUDGED)
+    @example(JUDGED_NONE)
+    @example(ONE_FOUND)
+    @example(UNREAD)
+    def test_table_holds(self, leg: Leg) -> None:
         """Each row of the table, and only that row, decides the colour."""
         code, judged, missing = leg["code"], leg["judged"], leg["missing"]
         facts = {"stopped": leg["stopped"]}
@@ -154,23 +270,11 @@ class Table(unittest.TestCase):
 class AnyFindingIsRed(Scratch):
     """V: a finding in the report is red, whatever else it says."""
 
-    @given(
-        st.fixed_dictionaries({
-            "code": CODE,
-            "saved": st.booleans(),
-            "findings": st.lists(JSON, min_size=1, max_size=4),
-            "facts": st.lists(FACT, max_size=4),
-        })
-    )
-    @example({
-        "code": "0",
-        "saved": True,
-        "findings": [{"subject": "CT index 1"}],
-        "facts": [1],
-    })
-    def test_finding_is_red(self, leg: dict) -> None:
+    @given(REPORTED)
+    @example(CLEAN_EXIT)
+    def test_finding_is_red(self, leg: Reported) -> None:
         """Whatever the exit code, saved or not, whatever the facts."""
-        doc = {
+        doc: dict[str, object] = {
             "target": verdict.TARGET,
             "findings": leg["findings"],
             "facts": leg["facts"],

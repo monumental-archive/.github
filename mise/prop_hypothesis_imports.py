@@ -71,13 +71,17 @@ STATEMENT = st.tuples(
     st.sampled_from(["top", "def", "try"]),
 )
 
+# A relative import of a sibling named hypothesis, and one only quoted.
+RELATIVE_IMPORT: list[tuple[str, str]] = [("from . import hypothesis", "top")]
+QUOTED_IMPORT: list[tuple[str, str]] = [("x = 'import hypothesis'", "def")]
+
 
 class Invariance(unittest.TestCase):
     """An importer is a statement, wherever it sits."""
 
     @given(st.lists(STATEMENT, max_size=6))
-    @example([("from . import hypothesis", "top")])
-    @example([("x = 'import hypothesis'", "def")])
+    @example(RELATIVE_IMPORT)
+    @example(QUOTED_IMPORT)
     def test_importer_exactly_when_a_statement_imports(
         self, statements: list[tuple[str, str]]
     ) -> None:
