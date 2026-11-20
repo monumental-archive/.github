@@ -298,11 +298,11 @@ class Headers(unittest.TestCase):
     def test_every_header_is_counted(self) -> None:
         """Each indicator form, and a trailing comment, reaches the ceiling."""
         for header in ["|", "|-", "|+", "|2", "|2-", "|-2", ">", ">-", ">+", ">2"]:
+            style = es.LITERAL if header.startswith("|") else es.FOLDED
             for comment in ["", " # zizmor: ignore[github-env]"]:
                 with self.subTest(header=header, comment=comment):
                     [run] = read_runs(workflow(folded("H", 16, header + comment)))
-                    self.assertEqual((run.header, es.weight(run.source)), (header, 16))
-                    self.assertEqual(run.commented, bool(comment))
+                    self.assertEqual((run.style, es.weight(run.source)), (style, 16))
 
     def test_what_shellcheck_reads_and_how(self) -> None:
         """Every literal header is read as written, every folded one folded.
@@ -326,14 +326,14 @@ class Headers(unittest.TestCase):
             with self.subTest(header=header), TemporaryDirectory() as tmp:
                 p = Path(tmp) / "w.yml"
                 p.write_text(workflow(folded("H", 3, header)), encoding="utf-8")
-                read = [f for _, _, f in es.blocks(p)]
+                read = [r.style == es.FOLDED for r in es.linted(p)]
                 self.assertEqual(read, folds)
                 self.assertEqual(es.weight(next(es.runs(p)).source), 3)
 
     def test_mint_doi_folded_block_is_seen(self) -> None:
         """The canon's one `>-` block is read and counted (3 lines)."""
         path = _HERE.parent / ".github" / "workflows" / "mint-doi.yml"
-        found = [r for r in es.runs(path) if r.header == ">-"]
+        found = [r for r in es.runs(path) if r.style == es.FOLDED]
         weighed = [(r.name, es.weight(r.source)) for r in found]
         want: list[tuple[str | None, int]] = [
             ("Deposit, then publish — the DOI names the released bytes", 3)
@@ -428,19 +428,171 @@ class Folded(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertEqual(out, action("| # keep", "if true; then echo x; fi"))
 
-    def test_fold(self) -> None:
-        """The fold, against YAML's rule, row by row."""
+    def test_a_folded_block_is_weighed_by_its_lines(self) -> None:
+        """Folding joins lines; the ceiling counts the ones the file holds."""
         rows = [
-            ("a\nb\n", "a b\n"),
-            ("a\n\nb\n", "a\nb\n"),
-            ("a\n\n\nb\n", "a\n\nb\n"),
-            ("a\n  b\nc\n", "a\n  b\nc\n"),
-            ("a\n\n  b\n", "a\n\n  b\n"),
-            ("\na\nb\n", "\na b\n"),
+            ("a\nb", 2),
+            ("a\n\nb", 2),
+            ("a\n  b\nc", 3),
+            ("# c\na\nb", 2),
         ]
-        for source, folded_text in rows:
-            with self.subTest(source=source):
-                self.assertEqual(es.fold(source), folded_text)
+        for body, lines in rows:
+            with self.subTest(body=body), TemporaryDirectory() as tmp:
+                p = Path(tmp) / "action.yml"
+                p.write_text(action(">", body) + "    - run: echo b\n", "utf-8")
+                found = list(es.runs(p))
+                self.assertEqual(es.weight(found[0].source), lines)
+                self.assertEqual(found[1].source, "echo b\n")
+
+
+class Parser(unittest.TestCase):
+    """#1846: every `run:` value is read, however the YAML spells it.
+
+    The first four rows fail before #1846: the hand reader matched block
+    headers with a line regex, so an anchored header, a single-line
+    value, a flow mapping and a quoted key each gave no block at all.
+    """
+
+    def check(self, name: str, text: str) -> tuple[Path, list[str]]:
+        """Run shfmt and shellcheck over one file's text.
+
+        Returns:
+            The file's path and the findings.
+
+        """
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return path, es.check(path, fmt=True, lint=True)
+
+    def test_an_anchored_literal_block_is_linted_at_its_line(self) -> None:
+        """`run: &x |` is a block like any other: SC2086 on its body line."""
+        path, found = self.check("action.yml", action("&x |", "rm -rf ${GONE}"))
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith(f"{path}:8:"), found[0])
+        self.assertIn("SC2086", found[0])
+
+    def test_a_single_line_value_in_an_action_is_linted_at_its_line(self) -> None:
+        """A composite action's `run: rm -rf ${GONE}` is a finding on line 7.
+
+        actionlint does not read an action, so nothing else checks it.
+        """
+        path, found = self.check(
+            "action.yml",
+            "name: a\nruns:\n  using: composite\n  steps:\n"
+            "    - name: Act\n      shell: bash\n      run: rm -rf ${GONE}\n",
+        )
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith(f"{path}:7:"), found[0])
+        self.assertIn("SC2086", found[0])
+
+    def test_a_flow_mapping_and_a_quoted_key_are_read(self) -> None:
+        """`- {run: ...}` and `- "run": ...` are each a value, at its line."""
+        path, found = self.check(
+            "w.yml",
+            workflow('- {name: F, run: "rm -rf ${FLOW}"}\n- "run": rm -rf ${QUOTED}\n'),
+        )
+        at = [(f.split(":")[1], "SC2086" in f) for f in found]
+        want: list[tuple[str, bool]] = [("6", True), ("7", True)]
+        self.assertEqual(at, want, found)
+        self.assertTrue(all(f.startswith(f"{path}:") for f in found), found)
+
+    def test_an_alias_adds_no_second_finding(self) -> None:
+        """`run: *x` is its anchor's text, linted once where the anchor is."""
+        path, found = self.check(
+            "w.yml",
+            workflow(
+                "- name: A\n  run: &x |\n    rm -rf ${GONE}\n- name: B\n  run: *x\n"
+            ),
+        )
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith(f"{path}:8:"), found[0])
+        [anchor, alias] = list(es.runs(path))
+        self.assertEqual((anchor.alias, alias.alias), (False, True))
+        self.assertEqual(alias.text, anchor.text)
+
+    def test_an_alias_is_not_weighed_again(self) -> None:
+        """A 16-line anchor, listed, aliased in an unlisted step: one entry."""
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        t = Tree(Path(tmp.name), workflow(step("Big", 16)), None)
+        text = t.wf.read_text(encoding="utf-8").replace("run: |", "run: &x |")
+        t.wf.write_text(text + "      - name: Again\n        run: *x\n", "utf-8")
+        t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
+        rc, _, err = t.run()
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_a_single_line_format_finding_carries_shfmt_text(self) -> None:
+        """Fixed by hand: the file, the line and what shfmt would write."""
+        text = workflow("- run: if true;then echo x;fi\n")
+        path, found = self.check("w.yml", text)
+        want: list[str] = [
+            (
+                f"{path}:6: run: value is not shfmt-formatted, and only a literal "
+                "block is rewritten — shfmt writes it as: if true; then echo x; fi"
+            )
+        ]
+        self.assertEqual(found, want)
+        self.assertEqual(es.rewrite(path), 0)
+        self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_a_file_yq_cannot_parse_is_refused_by_name(self) -> None:
+        """Not YAML: exit 1 naming the file, never an empty clean run."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "w.yml"
+            path.write_text("on: [push\n", encoding="utf-8")
+            done = hermetic.call_main(lambda: es.main([str(path)]))
+            debt = Path(tmp) / "debt.txt"
+            ceiling = hermetic.call_main(
+                lambda: es.main(["--ceiling", str(debt), str(path)])
+            )
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue(done.stderr.startswith(f"embedded-shell: {path}: "))
+        self.assertEqual(ceiling.returncode, 1)
+        self.assertTrue(ceiling.stderr.startswith(f"workflow-shell: {path}: "))
+
+    def test_fix_mode_rewrites_a_literal_block_byte_for_byte(self) -> None:
+        """A commented `|2+` header with trailing blanks: only the body moves.
+
+        The parser locates the body: from the line after the header, as
+        many lines as the value has before its trailing line breaks, at
+        the indent its first non-blank line carries ahead of its text.
+        """
+        before = (
+            "name: a\n"
+            "runs:\n"
+            "  using: composite\n"
+            "  steps:\n"
+            "    - name: Act\n"
+            "      shell: bash\n"
+            "      run: |2+ # keep me\n"
+            "          if true;then\n"
+            "            echo x;fi\n"
+            "\n"
+            "\n"
+            "    # a comment between steps\n"
+            "    - run: echo  next\n"
+        )
+        after = (
+            "name: a\n"
+            "runs:\n"
+            "  using: composite\n"
+            "  steps:\n"
+            "    - name: Act\n"
+            "      shell: bash\n"
+            "      run: |2+ # keep me\n"
+            "        if true; then\n"
+            "          echo x\n"
+            "        fi\n"
+            "\n"
+            "\n"
+            "    # a comment between steps\n"
+            "    - run: echo  next\n"
+        )
+        n, out = rewrite_text(before)
+        self.assertEqual((n, out.encode()), (1, after.encode()))
+        self.assertEqual(rewrite_text(after), (0, after))
 
 
 class OrgConfig(unittest.TestCase):
@@ -713,7 +865,7 @@ class Reader(unittest.TestCase):
             "    - name: Act\n      shell: bash\n      run: |\n        x\n"
         )
         [run] = read_runs(text)
-        self.assertEqual((run.name, run.line), ("Act", 7))
+        self.assertEqual((run.name, run.line, es.place(run, 0)), ("Act", 6, 7))
 
     def test_the_shell_key_anywhere_in_the_step(self) -> None:
         """First on the `- ` line, or after the block: still the step's (#1555).
@@ -742,7 +894,7 @@ class Reader(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             p = Path(tmp) / "w.yml"
             p.write_text(text, encoding="utf-8")
-            read = list(es.blocks(p))
+            read = list(es.linted(p))
             self.assertEqual(read, NOTHING)
 
 

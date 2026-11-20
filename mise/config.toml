@@ -2185,6 +2185,13 @@ dir = "{{cwd}}"
 # tool on it — and the code deliberately does NOT move. Extraction to .sh
 # would hide it from zizmor, whose github-env and template-injection
 # audits read run: content and cannot follow a script call.
+#
+# The values are read by the parser, mise/workflow_yaml.py on the
+# belt's yq (#1846): every run: value, however the YAML spells it — a
+# block, a single line, anchored, in a flow mapping, under a quoted
+# key. A literal block and a single-line value get shfmt and
+# shellcheck; a folded block gets shellcheck on its folded text; an
+# alias is linted where its anchor is.
 run = '''
 set -euo pipefail
 # The action lints' one selection (#1448): an action's run: blocks are
@@ -2224,13 +2231,13 @@ dir = "{{cwd}}"
 # the one exception. Where the logic goes is CONTRIBUTING.md's rule.
 #
 # The counter is mise/embedded_shell.py's reader, the one that hands
-# blocks to shfmt and shellcheck in lint:shell-embedded, so there is one
-# definition of where a block starts and ends. The ceiling sees every
-# block-scalar header (`|`, `>`, chomping and indentation indicators, a
-# trailing comment): a header it could not read would be an opt-out by
-# punctuation. Universal: a repository
-# with a block over the ceiling carries its own debt file, and one that
-# tracks no workflow skips clean.
+# values to shfmt and shellcheck in lint:shell-embedded: the parser
+# (#1846), so the ceiling sees every run: value however it is written,
+# and a folded block weighs the lines the file holds, not the one line
+# folding makes of them — either gap would be an opt-out by
+# punctuation. An alias is weighed where its anchor is. Universal: a
+# repository with a block over the ceiling carries its own debt file,
+# and one that tracks no workflow skips clean.
 run = '''
 # The action lints' one selection (#1448), and the workflow templates.
 . "${ORG_BELT_DIR}/action-files.sh"
