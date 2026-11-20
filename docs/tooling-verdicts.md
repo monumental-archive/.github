@@ -2712,7 +2712,8 @@ runner):
   reached are listed in `security/helper-import-debt.txt`, 164 of 697
   when the law landed. Rewriting the child's mutant name and writing
   its statistics back were rejected there: both reach into mutmut's
-  internals.
+  internals. The law was removed on #1790 once cosmic-ray judged
+  child-reached functions.
 - **A child's configuration (#1542), measured.** In the statistics
   pass every mutated function reads mutmut's configuration, which
   mutmut loads lazily from the CURRENT directory; a child a test

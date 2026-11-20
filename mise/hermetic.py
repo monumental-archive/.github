@@ -260,13 +260,12 @@ def call_main(
     """Call a helper's `main` in this process, as a script row ran it.
 
     `run` makes the call, written out in the test (`lambda:
-    helper.main([...])`), so the call is the test's own and
-    `lint:in-process` reads it there (#1673). `env`, when given, IS the
-    process environment for the call (the variables a child would have
-    had, built with `env()`); `cwd` the working directory; `stdin` what
-    the child would have read. Each is restored afterwards. A
-    `SystemExit` (argparse's usage error, or a helper that exits) is the
-    status, as it would be for a child.
+    helper.main([...])`), so the call is the test's own. `env`, when
+    given, IS the process environment for the call (the variables a
+    child would have had, built with `env()`); `cwd` the working
+    directory; `stdin` what the child would have read. Each is restored
+    afterwards. A `SystemExit` (argparse's usage error, or a helper that
+    exits) is the status, as it would be for a child.
 
     Returns:
         The status and what was written to each stream.

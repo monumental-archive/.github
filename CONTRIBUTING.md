@@ -135,11 +135,11 @@ one end-to-end row per helper that holds the script contract: it
 starts, reads its arguments and exits with the documented status,
 which only a real process can show.
 
-`lint:in-process` holds the rule per function, following what each
-reached function names; the functions not yet reached are listed in
-`security/helper-import-debt.txt`, which only shrinks ([#1673]).
+An in-process row skips an interpreter start, 0.06 s on the runner
+([#1766]), and its failure names the function. Nothing in the gate
+checks it.
 
-[#1673]: https://github.com/monumental-archive/.github/issues/1673
+[#1766]: https://github.com/monumental-archive/.github/issues/1766
 
 ### A copied fixture keeps its source's licence
 

@@ -193,7 +193,6 @@ tasks = [
   "lint:fuzz-build",
   "lint:licence",
   "lint:gate-surface",
-  "lint:in-process",
   "lint:lock-platforms",
   "lint:msrv",
   "lint:pg-clippy",
