@@ -24,6 +24,7 @@ import unittest
 from pathlib import Path
 
 import hermetic
+import vex_one_per_merge
 
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
@@ -92,25 +93,49 @@ class Tree:
         """Point origin/main at HEAD: everything so far is the default branch."""
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
-    def listing(self) -> subprocess.CompletedProcess[str]:
+    def listing(self) -> hermetic.Called:
         """List the decisions ahead of origin/main, as vex-attest.yml asks.
 
         Returns:
-            The finished process, output captured.
+            The status and both streams, from an in-process call (#1697).
 
         """
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(
-            [sys.executable, str(HELPER), "--list", "origin/main.."],
-            cwd=self.dir,
+        return hermetic.call_main(
+            lambda: vex_one_per_merge.main(["--list", "origin/main.."]),
             env=self.env,
-            capture_output=True,
-            text=True,
-            check=False,
+            cwd=self.dir,
         )
 
-    def run(self, event: str = "") -> subprocess.CompletedProcess[str]:
-        """Run the task's body in the tree, as the CI event `event`.
+    def task_env(self, event: str) -> dict[str, str]:
+        """Build the environment the task hands the helper.
+
+        Returns:
+            The environment, with the CI event when there is one.
+
+        """
+        return {
+            **self.env,
+            "ORG_BELT_DIR": str(BELT),
+            **({"GITHUB_EVENT_NAME": event} if event else {}),
+        }
+
+    def run(self, event: str = "") -> hermetic.Called:
+        """Call the task's helper in the tree, as the CI event `event`.
+
+        The task's body is the one line that starts the helper with no
+        arguments, so the row calls `main([])` with the body's
+        environment (#1697).
+
+        Returns:
+            The status and both streams.
+
+        """
+        return hermetic.call_main(
+            lambda: vex_one_per_merge.main([]), env=self.task_env(event), cwd=self.dir
+        )
+
+    def start(self, event: str = "") -> subprocess.CompletedProcess[str]:
+        """Start the helper as a process, as the task does: the contract.
 
         Returns:
             The finished process, output captured.
@@ -118,13 +143,9 @@ class Tree:
         """
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body()],
+            [sys.executable, str(HELPER)],
             cwd=self.dir,
-            env={
-                **self.env,
-                "ORG_BELT_DIR": str(BELT),
-                **({"GITHUB_EVENT_NAME": event} if event else {}),
-            },
+            env=self.task_env(event),
             capture_output=True,
             text=True,
             check=False,
@@ -154,6 +175,16 @@ class OnePerMerge(unittest.TestCase):
         self.tree.commit(B)
         self.tree.commit(A)
         done = self.tree.run()
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn(f"{TASK}: {SENTENCE}:", done.stderr)
+        self.assertIn(f"  {A}\n", done.stderr)
+        self.assertIn(f"  {B}\n", done.stderr)
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it reads the tree and exits 1, naming both."""
+        self.tree.commit(B)
+        self.tree.commit(A)
+        done = self.tree.start()
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn(f"{TASK}: {SENTENCE}:", done.stderr)
         self.assertIn(f"  {A}\n", done.stderr)

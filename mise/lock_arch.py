@@ -226,7 +226,7 @@ def candidates(lock_path: pathlib.Path) -> list[str]:
     return lines
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     """Emit a candidate line for every disagreeing lock entry on stdin.
 
     Returns:
@@ -234,6 +234,7 @@ def main() -> int:
         caller decides, once it has asked the release what it publishes.
 
     """
+    del argv  # the entries arrive on stdin, not as arguments
     for raw in stdin_text().splitlines():
         name = raw.strip()
         if not name:
@@ -247,4 +248,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

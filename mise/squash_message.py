@@ -133,13 +133,14 @@ def check(path: pathlib.Path, number: str) -> None:
         raise StepError(msg)
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     """Compose the squash message and hold it to the commit canon.
 
     Returns:
         The step's exit status.
 
     """
+    del argv  # the step reads its environment, not arguments
     env = os.environ
     number = env["PR_NUMBER"]
     try:
@@ -155,4 +156,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

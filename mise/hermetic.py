@@ -41,16 +41,30 @@ never a bare name the child's own PATH resolves to something else.
 `optional_tool` is for a lookup whose absence is a decision the row
 makes: a skip, or a planted "tool missing". No test calls
 `shutil.which` itself; `test_hermetic.py` holds them to that.
+
+A test calls a helper's `main` in its own process here too (#1673):
+
+    done = hermetic.call_main(lambda: helper.main(["--flag"]), env=env, cwd=tree)
+
+The environment, working directory and standard input a script row
+handed the child are this process's for the call, then restored, so
+mutation, coverage and the type checker see the helper run. `done`
+carries the status and both streams, as a finished process does.
 """
 
+import contextlib
+import io
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest import mock
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 # What every fixture inherits, by name, and why.
 INHERITED: dict[str, str] = {
@@ -245,3 +259,53 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
         )
         raise RuntimeError(msg)
     return names
+
+
+@dataclass(frozen=True)
+class Called:
+    """What an in-process call to a helper's `main` returned and wrote."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def call_main(
+    run: Callable[[], int],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
+    stdin: str = "",
+) -> Called:
+    """Call a helper's `main` in this process, as a script row ran it.
+
+    `run` makes the call, written out in the test (`lambda:
+    helper.main([...])`), so the call is the test's own and
+    `lint:in-process` reads it there (#1673). `env`, when given, IS the
+    process environment for the call (the variables a child would have
+    had, built with `env()`); `cwd` the working directory; `stdin` what
+    the child would have read. Each is restored afterwards. A
+    `SystemExit` (argparse's usage error, or a helper that exits) is the
+    status, as it would be for a child.
+
+    Returns:
+        The status and what was written to each stream.
+
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.ExitStack() as stack:
+        if env is not None:
+            stack.enter_context(mock.patch.dict(os.environ, env, clear=True))
+        if cwd is not None:
+            stack.enter_context(contextlib.chdir(cwd))
+        stack.enter_context(mock.patch.object(sys, "stdin", io.StringIO(stdin)))
+        stack.enter_context(contextlib.redirect_stdout(out))
+        stack.enter_context(contextlib.redirect_stderr(err))
+        try:
+            status = run()
+        except SystemExit as exc:
+            code = exc.code
+            status = code if isinstance(code, int) else (0 if code is None else 1)
+            if isinstance(code, str):
+                print(code, file=sys.stderr)
+    return Called(status, out.getvalue(), err.getvalue())

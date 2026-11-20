@@ -23,6 +23,7 @@ gate as `mise run test`, which `ci` collects.
 import contextlib
 import io
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -35,6 +36,8 @@ CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
+PYTHON = sys.executable
+DEFAULTS = CANON / ".github" / "workflows" / "publish.yml"
 
 NAME = "lint:lock-platforms"
 STUB_PATH = ".github/workflows/publish.yml"
@@ -149,6 +152,58 @@ def lint(
         )
 
 
+def plant(root: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
+    """Write a git tree holding `files` tracked and `untracked` beside them."""
+    env = hermetic.env()
+    for rel, text in (files | untracked).items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+    if files:
+        subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+
+
+def check(
+    files: dict[str, str], untracked: dict[str, str] | None = None
+) -> hermetic.Called:
+    """Call the helper in-process with what the task body hands it (#1697).
+
+    The body finds the tree's config and lock and pipes its tracked
+    workflows to the helper; the rows' trees always hold `mise.toml` and
+    `mise.lock`, so the call names them and reads the same listing.
+
+    Returns:
+        The status and both streams.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        plant(root, files, untracked or {})
+        try:
+            names = hermetic.tracked(
+                root,
+                ":!vendor/**",
+                ".github/workflows/*.yml",
+                ".github/workflows/*.yaml",
+            )
+        except RuntimeError:
+            names = []  # the body's listing is empty here too
+        listing = "".join(f"{name}\n" for name in names)
+        return hermetic.call_main(
+            lambda: lock_platforms.main([
+                "--defaults",
+                str(DEFAULTS),
+                "--config",
+                "mise.toml",
+                "--lock",
+                "mise.lock",
+            ]),
+            cwd=root,
+            stdin=listing,
+        )
+
+
 def tree(**overrides: str | None) -> dict[str, str]:
     """Build the baseline tree with files replaced or (None) removed.
 
@@ -171,7 +226,7 @@ class Case(unittest.TestCase):
 
     def assert_red(self, files: dict[str, str], message: str = RED) -> None:
         """Assert exit 1 with exactly `message` on stderr."""
-        done = lint(files)
+        done = check(files)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(done.stderr, message)
         self.assertEqual(done.stdout, "")
@@ -180,7 +235,14 @@ class Case(unittest.TestCase):
         self, files: dict[str, str], line: str, **kw: dict[str, str]
     ) -> None:
         """Assert exit 0 with exactly one stdout line and no stderr."""
-        done = lint(files, **kw)
+        done = check(files, **kw)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, f"{NAME}: {line}\n")
+        self.assertEqual(done.stderr, "")
+
+    def assert_body_out(self, files: dict[str, str], line: str) -> None:
+        """Assert the task body's own skip line: its subject is the body."""
+        done = lint(files)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{NAME}: {line}\n")
         self.assertEqual(done.stderr, "")
@@ -206,11 +268,11 @@ class Guards(Case):
 
     def test_no_mise_config_skips(self) -> None:
         """No config: nothing installs, nothing to cover."""
-        self.assert_out(tree(config=None), "no mise config, skipped")
+        self.assert_body_out(tree(config=None), "no mise config, skipped")
 
     def test_no_lock_skips(self) -> None:
         """No lock: --locked is not in play."""
-        self.assert_out(tree(lock=None), "no mise.lock, skipped")
+        self.assert_body_out(tree(lock=None), "no mise.lock, skipped")
 
     def test_no_tracked_workflow_skips(self) -> None:
         """No workflows at all: no publish stub."""
@@ -326,7 +388,7 @@ class Unreadable(Case):
 
     def assert_refused(self, files: dict[str, str], detail: str) -> None:
         """Assert exit 2 and the refusal naming `detail`."""
-        done = lint(files)
+        done = check(files)
         self.assertEqual(done.returncode, 2, done.stdout)
         self.assertEqual(done.stdout, "")
         first = done.stderr.splitlines()[0]
@@ -394,7 +456,7 @@ class Defaults(unittest.TestCase):
         """Each canon default target has a platform key — all four, both classes."""
         lock = entry("node", "26.5.1", ("windows-x64",))
         both = stub("      classes: rust-binary,go-binary\n")
-        done = lint(tree(lock=lock, stub=both))
+        done = check(tree(lock=lock, stub=both))
         self.assertEqual(done.returncode, 1, done.stderr)
         for key in ALL.split(","):
             self.assertIn(f"  {key}: node@26.5.1\n", done.stderr)
@@ -450,6 +512,31 @@ class ReadDocuments(unittest.TestCase):
                     "  a file this cannot read is not one it may pass\n",
                     err,
                 )
+
+
+class Script(unittest.TestCase):
+    """The one row that starts the helper as a process (#1697)."""
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it reads its arguments and stdin, and exits 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plant(root, tree(), {})
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [
+                    *(PYTHON, str(BELT / "lock_platforms.py")),
+                    *("--defaults", str(DEFAULTS), "--config", "mise.toml"),
+                    *("--lock", "mise.lock"),
+                ],
+                cwd=root,
+                env=hermetic.env(),
+                input=f"{STUB_PATH}\n",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertEqual(done.stderr, RED)
 
 
 if __name__ == "__main__":

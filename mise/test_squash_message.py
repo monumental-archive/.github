@@ -22,6 +22,7 @@ import tempfile
 import unittest
 
 import hermetic
+import squash_message
 
 HELPER = pathlib.Path(__file__).resolve().parent / "squash_message.py"
 STUB_MISE = """#!/usr/bin/env bash
@@ -57,13 +58,11 @@ class SquashMessage(unittest.TestCase):
         stub.chmod(0o755)
         self.bindir = bindir
 
-    def squash(
-        self, title: str, body: str | None, *, verdict: int = 0
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the helper on one pull request.
+    def step_env(self, title: str, body: str | None, verdict: int) -> dict[str, str]:
+        """Build the environment the workflow step hands the helper.
 
         Returns:
-            The run.
+            The environment, the stub `mise` leading PATH.
 
         """
         env = hermetic.env(
@@ -77,15 +76,33 @@ class SquashMessage(unittest.TestCase):
         )
         if body is not None:
             env["PR_BODY"] = body
+        return env
+
+    def squash(
+        self, title: str, body: str | None, *, verdict: int = 0
+    ) -> hermetic.Called:
+        """Call the helper in-process on one pull request (#1697).
+
+        Returns:
+            The status and both streams.
+
+        """
+        return hermetic.call_main(
+            lambda: squash_message.main([]), env=self.step_env(title, body, verdict)
+        )
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it reads the step's variables and exits 0."""
         # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(
+        done = subprocess.run(
             [sys.executable, str(HELPER)],
-            env=env,
+            env=self.step_env("fix: a thing (#700)", "", 0),
             capture_output=True,
             text=True,
             check=False,
             timeout=60,
         )
+        self.assertEqual((0, PASSES), (done.returncode, done.stdout), done.stderr)
 
     def checked(self) -> str:
         """Read the message `commits:check` was handed.

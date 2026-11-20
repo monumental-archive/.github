@@ -1117,32 +1117,29 @@ class TaskShellTask(unittest.TestCase):
 
 
 class Cli(unittest.TestCase):
-    """`--ceiling` and `--task-ceiling` on the command line exit by the verdict."""
+    """`--ceiling` and `--task-ceiling` on the command line exit by the verdict.
+
+    `main(argv)` is called in the test process (#1697); one row starts
+    the helper as a process.
+    """
 
     def test_exit_status(self) -> None:
         """Red is exit 1 with the finding on stderr; green is exit 0."""
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
-            argv = [sys.executable, str(_HERE / "embedded_shell.py"), "--ceiling"]
-            red = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [*argv, str(t.debt), str(t.wf)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            argv = ["--ceiling", str(t.debt), str(t.wf)]
+            red = hermetic.call_main(lambda: es.main(argv))
             t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-            green = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [*argv, str(t.debt), str(t.wf)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            green = hermetic.call_main(lambda: es.main(argv))
         self.assertEqual(red.returncode, 1)
         self.assertIn("step 'Big' holds a run: block of 16 lines", red.stderr)
         self.assertEqual(green.returncode, 0, green.stderr)
 
     def test_task_ceiling_exit_status(self) -> None:
-        """`--task-ceiling` is red on an unlisted long body, green when listed."""
+        """Started as a process: `--task-ceiling` red, then green when listed.
+
+        The script contract (#1697): the one row that starts the helper.
+        """
         with TemporaryDirectory() as tmp:
             cfg, debt = Path(tmp) / "mise.toml", Path(tmp) / "debt.txt"
             cfg.write_text(config(lint_a=16), encoding="utf-8")

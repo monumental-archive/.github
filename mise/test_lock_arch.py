@@ -5,9 +5,12 @@ import contextlib
 import io
 import pathlib
 import re
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 
+import hermetic
 import lock_arch
 
 
@@ -185,6 +188,55 @@ class TestCandidates(unittest.TestCase):
     def test_empty_lock_is_clean(self) -> None:
         """A lock with no tools is not an error."""
         self.assertEqual(lock_arch.candidates(self._lock("[tools]\n")), [])
+
+
+DEFECT = (
+    '[[tools."aqua:rustwasm/wasm-pack"]]\n'
+    'version = "0.15.0"\n\n'
+    '[tools."aqua:rustwasm/wasm-pack"."platforms.macos-arm64"]\n'
+    'checksum = "sha256:d3f1a4a3"\n'
+    'url = "https://github.com/wasm-bindgen/wasm-pack/releases/'
+    'download/v0.15.0/wasm-pack-v0.15.0-x86_64-apple-darwin.tar.gz"\n'
+)
+
+
+def planted_lock(body: str) -> pathlib.Path:
+    """Write a lock file into a temporary directory.
+
+    Returns:
+        The path written.
+
+    """
+    path = pathlib.Path(tempfile.mkdtemp()) / "mise.lock"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+class TestMain(unittest.TestCase):
+    """The entry the task starts, called in the test process (#1697)."""
+
+    def test_each_lock_on_stdin_is_read_and_its_candidates_printed(self) -> None:
+        """A blank line and a missing file are passed over; exit is 0."""
+        path = planted_lock(DEFECT)
+        listing = f"\n{path}\n{path.parent / 'absent.lock'}\n"
+        done = hermetic.call_main(lambda: lock_arch.main([]), stdin=listing)
+        self.assertEqual(0, done.returncode)
+        self.assertEqual(lock_arch.candidates(path), done.stdout.splitlines())
+        self.assertEqual(1, len(done.stdout.splitlines()))
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it reads stdin and exits 0 with a finding."""
+        path = planted_lock(DEFECT)
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [sys.executable, str(pathlib.Path(lock_arch.__file__))],
+            env=hermetic.env(),
+            input=f"{path}\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(lock_arch.candidates(path), done.stdout.splitlines())
 
 
 if __name__ == "__main__":

@@ -193,8 +193,13 @@ class Args(argparse.Namespace):
     command: list[str]
 
 
-def main() -> None:
-    """Parse arguments and dispatch."""
+def main(argv: list[str]) -> int:
+    """Parse arguments and dispatch.
+
+    Returns:
+        0 after planting, or the command's exit status.
+
+    """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="verb", required=True)
     p = sub.add_parser("plant", help="make the decoy repository in DIR")
@@ -202,16 +207,16 @@ def main() -> None:
     r = sub.add_parser("run", help="run CMD with git aimed at the decoy")
     r.add_argument("decoy", type=pathlib.Path)
     r.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args(namespace=Args())
+    args = parser.parse_args(argv, namespace=Args())
     decoy = args.decoy.resolve()
     if args.verb == "plant":
         plant(decoy)
-        sys.exit(0)
+        return 0
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("run: no command after the decoy")
-    sys.exit(run(decoy, command))
+    return run(decoy, command)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

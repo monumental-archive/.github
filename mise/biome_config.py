@@ -350,7 +350,7 @@ def run(args: Args, manifests: list[Path]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Generate one repository's biome config from stdin's manifest list.
 
     Returns:
@@ -369,4 +369,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

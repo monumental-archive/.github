@@ -211,32 +211,64 @@ class Helper(unittest.TestCase):
         self.work = pathlib.Path(tmp.name) / "work"
         self.work.mkdir()
 
+    def leak_env(self) -> dict[str, str]:
+        """Build the environment a root's test run gets under the decoy.
+
+        Returns:
+            The environment.
+
+        """
+        return {**CLEAN, "HOME": str(self.work), "XDG_CONFIG_HOME": str(self.work)}
+
     def leak(self, script: str) -> tuple[int, str]:
-        """Run a shell script under the decoy, as the task runs a root.
+        """Call the helper in-process to run a script under the decoy (#1697).
 
         Returns:
             The helper's exit status and its standard error.
 
         """
+        done = hermetic.call_main(
+            lambda: gd.main(["run", str(self.decoy), "--", BASH, "-c", script]),
+            env=self.leak_env(),
+            cwd=self.work,
+        )
+        return done.returncode, done.stderr
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, `run` hands back its command's status."""
         # ruff: ignore[subprocess-without-shell-equals-true]
         r = subprocess.run(
             [
-                sys.executable,
-                str(_HERE / "git_decoy.py"),
-                "run",
-                str(self.decoy),
-                "--",
-                BASH,
-                "-c",
-                script,
+                *(sys.executable, str(_HERE / "git_decoy.py")),
+                *("run", str(self.decoy), "--", BASH, "-c", "exit 3"),
             ],
             cwd=self.work,
-            env={**CLEAN, "HOME": str(self.work), "XDG_CONFIG_HOME": str(self.work)},
+            env=self.leak_env(),
             capture_output=True,
             text=True,
             check=False,
         )
-        return r.returncode, r.stderr
+        self.assertEqual((r.returncode, r.stderr), (3, ""))
+
+    def test_plant_makes_the_decoy_and_exits_0(self) -> None:
+        """`plant DIR` makes a repository there: the task's first call."""
+        fresh = self.work / "fresh"
+        fresh.mkdir()
+        done = hermetic.call_main(
+            lambda: gd.main(["plant", str(fresh)]), env=self.leak_env(), cwd=self.work
+        )
+        self.assertEqual((0, ""), (done.returncode, done.stderr))
+        self.assertTrue((fresh / ".git").is_dir())
+
+    def test_run_with_no_command_is_a_usage_error(self) -> None:
+        """`run DIR` and nothing to run is argparse's exit 2, by name."""
+        done = hermetic.call_main(
+            lambda: gd.main(["run", str(self.decoy)]),
+            env=self.leak_env(),
+            cwd=self.work,
+        )
+        self.assertEqual(2, done.returncode)
+        self.assertIn("run: no command after the decoy", done.stderr)
 
     def test_each_change_is_named(self) -> None:
         """Commit, branch, switch and stage each red with what changed."""

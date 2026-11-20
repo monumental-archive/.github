@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import hermetic
+import python_roots
+import python_types_seams
 
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
@@ -285,6 +287,129 @@ class TheWiring(unittest.TestCase):
         """`# type: ignore[<code>]` names its rule and passes the helper."""
         done = run({"a.py": "X: int = 1  # type: ignore[misc]\n"}, stub={})
         self.assertEqual(0, done.returncode, done.stderr)
+
+
+def seams(text: str) -> hermetic.Called:
+    """Call python_types_seams in-process on one planted `a.py` (#1697).
+
+    Returns:
+        The status and both streams.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "a.py").write_text(text, encoding="utf-8")
+        return hermetic.call_main(lambda: python_types_seams.main(["a.py"]), cwd=tmp)
+
+
+def roots(*files: str) -> hermetic.Called:
+    """Call python_roots in-process over planted files, as the script does.
+
+    Returns:
+        The status and both streams.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in files:
+            (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
+            (Path(tmp) / name).write_text("X = 1\n", encoding="utf-8")
+        return hermetic.call_main(
+            lambda: python_roots.main([str(BELT), *files]), cwd=tmp
+        )
+
+
+class TheHelpers(unittest.TestCase):
+    """The seams and the roots, called in the test process (#1697)."""
+
+    def test_a_bare_ignore_is_a_seam(self) -> None:
+        """`# type: ignore` with no code is named, even at the module's top."""
+        done = seams("# type: ignore\nX: int = 1\n")
+        self.assertEqual(
+            (1, "a.py:1: `# type: ignore` names no error code\n"),
+            (done.returncode, done.stdout),
+        )
+
+    def test_an_inline_config_is_a_seam(self) -> None:
+        """A `# mypy:` comment lowering its file's level is named."""
+        done = seams("# mypy: ignore-errors\nX: int = 1\n")
+        self.assertEqual(
+            (1, "a.py:1: an inline `# mypy:` comment sets options for its file\n"),
+            (done.returncode, done.stdout),
+        )
+
+    def test_no_type_check_is_a_seam(self) -> None:
+        """`typing.no_type_check`, by attribute, is named."""
+        text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
+        done = seams(text)
+        self.assertEqual(
+            (1, "a.py:4: `no_type_check` skips type checking\n"),
+            (done.returncode, done.stdout),
+        )
+
+    def test_markers_in_strings_are_not_seams(self) -> None:
+        """The same text inside a string is not a finding."""
+        done = seams('S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n')
+        self.assertEqual((0, ""), (done.returncode, done.stdout))
+
+    def test_a_coded_ignore_is_not_a_seam(self) -> None:
+        """`# type: ignore[<code>]` names its rule."""
+        done = seams("X: int = 1  # type: ignore[misc]\n")
+        self.assertEqual((0, ""), (done.returncode, done.stdout))
+
+    def test_the_roots_are_printed(self) -> None:
+        """Each file's root, then the belt's, joined for MYPYPATH."""
+        done = roots("top.py", "a/helper.py")
+        self.assertEqual(
+            (0, f"a:{BELT}\n", ""), (done.returncode, done.stdout, done.stderr)
+        )
+
+    def test_two_files_that_are_one_module_are_named(self) -> None:
+        """Two roots each holding helper.py: a clash, by module name."""
+        done = roots("a/helper.py", "b/helper.py")
+        self.assertEqual(1, done.returncode)
+        self.assertEqual(
+            "python_roots: these tracked files would be one module, so an import"
+            " of that name reaches only one of them:\n  helper: a/helper, b/helper\n",
+            done.stderr,
+        )
+
+    def test_too_few_arguments_is_a_usage_error(self) -> None:
+        """No belt or no file: exit 2 with the usage."""
+        done = hermetic.call_main(lambda: python_roots.main([str(BELT)]))
+        self.assertEqual(
+            (2, "usage: python_roots.py <belt-dir> <file>...\n"),
+            (done.returncode, done.stderr),
+        )
+
+    def test_the_seams_script_contract(self) -> None:
+        """python_types_seams started as a process: arguments in, exit 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "a.py").write_text("# type: ignore\n", encoding="utf-8")
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [sys.executable, str(BELT / "python_types_seams.py"), "a.py"],
+                cwd=tmp,
+                env=hermetic.env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(
+            (1, "a.py:1: `# type: ignore` names no error code\n"),
+            (done.returncode, done.stdout),
+        )
+
+    def test_the_roots_script_contract(self) -> None:
+        """python_roots started as a process: no file is exit 2 and the usage."""
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [sys.executable, str(BELT / "python_roots.py"), str(BELT)],
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            (2, "usage: python_roots.py <belt-dir> <file>...\n"),
+            (done.returncode, done.stderr),
+        )
 
 
 @unittest.skipUnless(real_mypy(), "the belt's pinned mypy is not installed here")
