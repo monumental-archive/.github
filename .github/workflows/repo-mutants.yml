@@ -334,9 +334,11 @@ jobs:
     # The count is written twice, here and in MUTANTS_SHARDS below; move
     # both together. One mutant at a time per checkout: the shards are
     # the parallelism. No fail-fast: every shard reports its own
-    # survivors. The count and the timeout are #1530's, from the first
-    # run measured on a runner.
-    timeout-minutes: 120
+    # survivors. 360 minutes, the hosted maximum, is the measuring
+    # setting: it lets every shard finish, so a run records each
+    # shard's true time. #1530's item 2 sets the final count and
+    # timeout from that run.
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
