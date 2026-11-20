@@ -76,11 +76,6 @@ if [[ ${profile} == gate ]]; then
   fi
 fi
 
-command -v hypothesis > /dev/null || {
-  echo "${label}: prop_*.py tracked but hypothesis is missing —" >&2
-  echo "  the belt pins pipx:hypothesis; run: mise install" >&2
-  exit 1
-}
 # The venv must sit on the belt's Python, and import Hypothesis: the
 # belt's one check asks both (tool_python.py, #1788). The first call
 # names the interpreter the properties run on; the second, with
