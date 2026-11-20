@@ -39,10 +39,13 @@ name: build-pgrx-images
         type: string
       pg-majors:
         # forwarding: universal
-        description: PG majors, matching what build-pgrx-extension built.
+        description: >
+          PG majors, matching what build-pgrx-extension built. Required:
+          there is no default matrix, and the plan job refuses an empty
+          request.
         required: false
         type: string
-        default: 14,15,16,17,18
+        default: ""
       facts:
         # forwarding: universal
         description: >

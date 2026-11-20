@@ -230,10 +230,14 @@ name: publish
         type: string
         default: ""
       pg-majors:
-        description: PG majors for the pgrx-extension class.
+        description: >
+          Comma-separated PG majors for the pgrx-extension class, equal to
+          the extension crate's pgNN features. Required when the class is
+          requested: no default matrix, so one that forgets it is refused
+          (lint:gate-surface, then the build's plan job).
         required: false
         type: string
-        default: 14,15,16,17,18
+        default: ""
       extension-smoke-test:
         description: >
           Executable proving the packaged extension does its one job, for
@@ -592,8 +596,8 @@ jobs:
           # at the other.
           EVIDENCE_CLASSES: ${{ needs.guard.outputs.classes }}
           # Every requested major must be covered — asked only of a
-          # release that built the extension, since pg-majors defaults
-          # for every caller.
+          # release that built the extension, since pg-majors is
+          # forwarded whether or not the class was requested.
           VARIANTS: ${{ contains(inputs.classes, 'pgrx-extension') && inputs.pg-majors || '' }}
         # One call (stele#396, #1371): the plans judged as `assert plans`
         # judges them, one document per judged entry and the view folded

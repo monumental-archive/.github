@@ -38,12 +38,13 @@ name: build-pgrx-extension
       pg-majors:
         # forwarding: universal
         description: >
-          Comma-separated PG majors to build. The plan job refuses anything
+          Comma-separated PG majors to build. Required: there is no default
+          matrix, and the plan job refuses an empty request and anything
           the base-image mapping does not carry — a typo must fail the
           release, not quietly ship four majors instead of five.
         required: false
         type: string
-        default: 14,15,16,17,18
+        default: ""
       smoke-test:
         # forwarding: universal
         description: >

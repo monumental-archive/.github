@@ -53,7 +53,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# The canon's one reader of the base-image mapping and of a pgrx
+# request, beside this tree in release/ (#1553, #1845). Appended, so this
+# file's own directory and the standard library come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
+
 import decoded
+import matrix
 import typed_std
 
 NAME = "gate-surface"
@@ -73,6 +79,11 @@ CRATE_CLASSES = {
 # The classes that build the workspace itself, minus whatever the stub
 # excludes from them.
 WORKSPACE_CLASSES = {"rust-crate", "rust-binary"}
+
+# The canon's support matrix, in the canon tree this file travels in: the
+# belt is that tree's mise/, so its parent holds the mapping the release
+# plans against at the same pin.
+MAPPING = Path(__file__).resolve().parents[1] / matrix.MAPPING_NAME
 
 
 def listed(value: object) -> list[object]:
@@ -363,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
         findings = invariant(args.publish, surface, held)
         if findings:
             print(
-                f"{NAME}: the gate does not compile what the publish path builds",
+                f"{NAME}: the publish path is not what the gate checks",
                 file=sys.stderr,
             )
             for line in findings:
@@ -374,8 +385,16 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def invariant(stub: Path, surface: list[Crate], held: set[str]) -> list[str]:
+def invariant(
+    stub: Path, surface: list[Crate], held: set[str], mapping: Path = MAPPING
+) -> list[str]:
     """Check that every crate the publish path builds is compiled by the gate.
+
+    And, for the pgrx-extension class, that the stub states the majors it
+    builds and the canon serves each of them (#1845): one source per
+    question — the crate's features say which majors it builds, the
+    mapping which the canon serves — held to each other here, before a
+    tag, rather than by the release's plan job after one.
 
     Returns:
         One line per finding, already worded as a remedy.
@@ -399,17 +418,53 @@ def invariant(stub: Path, surface: list[Crate], held: set[str]) -> list[str]:
         if crate.name in built and crate.name in held
     ]
     stated = inputs.get("pg-majors", "")
+    extension = "pgrx-extension" in {
+        c.strip() for c in inputs.get("classes", "").split(",")
+    }
+    if extension and not stated:
+        findings.append(
+            f"{stub} requests pgrx-extension and states no pg-majors — "
+            "the input has no default; state the majors the crate's "
+            "pgNN features declare",
+        )
     for crate in surface:
-        if not crate.majors or crate.name not in built or not stated:
+        if not crate.majors or crate.name not in built:
             continue
         want = ",".join(str(m) for m in crate.majors)
-        if stated.replace(" ", "") != want:
+        if stated and stated.replace(" ", "") != want:
             findings.append(
                 f"{crate.spec} declares features for {want} and the stub "
                 f"publishes pg-majors: {stated} — the features are what "
                 "cargo compiles, so the stub is the one that is wrong",
             )
+        if extension:
+            findings += served(crate, want, mapping)
     return findings
+
+
+def served(crate: Crate, want: str, mapping: Path) -> list[str]:
+    """Check the canon pins a base image for every major a crate declares.
+
+    The release's own plan, run here: `matrix.py` loads the mapping and
+    applies `requested_majors`, so the gate and the release cannot
+    disagree about what the canon serves.
+
+    Returns:
+        One finding, or none.
+
+    """
+    try:
+        matrix.pgrx_extension(mapping, want)
+    except matrix.RefusalError as refusal:
+        refused = (
+            f"{crate.spec} declares features for {want}, and the release "
+            f"would refuse it: {refusal} — drop the feature, or pin the "
+            "canon at a release that still serves that major"
+        )
+        return [refused]
+    except OSError as bad:
+        return [f"{mapping}: cannot be read ({bad})"]
+    return []
 
 
 if __name__ == "__main__":

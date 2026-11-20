@@ -122,7 +122,6 @@ def crate(name: str, majors: tuple[int, ...] = ()) -> gate_surface.Crate:
 
 
 PG_FEATURES: dict[str, list[str]] = {
-    "pg14": [],
     "pg15": [],
     "pg16": [],
     "pg17": [],
@@ -136,7 +135,7 @@ class MajorsTest(unittest.TestCase):
 
     def test_the_dependency_and_the_features_together(self) -> None:
         """The org shape: edtf-postgres exactly."""
-        majors: list[int] = [14, 15, 16, 17, 18]
+        majors: list[int] = [15, 16, 17, 18]
         self.assertEqual(
             majors_of(member("ext", features=PG_FEATURES, pgrx=True)), majors
         )
@@ -173,10 +172,10 @@ class MajorsTest(unittest.TestCase):
 
     def test_the_majors_come_back_ascending(self) -> None:
         """Declaration order in a manifest is not a promise."""
-        majors: list[int] = [14, 16, 18]
+        majors: list[int] = [15, 16, 18]
         self.assertEqual(
             majors_of(
-                member("ext", features={"pg18": [], "pg14": [], "pg16": []}, pgrx=True),
+                member("ext", features={"pg18": [], "pg15": [], "pg16": []}, pgrx=True),
             ),
             majors,
         )
@@ -232,12 +231,12 @@ class StubInputsTest(unittest.TestCase):
             "      classes: rust-crate,pgrx-extension\n"
             "      exclude: edtf-postgres\n"
             "      extension-crate-dir: crates/edtf-postgres\n"
-            "      pg-majors: 14,15\n",
+            "      pg-majors: 15,16\n",
         )
         self.assertEqual(unreadable, NOTHING)
         self.assertEqual(found["classes"], "rust-crate,pgrx-extension")
         self.assertEqual(found["exclude"], "edtf-postgres")
-        self.assertEqual(found["pg-majors"], "14,15")
+        self.assertEqual(found["pg-majors"], "15,16")
 
     def test_a_comment_is_not_a_value(self) -> None:
         """The stubs are more comment than code."""
@@ -394,14 +393,14 @@ class InvariantTest(unittest.TestCase):
             "    with:",
             "      classes: pgrx-extension",
             "      extension-crate-dir: crates/ext",
-            "      pg-majors: 14,17",
+            "      pg-majors: 15,17",
         )
         findings = gate_surface.invariant(thin, self.surface, set())
         self.assertEqual(len(findings), 1)
         self.assertIn("pg-majors", findings[0])
 
     def test_spaces_in_the_stub_major_list_are_not_a_disagreement(self) -> None:
-        """`14, 17` and `14,17` are the same claim."""
+        """`15, 17` and `15,17` are the same claim."""
         spaced = stub(
             "    with:",
             "      classes: pgrx-extension",
@@ -409,6 +408,42 @@ class InvariantTest(unittest.TestCase):
             "      pg-majors: 17",
         )
         self.assertEqual(gate_surface.invariant(spaced, self.surface, set()), NOTHING)
+
+    def test_stated_majors_the_mapping_pins_are_clean(self) -> None:
+        """Features equal to the stub, every major served by the canon."""
+        surface = [crate("ext", (15, 16, 17, 18))]
+        full = stub(
+            "    with:",
+            "      classes: pgrx-extension",
+            "      extension-crate-dir: crates/ext",
+            "      pg-majors: 15,16,17,18",
+        )
+        self.assertEqual(gate_surface.invariant(full, surface, set()), NOTHING)
+
+    def test_stub_without_pg_majors_is_a_finding(self) -> None:
+        """No default matrix: an unstated request is not built at a guess."""
+        bare = stub(
+            "    with:",
+            "      classes: pgrx-extension",
+            "      extension-crate-dir: crates/ext",
+        )
+        findings = gate_surface.invariant(bare, self.surface, set())
+        self.assertEqual(len(findings), 1)
+        self.assertIn("states no pg-majors", findings[0])
+
+    def test_declared_major_without_base_image_is_a_finding(self) -> None:
+        """A major the canon does not serve is the gate's red, not the tag's."""
+        surface = [crate("ext", (13, 17))]
+        retired = stub(
+            "    with:",
+            "      classes: pgrx-extension",
+            "      extension-crate-dir: crates/ext",
+            "      pg-majors: 13,17",
+        )
+        findings = gate_surface.invariant(retired, surface, set())
+        self.assertEqual(len(findings), 1)
+        self.assertIn("ext@1.3.1", findings[0])
+        self.assertIn("pg13 has no digest-pinned base image", findings[0])
 
     def test_a_missing_stub_is_a_finding(self) -> None:
         """Silence about a publish surface is not a clean publish surface."""
@@ -465,7 +500,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 0, msg=err)
         self.assertEqual(
             out.strip(),
-            "crate\text@1.3.1\tpgrx\t14,15,16,17,18\tcrates/ext",
+            "crate\text@1.3.1\tpgrx\t15,16,17,18\tcrates/ext",
         )
 
     def test_an_excluded_member_is_reported_as_excluded(self) -> None:
