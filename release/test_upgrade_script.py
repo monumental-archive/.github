@@ -37,10 +37,15 @@ and landed at 78. #794 fixed it by splitting the guard across three
 lines; that shipped in canon v1.58.2 and was WRONG, because PostgreSQL's
 extension loader ignores only lines BEGINNING WITH `\\echo`, so a bare
 `\\quit` line is parsed and fails. #801 reverted to one shortened line.
-The arithmetic is table-tested below; the half a linter cannot answer —
-whether a database will actually load the file — is the oracle in
-`TheLoadableGuardOracle`, which is blocked on #813 and skipped with its
-reason rather than quietly absent.
+The arithmetic is table-tested below. The half a linter cannot answer —
+whether a database will actually load the file — is answered by a real
+server, and not here: the generator's own proof stage (`proof.sh` in
+`generate-pgrx-upgrade.sh`) installs the previous release, lands the
+derived script over it and runs `ALTER EXTENSION UPDATE` on every
+Release PR, before any tag exists. That stage is what refused the
+three-line guard (#792, #801). Without a server, the rows below red on
+that shape too: planting the v1.58.2 guard in the generator fails five
+of them, the byte-for-byte reproduction among them (#1807).
 
 stdlib `unittest`, matching mise/test_*.py — #364 refused a test
 framework as a fourth thing to port.
@@ -71,15 +76,8 @@ REAL_PREV = (TESTDATA / "lab_pg--0.27.0.sql").read_text()
 REAL_NEW = (TESTDATA / "lab_pg--0.28.1.sql").read_text()
 REAL_DERIVED = (TESTDATA / "lab_pg--0.27.0--0.28.1.sql").read_text()
 
-# The guard the loader tolerates, and the one canon v1.58.2 shipped.
-# Kept as data because `TheLoadableGuardOracle` must red on the second
-# one the moment #813 gives it a database to ask.
+# The guard the loader tolerates: one line, `\quit` after an `\echo`.
 GOOD_GUARD = "\\echo Use ALTER EXTENSION {ext} UPDATE to load this file. \\quit"
-V1_58_2_GUARD = (
-    "\\echo Use \"ALTER EXTENSION {ext} UPDATE TO '{new}'\"\n"
-    "\\echo to load this file.\n"
-    "\\quit"
-)
 # The org's SQL column rule, named once so the rows below compare against
 # it rather than against a literal nobody can grep for.
 GUARD_COLUMNS = 80
@@ -530,40 +528,6 @@ class TheFloorBlock(unittest.TestCase):
             self.assertEqual(
                 (1, NEW_REFUSED, ""), (result.returncode, result.stderr, script)
             )
-
-
-class TheLoadableGuardOracle(unittest.TestCase):
-    r"""Does a real PostgreSQL accept the file, and not merely a linter.
-
-    This is the half #792 proved a linter cannot answer. `lint:sql` said
-    the three-line guard was fine; the server rejected it with
-    `syntax error at or near "\"` on the bare `\quit`, because the
-    extension loader ignores only lines BEGINNING WITH `\echo`. That
-    shape shipped in canon v1.58.2 and was reverted by #801.
-
-    Written and skipped rather than absent, so the gap is a recorded
-    obligation with a body to run rather than a note somebody has to
-    remember to act on. Both rows are required: the current guard must
-    LOAD, and v1.58.2's must FAIL. A one-directional oracle would have
-    passed for v1.58.2 too.
-    """
-
-    @override
-    def setUp(self) -> None:
-        """Skip every row until the oracle has a server to ask."""
-        self.skipTest(
-            "blocked by #813: the loadable-guard oracle needs the belt-provisioned "
-            "PostgreSQL #813 owns, and #772 refuses to build a second provisioning "
-            "for it. Unskip when #813 lands, pointing SERVER at its mechanism."
-        )
-
-    def test_the_current_guard_loads(self) -> None:
-        """CREATE EXTENSION then ALTER EXTENSION UPDATE over the derived file."""
-        raise NotImplementedError(self.__doc__)
-
-    def test_the_v1_58_2_guard_is_rejected_by_the_server(self) -> None:
-        """The negative control, and the reason this oracle exists."""
-        raise NotImplementedError(self.__doc__)
 
 
 if __name__ == "__main__":

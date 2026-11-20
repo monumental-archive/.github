@@ -3406,15 +3406,33 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
     and `tag-release.sh` (`test_release_guards.py`). Mutation-checked,
     not trusted: eight deliberate defects in the generator, each caught
     by the row that claims it.
-  - **Container truth, via #813's mechanism, not a second one.** A
-    linter can say a line is 84 columns; it cannot say whether
-    PostgreSQL will load the file. #792 is the proof — the three-line
-    guard passed `lint:sql` and canon v1.58.2 shipped it, and the
-    server rejects a bare `\quit` line because the extension loader
-    ignores only lines beginning with `\echo`. That oracle is written,
-    both directions, in `TheLoadableGuardOracle`, and skipped with #813
-    as its stated reason rather than left absent. #772 deliberately
-    built no Postgres provisioning of its own.
+  - **Server truth, from the generator's own proof stage.** A linter
+    can say a line is 84 columns; it cannot say whether PostgreSQL
+    will load the file. #792 is the proof — the three-line guard
+    passed `lint:sql` and canon v1.58.2 shipped it, and the server
+    rejects a bare `\quit` line because the extension loader ignores
+    only lines beginning with `\echo`. That question is answered by a
+    real server on every pgrx Release PR, before any tag: the
+    `proof.sh` stage of `generate-pgrx-upgrade.sh` installs the
+    previous release's tarball, lands the derived script over it, runs
+    `ALTER EXTENSION UPDATE` and compares the catalog with a fresh
+    install. It is what refused the three-line guard — edtf's release
+    run 32517990596 failed on `syntax error at or near "\"`, no tag
+    was minted, nothing published (#801) — and the gate already reds
+    on that shape without a server: with the generator emitting the
+    v1.58.2 guard, five rows of `test_upgrade_script.py` fail, the
+    byte-for-byte reproduction of `lab_pg--0.27.0--0.28.1.sql` and the
+    one-line guard row among them (measured for #1807). A server
+    oracle in the canon's own gate was probed and refused on
+    2026-11-20 (#1807): it works — Postgres 18.7 from
+    `aqua:theseus-rs/postgresql-binaries`, a temporary cluster with
+    `extension_control_path`, loads the current guard and rejects the
+    v1.58.2 one in a second, no container — but it needs a Postgres
+    pin and a root `mise.lock` in a repository whose `mise.toml`
+    carries no `[tools]` on purpose, a 263 MB install, and it would
+    only move an existing red from the next pgrx Release PR to the
+    canon's pull request. A belt pin was ruled out by #813: belt tools
+    install in every repository.
   - **Full-width integration stays release-lab's.** The candidate
     package build, the ALTER EXTENSION round trip against a live
     catalog, and the five artefact classes across PG 14–18 are proven
