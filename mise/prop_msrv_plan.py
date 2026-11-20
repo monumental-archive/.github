@@ -18,6 +18,7 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import unittest
+from typing import TypedDict
 
 import msrv_plan as mp
 from hypothesis import example
@@ -27,6 +28,21 @@ from typed_hypothesis import given
 PART = st.integers(0, 999)
 VERSION = st.tuples(PART, PART, PART)
 NAME = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
+SHOWN: st.SearchStrategy[str] = VERSION.map(mp.show)
+Member = dict[str, str | None]
+
+
+class ToolchainDoc(TypedDict):
+    """One entry of `mise ls --json` for the rust tool."""
+
+    version: str
+    active: bool
+    installed: bool
+
+
+TOOLCHAIN: st.SearchStrategy[ToolchainDoc] = st.builds(
+    ToolchainDoc, version=SHOWN, active=st.booleans(), installed=st.booleans()
+)
 
 
 class Versions(unittest.TestCase):
@@ -53,8 +69,7 @@ class Refusal(unittest.TestCase):
         self.assertTrue(got is None or len(got) == 3)  # ruff: ignore[magic-value-comparison] - three parts
 
 
-@st.composite
-def workspace(draw: st.DrawFn) -> list[dict[str, str | None]]:
+def draw_workspace(draw: st.DrawFn) -> list[Member]:
     """Draw members, each with or without a rust-version promise.
 
     Returns:
@@ -62,14 +77,17 @@ def workspace(draw: st.DrawFn) -> list[dict[str, str | None]]:
 
     """
     names = draw(st.lists(NAME, unique=True, max_size=6))
-    out = []
+    out: list[Member] = []
     for name in names:
         promise = draw(st.one_of(st.none(), VERSION.map(mp.show)))
         out.append({"name": name, "version": "0.1.0", "rust_version": promise})
     return out
 
 
-def typed(members: list[dict[str, str | None]]) -> list[mp.Package]:
+workspace = st.composite(draw_workspace)
+
+
+def typed(members: list[Member]) -> list[mp.Package]:
     """Decode drawn members the way the check decodes cargo metadata.
 
     Returns:
@@ -84,52 +102,41 @@ class Promises(unittest.TestCase):
 
     @given(st.data(), workspace(), st.sets(NAME, max_size=2))
     def test_member_order_does_not_matter(
-        self, data: st.DataObject, members: list[dict], exclude: set[str]
+        self, data: st.DataObject, members: list[Member], exclude: set[str]
     ) -> None:
         """The same members per promise, in any order."""
         shuffled = data.draw(st.permutations(members))
         one, unreachable_one, _ = mp.promises(typed(members), exclude)
         two, unreachable_two, _ = mp.promises(typed(shuffled), exclude)
-        self.assertEqual(
-            {k: sorted(v) for k, v in one.items()},
-            {k: sorted(v) for k, v in two.items()},
-        )
-        self.assertEqual(sorted(unreachable_one), sorted(unreachable_two))
+        groups_one = {k: sorted(v) for k, v in one.items()}
+        groups_two = {k: sorted(v) for k, v in two.items()}
+        self.assertEqual(groups_one, groups_two)
+        lost_one, lost_two = sorted(unreachable_one), sorted(unreachable_two)
+        self.assertEqual(lost_one, lost_two)
         grouped = {s.split("@")[0] for specs in one.values() for s in specs}
-        self.assertEqual(
-            grouped,
-            {
-                m["name"]
-                for m in members
-                if m["rust_version"] and m["name"] not in exclude
-            },
-        )
+        promised = {
+            m["name"] for m in members if m["rust_version"] and m["name"] not in exclude
+        }
+        self.assertEqual(grouped, promised)
 
-    @given(
-        st.lists(
-            st.fixed_dictionaries({
-                "version": VERSION.map(mp.show),
-                "active": st.booleans(),
-                "installed": st.booleans(),
-            }),
-            max_size=6,
-        )
-    )
-    def test_only_active_installed_toolchains_pin(self, listing: list[dict]) -> None:
+    @given(st.lists(TOOLCHAIN, max_size=6))
+    def test_only_active_installed_toolchains_pin(
+        self, listing: list[ToolchainDoc]
+    ) -> None:
         """Pins are the active and installed; absent the active, uninstalled."""
         pinned, absent = mp.pins(mp.toolchains(listing))
-        self.assertEqual(
-            set(pinned),
-            {
-                mp.parse_version(e["version"])
-                for e in listing
-                if e["active"] and e["installed"]
-            },
+        served = set(pinned)
+        installed = {
+            mp.parse_version(e["version"])
+            for e in listing
+            if e["active"] and e["installed"]
+        }
+        self.assertEqual(served, installed)
+        absent_sorted = sorted(absent)
+        uninstalled = sorted(
+            e["version"] for e in listing if e["active"] and not e["installed"]
         )
-        self.assertEqual(
-            sorted(absent),
-            sorted(e["version"] for e in listing if e["active"] and not e["installed"]),
-        )
+        self.assertEqual(absent_sorted, uninstalled)
 
     @given(st.data(), st.dictionaries(NAME, st.integers(10, 30), max_size=4))
     def test_pgrx_pairs_in_any_order(
@@ -138,10 +145,8 @@ class Promises(unittest.TestCase):
         """Each member's flags name its major."""
         items = data.draw(st.permutations(list(pairs.items())))
         declared = ",".join(f" {n}:{m} " for n, m in items)
-        self.assertEqual(
-            mp.features(declared),
-            {n: f"--no-default-features --features pg{m}" for n, m in pairs.items()},
-        )
+        flags = {n: f"--no-default-features --features pg{m}" for n, m in pairs.items()}
+        self.assertEqual(mp.features(declared), flags)
 
 
 if __name__ == "__main__":

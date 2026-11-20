@@ -193,6 +193,16 @@ class Audit(unittest.TestCase):
 USAGE = "usage: python_properties.py gate|audit FILE...\n"
 
 
+def unlabelled(word: str) -> bool:
+    """Tell whether a word is not a profile's label.
+
+    Returns:
+        True when it is none.
+
+    """
+    return word not in pp.LABELS
+
+
 class Usage(unittest.TestCase):
     """Arguments that name no profile and a file."""
 
@@ -200,7 +210,7 @@ class Usage(unittest.TestCase):
         st.one_of(
             st.lists(st.text(max_size=6), max_size=1),
             st.lists(
-                st.text(max_size=6).filter(lambda word: word not in pp.LABELS),
+                st.text(max_size=6).filter(unlabelled),
                 min_size=2,
                 max_size=4,
             ),
@@ -218,6 +228,7 @@ NAME = st.from_regex(
 FILES = st.lists(NAME, unique=True, max_size=20).map(
     lambda names: [Path(n) for n in names]
 )
+NO_FILES: list[Path] = []
 
 
 class ShardPartition(unittest.TestCase):
@@ -235,9 +246,11 @@ class ShardPartition(unittest.TestCase):
         """Disjoint, complete, balanced, and independent of listing order."""
         shuffled = [files[i] for i in order if i < len(files)]
         shards = [pp.shard_of(files, f"{k}/{n}") for k in range(n)]
-        self.assertEqual(shards, [pp.shard_of(shuffled, f"{k}/{n}") for k in range(n)])
+        reshuffled = [pp.shard_of(shuffled, f"{k}/{n}") for k in range(n)]
+        self.assertEqual(shards, reshuffled)
         flat = [f for shard in shards for f in shard]
-        self.assertEqual(sorted(flat, key=str), sorted(files, key=str))
+        every, given_files = sorted(flat, key=str), sorted(files, key=str)
+        self.assertEqual(every, given_files)
         sizes = [len(shard) for shard in shards]
         self.assertLessEqual(max(sizes) - min(sizes), 1)
 
@@ -246,10 +259,10 @@ class ShardRefusal(unittest.TestCase):
     """Anything but k/n with k < n is refused by name."""
 
     @given(FILES, st.text(max_size=8))
-    @example([], "8/8")
-    @example([], "0/0")
-    @example([], "²/8")
-    @example([], "1/8 ")
+    @example(NO_FILES, "8/8")
+    @example(NO_FILES, "0/0")
+    @example(NO_FILES, "²/8")
+    @example(NO_FILES, "1/8 ")
     def test_any_value_is_read_or_refused(self, files: list[Path], spec: str) -> None:
         """A shard, or ShardError naming the value."""
         try:

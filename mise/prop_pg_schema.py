@@ -37,8 +37,7 @@ COMMENT = st.sampled_from([
 ])
 
 
-@st.composite
-def spelt(draw: st.DrawFn, statements: list[list[str]]) -> str:
+def draw_spelt(draw: st.DrawFn, statements: list[list[str]]) -> str:
     """Write statements in any order, with comments and whitespace.
 
     Returns:
@@ -46,7 +45,7 @@ def spelt(draw: st.DrawFn, statements: list[list[str]]) -> str:
 
     """
     order = draw(st.permutations(statements))
-    out = []
+    out: list[str] = []
     for words in order:
         out.extend((
             draw(COMMENT),
@@ -54,6 +53,9 @@ def spelt(draw: st.DrawFn, statements: list[list[str]]) -> str:
             draw(GAP) + ";" + draw(GAP),
         ))
     return "".join(out)
+
+
+spelt = st.composite(draw_spelt)
 
 
 class Normalise(unittest.TestCase):

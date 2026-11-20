@@ -35,6 +35,8 @@ PATH = st.lists(SEGMENT, min_size=1, max_size=3).map(lambda p: "/".join(p) + ".g
 KIND = st.from_regex(r"[A-Z][A-Za-z]{2,10}", fullmatch=True)
 REASON = st.from_regex(r"[a-z][a-z ,.]{0,30}", fullmatch=True).map(str.strip)
 CODE = st.sampled_from(["", "\t", "\tx := a + b ", "\treturn n "])
+Hit = tuple[str, int, str, str, str]
+Profile = tuple[str, dict[str, str], dict[str, list[range]]]
 
 
 class Records(unittest.TestCase):
@@ -43,7 +45,7 @@ class Records(unittest.TestCase):
     @given(
         st.lists(st.tuples(PATH, st.integers(1, 9999), CODE, KIND, REASON), max_size=5)
     )
-    def test_hits_read_back(self, hits: list[tuple]) -> None:
+    def test_hits_read_back(self, hits: list[Hit]) -> None:
         """Path, line, site, mutator and reason."""
         text = "".join(
             f"{p}:{n}:{code}{mg.MARK} {kind} {reason}\n"
@@ -52,17 +54,15 @@ class Records(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             (Path(scratch) / "records.txt").write_text(text, encoding="utf-8")
             got = mg.read_records(Path(scratch))
-        self.assertEqual(
-            [(r.path, r.line, r.site, r.kind, r.reason) for r in got],
-            [
-                (p, n, n if code.strip() else n + 1, kind, reason)
-                for p, n, code, kind, reason in hits
-            ],
-        )
+        read = [(r.path, r.line, r.site, r.kind, r.reason) for r in got]
+        written = [
+            (p, n, n if code.strip() else n + 1, kind, reason)
+            for p, n, code, kind, reason in hits
+        ]
+        self.assertEqual(read, written)
 
 
-@st.composite
-def profile(draw: st.DrawFn) -> tuple[str, dict[str, str], dict[str, list[range]]]:
+def draw_profile(draw: st.DrawFn) -> Profile:
     """Write a coverage profile over some packages.
 
     Returns:
@@ -99,11 +99,14 @@ def profile(draw: st.DrawFn) -> tuple[str, dict[str, str], dict[str, list[range]
     return "\n".join(lines) + "\n", packages, expected
 
 
+profile = st.composite(draw_profile)
+
+
 class Coverage(unittest.TestCase):
     """Executed blocks, under the path from the root."""
 
     @given(profile())
-    def test_profile_reads_back(self, drawn: tuple) -> None:
+    def test_profile_reads_back(self, drawn: Profile) -> None:
         """Count-zero and foreign blocks dropped; the rest as ranges."""
         text, packages, expected = drawn
         with tempfile.TemporaryDirectory() as scratch:
@@ -157,8 +160,9 @@ class Survivors(unittest.TestCase):
         verdict = mg.Verdict()
         mutant = mg.Mutant(file=f"/r/{path}", line=line, column=1, kind=kind)
         mg.class_survivor(shard, verdict, mutant, "site")
-        self.assertEqual(verdict.not_covered, ["site"] if how == "uncovered" else [])
-        self.assertEqual(verdict.survived, ["site"] if how == "survived" else [])
+        named, unnamed = ["site"], list[str]()
+        self.assertEqual(verdict.not_covered, named if how == "uncovered" else unnamed)
+        self.assertEqual(verdict.survived, named if how == "survived" else unnamed)
 
 
 if __name__ == "__main__":

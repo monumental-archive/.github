@@ -25,8 +25,7 @@ CLASS = st.from_regex(r"[a-z]{3,6}-[a-z]{3,6}", fullmatch=True)
 PREFIX = st.from_regex(r"sbom-[a-z]{2,6}-", fullmatch=True)
 
 
-@st.composite
-def obligations(draw: st.DrawFn) -> list[tuple[str, str]]:
+def draw_obligations(draw: st.DrawFn) -> list[tuple[str, str]]:
     """Draw planned (class, prefix) pairs, one prefix each.
 
     Returns:
@@ -38,6 +37,9 @@ def obligations(draw: st.DrawFn) -> list[tuple[str, str]]:
         st.lists(PREFIX, unique=True, min_size=len(classes), max_size=len(classes))
     )
     return list(zip(classes, prefixes, strict=True))
+
+
+obligations = st.composite(draw_obligations)
 
 
 def policy(pairs: list[tuple[str, str]]) -> pp.Policy:
@@ -57,14 +59,14 @@ def policy(pairs: list[tuple[str, str]]) -> pp.Policy:
     })
 
 
-def producer(draw: st.DrawFn, klass: str, prefix: str) -> str:
+def producer(data: st.DataObject, klass: str, prefix: str) -> str:
     """Write one workflow that produces an obligation.
 
     Returns:
         The workflow text.
 
     """
-    emit = draw(
+    emit = data.draw(
         st.sampled_from([
             f"      PLAN_DOC_PREFIX: {prefix}",
             f"      run: jq -n '{{doc: (\"{prefix}\" + $v)}}'",
@@ -72,7 +74,7 @@ def producer(draw: st.DrawFn, klass: str, prefix: str) -> str:
     )
     return (
         "\n".join([
-            draw(st.sampled_from(["", "# a workflow"])),
+            data.draw(st.sampled_from(["", "# a workflow"])),
             f"# plan-producer: {klass} {prefix}",
             f"name: build {klass}",
             "    env:",
@@ -91,12 +93,10 @@ class Join(unittest.TestCase):
         self, data: st.DataObject, pairs: list[tuple[str, str]]
     ) -> None:
         """Clean with all producers; one finding per producer removed."""
-        files = {
-            f"w{i}.yml": producer(data.draw, k, p) for i, (k, p) in enumerate(pairs)
-        }
+        files = {f"w{i}.yml": producer(data, k, p) for i, (k, p) in enumerate(pairs)}
         order = data.draw(st.permutations(sorted(files)))
         files = {name: files[name] for name in order}
-        self.assertEqual(pp.judge(policy(pairs), files), [])
+        self.assertEqual(pp.judge(policy(pairs), files), list[str]())
         gone = data.draw(st.integers(0, len(pairs) - 1))
         del files[f"w{gone}.yml"]
         found = pp.judge(policy(pairs), files)
@@ -131,7 +131,8 @@ class StripMarkers(unittest.TestCase):
         text = "\n".join(lines)
         kept = [line for line in text.splitlines() if not pp.MARKER.match(line)]
         got = [line for line in pp.strip_markers(text).splitlines() if line]
-        self.assertEqual(got, [line for line in kept if line])
+        unblank = [line for line in kept if line]
+        self.assertEqual(got, unblank)
 
 
 if __name__ == "__main__":
