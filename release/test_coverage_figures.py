@@ -19,6 +19,7 @@ stdlib `unittest`, matching the other release/test_*.py; run through
 the gate as `mise run test`.
 """
 
+import contextlib
 import io
 import json
 import shutil
@@ -29,6 +30,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 import coverage_figures as figures
 
@@ -285,6 +287,92 @@ class OneLeg(unittest.TestCase):
         self.assertEqual(2, figures.main(["figures", SHA, "python"]))
 
 
+class CommandLine(unittest.TestCase):
+    """main(), in process: each subcommand over what is piped to it."""
+
+    @staticmethod
+    def main(argv: list[str], data: bytes) -> tuple[int, str, str]:
+        """Run the command line with `data` as its standard input.
+
+        Returns:
+            The exit status, stdout and stderr.
+
+        """
+        with tempfile.TemporaryFile() as piped:
+            piped.write(data)
+            piped.seek(0)
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                mock.patch.object(figures, "STDIN", piped.fileno()),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                status = figures.main(argv)
+        return status, out.getvalue(), err.getvalue()
+
+    def test_each_subcommand_answers(self) -> None:
+        """choose, judge and figures print what the script reads."""
+        listed = json.dumps(listing(artifact(SHA, SHA))).encode()
+        ran = json.dumps(run_record(SHA)).encode()
+        for argv, data, said in (
+            (["choose", SHA], listed, "14582536594 44631546473\n"),
+            (
+                ["judge", SHA],
+                ran,
+                "https://github.com/monumental-archive/.github/actions/runs/44631546473\n",
+            ),
+            (["figures", SHA], zipped(LEGS), LEGS),
+            (
+                ["figures", SHA, "pgrx-pg17"],
+                zipped("pgrx-pg17 96.5\n"),
+                "pgrx-pg17 96.5\n",
+            ),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual((0, said, ""), self.main(argv, data))
+
+    def test_a_refusal_is_one_line_and_status_one(self) -> None:
+        """The reason, labelled, on stderr; nothing on stdout."""
+        status, out, err = self.main(
+            ["judge", SHA], json.dumps(run_record(OTHER)).encode()
+        )
+        self.assertEqual((1, ""), (status, out))
+        self.assertEqual(
+            f"release:coverage-floor: not reading the gate's figures:"
+            f" run 44631546473 is for {OTHER}, not {SHA}\n",
+            err,
+        )
+
+    def test_a_forge_answer_that_is_not_json_is_refused(self) -> None:
+        """decoded.py's refusal becomes the step's."""
+        status, _, err = self.main(["choose", SHA], b"<html>rate limited</html>")
+        self.assertEqual(1, status)
+        self.assertIn("the forge answered with something that is not JSON", err)
+
+    def test_usage_errors_are_status_two(self) -> None:
+        """No sha, a short sha, an unknown command, a leg that is not pgrx."""
+        for argv in (
+            ["choose"],
+            ["choose", "abc"],
+            ["measure", SHA],
+            ["figures", SHA, "python"],
+        ):
+            with self.subTest(argv=argv):
+                status, out, err = self.main(argv, b"")
+                self.assertEqual((2, ""), (status, out))
+                self.assertIn("usage: coverage_figures.py", err)
+
+
+def no_cache(_directory: str, names: list[str]) -> set[str]:
+    """Leave Python's byte-code caches out of a copied tree.
+
+    Returns:
+        The names to skip.
+
+    """
+    return {name for name in names if name == "__pycache__"}
+
+
 # The forge: answers from files the row planted beside it, keyed by the
 # artifact's name, the run's id and the artifact's id, and records every
 # call. A path with no planted answer fails as gh does.
@@ -362,9 +450,7 @@ class Derive(unittest.TestCase):
         # The belt whole, as the release job has it: a helper that comes
         # to import another belt module finds it, and only the
         # measurement below is a stub.
-        shutil.copytree(
-            CANON / "mise", canon / "mise", ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(CANON / "mise", canon / "mise", ignore=no_cache)
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         for path, text in (
