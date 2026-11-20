@@ -96,12 +96,14 @@ from __future__ import annotations
 import base64
 import contextlib
 import copy
+import http.client
 import io
 import json
 import os
 import sys
 import threading
 import unittest
+import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -937,6 +939,55 @@ def edtf_zenodo() -> Zenodo:
         redirect=True,
         records={EDTF_PREV: recorded(EDTF_RDM), f"plain/{EDTF_PREV}": prev},
     )
+
+
+def no_redirect_handler() -> type[urllib.request.HTTPRedirectHandler]:
+    """Find the helper's own redirect handler, the authenticated opener's.
+
+    Returns:
+        The one `HTTPRedirectHandler` subclass the helper defines.
+
+    """
+    (handler,) = (
+        c
+        for c in urllib.request.HTTPRedirectHandler.__subclasses__()
+        if c.__module__ == mint_doi.__name__
+    )
+    return handler
+
+
+class TheTokenNeverFollowsARedirect(unittest.TestCase):
+    """An authenticated call answered with a 3xx stops there (#1698)."""
+
+    def test_the_handler_makes_no_new_request(self) -> None:
+        """Asked for the redirected request, as urllib asks, it makes none.
+
+        urllib then raises the 3xx as an `HTTPError`, so the token is
+        never sent on to the redirect's target.
+        """
+        old = urllib.request.Request(
+            "https://zenodo.org/api/records/1/versions/latest",
+            headers={"Authorization": "Bearer stub-token"},
+        )
+        new = no_redirect_handler()().redirect_request(
+            old,
+            io.BytesIO(),
+            301,
+            "Moved Permanently",
+            http.client.HTTPMessage(),
+            "https://zenodo.org/api/records/2",
+        )
+        self.assertIsNone(new)
+
+    def test_an_authenticated_read_is_not_followed(self) -> None:
+        """The 301 is the answer, though its target would answer 200."""
+        z = edtf_zenodo()
+        with Fake(z):
+            client = mint_doi.Zenodo(z.base, "stub-token", "stub-agent")
+            url = f"{z.base}/api/records/{EDTF_CONCEPT}/versions/latest"
+            with self.assertRaises(mint_doi.HttpError) as caught:
+                client.idem("GET", url)
+        self.assertEqual(f"GET {url}: HTTP 301", str(caught.exception))
 
 
 class TheRecordedResponses(unittest.TestCase):

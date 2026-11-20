@@ -19,12 +19,15 @@ helper the publisher reads too) and fails by name on one it names that
 cargo did not write.
 
 WHAT RUNS. The Package step's helper, release/package_crates.py
-(#1384), then the `run:` bodies of `Compute the subject manifest` and
-`Emit the inventory plan`, cut out of
-`.github/workflows/build-rust-crate.yml` as shipped, in order, the two
-bodies under `bash -c`, with a stub `cargo` first on PATH. The helper
-runs through a `.org-canon` link to this tree exactly as the canon
-action lays it out, and so does crates-io-members.sh, which it calls;
+(#1384), its `main` called in this process (#1698), then the `run:`
+bodies of `Compute the subject manifest` and `Emit the inventory
+plan`, cut out of `.github/workflows/build-rust-crate.yml` as shipped,
+in order, the two bodies under `bash -c`, with a stub `cargo` first on
+PATH. One row starts the helper as the job does instead, through a
+`.org-canon` link to this tree exactly as the canon action lays it
+out: the script contract (it starts, and exits with cargo's own
+status and message). crates-io-members.sh, which it calls, runs from
+this tree;
 `sha256sum`, `sed` and `jq` are the real ones; GITHUB_OUTPUT is a real
 file the hash step writes and the test reads back. One row holds the
 shipped Package step to the helper call, so what runs here is what the
@@ -67,6 +70,7 @@ from tempfile import TemporaryDirectory
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+import package_crates
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-rust-crate.yml"
@@ -202,6 +206,27 @@ def metadata(publish: dict[str, list[str] | None]) -> dict[str, object]:
     }
 
 
+@dataclass(frozen=True)
+class Job:
+    """One row's workspace and the resolve step's flags.
+
+    Attributes:
+        excludes: EXCLUDE_FLAGS, as the resolve step writes them.
+        second: bytes the --no-verify run writes instead, per member.
+        members: the workspace members cargo packages.
+        publish: each member's `publish` key as cargo metadata reports
+            it, where the row sets one; unset (null) otherwise.
+        unwritten: members cargo package writes no crate for.
+
+    """
+
+    excludes: str
+    second: dict[str, bytes] | None = None
+    members: tuple[str, ...] = MEMBERS
+    publish: dict[str, list[str]] | None = None
+    unwritten: tuple[str, ...] = ()
+
+
 def run_steps(
     excludes: str,
     second: dict[str, bytes] | None = None,
@@ -209,15 +234,22 @@ def run_steps(
     publish: dict[str, list[str]] | None = None,
     unwritten: tuple[str, ...] = (),
 ) -> Run:
+    """Run the shipped step bodies in order, the helper in this process.
+
+    The arguments are `Job`'s fields.
+
+    Returns:
+        The run's status, output, cargo log and what it left behind.
+
+    """
+    return steps(Job(excludes, second, members, publish, unwritten), script=False)
+
+
+def steps(job: Job, *, script: bool) -> Run:
     """Run the shipped step bodies in order, as the job does.
 
-    Args:
-        excludes: EXCLUDE_FLAGS, as the resolve step writes them.
-        second: bytes the --no-verify run writes instead, per member.
-        members: the workspace members cargo packages.
-        publish: each member's `publish` key as cargo metadata reports
-            it, where the row sets one; unset (null) otherwise.
-        unwritten: members cargo package writes no crate for.
+    `script` starts the helper as the job does, rather than call its
+    `main` in this process.
 
     Returns:
         The run's status, output, cargo log and what it left behind.
@@ -234,38 +266,46 @@ def run_steps(
         (stubs / "cargo").chmod(0o755)
         # The inventory step reads the policy the release asserts.
         hermetic.canon(work / ".org-canon", "slsa/assert-policy.json")
-        keys = {m: (publish or {}).get(m) for m in members}
+        keys = {m: (job.publish or {}).get(m) for m in job.members}
         (tmp / "metadata.json").write_text(json.dumps(metadata(keys)))
-        for m in members:
+        for m in job.members:
             (first / f"{m}-{VERSION}.crate").write_bytes(crate_bytes(m))
-        for m, b in (second or {}).items():
+        for m, b in (job.second or {}).items():
             (planted / f"{m}-{VERSION}.crate").write_bytes(b)
         log, outputs = tmp / "cargo.log", tmp / "github_output"
         outputs.touch()
         env = hermetic.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            EXCLUDE_FLAGS=excludes,
+            EXCLUDE_FLAGS=job.excludes,
             UNTRUSTED_VERSION=VERSION,
             GITHUB_OUTPUT=str(outputs),
             STUB_LOG=str(log),
-            STUB_MEMBERS=" ".join(members),
+            STUB_MEMBERS=" ".join(job.members),
             STUB_UNCOMPILABLE=UNCOMPILABLE,
             STUB_VERSION=VERSION,
             STUB_FIRST=str(first),
             STUB_SECOND=str(planted),
             STUB_METADATA=str(tmp / "metadata.json"),
-            STUB_UNWRITTEN=" ".join(unwritten),
+            STUB_UNWRITTEN=" ".join(job.unwritten),
         )
         out, err, rc = "", "", 0
+        result: subprocess.CompletedProcess[str] | hermetic.Called
         for argv in [[HELPER], *([BASH, "-c", step_body(n)] for n in STEPS)]:
-            result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                argv,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=work,
-            )
+            if argv == [HELPER] and not script:
+
+                def call() -> int:
+                    return package_crates.main()
+
+                result = hermetic.call_main(call, env=env, cwd=work)
+            else:
+                result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                    argv,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    cwd=work,
+                )
             out, err, rc = out + result.stdout, err + result.stderr, result.returncode
             if rc != 0:
                 break
@@ -356,8 +396,11 @@ class PackageAnExcludedMember(unittest.TestCase):
         self.assertEqual("", run.outputs)
 
     def test_a_failing_cargo_fails_the_step_with_its_status(self) -> None:
-        """The uncompilable member, not excluded: cargo's 101 is the step's."""
-        run = run_steps("")
+        """The uncompilable member, not excluded: cargo's 101 is the step's.
+
+        The script row: cargo's message is on the child's own stderr.
+        """
+        run = steps(Job(""), script=True)
         self.assertEqual(101, run.returncode)
         self.assertIn("failed to compile pgrx-pg-sys", run.stderr)
         self.assertEqual(["package --workspace --locked"], run.cargo)

@@ -6,11 +6,13 @@ commit" out of build-go-binary.yml into the helper, refusals unchanged.
 A build leg carries no belt, so the step runs the helper from the canon
 tree the pins step recorded, like the build step beside it.
 
-WHAT RUNS. The helper itself, by its path in this tree, in a real git
-repository (its HEAD is the released commit), with a stub `go` first on
-PATH. The stub answers `version -m FILE` with FILE's own contents, so a
-row plants the build info each binary reports by writing it as the
-binary; STUB_FAIL makes go fail instead.
+WHAT RUNS. The helper's `main`, called in this process (#1698), in a
+real git repository (its HEAD is the released commit), with a stub
+`go` first on PATH. The stub answers `version -m FILE` with FILE's own
+contents, so a row plants the build info each binary reports by
+writing it as the binary; STUB_FAIL makes go fail instead. One row
+starts the helper by its path in this tree instead: the script
+contract (it starts, and exits with go's own status and message).
 
 stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
@@ -30,6 +32,7 @@ from tempfile import TemporaryDirectory
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import check_go_stamps
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -112,11 +115,16 @@ def git(cwd: Path, *args: str) -> str:
 
 
 def run_helper(
-    binaries: dict[str, str] | None, *, fail: bool = False, repo: bool = True
+    binaries: dict[str, str] | None,
+    *,
+    fail: bool = False,
+    repo: bool = True,
+    script: bool = False,
 ) -> Run:
     """Run the helper over staged/ holding `binaries` (name → build info).
 
-    `{head}` in a build info is replaced by the repository's HEAD.
+    `{head}` in a build info is replaced by the repository's HEAD. In
+    this process unless `script`, which starts it by its path.
 
     Returns:
         Its status, output and the released commit.
@@ -145,15 +153,23 @@ def run_helper(
             "STUB_FAIL": "1" if fail else "",
             "GIT_CEILING_DIRECTORIES": str(tmp),
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        result = subprocess.run(
-            [str(HELPER)],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=work,
-        )
+        result: subprocess.CompletedProcess[str] | hermetic.Called
+        if script:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            result = subprocess.run(
+                [str(HELPER)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=work,
+            )
+        else:
+
+            def call() -> int:
+                return check_go_stamps.main()
+
+            result = hermetic.call_main(call, env=env, cwd=work)
         return Run(result.returncode, result.stdout, result.stderr, head)
 
 
@@ -271,8 +287,11 @@ class ToolFailures(unittest.TestCase):
     """go's or git's own failure fails the step with its status."""
 
     def test_a_file_go_cannot_read_fails_the_step(self) -> None:
-        """Not a Go binary: go's status and message."""
-        run = run_helper({"tool": info("{head}")}, fail=True)
+        """Not a Go binary: go's status and message.
+
+        The script row: go's message is on the child's own stderr.
+        """
+        run = run_helper({"tool": info("{head}")}, fail=True, script=True)
         self.assertEqual(1, run.returncode)
         self.assertEqual("go: not a Go binary\n", run.stderr)
         self.assertEqual("", run.stdout)
