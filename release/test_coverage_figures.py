@@ -399,9 +399,13 @@ echo "gh: Not Found (HTTP 404)" >&2
 exit 1
 """
 
-# The measurement: `probe` names the python leg and `pgrx-majors` the
-# planted majors; a measurement (`all` or `pgrx`) prints the planted
-# legs, or fails loudly where the row says nothing may be measured.
+# The measurement script, as the step calls it directly: `probe` names
+# the python leg, `pgrx-majors` the planted majors, and `pgrx` prints
+# the extension's planted legs, or fails loudly where the row says
+# nothing may be measured. The gate's own legs are never asked of it
+# outside mise (#1667): outside a run the python leg reads nothing, so
+# the step measures them through `mise run coverage:check`, and a direct
+# call for them here is red by name.
 MEASURE = """\
 #!/usr/bin/env bash
 case "$2" in
@@ -413,18 +417,34 @@ case "$2" in
     [[ -z ${STUB_MAJORS:-} ]] || printf '%s\\n' ${STUB_MAJORS}
     exit 0
     ;;
-  *) ;;
+  pgrx) ;;
+  *)
+    echo "coverage-measure.sh measured outside mise: no run to read" >&2
+    exit 98
+    ;;
 esac
-echo "${2:-all}" >> "${STUB_DIR}/measured.log"
+echo pgrx >> "${STUB_DIR}/measured.log"
 if [[ -n ${STUB_NO_MEASURE:-} ]]; then
-  echo "the stub measurement (${2:-all}) was called" >&2
+  echo "the stub measurement (pgrx) was called" >&2
   exit 97
 fi
-if [[ $2 == pgrx ]]; then
-  printf '%s' "${STUB_PGRX_LEGS}"
-else
-  printf '%s' "${STUB_LEGS}"
+printf '%s' "${STUB_PGRX_LEGS}"
+"""
+
+# `mise run coverage:check`, the step's own measurement of the gate's
+# legs (#1667): logged as `all`, they land in coverage-figures.txt
+# under ORG_COVERAGE_REPORTS, where coverage-measure.sh's `reports`
+# path writes them; or it fails loudly where the row says nothing may
+# be measured.
+MISE = """\
+#!/usr/bin/env bash
+[[ "$1 $2" == "run coverage:check" ]] || exit 2
+echo all >> "${STUB_DIR}/measured.log"
+if [[ -n ${STUB_NO_MEASURE:-} ]]; then
+  echo "the stub measurement (all) was called" >&2
+  exit 97
 fi
+printf '%s' "${STUB_LEGS}" > "${ORG_COVERAGE_REPORTS}/coverage-figures.txt"
 """
 
 PGRX_LEGS = "pgrx-pg17 96.5\npgrx-pg18 96.25\n"
@@ -455,6 +475,7 @@ class Derive(unittest.TestCase):
         self.stubs.mkdir()
         for path, text in (
             (self.stubs / "gh", GH),
+            (self.stubs / "mise", MISE),
             (canon / "mise" / "coverage-measure.sh", MEASURE),
         ):
             path.write_text(text, encoding="utf-8")

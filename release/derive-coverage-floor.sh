@@ -66,9 +66,9 @@ fi
 # to the floor as `coverage-figures-<sha>`. This reads that artifact
 # when every fact about it is this commit's — coverage_figures.py
 # decides each one and starts nothing — and names the run it read;
-# otherwise it says why, and measures as it always did. Either way the
-# figure is coverage-measure.sh's own, and coverage_floor.py judges it
-# below by one law.
+# otherwise it says why, and measures the way the gate does. Either way
+# the figure is coverage-measure.sh's own, and coverage_floor.py judges
+# it below by one law.
 figures="$(dirname "${BASH_SOURCE[0]}")/coverage_figures.py"
 sha=$(git rev-parse HEAD)
 
@@ -106,10 +106,19 @@ read_figures() { # usage: read_figures [pgrx-pg<major>]
 read_figures
 legs=${read_legs}
 if [[ -z ${legs} ]]; then
-  # One measurement shared with the gate, so the flags cannot drift apart
-  # (#316's shape, #652's fix).
+  # The gate's own measurement, made here (#1667): coverage:check depends
+  # on the repository's `test`, whose test command runs through
+  # `measured`, and keeps the leg lines it read in coverage-figures.txt
+  # (#1622). A plain step reads no run's directory, so the run is mise's,
+  # and the flags cannot drift from the gate's (#316's shape, #652's fix).
   echo "release:coverage-floor: measuring ${sha}" >&2
-  legs=$("${belt}/coverage-measure.sh" "release:coverage-floor")
+  reports=$(mktemp -d)
+  if ! ORG_COVERAGE_REPORTS="${reports}" mise run coverage:check >&2; then
+    echo "release:coverage-floor: coverage:check failed measuring ${sha} (above)" >&2
+    exit 1
+  fi
+  legs=$(< "${reports}/coverage-figures.txt")
+  rm -rf "${reports}"
 fi
 
 # A pgrx extension's `pgrx-pgNN` legs (#1656) are held to the floor by
