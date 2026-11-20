@@ -875,6 +875,18 @@ class Belt(unittest.TestCase):
         self.assertNotEqual("stub\n", real.read_text(encoding="utf-8"))
         self.assertEqual("new\n", (belt / "new.txt").read_text(encoding="utf-8"))
 
+    def test_a_stub_never_writes_the_canon(self) -> None:
+        """The stub is in the planted file; the canon's file is untouched (#1869)."""
+        real = CANON / "mise" / "config.toml"
+        before = real.read_bytes()
+        dest = hermetic.plant(
+            self.tmp / "belt", ["mise/config.toml"], "mise/", {"config.toml": "stub\n"}
+        )
+        self.assertNotEqual(CANON, dest)
+        self.assertFalse((dest / "config.toml").is_symlink())
+        self.assertEqual("stub\n", (dest / "config.toml").read_text(encoding="utf-8"))
+        self.assertEqual(before, real.read_bytes())
+
     def test_a_file_added_to_the_belt_appears_unasked(self) -> None:
         """A new helper, or a new sibling a script starts, needs no row change."""
         scratch = self.tmp / "canon"
