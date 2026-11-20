@@ -580,13 +580,14 @@ class Compiler(unittest.TestCase):
 
     def test_the_gate_and_pgrx_hold_the_cargo_caches(self) -> None:
         """The surface today: one restore in each of two jobs."""
-        held = {
+        held: set[str] = {
             job_id
             for job_id, job in workflow_yaml.jobs(parsed(real())).items()
             for s in workflow_yaml.steps(job)
             if holds_cargo(s)
         }
-        self.assertEqual({"gate", "pgrx"}, held)
+        want: set[str] = {"gate", "pgrx"}
+        self.assertEqual(want, held)
 
     def test_planted_breaches_are_named(self) -> None:
         """Each property broken once on the real file, by its message."""
@@ -635,7 +636,8 @@ class Compiler(unittest.TestCase):
         ]
         for label, (old, new), message in rows:
             with self.subTest(row=label):
-                self.assertEqual([message], compiler_findings(plant(old, new)))
+                want: list[str] = [message]
+                self.assertEqual(want, compiler_findings(plant(old, new)))
 
     def test_a_digest_read_before_the_install_is_named(self) -> None:
         """Planted: the step moved above mise-action reads no toolchain."""
@@ -648,10 +650,8 @@ class Compiler(unittest.TestCase):
         install = "      - name: Install mise and the leg's tools\n"
         text = plant(step, "")
         text = text.replace(install, step + install, 1)
-        self.assertEqual(
-            ["ci.yml: pgrx: the rustc digest is read before the install"],
-            compiler_findings(text),
-        )
+        want: list[str] = ["ci.yml: pgrx: the rustc digest is read before the install"]
+        self.assertEqual(want, compiler_findings(text))
 
 
 def install_key_findings(text: str) -> list[str]:
