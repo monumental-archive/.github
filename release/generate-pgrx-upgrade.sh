@@ -312,7 +312,7 @@ if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; th
 fi
 apt-get install -y -qq --no-install-recommends \
   "postgresql-server-dev-${PG}=${server}" build-essential \
-  ca-certificates curl pkg-config libclang-dev git
+  ca-certificates curl pkg-config clang llvm libclang-dev git
 after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 [[ ${after} == "${server}" ]] || {
   org_error "the build moved the server from ${server} to ${after}"

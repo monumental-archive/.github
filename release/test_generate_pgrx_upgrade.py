@@ -1101,6 +1101,30 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
             header_install(BUILD_ROOT.read_text()),
         )
 
+    def test_install_line_carries_the_clang_driver_and_llvm(self) -> None:
+        """pgrx 0.20 builds with a clang driver and llvm-ar (#1847).
+
+        Its bindgen step needs the `clang` and the `llvm-ar` of the
+        `libclang` release it binds through. The packages are
+        unversioned, so all three follow the image's default LLVM.
+        """
+        for site in (SCRIPT, BUILD_ROOT):
+            with self.subTest(site=site.name):
+                block = header_install(site.read_text())
+                start = next(
+                    i
+                    for i, line in enumerate(block)
+                    if line.startswith("apt-get install")
+                )
+                end = next(
+                    i for i in range(start, len(block)) if not block[i].endswith("\\")
+                )
+                words = " ".join(
+                    line.removesuffix("\\") for line in block[start : end + 1]
+                ).split()
+                for package in ("clang", "llvm", "libclang-dev"):
+                    self.assertIn(package, words)
+
     def test_installs_the_headers_at_the_server_version(self) -> None:
         """Every minor served, the image's own is the one installed."""
         result, args = run_header_install([
