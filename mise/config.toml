@@ -2664,13 +2664,16 @@ dir = "{{cwd}}"
 run = 'git ls-files ":!vendor/**" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/subject_budget.py"'
 
 [tasks."lint:zizmor"]
-description = "Security-audit GitHub Actions workflows (zizmor, pedantic)"
+description = "Security-audit GitHub Actions workflows (zizmor, auditor)"
 dir = "{{cwd}}"
 # --offline: with a token present zizmor auto-enables online audits, whose
 # results change with remote state — the gate checks the diff, not the
-# internet. Pedantic, no severity floor: every actionable finding fails.
-# The auditor persona (includes likely false positives) lives in
-# audit:actions for human-run reviews, not the gate.
+# internet. Auditor, the tool's maximum, no severity floor: every audit
+# that reads only the files runs here (#1719, #445). Pedantic left out
+# secrets-outside-env, so a job drawing an environment's secret with no
+# `environment:` merged green and was handed an empty string (#1602).
+# audit:actions runs the same persona online; the two differ only by
+# what needs the API.
 # Scope covers composite actions, not just workflows. zizmor audits
 # `action.yml` files and flags unpinned `uses:` in them exactly as it does
 # for workflows — it had simply never been pointed at them, so
@@ -2699,7 +2702,7 @@ files=$(action_files)
   echo "lint:zizmor: no workflows or actions, skipped"
   exit 0
 }
-xargs zizmor --offline --persona=pedantic <<< "${files}"
+xargs zizmor --offline --persona=auditor <<< "${files}"
 '''
 
 [tasks."lint:vex-one-per-merge"]
@@ -4944,8 +4947,8 @@ dir = "{{cwd}}"
 # needs the GitHub API: impostor-commit, known-vulnerable-actions,
 # ref-confusion, typosquat-uses, stale-action-refs. Those are exactly the
 # checks that catch a compromised or impersonated action, so they run here
-# on a schedule instead of nowhere. Auditor persona adds secrets-outside-env
-# and misfeature. Needs GH_TOKEN.
+# on a schedule instead of nowhere. Same auditor persona as the gate, so
+# the two differ only by what needs the API (#1719). Needs GH_TOKEN.
 #
 # FAIL CLOSED ON BLINDNESS (#310 finding 3, the claims.sh/#240 pattern):
 # without a token zizmor silently degrades to offline — skipping every
