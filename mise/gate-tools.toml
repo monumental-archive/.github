@@ -97,6 +97,14 @@ tasks = [
   "test:pgrx",
 ]
 
+[tools.yq]
+# No gate task calls it (#1840): the canon's own tests read workflows
+# through mise/workflow_yaml.py, and the canon's config pins yq, so its
+# gate installs it ("this repository pins yq itself"). #1846 gives it
+# its first gate task.
+tasks = []
+when = []
+
 [tools."aqua:suzuki-shunsuke/pinact"]
 tasks = ["lint:action-pins", "lint:scaffold-assembly"]
 when = ["*action.y*ml", ".github/workflows/*.y*ml", "scaffold/"]
