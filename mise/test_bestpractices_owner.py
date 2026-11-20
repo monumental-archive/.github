@@ -21,13 +21,21 @@ import json
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import bestpractices_owner as owner
+import decoded
 
 HERE = Path(__file__).resolve().parent
 
-DB = json.loads((HERE / "testdata" / "bestpractices-13998.json").read_text())
-CANON = json.loads((HERE / "testdata" / "bestpractices-14058.json").read_text())
+DB = decoded.as_object(
+    decoded.load_json((HERE / "testdata" / "bestpractices-13998.json").read_text()),
+    "project 13998's entry",
+)
+CANON = decoded.as_object(
+    decoded.load_json((HERE / "testdata" / "bestpractices-14058.json").read_text()),
+    "project 14058's entry",
+)
 
 DB_WEARER = "https://github.com/monumental-archive/monumental-archive-db"
 CANON_WEARER = "https://github.com/monumental-archive/.github"
@@ -42,17 +50,12 @@ def run(entry: object, wearer: str) -> tuple[int, str]:
     """
     out = io.StringIO()
     stdin = io.StringIO(json.dumps(entry))
-    real = owner.sys.stdin
-    owner.sys.stdin = stdin
-    try:
-        with redirect_stdout(out):
-            status = owner.main([wearer])
-    finally:
-        owner.sys.stdin = real
+    with mock.patch("sys.stdin", stdin), redirect_stdout(out):
+        status = owner.main([wearer])
     return status, out.getvalue()
 
 
-def entry(repo_url: str) -> dict:
+def entry(repo_url: str) -> dict[str, object]:
     """Return the canon's real entry with repo_url replaced.
 
     Returns:
@@ -127,13 +130,8 @@ class Normalisation(unittest.TestCase):
     def test_a_process_with_no_stdin_is_red_by_name(self) -> None:
         """No standard input is named, never a traceback (#1681)."""
         out = io.StringIO()
-        real = owner.sys.stdin
-        owner.sys.stdin = None
-        try:
-            with redirect_stdout(out):
-                status = owner.main([CANON_WEARER])
-        finally:
-            owner.sys.stdin = real
+        with mock.patch("sys.stdin", None), redirect_stdout(out):
+            status = owner.main([CANON_WEARER])
         self.assertEqual(status, 1)
         self.assertEqual(
             out.getvalue(),

@@ -6,8 +6,8 @@
 `mise/coverage-measure.sh`'s `rust-branches` leg on the repository's
 dated nightly; `coverage:adopt` writes that line. The bodies under test
 are the tasks' own `run` strings, read out of mise/config.toml with
-tomllib and run by bash in a planted git tree, and they call the real
-measurement script, the real `coverage_floor.py` and the real
+decoded.load_toml and run by bash in a planted git tree, and they call
+the real measurement script, the real `coverage_floor.py` and the real
 `pgrx-env.sh`. Only `cargo` and `rustup` are stubs: cargo answers
 `metadata` with a workspace holding no extension and `llvm-cov` with
 the numbers the row planted, and logs every `llvm-cov` call with the
@@ -24,7 +24,6 @@ import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -37,9 +36,6 @@ CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
-
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-
 
 NIGHTLY = "nightly-2026-07-20"
 
@@ -220,6 +216,13 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
 # it renders the test task's own measured run (#1653).
 LINE_RUN = "stable llvm-cov report --lcov --output-path <reports>/lcov.info"
 
+# What a row expects of the call log (or of the parse's problems), named
+# so each expected list carries its element type.
+EMPTY: list[str] = []
+LINE_ONLY: list[str] = [LINE_RUN]
+BRANCH_ONLY: list[str] = [BRANCH_RUN]
+LINE_THEN_BRANCH: list[str] = [LINE_RUN, BRANCH_RUN]
+
 
 class BranchCase(unittest.TestCase):
     """Runs a task and removes the planted tree afterwards."""
@@ -255,10 +258,7 @@ class AuditRows(BranchCase):
             "audit:coverage-branches: rust-branches holds the floor 70.0 (75.5%)\n",
             done.stdout,
         )
-        self.assertEqual(
-            [BRANCH_RUN],
-            calls,
-        )
+        self.assertEqual(BRANCH_ONLY, calls)
 
     def test_below_the_floor_reds_by_name(self) -> None:
         """One tenth below the line is red, naming the leg and both numbers."""
@@ -276,14 +276,14 @@ class AuditRows(BranchCase):
         done, _, calls = self.run_task(self.TASK, floor=MAIN)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(SKIP, done.stdout)
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_no_floor_file_skips_clean(self) -> None:
         """A repository that adopted no floor owes no branch figure either."""
         done, _, calls = self.run_task(self.TASK, floor=None)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(SKIP, done.stdout)
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_no_cargo_toml_skips_clean(self) -> None:
         """A tree with no Cargo.toml has no Rust branch to measure."""
@@ -292,7 +292,7 @@ class AuditRows(BranchCase):
         self.assertEqual(
             "audit:coverage-branches: no Cargo.toml, skipped\n", done.stdout
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_coverage_exclude_is_refused_as_the_rust_leg_refuses_it(self) -> None:
         """The removed variable reds the branch run by name, before any run (#1653)."""
@@ -304,7 +304,7 @@ class AuditRows(BranchCase):
             " own command builds, so the command\n",
             done.stderr,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_an_undeclared_nightly_reds_by_name(self) -> None:
         """A committed line with no FUZZ_TOOLCHAIN cannot be held, and says so."""
@@ -315,7 +315,7 @@ class AuditRows(BranchCase):
             " coverage needs a nightly\n",
             done.stderr,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_a_declared_nightly_not_installed_reds_by_name(self) -> None:
         """The nightly rides the pin; a missing one is never installed mid-run."""
@@ -326,7 +326,7 @@ class AuditRows(BranchCase):
             " not installed\n",
             done.stderr,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
     def test_no_branches_counted_is_refused(self) -> None:
         """Count 0 is an uninstrumented run's shape, never a 0% to compare."""
@@ -348,7 +348,7 @@ class AuditRows(BranchCase):
             " 72.0 under band 2 and the cap 90 derives 70.0.",
             done.stderr,
         )
-        self.assertEqual([], calls)
+        self.assertEqual(EMPTY, calls)
 
 
 class GateRows(BranchCase):
@@ -363,10 +363,7 @@ class GateRows(BranchCase):
             f"coverage:check: upload {tree.parent / 'reports' / 'lcov.info'}\n",
             done.stdout,
         )
-        self.assertEqual(
-            [LINE_RUN],
-            calls,
-        )
+        self.assertEqual(LINE_ONLY, calls)
 
 
 class AdoptRows(BranchCase):
@@ -386,17 +383,14 @@ class AdoptRows(BranchCase):
         parsed, problems = cf.parse(
             (tree / ".coverage-floor").read_text(encoding="utf-8")
         )
-        self.assertEqual([], problems)
-        self.assertEqual(
-            {"rust-branches": (Decimal("71.4"), Decimal("73.4"))}, parsed.separate
-        )
-        self.assertEqual(
-            [
-                LINE_RUN,
-                BRANCH_RUN,
-            ],
-            calls,
-        )
+        self.assertEqual(EMPTY, problems)
+        if parsed is None:
+            self.fail("the adopted .coverage-floor did not parse")
+        held: dict[str, tuple[Decimal, Decimal]] = {
+            "rust-branches": (Decimal("71.4"), Decimal("73.4"))
+        }
+        self.assertEqual(held, parsed.separate)
+        self.assertEqual(LINE_THEN_BRANCH, calls)
 
     def test_adopt_without_the_nightly_writes_no_line(self) -> None:
         """No FUZZ_TOOLCHAIN: the main floor only, and the reason printed."""
@@ -409,10 +403,7 @@ class AdoptRows(BranchCase):
         )
         text = (tree / ".coverage-floor").read_text(encoding="utf-8")
         self.assertNotIn("rust-branches", text)
-        self.assertEqual(
-            [LINE_RUN],
-            calls,
-        )
+        self.assertEqual(LINE_ONLY, calls)
 
     def test_adopt_cannot_lower_the_branch_line(self) -> None:
         """Below its floor, nothing is written."""

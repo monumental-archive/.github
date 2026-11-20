@@ -9,8 +9,8 @@ location Codecov reads: four names, at the root or under dev/ or
 .github/ (codecov/umbrella libs/shared/shared/yaml/fetcher.py).
 
 The body under test is the task's own `run` string, read out of
-mise/config.toml with tomllib and run by bash in a planted git tree, not
-a copy of it. Every red row asserts the exact message (#650).
+mise/config.toml with decoded.load_toml and run by bash in a planted git
+tree, not a copy of it. Every red row asserts the exact message (#650).
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -18,10 +18,10 @@ gate as `mise run test`, which `ci` collects.
 
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -44,8 +44,10 @@ def body() -> str:
         The task body.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    return config["tasks"][NAME]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks[NAME], NAME)
+    return decoded.as_str(task["run"], f"{NAME}'s run")
 
 
 BODY = body()

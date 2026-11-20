@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from typing import override
 
 import hermetic
 
@@ -68,6 +69,7 @@ def bash() -> str:
 class InstallTheBeltsPython(unittest.TestCase):
     """Each row: the planted tree and stub, and what the step did."""
 
+    @override
     def setUp(self) -> None:
         """Give each row a canon tree, a stub mise and a runner's files."""
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
