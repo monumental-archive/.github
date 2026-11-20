@@ -10,6 +10,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.6](https://github.com/monumental-archive/.github/compare/v1.70.5...v1.70.6) - 2026-11-20
+
+### Changed
+
+- remove what only mutmut's copy needed (#1772) ([#1784](https://github.com/monumental-archive/.github/pull/1784))
+
+### Fixed
+
+- mutate the python leg in place with cosmic-ray (#1771) ([#1775](https://github.com/monumental-archive/.github/pull/1775))
+- make the debt directory before generating it (#1746) ([#1776](https://github.com/monumental-archive/.github/pull/1776))
+- delete the default task shell setting (#1745) ([#1779](https://github.com/monumental-archive/.github/pull/1779))
+- take the held-out list out of org_pgrx_provision ([#1781](https://github.com/monumental-archive/.github/pull/1781))
+- move every entry of an array mise pin (#1773) ([#1778](https://github.com/monumental-archive/.github/pull/1778))
+- read a :? expansion's message as prose (#1782) ([#1783](https://github.com/monumental-archive/.github/pull/1783))
+- update monumental-archive/signer to f8157c8 ([#1789](https://github.com/monumental-archive/.github/pull/1789))
+- drop the machine-belt source and its note (#1739) ([#1780](https://github.com/monumental-archive/.github/pull/1780))
+- cap the floor at 90 and release on the gate's line ([#1791](https://github.com/monumental-archive/.github/pull/1791))
+
+### Testing
+
+- reach each refusal of the python mutation leg (#1771) ([#1787](https://github.com/monumental-archive/.github/pull/1787))
+
 ## [1.70.5](https://github.com/monumental-archive/.github/compare/v1.70.4...v1.70.5) - 2026-11-20
 
 ### Fixed
