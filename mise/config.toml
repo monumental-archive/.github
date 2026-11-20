@@ -1,9 +1,11 @@
 # The org toolbelt: universal tools every repo gets, locally and in CI.
 #
-# Local: symlink into the global fragment directory —
-#   ln -s ~/Projects/org-github/mise/config.toml ~/.config/mise/conf.d/toolbelt.toml
+# Local: each clone links the belt of its own pin (#1686, #1739) — the
+#   org hooks point `.config/mise/conf.d/belt.toml` at the machine's cache
+#   tree of the gate stub's sha; `lefthook run post-checkout` makes the
+#   link. There is no machine-wide belt. In the canon, the tree is the belt.
 # CI: the shared workflow checks out this repo (SHA-pinned) and sets
-#   MISE_GLOBAL_CONFIG_FILE to this file, so the layering is identical to local.
+#   MISE_GLOBAL_CONFIG_FILE to this file, at the same resolution.
 #
 # Every tool enters this file only after its own docs-first standup, pinned
 # exact. mise.lock alongside carries checksums; CI runs MISE_LOCKED=1.
@@ -20,7 +22,7 @@
 lockfile = true
 # `locked` is set by the shared workflow as MISE_LOCKED=1, not here. In the
 # config it also applies to local task runs, where mise re-resolves per task
-# directory and cannot find this file's lock through the conf.d symlink —
+# directory and cannot find this file's lock through the clone's link —
 # every task then warns that every tool "is not in the lockfile". The
 # enforcement belongs where the lock is guaranteed reachable: CI.
 # Re-verify each tool's provenance attestation on install, even when the
@@ -100,7 +102,7 @@ aqua.registries = [
 # had begun carrying their own resolution blocks. Six of them, at the
 # point this replaced them.
 #
-# Four carriers, one expression, first found wins (#1686):
+# Three carriers, one expression, first found wins (#1686, #1739):
 #   1. MISE_GLOBAL_CONFIG_FILE: CI, the canon tree that
 #      `$/.github/actions/canon` linked.
 #   2. The working tree's own mise/config.toml with clippy.toml beside
@@ -109,24 +111,26 @@ aqua.registries = [
 #      org hooks point at the cache tree of the gate stub's pinned sha:
 #      mise loads that link as a project config, and this follows it,
 #      so the tasks and ORG_BELT_DIR name one tree.
-#   4. A ~/.config/mise/conf.d symlink into a checkout: the machine belt,
-#      kept so a machine not yet moved to the link still works.
+# Nothing else. A clone with none of the three has no belt, and its
+# unset messages say how to make the link: `lefthook run post-checkout`.
+# There is no fourth source on the machine (#1739): one that answered
+# an unlinked clone would answer it with an unpinned belt, which is what
+# #1686 ended.
 # mise runs this exec in the directory of the config file that defines
 # it, whatever the shell's or the task's working directory (measured on
 # #1686, mise 2026.11.7): `<clone>/.config/mise/conf.d` for the link,
 # `<canon>/mise` for the canon's own file. So `git rev-parse` in 2 and 3
-# names the clone the config belongs to; the machine's copy runs in its
-# own conf.d, outside any clone, and finds only 4.
+# names the clone the config belongs to.
 # git's own repository variables are unset for that one question
 # (#1744). A hook in a linked worktree is handed GIT_DIR with no
 # GIT_WORK_TREE, and git then calls the directory it stands in the top
-# level: conf.d itself, where no link is found, so the machine's belt
-# answered every pre-push from a worktree. Unset, git discovers the
-# clone from the directory, which is what 2 and 3 mean. The list is
-# git's own (`rev-parse --local-env-vars`), not one written here, and
-# the unset lives inside the command substitution, so nothing leaks.
-# The belt is identified by a file only the belt has (clippy.toml), so no
-# link's NAME in the machine's conf.d is assumed. Empty when the belt
+# level: conf.d itself, where no link is found, so no belt answered a
+# pre-push from a worktree. Unset, git discovers the clone from the
+# directory, which is what 2 and 3 mean. The list is git's own
+# (`rev-parse --local-env-vars`), not one written here, and the unset
+# lives inside the command substitution, so nothing leaks.
+# The belt is identified by a file only the belt has (clippy.toml), so a
+# link to a tree that is no belt answers nothing. Empty when the belt
 # did not arrive — which is not a quiet state: `ci` is itself
 # belt-defined, so a tree with no belt dies at `mise run ci` as an
 # unknown command, before any lint task exists to skip (measured
@@ -142,14 +146,14 @@ aqua.registries = [
 # not-found branches are therefore `if`-guarded, never bare AND-lists whose
 # failure errexit promotes to a crash, and `git` and `readlink`, which may
 # be absent or find nothing, end in `|| true`.
-ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d" ]; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && [ -f "$t/mise/config.toml" ] && [ -f "$t/mise/clippy.toml" ]; then d="$t/mise/config.toml"; elif [ -n "$t" ] && [ -L "$t/.config/mise/conf.d/belt.toml" ]; then l=$(readlink "$t/.config/mise/conf.d/belt.toml" || true); case "$l" in /*) ;; *) l="$t/.config/mise/conf.d/$l" ;; esac; if [ -f "$(dirname "$l")/clippy.toml" ]; then d="$l"; fi; fi; fi; if [ -z "$d" ]; then for f in "${XDG_CONFIG_HOME:-$HOME/.config}"/mise/conf.d/*.toml; do t=$(readlink "$f" 2>/dev/null || echo "$f"); if [ -f "$(dirname "$t")/clippy.toml" ]; then d="$t"; break; fi; done; fi; if [ -n "$d" ] && [ -d "$(dirname "$d")" ]; then cd "$(dirname "$d")" && pwd; fi`) }}'''
+ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d" ]; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && [ -f "$t/mise/config.toml" ] && [ -f "$t/mise/clippy.toml" ]; then d="$t/mise/config.toml"; elif [ -n "$t" ] && [ -L "$t/.config/mise/conf.d/belt.toml" ]; then l=$(readlink "$t/.config/mise/conf.d/belt.toml" || true); case "$l" in /*) ;; *) l="$t/.config/mise/conf.d/$l" ;; esac; if [ -f "$(dirname "$l")/clippy.toml" ]; then d="$l"; fi; fi; fi; if [ -n "$d" ] && [ -d "$(dirname "$d")" ]; then cd "$(dirname "$d")" && pwd; fi`) }}'''
 # WHERE THE CANON TREE IS, derived from the belt and never resolved a
 # second time. The belt is one directory inside the canon; the tasks
 # that need the canon proper need what sits BESIDE it — slsa/ policies,
 # release/, security/. Both carriers put the belt inside a full canon
 # tree by construction: CI's `$/.github/actions/canon` refuses any tree
-# with no mise/config.toml before linking it, and locally the conf.d
-# symlink points into a checkout. So this is a dirname, not a second
+# with no mise/config.toml before linking it, and locally the clone's
+# link points into the cache tree of a canon commit. So this is a dirname, not a second
 # search, and it cannot disagree with ORG_BELT_DIR about which tree is
 # in play. Empty when the belt did not arrive, for the same #569 reason
 # stated above — `dirname` of empty is empty, not an error.
@@ -2338,7 +2342,7 @@ dir = "{{cwd}}"
 # field the newer version writes. Nothing was red.
 #
 # The belt: every repository on a machine read ONE canon checkout
-# through the conf.d symlink. That checkout was 215 commits behind, so
+# through a machine-wide symlink. That checkout was 215 commits behind, so
 # every repository was being linted locally with August's tools while
 # its gate ran November's; and one checkout sits on one commit while the
 # org's repositories pin several. Now each clone loads the belt of its
@@ -2367,11 +2371,12 @@ description = "The belt answering this gate is the belt in this tree (#867)"
 dir = "{{cwd}}"
 # CLAUDE.md promises `mise run ci` locally is exactly what CI runs. That
 # is only true if the belt answering is the belt in the tree under test,
-# and nothing said when it was not. `ORG_BELT_DIR` falls back to the
-# `~/.config/mise/conf.d` symlink whenever MISE_GLOBAL_CONFIG_FILE is
-# unset, and that symlink names ONE canon checkout on the machine —
-# whatever commit it happens to sit on. A fresh canon clone carrying its
-# own complete belt still resolved ORG_BELT_DIR to a DIFFERENT checkout.
+# and nothing said when it was not. `ORG_BELT_DIR` once fell back to a
+# machine-wide symlink whenever MISE_GLOBAL_CONFIG_FILE was unset, and
+# that symlink named ONE canon checkout on the machine — whatever commit
+# it happened to sit on. A fresh canon clone carrying its own complete
+# belt still resolved ORG_BELT_DIR to a DIFFERENT checkout. That
+# fallback is gone (#1739), and this guard stays the local control.
 #
 # It fires both ways and the dangerous one is silent. The false red froze
 # a merge queue on 2026-08-24: canon main was reported red on
@@ -2411,7 +2416,7 @@ dir = "{{cwd}}"
 # not this tree's mise/config.toml. Whichever body mise resolved is the
 # one running, so this works precisely when the wrong belt answers —
 # provided that belt carries it; a belt predating the check has nothing
-# to run, and that gap closes as the machine belt moves. The delivered
+# to run, and that gap closes as the pinned belt moves. The delivered
 # hooks set MISE_CEILING_PATHS to the tree's parent, so a push never
 # loads a config above the tree, and the remedy below carries the same
 # ceiling. In CI the workspace's mise/config.toml is a local config and
@@ -3072,8 +3077,8 @@ if [[ -n ${local_conf} ]]; then
   exit 1
 fi
 # Locate the canon's clippy.toml. CI sets MISE_GLOBAL_CONFIG_FILE to it;
-# locally the belt arrives as a ~/.config/mise/conf.d symlink into a
-# canon checkout. No mise template variable resolves the config file's
+# locally the belt arrives through the clone's own link into the cache
+# tree of its pin. No mise template variable resolves the config file's
 # own directory ({{config_root}} is the home directory for a global
 # config), so both carriers are read here — and an unresolvable belt is
 # fatal, because clippy would otherwise silently run at its own defaults.
@@ -4261,9 +4266,9 @@ command -v mise > /dev/null || {
 }
 # THE BELT UNDER TEST IS THIS COMMIT'S, not the one the machine happens
 # to wear. ORG_BELT_DIR is right for reading delivered configs and wrong
-# here: locally it resolves through the ~/.config/mise/conf.d symlink to
-# whichever checkout was linked, so a belt change in the branch would be
-# assembled against the belt on main and the run would prove nothing
+# here: locally it resolves through the clone's link to the tree of the
+# gate stub's pin, so a belt change in the branch would be assembled
+# against the pinned belt and the run would prove nothing
 # about the pull request. The canon tracks the belt, so the canon's own
 # copy is the answer, in CI and on a laptop alike.
 belt="${PWD}/mise/config.toml"
@@ -4719,7 +4724,7 @@ command -v stele > /dev/null || {
 vex="${ORG_CANON_DIR}/security/vex"
 [[ -d ${vex} ]] || {
   echo "audit:go-vulns: ${vex} is not a directory, so the org's triage decisions cannot be read" >&2
-  echo "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally a ~/.config/mise/conf.d symlink into a canon checkout" >&2
+  echo "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally run: lefthook run post-checkout" >&2
   exit 1
 }
 scan=$(mktemp)

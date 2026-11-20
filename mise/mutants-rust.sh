@@ -44,7 +44,7 @@ set -euo pipefail
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: rust"
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 config=".cargo/mutants.toml"
 
 # One shard of the population, `k/n`, when repo-mutants.yml's matrix runs

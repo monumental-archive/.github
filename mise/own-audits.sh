@@ -44,7 +44,8 @@ own_audit_tasks() { # usage: own_audit_tasks -> zero or more names on stdout
     echo "own-audits: jq is not on PATH — it is a belt pin, so the belt did not arrive" >&2
     return 1
   }
-  local belt_config="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}/config.toml"
+  : "${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
+  local belt_config="${ORG_BELT_DIR}/config.toml"
   [[ -f ${belt_config} ]] || {
     echo "own-audits: ${belt_config} missing — the belt's own task list is what" >&2
     echo "  every other audit task is measured against; without it nothing can be" >&2

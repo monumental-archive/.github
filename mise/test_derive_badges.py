@@ -288,7 +288,7 @@ class Refusals(unittest.TestCase):
         self.assertRegex(
             done.stderr,
             r"ORG_CANON_DIR: unset — no belt \(CI: MISE_GLOBAL_CONFIG_FILE; "
-            r"local: conf\.d symlink\)\n\Z",
+            r"local: lefthook run post-checkout\)\n\Z",
         )
 
 

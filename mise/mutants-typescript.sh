@@ -94,7 +94,7 @@ if [[ -z ${CI:-} ]]; then
   exit 1
 fi
 
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 python3 "${belt}/mutants_typescript.py" --label "${label}" config "${adoption}"
 
 stryker=node_modules/.bin/stryker

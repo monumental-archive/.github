@@ -25,7 +25,7 @@
 set -euo pipefail
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 label=coverage:adopt
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 case "${1:-}" in
   start)

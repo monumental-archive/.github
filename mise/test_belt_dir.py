@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Table tests for where ORG_BELT_DIR finds the belt (#1686).
+"""Table tests for where ORG_BELT_DIR finds the belt (#1686, #1739).
 
 The belt's `[env]` resolves ORG_BELT_DIR with one shell command inside
-a Tera `exec`, from four carriers, first found wins:
+a Tera `exec`, from three carriers, first found wins:
 MISE_GLOBAL_CONFIG_FILE (CI); the working tree's own mise/config.toml
 with clippy.toml beside it (the canon); the working tree's
-`.config/mise/conf.d/belt.toml` link (a consumer's pinned belt); the
-machine's conf.d (a machine not yet moved). Each row plants all the
-carriers it names and asserts the one that answers.
+`.config/mise/conf.d/belt.toml` link (a consumer's pinned belt). Each
+row plants the carriers it names and asserts the one that answers.
+
+Every row also plants a machine belt, a belt linked from the machine's
+own mise conf.d, and it never answers (#1739): it was the fourth
+source until then, and a clone with no link was judged by it, an
+unpinned belt (the fail-before row: on 64b2f99e it answered).
 
 The command under test is the template's own, read out of
 mise/config.toml through decoded.py and run by `sh -o errexit` as mise runs
@@ -129,7 +133,7 @@ class Planted(unittest.TestCase):
         (conf / "belt.toml").symlink_to(target)
 
     def machine_link(self) -> None:
-        """Give the machine a conf.d symlink into its checkout."""
+        """Plant a machine belt: a link from the machine's own conf.d."""
         conf = self.xdg / "mise" / "conf.d"
         conf.mkdir(parents=True)
         (conf / "toolbelt.toml").symlink_to(self.machine / "config.toml")
@@ -142,7 +146,7 @@ class Planted(unittest.TestCase):
         mise runs an `[env]` exec in the directory of the config file that
         defines it, whatever the shell's or the task's working directory
         (measured on #1686, mise 2026.11.7): the link's own directory in a
-        clone, `mise/` in the canon, the machine's conf.d for its belt.
+        clone, `mise/` in the canon.
 
         Returns:
             The run.
@@ -176,7 +180,7 @@ class WhereTheBeltIs(Planted):
     """Each row: the carriers planted, and which one answers."""
 
     def test_ci_carrier_wins_over_all_three(self) -> None:
-        """1. MISE_GLOBAL_CONFIG_FILE, with every other carrier present."""
+        """1. MISE_GLOBAL_CONFIG_FILE, with every other belt present."""
         self.own_tree()
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
@@ -190,16 +194,21 @@ class WhereTheBeltIs(Planted):
         self.machine_link()
         self.assert_answers(own, own)
 
-    def test_the_link_wins_over_the_machine(self) -> None:
+    def test_the_link_answers_with_a_machine_belt_present(self) -> None:
         """3. A consumer's link to its pin's cache tree, machine belt present."""
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
         self.assert_answers(self.cache, self.link_dir())
 
-    def test_the_machine_belt_answers_last(self) -> None:
-        """4. The machine's conf.d, read from its own directory: it works."""
+    def test_a_machine_belt_is_not_followed(self) -> None:
+        """No fourth source: an unlinked clone has no belt (#1739)."""
         self.machine_link()
-        self.assert_answers(self.machine, self.xdg / "mise" / "conf.d")
+        self.assert_answers(None, self.repo)
+
+    def test_a_machine_belt_is_not_followed_from_its_own_conf_d(self) -> None:
+        """Run where mise runs a machine conf.d exec: still nothing."""
+        self.machine_link()
+        self.assert_answers(None, self.xdg / "mise" / "conf.d")
 
     def test_a_relative_link_is_read_from_its_own_directory(self) -> None:
         """A link written relative resolves against conf.d, not the cwd."""
@@ -210,19 +219,19 @@ class WhereTheBeltIs(Planted):
         )
         self.assert_answers(self.cache, self.link_dir())
 
-    def test_a_link_to_a_tree_that_is_no_belt_falls_through(self) -> None:
-        """No clippy.toml beside the link's target: the machine answers."""
+    def test_a_link_to_a_tree_that_is_no_belt_answers_nothing(self) -> None:
+        """No clippy.toml beside the link's target: no belt, machine unread."""
         (self.cache / "clippy.toml").unlink()
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
-        self.assert_answers(self.machine, self.link_dir())
+        self.assert_answers(None, self.link_dir())
 
     def test_no_carrier_is_empty_and_exit_zero(self) -> None:
         """Nothing anywhere: no output, exit 0 (#569)."""
         self.assert_answers(None, self.repo)
 
     def test_no_git_is_still_total(self) -> None:
-        """Without git (Renovate's container): falls to the machine, exit 0."""
+        """Without git (Renovate's container): no belt, exit 0."""
         self.link(str(self.cache / "config.toml"))
         self.machine_link()
         bare = self.tmp / "bin"
@@ -233,7 +242,7 @@ class WhereTheBeltIs(Planted):
                 (bare / name).symlink_to(found)
         done = self.resolve(self.link_dir(), path=str(bare))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, f"{self.machine}\n")
+        self.assertEqual(done.stdout, "")
 
 
 class UnderAHook(Planted):

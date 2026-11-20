@@ -24,7 +24,7 @@
 # asserted to be the same Python as `python3`, the belt's pin.
 set -euo pipefail
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
+belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 label="${1:?expected the task name}"
 
 files=$(git ls-files ':!vendor/**' '*.py' '*.pyi')

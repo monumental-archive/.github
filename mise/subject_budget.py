@@ -456,8 +456,8 @@ def preset_path(files: list[Path]) -> Path:
         sys.exit(
             "lint:subject-budget: ORG_CANON_DIR is unset, so the owned "
             "template cannot be read; the org belt did not arrive: "
-            "CI sets MISE_GLOBAL_CONFIG_FILE, locally it is a "
-            "~/.config/mise/conf.d symlink into a canon checkout",
+            "CI sets MISE_GLOBAL_CONFIG_FILE, locally run "
+            "lefthook run post-checkout",
         )
     return Path(canon) / "default.json"
 
@@ -1086,8 +1086,8 @@ def ceiling() -> int:
         sys.exit(
             "lint:subject-budget: ORG_BELT_DIR carries no committed.toml, so "
             "the ceiling has no definition; the org belt did not arrive: "
-            "CI sets MISE_GLOBAL_CONFIG_FILE, locally it is a "
-            "~/.config/mise/conf.d symlink into a canon checkout",
+            "CI sets MISE_GLOBAL_CONFIG_FILE, locally run "
+            "lefthook run post-checkout",
         )
     try:
         doc = decoded.load_toml(config.read_text(encoding="utf-8"))
