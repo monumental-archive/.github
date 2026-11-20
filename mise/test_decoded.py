@@ -82,7 +82,6 @@ MOVING = frozenset({
     "mise/test_go_fuzz_seeds.py",
     "mise/test_hook_jobs.py",
     "mise/test_lock_platforms.py",
-    "mise/test_mutants_go.py",
     "mise/test_pg_schema.py",
     "mise/test_plan_producers.py",
     "mise/test_plpgsql_coverage.py",
