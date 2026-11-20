@@ -173,6 +173,68 @@ def calls(*mutants: tuple[str, str, int]) -> list[str]:
     ]
 
 
+def git_in(tree: Path, *args: str) -> None:
+    """Run git in a planted tree, scrubbed of the caller's git state."""
+    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [GIT, *args], cwd=tree, env=hermetic.env(), check=True
+    )
+
+
+def init_tree(tree: Path) -> None:
+    """Make an empty git tree with an identity of its own."""
+    tree.mkdir(parents=True)
+    git_in(tree, "init", "-q")
+    git_in(tree, "config", "user.email", "t@example.invalid")
+    git_in(tree, "config", "user.name", "t")
+
+
+def stand_in_env(root: Path) -> dict[str, str]:
+    """Install the stand-in under ROOT and build the leg's environment.
+
+    Returns:
+        The environment: the stand-in first on PATH, its files under
+        ROOT, and no mutation state inherited.
+
+    """
+    bins = root / "bin"
+    bins.mkdir()
+    stand_in = bins / "cosmic-ray"
+    stand_in.write_text(STAND_IN.replace("{python}", sys.executable), encoding="utf-8")
+    stand_in.chmod(0o755)
+    for name in ("log", "ran", "dump"):
+        (root / name).touch()
+    (root / "mutants.json").write_text("{}", encoding="utf-8")
+    env = hermetic.env() | {
+        "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
+        "PLANT_LOG": str(root / "log"),
+        "PLANT_RAN": str(root / "ran"),
+        "PLANT_DUMP": str(root / "dump"),
+        "PLANT_MUTANTS": str(root / "mutants.json"),
+        "MUTANTS_SUMMARY_DIR": str(root / "summary"),
+        "ORG_BELT_DIR": str(BELT),
+        "ORG_PYTHON": sys.executable,
+    }
+    for name in ("MUTANTS_SHARD", "MUTANTS_PLAN", "PLANT_UNDER_MUTANT"):
+        env.pop(name, None)
+    return env
+
+
+# The tree every judging row copies, planned once for real: the module,
+# its test file, and a dump holding every judging row's mutants. A row
+# that needs another module, dump or test file plants its own.
+SHARED: dict[str, Path] = {}
+
+
+def judged(*mutants: tuple[str, str, int]) -> list[str]:
+    """Spell the stand-in's log for a shard judged from a plan.
+
+    Returns:
+        One `mutate-and-test` per mutant, nothing listed again.
+
+    """
+    return [f"cosmic-ray mutate-and-test {p} {o} {n}" for p, o, n in mutants]
+
+
 class Planted(unittest.TestCase):
     """A planted tree and a stand-in cosmic-ray; the rows are below."""
 
@@ -181,47 +243,22 @@ class Planted(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
         self.tree = self.tmp / "tree"
-        self.tree.mkdir()
         self.bins = self.tmp / "bin"
-        self.bins.mkdir()
-        stand_in = self.bins / "cosmic-ray"
-        stand_in.write_text(
-            STAND_IN.replace("{python}", sys.executable), encoding="utf-8"
-        )
-        stand_in.chmod(0o755)
         self.log = self.tmp / "log"
-        self.log.touch()
         self.ran = self.tmp / "ran"
-        self.ran.touch()
         self.dump = self.tmp / "dump"
-        self.dump.touch()
         self.mutants = self.tmp / "mutants.json"
-        self.mutants.write_text("{}", encoding="utf-8")
         self.summary = self.tmp / "summary"
-        self.env = hermetic.env() | {
-            "PATH": f"{self.bins}{os.pathsep}{os.environ['PATH']}",
-            "PLANT_LOG": str(self.log),
-            "PLANT_RAN": str(self.ran),
-            "PLANT_DUMP": str(self.dump),
-            "PLANT_MUTANTS": str(self.mutants),
-            "MUTANTS_SUMMARY_DIR": str(self.summary),
-            "ORG_BELT_DIR": str(BELT),
-            "ORG_PYTHON": sys.executable,
-        }
-        for name in ("MUTANTS_SHARD", "MUTANTS_PLAN", "PLANT_UNDER_MUTANT"):
-            self.env.pop(name, None)
-        self.git("init", "-q")
-        self.git("config", "user.email", "t@example.invalid")
-        self.git("config", "user.name", "t")
+        self.env = stand_in_env(self.tmp)
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, *args], cwd=self.tree, env=hermetic.env(), check=True
-        )
+        git_in(self.tree, *args)
 
     def track(self, path: str, text: str) -> None:
         """Write a file into the planted tree and track it."""
+        if not self.tree.exists():
+            init_tree(self.tree)
         target = self.tree / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
@@ -242,6 +279,34 @@ class Planted(unittest.TestCase):
         self.git("commit", "-q", "-m", "plant")
         self.dump.write_text("".join(f"{i}\n" for i in items), encoding="utf-8")
         self.mutants.write_text(json.dumps(mutants or {}), encoding="utf-8")
+
+    def shared(
+        self,
+        keys: list[tuple[str, str, int]],
+        mutants: dict[str, dict[str, object]] | None = None,
+    ) -> Path:
+        """Copy the shared tree, and its plan cut to this row's mutants.
+
+        The tree is copied whole, `.git` included, so its HEAD is the
+        plan's; the plan's line map is the one real coverage measured
+        when the module was set up. Nothing the row does reaches another.
+
+        Returns:
+            The row's own plan directory, for MUTANTS_PLAN.
+
+        """
+        shutil.copytree(SHARED["tree"], self.tree, symlinks=True)
+        document = json.loads(SHARED["plan"].read_text(encoding="utf-8"))
+        wanted = {f"{p} {o} {n}" for p, o, n in keys}
+        document["mutants"] = [
+            m for m in document["mutants"] if f"{m[0]} {m[1]} {m[2]}" in wanted
+        ]
+        self.assertEqual(len(document["mutants"]), len(keys))
+        plan = self.tmp / "plan"
+        plan.mkdir()
+        (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
+        self.mutants.write_text(json.dumps(mutants or {}), encoding="utf-8")
+        return plan
 
     def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.
@@ -285,6 +350,44 @@ class Planted(unittest.TestCase):
 ITEM_KILLED = work_item("pkg/mod.py", ADD, 0, 2, "answer")
 ITEM_SURVIVOR = work_item("pkg/mod.py", NUM, 0, 2, "answer")
 ITEM_UNREACHED = work_item("pkg/mod.py", MUL, 0, 6, "unreached")
+KILLED = ("pkg/mod.py", ADD, 0)
+SURVIVOR = ("pkg/mod.py", NUM, 0)
+UNREACHED = ("pkg/mod.py", MUL, 0)
+FOUR = [("pkg/mod.py", ADD, n) for n in range(4)]
+
+
+def setUpModule() -> None:
+    """Plant the shared tree and plan it once, with real coverage.
+
+    Raises:
+        RuntimeError: the shared plan failed; every judging row needs it.
+
+    """
+    root = Path(tempfile.mkdtemp())
+    unittest.addModuleCleanup(shutil.rmtree, root)
+    env = stand_in_env(root)
+    tree = root / "tree"
+    init_tree(tree)
+    for path, text in (
+        ("cosmic-ray.toml", CONFIG),
+        ("pkg/mod.py", MODULE),
+        ("pkg/test_mod.py", TEST.format(sleep=0, name="test_mod")),
+    ):
+        (tree / path).parent.mkdir(parents=True, exist_ok=True)
+        (tree / path).write_text(text, encoding="utf-8")
+    git_in(tree, "add", ".")
+    git_in(tree, "commit", "-q", "-m", "shared")
+    items = [ITEM_SURVIVOR, ITEM_UNREACHED]
+    items += [work_item(*key, 2, "answer") for key in FOUR]
+    (root / "dump").write_text("".join(f"{i}\n" for i in items), encoding="utf-8")
+    plan = root / "plan"
+    planned = hermetic.call_main(
+        lambda: helper.main(["plan", "cosmic-ray.toml", str(plan)]), env=env, cwd=tree
+    )
+    if planned.returncode != 0:
+        raise RuntimeError(planned.stderr)
+    SHARED["tree"] = tree
+    SHARED["plan"] = plan / "plan.json"
 
 
 class Adoption(Planted):
@@ -310,7 +413,7 @@ class Adoption(Planted):
 
     def test_cosmic_ray_missing_is_named(self) -> None:
         """Adopted, no tool: red, with the install line."""
-        self.plant([ITEM_KILLED])
+        self.shared([KILLED])
         (self.bins / "cosmic-ray").unlink()
         # Every other directory on the path, less any that holds a real one.
         path = os.pathsep.join(
@@ -332,24 +435,23 @@ class Verdicts(Planted):
 
     def test_clean_result(self) -> None:
         """Every mutant killed: exit 0, the summary line, the counts."""
-        self.plant([ITEM_KILLED], {f"pkg/mod.py {ADD} 0": KILLS})
-        done, log = self.run_leg()
+        plan = self.shared([KILLED], {f"pkg/mod.py {ADD} 0": KILLS})
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn(f"{LABEL}: plan: 1 mutants, 1 test files", done.stdout)
         self.assertTrue(
             done.stdout.endswith(
                 f"{LABEL}: 1 mutants, 1 killed, 0 survived, 0 excluded\n"
             ),
             done.stdout,
         )
-        self.assertEqual(log, calls(("pkg/mod.py", ADD, 0)))
+        self.assertEqual(log, judged(KILLED))
         self.assertEqual(self.counts(), "0/1\t1\t1\t0\t0\n")
         self.assertEqual(self.ran.read_text(encoding="utf-8"), "test_mod\n")
 
     def test_one_survivor_is_red_with_its_file_and_line(self) -> None:
         """A survivor: red, its file:line, operator and diff printed."""
-        self.plant([ITEM_SURVIVOR], {f"pkg/mod.py {NUM} 0": SURVIVES})
-        done, log = self.run_leg()
+        plan = self.shared([SURVIVOR], {f"pkg/mod.py {NUM} 0": SURVIVES})
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 1)
         self.assertIn(
             f"{LABEL}: survived: pkg/mod.py:2: {NUM} #0 (answer)\n"
@@ -360,13 +462,13 @@ class Verdicts(Planted):
             done.stdout,
         )
         self.assertEqual(done.stderr.splitlines(), RED)
-        self.assertEqual(log, calls(("pkg/mod.py", NUM, 0)))
+        self.assertEqual(log, judged(SURVIVOR))
         self.assertEqual(self.counts(), "0/1\t1\t0\t1\t0\n")
 
     def test_no_tests_runs_nothing(self) -> None:
         """A line no test file executes: "no tests", a survivor, nothing run."""
-        self.plant([ITEM_UNREACHED], {f"pkg/mod.py {MUL} 0": KILLS})
-        done, log = self.run_leg()
+        plan = self.shared([UNREACHED], {f"pkg/mod.py {MUL} 0": KILLS})
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 1)
         self.assertIn(
             f"{LABEL}: no tests: pkg/mod.py:6: {MUL} #0 (unreached): return x * 2\n",
@@ -375,20 +477,20 @@ class Verdicts(Planted):
         self.assertIn(
             f"{LABEL}: 1 mutants, 0 killed, 1 survived, 0 excluded\n", done.stdout
         )
-        self.assertEqual(log, calls())
+        self.assertEqual(log, [])
         self.assertEqual(done.stderr.splitlines(), RED)
 
     def test_abnormal_worker_is_never_judged(self) -> None:
         """A worker outcome `abnormal`: red by name, no counts written."""
-        self.plant([ITEM_KILLED], {f"pkg/mod.py {ADD} 0": {"worker": "abnormal"}})
-        done, log = self.run_leg()
+        plan = self.shared([KILLED], {f"pkg/mod.py {ADD} 0": {"worker": "abnormal"}})
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stderr,
             f"{LABEL}: never judged: pkg/mod.py:2: {ADD} #0 (answer):"
             " worker outcome 'abnormal'\n",
         )
-        self.assertEqual(log, calls(("pkg/mod.py", ADD, 0)))
+        self.assertEqual(log, judged(KILLED))
         self.assertFalse((self.summary / "python.tsv").exists())
 
     def test_continuation_line_is_judged_by_its_statement(self) -> None:
@@ -522,28 +624,30 @@ class Safety(Planted):
 
     def test_file_left_mutated_is_restored_and_red(self) -> None:
         """A mutant the worker did not undo: restored from git, red by name."""
-        self.plant([ITEM_KILLED], {f"pkg/mod.py {ADD} 0": {**KILLS, "leave": True}})
-        done, _ = self.run_leg()
+        plan = self.shared([KILLED], {f"pkg/mod.py {ADD} 0": {**KILLS, "leave": True}})
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stderr,
             f"{LABEL}: pkg/mod.py differed from git after pkg/mod.py:2: {ADD} #0"
             " (answer) — restored\n",
         )
+        self.assertEqual(log, judged(KILLED))
         self.assertEqual(
             (self.tree / "pkg" / "mod.py").read_text(encoding="utf-8"), MODULE
         )
 
     def test_run_killed_mid_mutant_is_restored_by_the_trap(self) -> None:
         """The judge dies with a mutant applied: the exit trap restores it."""
-        self.plant(
-            [ITEM_KILLED], {f"pkg/mod.py {ADD} 0": {**KILLS, "kill_parent": True}}
+        plan = self.shared(
+            [KILLED], {f"pkg/mod.py {ADD} 0": {**KILLS, "kill_parent": True}}
         )
-        done, _ = self.run_leg()
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertNotEqual(done.returncode, 0)
         self.assertIn(
             f"{LABEL}: pkg/mod.py differed from git at exit — restored\n", done.stderr
         )
+        self.assertEqual(log, judged(KILLED))
         self.assertEqual(
             (self.tree / "pkg" / "mod.py").read_text(encoding="utf-8"), MODULE
         )
@@ -579,15 +683,10 @@ class Shards(Planted):
 
     def test_two_shards_judge_every_mutant_exactly_once(self) -> None:
         """One plan; 0/2 and 1/2 are disjoint, and together the whole list."""
-        items = [work_item("pkg/mod.py", ADD, n, 2, "answer") for n in range(4)]
-        self.plant(items, {f"pkg/mod.py {ADD} {n}": KILLS for n in range(4)})
-        plan = self.tmp / "plan"
-        planned = self.call("plan", "cosmic-ray.toml", str(plan))
-        self.assertEqual(planned.returncode, 0, planned.stderr)
-        self.assertEqual(self.log.read_text(encoding="utf-8").splitlines(), calls())
+        plan = self.shared(FOUR, {f"pkg/mod.py {ADD} {n}": KILLS for n in range(4)})
         pragmas = self.tmp / "pragmas.tsv"
         pragmas.touch()
-        judged = []
+        logs = []
         for shard in ("0/2", "1/2"):
             self.log.write_text("", encoding="utf-8")
             done = self.call(
@@ -595,9 +694,8 @@ class Shards(Planted):
             )
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertEqual(self.counts(), f"{shard}\t2\t2\t0\t0\n")
-            log = self.log.read_text(encoding="utf-8").splitlines()
-            judged.append([line.split()[-1] for line in log])
-        self.assertEqual(judged, [["0", "2"], ["1", "3"]])
+            logs.append(self.log.read_text(encoding="utf-8").splitlines())
+        self.assertEqual(logs, [judged(FOUR[0], FOUR[2]), judged(FOUR[1], FOUR[3])])
 
     def test_plan_step_then_a_shard_judges_from_it(self) -> None:
         """MUTANTS_SHARD=plan writes the plan and stops; a shard judges alone."""
@@ -615,7 +713,7 @@ class Shards(Planted):
 
     def test_shard_without_a_plan_is_red(self) -> None:
         """MUTANTS_PLAN naming no plan: red by name, nothing judged."""
-        self.plant([ITEM_KILLED])
+        self.shared([KILLED])
         empty = self.tmp / "empty"
         empty.mkdir()
         done, log = self.run_leg(MUTANTS_SHARD="0/1", MUTANTS_PLAN=str(empty))
@@ -625,13 +723,14 @@ class Shards(Planted):
 
     def test_bad_shard_is_red(self) -> None:
         """K must be below N."""
-        self.plant([ITEM_KILLED])
-        done, _ = self.run_leg(MUTANTS_SHARD="2/2")
+        plan = self.shared([KILLED])
+        done, log = self.run_leg(MUTANTS_SHARD="2/2", MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stderr,
             f"{LABEL}: MUTANTS_SHARD='2/2' — expected k/N with 0 <= k < N, or plan\n",
         )
+        self.assertEqual(log, [])
 
 
 class Order(Planted):
