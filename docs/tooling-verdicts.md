@@ -2865,7 +2865,16 @@ Measured 2026-11-20 on Python 3.15.2:
   by one file, 30% by two or three, 4% by none. So the leg runs only
   the files that reach a mutant's line, fastest first, each limited to
   three times its planned time; one plan job lists and measures, and
-  16 shards of 120 minutes judge (#1530 sets the final count).
+  the shards judge.
+- **Shard count and timeout** (#1530). The first whole run,
+  self-mutants 44809148364 on `aff69e8b`, judged 17,079 mutants in
+  16 shards at the 360-minute measuring timeout: the slowest shard
+  took 171m45s, the fastest 103m44s, and each shard's fixed cost is
+  under 3 minutes, so time scales with mutants per shard. 47 shards
+  would put the slowest at about 58.5 minutes; 48 is chosen for
+  margin, as the spread widens at a finer split, and the timeout is
+  180 minutes, about three times the slowest, rounded up. The
+  owner's word, 2026-11-21.
 
 Rejected: reshaping the helpers into a package for mutmut (419 import
 lines in 245 files, and it would still copy the tree); carrying mutmut
