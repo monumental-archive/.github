@@ -22,18 +22,63 @@ gate as `mise run test`, which `ci` collects.
 import copy
 import io
 import json
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
+import decoded
 import zizmor_signer as signer
 
 HERE = Path(__file__).resolve().parent
 
-REAL = json.loads((HERE / "testdata" / "zizmor-1.32.0-canon.json").read_text())
-MISMATCH = json.loads(
-    (HERE / "testdata" / "zizmor-1.32.0-ref-version-mismatch.json").read_text(),
-)
+
+def fixture(name: str) -> list[dict[str, object]]:
+    """Read a recorded zizmor run: its finding array, each an object.
+
+    Returns:
+        The findings, as zizmor wrote them.
+
+    """
+    text = (HERE / "testdata" / name).read_text()
+    found = decoded.as_array(decoded.load_json(text), name)
+    return [decoded.as_object(f, f"{name}[{i}]") for i, f in enumerate(found)]
+
+
+def locations(finding: dict[str, object]) -> list[dict[str, object]]:
+    """Read a finding's locations, each an object.
+
+    Returns:
+        The locations themselves, so a change to one changes the finding.
+
+    """
+    found = decoded.as_array(finding["locations"], "locations")
+    return [decoded.as_object(loc, f"locations[{i}]") for i, loc in enumerate(found)]
+
+
+def symbolic(location: dict[str, object]) -> dict[str, object]:
+    """Read a location's `symbolic` half.
+
+    Returns:
+        The object itself.
+
+    """
+    return decoded.as_object(location["symbolic"], "symbolic")
+
+
+def concrete(location: dict[str, object]) -> dict[str, object]:
+    """Read a location's `concrete` half.
+
+    Returns:
+        The object itself.
+
+    """
+    return decoded.as_object(location["concrete"], "concrete")
+
+
+REAL = fixture("zizmor-1.32.0-canon.json")
+MISMATCH = fixture("zizmor-1.32.0-ref-version-mismatch.json")
 SIGNER_WORKFLOW = "monumental-archive/signer/.github/workflows/sign.yml"
 SIGNER_REF = SIGNER_WORKFLOW + "@cffec9441210d46f237099d8785098aacf5b8273"
 MISMATCH_REF = SIGNER_WORKFLOW + "@0d6c6e297684c8ba401fb9c212532628fe552148"
@@ -47,17 +92,17 @@ def run(findings: object, workflow: str = SIGNER_WORKFLOW) -> tuple[int, str, st
 
     """
     out, err = io.StringIO(), io.StringIO()
-    real = signer.sys.stdin
-    signer.sys.stdin = io.StringIO(json.dumps(findings))
-    try:
-        with redirect_stdout(out), redirect_stderr(err):
-            status = signer.main(["--signer-workflow", workflow])
-    finally:
-        signer.sys.stdin = real
+    stdin = io.StringIO(json.dumps(findings))
+    with (
+        mock.patch.object(sys, "stdin", stdin),
+        redirect_stdout(out),
+        redirect_stderr(err),
+    ):
+        status = signer.main(["--signer-workflow", workflow])
     return status, out.getvalue(), err.getvalue()
 
 
-def repointed(finding: dict, reference: str) -> dict:
+def repointed(finding: dict[str, object], reference: str) -> dict[str, object]:
     """Return a copy of a real finding whose Primary reference is changed.
 
     Returns:
@@ -65,13 +110,18 @@ def repointed(finding: dict, reference: str) -> dict:
 
     """
     changed = copy.deepcopy(finding)
-    for location in changed["locations"]:
-        if location["symbolic"]["kind"] == "Primary":
-            location["concrete"]["feature"] = reference
+    for location in locations(changed):
+        if symbolic(location)["kind"] == "Primary":
+            concrete(location)["feature"] = reference
     return changed
 
 
-def rewritten(finding: dict, kind: str, old: str, new: str) -> dict:
+def rewritten(
+    finding: dict[str, object],
+    kind: str,
+    old: str,
+    new: str,
+) -> dict[str, object]:
     """Return a copy of a real finding with text replaced in one location kind.
 
     Returns:
@@ -80,10 +130,10 @@ def rewritten(finding: dict, kind: str, old: str, new: str) -> dict:
 
     """
     changed = copy.deepcopy(finding)
-    for location in changed["locations"]:
-        if location["symbolic"]["kind"] == kind:
-            feature = location["concrete"]["feature"]
-            location["concrete"]["feature"] = feature.replace(old, new)
+    for location in locations(changed):
+        if symbolic(location)["kind"] == kind:
+            feature = decoded.as_str(concrete(location)["feature"], "feature")
+            concrete(location)["feature"] = feature.replace(old, new)
     return changed
 
 
@@ -93,9 +143,12 @@ class RealCanonOutput(unittest.TestCase):
     def test_the_fixture_is_the_ten_signer_findings(self) -> None:
         """The fixture is what the issue measured: ten, one rule, one ref."""
         self.assertEqual(10, len(REAL))
-        self.assertEqual({"stale-action-refs"}, {f["ident"] for f in REAL})
+        idents: set[object] = {f["ident"] for f in REAL}
+        rules: set[object] = {"stale-action-refs"}
+        self.assertEqual(rules, idents)
         refs = {r for f in REAL for r in signer.references(f)}
-        self.assertEqual({SIGNER_REF}, refs)
+        want: set[str] = {SIGNER_REF}
+        self.assertEqual(want, refs)
 
     def test_all_ten_are_dropped_and_counted(self) -> None:
         """The canon goes green, and says what it dropped."""
@@ -113,12 +166,14 @@ class RefVersionMismatch(unittest.TestCase):
         self.assertEqual(1, len(MISMATCH))
         self.assertEqual("ref-version-mismatch", MISMATCH[0]["ident"])
         primary = [
-            loc["concrete"]["feature"]
-            for loc in MISMATCH[0]["locations"]
-            if loc["symbolic"]["kind"] == "Primary"
+            concrete(loc)["feature"]
+            for loc in locations(MISMATCH[0])
+            if symbolic(loc)["kind"] == "Primary"
         ]
-        self.assertEqual(["main"], primary)
-        self.assertEqual([MISMATCH_REF], signer.references(MISMATCH[0]))
+        feature: list[object] = ["main"]
+        self.assertEqual(feature, primary)
+        want: list[str] = [MISMATCH_REF]
+        self.assertEqual(want, signer.references(MISMATCH[0]))
 
     def test_the_signer_mismatch_is_dropped_and_counted(self) -> None:
         """The signer's `# main` behind its branch head goes green, said aloud."""
@@ -154,7 +209,8 @@ class RefVersionMismatch(unittest.TestCase):
     def test_a_mismatch_with_no_readable_reference_is_kept(self) -> None:
         """A Hidden location with no `uses:` line names nothing; it is kept."""
         blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
-        self.assertEqual([], signer.references(blind))
+        none: list[str] = []
+        self.assertEqual(none, signer.references(blind))
         status, _, err = run([blind])
         self.assertEqual(1, status)
         self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
@@ -163,7 +219,7 @@ class RefVersionMismatch(unittest.TestCase):
         """Primary carries only `main`; dropping the Hidden location blinds it."""
         blind = copy.deepcopy(MISMATCH[0])
         blind["locations"] = [
-            loc for loc in blind["locations"] if loc["symbolic"]["kind"] == "Primary"
+            loc for loc in locations(blind) if symbolic(loc)["kind"] == "Primary"
         ]
         status, _, err = run([blind])
         self.assertEqual(1, status)
@@ -177,7 +233,8 @@ class RefVersionMismatch(unittest.TestCase):
             "    with:\n",
             "    # relative `uses: actions/checkout@v4` in prose\n    with:\n",
         )
-        self.assertEqual([MISMATCH_REF], signer.references(prose))
+        want: list[str] = [MISMATCH_REF]
+        self.assertEqual(want, signer.references(prose))
         self.assertEqual(0, run([prose])[0])
 
     def test_a_second_reference_elsewhere_keeps_it(self) -> None:
@@ -241,8 +298,8 @@ class Kept(unittest.TestCase):
     def test_a_finding_with_no_readable_reference_is_kept(self) -> None:
         """When zizmor's shape gives no reference, nothing is assumed."""
         blind = copy.deepcopy(REAL[0])
-        for location in blind["locations"]:
-            location["symbolic"]["kind"] = "Related"
+        for location in locations(blind):
+            symbolic(location)["kind"] = "Related"
         self.assertEqual(1, run([blind])[0])
 
     def test_a_reference_without_a_ref_is_kept(self) -> None:
@@ -282,7 +339,7 @@ class Refusals(unittest.TestCase):
 
     def test_a_finding_of_the_wrong_shape_is_kept_not_raised(self) -> None:
         """The shrunk examples: kept and reported, never a traceback (#1555)."""
-        for finding in (
+        shapes: tuple[dict[str, object], ...] = (
             {"ident": []},
             {"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]},
             {"ident": "stale-action-refs", "locations": 5},
@@ -290,7 +347,8 @@ class Refusals(unittest.TestCase):
                 "ident": "stale-action-refs",
                 "locations": [{"symbolic": {"kind": "Primary"}, "concrete": 1}],
             },
-        ):
+        )
+        for finding in shapes:
             with self.subTest(finding=finding):
                 status, _, err = run([finding])
                 self.assertEqual(1, status)
@@ -299,13 +357,12 @@ class Refusals(unittest.TestCase):
     def test_a_process_with_no_stdin_is_refused_by_name(self) -> None:
         """No standard input is a refusal, never a traceback (#1681)."""
         err = io.StringIO()
-        real = signer.sys.stdin
-        signer.sys.stdin = None
-        try:
-            with redirect_stdout(io.StringIO()), redirect_stderr(err):
-                status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
-        finally:
-            signer.sys.stdin = real
+        with (
+            mock.patch.object(sys, "stdin", None),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(err),
+        ):
+            status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
         self.assertEqual(2, status)
         self.assertEqual(
             err.getvalue(),
