@@ -470,7 +470,7 @@ class LeavesTheCallersGitAlone(unittest.TestCase):
             index = gitdir / "index"
 
             before_digest = hashlib.sha256(index.read_bytes()).hexdigest()
-            before_files = git(["ls-files"], linked, home)
+            before_files = hermetic.tracked(linked)
 
             planted = hermetic.env()
             planted.update({
@@ -489,7 +489,7 @@ class LeavesTheCallersGitAlone(unittest.TestCase):
             )
 
             after_digest = hashlib.sha256(index.read_bytes()).hexdigest()
-            after_files = git(["ls-files"], linked, home)
+            after_files = hermetic.tracked(linked)
             status = git(["status", "--porcelain"], linked, home)
 
         self.assertEqual(0, run.returncode, run.stderr)
