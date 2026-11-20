@@ -40,7 +40,7 @@ def member(
     tracks: list[str] | None = None,
     visibility: str = "public",
     tagged: bool = False,
-) -> dict:
+) -> dict[str, object]:
     """Build one member in the shape `stele derive population` prints.
 
     Returns:
@@ -57,7 +57,7 @@ def member(
     }
 
 
-def document(*members: dict, schema: object = 9) -> dict:
+def document(*members: object, schema: object = 9) -> dict[str, object]:
     """Wrap members in the population document.
 
     Returns:
@@ -95,7 +95,7 @@ class TestObligations(unittest.TestCase):
     """What a declared membership makes applicable, and what it does not."""
 
     @staticmethod
-    def names(m: dict) -> list[str]:
+    def names(m: dict[str, object]) -> list[str]:
         """Return just the artifact names a member owes.
 
         Returns:
@@ -106,17 +106,18 @@ class TestObligations(unittest.TestCase):
 
     def test_public_full_member_owes_everything(self) -> None:
         """A public, tagged member on every track owes the whole set."""
+        expected = [
+            "ci",
+            "audit",
+            "scorecard",
+            "dependency-review",
+            "source-attest",
+            "release",
+            "publish",
+        ]
         self.assertEqual(
             self.names(member(tagged=True)),
-            [
-                "ci",
-                "audit",
-                "scorecard",
-                "dependency-review",
-                "source-attest",
-                "release",
-                "publish",
-            ],
+            expected,
         )
 
     def test_every_track_owes_source_attest_and_an_exclusion_does_not(self) -> None:
@@ -134,16 +135,16 @@ class TestObligations(unittest.TestCase):
 
     def test_exclusion_still_owes_the_hygiene_that_asks_no_track_question(self) -> None:
         """An exclusion narrows EVIDENCE, and evidence only (stele#181)."""
+        expected = ["ci", "audit", "scorecard", "dependency-review"]
         self.assertEqual(
             self.names(member(tracks=[])),
-            ["ci", "audit", "scorecard", "dependency-review"],
+            expected,
         )
 
     def test_the_private_exclusion_owes_exactly_two(self) -> None:
         """monumental-archive's live shape: four opt-out rows before, none after."""
-        self.assertEqual(
-            self.names(member(tracks=[], visibility="private")), ["ci", "audit"]
-        )
+        expected = ["ci", "audit"]
+        self.assertEqual(self.names(member(tracks=[], visibility="private")), expected)
 
     def test_source_only_member_owes_source_attest(self) -> None:
         """A member bearing SOURCE owes the source chain's evidence."""
@@ -174,7 +175,7 @@ class TestObligations(unittest.TestCase):
 
 
 # Documents this reader refuses, each with the message it must print.
-REFUSALS = (
+REFUSALS: tuple[tuple[str, object, str], ...] = (
     ("not JSON", "{", "population document is not JSON"),
     ("not an object", [], "population document is not a JSON object"),
     (
@@ -249,8 +250,11 @@ class TestMain(unittest.TestCase):
         for line in out.splitlines():
             _, repo, artifact, _names = line.split("\t")
             owed.setdefault(repo, []).append(artifact)
-        self.assertEqual(["app", "canon", "signer"], list(owed))
-        self.assertEqual(owed["app"], ["ci", "audit"])
+        repos = ["app", "canon", "signer"]
+        listed = list(owed)
+        self.assertEqual(repos, listed)
+        app = ["ci", "audit"]
+        self.assertEqual(owed["app"], app)
         self.assertIn("release", owed["canon"])
         self.assertNotIn("release", owed["signer"])
         self.assertIn("source-attest", owed["signer"])

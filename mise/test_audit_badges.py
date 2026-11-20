@@ -36,7 +36,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -148,6 +148,7 @@ def bare_curls(source: str) -> list[str]:
 class Planted(unittest.TestCase):
     """A planted canon and org, alpha then beta, each wearing one shield."""
 
+    @override
     def setUp(self) -> None:
         """Plant the canon tree, the floors and the stub tools."""
         tmp = Path(tempfile.mkdtemp())
@@ -234,9 +235,11 @@ class ScorecardRead(Planted):
     def asked_identified(self) -> None:
         """Assert every Scorecard request carried the identifying client."""
         log = (self.stubs / "curl.log").read_text(encoding="utf-8").splitlines()
+        got = [line.split(" ", 1)[0] for line in log]
+        expected = [f"{PROJECT}/alpha", f"{PROJECT}/beta"]
         self.assertEqual(
-            [line.split(" ", 1)[0] for line in log],
-            [f"{PROJECT}/alpha", f"{PROJECT}/beta"],
+            got,
+            expected,
         )
         for line in log:
             self.assertIn(UA, line)
@@ -283,13 +286,14 @@ class ScorecardRead(Planted):
         self.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
         done = self.run_audit()
         self.assertEqual(done.returncode, 0, done.stderr)
+        expected = [
+            "audit:badges: alpha: scorecard 5.0 (floor 5.0)",
+            "audit:badges: beta: scorecard 5.1 (floor 5.0)",
+            "audit:badges: 2 shield(s) checked, all agree with their issuers",
+        ]
         self.assertEqual(
             done.stdout.splitlines(),
-            [
-                "audit:badges: alpha: scorecard 5.0 (floor 5.0)",
-                "audit:badges: beta: scorecard 5.1 (floor 5.0)",
-                "audit:badges: 2 shield(s) checked, all agree with their issuers",
-            ],
+            expected,
         )
         self.asked_identified()
 
@@ -313,6 +317,7 @@ def entry(repo: str, **fields: object) -> str:
 class BestPracticesRead(Planted):
     """The Best Practices badge leg, asked through `ask` (#1633)."""
 
+    @override
     def setUp(self) -> None:
         """Wear the passing badge, whose id the stub reads as the repo."""
         super().setUp()
@@ -353,6 +358,7 @@ class BestPracticesRead(Planted):
 class BaselineRead(Planted):
     """The OSPS Baseline leg, asked through `ask` (#1633)."""
 
+    @override
     def setUp(self) -> None:
         """Wear the Baseline shield on the same entry."""
         super().setUp()
@@ -396,6 +402,7 @@ class BaselineRead(Planted):
 class LevelShieldRead(Planted):
     """The level shield's published document, asked through `ask` (#1633)."""
 
+    @override
     def setUp(self) -> None:
         """Wear a shields endpoint over a document named for the repo."""
         super().setUp()
@@ -453,7 +460,8 @@ CODECOV = f"https://codecov.io/gh/{OWNER}/@REPO@/graph/badge.svg"
 # Each leg that asks an issuer: its shield, the suffix its question's
 # last path component carries, how `unanswered` names the issuer for
 # alpha, a 200 body it judges clean for a repository, and its note.
-LEGS = (
+type Leg = tuple[str, str, str, str, Callable[[str], str], Callable[[str], str]]
+LEGS: tuple[Leg, ...] = (
     (
         "scorecard",
         f"{PROJECT}/@REPO@/badge",
@@ -674,6 +682,7 @@ class CodecovRead(Planted):
     at `abc1234`, committed at HEAD_AT (now, unless a row says).
     """
 
+    @override
     def setUp(self) -> None:
         """Wear the Codecov shield."""
         super().setUp()
@@ -706,9 +715,8 @@ class CodecovRead(Planted):
             ],
         )
         api = f"https://api.codecov.io/api/v2/github/{OWNER}/repos"
-        self.assertEqual(
-            self.asked(), [f"{api}/alpha/branches/main", f"{api}/beta/branches/main"]
-        )
+        expected = [f"{api}/alpha/branches/main", f"{api}/beta/branches/main"]
+        self.assertEqual(self.asked(), expected)
 
     def test_branch_route_404_is_no_record(self) -> None:
         """Codecov knows neither the repository nor the branch."""
@@ -769,7 +777,7 @@ class BareCurl(unittest.TestCase):
 
     def test_script_curls_only_inside_ask(self) -> None:
         """Every issuer read in the script goes through `ask`."""
-        self.assertEqual(bare_curls(SCRIPT.read_text(encoding="utf-8")), [])
+        self.assertEqual(bare_curls(SCRIPT.read_text(encoding="utf-8")), list[str]())
 
     def test_a_bare_read_is_found(self) -> None:
         """A planted bare read is named; ask's own curl and comments are not."""
@@ -780,9 +788,10 @@ class BareCurl(unittest.TestCase):
             "}\n"
             'bp=$(curl -sf "https://y/${id}.json" || true)\n'
         )
+        expected = ['5: bp=$(curl -sf "https://y/${id}.json" || true)']
         self.assertEqual(
             bare_curls(planted),
-            ['5: bp=$(curl -sf "https://y/${id}.json" || true)'],
+            expected,
         )
 
 

@@ -32,6 +32,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import decoded
 import hermetic
@@ -96,6 +97,7 @@ def plant_belt(tree: Path) -> Path:
 class Planted(unittest.TestCase):
     """A repository and one tree for each carrier; the rows are below."""
 
+    @override
     def setUp(self) -> None:
         """Plant a repository and one tree for each carrier."""
         self.tmp = Path(tempfile.mkdtemp()).resolve()

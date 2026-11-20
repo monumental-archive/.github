@@ -24,13 +24,13 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 """
 
 import io
-import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import belt_shell as bs
+import decoded
 
 # A body mise would run verbatim, already in the org's format.
 CLEAN = 'echo "hello"\n'
@@ -53,6 +53,18 @@ def write(tmp: str, text: str) -> Path:
     path = Path(tmp) / "mise.toml"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def run_of(path: Path) -> str:
+    """Read task t's run back from a written config.
+
+    Returns:
+        The run string, as TOML decodes it.
+
+    """
+    config = decoded.load_toml(path.read_text(encoding="utf-8"))
+    task = decoded.as_object(decoded.as_object(config["tasks"], "tasks")["t"], "t")
+    return decoded.as_str(task["run"], "t.run")
 
 
 class Locate(unittest.TestCase):
@@ -96,8 +108,12 @@ class Read(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = write(tmp, '[tasks.a]\nrun = ["echo one", "echo two"]\n')
             bodies = bs.read(path).bodies
-        self.assertEqual([b.source for b in bodies], ["echo one", "echo two"])
-        self.assertEqual({b.run_line for b in bodies}, {2})
+        sources = [b.source for b in bodies]
+        commands = ["echo one", "echo two"]
+        self.assertEqual(sources, commands)
+        lines = {b.run_line for b in bodies}
+        run_line = {2}
+        self.assertEqual(lines, run_line)
         self.assertFalse(any(b.rewritable for b in bodies))
 
     def test_string_run_is_rewritable(self) -> None:
@@ -115,7 +131,7 @@ class Read(unittest.TestCase):
                 '[tasks.a]\nfile = "x.sh"\n\n[tasks.b]\ndepends = ["a"]\n\n'
                 '[tasks.c]\nrun = "   "\n',
             )
-            self.assertEqual(bs.read(path).bodies, [])
+            self.assertEqual(bs.read(path).bodies, list[bs.Body]())
 
     def test_env_names_skip_mise_directives(self) -> None:
         """`_.file` and friends are mise directives, not variable names."""
@@ -125,7 +141,8 @@ class Read(unittest.TestCase):
                 '[env]\nA = "1"\n"_.file" = ".env"\n\n'
                 '[tasks.t]\nrun = "x"\n[tasks.t.env]\nB = "2"\n',
             )
-            self.assertEqual(bs.read(path).env, {"A", "B"})
+            expected = {"A", "B"}
+            self.assertEqual(bs.read(path).env, expected)
 
     def test_env_array_names_every_table(self) -> None:
         """`[[env]]`, mise's ordered form, names each table's variables.
@@ -138,7 +155,8 @@ class Read(unittest.TestCase):
                 '[[env]]\nA = "1"\n[[env]]\nB = "2"\n"_.path" = "x"\n\n'
                 '[tasks.t]\nrun = "x"\n',
             )
-            self.assertEqual(bs.read(path).env, {"A", "B"})
+            expected = {"A", "B"}
+            self.assertEqual(bs.read(path).env, expected)
 
     def test_wrong_shaped_tables_read_as_nothing(self) -> None:
         """A non-table env, tasks or task_config sets nothing, no traceback."""
@@ -151,7 +169,7 @@ class Read(unittest.TestCase):
         ):
             with self.subTest(text=text), TemporaryDirectory() as tmp:
                 config = bs.read(write(tmp, text))
-                self.assertEqual(config.env, set())
+                self.assertEqual(config.env, set[str]())
                 self.assertIsNone(config.shell)
 
     def test_no_tasks_is_an_empty_contribution(self) -> None:
@@ -159,7 +177,7 @@ class Read(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = write(tmp, '[package]\nname = "not-mise"\n')
             config = bs.read(path)
-        self.assertEqual(config.bodies, [])
+        self.assertEqual(config.bodies, list[bs.Body]())
         self.assertIsNone(config.shell)
 
 
@@ -196,7 +214,10 @@ class Tera(unittest.TestCase):
     def test_indented_markers_keep_their_indent(self) -> None:
         """Shfmt may move a comment; the marker still has to come back."""
         shell, count = bs.shellify("  {% raw %}\n  x\n  {% endraw %}\n")
-        self.assertEqual(bs.unshellify(shell, count).splitlines()[0], "  {% raw %}")
+        back = bs.unshellify(shell, count)
+        if back is None:
+            self.fail("an indented marker did not come back")
+        self.assertEqual(back.splitlines()[0], "  {% raw %}")
 
     def test_count_mismatch_refuses(self) -> None:
         """A body whose own comments look like Tera is not rewritten blind."""
@@ -211,7 +232,7 @@ class Splice(unittest.TestCase):
     """The rewrite region, and every way it refuses to be found."""
 
     @staticmethod
-    def body(line: int, delim: str) -> object:
+    def body(line: int, delim: str) -> bs.Body:
         """Build a Body pointing at a given line.
 
         Returns:
@@ -224,12 +245,14 @@ class Splice(unittest.TestCase):
         """The closing delimiter bounds the region."""
         lines = ["[tasks.t]", "run = '''", "old", "'''", "after"]
         out = bs.splice(lines, self.body(2, "'''"), "new\n")
-        self.assertEqual(out, ["[tasks.t]", "run = '''", "new", "'''", "after"])
+        expected = ["[tasks.t]", "run = '''", "new", "'''", "after"]
+        self.assertEqual(out, expected)
 
     def test_one_liner_is_promoted_to_a_block(self) -> None:
         """A formatter that adds lines needs a form that can hold them."""
         out = bs.splice(['run = "a; b"'], self.body(1, ""), "a\nb\n")
-        self.assertEqual(out, ["run = '''", "a", "b", "'''"])
+        expected = ["run = '''", "a", "b", "'''"]
+        self.assertEqual(out, expected)
 
     def test_text_containing_the_delimiter_refuses(self) -> None:
         """`'''` inside the body would close the string it is written into."""
@@ -257,9 +280,9 @@ class Rewrite(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = write(tmp, f"[tasks.t]\nrun = '''\n{DIRTY}'''\n")
             changed, refused = bs.rewrite(path, bs.read(path).bodies)
-            body = tomllib.loads(path.read_text(encoding="utf-8"))["tasks"]["t"]["run"]
+            body = run_of(path)
         self.assertEqual(changed, 1)
-        self.assertEqual(refused, [])
+        self.assertEqual(refused, list[str]())
         self.assertEqual(body, '[[ -n ${x} ]] || {\n  echo "no"\n  exit 0\n}\n')
 
     def test_clean_body_is_left_alone(self) -> None:
@@ -294,7 +317,7 @@ class Rewrite(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = write(tmp, f"[tasks.t]\nrun = '''\n{source}'''\n")
             changed, refused = bs.rewrite(path, bs.read(path).bodies)
-            body = tomllib.loads(path.read_text(encoding="utf-8"))["tasks"]["t"]["run"]
+            body = run_of(path)
         self.assertEqual((changed, refused), (1, []))
         self.assertTrue(body.startswith("{% raw %}\n"))
         self.assertTrue(body.rstrip("\n").endswith("{% endraw %}"))
@@ -336,7 +359,7 @@ class Findings(unittest.TestCase):
                 tmp,
                 '[env]\nMINE = "x"\n\n[tasks.t]\nrun = "echo \\"${MINE}\\""\n',
             )
-            self.assertEqual(self.check(path), [])
+            self.assertEqual(self.check(path), list[str]())
 
     def test_undeclared_env_still_reports(self) -> None:
         """The other direction: the check is live, not switched off."""
@@ -353,7 +376,7 @@ class Findings(unittest.TestCase):
         """
         with TemporaryDirectory() as tmp:
             path = write(tmp, '[tasks.t]\nrun = "x=$(date)\\necho \\"${x}\\""\n')
-            self.assertEqual(self.check(path), [])
+            self.assertEqual(self.check(path), list[str]())
 
 
 class Main(unittest.TestCase):
@@ -389,10 +412,9 @@ class Main(unittest.TestCase):
 
     def test_a_config_that_is_not_toml_is_refused_by_name(self) -> None:
         """Checked or written, an undecodable config is named (#1681)."""
-        try:
-            tomllib.loads("[tasks.t\n")
-        except tomllib.TOMLDecodeError as exc:
-            why = str(exc)
+        with self.assertRaises(decoded.UndecodableError) as caught:
+            decoded.load_toml("[tasks.t\n")
+        why = str(caught.exception)
         with TemporaryDirectory() as tmp:
             path = write(tmp, "[tasks.t\n")
             for extra in ([], ["--write"]):
@@ -441,20 +463,20 @@ class Unpinned(unittest.TestCase):
         """The other direction, so the row above is not vacuously true."""
         with TemporaryDirectory() as tmp:
             path = write(tmp, f'{PIN}\n[tasks.t]\nrun = "echo hi"\n')
-            self.assertEqual(bs.unpinned({path: bs.read(path)}), [])
+            self.assertEqual(bs.unpinned({path: bs.read(path)}), list[str]())
 
     def test_a_config_with_no_tasks_is_silent(self) -> None:
         """Skip clean by name: nothing to run means no shell to pin."""
         with TemporaryDirectory() as tmp:
             path = write(tmp, '[tools]\njq = "1.8.2"\n')
-            self.assertEqual(bs.unpinned({path: bs.read(path)}), [])
+            self.assertEqual(bs.unpinned({path: bs.read(path)}), list[str]())
 
     def test_a_pin_to_something_other_than_bash_is_still_a_pin(self) -> None:
         """The assertion is that the file DECIDES, not which shell it picks."""
         with TemporaryDirectory() as tmp:
             other = '[task_config]\nshell = "pwsh -c"\n'
             path = write(tmp, f'{other}\n[tasks.t]\nrun = "x"\n')
-            self.assertEqual(bs.unpinned({path: bs.read(path)}), [])
+            self.assertEqual(bs.unpinned({path: bs.read(path)}), list[str]())
 
     def test_main_reds_on_an_unpinned_config(self) -> None:
         """End to end, through the exit status the gate reads."""
@@ -541,29 +563,29 @@ class Nested(unittest.TestCase):
 
     def test_an_unplanted_body_is_green(self) -> None:
         """The other direction, so the row above is not vacuously true."""
-        self.assertEqual(nested('echo "hello"\n'), [])
+        self.assertEqual(nested('echo "hello"\n'), list[str]())
 
     def test_an_echoed_remedy_stays_green(self) -> None:
         """A message MAY tell a human to run the task. It may not run it."""
-        self.assertEqual(nested('echo "  run mise run fix:probe" >&2\n'), [])
+        self.assertEqual(nested('echo "  run mise run fix:probe" >&2\n'), list[str]())
 
     def test_a_grep_pattern_stays_green(self) -> None:
         """lint:audit-scheduled greps the workflows for this exact string."""
         self.assertEqual(
             nested('grep -rEq "mise run audit:${t}" .github/workflows/\n'),
-            [],
+            list[str](),
         )
 
     def test_a_comment_inside_a_body_stays_green(self) -> None:
         """The belt states the rule in prose beside the code obeying it."""
         self.assertEqual(
             nested("# never obtained via `mise run fix:probe`\ntrue\n"),
-            [],
+            list[str](),
         )
 
     def test_an_unquoted_argument_is_not_a_command(self) -> None:
         """Position decides, not the presence of the words."""
-        self.assertEqual(nested("echo mise run fix:probe\n"), [])
+        self.assertEqual(nested("echo mise run fix:probe\n"), list[str]())
 
     def test_a_quoted_span_across_lines_stays_quoted(self) -> None:
         """The belt's awk programs run to fifty lines inside one `'…'`.
@@ -573,7 +595,7 @@ class Nested(unittest.TestCase):
         this reds a body that executes nothing.
         """
         body = "awk '\nBEGIN { print \"x\" }\nmise run not-a-command\n' file\n"
-        self.assertEqual(nested(body), [])
+        self.assertEqual(nested(body), list[str]())
 
     def test_an_assignment_prefix_is_still_a_command(self) -> None:
         """`CITATION_OUT=… mise run fix:citation` was the #764 site itself."""
@@ -668,7 +690,7 @@ class NestedBadges(unittest.TestCase):
     def test_the_belt_as_it_is_runs_the_derivation_directly(self) -> None:
         """The real body calls derive-badges.sh, and the check is silent."""
         text = self.CONFIG.read_text(encoding="utf-8")
-        self.assertEqual(self.findings(text), [])
+        self.assertEqual(self.findings(text), list[str]())
         self.assertEqual(text.count(self.NOW), 1)
 
     def test_the_old_nested_call_is_named(self) -> None:
@@ -695,7 +717,7 @@ class NestedMarker(unittest.TestCase):
     def test_a_marker_above_the_line_excuses_it(self) -> None:
         """Where dispatching by name IS the job, the reason is written down."""
         body = '# nested-mise: dispatching by name is the job\nmise run "${t}"\n'
-        self.assertEqual(nested(body), [])
+        self.assertEqual(nested(body), list[str]())
 
     def test_a_marker_may_end_a_block_of_comment_lines(self) -> None:
         """A reason long enough to be a reason takes more than one line."""
@@ -705,13 +727,13 @@ class NestedMarker(unittest.TestCase):
             "# race needs never runs it.\n"
             'mise run "${t}"\n'
         )
-        self.assertEqual(nested(body), [])
+        self.assertEqual(nested(body), list[str]())
 
     def test_a_trailing_marker_excuses_its_own_line(self) -> None:
         """On the line is as close as a marker can sit to what it excuses."""
         self.assertEqual(
             nested('mise run "${t}"  # nested-mise: dispatch is the job\n'),
-            [],
+            list[str](),
         )
 
     def test_a_marker_with_no_reason_is_not_a_marker(self) -> None:
@@ -737,7 +759,7 @@ class NestedMarker(unittest.TestCase):
             "  true\n"
             "fi\n"
         )
-        self.assertEqual(nested(body), [])
+        self.assertEqual(nested(body), list[str]())
 
     def test_a_run_after_a_continuation_is_named_on_its_own_line(self) -> None:
         """Counted in the source, so a continuation above moves nothing."""

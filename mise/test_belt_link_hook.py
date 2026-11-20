@@ -29,12 +29,16 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import override
 
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
 LEFTHOOK = hermetic.optional_tool("lefthook")
+# What the hook adds to .git/info/exclude, and the names it leaves there.
+EXCLUDED = [".config/mise/"]
+LINK_NAMES = ["belt.toml", "conf.d", "mise.lock"]
 OWNER_REPO = "example-org/.github"
 
 # A git that fetches the canon's main whatever sha it is asked for: a
@@ -96,6 +100,7 @@ def run(
 class HookFixture(unittest.TestCase):
     """A bare canon with two commits, a consumer pinning the first, a cache."""
 
+    @override
     def setUp(self) -> None:
         """Plant the canon with two commits, a consumer, HOME and cache."""
         self.tmp = Path(tempfile.mkdtemp()).resolve()
@@ -243,10 +248,13 @@ class TheCacheAndTheLinks(HookFixture):
             done.stdout,
             f"org-belt: .config/mise links the belt of {OWNER_REPO}@{self.shas[0]}\n",
         )
-        self.assertEqual(self.cached(), [self.shas[0]])
+        first = [self.shas[0]]
+        self.assertEqual(self.cached(), first)
         tree = self.cache / "org-belt" / self.shas[0]
         self.assertTrue(tree.is_symlink())
-        self.assertEqual([tree.resolve()], [p.resolve() for p in self.trees()])
+        trees = [p.resolve() for p in self.trees()]
+        made = [tree.resolve()]
+        self.assertEqual(made, trees)
         self.assertTrue(self.trees()[0].name.startswith(f"{self.shas[0]}."))
         head = self.git(tree, "rev-parse", "HEAD").stdout.strip()
         self.assertEqual(head, self.shas[0])
@@ -255,7 +263,7 @@ class TheCacheAndTheLinks(HookFixture):
             (self.consumer / ".config/mise/conf.d/belt.toml").read_text("utf-8"),
             "# belt 1\n",
         )
-        self.assertEqual(self.excluded(), [".config/mise/"])
+        self.assertEqual(self.excluded(), EXCLUDED)
 
     def test_a_second_run_offline_changes_nothing(self) -> None:
         """The remote gone: no fetch, no output, links untouched."""
@@ -269,7 +277,7 @@ class TheCacheAndTheLinks(HookFixture):
         self.assertEqual(
             (link.lstat().st_mtime_ns, self.cached(), self.links()), before
         )
-        self.assertEqual(self.excluded(), [".config/mise/"])
+        self.assertEqual(self.excluded(), EXCLUDED)
 
     def test_a_changed_pin_relinks(self) -> None:
         """The stub moves to the second commit: a second tree, new links."""
@@ -281,7 +289,8 @@ class TheCacheAndTheLinks(HookFixture):
             done.stdout,
             f"org-belt: .config/mise links the belt of {OWNER_REPO}@{self.shas[1]}\n",
         )
-        self.assertEqual(self.cached(), sorted(self.shas))
+        both = sorted(self.shas)
+        self.assertEqual(self.cached(), both)
         self.assertEqual(self.links(), self.linked(self.shas[1]))
 
     def test_two_runs_at_once_leave_one_whole_tree(self) -> None:
@@ -290,10 +299,15 @@ class TheCacheAndTheLinks(HookFixture):
             runs = list(pool.map(lambda _: self.hook(), range(2)))
         for done in runs:
             self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.cached(), [self.shas[0]])
+        first = [self.shas[0]]
+        self.assertEqual(self.cached(), first)
         tree = self.cache / "org-belt" / self.shas[0]
-        self.assertEqual([tree.resolve()], [p.resolve() for p in self.trees()])
-        self.assertEqual(sorted(p.name for p in tree.iterdir()), [".git", "mise"])
+        trees = [p.resolve() for p in self.trees()]
+        made = [tree.resolve()]
+        self.assertEqual(made, trees)
+        names = sorted(p.name for p in tree.iterdir())
+        checkout = [".git", "mise"]
+        self.assertEqual(names, checkout)
         self.assertEqual(self.git(tree, "status", "--porcelain").stdout, "")
         self.assertEqual(self.links(), self.linked(self.shas[0]))
 
@@ -312,7 +326,10 @@ class TheCacheAndTheLinks(HookFixture):
             for rel in self.linked(self.shas[0]):
                 (self.consumer / rel).unlink(missing_ok=True)
                 if pair % 2:
-                    (self.consumer / rel).symlink_to(stale[rel])
+                    target = stale[rel]
+                    if target is None:
+                        self.fail(f"no stale link for {rel}")
+                    (self.consumer / rel).symlink_to(target)
             with ThreadPoolExecutor(max_workers=2) as pool:
                 runs = list(pool.map(lambda _: self.hook(), range(2)))
             for done in runs:
@@ -321,7 +338,7 @@ class TheCacheAndTheLinks(HookFixture):
             left = sorted(
                 p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()]
             )
-            self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"], pair)
+            self.assertEqual(left, LINK_NAMES, pair)
 
     def test_a_killed_hooks_temporary_name_is_removed(self) -> None:
         """A `<link>.<pid>` whose hook is gone is removed by the next run."""
@@ -335,7 +352,7 @@ class TheCacheAndTheLinks(HookFixture):
         self.assertEqual((done.returncode, done.stderr), (0, ""))
         self.assertEqual(self.links(), self.linked(self.shas[0]))
         left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
-        self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"])
+        self.assertEqual(left, LINK_NAMES)
 
     def test_a_sibling_whose_suffix_is_not_a_pid_is_left(self) -> None:
         """Only `<link>.<digits>` is the hook's: `mise.lock.bak` stays."""
@@ -368,7 +385,8 @@ class TheCacheAndTheLinks(HookFixture):
             " nothing linked\n",
         )
         self.assertEqual((self.cached(), self.trees()), ([], []))
-        self.assertEqual(self.links(), dict.fromkeys(self.linked(self.shas[0])))
+        unlinked: dict[str, str | None] = dict.fromkeys(self.linked(self.shas[0]))
+        self.assertEqual(self.links(), unlinked)
 
 
 class TheCloneStaysItsOwn(HookFixture):
@@ -392,7 +410,7 @@ class TheCloneStaysItsOwn(HookFixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue((worktree / ".config/mise/conf.d/belt.toml").is_symlink())
         self.assertEqual(self.git(worktree, "status", "--porcelain").stdout, "")
-        self.assertEqual(self.excluded(), [".config/mise/"])
+        self.assertEqual(self.excluded(), EXCLUDED)
 
     def test_git_variables_a_hook_inherits_do_not_reach_the_fetch(self) -> None:
         """Under a hook git exports GIT_DIR: the cache is not the clone's."""
@@ -417,12 +435,13 @@ class TheCloneStaysItsOwn(HookFixture):
         shutil.rmtree(self.consumer / ".github")
         done = self.hook()
         self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "", ""))
-        self.assertEqual(self.cached(), [])
+        self.assertEqual(self.cached(), list[str]())
         self.assertFalse((self.consumer / ".config").exists())
 
-    @unittest.skipIf(LEFTHOOK is None, "lefthook is not installed")
     def test_lefthook_runs_the_job_as_written(self) -> None:
         """Through lefthook itself: its templating leaves the command whole."""
+        if LEFTHOOK is None:
+            self.skipTest("lefthook is not installed")
         (self.consumer / "lefthook.yml").write_text(
             HOOKS.read_text(encoding="utf-8"), encoding="utf-8"
         )
