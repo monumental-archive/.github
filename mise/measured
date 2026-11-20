@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Run a repository's test command, measured where it runs (#1667).
+#
+#   "${ORG_BELT_DIR}/measured" <command> [<argument>…]
+#
+# The repository's `test` task names its command through this script,
+# and nothing else interposes: the measurement is applied by the
+# command line that runs the suite, in whatever task, shell, file task
+# or script that line sits in. It execs its arguments, so the exit
+# status and the signals are the command's own.
+#
+# With no `.coverage-floor` at the repository root, or outside a run
+# that has a measurement directory (ORG_COVERAGE_RUN, set by the belt's
+# `[env]` for every task of one `mise run`), it is `exec "$@"` and
+# nothing else: the environment reaches the command unchanged. The floor
+# file's EXISTENCE is the switch, whatever it holds: coverage:adopt
+# measures a tree adopting for the first time by creating it empty
+# before the suite runs.
+#
+# With both, it first EXTENDS the environment the command really has,
+# merging and never replacing (#1667 item 2), because a variable the
+# command's task set is the repository's:
+#
+#   python   the run's start-up hook is put in front of PYTHONPATH,
+#            beside what is there, and COVERAGE_PROCESS_START names the
+#            run's rc file; every python3 the command starts is
+#            measured into the run's directory.
+#   plpgsql  ORG_PLPGSQL_COVERAGE names the report the suite's teardown
+#            writes, in the run directory.
+#
+# Go (#1651) and Rust (#1653) add their own here.
+#
+# coverage:check reads the run directory after `test` ends. A
+# repository whose suite does not run through this script leaves no
+# data there, and its floor's record names the leg that measured
+# nothing (#1666).
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+  cat >&2 << 'USAGE'
+measured: no command — usage: "${ORG_BELT_DIR}/measured" <test command> [<argument>…]
+USAGE
+  exit 2
+fi
+
+run=${ORG_COVERAGE_RUN:-}
+root=""
+if [[ -n ${run} ]]; then
+  root=$(git rev-parse --show-toplevel 2> /dev/null) || root=""
+fi
+if [[ -z ${run} || -z ${root} || ! -f ${root}/.coverage-floor ]]; then
+  exec "$@"
+fi
+
+belt=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# The first call in a run clears what earlier runs left: the sweep and
+# why it is needed are coverage-run.sh's.
+# shellcheck source=mise/coverage-run.sh
+. "${belt}/coverage-run.sh"
+[[ -d ${run} ]] || org_coverage_sweep "${run}"
+mkdir -p "${run}"
+
+# python: a start-up hook and an rc file, written into the run's
+# directory by the first call in the run and read by every later one.
+#
+# The hook is written by the belt's one hook writer (startup_hook.py,
+# #1542), which appends the chain to the next sitecustomize on the path,
+# so a repository's own hook and the mutation leg's still run. Its work
+# is coverage's own start-up, from the directory the coverage package is
+# imported from, appended to sys.path so the suite's imports resolve as
+# they do unmeasured. The rc file names this run's data file and the
+# repository's root; coverage-measure.sh reads the run with it.
+#
+# The tool venv's interpreter must be the one the suite runs on: the
+# tracer is a compiled extension, and a venv built on another Python
+# would load in no child, silently. Asked once per run (about 0.2 s).
+#
+# Each file is written whole and renamed into place, the rc file last,
+# so a call running beside the first reads complete files or writes
+# its own identical ones.
+if command -v coverage > /dev/null; then
+  if [[ ! -f ${run}/coverage.rc ]]; then
+    : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+    cov_sys=$(coverage debug sys 2> /dev/null) || cov_sys=""
+    cov_module=$(awk '$1 == "coverage_module:" { print $2 }' <<< "${cov_sys}")
+    cov_python=$(awk '$1 == "executable:" { print $2 }' <<< "${cov_sys}")
+    cov_version=$("${cov_python:-false}" -c 'import sys; print(sys.version)' 2> /dev/null) || cov_version=""
+    run_version=$(python3 -c 'import sys; print(sys.version)' 2> /dev/null) || run_version=""
+    if [[ -z ${cov_module} || -z ${cov_version} || ${cov_version} != "${run_version}" ]]; then
+      echo "measured: coverage runs on '${cov_version:-no interpreter}'" >&2
+      echo "  but the suite's python3 is '${run_version:-missing}' — the tool venv" >&2
+      echo "  must be built on the belt's python pin (reinstall: mise install -f pipx:coverage)" >&2
+      exit 1
+    fi
+    site=$("${ORG_PYTHON}" -c 'import sys; print(repr(sys.argv[1]))' "$(dirname "$(dirname "${cov_module}")")")
+    mkdir -p "${run}/hook" "${run}/python"
+    printf 'import sys\nsys.path.append(%s)\nimport coverage\ncoverage.process_startup()\n' \
+      "${site}" | "${ORG_PYTHON}" "${belt}/startup_hook.py" "${run}/hook.$$"
+    mv -f "${run}/hook.$$/sitecustomize.py" "${run}/hook/sitecustomize.py"
+    rmdir "${run}/hook.$$"
+    # Branches from the start (#1336 property 2). Test files are omitted:
+    # a suite executes itself completely by construction, and counting it
+    # would raise the number without one more line of the code under
+    # test being run. relative_files, so the report's paths are the
+    # repository's own and Codecov maps them without a fix-up.
+    cat > "${run}/coverage.rc.$$" << RC
+[run]
+branch = true
+parallel = true
+source = ${root}
+data_file = ${run}/python/.coverage
+relative_files = true
+omit = */test_*.py
+disable_warnings = no-data-collected, module-not-measured
+
+[report]
+precision = 2
+RC
+    mv -f "${run}/coverage.rc.$$" "${run}/coverage.rc"
+  fi
+  export COVERAGE_PROCESS_START="${run}/coverage.rc"
+  case ":${PYTHONPATH:-}:" in
+    *":${run}/hook:"*) ;;
+    *) export PYTHONPATH="${run}/hook${PYTHONPATH:+:${PYTHONPATH}}" ;;
+  esac
+fi
+
+# plpgsql: one report per run; a value already set is kept.
+export ORG_PLPGSQL_COVERAGE="${ORG_PLPGSQL_COVERAGE:-${run}/plpgsql-coverage.json}"
+
+exec "$@"

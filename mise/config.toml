@@ -198,6 +198,15 @@ ORG_PYTHON = '''{{ exec(command=`b="${ORG_BELT_DIR:-}"; v=""; if [ -n "$b" ] && 
 # version read from the belt's file like ORG_PYTHON's, never typed here.
 # No apostrophe: bash drops one inside `${VAR:?...}` (#1543).
 ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise install python@{{ exec(command=`b="${ORG_BELT_DIR:-}"; if [ -n "$b" ] && [ -f "$b/config.toml" ]; then awk -F'"' '/^python = "/ { print $2 }' "$b/config.toml"; fi`) }} (CI: the canon action)'''
+# THE RUN'S MEASUREMENT DIRECTORY (#1667): one per `mise run`, named for
+# that run's mise pid, under the temporary directory and so outside the
+# working tree (#1628's contract). Every task of the run, and every child
+# a task starts, sees the same value, with no exec at load: `{{ mise_pid }}`
+# renders the same in this [env], in a depends entry and in a task's run
+# script (measured on mise 2026.11.7). `measured` writes what the suite
+# measured here; coverage:check and coverage:adopt read it after `test`.
+# A run's directory can outlive it; coverage-run.sh says who sweeps it.
+ORG_COVERAGE_RUN = "{{ get_env(name='TMPDIR', default='') | default(value='/tmp', boolean=true) | trim_end(pat='/') }}/org-coverage-{{ mise_pid }}"
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
@@ -633,18 +642,12 @@ description = "The gate: everything the org enforces, plus this repo's tasks"
 dir = "{{cwd}}"
 depends = [
   "lint:*",
-  # `test` once per gate (#1623 item 3): collected unless the coverage
-  # measurement already runs the whole task, which coverage-measure.sh's
-  # `runs-test` answers (the python leg, or a leg the floor's record
-  # names that runs the task, #1666). The
-  # belt's directory reaches the exec through Tera's `env`, never the
-  # shell's (the exec's shell does not see the belt's [env]), and the
-  # exec moves to `cwd`, the tree `ci` runs in (it starts in the
-  # global config's own directory, measured). The exec
-  # always exits 0 and prints nothing where the belt or the script is
-  # absent or unreadable, so `test` is then kept, never an error: a
-  # template that fails crashes mise on load (#569).
-  { task = '''{% set belt = env.ORG_BELT_DIR | default(value="") | replace(from=`'`, to=`'\\''`) %}{% set here = cwd | replace(from=`'`, to=`'\\''`) %}{% if exec(command=`f='` ~ belt ~ `/coverage-measure.sh'; if [ -n '` ~ belt ~ `' ] && [ -r "$f" ] && cd '` ~ here ~ `'; then bash "$f" ci runs-test 2> /dev/null || true; fi`) == "" %}test{% endif %}''', optional = true },
+  # `test` once per gate, plainly (#1667). Its own test command runs
+  # through `"${ORG_BELT_DIR}/measured"`, which measures where the suite
+  # runs when the tree has a floor, so coverage:check below runs no
+  # suite: it depends on this same `test`, which mise runs once in the
+  # run, and reads what it measured after it ends.
+  { task = "test", optional = true },
   { task = "build", optional = true },
   # The coverage ratchet joins the gate the moment a repo commits a
   # floor; without one it skips clean like every guarded belt task.
@@ -6754,6 +6757,13 @@ files=$(git ls-files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
 [tasks."coverage:check"]
 description = "Enforce the derived coverage floor (.coverage-floor); repos without one skip clean"
 dir = "{{cwd}}"
+# Runs no suite (#1667). It depends on the repository's `test`, whose
+# test command runs through `measured`, and reads the run's directory
+# after `test` ends. In `ci`, which depends on `test` too, mise runs it
+# once; run on its own (a person, the release derivation) this runs it.
+# Optional, as in `ci`: a tree with no `test` task measures through its
+# own commands (go, rust, typescript) or skips.
+depends = [{ task = "test", optional = true }]
 # The ratchet: the floor is DERIVED STATE that only rises (#652). The
 # release machinery writes it as `measured - band` and commits it with
 # the release; this task enforces it, and refuses a floor that disagrees
@@ -6863,23 +6873,18 @@ dir = "{{cwd}}"
 # selector) and inside the minimum: the gate holds each major to the
 # floor in its own pgrx job, so the floor is derived from them too. The
 # selector prints nothing where there is no extension.
-run = '''
-applies=$(ORG_COVERAGE_DISCOVER=1 "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt probe) || exit 1
-if [[ -z ${applies} ]]; then
-  echo "coverage:adopt: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), nothing to measure"
-  exit 0
-fi
-legs=$(ORG_COVERAGE_DISCOVER=1 "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt && "${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt pgrx) || exit 1
-if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
-  branches=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:adopt rust-branches) || exit 1
-  legs="${legs}"$'\n'"${branches}"
-elif [[ -f Cargo.toml ]]; then
-  echo "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line (branch coverage needs the dated nightly)"
-fi
-[[ ! -f go.mod ]] || legs+=$'\n'"$("${ORG_BELT_DIR}/coverage-go-branches.sh" coverage:adopt)" || exit 1
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" write \
-  --provenance "coverage:adopt" --adopt <<< "${legs}"
-'''
+#
+# A sequence, not one script (#1667): adoption measures the repository's
+# own `test` run, through `measured`, which measures only a tree whose
+# `.coverage-floor` exists. `start` creates it empty where there is none
+# (and refuses a tree with no `test` task), `test` runs by reference
+# once `start` has ended, in this run's measurement directory, and
+# `write` reads that run and writes the floor (coverage-adopt.sh).
+run = [
+  '"${ORG_BELT_DIR}/coverage-adopt.sh" start',
+  { task = "test" },
+  '"${ORG_BELT_DIR}/coverage-adopt.sh" write',
+]
 
 [tasks."lint:fuzz-build"]
 description = "Fuzz targets still compile (cargo-fuzz, sanitizer none, stable toolchain); repos without fuzz/ skip clean"

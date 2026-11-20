@@ -635,6 +635,18 @@ class Measured(unittest.TestCase):
         for argv in ([GIT, "init", "-q"], [GIT, "add", "."]):
             # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run(argv, cwd=tree, env=env, check=True)
+        # The suite runs once, through `measured`, as the repository's
+        # test task runs it (#1667); the leg then reads that run.
+        (tree / ".coverage-floor").write_text("", encoding="utf-8")
+        env["ORG_COVERAGE_RUN"] = str(base / "run")
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
+            [str(MEASURE.parent / "measured"), BASH, "-c", run],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            check=True,
+        )
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(MEASURE), "coverage:test", "python"],

@@ -183,6 +183,7 @@ class Planted(unittest.TestCase):
         for real in (
             "pgrx-test.sh",
             "coverage-measure.sh",
+            "coverage-run.sh",
             "coverage_floor.py",
             "gate_surface.py",
         ):

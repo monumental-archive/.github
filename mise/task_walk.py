@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Walk a mise task to the scripts `mise run` would run for it.
 
-Org canon (#1608, ruled on #1547). The coverage legs that read the
-repository's own `test` task (python, plpgsql, typescript) read it
-through this one walk, so they measure the run the gate makes. It asks
+Org canon (#1608, ruled on #1547). The typescript coverage leg finds
+the vitest command the repository's own `test` task runs through this
+walk (coverage_js_runner.py). The python and plpgsql legs ran the
+task's steps from here until #1667: they now read what the suite's own
+run measured through `measured`, and run nothing. It asks
 mise the read-only `mise tasks info <name> --json` of each task it
 reaches, never a nested `mise run` (the #82 race), and decodes each
 answer through one validating function, `decode`.
@@ -21,20 +23,15 @@ skipped: a reference that passes arguments or environment (the walk
 runs a script as written), a file task, a pattern that matches nothing,
 and an entry of a shape mise does not document.
 
-    task_walk.py steps <label> [<task>]
-        prints one step per line, `<dir> <script>`, each base64 (`-` for
-        a task with no `dir`), for a bash read loop; or the refusal on
-        stderr and exit 1. <task> is `test` unless named.
+A module, imported by name; it has no command line.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -353,58 +350,3 @@ def walk_mise(root: str) -> Walk:
 
     """
     return walk(root, lambda n: mise_json("tasks", "info", n), task_names)
-
-
-def encode(text: str) -> str:
-    """Base64 one field of a step record.
-
-    Returns:
-        The encoding.
-
-    """
-    return base64.b64encode(text.encode("utf-8")).decode("ascii")
-
-
-def steps_command(label: str, root: str) -> int:
-    """Print the root task's steps, one record per line, or refuse.
-
-    Returns:
-        0, or 1 with the refusal on stderr.
-
-    """
-    try:
-        found = walk_mise(root)
-    except RefusedError as exc:
-        print(f"{label}: {exc}", file=sys.stderr)
-        return 1
-    if not found.steps:
-        print(
-            f"{label}: the test task and its depends run nothing — the legs measure\n"
-            "  the repository's own suite and cannot measure a task that runs nothing",
-            file=sys.stderr,
-        )
-        return 1
-    for step in found.steps:
-        print(f"{encode(step.dir) if step.dir else '-'} {encode(step.script)}")
-    return 0
-
-
-def main(argv: list[str]) -> int:
-    """Run the command line.
-
-    Returns:
-        The exit status.
-
-    """
-    match argv:
-        case ["steps", label]:
-            return steps_command(label, "test")
-        case ["steps", label, root]:
-            return steps_command(label, root)
-        case _:
-            print("usage: task_walk.py steps <label> [<task>]", file=sys.stderr)
-            return 2
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))

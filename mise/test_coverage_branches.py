@@ -30,6 +30,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import coverage_floor as cf
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -109,6 +110,25 @@ esac
 """
 
 
+def measuring_step(task: str) -> str:
+    """Read the step of a coverage task that measures (#1667).
+
+    `coverage:adopt` is a run list: create the floor, `test` by
+    reference, then the measurement, which is the step these rows run.
+
+    Returns:
+        The task's script, or its run list's last one.
+
+    """
+    belt = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(belt["tasks"], "the belt's [tasks]")
+    run = decoded.as_object(tasks[task], task)["run"]
+    if isinstance(run, str):
+        return run
+    steps = decoded.as_array(run, f"{task}'s run")
+    return decoded.as_str(steps[-1], f"{task}'s last step")
+
+
 def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
     task: str,
     *,
@@ -172,7 +192,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
             [GIT, "add", *tracked], cwd=tree, env=env, check=True
         )
     done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [BASH, "-euo", "pipefail", "-c", CONFIG["tasks"][task]["run"]],
+        [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
         cwd=tree,
         env=env,
         capture_output=True,

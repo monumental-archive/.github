@@ -31,6 +31,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -248,6 +249,37 @@ def captured_env(captured_test: str | None, tree: Path) -> dict[str, str]:
     }
 
 
+def measuring_step(task: str) -> str:
+    """Read the step of a coverage task that measures (#1667).
+
+    `coverage:adopt` is a run list: create the floor, `test` by
+    reference, then the measurement, which is the step these rows run.
+
+    Returns:
+        The task's script, or its run list's last one.
+
+    """
+    belt = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(belt["tasks"], "the belt's [tasks]")
+    run = decoded.as_object(tasks[task], task)["run"]
+    if isinstance(run, str):
+        return run
+    steps = decoded.as_array(run, f"{task}'s run")
+    return decoded.as_str(steps[-1], f"{task}'s last step")
+
+
+def plant_run(run: Path) -> None:
+    """Leave a run's directory as `measured` leaves it (#1667).
+
+    The suite ran through `measured`, which wrote the run's rc file and
+    coverage.py's data; the stub `coverage` reads neither, but the leg
+    finds them.
+    """
+    (run / "python").mkdir(parents=True)
+    (run / "coverage.rc").write_text("[run]\n", encoding="utf-8")
+    (run / "python" / ".coverage.stub").write_text("", encoding="utf-8")
+
+
 def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
     task: str,
     *,
@@ -266,6 +298,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     captured_test: str | None = None,
     reports_dir: bool | str = True,
     commit: bool = False,
+    measured: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
@@ -275,7 +308,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     ORG_COVERAGE_REPORTS, as the gate job names one; False leaves the
     variable unset, as on a developer's machine; a path names that.
     `commit` commits the planted tree, so `git status` reads what the
-    run changed.
+    run changed. `measured` leaves the run's directory as a suite run
+    through `measured` does (#1667); False, as one that ran outside it.
 
     Returns:
         The finished process, and a snapshot directory holding the
@@ -338,9 +372,12 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     }
     env |= captured_env(captured_test, tree)
     env |= reports_env(tmp, reports_dir=reports_dir)
+    env["ORG_COVERAGE_RUN"] = str(tmp / "run")
+    if measured:
+        plant_run(tmp / "run")
     init_tree(tree, env, tracked, commit=commit)
     done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [BASH, "-euo", "pipefail", "-c", CONFIG["tasks"][task]["run"]],
+        [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
         cwd=tree,
         env=env,
         capture_output=True,
@@ -380,7 +417,20 @@ class CheckRows(CoverageTaskCase):
             + upload_line(tree, "coverage.xml"),
             done.stdout,
         )
-        self.assertIn("suite ran", done.stderr)
+        # The check reads the run `measured` left and runs no suite (#1667).
+        self.assertNotIn("suite ran", done.stderr)
+
+    def test_python_run_outside_measured_reports_no_figure(self) -> None:
+        """A suite that ran outside `measured`: no python figure, by name."""
+        done, _ = self.run_task("coverage:check", go="91.0", measured=False)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            "coverage:check: python: the test run measured no Python — its test"
+            ' command runs\n  through "${ORG_BELT_DIR}/measured" (#1667),'
+            " or no suite ran under mise\n",
+            done.stderr,
+        )
+        self.assertNotIn("python", done.stdout)
 
     def test_branches_below_the_floor_red_by_name(self) -> None:
         """Statements holding does not carry the branch leg."""
@@ -729,16 +779,6 @@ class TaskReferenceRows(CoverageTaskCase):
                 done = self.captured(root)
                 self.assertEqual(1, done.returncode, done.stderr)
                 self.assertIn(f"runs 'unit' with {what},", done.stderr)
-
-    def test_the_python_leg_reads_the_same_walk(self) -> None:
-        """A depends with arguments, under the python leg (#1608)."""
-        done, _ = self.run_task("coverage:check", captured_test="depends-args")
-        self.assertEqual(1, done.returncode, done.stderr)
-        self.assertIn(
-            "coverage:check: task 'test' runs 'unit' with arguments,"
-            " which the measured run cannot pass\n",
-            done.stderr,
-        )
 
     def test_a_cycle_ends_and_refuses_by_name(self) -> None:
         """cycle-a depends on cycle-b, which runs cycle-a: no vitest."""
@@ -1217,8 +1257,9 @@ NO_SOURCE_MSG = (
 def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], bool]:
     """Measure a planted tree's python leg with the real coverage.py.
 
-    The tree tracks `sub/helper.py`; its test task is `test_run`, read
-    through the stub `mise`.
+    The tree tracks `sub/helper.py` and an empty floor. `test_run` runs
+    first through the real `measured`, as the repository's test task
+    would (#1667), then the leg reads the run it measured.
 
     Returns:
         The finished measurement, and whether it wrote coverage.xml.
@@ -1236,17 +1277,26 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         task.write_text(
             json.dumps({"dir": str(tree), "run": [test_run]}), encoding="utf-8"
         )
+        (tree / ".coverage-floor").write_text("", encoding="utf-8")
         env = hermetic.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STUB_TASK": str(task),
             "ORG_COVERAGE_REPORTS": str(Path(tmp) / "reports"),
+            "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
         }
         for args in (["init", "-q"], ["add", "sub/helper.py"]):
             subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
                 [GIT, *args], cwd=tree, env=env, check=True
             )
+        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [str(BELT / "measured"), BASH, "-c", test_run],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            check=True,
+        )
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "python"],
             cwd=tree,

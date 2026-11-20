@@ -89,11 +89,14 @@ def body(task: dict) -> str:
     """Read a task's run text.
 
     Returns:
-        The `run` string, a list joined by lines.
+        The `run` string, a list's scripts joined by lines; a `{ task }`
+        entry in the list is a reference, not a script (#1667).
 
     """
     run = task.get("run", "")
-    return run if isinstance(run, str) else "\n".join(run)
+    if isinstance(run, str):
+        return run
+    return "\n".join(entry for entry in run if isinstance(entry, str))
 
 
 def reached(name: str, tasks: dict) -> list[str]:

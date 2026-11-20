@@ -82,5 +82,9 @@ shell = "bash -euo pipefail -c"
 # recommendation — upstream's own CI example uses 300.
 # FUZZ_SECONDS = "300"
 
+# The suite runs through the belt's `measured` (#1667): with a
+# `.coverage-floor`, coverage is measured in this one run and
+# coverage:check reads it; without one the command runs unchanged.
+# e.g. run = '"${ORG_BELT_DIR}/measured" python3 -m unittest discover'
 [tasks.test]
 run = "echo TODO: this repo has no tests yet && exit 1"

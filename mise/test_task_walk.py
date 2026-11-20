@@ -10,8 +10,6 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import contextlib
-import io
 import json
 import os
 import re
@@ -305,26 +303,15 @@ class Mise(unittest.TestCase):
         self.assertIsNone(tw.mise_json("tasks", "info", "gone"))
         self.assertIsNone(tw.mise_json("tasks", "info", "bad"))
 
+    def test_walk_mise_walks_from_a_named_root(self) -> None:
+        """`walk_mise` asks mise for each task it reaches, from the root named."""
+        walked = tw.walk_mise("x")
+        self.assertEqual(("echo hi",), tuple(step.script for step in walked.steps))
+
     def test_no_mise_on_path_is_none(self) -> None:
         """Without mise there is nothing to ask."""
         with mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertIsNone(tw.mise_json("tasks", "ls"))
-
-    def test_steps_from_a_named_root(self) -> None:
-        """`steps <label> <task>` walks from that task."""
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = tw.main(["steps", "leg", "x"])
-        self.assertEqual(0, status)
-        self.assertEqual("- ZWNobyBoaQ==\n", out.getvalue())
-
-    def test_a_usage_error(self) -> None:
-        """Anything but `steps` is exit 2 with the usage."""
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            status = tw.main([])
-        self.assertEqual(2, status)
-        self.assertEqual("usage: task_walk.py steps <label> [<task>]\n", err.getvalue())
 
 
 class Fields(unittest.TestCase):
