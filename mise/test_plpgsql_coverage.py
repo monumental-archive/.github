@@ -20,6 +20,8 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import base64
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -28,10 +30,14 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
+from unittest import mock
 
 import hermetic
+import plpgsql_coverage as pc
 import test_coverage_tasks
+from decoded import as_array, as_object, load_json
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -226,6 +232,37 @@ def run(
     )
 
 
+@dataclass(frozen=True)
+class Done:
+    """What an in-process call to the helper returned and wrote."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def call(argv: list[str], env: dict[str, str], cwd: Path) -> Done:
+    """Call the helper's `main` in this process (#1711).
+
+    The environment a script row handed the child is this process's for
+    the call (`mock.patch.dict`, cleared and restored), so the helper
+    starts the stub psql it finds on that PATH, as the child did.
+
+    Returns:
+        The status `main` returned and what it wrote to each stream.
+
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        contextlib.chdir(cwd),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
+        status = pc.main(argv)
+    return Done(status, out.getvalue(), err.getvalue())
+
+
 class Collecting(unittest.TestCase):
     """Collects from a planted database and reads the report."""
 
@@ -237,7 +274,7 @@ class Collecting(unittest.TestCase):
         lint: dict[str, str] | None = None,
         sources: dict[str, str] | None = None,
         **planted: str,
-    ) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]]:
+    ) -> tuple[Done, Done]:
         """Collect a report from the planted database and read it.
 
         `listing` replaces the function listing psql prints, verbatim;
@@ -261,9 +298,8 @@ class Collecting(unittest.TestCase):
         report = tmp / "report.json"
         self.answers, self.report = answers, report
         env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(report), **planted)
-        py = sys.executable
-        collected = run([py, str(HELPER), "collect", "postgres://stub"], env, tmp)
-        read = run([py, str(HELPER), "totals", "leg", str(report)], env, tmp)
+        collected = call(["collect", "postgres://stub"], env, tmp)
+        read = call(["totals", "leg", str(report)], env, tmp)
         return collected, read
 
 
@@ -385,8 +421,8 @@ class HelperRows(Collecting):
         """A suite whose teardown never called collect is refused."""
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        read = run(
-            [sys.executable, str(HELPER), "totals", "leg", str(tmp / "none.json")],
+        read = call(
+            ["totals", "leg", str(tmp / "none.json")],
             hermetic.env(),
             tmp,
         )
@@ -414,8 +450,8 @@ class HelperRows(Collecting):
         }
         document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
         planted.write_text(json.dumps(document), encoding="utf-8")
-        read = run(
-            [sys.executable, str(HELPER), "totals", "leg", str(planted)],
+        read = call(
+            ["totals", "leg", str(planted)],
             hermetic.env(),
             tmp,
         )
@@ -432,8 +468,8 @@ class HelperRows(Collecting):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         stubs, answers = plant_stubs(tmp, TWO)
-        done = run(
-            [sys.executable, str(HELPER), "collect", "postgres://stub"],
+        done = call(
+            ["collect", "postgres://stub"],
             stub_env(stubs, answers),
             tmp,
         )
@@ -472,8 +508,11 @@ class LintRows(Collecting):
         self.assertEqual(0, collected.returncode, collected.stderr)
         self.assertEqual(0, read.returncode, read.stderr)
         self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", read.stdout)
-        document = json.loads(self.report.read_text(encoding="utf-8"))
-        self.assertEqual([[], []], [f["findings"] for f in document["functions"]])
+        document = as_object(load_json(self.report.read_text("utf-8")), "report")
+        functions = as_array(document.get("functions"), "functions")
+        self.assertEqual(
+            [[], []], [as_object(f, "function").get("findings") for f in functions]
+        )
         self.assertEqual("101 0\n102 0\n", (self.answers / "linted").read_text("utf-8"))
 
     def test_an_error_is_red_by_function_and_line(self) -> None:
@@ -578,8 +617,8 @@ class LintRows(Collecting):
         planted = tmp / "report.json"
         document = {"profiler": "on", "preload": PRELOAD, "functions": [entry]}
         planted.write_text(json.dumps(document), encoding="utf-8")
-        read = run(
-            [sys.executable, str(HELPER), "totals", "leg", str(planted)],
+        read = call(
+            ["totals", "leg", str(planted)],
             hermetic.env(),
             tmp,
         )
@@ -657,9 +696,7 @@ class SuppressionRows(Collecting):
 class RefusalRows(Collecting):
     """Every way a collection or a report file is refused, by name."""
 
-    def collection_failed(
-        self, read: subprocess.CompletedProcess[str], why: str
-    ) -> None:
+    def collection_failed(self, read: Done, why: str) -> None:
         """Assert the leg refuses a failed collection, naming why."""
         self.assertEqual(1, read.returncode)
         self.assertEqual("", read.stdout)
@@ -714,7 +751,7 @@ class RefusalRows(Collecting):
         """The failure shape decodes, and the leg refuses with its reason."""
         self.collection_failed(self.read_planted({"error": "boom"}), "boom")
 
-    def read_planted(self, document: object) -> subprocess.CompletedProcess[str]:
+    def read_planted(self, document: object) -> Done:
         """Run `totals` over a planted report file.
 
         Returns:
@@ -726,8 +763,8 @@ class RefusalRows(Collecting):
         planted = tmp / "report.json"
         text = document if isinstance(document, str) else json.dumps(document)
         planted.write_text(text, encoding="utf-8")
-        return run(
-            [sys.executable, str(HELPER), "totals", "leg", str(planted)],
+        return call(
+            ["totals", "leg", str(planted)],
             hermetic.env(),
             tmp,
         )
