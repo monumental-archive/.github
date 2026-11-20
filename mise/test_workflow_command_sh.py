@@ -6,8 +6,8 @@ writes for a message carrying a newline, a CR or a `%` (the escape bash
 3.2 gets wrong when the `%` is unquoted), and for several arguments.
 
 The law, read line by line from every tracked script, workflow step and
-task body in the canon (the tree on disk: this suite runs with git aimed
-at a decoy repository), the function file excepted:
+task body in the canon (listed through hermetic.tracked, #1618), the
+function file excepted:
 
 1. A quoted string that begins a workflow command (`::name::` or
    `::name `) expands nothing inside its quotes: no `$` or backtick in
@@ -27,7 +27,6 @@ at a decoy repository), the function file excepted:
 stdlib `unittest`, matching the rest of mise/.
 """
 
-import os
 import re
 
 # ruff: ignore[suspicious-subprocess-import]
@@ -40,7 +39,7 @@ import hermetic
 CANON = Path(__file__).resolve().parents[1]
 WRITER = CANON / "mise" / "workflow-command.sh"
 BASH = hermetic.tool("bash")
-SKIP = {".git", "node_modules", "target", "vendor", "__pycache__", ".venv", "testdata"}
+SKIP = {"vendor", "testdata"}
 
 # Where a command begins: a quote, `::`, a name, then `::` or a space.
 COMMAND = re.compile(r"""(f?)(["'])::[A-Za-z][A-Za-z0-9_-]*(?:::| )""")
@@ -236,25 +235,19 @@ def held_files(root: Path) -> list[Path]:
     """List the shell the law reads: scripts, workflows, actions, task bodies.
 
     Returns:
-        Each file, relative to the root.
+        Each tracked file, relative to the root, less vendored and
+        test-data trees and the writer itself.
 
     """
-    found: list[Path] = []
-    for here, dirs, files in os.walk(root):
-        dirs[:] = sorted(
-            d
-            for d in dirs
-            if d not in SKIP and (d == ".github" or not d.startswith("."))
-        )
-        for name in sorted(files):
-            rel = (Path(here) / name).relative_to(root)
-            held = name.endswith(".sh") or name in {"config.toml", "mise.toml"}
-            held = held or (
-                rel.parts[0] == ".github" and rel.suffix in {".yml", ".yaml"}
-            )
-            if held and rel != Path("mise/workflow-command.sh"):
-                found.append(rel)
-    return found
+    names = hermetic.tracked(
+        root, "*.sh", "mise/config.toml", "mise.toml", ".github/*.yml", ".github/*.yaml"
+    )
+    return [
+        Path(name)
+        for name in names
+        if Path(name) != Path("mise/workflow-command.sh")
+        and not SKIP.intersection(Path(name).parts)
+    ]
 
 
 def findings(root: Path) -> list[str]:

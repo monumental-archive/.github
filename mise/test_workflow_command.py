@@ -11,15 +11,14 @@ other than the module holds a string that begins any workflow command:
 `::`, a command name, then `::` or a space (a plain literal, or the
 literal head of an f-string). No list of names: the next one is
 refused too. Test and property files are exempt: they hold the commands
-they expect to read. The walk is the tree on disk, not `git ls-files`:
-this suite runs with git aimed at a decoy repository.
+they expect to read. The files are the tree's tracked ones, listed
+through hermetic.tracked (#1618).
 
 stdlib `unittest`, matching the rest of mise/.
 """
 
 import ast
 import io
-import os
 import re
 import sys
 import tempfile
@@ -28,6 +27,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import hermetic
 import workflow_command
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ CANON = Path(__file__).resolve().parents[1]
 COMMAND = re.compile(r"::[A-Za-z][A-Za-z0-9_-]*(::| )")
 MODULE = Path("mise/workflow_command.py")
 # Directories the walk never enters: tool state, vendored trees, caches.
-SKIP = {".git", "node_modules", "target", "vendor", "__pycache__", ".venv"}
+SKIP = {"vendor", "testdata"}
 
 
 def written(call: Callable[[], None]) -> str:
@@ -95,25 +95,19 @@ def command_strings(source: str) -> list[int]:
 
 
 def python_files(root: Path) -> list[Path]:
-    """List the canon's Python files a helper may live in.
+    """List the canon's tracked Python files a helper may live in.
 
     Returns:
-        Every `.py` below `root`, as a path relative to it, skipping
-        tool state and test and property files.
+        Every tracked `.py`, as a path relative to the root, less test
+        and property files and vendored or test-data trees.
 
     """
-    found: list[Path] = []
-    for here, dirs, files in os.walk(root):
-        dirs[:] = sorted(
-            d
-            for d in dirs
-            if d not in SKIP and (d == ".github" or not d.startswith("."))
-        )
-        for name in sorted(files):
-            if not name.endswith(".py") or name.startswith(("test_", "prop_")):
-                continue
-            found.append((Path(here) / name).relative_to(root))
-    return found
+    return [
+        Path(name)
+        for name in hermetic.tracked(root, "*.py")
+        if not Path(name).name.startswith(("test_", "prop_"))
+        and not SKIP.intersection(Path(name).parts)
+    ]
 
 
 def findings(root: Path) -> list[str]:
