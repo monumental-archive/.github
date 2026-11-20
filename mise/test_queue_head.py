@@ -521,8 +521,11 @@ class Workflow(unittest.TestCase):
         steps = [s for s in gate_steps() if "queue_head.py" in s]
         self.assertEqual(len(steps), 1, steps)
         step = steps[0]
+        # Once per run: the gate's lint leg (#1740).
         self.assertIn(
-            "        if: ${{ github.event_name == 'merge_group' }}\n", step + "\n"
+            "        if: ${{ matrix.leg == 'lint'"
+            " && github.event_name == 'merge_group' }}\n",
+            step + "\n",
         )
         runs = [line for line in step.splitlines() if line.startswith("        run:")]
         self.assertEqual(

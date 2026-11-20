@@ -905,12 +905,17 @@ class UploadStep(unittest.TestCase):
             done.stdout,
         )
 
-    def test_an_empty_artifact_is_refused(self) -> None:
-        """An artifact with no report is red, never an upload of nothing."""
+    def test_no_report_skips_by_name(self) -> None:
+        """Nothing came down: skipped by name, never an upload of nothing.
+
+        The job reads no gate output (#1740), so a tree without a floor,
+        whose gate wrote no report, reaches this step with none.
+        """
         done = run_upload_step(["unrelated.txt"])
-        self.assertEqual(1, done.returncode)
-        self.assertIn(
-            "::error::the gate's coverage-reports artifact holds no report",
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(
+            "::notice::no coverage report came down from the gate;"
+            " badge upload skipped\nfiles=\n",
             done.stdout,
         )
 

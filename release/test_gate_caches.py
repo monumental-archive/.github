@@ -17,7 +17,10 @@ use. These rows hold each cache step in ci.yml to the shape that fixes it:
   fallback restored and saved back on the default branch is the growth
   #1285 and #1330 measured;
 - every restore is paired with a save of the same paths under the
-  restore's own primary key, and only the gate's three jobs hold caches.
+  restore's own primary key, and only the gate's three jobs hold caches;
+- in the gate's matrix (#1740), the lint and test legs each keep their
+  own cargo and Go caches, keyed by leg, and the test leg alone saves
+  the tool cache every leg restores.
 
 The planted rows each break one property on the real file and assert the
 message that names it.
@@ -228,12 +231,13 @@ def plant(old: str, new: str) -> str:
 
 
 TOOL_SAVE_IF = (
-    "        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true'"
-    " && steps.tool-cache.outputs.cache-hit != 'true' }}\n"
+    "        if: >-\n"
+    "          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && matrix.leg == 'test'\n"
+    "          && steps.tool-cache.outputs.cache-hit != 'true' }}\n"
 )
 GO_KEYS = (
     "restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'"
-    " && format('gate-go-v2-{0}-', runner.os) || '' }}"
+    " && format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os) || '' }}"
 )
 TOOL_KEYS = (
     "          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'"
@@ -308,7 +312,9 @@ class Planted(unittest.TestCase):
     def test_a_fallback_on_the_default_branch(self) -> None:
         """An unconditioned restore-keys falls back on the default branch too."""
         self.assert_named(
-            plant(GO_KEYS, "restore-keys: gate-go-v2-${{ runner.os }}-"),
+            plant(
+                GO_KEYS, "restore-keys: gate-go-v2-${{ matrix.leg }}-${{ runner.os }}-"
+            ),
             f"gate: {GO_RESTORE} carries a fallback on the default branch",
         )
 
@@ -342,7 +348,10 @@ class Planted(unittest.TestCase):
 
     def test_a_restore_never_saved(self) -> None:
         """A restore with no save starves the default branch's copy."""
-        text = plant(GO_SAVE_KEY, "          key: gate-go-v2-${{ runner.os }}-\n")
+        text = plant(
+            GO_SAVE_KEY,
+            "          key: gate-go-v2-${{ matrix.leg }}-${{ runner.os }}-\n",
+        )
         self.assert_named(text, f"gate: {GO_RESTORE} is restored and never saved")
         self.assert_named(
             text, f"gate: {GO_SAVE} saves under a key no restore in the job computed"
@@ -372,6 +381,119 @@ class Planted(unittest.TestCase):
             plant("    ${{ github.ref != format(", "    ${{ github.ref == format("),
             "ORG_GATE_CACHE_FALLBACK is not",
         )
+
+
+# WHICH LEG HOLDS WHICH CACHE (#1740). The gate is a matrix of three
+# legs. Clippy's `target` and the test build's are different contents,
+# so the lint and test legs each keep a cargo and a Go cache under a name
+# carrying the leg, and the properties leg, which builds neither, keeps
+# none. Every leg installs the same tools under the one key, so every leg
+# restores the tool cache and one, the test leg, saves it.
+BUILD_LEGS = "matrix.leg != 'properties'"
+LEG_CACHES = {
+    "Restore the Go caches (unsigned gate only)": BUILD_LEGS,
+    "Save the Go caches (default branch only)": BUILD_LEGS,
+    "Restore the cargo caches (unsigned gate only)": BUILD_LEGS,
+    "Save the cargo caches (default branch only)": BUILD_LEGS,
+    "Save the tool cache (default branch only)": "matrix.leg == 'test'",
+}
+LEG_KEYS = {
+    "go-cache": "gate-go-v2-${{ matrix.leg }}-",
+    "cargo-cache": "gate-cargo-${{ matrix.leg }}-",
+}
+LEG_PREFIXES = {
+    "go-cache": "format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os)",
+    "cargo-cache": "format('gate-cargo-{0}-{1}-', matrix.leg, runner.os)",
+}
+
+
+def leg_cache_findings(text: str) -> list[str]:
+    """Hold the gate's caches to the legs that build them.
+
+    Returns:
+        One line per cache step run on a leg it does not belong to, per
+        build cache whose key or fallback prefix omits the leg, and for a
+        tool cache restored on fewer than every leg.
+
+    """
+    gate = job_installs.steps(job_installs.jobs(text)["gate"])
+    by_name = {s.get("name", ""): s for s in gate}
+    by_id = {s.get("id", ""): s for s in gate if s.get("id")}
+    out = []
+    for name, leg in LEG_CACHES.items():
+        if leg not in flat(by_name.get(name, {}).get("if", "")):
+            out.append(f"gate: '{name}' runs on every leg, not only where {leg}")
+    for sid, key in LEG_KEYS.items():
+        step = by_id.get(sid, {})
+        if not step.get("with.key", "").startswith(key):
+            out.append(f"gate: the {sid} key does not start {key}")
+        if LEG_PREFIXES[sid] not in flat(step.get("with.restore-keys", "")):
+            out.append(f"gate: the {sid} fallback is not {LEG_PREFIXES[sid]}")
+    if "matrix.leg" in by_name.get(TOOL_RESTORE.strip("'"), {}).get("if", ""):
+        out.append(f"gate: {TOOL_RESTORE} is not restored by every leg")
+    return out
+
+
+class LegCaches(unittest.TestCase):
+    """Each gate leg holds the caches it builds (#1740)."""
+
+    def test_the_real_gate_conforms(self) -> None:
+        """Two build legs keyed by leg, one tool-cache saver."""
+        self.assertEqual([], leg_cache_findings(real()))
+
+    def test_planted_breaches_are_named(self) -> None:
+        """Each property broken once on the real file, by its message."""
+        rows = [
+            (
+                "a shared cargo key",
+                (
+                    "key: gate-cargo-${{ matrix.leg }}-${{ runner.os }}",
+                    "key: gate-cargo-${{ runner.os }}",
+                ),
+                (
+                    "gate: the cargo-cache key does not start"
+                    " gate-cargo-${{ matrix.leg }}-"
+                ),
+            ),
+            (
+                "a shared Go fallback",
+                (GO_KEYS, GO_KEYS.replace("{0}-{1}-', matrix.leg, ", "{0}-', ")),
+                (
+                    "gate: the go-cache fallback is not"
+                    " format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os)"
+                ),
+            ),
+            (
+                "every leg saves the tools",
+                (" && matrix.leg == 'test'\n", "\n"),
+                (
+                    f"gate: {TOOL_SAVE} runs on every leg, not only where"
+                    " matrix.leg == 'test'"
+                ),
+            ),
+            (
+                "the properties leg restores cargo",
+                (
+                    "if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock')",
+                    "if: ${{ hashFiles('Cargo.lock')",
+                ),
+                (
+                    "gate: 'Restore the cargo caches (unsigned gate only)' runs on"
+                    " every leg, not only where matrix.leg != 'properties'"
+                ),
+            ),
+            (
+                "one leg restores the tools",
+                (
+                    "        id: tool-cache\n",
+                    "        id: tool-cache\n        if: ${{ matrix.leg == 'test' }}\n",
+                ),
+                f"gate: {TOOL_RESTORE} is not restored by every leg",
+            ),
+        ]
+        for label, (old, new), message in rows:
+            with self.subTest(row=label):
+                self.assertEqual([message], leg_cache_findings(plant(old, new)))
 
 
 def install_key_findings(text: str) -> list[str]:

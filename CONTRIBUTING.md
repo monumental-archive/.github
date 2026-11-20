@@ -229,7 +229,12 @@ own; `measured` refuses one by name.
 ### What a pull request pays
 
 The gate stays fast and deterministic. A mechanism enters `ci` only
-with its measured cost written in its issue. Mutation testing, which
+with its measured cost written in its issue. The gate runs as three
+legs side by side, one runner each (#1740): the lints (`ci:lint`),
+the tests with the coverage ratchet (`ci:test`) and the property
+tests (`ci:properties`), so a pull request waits on its slowest leg,
+not on the sum, and a task added to one leg does not slow the
+others. Mutation testing, which
 repeats the suite once per mutant, runs on its own weekly mutation
 workflow, apart from the audit, never on a pull request. Anything
 that is random (the random half of property testing), needs a

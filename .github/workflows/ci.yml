@@ -160,20 +160,34 @@ jobs:
   # `pgrx` legs below run one major each. This was the job named `ci`;
   # that name now belongs to the final job, because `ci / ci` is the one
   # check the org ruleset requires and it has to mean "all of it passed".
+  #
+  # THREE LEGS, SIDE BY SIDE (#1740). One four-core runner ran every
+  # task at once, so the job took the sum of the work divided by four:
+  # 262 s on the canon (run 44731221146), `test` alone 226 s of it. Each
+  # leg is a belt task, `ci:<leg>`, and `ci` is their sum, so a laptop's
+  # `mise run ci` runs exactly what the three legs run together. One job
+  # with a matrix, its setup written once: a step that belongs to one
+  # leg says so in its `if:`. fail-fast is off: which legs pass is the
+  # information, and a leg cancelled by its neighbour reports nothing.
+  # `ci / ci` reads the job's one result, success only when every leg's
+  # is.
   gate:
-    name: gate
+    name: gate (${{ matrix.leg }})
     needs: plan
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        leg:
+          - lint
+          - test
+          - properties
     # A hung gate must fail in minutes, not at GitHub's six-hour default:
     # on #969 mise never exited after a task failed and the job held a
     # runner for 6h00m. Sized from the org's own history (2026-11-13, nine
     # repos, 167 runs): the slowest gate anywhere took 5m56s, so 30 is five
     # times the worst case and leaves room for a cold cache.
     timeout-minutes: 30
-    # The artifact holding the coverage reports this run's coverage:check
-    # wrote, or empty when it wrote none (#1528).
-    outputs:
-      coverage-reports: ${{ steps.coverage-reports.outputs.artifact-id }}
     env:
       # Both checkouts are trusted mise config roots; nothing else is.
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -203,9 +217,10 @@ jobs:
       # request's current head merged onto the group's base; anything
       # else, or anything unverifiable, is red by name. The token is the
       # job's own `contents: read`, for one git fetch of
-      # refs/pull/<n>/head: the checkout keeps no credentials.
+      # refs/pull/<n>/head: the checkout keeps no credentials. Once per
+      # run: the lint leg's (#1740).
       - name: A merge group is the pull request's current head
-        if: ${{ github.event_name == 'merge_group' }}
+        if: ${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}
         env:
           ORG_QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
           ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
@@ -326,9 +341,13 @@ jobs:
       # unattested-path: the write half of the tool cache restored
       # above, on the same standing. It runs on a push to the default
       # branch only, and only when the restore missed: an exact hit is
-      # already saved, and every other ref writes nothing (#1406).
+      # already saved, and every other ref writes nothing (#1406). Every
+      # leg installs the same tools under the one key, so one leg saves
+      # them: the test leg's (#1740).
       - name: Save the tool cache (default branch only)
-        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.tool-cache.outputs.cache-hit != 'true' }}
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && matrix.leg == 'test'
+          && steps.tool-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.tool-key.outputs.dir }}
@@ -363,16 +382,20 @@ jobs:
       # copy no other ref could read. Both paths stay cached: modules
       # alone measured 241s against 62s (#1181). v2 leaves the
       # oversized v1 entries behind.
+      #
+      # The lint and test legs only, each under a name of its own
+      # (#1740): the linters' build cache and the test build's are
+      # different contents, and the properties leg builds no Go.
       - name: Restore the Go caches (unsigned gate only)
         id: go-cache
-        if: ${{ hashFiles('go.sum') != '' }}
+        if: ${{ matrix.leg != 'properties' && hashFiles('go.sum') != '' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: gate-go-v2-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-go-v2-{0}-', runner.os) || '' }}
+          key: gate-go-v2-${{ matrix.leg }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os) || '' }}
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
@@ -392,17 +415,21 @@ jobs:
       # `org_pgrx_init` keeps it when the registrations are unchanged.
       # A path that does not exist — every repository without an
       # extension — is skipped by the action.
+      #
+      # The lint and test legs only, each under a name of its own
+      # (#1740): clippy's `target` and the test build's are different
+      # contents, so one shared entry would hold whichever leg saved it.
       - name: Restore the cargo caches (unsigned gate only)
         id: cargo-cache
-        if: ${{ hashFiles('Cargo.lock') != '' }}
+        if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.pgrx/config.toml
             target
-          key: gate-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-cargo-{0}-', runner.os) || '' }}
+          key: gate-cargo-${{ matrix.leg }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-cargo-{0}-{1}-', matrix.leg, runner.os) || '' }}
 
       # PRs squash-merge, and the PERMANENT commit message is the PR
       # title with GitHub's " (#N)" appended, then the PR body — neither
@@ -435,10 +462,10 @@ jobs:
       # lint:subject-budget proves, on the pull request that introduces
       # a dependency, that every title the owned template could mint
       # for it fits. By the time the bot runs, there is nothing to
-      # catch.
+      # catch. Once per run: the lint leg's (#1740).
       - name: The squash message is the PR title and body — hold it to the commit canon
         if: >-
-          ${{ github.event_name == 'pull_request'
+          ${{ matrix.leg == 'lint' && github.event_name == 'pull_request'
           && github.event.pull_request.user.type != 'Bot' }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -449,8 +476,11 @@ jobs:
         run: '"${ORG_PYTHON}" .org-canon/mise/squash_message.py'
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
+      # This leg's belt task, `ci:lint`, `ci:test` or `ci:properties`
+      # (#1740); `ci` is the three of them.
       - name: Run the gate
         env:
+          LEG: ${{ matrix.leg }}
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
           # The planned legs. With this set, test:pgrx runs no suite here
           # — the legs do — and instead holds the plan to the list it
@@ -460,23 +490,22 @@ jobs:
           # checkout, so nothing the gate measures lands in the tree
           # (#1628). The step below keeps this directory.
           ORG_COVERAGE_REPORTS: ${{ runner.temp }}/coverage-reports
-        run: mise run ci
+        run: mise run "ci:${LEG}"
 
       # COVERAGE IS MEASURED ONCE, HERE (#1528). coverage:check, which
-      # `ci` runs, writes the report each leg's number came from into
-      # ORG_COVERAGE_REPORTS and prints `coverage:check: upload
-      # <paths>`; this is that directory, kept for the badge job, which
-      # downloads it beside the checkout, uploads it and measures
-      # nothing (#1628).
+      # the test leg runs (#1740), writes the report each leg's number
+      # came from into ORG_COVERAGE_REPORTS and prints
+      # `coverage:check: upload <paths>`; this is that directory, kept
+      # for the badge job, which downloads it beside the checkout,
+      # uploads it and measures nothing (#1628).
       # It used to run the whole suite a second time with five tools
       # where the gate has the belt, and on main it hung in a test the
       # gate passes, for its 30 minutes, on every push for a day. On a
       # push to the default branch only, where the badge is fed; a tree
       # without a floor writes none, and the badge job skips.
       - name: Keep the coverage reports for the badge (default branch only)
-        id: coverage-reports
         if: >-
-          ${{ github.event_name == 'push'
+          ${{ matrix.leg == 'test' && github.event_name == 'push'
           && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -495,9 +524,9 @@ jobs:
       # commit and measures nothing; without it, it measures as before.
       - name: Keep the coverage figures for the release
         if: >-
-          ${{ github.event_name == 'merge_group'
+          ${{ matrix.leg == 'test' && (github.event_name == 'merge_group'
           || (github.event_name == 'push'
-          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-figures-${{ github.sha }}
@@ -512,7 +541,7 @@ jobs:
       - name: Save the Go caches (default branch only)
         if: >-
           ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.go-cache.outputs.cache-hit != 'true'
-          && hashFiles('go.sum') != '' }}
+          && matrix.leg != 'properties' && hashFiles('go.sum') != '' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -527,7 +556,7 @@ jobs:
       - name: Save the cargo caches (default branch only)
         if: >-
           ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.cargo-cache.outputs.cache-hit != 'true'
-          && hashFiles('Cargo.lock') != '' }}
+          && matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -781,10 +810,15 @@ jobs:
   # main. Now it installs nothing and runs no task: the number the
   # badge shows is the number the gate enforced, from one run.
   # release/test_job_installs.py holds it to that.
+  #
+  # IT READS NO JOB OUTPUT (#1740). The gate is a matrix, and a matrix
+  # job has one set of outputs for all its legs, so no output could say
+  # what the test leg kept. The job runs whenever `ci` passed on a push
+  # to the default branch, downloads by pattern, and skips by name when
+  # nothing came down.
   coverage-upload:
     name: coverage upload (badge only)
     needs:
-      - gate
       - ci
     # `!cancelled()` and the explicit result are load-bearing (#1161).
     # An `if:` with no status function gets an implicit `success()`,
@@ -795,7 +829,6 @@ jobs:
     # existed, and nothing went red because a skip is not a failure.
     if: >-
       ${{ !cancelled() && needs.ci.result == 'success'
-      && needs.gate.outputs.coverage-reports != ''
       && github.event_name == 'push'
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     runs-on: ubuntu-26.04
@@ -818,8 +851,9 @@ jobs:
           pattern: coverage-reports*
           merge-multiple: true
 
-      # The list is what the gate's artifact holds, in coverage:check's
-      # order, and the step names it: the files the gate wrote.
+      # The list is what the gate's artifacts hold, in coverage:check's
+      # order, and the step names it: the files the gate wrote. None is
+      # a tree without a floor, which writes none: skipped by name.
       - name: List the reports
         id: gen
         env:
@@ -834,10 +868,10 @@ jobs:
               [[ ! -f ${f} ]] || files="${files:+${files},}${f}"
             done
             if [[ -z ${files} ]]; then
-              echo "::error::the gate's coverage-reports artifact holds no report"
-              exit 1
+              echo "::notice::no coverage report came down from the gate; badge upload skipped"
+            else
+              printf 'upload %q\n' "${files}"
             fi
-            printf 'upload %q\n' "${files}"
           fi
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
       # fail_ci_if_error: TRUE, deliberately. The job is

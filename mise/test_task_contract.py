@@ -131,12 +131,13 @@ class Gate(unittest.TestCase):
         self.assertEqual(hits, [])
 
     def test_ci_names_each_property_leg(self) -> None:
-        """A belt test leg is named in `ci`, never collected (#1332, #1549).
+        """A belt test leg is named in the gate, never collected (#1332, #1549).
 
         `test` is the repository's, so a belt-defined test reaches the
-        gate only by a line of its own in `ci`'s depends.
+        gate only by a line of its own in a leg's depends: the
+        properties leg's since #1740.
         """
-        direct = [named(entry) for entry in tasks()["ci"]["depends"]]
+        direct = [named(entry) for entry in tasks()["ci:properties"]["depends"]]
         for leg in ("test:python-properties", "test:typescript-properties"):
             with self.subTest(leg=leg):
                 self.assertIn(leg, direct)
@@ -146,6 +147,163 @@ class Gate(unittest.TestCase):
         defined = tasks()
         defined["ci"] = {**defined["ci"], "depends": ["lint:*", "audit:mutants"]}
         self.assertIn("audit:mutants", closure("ci", defined))
+
+
+# The gate's three legs (#1740): ci.yml's `gate` job runs one per runner,
+# and `ci` is their sum.
+LEGS = ("ci:lint", "ci:test", "ci:properties")
+
+# Everything `ci` named before it was split into legs, each entry spelt
+# as `depends` spells it. The legs together must name exactly these.
+GATE: tuple[str | dict, ...] = (
+    "lint:*",
+    {"task": "test", "optional": True},
+    {"task": "build", "optional": True},
+    "coverage:check",
+    "test:pgrx",
+    "test:python-properties",
+    "test:typescript-properties",
+)
+
+
+def spelt(entry: str | dict) -> str:
+    """Spell one `depends` entry whole, its optional flag included.
+
+    Returns:
+        The name, with ` (optional)` when the entry is optional.
+
+    """
+    if isinstance(entry, str):
+        return entry
+    return entry["task"] + (" (optional)" if entry.get("optional") else "")
+
+
+def leg_findings(defined: dict[str, dict]) -> list[str]:
+    """Hold `ci` to the sum of its legs, and the legs to the gate's list.
+
+    Returns:
+        One line per breach: `ci` naming anything but the three legs, an
+        entry of the gate's list no leg names, an entry two legs name or
+        one leg names twice, and an entry no gate ever ran.
+
+    """
+    out = []
+    direct = [named(entry) for entry in defined["ci"].get("depends") or []]
+    if direct != list(LEGS):
+        out.append(f"ci depends on {direct}, not the three legs {list(LEGS)}")
+    where: dict[str, list[str]] = {}
+    for leg in LEGS:
+        for entry in defined.get(leg, {}).get("depends") or []:
+            where.setdefault(spelt(entry), []).append(leg)
+    wanted = [spelt(entry) for entry in GATE]
+    out.extend(f"no leg runs {name}" for name in wanted if name not in where)
+    out.extend(
+        f"{name} is run {len(legs)} times, by {legs}"
+        for name, legs in where.items()
+        if len(legs) > 1
+    )
+    out.extend(
+        f"{name} is in {legs} and was never in the gate"
+        for name, legs in where.items()
+        if name not in wanted
+    )
+    return out
+
+
+class Legs(unittest.TestCase):
+    """`ci` is the sum of three legs, and they run what it ran (#1740)."""
+
+    def test_the_belt_conforms(self) -> None:
+        """The real config: three legs, the gate's list split among them."""
+        self.assertEqual([], leg_findings(tasks()))
+
+    def test_each_leg_holds_its_share(self) -> None:
+        """Coverage is judged on the leg that measures it."""
+        legs = {leg: [spelt(e) for e in tasks()[leg]["depends"]] for leg in LEGS}
+        self.assertEqual(["lint:*"], legs["ci:lint"])
+        self.assertEqual(
+            [
+                "test (optional)",
+                "build (optional)",
+                "coverage:check",
+                "test:pgrx",
+            ],
+            legs["ci:test"],
+        )
+        self.assertEqual(
+            ["test:python-properties", "test:typescript-properties"],
+            legs["ci:properties"],
+        )
+
+    @staticmethod
+    def plant(leg: str, depends: list[str | dict]) -> list[str]:
+        """Replace one task's depends in the real config.
+
+        Returns:
+            The findings for the planted config.
+
+        """
+        defined = tasks()
+        defined[leg] = {**defined[leg], "depends": depends}
+        return leg_findings(defined)
+
+    def test_a_fourth_line_in_ci_is_named(self) -> None:
+        """Planted: `ci` names a task beside its legs."""
+        self.assertEqual(
+            [
+                (
+                    "ci depends on"
+                    " ['ci:lint', 'ci:test', 'ci:properties', 'test:pgrx'],"
+                    " not the three legs ['ci:lint', 'ci:test', 'ci:properties']"
+                ),
+            ],
+            self.plant("ci", [*LEGS, "test:pgrx"]),
+        )
+
+    def test_a_dropped_entry_is_named(self) -> None:
+        """Planted: the test leg loses the coverage ratchet."""
+        self.assertEqual(
+            ["no leg runs coverage:check"],
+            self.plant(
+                "ci:test",
+                [
+                    {"task": "test", "optional": True},
+                    {"task": "build", "optional": True},
+                    "test:pgrx",
+                ],
+            ),
+        )
+
+    def test_an_entry_in_two_legs_is_named(self) -> None:
+        """Planted: the lint leg runs the properties too."""
+        self.assertEqual(
+            ["test:python-properties is run 2 times, by ['ci:lint', 'ci:properties']"],
+            self.plant("ci:lint", ["lint:*", "test:python-properties"]),
+        )
+
+    def test_test_made_required_is_named(self) -> None:
+        """Planted: `test` loses its optional flag, which every repo needs."""
+        self.assertEqual(
+            [
+                "no leg runs test (optional)",
+                "test is in ['ci:test'] and was never in the gate",
+            ],
+            self.plant(
+                "ci:test",
+                [
+                    "test",
+                    {"task": "build", "optional": True},
+                    "coverage:check",
+                    "test:pgrx",
+                ],
+            ),
+        )
+
+    def test_a_missing_leg_is_named(self) -> None:
+        """Before #1740 there was no `ci:lint`: every lint is unrun."""
+        defined = tasks()
+        del defined["ci:lint"]
+        self.assertEqual(["no leg runs lint:*"], leg_findings(defined))
 
 
 LEG_LINE = re.compile(r"^leg ([a-z]+)$", re.MULTILINE)

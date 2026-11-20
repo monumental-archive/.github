@@ -627,10 +627,13 @@ python = "3.15.2"
 #
 # The task contract, in full:
 #   - `mise run ci` must pass in every repo. Repos do NOT define `ci`; the
-#     global task below assembles it.
-#   - `lint:*` is claimed by the belt and wildcard-collected into `ci`, so a
-#     linter added here is enforced in every repo with no repo change. Repos
-#     may add their own `lint:<thing>` tasks; same collection applies.
+#     global task below assembles it as the sum of three legs, `ci:lint`,
+#     `ci:test` and `ci:properties`, which the gate runs side by side,
+#     one runner each (#1740). Repos do not define those either.
+#   - `lint:*` is claimed by the belt and wildcard-collected into
+#     `ci:lint`, so a linter added here is enforced in every repo with no
+#     repo change. Repos may add their own `lint:<thing>` tasks; same
+#     collection applies.
 #   - `test` and `build` are reserved names: define them and `ci` runs them,
 #     omit them and `ci` skips them (optional depends).
 #   - Belt linters guard for applicability and exit 0 when a repo has
@@ -648,13 +651,32 @@ python = "3.15.2"
 [tasks.ci]
 description = "The gate: everything the org enforces, plus this repo's tasks"
 dir = "{{cwd}}"
+# The sum of the three legs and nothing else (#1740). The gate job in
+# ci.yml runs one leg per runner, side by side; a laptop runs `ci` and
+# gets all three, exactly what one gate run checks. Every line the gate
+# runs belongs to one leg, and mise/test_task_contract.py holds the
+# legs' depends together to the gate's list: nothing dropped, nothing
+# twice.
+depends = ["ci:lint", "ci:test", "ci:properties"]
+run = "echo 'ci: all gates green'"
+
+[tasks."ci:lint"]
+description = "The gate's lint leg: every lint:* task"
+dir = "{{cwd}}"
+depends = ["lint:*"]
+run = "echo 'ci:lint: every lint green'"
+
+[tasks."ci:test"]
+description = "The gate's test leg: test, build, the coverage ratchet, test:pgrx"
+dir = "{{cwd}}"
 depends = [
-  "lint:*",
   # `test` once per gate, plainly (#1667). Its own test command runs
   # through `"${ORG_BELT_DIR}/measured"`, which measures where the suite
   # runs when the tree has a floor, so coverage:check below runs no
   # suite: it depends on this same `test`, which mise runs once in the
-  # run, and reads what it measured after it ends.
+  # run, and reads what it measured after it ends. Both sit in this one
+  # leg, so coverage is measured and judged on one runner and nothing
+  # is combined across runners (#1740).
   { task = "test", optional = true },
   { task = "build", optional = true },
   # The coverage ratchet joins the gate the moment a repo commits a
@@ -669,15 +691,22 @@ depends = [
   # in the first place. Guarded and skip-clean like every belt task, so
   # a repo with no pgrx crate pays nothing.
   "test:pgrx",
-  # The Python properties, named for the same reason (#1332): a test,
-  # not a lint, and `test` is the repository's. Skips clean, by name,
-  # where no `prop_*.py` is tracked.
+]
+run = "echo 'ci:test: tests and coverage green'"
+
+[tasks."ci:properties"]
+description = "The gate's properties leg: the Python and TypeScript properties"
+dir = "{{cwd}}"
+depends = [
+  # The Python properties, named for the same reason as test:pgrx
+  # (#1332): a test, not a lint, and `test` is the repository's. Skips
+  # clean, by name, where no `prop_*.py` is tracked.
   "test:python-properties",
   # The TypeScript properties, named for the same reason (#1549).
   # Skips clean, by name, where no tracked lockfile holds fast-check.
   "test:typescript-properties",
 ]
-run = "echo 'ci: all gates green'"
+run = "echo 'ci:properties: every property green'"
 
 [tasks.fix]
 description = "Run every write-mode fixer (the fix:* siblings ci deliberately excludes)"
