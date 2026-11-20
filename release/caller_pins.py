@@ -63,10 +63,8 @@ applied before this reader replaced its own.
 """
 
 import argparse
-import json
-import re
 import sys
-import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 # The canon's one writer of workflow commands, in mise/ (#1660).
@@ -74,6 +72,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import workflow_command
 
 CANDIDATES = ("mise.toml", ".mise.toml", "mise/config.toml")
@@ -93,7 +92,7 @@ def tool_name(key: str) -> str:
         `rust` names `rust`.
 
     """
-    return re.split(r"[/:]", key.split("[", 1)[0])[-1]
+    return key.split("[", 1)[0].replace(":", "/").rsplit("/", 1)[-1]
 
 
 def first_version(value: object) -> str:
@@ -103,9 +102,9 @@ def first_version(value: object) -> str:
         The version string, or "" where the value pins none.
 
     """
-    if isinstance(value, list):
+    if decoded.is_array(value):
         value = value[0] if value else ""
-    if isinstance(value, dict):
+    if decoded.is_object(value):
         value = value.get("version", "")
     return value if isinstance(value, str) else ""
 
@@ -118,7 +117,7 @@ def entries(value: object) -> list[str]:
         that pins none.
 
     """
-    return [first_version(v) for v in (value if isinstance(value, list) else [value])]
+    return [first_version(v) for v in (value if decoded.is_array(value) else [value])]
 
 
 def parse_majors(spec: str) -> list[int] | None:
@@ -134,11 +133,11 @@ def parse_majors(spec: str) -> list[int] | None:
 
     """
     try:
-        value = json.loads(spec)
-    except json.JSONDecodeError:
+        value = decoded.load_json(spec)
+    except decoded.UndecodableError:
         return None
     majors: list[int] = []
-    for m in value if isinstance(value, list) else [value]:
+    for m in value if decoded.is_array(value) else [value]:
         if isinstance(m, int) and not isinstance(m, bool):
             majors.append(m)
         elif isinstance(m, str) and m.isascii() and m.isdigit():
@@ -194,7 +193,17 @@ def find_config(root: Path) -> Path | None:
     return None
 
 
-def tools_of(path: Path) -> dict | None:
+@dataclass(frozen=True)
+class Pin:
+    """What one `[tools]` value pins, read once where the config is read."""
+
+    # The version it puts on PATH; "" where it pins none.
+    first: str
+    # Every version it pins, one per entry; "" for an entry pinning none.
+    entries: list[str]
+
+
+def tools_of(path: Path) -> dict[str, Pin] | None:
     """Read a config's `[tools]` table.
 
     `tools` is a table in every config mise accepts; TOML also lets a
@@ -202,12 +211,17 @@ def tools_of(path: Path) -> dict | None:
     (#1556: both died here as a TypeError).
 
     Returns:
-        The table, empty where the file has none, or None where `tools`
-        is some other value.
+        Each key's pin, empty where the file has no table, or None where
+        `tools` is some other value.
 
     """
-    tools = tomllib.loads(path.read_text("utf-8")).get("tools", {})
-    return tools if isinstance(tools, dict) else None
+    tools = decoded.load_toml(path.read_bytes()).get("tools", {})
+    if not decoded.is_object(tools):
+        return None
+    return {
+        key: Pin(first=first_version(value), entries=entries(value))
+        for key, value in tools.items()
+    }
 
 
 # Every config file mise reads [tools] from in a checkout, for a question
@@ -277,7 +291,7 @@ def read_pins(
     keys: dict[str, list[str]] = {}
     for key in tools:
         keys.setdefault(tool_name(key), []).append(key)
-    errors = []
+    errors: list[str] = []
     pins: dict[str, tuple[str, list[str]]] = {}
     for name in [*needed, *optional, *majors]:
         found = keys.get(name, [])
@@ -290,12 +304,12 @@ def read_pins(
             continue
         if found and name in majors:
             chosen, refused = select_majors(
-                name, config.name, entries(tools[found[0]]), majors[name], input_of
+                name, config.name, tools[found[0]].entries, majors[name], input_of
             )
             errors += refused
             pins[name] = (found[0], chosen)
             continue
-        version = first_version(tools[found[0]]) if found else ""
+        version = tools[found[0]].first if found else ""
         if version:
             pins[name] = (found[0], [version])
         elif name in needed or name in majors:
@@ -306,6 +320,17 @@ def read_pins(
     if errors:
         raise RefusalError("\n".join(errors))
     return pins
+
+
+class Args(argparse.Namespace):
+    """The flags both modes' parsers may set, typed as parsed."""
+
+    mode: str
+    input_of: str
+    if_pinned: list[str]
+    major: list[str]
+    tools: list[str]
+    pairs: list[str]
 
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
@@ -319,21 +344,24 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     sub = parser.add_subparsers(dest="mode", required=True)
     install = sub.add_parser("install")
     install.add_argument("--input-of", required=True)
-    install.add_argument("--if-pinned", action="append", default=[])
-    install.add_argument("--major", action="append", default=[])
+    install.add_argument("--if-pinned", action="append", default=list[str]())
+    install.add_argument("--major", action="append", default=list[str]())
     install.add_argument("tools", nargs="*")
     env = sub.add_parser("env")
     env.add_argument("--input-of", required=True)
     env.add_argument("pairs", nargs="+")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     root = root or Path.cwd()
+    pairs: list[tuple[str, str, str]] = []
+    optional: list[str] = []
+    majors: dict[str, list[int]] = {}
     if args.mode == "env":
         pairs = [p.partition("=") for p in args.pairs]
         if any(not var or not sep or not name for var, sep, name in pairs):
             parser.error("env takes VAR=TOOL pairs")
-        needed, optional, majors = [name for _, _, name in pairs], [], {}
+        needed = [name for _, _, name in pairs]
     else:
-        needed, optional, majors = args.tools, args.if_pinned, {}
+        needed, optional = args.tools, args.if_pinned
         for pair in args.major:
             name, sep, spec = pair.partition("=")
             wanted = parse_majors(spec)

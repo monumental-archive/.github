@@ -106,7 +106,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Self
+from typing import TYPE_CHECKING, Self
 from unittest import mock
 
 import mint_doi
@@ -116,6 +116,9 @@ import mint_doi
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = Path(__file__).resolve().parent.parent
 HELPER = CANON / "release" / "mint_doi.py"
@@ -1534,6 +1537,125 @@ class LicenceIds(unittest.TestCase):
                     f"CITATION.cff license '{licence}' {why} — the record carries"
                     " plain SPDX ids joined by OR or AND",
                 )
+
+
+class AnswerShapes(unittest.TestCase):
+    """Each answer Zenodo gives is read once, or refused by name (#1682)."""
+
+    def refused(self, call: Callable[[], object], message: str) -> None:
+        """Assert calling `call` refuses with exactly `message`."""
+        with self.assertRaises(mint_doi.RefusedError) as caught:
+            call()
+        self.assertEqual(message, str(caught.exception))
+
+    def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
+        """What the opener answered is not an HTTP response: refused by name."""
+        url = "https://zenodo.invalid/api/records/1"
+        z = mint_doi.Zenodo("https://zenodo.invalid", "t", "a")
+        with (
+            mock.patch.object(z._public, "open", return_value=None),  # ruff: ignore[private-member-access] - the opener the row stubs
+            self.assertRaises(mint_doi.RefusedError) as caught,
+        ):
+            z.public(url)
+        self.assertEqual(
+            f"{url} answered NoneType, not an HTTP response", str(caught.exception)
+        )
+
+    def test_an_answer_that_is_not_json_is_refused(self) -> None:
+        """Named with the decoder's reason."""
+        with self.assertRaises(mint_doi.RefusedError) as caught:
+            mint_doi.loaded(b"<html>", "the new deposition")
+        self.assertTrue(
+            str(caught.exception).startswith("the new deposition is not JSON: ")
+        )
+
+    def test_each_wrong_deposition_shape_is_refused(self) -> None:
+        """Not an object, no links, a link or file that is not readable, no id."""
+        links = {"self": "s", "bucket": "b", "publish": "p"}
+        what = "the new deposition"
+        for value, message in (
+            ([], f"{what} is not an object"),
+            ({"id": 1}, f"{what}'s links is not an object"),
+            (
+                {"id": 1, "links": {**links, "self": 1}},
+                f"{what}'s links.self is not a string",
+            ),
+            (
+                {"id": 1, "links": {**links, "bucket": None}},
+                f"{what}'s links.bucket is not a string",
+            ),
+            (
+                {"id": 1, "links": {"self": "s", "bucket": "b"}},
+                f"{what}'s links.publish is not a string",
+            ),
+            (
+                {"id": 1, "links": links, "files": {"a": 1}},
+                f"{what}'s files is not a list",
+            ),
+            (
+                {"id": 1, "links": links, "files": [1]},
+                f"a file of {what} is not an object",
+            ),
+            ({"id": 1, "links": links, "files": [{}]}, f"a file of {what} has no id"),
+            ({"links": links}, f"{what} has no id"),
+        ):
+            with self.subTest(value=value):
+                self.refused(lambda v=value: mint_doi.deposition(v, what), message)
+
+    def test_a_deposition_reads_its_id_links_and_files(self) -> None:
+        """The shape the step reads, an id that is not a string compact."""
+        got = mint_doi.deposition(
+            {
+                "id": 7,
+                "links": {"self": "s", "bucket": "b", "publish": "p"},
+                "files": [{"id": "f1"}],
+            },
+            "it",
+        )
+        self.assertEqual(got, mint_doi.Deposition("7", "s", "b", "p", ["f1"]))
+
+    def test_rights_that_are_not_a_list_of_ids_are_unreadable(self) -> None:
+        """Each refusal of the rights reader names the record."""
+        where = "the published record 1"
+        for value, message in (
+            ({"metadata": {}}, f"{where}'s rights is not a list"),
+            ({"metadata": {"rights": [1]}}, f"a right of {where} is not an object"),
+            ({"metadata": {"rights": [{}]}}, f"a right of {where} has no id"),
+            ({"metadata": []}, f"{where} is not an object"),
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(mint_doi.decoded.UndecodableError) as caught:
+                    mint_doi.rights_ids(value, where)
+                self.assertEqual(message, str(caught.exception))
+
+    def test_a_newversion_answer_with_no_draft_link_is_refused(self) -> None:
+        """No deposit is grown from an answer that names no draft."""
+        run = canon_run(canon_zenodo(newversion_body={"links": {}}))
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::the newversion answer's links.latest_draft is not a string",
+            run.stdout,
+        )
+
+    def test_a_draft_listing_entry_that_is_not_an_object_is_refused(self) -> None:
+        """The stale-draft sweep reads depositions, nothing else."""
+        run = canon_run(canon_zenodo(drafts=[1]))
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::an entry of the draft listing is not an object", run.stdout
+        )
+
+    def test_a_title_listing_entry_that_is_not_an_object_is_refused(self) -> None:
+        """The first-mint guard reads depositions, nothing else."""
+        run = run_helper(
+            "0BSD", zenodo=first_mint_zenodo([1]), version="1.68.5", repo=CANON_REPO
+        )
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn(
+            "::error::an entry of the deposition listing (q=title:", run.stdout
+        )
+        self.assertIn(") is not an object", run.stdout)
+        self.assertEqual(run.writes(), [])
 
 
 if __name__ == "__main__":

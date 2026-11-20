@@ -34,8 +34,14 @@ from typed_hypothesis import given
 IMAGE = st.from_regex(r"ghcr\.io/[a-z0-9._/-]{1,24}", fullmatch=True)
 TAG = st.from_regex(r"[A-Za-z0-9._-]{1,16}", fullmatch=True)
 DIGEST = st.from_regex(r"sha256:[0-9a-f]{64}", fullmatch=True)
+# A JSON scalar: JSON has no NaN or Infinity, and these documents are
+# read strictly (#1676), so a float that is not finite is not one.
 SCALAR = (
-    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text()
+    st.none()
+    | st.booleans()
+    | st.integers()
+    | st.floats(allow_nan=False, allow_infinity=False)
+    | st.text()
 )
 JSON = st.recursive(
     SCALAR,

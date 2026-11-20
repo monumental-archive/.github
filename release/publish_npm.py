@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import typed_std
 import workflow_command
 
 if TYPE_CHECKING:
@@ -79,7 +80,7 @@ def version_key(version: str) -> tuple[int, ...]:
         The version's numeric parts.
 
     """
-    return tuple(int(part) for part in re.findall(r"\d+", version))
+    return tuple(int(typed_std.group(m) or "0") for m in re.finditer(r"\d+", version))
 
 
 def npm(

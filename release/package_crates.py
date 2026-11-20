@@ -161,11 +161,11 @@ def package(flags: str) -> list[str]:
             )
     if missing:
         return missing
-    for crate in sorted(PACKAGE.glob("*.crate")):
-        if crate.name not in ships:
-            crate.unlink()
+    for packed in sorted(PACKAGE.glob("*.crate")):
+        if packed.name not in ships:
+            packed.unlink()
             print(
-                f"{crate.name} is not published to crates.io (publish key);"
+                f"{packed.name} is not published to crates.io (publish key);"
                 " not a release subject",
                 flush=True,
             )

@@ -65,7 +65,6 @@ import argparse
 import shutil
 import sys
 import tarfile
-import tomllib
 from pathlib import Path
 from typing import NamedTuple
 
@@ -74,6 +73,7 @@ from typing import NamedTuple
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import workflow_command
 
 ARCHES = ("amd64", "arm64")
@@ -211,11 +211,11 @@ def base_image(table: Path, pg: str) -> str:
             major, or the row is not a reference.
 
     """
-    rows = tomllib.loads(table.read_text("utf-8")).get("build", {})
+    rows = decoded.load_toml(table.read_bytes()).get("build", {})
     # `build` must be a table and its row a reference: `build = false`
     # and a row of `[]` died here as a TypeError, and `build = "x16"`
     # matched pg 16 as a substring (#1556).
-    if not isinstance(rows, dict):
+    if not decoded.is_object(rows):
         msg = f"[build] in {table} is not a table of majors"
         raise RefusalError(msg)
     if pg not in rows:
@@ -226,6 +226,22 @@ def base_image(table: Path, pg: str) -> str:
         msg = f"pg{pg}'s build image in {table} is not a reference"
         raise RefusalError(msg)
     return ref
+
+
+class Args(argparse.Namespace):
+    """The arguments every verb's parser may set, typed as parsed."""
+
+    verb: str
+    version: str
+    crate_dir: str
+    pg: str
+    tarballs: str
+    out: str
+    recipe: str
+    image: str
+    base: str
+    tree: Path
+    table: Path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -244,7 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     staging.add_argument("--tarballs", default="tarballs")
     staging.add_argument("--out", default="staged")
     render = verbs.add_parser("consumer-dockerfile")
-    render.add_argument("--recipe", choices=sorted(RECIPES), required=True)
+    recipes: list[str] = sorted(RECIPES)
+    render.add_argument("--recipe", choices=recipes, required=True)
     render.add_argument("--image", required=True)
     render.add_argument("--base", required=True)
     render.add_argument("--pg", required=True)
@@ -253,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     base = verbs.add_parser("base-image")
     base.add_argument("--pg", required=True)
     base.add_argument("--table", type=Path, required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     try:
         sys.stdout.write(run(args))
     except RefusalError as refusal:
@@ -262,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def run(args: argparse.Namespace) -> str:
+def run(args: Args) -> str:
     """Do the verb the arguments name.
 
     Returns:

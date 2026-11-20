@@ -25,7 +25,7 @@ import json
 import os
 import re
 import sys
-import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 # The canon's one writer of workflow commands, in mise/ (#1660).
@@ -33,6 +33,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import decoded
 import workflow_command
 
 MAJOR = re.compile(r"^[0-9]+$")
@@ -54,25 +55,51 @@ def package_name(crate_dir: Path) -> str:
     """
     manifest = crate_dir / "Cargo.toml"
     try:
-        with manifest.open("rb") as f:
-            parsed = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError) as e:
+        parsed = decoded.load_toml(manifest.read_bytes())
+    except (OSError, decoded.UndecodableError) as e:
         msg = f"{manifest}: {e}"
         raise RefusedError(msg) from e
     package = parsed.get("package", {})
     # `package = false` died here as an AttributeError (#1556).
-    name = package.get("name") if isinstance(package, dict) else None
+    name = package.get("name") if decoded.is_object(package) else None
     if not isinstance(name, str) or not name:
         msg = f"{manifest} names no package — a cell plans the crate it built"
         raise RefusedError(msg)
     return name
 
 
-def plan(crate_dir: Path, major: str, prefix: str) -> list[dict]:
-    """Build the cell's one-entry plan.
+@dataclass(frozen=True)
+class Cell:
+    """What one cell built: the crate, the major, the document's name."""
+
+    package: str
+    major: str
+    doc: str
+
+    def entry(self) -> dict[str, object]:
+        """Write the cell as its plan entry.
+
+        Returns:
+            The entry, in the shape `stele assert plans` judges.
+
+        """
+        return {
+            "class": "pgrx-extension",
+            "doc": self.doc,
+            "artifact": f"{self.package}-pg{self.major}",
+            "params": {
+                "cargoPackage": self.package,
+                "features": [f"pg{self.major}"],
+                "noDefaultFeatures": True,
+            },
+        }
+
+
+def cell(crate_dir: Path, major: str, prefix: str) -> Cell:
+    """Name the cell this step plans.
 
     Returns:
-        The plan document.
+        The cell.
 
     Raises:
         RefusedError: no prefix, or a major that is not a number.
@@ -85,18 +112,17 @@ def plan(crate_dir: Path, major: str, prefix: str) -> list[dict]:
         msg = f"major {major!r} is not a Postgres major"
         raise RefusedError(msg)
     pkg = package_name(crate_dir)
-    return [
-        {
-            "class": "pgrx-extension",
-            "doc": f"{prefix}{pkg}-pg{major}",
-            "artifact": f"{pkg}-pg{major}",
-            "params": {
-                "cargoPackage": pkg,
-                "features": [f"pg{major}"],
-                "noDefaultFeatures": True,
-            },
-        }
-    ]
+    return Cell(package=pkg, major=major, doc=f"{prefix}{pkg}-pg{major}")
+
+
+def plan(crate_dir: Path, major: str, prefix: str) -> list[dict[str, object]]:
+    """Build the cell's one-entry plan; `cell` refuses what it cannot name.
+
+    Returns:
+        The plan document.
+
+    """
+    return [cell(crate_dir, major, prefix).entry()]
 
 
 def main(argv: list[str]) -> int:
@@ -110,17 +136,16 @@ def main(argv: list[str]) -> int:
         print("usage: inventory_plan.py CRATE_DIR MAJOR", file=sys.stderr)
         return 2
     try:
-        entries = plan(Path(argv[0]), argv[1], os.environ.get("PLAN_DOC_PREFIX", ""))
+        one = cell(Path(argv[0]), argv[1], os.environ.get("PLAN_DOC_PREFIX", ""))
     except RefusedError as e:
         workflow_command.error(str(e))
         return 1
     out = Path("plan")
     out.mkdir(exist_ok=True)
+    entries: list[dict[str, object]] = [one.entry()]
     rendered = json.dumps(entries, indent=2) + "\n"
     (out / "plan.json").write_text(rendered, encoding="utf-8")
-    for e in entries:
-        doc, pkg = e["doc"], e["params"]["cargoPackage"]
-        workflow_command.notice(f"plans inventory {doc} for package {pkg}")
+    workflow_command.notice(f"plans inventory {one.doc} for package {one.package}")
     return 0
 
 

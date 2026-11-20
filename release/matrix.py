@@ -30,7 +30,7 @@ dropped, an inner or leading empty field kept and refused as unknown.
 
 import json
 import sys
-import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 # The canon's one writer of workflow commands, in mise/ (#1660).
@@ -38,6 +38,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import workflow_command
 
 # The canon's target-to-runner tables, one per class that builds per
@@ -118,7 +119,7 @@ def targets(cls: str, request: str) -> tuple[list[str], list[str]]:
     if not requested:
         msg = "no targets requested — a release that builds nothing is not a release"
         raise RefusalError(msg)
-    include = []
+    include: list[dict[str, str]] = []
     for target in requested:
         if target not in runners:
             msg = f"unknown target {target}; {hint}"
@@ -136,26 +137,74 @@ def targets(cls: str, request: str) -> tuple[list[str], list[str]]:
     return outputs, notices
 
 
-def load(mapping: Path) -> dict:
+@dataclass(frozen=True)
+class BaseImages:
+    """The base-image mapping: each role's references, and the glibc floor."""
+
+    # Role ("build", "smoke") to major to reference, as the file pins them.
+    roles: dict[str, dict[str, str]]
+    # `floor.glibc` as the step prints it; None where the file has none.
+    floor: str | None
+
+
+def role_table(doc: dict[str, object], role: str) -> dict[str, str]:
+    """Read one role's table of majors.
+
+    Returns:
+        Each major's reference; none where the file has no such table.
+
+    Raises:
+        RefusalError: the role is not a table, or a reference is not a string.
+
+    """
+    table = doc.get(role, {})
+    if not decoded.is_object(table):
+        msg = f"[{role}] in {MAPPING_NAME} is not a table of majors"
+        raise RefusalError(msg)
+    refs: dict[str, str] = {}
+    for pg, ref in table.items():
+        if not isinstance(ref, str):
+            msg = f"{role}.{pg} in {MAPPING_NAME} is not a reference"
+            raise RefusalError(msg)
+        refs[pg] = ref
+    return refs
+
+
+def load(mapping: Path) -> BaseImages:
     """Read the base-image mapping.
 
     Returns:
-        The parsed TOML.
+        Its roles and floor.
+
+    Raises:
+        RefusalError: the file is not TOML, or not the mapping's shape.
 
     """
-    with mapping.open("rb") as f:
-        return tomllib.load(f)
+    try:
+        doc = decoded.load_toml(mapping.read_bytes())
+    except decoded.UndecodableError as err:
+        msg = f"{MAPPING_NAME} is not TOML: {err}"
+        raise RefusalError(msg) from err
+    floor = doc.get("floor", {})
+    if not decoded.is_object(floor):
+        msg = f"[floor] in {MAPPING_NAME} is not a table"
+        raise RefusalError(msg)
+    glibc = floor.get("glibc")
+    return BaseImages(
+        roles={role: role_table(doc, role) for role in ("build", "smoke")},
+        floor=None if glibc is None else f"{glibc}",
+    )
 
 
-def pinned(table: object, major: str) -> str | None:
+def pinned(table: dict[str, str], major: str) -> str | None:
     """Return the image a role pins for a major, or None where it pins none.
 
     Returns:
         The digest-pinned reference, or None.
 
     """
-    ref = table.get(major) if isinstance(table, dict) else None
-    return ref if isinstance(ref, str) and ref else None
+    ref = table.get(major)
+    return ref or None
 
 
 def requested_majors(request: str) -> list[str]:
@@ -199,9 +248,9 @@ def pgrx_extension(mapping: Path, request: str) -> tuple[list[str], list[str]]:
     """
     t = load(mapping)
     majors = requested_majors(request)
-    include = []
+    include: list[dict[str, str]] = []
     for pg in majors:
-        build, smoke = pinned(t.get("build"), pg), pinned(t.get("smoke"), pg)
+        build, smoke = pinned(t.roles["build"], pg), pinned(t.roles["smoke"], pg)
         if build is None or smoke is None:
             msg = f"pg{pg} has no digest-pinned base image in {MAPPING_NAME}"
             raise RefusalError(msg)
@@ -210,7 +259,7 @@ def pgrx_extension(mapping: Path, request: str) -> tuple[list[str], list[str]]:
             for arch, runner in PGRX_ARCHES
         ]
     planned = [f"{cell['pg']}-{cell['arch']}" for cell in include]
-    floor = t.get("floor", {}).get("glibc")
+    floor = t.floor
     outputs = [
         f"matrix={compact({'include': include})}",
         f"expected={compact(planned)}",
@@ -251,9 +300,9 @@ def base_images(mapping: Path) -> tuple[list[str], list[str]]:
 
     """
     t = load(mapping)
-    cells = []
+    cells: list[dict[str, str]] = []
     for role in ("build", "smoke"):
-        for pg, ref in sorted(t.get(role, {}).items()):
+        for pg, ref in sorted(t.roles[role].items()):
             name, _, digest = ref.partition("@")
             if not digest.startswith("sha256:"):
                 msg = f"{role}.{pg}: no digest in {ref!r}"
@@ -297,7 +346,8 @@ def plan(argv: list[str]) -> tuple[list[str], list[str]] | None:
             return pgrx_images(request)
         case ["base-images", mapping]:
             return base_images(Path(mapping))
-    return None
+        case _:
+            return None
 
 
 def main(argv: list[str] | None = None) -> int:

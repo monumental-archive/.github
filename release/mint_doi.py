@@ -38,7 +38,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 from urllib.parse import quote
 
 # The canon's one writer of workflow commands, in mise/ (#1660).
@@ -46,6 +46,8 @@ from urllib.parse import quote
 # come first.
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
+import typed_std
 import workflow_command
 
 if TYPE_CHECKING:
@@ -99,6 +101,154 @@ class HttpError(Exception):
     def __init__(self, method: str, url: str, detail: str) -> None:
         """Name the request and what went wrong."""
         super().__init__(f"{method} {url}: {detail}")
+
+
+def loaded(raw: bytes, what: str) -> object:
+    """Decode an answer Zenodo gave, or refuse it by name.
+
+    Returns:
+        The decoded value.
+
+    Raises:
+        RefusedError: it is not JSON, naming `what`.
+
+    """
+    try:
+        return decoded.load_json(raw)
+    except decoded.UndecodableError as e:
+        msg = f"{what} is not JSON: {e}"
+        raise RefusedError(msg) from e
+
+
+def an_object(value: object, where: str) -> dict[str, object]:
+    """Narrow an answer's value to an object, or refuse it by name.
+
+    Returns:
+        The object.
+
+    Raises:
+        RefusedError: it is not one, naming `where`.
+
+    """
+    try:
+        return decoded.as_object(value, where)
+    except decoded.UndecodableError as e:
+        raise RefusedError(str(e)) from None
+
+
+def a_string(value: object, where: str) -> str:
+    """Narrow an answer's value to a string, or refuse it by name.
+
+    Returns:
+        The string.
+
+    Raises:
+        RefusedError: it is not one, naming `where`.
+
+    """
+    try:
+        return decoded.as_str(value, where)
+    except decoded.UndecodableError as e:
+        raise RefusedError(str(e)) from None
+
+
+def a_list(value: object, where: str) -> list[object]:
+    """Narrow an answer's value to a list, or refuse it by name.
+
+    Returns:
+        The list.
+
+    Raises:
+        RefusedError: it is not one, naming `where`.
+
+    """
+    try:
+        return decoded.as_array(value, where)
+    except decoded.UndecodableError as e:
+        raise RefusedError(str(e)) from None
+
+
+def rendered(value: object) -> str:
+    """Render an id as the step always has: a string as is, else compact.
+
+    Returns:
+        The id's text.
+
+    """
+    return value if isinstance(value, str) else compact(value)
+
+
+@dataclass(frozen=True)
+class Deposition:
+    """A deposition, as the step reads one: its id, links and files."""
+
+    id: str
+    self_url: str
+    bucket: str
+    publish: str
+    # Each file's id, as its delete URL names it.
+    files: list[str]
+
+
+def deposition(value: object, what: str) -> Deposition:
+    """Read a deposition Zenodo answered.
+
+    Returns:
+        Its id, links and file ids.
+
+    Raises:
+        RefusedError: not that shape, naming `what` and the field.
+
+    """
+    dep = an_object(value, what)
+    links = an_object(dep.get("links"), f"{what}'s links")
+    files: list[str] = []
+    for item in a_list(dep.get("files") or [], f"{what}'s files"):
+        entry = an_object(item, f"a file of {what}")
+        if "id" not in entry:
+            msg = f"a file of {what} has no id"
+            raise RefusedError(msg)
+        files.append(f"{entry['id']}")
+    if "id" not in dep:
+        msg = f"{what} has no id"
+        raise RefusedError(msg)
+    return Deposition(
+        id=rendered(dep["id"]),
+        self_url=a_string(links.get("self"), f"{what}'s links.self"),
+        bucket=a_string(links.get("bucket"), f"{what}'s links.bucket"),
+        publish=a_string(links.get("publish"), f"{what}'s links.publish"),
+        files=files,
+    )
+
+
+def rights_ids(value: object, where: str) -> str:
+    """Read a record's licence ids, as `jq -c '[.metadata.rights[].id]'`.
+
+    Returns:
+        The ids, compact.
+
+    Raises:
+        decoded.UndecodableError: the record holds no list of rights.
+
+    """
+    meta = decoded.as_object(decoded.as_object(value, where).get("metadata"), where)
+    ids: list[object] = []
+    for right in decoded.as_array(meta.get("rights"), f"{where}'s rights"):
+        entry = decoded.as_object(right, f"a right of {where}")
+        if "id" not in entry:
+            msg = f"a right of {where} has no id"
+            raise decoded.UndecodableError(msg)
+        ids.append(entry["id"])
+    return compact(ids)
+
+
+@dataclass(frozen=True)
+class Listed:
+    """A deposition listing's entry, as the title guard reads it."""
+
+    # The title; None where it is not a string, which no repo's name equals.
+    title: str | None
+    submitted: bool
 
 
 def pause(seconds: float) -> None:
@@ -223,6 +373,7 @@ def _licence_fault(licence: str, ids: list[str]) -> str:  # ruff: ignore[too-man
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Authenticated calls never follow a redirect: the token stays put."""
 
+    @override
     @staticmethod
     def redirect_request(*_: object, **__: object) -> None:
         """Refuse: urllib then raises the 3xx as an HTTPError."""
@@ -259,6 +410,7 @@ class Zenodo:
 
         Raises:
             HttpError: no answer at all.
+            RefusedError: what answered is not an HTTP response.
 
         """
         h = {"User-Agent": self.agent, **(headers or {})}
@@ -267,12 +419,15 @@ class Zenodo:
         req = urllib.request.Request(url, data=body, headers=h, method=method)  # ruff: ignore[suspicious-url-open-usage] - BASE_URL is the step's input
         opener = self._authed if auth else self._public
         try:
-            with opener.open(req, timeout=TIMEOUT) as resp:
+            with typed_std.urlopen(req, timeout=TIMEOUT, opener=opener) as resp:
                 return resp.status, resp.read()
+        except typed_std.NotAResponseError as e:
+            raise RefusedError(str(e)) from None
         except urllib.error.HTTPError as e:
             return e.code, e.read()
         except (urllib.error.URLError, OSError) as e:
-            raise HttpError(method, url, str(getattr(e, "reason", e))) from e
+            reason = e.reason if isinstance(e, urllib.error.URLError) else e
+            raise HttpError(method, url, str(reason)) from e
 
     def _retrying(  # ruff: ignore[too-many-arguments] - curl's two retry modes
         self,
@@ -432,19 +587,20 @@ class Mint:
         """
         url = f"{self.zenodo.base}/api/records/{concept_recid}/versions/latest"
         try:
-            rec = json.loads(self.zenodo.public(url))
-        except (HttpError, ValueError) as e:
+            rec = decoded.load_json(self.zenodo.public(url))
+        except (HttpError, decoded.UndecodableError) as e:
             print(e, file=sys.stderr)
             return None
-        if not isinstance(rec, dict):
+        if not decoded.is_object(rec):
             return None
         meta = rec.get("metadata") or {}
-        rid = rec.get("id")
+        version = meta.get("version") if decoded.is_object(meta) else None
+        doi, concept = rec.get("doi"), rec.get("conceptdoi")
         return (
-            rec.get("doi") or "",
-            rec.get("conceptdoi") or "unrecorded",
-            rid if isinstance(rid, str) else compact(rid),
-            (meta.get("version") if isinstance(meta, dict) else None) or "unversioned",
+            (doi if isinstance(doi, str) else "") or "",
+            (concept if isinstance(concept, str) else "") or "unrecorded",
+            rendered(rec.get("id")),
+            (version if isinstance(version, str) else "") or "unversioned",
         )
 
     def done(self, doi: str, concept: str, extra: str = "") -> int:
@@ -481,13 +637,15 @@ class Mint:
             return
         want = compact(self.ids)
         try:
-            rec = json.loads(
-                self.zenodo.public(
-                    f"{self.zenodo.base}/api/records/{recid}", accept=RDM
-                )
+            got = rights_ids(
+                decoded.load_json(
+                    self.zenodo.public(
+                        f"{self.zenodo.base}/api/records/{recid}", accept=RDM
+                    )
+                ),
+                f"the published record {recid}",
             )
-            got = compact([r["id"] for r in rec["metadata"]["rights"]])
-        except (HttpError, ValueError, KeyError, TypeError) as e:
+        except (HttpError, decoded.UndecodableError) as e:
             print(e, file=sys.stderr)
             msg = (
                 f"the published record {recid} could not be read back — the"
@@ -571,7 +729,7 @@ class Mint:
                 )
                 raise RefusedError(msg)
 
-    def read_listing(self, query: str) -> list[dict]:
+    def read_listing(self, query: str) -> list[Listed]:
         """Read a deposition listing to its end, page by page (#1389).
 
         The end is a page shorter than the page size. A page that cannot
@@ -583,24 +741,31 @@ class Mint:
             Every entry, in the order the pages answered.
 
         Raises:
-            RefusedError: the listing could not be read to its end.
+            RefusedError: the listing could not be read to its end, or
+                holds an entry that is not a deposition.
 
         """
         z = self.zenodo
-        entries: list[dict] = []
+        entries: list[Listed] = []
         for page in range(1, LISTING_MAX_PAGES + 1):
             url = (
                 f"{z.base}/api/deposit/depositions?{query}"
                 f"&size={LISTING_PAGE}&page={page}"
             )
             try:
-                got = json.loads(z.idem("GET", url))
-            except (HttpError, ValueError) as e:
+                got = decoded.load_json(z.idem("GET", url))
+            except (HttpError, decoded.UndecodableError) as e:
                 print(e, file=sys.stderr)
                 got = None
-            if not isinstance(got, list):
+            if not decoded.is_array(got):
                 break
-            entries += got
+            for item in got:
+                entry = an_object(item, f"an entry of the deposition listing ({query})")
+                said = entry.get("title")
+                title = said if isinstance(said, str) else None
+                entries.append(
+                    Listed(title=title, submitted=entry.get("submitted") is True)
+                )
             if len(got) < LISTING_PAGE:
                 return entries
         msg = (
@@ -610,7 +775,7 @@ class Mint:
         )
         raise RefusedError(msg)
 
-    def first_deposit(self) -> dict:
+    def first_deposit(self) -> Deposition:
         """Create a deposition for a first mint, behind the title guard.
 
         A submitted deposition already bearing this title is a concept
@@ -630,25 +795,22 @@ class Mint:
         # anything; `title:"<owner>/<repo>"` answered exactly the record
         # for both, the slash encoded or literal.
         listing = self.read_listing(f"q=title:%22{quote(self.repo, safe='')}%22")
-        if any(
-            d.get("title") == self.repo and d.get("submitted") is True for d in listing
-        ):
+        if any(d.title == self.repo and d.submitted for d in listing):
             msg = (
                 "a submitted deposition already bears this title but CITATION.cff"
                 " records no concept DOI — record it under identifiers: before"
                 " minting again"
             )
             raise RefusedError(msg)
-        return json.loads(
-            self.zenodo.call(
-                "POST",
-                f"{self.zenodo.base}/api/deposit/depositions",
-                body=b"{}",
-                headers={"Content-Type": "application/json"},
-            )
+        created = self.zenodo.call(
+            "POST",
+            f"{self.zenodo.base}/api/deposit/depositions",
+            body=b"{}",
+            headers={"Content-Type": "application/json"},
         )
+        return deposition(loaded(created, "the new deposition"), "the new deposition")
 
-    def new_version(self, concept_recid: str, latest: str) -> dict:
+    def new_version(self, concept_recid: str, latest: str) -> Deposition:
         """Open a new version of the concept, emptied of inherited files.
 
         An unpublished draft under the concept is the wreckage of an
@@ -662,32 +824,40 @@ class Mint:
 
         """
         z = self.zenodo
-        found = json.loads(
-            z.idem(
-                "GET",
-                f"{z.base}/api/deposit/depositions?q=conceptrecid:{concept_recid}"
-                "&status=draft&size=50",
-            )
+        what = "the draft listing"
+        raw = z.idem(
+            "GET",
+            f"{z.base}/api/deposit/depositions?q=conceptrecid:{concept_recid}"
+            "&status=draft&size=50",
         )
-        for d in found:
+        for item in a_list(loaded(raw, what), what):
+            d = an_object(item, f"an entry of {what}")
             rid = d.get("conceptrecid") or ""
-            if (
-                d.get("submitted") is False
-                and (rid if isinstance(rid, str) else compact(rid)) == concept_recid
-            ):
-                url = d["links"]["self"]
+            if d.get("submitted") is False and rendered(rid) == concept_recid:
+                links = an_object(d.get("links"), f"a stale draft's links in {what}")
+                url = a_string(
+                    links.get("self"), f"a stale draft's links.self in {what}"
+                )
                 workflow_command.notice(
                     f"deleting stale unpublished draft {url} left by an interrupted run"
                 )
                 z.call("DELETE", url)
-        newv = json.loads(
-            z.call(
-                "POST", f"{z.base}/api/deposit/depositions/{latest}/actions/newversion"
-            )
+        what = "the newversion answer"
+        newv = an_object(
+            loaded(
+                z.call(
+                    "POST",
+                    f"{z.base}/api/deposit/depositions/{latest}/actions/newversion",
+                ),
+                what,
+            ),
+            what,
         )
-        dep = json.loads(z.idem("GET", newv["links"]["latest_draft"]))
-        for f in dep.get("files") or []:
-            z.call("DELETE", f"{dep['links']['self']}/files/{f['id']}")
+        links = an_object(newv.get("links"), f"{what}'s links")
+        draft = a_string(links.get("latest_draft"), f"{what}'s links.latest_draft")
+        dep = deposition(loaded(z.idem("GET", draft), "the new draft"), "the new draft")
+        for fid in dep.files:
+            z.call("DELETE", f"{dep.self_url}/files/{fid}")
         return dep
 
     def set_rights(self, recid: str) -> None:
@@ -708,19 +878,30 @@ class Mint:
         """
         z = self.zenodo
         url = f"{z.base}/api/records/{recid}/draft"
-        draft = json.loads(z.idem("GET", url, headers={"Accept": RDM}))
-        meta = draft["metadata"]
+        what = f"the InvenioRDM draft {recid}"
+        draft = an_object(
+            loaded(z.idem("GET", url, headers={"Accept": RDM}), what), what
+        )
+        meta = an_object(draft.get("metadata"), f"{what}'s metadata")
+        if "files" not in draft:
+            msg = f"{what} has no files"
+            raise RefusedError(msg)
         meta["rights"] = self.rights
-        body = compact({"metadata": meta, "files": draft["files"]}).encode()
-        back = json.loads(
+        sent: dict[str, object] = {"metadata": meta, "files": draft["files"]}
+        body = compact(sent).encode()
+        back = loaded(
             z.idem(
                 "PUT",
                 url,
                 body=body,
                 headers={"Accept": RDM, "Content-Type": "application/json"},
-            )
+            ),
+            f"{what}'s read-back",
         )
-        got = compact([r["id"] for r in back["metadata"]["rights"]])
+        try:
+            got = rights_ids(back, f"{what}'s read-back")
+        except decoded.UndecodableError as e:
+            raise RefusedError(str(e)) from None
         if got != compact(self.ids):
             msg = (
                 f"the draft's licences read back as {got}, not the"
@@ -794,21 +975,20 @@ class Mint:
                 self.verify_published(latest[2], latest[0])
                 return self.done(latest[0], latest[1], ALREADY)
             dep = self.new_version(concept_recid, latest[2])
-        links = dep["links"]
         name = self.repo.rsplit("/", 1)[-1]
         z.idem(
             "PUT",
-            f"{links['bucket']}/{name}-{self.version}.tar.gz",
+            f"{dep.bucket}/{name}-{self.version}.tar.gz",
             body=tarball,
             headers={"Content-Type": "application/octet-stream"},
         )
         z.idem(
             "PUT",
-            links["self"],
+            dep.self_url,
             body=metadata.encode(),
             headers={"Content-Type": "application/json"},
         )
-        recid = compact(dep["id"]) if not isinstance(dep["id"], str) else dep["id"]
+        recid = dep.id
         if len(self.ids) > 1:
             self.set_rights(recid)
         # The commitment point. One POST — then the truth is the
@@ -820,10 +1000,16 @@ class Mint:
         # red, and the rerun fails closed on the title guard.
         doi, concept = "", ""
         try:
-            published = json.loads(z.call("POST", links["publish"]))
-            doi = published.get("doi") or ""
-            concept = published.get("conceptdoi") or FIRST_CONCEPT
-        except (HttpError, ValueError, AttributeError) as e:
+            published = an_object(
+                loaded(z.call("POST", dep.publish), "the publish answer"),
+                "the publish answer",
+            )
+            said_doi, said_concept = published.get("doi"), published.get("conceptdoi")
+            doi = (said_doi if isinstance(said_doi, str) else "") or ""
+            concept = (
+                said_concept if isinstance(said_concept, str) else ""
+            ) or FIRST_CONCEPT
+        except (HttpError, RefusedError) as e:
             print(e, file=sys.stderr)
         if not doi and concept_recid:
             # Spaced reads: a publish that landed as the response was
@@ -845,6 +1031,12 @@ class Mint:
         return self.done(doi, concept, "" if concept_recid else FIRST)
 
 
+class Args(argparse.Namespace):
+    """The step's one flag, typed as parsed."""
+
+    pipeline: str
+
+
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
     """Run the step from its environment.
 
@@ -858,7 +1050,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         required=True,
         help="the description's sentence on how the release was built and proven",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=Args())
     env = os.environ if env is None else env
     mint = Mint(
         env=env,

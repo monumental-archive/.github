@@ -86,7 +86,10 @@ def verdict(manifest: dict, caller: str) -> str | None:
 
     """
     try:
-        pack.check(manifest, VERSION, caller)
+        read = pack.Manifest(
+            name="pkg", version=VERSION, repository=pack.repository(manifest)
+        )
+        pack.check(read, VERSION, caller)
     except pack.RefusedError as refused:
         return str(refused)
     return None
