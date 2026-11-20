@@ -57,7 +57,7 @@ order+=",Testing,Build,CI,Dependencies,Reverted"
 # worth reporting deterministically rather than arbitrarily.
 resumed=$(git tag --points-at HEAD --list 'v[0-9]*' | sort -V | tail -1)
 if [[ -n ${resumed} ]]; then
-  printf 'already minted, nothing to do: %q\n' "${resumed}"
+  org_say "already minted, nothing to do: ${resumed}"
   exit 0
 fi
 
@@ -122,9 +122,9 @@ head_subject=$(git log -1 --pretty=%s)
 case "${head_subject}" in
   "${subject}"*) ;;
   *)
-    printf 'FAIL: HEAD is not the release commit for %q\n' "${tag}" >&2
-    printf '  expected: %q\n' "${subject}" >&2
-    printf '  subject:  %q\n' "${head_subject}" >&2
+    org_say "FAIL: HEAD is not the release commit for ${tag}" >&2
+    org_say "  expected: ${subject}" >&2
+    org_say "  subject:  ${head_subject}" >&2
     exit 1
     ;;
 esac
@@ -159,8 +159,8 @@ while IFS= read -r control; do
   answer=$("${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}" \
     "${canon}/release/pgrx/previous_release.py" predecessor \
     --repo "${repo_slug}" --version "${version}" --control "${control}") || {
-    printf 'FAIL: refusing to mint %q — the release listing could not be read\n' "${tag}" >&2
-    printf '  to find %q'\''s predecessor; nothing was minted, re-run this job.\n' "${name}" >&2
+    org_say "FAIL: refusing to mint ${tag} — the release listing could not be read" >&2
+    org_say "  to find ${name}'s predecessor; nothing was minted, re-run this job." >&2
     exit 1
   }
   [[ -n ${answer} ]] || continue
@@ -168,9 +168,9 @@ while IFS= read -r control; do
   prev_tag="${answer#*$'\t'}"
   upgrade="${crate_dir}/sql/${name}--${prev}--${version}.sql"
   if [[ ! -f ${upgrade} ]]; then
-    printf 'FAIL: refusing to mint %q — no upgrade path %q from published %q (%q)\n' "${tag}" "${upgrade}" "${prev}" "${prev_tag}" >&2
-    printf '  The Release PR derived its path before %q finished publishing\n' "${prev_tag}" >&2
-    printf '  (#358 seam 5). No tag was minted, so %q is NOT burned:\n' "${version}" >&2
+    org_say "FAIL: refusing to mint ${tag} — no upgrade path ${upgrade} from published ${prev} (${prev_tag})" >&2
+    org_say "  The Release PR derived its path before ${prev_tag} finished publishing" >&2
+    org_say "  (#358 seam 5). No tag was minted, so ${version} is NOT burned:" >&2
     echo "  once the in-flight publish is complete, refresh the derivation via" >&2
     echo "  the Release-PR leg (a push to the default branch, or the" >&2
     echo "  release-published trigger) and re-run this job on the refreshed" >&2
@@ -257,7 +257,7 @@ if [[ ${push_rc} -ne 0 ]] \
 fi
 cat "${push_log}" >&2
 [[ ${push_rc} -eq 0 ]] || exit "${push_rc}"
-printf 'pushed %q (signed)\n' "${tag}"
+org_say "pushed ${tag} (signed)"
 
 # Release notes are the changelog section for this version — the same text
 # reviewers already approved in the Release PR, not a second description of
@@ -273,4 +273,4 @@ jq -r '.notes' "${plan}" | gh release create "${tag}" \
   --draft \
   --title "${tag}" \
   --notes-file -
-printf 'created draft release %q\n' "${tag}"
+org_say "created draft release ${tag}"

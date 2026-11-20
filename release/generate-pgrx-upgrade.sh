@@ -130,12 +130,12 @@ fi
 record=".pgrx-installable"
 predecessors=$("${ORG_PYTHON}" "${predecessor_helper}" record --repo "${GITHUB_REPOSITORY}" \
   --version "${VERSION}" --out "${record}" "${controls[@]}")
-printf 'installable set recorded in %q:\n' "${record}"
+org_say "installable set recorded in ${record}:"
 sed 's/^/  /' "${record}"
 files_out=" ${record}"
 
 if grep -qxF "${VERSION}" <<< "${graph_targets}"; then
-  printf 'upgrade graph already reaches %q; nothing to derive\n' "${VERSION}"
+  org_say "upgrade graph already reaches ${VERSION}; nothing to derive"
   emit "files=${files_out# }"
   exit 0
 fi
@@ -146,7 +146,7 @@ fi
 graph_below=$("${ORG_PYTHON}" "${predecessor_helper}" graph --below "${VERSION}" "${controls[@]}")
 below_head=$(head -n 1 <<< "${graph_below}")
 if [[ -n ${PREV_MANIFEST} && ${PREV_MANIFEST} != "${below_head}" ]]; then
-  printf 'NOTE: manifest carried %q but the upgrade graph reaches %q\n' "${PREV_MANIFEST}" "${below_head}"
+  org_say "NOTE: manifest carried ${PREV_MANIFEST} but the upgrade graph reaches ${below_head}"
 fi
 
 # rust and cargo-pgrx are caller build inputs, pinned in the caller's own
@@ -207,16 +207,16 @@ for control in "${controls[@]}"; do
   while IFS= read -r candidate; do
     [[ -n ${candidate} ]] || continue
     [[ ${candidate} != "${prev}" ]] || break
-    printf 'NOTE: %q %q is in the upgrade graph but no non-draft release\n' "${name}" "${candidate}"
+    org_say "NOTE: ${name} ${candidate} is in the upgrade graph but no non-draft release"
     echo "      carries its tarballs; not installable, trying the next older version"
   done <<< "${graph_below}"
   if [[ -z ${prev} ]]; then
-    printf 'no non-draft release carries any %q tarball; first publish of this extension, no upgrade path needed\n' "${name}"
+    org_say "no non-draft release carries any ${name} tarball; first publish of this extension, no upgrade path needed"
     continue
   fi
   if [[ ${prev} != "${below_head}" ]]; then
-    printf 'NOTE: deriving %q from %q, the newest installable published\n' "${name}" "${prev}"
-    printf '      version; graph head %q is not installable\n' "${below_head}"
+    org_say "NOTE: deriving ${name} from ${prev}, the newest installable published"
+    org_say "      version; graph head ${below_head} is not installable"
   fi
   shipped=$(gh release view "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
     --json assets --jq \
@@ -231,7 +231,7 @@ for control in "${controls[@]}"; do
     fi
   done
   if [[ -z ${pg} ]]; then
-    printf 'FAIL: %q shipped %q tarballs, but none for a PG major the base-image mapping carries\n' "${prev_tag}" "${name}" >&2
+    org_say "FAIL: ${prev_tag} shipped ${name} tarballs, but none for a PG major the base-image mapping carries" >&2
     exit 1
   fi
   build_image=$(jq -r --arg pg "${pg}" '.build[$pg]' <<< "${mapping}")
@@ -271,8 +271,8 @@ for control in "${controls[@]}"; do
   prev_root="${work}/prevroot/pkgroot"
   [[ -d ${prev_root} ]] || prev_root="${work}/prevroot"
   if [[ ! -d ${prev_root}/usr/lib/postgresql/${pg}/lib ]]; then
-    printf 'FAIL: %q tarball has no usr/lib/postgresql/%q/lib under its package root\n' "${prev_tag}" "${pg}" >&2
-    printf '  looked in %q (of %q)\n' "${prev_root#"${work}/"}" "$(basename "${work}/prev.tar.gz")" >&2
+    org_say "FAIL: ${prev_tag} tarball has no usr/lib/postgresql/${pg}/lib under its package root" >&2
+    org_say "  looked in ${prev_root#"${work}/"} (of $(basename "${work}/prev.tar.gz"))" >&2
     echo "  the archive is neither pkgroot/usr/... nor ./usr/..., which is the shape a" >&2
     echo "  pgrx package tarball has; nothing downstream can read it" >&2
     exit 1
@@ -283,7 +283,7 @@ for control in "${controls[@]}"; do
   # and no walk to finish (#682).
   prev_schema=$(find "${prev_root}" -type f -name "${name}--${prev}.sql" -print -quit)
   if [[ -z ${prev_schema} ]]; then
-    printf 'FAIL: %q tarball carries no generated schema %q--%q.sql\n' "${prev_tag}" "${name}" "${prev}" >&2
+    org_say "FAIL: ${prev_tag} tarball carries no generated schema ${name}--${prev}.sql" >&2
     exit 1
   fi
 
@@ -357,7 +357,7 @@ EOSH
   # there is no pipe to break and no walk to finish (#682).
   new_schema=$(find "${work}/out/pkgroot" -type f -name "${name}--${VERSION}.sql" -print -quit)
   if [[ -z ${new_schema} ]]; then
-    printf 'FAIL: candidate build produced no generated schema %q--%q.sql\n' "${name}" "${VERSION}" >&2
+    org_say "FAIL: candidate build produced no generated schema ${name}--${VERSION}.sql" >&2
     exit 1
   fi
 
@@ -830,7 +830,7 @@ EOSH
   mkdir -p "${crate_dir}/sql"
   cp "${work}/upgrade.sql" "${crate_dir}/sql/${name}--${prev}--${VERSION}.sql"
   files_out="${files_out} ${crate_dir}/sql/${name}--${prev}--${VERSION}.sql"
-  printf 'upgrade path derived and proven: %q/sql/%q--%q--%q.sql\n' "${crate_dir}" "${name}" "${prev}" "${VERSION}"
+  org_say "upgrade path derived and proven: ${crate_dir}/sql/${name}--${prev}--${VERSION}.sql"
 
   # The data fragment is consumed by this cycle: it leaves the tree in the
   # same release commit that ships its content inside the derived script.

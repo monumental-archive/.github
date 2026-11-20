@@ -15,7 +15,8 @@ at a decoy repository), the function file excepted:
    `%s` in single quotes. Outside text goes through `org_error` and its
    siblings, which escape it.
 2. In a script, step or task that prints a workflow command, text with
-   an expansion in it reaches the log only through the functions, or as
+   an expansion in it reaches the log only through the writer's
+   functions (`org_error` … `org_say`, the plain line), or as
    an argument to a `printf` whose format is a literal whose conversions
    are all `%q` (bash writes the value as one shell word: a newline
    comes out escaped, on the same line). A raw value with a
@@ -288,6 +289,23 @@ class Writer(unittest.TestCase):
         self.assertEqual(
             bash("org_mask $'s3cr\\net'; org_group $'log\\n::x::'; org_endgroup"),
             "::add-mask::s3cr%0Aet\n::group::log%0A::x::\n::endgroup::\n",
+        )
+
+
+class Say(unittest.TestCase):
+    """org_say: the plain line, one line whatever the text holds."""
+
+    def test_a_newline_and_a_command_stay_on_one_line(self) -> None:
+        """LF and CR are written as the two characters backslash-n and backslash-r."""
+        out = bash("org_say $'a\\n::error::x\\r'")
+        self.assertEqual(out, "a\\n::error::x\\r\n")
+        self.assertEqual(len(out.splitlines()), 1)
+
+    def test_readable_text_is_unchanged(self) -> None:
+        """Spaces, brackets, commas and quotes print as they are."""
+        self.assertEqual(
+            bash("org_say 'chore: release v1.1.0' '[16, 17]' \"it's 100%\""),
+            "chore: release v1.1.0 [16, 17] it's 100%\n",
         )
 
 

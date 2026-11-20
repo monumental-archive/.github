@@ -1449,7 +1449,9 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
                 snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
             )
             # The writer the real run copies into /work (#1660).
-            shutil.copy(CANON / "mise" / "workflow-command.sh", root / "work")
+            (root / "work" / "workflow-command.sh").write_bytes(
+                (CANON / "mise" / "workflow-command.sh").read_bytes()
+            )
             script = proof_sh(SCRIPT.read_text())
             # One pass, never a replace() per prefix: on Linux the scratch
             # root is itself under /tmp/, so a later replace() rewrote the

@@ -52,5 +52,5 @@ case "${root}" in
     ;;
 esac
 ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
-printf 'canon resolved: %q at %q\n' "${ref}" "${root}"
+org_say "canon resolved: ${ref} at ${root}"
 echo "ref=${ref}" >> "${GITHUB_OUTPUT}"

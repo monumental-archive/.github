@@ -40,3 +40,15 @@ org_notice() { org__workflow_command notice "$@"; }
 org_mask() { org__workflow_command add-mask "$@"; }
 org_group() { org__workflow_command group "$@"; }
 org_endgroup() { printf '::endgroup::\n'; }
+
+# A plain log line: every argument joined by one space, CR and LF
+# written as the two characters `\r` and `\n`, one line out, nothing
+# else changed. Outside text a unit prints to its log goes through here,
+# so a newline in it can never begin a line of its own (#1660), and the
+# line still reads as written: no `%q` quoting where the tree is present.
+org_say() {
+  local text="$*"
+  text=${text//$'\r'/\\r}
+  text=${text//$'\n'/\\n}
+  printf '%s\n' "${text}"
+}

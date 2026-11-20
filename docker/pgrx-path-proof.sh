@@ -24,10 +24,10 @@ ext=$(basename "${controls[0]}" .control)
 found=$(find /usr/lib/postgresql /usr/share/postgresql -name "${ext}*")
 if [[ -n ${found} ]]; then
   org_error "${ext} files under the system directories; the path proof would not prove the path:"
-  printf '%q\n' "${found}"
+  org_say "${found}"
   exit 1
 fi
-printf 'no file named %q* under the system directories\n' "${ext}"
+org_say "no file named ${ext}* under the system directories"
 bins=(/usr/lib/postgresql/*/bin)
 bin=${bins[0]}
 "${bin}/initdb" -D /tmp/pgdata -A trust > /dev/null
@@ -37,4 +37,4 @@ dynamic_library_path = '/extensions/ext/lib:$libdir'
 CONF
 "${bin}/pg_ctl" -D /tmp/pgdata -o "-c listen_addresses=" -w start > /dev/null
 psql -c "CREATE EXTENSION ${ext};"
-printf 'created extension %q through extension_control_path\n' "${ext}"
+org_say "created extension ${ext} through extension_control_path"
