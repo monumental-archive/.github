@@ -39,6 +39,8 @@ CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
 HELPER = CANON / "release" / "build_go_commands.py"
 TEMPLATE = '{{if eq .Name "main"}}{{.ImportPath}}{{end}}'
+# A run that staged no binary.
+NOTHING: list[str] = []
 
 GO_STUB = """#!/usr/bin/env bash
 # Stub `go`: `list` prints STUB_MAINS; `build -o OUT PKG` writes OUT,
@@ -156,22 +158,22 @@ class Builds(unittest.TestCase):
         """Each named by its import path's last element."""
         run = run_helper("example.com/m/cmd/stele\nexample.com/m/cmd/probe\n")
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(["probe", "stele"], run.staged)
-        self.assertEqual(
-            [
-                f"list -f {TEMPLATE} ./...",
-                "build -o staged/stele example.com/m/cmd/stele",
-                "build -o staged/probe example.com/m/cmd/probe",
-            ],
-            run.go,
-        )
+        staged: list[str] = ["probe", "stele"]
+        self.assertEqual(staged, run.staged)
+        go: list[str] = [
+            f"list -f {TEMPLATE} ./...",
+            "build -o staged/stele example.com/m/cmd/stele",
+            "build -o staged/probe example.com/m/cmd/probe",
+        ]
+        self.assertEqual(go, run.go)
         self.assertEqual("", run.stdout)
 
     def test_the_blank_lines_of_go_list_are_no_package(self) -> None:
         """Non-main packages print an empty line each."""
         run = run_helper("\n\nexample.com/m\n\n")
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(["m"], run.staged)
+        staged: list[str] = ["m"]
+        self.assertEqual(staged, run.staged)
 
 
 class Refuses(unittest.TestCase):
@@ -185,7 +187,7 @@ class Refuses(unittest.TestCase):
             "::error::no main packages in this module — go-binary is the wrong class\n",
             run.stdout,
         )
-        self.assertEqual([], run.staged)
+        self.assertEqual(NOTHING, run.staged)
 
     def test_two_commands_with_one_binary_name_are_refused(self) -> None:
         """The second would overwrite the first; it is never built."""
@@ -195,7 +197,8 @@ class Refuses(unittest.TestCase):
             "::error::two main packages both build a binary named tool\n",
             run.stdout,
         )
-        self.assertEqual(["tool"], run.staged)
+        staged: list[str] = ["tool"]
+        self.assertEqual(staged, run.staged)
         self.assertNotIn("build -o staged/tool example.com/m/internal/tool", run.go)
 
     def test_a_failing_build_fails_the_step_with_its_status(self) -> None:
@@ -211,7 +214,7 @@ class Refuses(unittest.TestCase):
         self.assertEqual(1, run.returncode)
         self.assertEqual("example.com/m/cmd/a: undefined: x\n", run.stderr)
         self.assertEqual("", run.stdout)
-        self.assertEqual([], run.staged)
+        self.assertEqual(NOTHING, run.staged)
 
 
 if __name__ == "__main__":

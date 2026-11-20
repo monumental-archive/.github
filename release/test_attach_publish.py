@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -99,6 +100,7 @@ def subcommands(calls: list[list[str]]) -> list[str]:
 class AttachAndPublish(unittest.TestCase):
     """Each row: the release as published, and what the step did."""
 
+    @override
     def setUp(self) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -122,7 +124,7 @@ class AttachAndPublish(unittest.TestCase):
         draft: str,
         *,
         published: str = REBUILT,
-        manifest: dict | None = None,
+        manifest: dict[str, object] | None = None,
         dry_run: str = "false",
         script: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str] | hermetic.Called, list[list[str]]]:
@@ -262,21 +264,17 @@ class AttachAndPublish(unittest.TestCase):
         done, calls = self.publish("true")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(done.stdout, f"::notice::published {TAG}\n")
-        self.assertEqual(
-            subcommands(calls), ["release view", "release upload", "release edit"]
-        )
-        self.assertEqual(
-            calls[1],
-            [
-                "release", "upload", TAG,
-                "dist/attestations.intoto.jsonl", "dist/checksums.txt",
-                "dist/sbom.spdx.json", "dist/tool-1.2.3-linux.tar.gz",
-                "--clobber", "--repo", REPO,
-            ],
-        )  # fmt: skip
-        self.assertEqual(
-            calls[2], ["release", "edit", TAG, "--draft=false", "--repo", REPO]
-        )
+        want: list[str] = ["release view", "release upload", "release edit"]
+        self.assertEqual(subcommands(calls), want)
+        upload: list[str] = [
+            "release", "upload", TAG,
+            "dist/attestations.intoto.jsonl", "dist/checksums.txt",
+            "dist/sbom.spdx.json", "dist/tool-1.2.3-linux.tar.gz",
+            "--clobber", "--repo", REPO,
+        ]  # fmt: skip
+        self.assertEqual(calls[1], upload)
+        edit: list[str] = ["release", "edit", TAG, "--draft=false", "--repo", REPO]
+        self.assertEqual(calls[2], edit)
 
     def test_rehearsal_stays_a_draft_and_records_it(self) -> None:
         """#597: a rehearsal uploads, keeps the draft, and says why."""

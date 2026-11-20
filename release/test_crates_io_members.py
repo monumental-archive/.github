@@ -63,15 +63,15 @@ def run_helper(
         (tmp / "bin" / "cargo").write_text(CARGO_STUB)
         (tmp / "bin" / "cargo").chmod(0o755)
         ids = {n: f"path+file:///work/{n}#0.1.0" for n in packages}
-        (tmp / "metadata.json").write_text(
-            json.dumps({
-                "packages": [
-                    {"name": n, "version": "0.1.0", "id": ids[n], "publish": key}
-                    for n, key in packages.items()
-                ],
-                "workspace_members": [ids[n] for n in members],
-            })
-        )
+        listed: list[dict[str, object]] = [
+            {"name": n, "version": "0.1.0", "id": ids[n], "publish": key}
+            for n, key in packages.items()
+        ]
+        metadata: dict[str, object] = {
+            "packages": listed,
+            "workspace_members": [ids[n] for n in members],
+        }
+        (tmp / "metadata.json").write_text(json.dumps(metadata))
         result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
             [BASH, str(HELPER)],
             env=hermetic.env(
@@ -92,7 +92,7 @@ class OnePublishKeyPerRow(unittest.TestCase):
 
     def test_the_key_decides(self) -> None:
         """Unset and a list naming crates-io ship; false and elsewhere do not."""
-        rows = (
+        rows: tuple[tuple[str, list[str] | None, str], ...] = (
             ("unset", None, "fx-unset\t0.1.0\n"),
             ("false", [], ""),
             ("crates-io", ["crates-io"], "fx-crates-io\t0.1.0\n"),
@@ -112,19 +112,20 @@ class TheWholeWorkspace(unittest.TestCase):
 
     def test_members_that_publish_to_crates_io_in_metadata_order(self) -> None:
         """Only workspace members, only crates.io's, name TAB version."""
+        packages: dict[str, list[str] | None] = {
+            "fx-unset": None,
+            "fx-false": [],
+            "fx-crates-io": ["crates-io"],
+            "fx-elsewhere": ["x"],
+            "fx-outside": None,
+        }
         result, calls = run_helper(
-            {
-                "fx-unset": None,
-                "fx-false": [],
-                "fx-crates-io": ["crates-io"],
-                "fx-elsewhere": ["x"],
-                "fx-outside": None,
-            },
-            ("fx-unset", "fx-false", "fx-crates-io", "fx-elsewhere"),
+            packages, ("fx-unset", "fx-false", "fx-crates-io", "fx-elsewhere")
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("fx-unset\t0.1.0\nfx-crates-io\t0.1.0\n", result.stdout)
-        self.assertEqual(["metadata --format-version 1 --no-deps --locked"], calls)
+        want: list[str] = ["metadata --format-version 1 --no-deps --locked"]
+        self.assertEqual(want, calls)
 
     def test_a_cargo_failure_fails_the_helper(self) -> None:
         """An unread workspace is never an empty one."""

@@ -21,32 +21,54 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import decoded
 import repro_resolve as resolve
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
+if TYPE_CHECKING:
+    import random
+
 # A JSON scalar: JSON has no NaN or Infinity, and the manifest is read
 # strictly (#1676), so a float that is not finite is not one.
-SCALAR = (
-    st.none()
-    | st.booleans()
-    | st.integers()
-    | st.floats(allow_nan=False, allow_infinity=False)
-    | st.text()
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(),
 )
-JSON = st.recursive(
-    SCALAR,
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
-    ),
-    max_leaves=12,
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+SUBJECT: st.SearchStrategy[object] = st.just("build-subject")
+ENTRY: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {}, optional={"name": JSON, "type": SUBJECT | JSON}
 )
-ENTRY = st.fixed_dictionaries(
-    {}, optional={"name": JSON, "type": st.just("build-subject") | JSON}
+# A manifest whose entries are anything.
+ENTRIES: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {}, optional={"entries": SCALAR | JSON}
 )
+# Entries that are not a list.
+ENTRIES_TRUE: dict[str, object] = {"entries": True}
+ENTRIES_OBJECT: dict[str, object] = {"entries": {"a": 1}}
 
 
 def written(text: str) -> Path:
@@ -84,7 +106,7 @@ def model(first: object) -> str:
         The name as text, or nothing.
 
     """
-    if not isinstance(first, dict):
+    if not decoded.is_object(first):
         return ""
     name = first.get("name")
     if name is None or name is False:
@@ -97,7 +119,7 @@ class OnlyTheFirstEntry(unittest.TestCase):
 
     @given(ENTRY | JSON, st.lists(ENTRY | JSON, max_size=4), st.randoms())
     def test_the_rest_never_moves_it(
-        self, first: object, rest: list[object], shuffle: object
+        self, first: object, rest: list[object], shuffle: random.Random
     ) -> None:
         """Same first entry, any tail in any order: the same answer."""
         alone = read({"entries": [first]})
@@ -109,9 +131,9 @@ class OnlyTheFirstEntry(unittest.TestCase):
 class AnyInput(unittest.TestCase):
     """R: answered or refused by name on anything."""
 
-    @given(st.fixed_dictionaries({}, optional={"entries": SCALAR | JSON}) | JSON)
-    @example({"entries": True})
-    @example({"entries": {"a": 1}})
+    @given(ENTRIES | JSON)
+    @example(ENTRIES_TRUE)
+    @example(ENTRIES_OBJECT)
     def test_any_json(self, doc: object) -> None:
         """Any JSON document: an answer, or the step's own refusal."""
         self.read_text(json.dumps(doc))

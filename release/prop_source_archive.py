@@ -31,9 +31,19 @@ from typed_hypothesis import given
 # GitHub's own alphabets: an owner is letters, digits and hyphens; a
 # repository name adds dots and underscores, and is never `.` or `..`.
 OWNER = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9-]{0,10}", fullmatch=True)
-NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(
-    lambda n: n not in {".", ".."}
-)
+
+
+def not_dots(name: str) -> bool:
+    """Say whether a repository name is anything but `.` or `..`.
+
+    Returns:
+        True for a name GitHub allows.
+
+    """
+    return name not in {".", ".."}
+
+
+NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(not_dots)
 VERSION = st.from_regex(
     r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(-[a-z0-9.]{1,6})?", fullmatch=True
 )
@@ -102,7 +112,8 @@ class AssetName(unittest.TestCase):
         shipped = name[1:] if name.startswith(".") else name
         base = f"{shipped}-{version}"
         notice, calls, dist = run_build(f"{owner}/{name}", version)
-        self.assertEqual(dist, [f"{base}.tar.gz"])
+        want: list[str] = [f"{base}.tar.gz"]
+        self.assertEqual(dist, want)
         self.assertTrue(notice.startswith(f"{base}.tar.gz: "), notice)
         self.assertEqual(len(calls), 2)
         for call in calls:
