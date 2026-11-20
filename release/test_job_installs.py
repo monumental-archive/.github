@@ -2016,8 +2016,8 @@ class GateCoverageReports(unittest.TestCase):
     def test_the_gate_names_the_directory_its_artifact_keeps(self) -> None:
         """The run step's variable is the artifact step's path."""
         gate = steps(load("ci.yml")["gate"])
-        runs = [s for s in gate if s.get("run", "").strip() == "mise run ci"]
-        keeps = [s for s in gate if s.get("id") == "coverage-reports"]
+        runs = [s for s in gate if s.get("run", "").strip() == RUN_LEG]
+        keeps = [s for s in gate if s.get("with.name") == "coverage-reports"]
         self.assertEqual(1, len(runs))
         self.assertEqual(1, len(keeps))
         self.assertEqual(self.REPORTS, runs[0].get("env.ORG_COVERAGE_REPORTS"))
@@ -2055,6 +2055,220 @@ class GateCoverageReports(unittest.TestCase):
         self.assertEqual("coverage-reports*", fetch[0].get("with.pattern"))
         self.assertEqual("true", fetch[0].get("with.merge-multiple"))
         self.assertNotIn("with.path", fetch[0])
+
+
+# THE GATE'S THREE LEGS (#1740). One job, a matrix over the legs, its
+# setup written once; each leg runs its own belt task, and a step that
+# belongs to one leg says so in its `if:`. The cache steps' legs are held
+# in test_gate_caches.py beside the caches.
+GATE_LEGS = ("lint", "test", "properties")
+RUN_LEG = 'mise run "ci:${LEG}"'
+LINT_ONLY = "matrix.leg == 'lint'"
+TEST_ONLY = "matrix.leg == 'test'"
+LEG_BOUND = {
+    "A merge group is the pull request's current head": LINT_ONLY,
+    "The squash message is the PR title and body — hold it to the commit canon": (
+        LINT_ONLY
+    ),
+    "Keep the coverage reports for the badge (default branch only)": TEST_ONLY,
+    "Keep the coverage figures for the release": TEST_ONLY,
+}
+
+
+def flat(value: str) -> str:
+    """Collapse a value's whitespace, as a folded scalar does.
+
+    Returns:
+        The value on one line.
+
+    """
+    return " ".join(value.split())
+
+
+def leg_findings(text: str) -> list[str]:
+    """Hold ci.yml's gate to its three legs, and its readers to the matrix.
+
+    Returns:
+        One line per breach: the gate not a matrix of the three legs, its
+        legs cancelling one another, its run step not this leg's task, a
+        one-leg step run on every leg, a job output a matrix cannot keep,
+        `ci` not needing the gate, and the badge job reading its output.
+
+    """
+    found = jobs(text)
+    gate = "\n".join(found["gate"])
+    out = []
+    legs = "".join(f"          - {leg}\n" for leg in GATE_LEGS)
+    if f"\n      matrix:\n        leg:\n{legs}" not in gate:
+        out.append(f"gate: not a matrix of the legs {list(GATE_LEGS)}")
+    if "\n    strategy:\n      fail-fast: false\n" not in gate:
+        out.append("gate: fail-fast is not false, so one red leg cancels the others")
+    if "\n    name: gate (${{ matrix.leg }})\n" not in gate:
+        out.append("gate: its name does not carry the leg")
+    if "\n    outputs:\n" in gate:
+        out.append("gate: declares a job output, which one leg's result overwrites")
+    gate_steps = steps(found["gate"])
+    runs = [s for s in gate_steps if s.get("run", "").strip() == RUN_LEG]
+    if len(runs) != 1 or runs[0].get("env.LEG") != "${{ matrix.leg }}":
+        out.append(f"gate: no step runs `{RUN_LEG}` with LEG from the matrix")
+    by_name = {s.get("name", ""): s for s in gate_steps}
+    for name, leg in LEG_BOUND.items():
+        if leg not in flat(by_name.get(name, {}).get("if", "")):
+            out.append(f"gate: '{name}' runs on every leg, not only where {leg}")
+    if not re.search(
+        r"\n    needs:\n(      - [\w-]+\n)*      - gate\n",
+        "\n".join(found["ci"]) + "\n",
+    ):
+        out.append("ci: does not need gate, so a red leg would not red ci / ci")
+    if "needs.gate." in "\n".join(found["coverage-upload"]):
+        out.append("coverage-upload: reads a gate output, which a matrix cannot keep")
+    return out
+
+
+def ci_text() -> str:
+    """Read ci.yml.
+
+    Returns:
+        The workflow as the tree holds it.
+
+    """
+    return (WORKFLOWS / "ci.yml").read_text("utf-8")
+
+
+def planted(old: str, new: str) -> str:
+    """Replace, in the real ci.yml, text that must be there.
+
+    Returns:
+        The workflow with the first `old` replaced.
+
+    Raises:
+        AssertionError: `old` is not in the file, so the plant proves
+            nothing.
+
+    """
+    text = ci_text()
+    if old not in text:
+        raise AssertionError(old)
+    return text.replace(old, new, 1)
+
+
+class GateLegs(unittest.TestCase):
+    """The gate is three legs side by side (#1740)."""
+
+    def test_the_real_gate_conforms(self) -> None:
+        """A matrix of the three, each one-leg step carrying its leg."""
+        self.assertEqual([], leg_findings(ci_text()))
+
+    def test_one_job_and_no_copies(self) -> None:
+        """One matrix job, not three copied ones."""
+        found = jobs(ci_text())
+        self.assertEqual([], [j for j in found if j.startswith("gate-")])
+
+    def test_planted_breaches_are_named(self) -> None:
+        """Each property broken once on the real file, by its message."""
+        rows = [
+            (
+                "a leg dropped",
+                ("          - test\n          - properties\n", "          - test\n"),
+                "gate: not a matrix of the legs ['lint', 'test', 'properties']",
+            ),
+            (
+                "fail-fast on",
+                (
+                    "      fail-fast: false\n      matrix:\n        leg:",
+                    "      fail-fast: true\n      matrix:\n        leg:",
+                ),
+                "gate: fail-fast is not false, so one red leg cancels the others",
+            ),
+            (
+                "the plain name",
+                ("    name: gate (${{ matrix.leg }})", "    name: gate"),
+                "gate: its name does not carry the leg",
+            ),
+            (
+                "the whole gate on every leg",
+                (RUN_LEG, "mise run ci"),
+                f"gate: no step runs `{RUN_LEG}` with LEG from the matrix",
+            ),
+            (
+                "the squash check on every leg",
+                (
+                    "${{ matrix.leg == 'lint' && github.event_name == 'pull_request'",
+                    "${{ github.event_name == 'pull_request'",
+                ),
+                (
+                    "gate: 'The squash message is the PR title and body — hold it to"
+                    " the commit canon' runs on every leg, not only where"
+                    " matrix.leg == 'lint'"
+                ),
+            ),
+            (
+                "the merge-group check on every leg",
+                (
+                    "${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}",
+                    "${{ github.event_name == 'merge_group' }}",
+                ),
+                (
+                    "gate: 'A merge group is the pull request's current head' runs on"
+                    " every leg, not only where matrix.leg == 'lint'"
+                ),
+            ),
+            (
+                "the badge reports from every leg",
+                (
+                    "${{ matrix.leg == 'test' && github.event_name == 'push'",
+                    "${{ github.event_name == 'push'",
+                ),
+                (
+                    "gate: 'Keep the coverage reports for the badge (default branch"
+                    " only)' runs on every leg, not only where matrix.leg == 'test'"
+                ),
+            ),
+            (
+                "the release figures from every leg",
+                (
+                    "${{ matrix.leg == 'test' && (github.event_name == 'merge_group'",
+                    "${{ (github.event_name == 'merge_group'",
+                ),
+                (
+                    "gate: 'Keep the coverage figures for the release' runs on every"
+                    " leg, not only where matrix.leg == 'test'"
+                ),
+            ),
+            (
+                "a job output",
+                (
+                    "    timeout-minutes: 30\n    env:\n      # Both checkouts",
+                    (
+                        "    timeout-minutes: 30\n    outputs:\n      x: y\n"
+                        "    env:\n      # Both checkouts"
+                    ),
+                ),
+                "gate: declares a job output, which one leg's result overwrites",
+            ),
+            (
+                "ci without the gate",
+                (
+                    "      - plan\n      - gate\n      - pgrx\n",
+                    "      - plan\n      - pgrx\n",
+                ),
+                "ci: does not need gate, so a red leg would not red ci / ci",
+            ),
+            (
+                "the badge reading an output",
+                (
+                    "      ${{ !cancelled() && needs.ci.result == 'success'\n",
+                    (
+                        "      ${{ !cancelled() && needs.ci.result == 'success'\n"
+                        "      && needs.gate.outputs.coverage-reports != ''\n"
+                    ),
+                ),
+                "coverage-upload: reads a gate output, which a matrix cannot keep",
+            ),
+        ]
+        for label, (old, new), message in rows:
+            with self.subTest(row=label):
+                self.assertEqual([message], leg_findings(planted(old, new)))
 
 
 # A default-branch test compares the ref with the event's own name for

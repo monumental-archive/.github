@@ -49,14 +49,18 @@ shared lives here and nowhere else. Five layers:
    the org hooks (#1686) — and in CI via `MISE_GLOBAL_CONFIG_FILE`.
    The filename is load-bearing: both mise and Renovate's mise manager
    recognise `mise/config.toml` natively — do not rename.
-3. **The task contract**: the global `ci` task wildcard-collects `lint:*`
-   and optionally runs `test`/`build`. Repos never define `ci`; adding a
-   `lint:<tool>` task here enforces that tool in every repo with no repo
-   change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
+3. **The task contract**: the global `ci` task is the sum of three
+   legs (#1740): `ci:lint` wildcard-collects `lint:*`, `ci:test` runs
+   `test`/`build` optionally with the coverage ratchet and `test:pgrx`,
+   and `ci:properties` runs the property tests. The gate runs the legs
+   side by side, one runner each. Repos never define `ci` or a leg;
+   adding a `lint:<tool>` task here enforces that tool in every repo
+   with no repo change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
    are network-bound or noisy checks, structurally outside the gate.
-   A belt-defined TEST leg is named in `ci` explicitly rather than
-   collected — there are two, `test:pgrx` (#813) and
-   `test:python-properties` (#1332). `test` belongs to the repo, so
+   A belt-defined TEST task is named in a leg explicitly rather than
+   collected — there are three, `test:pgrx` (#813),
+   `test:python-properties` (#1332) and `test:typescript-properties`
+   (#1549). `test` belongs to the repo, so
    the belt cannot define it without colliding; and naming a test
    `lint:` to reach the wildcard is the accident that put `pg:lint`
    outside the gate for forty releases. Guarded and skip-clean like
@@ -141,9 +145,11 @@ are referenced as
 
 `mise run ci` locally runs exactly what CI runs — same tasks, same
 tools, same versions, from the same lockfile. The one difference is
-where: CI runs a pgrx extension's suite on one machine per Postgres
-major (#1148), and locally the same script runs those majors side by
-side. Shared-workflow changes are
+where: CI runs the gate as three legs, `ci:lint`, `ci:test` and
+`ci:properties`, one runner each (#1740), and a pgrx extension's
+suite on one machine per Postgres major (#1148); locally `ci` runs
+the three legs together and the same script runs those majors side
+by side. Shared-workflow changes are
 exercised by this repo's own `gate.yml` on every PR, and the release
 half by the canon releasing itself. That is the proof for most
 changes: no repository waits on a lab run to move its pin.
