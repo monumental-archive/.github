@@ -46,6 +46,9 @@ PROVENANCE = (
     .filter(bool)
 )
 SEPARATE = st.dictionaries(st.sampled_from(cf.SEPARATE), PERCENT, max_size=1)
+# No separate leg, and one leg measured below a step.
+NO_LEG: dict[str, Decimal] = {}
+SMALL_LEG: dict[str, Decimal] = {"rust-branches": Decimal("0.05")}
 
 
 def floor(measured: Decimal) -> Decimal:
@@ -63,23 +66,23 @@ class RoundTrip(unittest.TestCase):
     """A rendered file reads back as what rendered it."""
 
     @given(PERCENT, PROVENANCE, SEPARATE)
-    @example(Decimal("61.53846153846154"), "v1.0.0", {})
-    @example(Decimal("1.99"), "x: y", {"rust-branches": Decimal("0.05")})
+    @example(Decimal("61.53846153846154"), "v1.0.0", NO_LEG)
+    @example(Decimal("1.99"), "x: y", SMALL_LEG)
     def test_render_then_parse(
         self, measured: Decimal, provenance: str, separate: dict[str, Decimal]
     ) -> None:
         """Floor, band, measurement, provenance and legs come back."""
         record, problems = cf.parse(cf.render(measured, provenance, separate))
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, list[str]())
+        if record is None:
+            self.fail("a rendered file did not read back")
         self.assertEqual(record.floor, floor(measured))
         self.assertEqual(record.band, cf.BAND)
         self.assertEqual(record.measured, cf.quantise(measured))
         self.assertEqual(record.derived, provenance)
         self.assertIsNone(record.reset)
-        self.assertEqual(
-            record.separate,
-            {leg: (floor(m), cf.quantise(m)) for leg, m in separate.items()},
-        )
+        legs = {leg: (floor(m), cf.quantise(m)) for leg, m in separate.items()}
+        self.assertEqual(record.separate, legs)
 
 
 class Quantise(unittest.TestCase):
@@ -131,7 +134,10 @@ class Ratchet(unittest.TestCase):
         if status:
             self.assertEqual(after, before)
         else:
-            self.assertGreaterEqual(cf.parse(after)[0].floor, floor(first))
+            written, _ = cf.parse(after)
+            if written is None:
+                self.fail("the written file did not read back")
+            self.assertGreaterEqual(written.floor, floor(first))
 
 
 class Refusal(unittest.TestCase):
@@ -165,7 +171,7 @@ class Refusal(unittest.TestCase):
         if record is None:
             self.assertTrue(problems)
         else:
-            self.assertEqual(problems, [])
+            self.assertEqual(problems, list[str]())
 
     @given(st.text(max_size=200))
     def test_legs_answers_any_text(self, text: str) -> None:

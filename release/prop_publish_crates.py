@@ -19,11 +19,16 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import json
 import unittest
+from typing import TYPE_CHECKING
 
 import publish_crates as publish
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+
+if TYPE_CHECKING:
+    import random
+    from collections.abc import Mapping
 
 NAME = "edtf"
 UA = "org-release (+https://example.invalid)"
@@ -33,21 +38,29 @@ VERSION = st.from_regex(
 CKSUM = st.from_regex(r"[0-9a-f]{64}", fullmatch=True)
 # A record as the index writes one: the fields the reader uses, and
 # others it must step over.
-EXTRA = st.dictionaries(
+Extra = dict[str, bool | int | str | None]
+EXTRA: st.SearchStrategy[Extra] = st.dictionaries(
     st.sampled_from(["name", "deps", "features", "yanked", "v", "rust_version"]),
     st.none() | st.booleans() | st.integers() | st.text(max_size=8),
     max_size=3,
 )
 
 
-def answer(status: int | None, body: bytes) -> object:
+def answer(status: int | None, body: bytes) -> publish.Fetch:
     """Make a fetch that answers every request alike.
 
     Returns:
         The fetch.
 
     """
-    return lambda *_: publish.Response(status, body)
+
+    def fetch(
+        method: str, url: str, headers: Mapping[str, str], data: bytes | None = None
+    ) -> publish.Response:
+        del method, url, headers, data
+        return publish.Response(status, body)
+
+    return fetch
 
 
 def read(body: bytes, version: str) -> str | None:
@@ -69,13 +82,16 @@ class PresentIsPublished(unittest.TestCase):
         st.randoms(),
     )
     def test_present_and_absent(
-        self, records: dict[str, tuple[str, dict]], probe: str, shuffle: object
+        self,
+        records: dict[str, tuple[str, Extra]],
+        probe: str,
+        shuffle: random.Random,
     ) -> None:
         """Every recorded version reads its checksum; another reads None."""
-        lines = [
-            json.dumps({**extra, "vers": v, "cksum": c})
-            for v, (c, extra) in records.items()
-        ]
+        lines: list[str] = []
+        for v, (c, extra) in records.items():
+            record: dict[str, object] = {**extra, "vers": v, "cksum": c}
+            lines.append(json.dumps(record))
         shuffle.shuffle(lines)
         body = ("\n".join(lines) + "\n").encode()
         for version, (cksum, _) in records.items():

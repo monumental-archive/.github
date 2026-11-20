@@ -132,7 +132,9 @@ fi
 cargo fetch --locked
 # shellcheck source=mise/pgrx-env.sh
 . "${belt}/pgrx-env.sh"
-org_pgrx_darwin_flags
+# The SDK, and every major's ICU headers checked before anything
+# compiles (#1774); each run below adds its own major's.
+org_pgrx_darwin_prepare "${only:-${declared}}"
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
 plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${only:-${declared}}" <<< "${installed}")
 org_pgrx_init <<< "${plan}" > /dev/null
@@ -183,6 +185,8 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # directory a plain build used it reuses uninstrumented binaries and
     # writes no profile at all.
     export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}"
+    # shellcheck disable=SC2310  # it returns 1 on every failure, explicitly
+    org_pgrx_darwin_icu "${one}" || exit 1
     envs=$(cargo llvm-cov show-env --sh) || exit 1
     eval "${envs}"
     # pgrx deletes the data directory on shutdown, and that is every
@@ -257,7 +261,7 @@ if [[ ${runs} != *" "* ]]; then
     hold "${line}"
     keep "${line}"
   else
-    (cd "${dir}" && cargo pgrx test "pg${one}")
+    (cd "${dir}" && org_pgrx_with_icu "${one}" cargo pgrx test "pg${one}")
   fi
   echo "${label}: 1 suite run: ${dir}(pg${one})"
   org_done=1
@@ -281,7 +285,7 @@ for run in ${runs}; do
   else
     (
       cd "${dir}"
-      CARGO_TARGET_DIR="${root}/pgrx-pg${one}" cargo pgrx test "pg${one}"
+      CARGO_TARGET_DIR="${root}/pgrx-pg${one}" org_pgrx_with_icu "${one}" cargo pgrx test "pg${one}"
     ) > "${logs}/pg${one}.log" 2>&1 &
   fi
   pids="${pids} $!:${dir}:${one}"

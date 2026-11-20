@@ -79,7 +79,7 @@ command -v cargo-pgrx > /dev/null || {
 }
 # shellcheck source=mise/pgrx-env.sh
 . "${belt}/pgrx-env.sh"
-org_pgrx_darwin_flags
+org_pgrx_darwin_prepare "${majors}"
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
 plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}")
 org_pgrx_init <<< "${plan}" > /dev/null
@@ -98,7 +98,8 @@ for target in "${targets[@]}"; do
   dir="${rest%%:*}"
   snapshot="${rest#*:}"
   raw="${out}/${name}.raw.sql"
-  cargo pgrx schema "pg${major}" --package "${name}" \
+  # With its own major's ICU headers, in a subshell (#1774).
+  org_pgrx_with_icu "${major}" cargo pgrx schema "pg${major}" --package "${name}" \
     --manifest-path "${dir}/Cargo.toml" \
     --no-default-features --features "pg${major}" --out "${raw}"
   if "${ORG_PYTHON}" "${belt}/pg_schema.py" "${mode}" "${raw}" "${snapshot}"; then
