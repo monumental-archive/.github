@@ -8,11 +8,12 @@ under coverage.py and prints `python <percent>` and `python-branches
 <percent>`, and the floor is a minimum every leg must hold.
 
 The bodies under test are the tasks' own `run` strings, read out of
-mise/config.toml with tomllib and run by bash in a planted git tree,
-not copies of them, and they call the real `mise/coverage-measure.sh`.
-Only the measuring tools are stubs (`coverage`, `go`, and `mise`'s
-read of the test task), each answering with a planted number, so a row
-states the measurement and asserts what the gate does with it.
+mise/config.toml with decoded.load_toml and run by bash in a planted
+git tree, not copies of them, and they call the real
+`mise/coverage-measure.sh`. Only the measuring tools are stubs
+(`coverage`, `go`, and `mise`'s read of the test task), each
+answering with a planted number, so a row states the measurement and
+asserts what the gate does with it.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
@@ -27,9 +28,9 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
 import decoded
 import hermetic
@@ -39,7 +40,7 @@ BELT = CANON / "mise"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
+CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 
 # A floor the derived-state law accepts: measured 82.0 minus the band.
 FLOOR = """\
@@ -345,18 +346,15 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         # leg runs the same line, so it is the stub binary, not pnpm.
         test_run = "node_modules/.bin/vitest run"
     for name, run in (depends or {}).items():
-        (tmp / f"task.{name}.json").write_text(
-            json.dumps({"dir": str(tree), "run": [run]}), encoding="utf-8"
-        )
+        answer: dict[str, object] = {"dir": str(tree), "run": [run]}
+        (tmp / f"task.{name}.json").write_text(json.dumps(answer), encoding="utf-8")
     if test_task:
-        task_json.write_text(
-            json.dumps({
-                "dir": str(tree),
-                "run": [test_run or "echo suite ran"],
-                "depends": sorted(depends or {}),
-            }),
-            encoding="utf-8",
-        )
+        test_answer: dict[str, object] = {
+            "dir": str(tree),
+            "run": [test_run or "echo suite ran"],
+            "depends": sorted(depends or {}),
+        }
+        task_json.write_text(json.dumps(test_answer), encoding="utf-8")
 
     tracked = []
     if python:
@@ -405,7 +403,7 @@ class CoverageTaskCase(unittest.TestCase):
     """Runs a task and removes the planted tree afterwards."""
 
     def run_task(
-        self, task: str, **plant: str | bool | None
+        self, task: str, **plant: str | bool | dict[str, str] | None
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
         """Run a task and schedule its tree for removal.
 
@@ -1010,10 +1008,10 @@ class CheckLeavesTheTree(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("", self.status(tree))
         named = self.named(done.stdout)
-        self.assertEqual(
-            [tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")],
-            named,
-        )
+        reports = [
+            tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")
+        ]
+        self.assertEqual(reports, named)
         for path in named:
             self.assertTrue(path.is_file(), path)
 
@@ -1039,7 +1037,9 @@ class CheckLeavesTheTree(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("", self.status(tree))
         named = self.named(done.stdout)
-        self.assertEqual(["coverage.txt", "coverage.xml"], [p.name for p in named])
+        files: list[str] = ["coverage.txt", "coverage.xml"]
+        names = [p.name for p in named]
+        self.assertEqual(files, names)
         scratch = named[0].parent
         self.assertNotEqual(tree, scratch)
         self.assertNotIn(tree, scratch.parents)
@@ -1068,7 +1068,9 @@ class CheckLeavesTheTree(CoverageTaskCase):
 
     def test_report_task_is_gone(self) -> None:
         """The badge's second measurement no longer exists to drift."""
-        self.assertNotIn("coverage:report", CONFIG["tasks"])
+        self.assertNotIn(
+            "coverage:report", decoded.as_object(CONFIG["tasks"], "the belt's [tasks]")
+        )
 
 
 # The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
@@ -1480,9 +1482,8 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         (stubs / "mise").chmod(0o755)
         (tree / "sub" / "helper.py").write_text("print('hi')\n", encoding="utf-8")
         task = Path(tmp) / "task.json"
-        task.write_text(
-            json.dumps({"dir": str(tree), "run": [test_run]}), encoding="utf-8"
-        )
+        answer: dict[str, object] = {"dir": str(tree), "run": [test_run]}
+        task.write_text(json.dumps(answer), encoding="utf-8")
         (tree / ".coverage-floor").write_text("", encoding="utf-8")
         env = hermetic.env()
         env |= {
@@ -1524,6 +1525,7 @@ class ChildFromAnotherDirectory(unittest.TestCase):
     """
 
     @classmethod
+    @override
     def setUpClass(cls) -> None:
         """Assert the tool first, as the belt's tasks assert theirs.
 
