@@ -287,14 +287,14 @@ class Derive(unittest.TestCase):
         self.base = Path(tmp.name)
         canon = self.base / "canon"
         (canon / "release").mkdir(parents=True)
-        (canon / "mise").mkdir()
-        for rel in (
-            "release/derive-coverage-floor.sh",
-            "release/coverage_figures.py",
-            "mise/coverage_floor.py",
-            "mise/decoded.py",
-        ):
+        for rel in ("release/derive-coverage-floor.sh", "release/coverage_figures.py"):
             shutil.copy(CANON / rel, canon / rel)
+        # The belt whole, as the release job has it: a helper that comes
+        # to import another belt module finds it, and only the
+        # measurement below is a stub.
+        shutil.copytree(
+            CANON / "mise", canon / "mise", ignore=shutil.ignore_patterns("__pycache__")
+        )
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         for path, text in (
