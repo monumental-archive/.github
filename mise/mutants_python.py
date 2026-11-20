@@ -852,29 +852,86 @@ def limit_seconds(millis: int) -> float:
 # it: the leg judges the canon, and the canon includes this file. Each
 # test file runs in turn, stopping at the first failure; one that runs
 # over its limit is killed with its process group, and that is a kill.
+# Each also starts under a process ceiling, the user's tasks now plus
+# MARGIN (#1833): a mutant that fans out without end gets a failed
+# fork, its test fails, and that is a kill, where unbounded it took
+# the runner and its shard down. Linux counts every thread of the real
+# user against RLIMIT_NPROC, macOS every process (measured: the kernel
+# admits about 20 more than ps lists); root is not bound on Linux.
 RUNNER = """import json
 import os
+import resource
 import signal
 import subprocess
 import sys
 
-with open(sys.argv[1], encoding="utf-8") as handle:
-    steps = json.load(handle)
-for step in steps:
-    proc = subprocess.Popen(step["argv"], start_new_session=True)
-    try:
-        status = proc.wait(timeout=step["limit"])
-    except subprocess.TimeoutExpired:
+# Headroom over what the user runs, far above the property runner's
+# fan-out of min(cores, files).
+MARGIN = 256
+
+
+def tasks():
+    \"\"\"Count what RLIMIT_NPROC counts for this user now.\"\"\"
+    uid = os.getuid()
+    if not os.path.isdir("/proc/self/task"):
+        listed = subprocess.run(
+            ["ps", "-U", str(uid), "-o", "pid="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return len(listed.stdout.split())
+    count = 0
+    for pid in filter(str.isdigit, os.listdir("/proc")):
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            with open(f"/proc/{pid}/status", encoding="utf-8") as status:
+                fields = dict(line.split(":", 1) for line in status)
         except OSError:
-            proc.kill()
-        proc.wait()
-        print("time limit: " + step["test"])
-        sys.exit(1)
-    if status != 0:
-        print("failed: " + step["test"])
-        sys.exit(1)
+            continue
+        if int(fields["Uid"].split()[0]) == uid:
+            count += int(fields["Threads"])
+    return count
+
+
+def ceiling(extra):
+    \"\"\"Cap the user's tasks at their count now plus EXTRA, for a child.\"\"\"
+    cap = tasks() + extra
+
+    def apply():
+        hard = resource.getrlimit(resource.RLIMIT_NPROC)[1]
+        if hard != resource.RLIM_INFINITY:
+            low = min(cap, hard)
+        else:
+            low = cap
+        resource.setrlimit(resource.RLIMIT_NPROC, (low, low))
+
+    return apply
+
+
+def main():
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        steps = json.load(handle)
+    for step in steps:
+        proc = subprocess.Popen(
+            step["argv"], start_new_session=True, preexec_fn=ceiling(MARGIN)
+        )
+        try:
+            status = proc.wait(timeout=step["limit"])
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                proc.kill()
+            proc.wait()
+            print("time limit: " + step["test"])
+            sys.exit(1)
+        if status != 0:
+            print("failed: " + step["test"])
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
 """
 
 

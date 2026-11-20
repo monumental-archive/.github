@@ -139,6 +139,50 @@ MUL = "core/ReplaceBinaryOperator_Mul_Add"
 # What each planted mutant does to the file.
 KILLS: dict[str, object] = {"replace": ["x + 1", "x - 1"]}
 SURVIVES: dict[str, object] = {"replace": ["return x + 1", "return (x + 1)"]}
+# A mutant whose test forks a tree of itself, 511 processes alive at
+# once: past the runner's margin of 256, inside the row's own 1024.
+# A fork that fails fails the test.
+FANS_OUT: dict[str, object] = {
+    "replace": [
+        "return x + 1",
+        """import os
+    import time
+
+    def grow(depth):
+        kids, failed = [], False
+        for _ in range(2 if depth else 0):
+            try:
+                pid = os.fork()
+            except OSError:
+                failed = True
+                break
+            if pid == 0:
+                code = 1
+                try:
+                    code = grow(depth - 1)
+                finally:
+                    os._exit(code)
+            kids.append(pid)
+        if not depth:
+            time.sleep(0.3)
+        for kid in kids:
+            failed = os.waitpid(kid, 0)[1] != 0 or failed
+        return int(failed)
+
+    if grow(8):
+        raise OSError("a fork failed")
+    return x + 1""",
+    ]
+}
+# The row's own ceiling, set before the leg starts: the runner's
+# `ceiling` with the row's margin, then the leg in its place.
+CAPPED = """import os
+import runpy
+import sys
+
+runpy.run_path(sys.argv[1])["ceiling"](int(sys.argv[2]))()
+os.execv(sys.argv[3], sys.argv[3:])
+"""
 RED = [
     f"{LABEL}: red — kill each survivor with an assertion, or exclude it at its site",
     "  with '# pragma: no mutate -- <why the mutant is equivalent>'",
@@ -343,8 +387,10 @@ class Planted(unittest.TestCase):
         self.mutants.write_text(json.dumps(chosen), encoding="utf-8")
         return plan
 
-    def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-        """Run the leg in the planted tree.
+    def run_leg(
+        self, *under: str, **env: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        """Run the leg in the planted tree, under UNDER's command if any.
 
         Returns:
             The finished process and the stand-in's call log.
@@ -352,7 +398,7 @@ class Planted(unittest.TestCase):
         """
         self.log.write_text("", encoding="utf-8")
         done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [BASH, str(SCRIPT)],
+            [*under, BASH, str(SCRIPT)],
             cwd=self.tree,
             env=self.env | env,
             capture_output=True,
@@ -711,6 +757,42 @@ class Safety(Planted):
         self.assertEqual(named, want)
         self.assertIn("AssertionError: planted", done.stderr)
         self.assertEqual(log, calls())
+
+
+class Ceiling(Planted):
+    """Each test file runs under a process ceiling (#1833)."""
+
+    def test_fan_out_past_the_margin_is_killed_and_the_next_is_judged(self) -> None:
+        """A mutant that forks 511 at once is killed; the next is judged.
+
+        The row caps the whole leg first, in its own child, at the
+        user's tasks plus 1024, so the machine is never at risk: under
+        that cap alone the 511 fit and the mutant survives.
+        """
+        runner = self.tmp / "run.py"
+        runner.write_text(helper.RUNNER, encoding="utf-8")
+        capped = self.tmp / "capped.py"
+        capped.write_text(CAPPED, encoding="utf-8")
+        plan = self.shared(
+            FOUR[:2],
+            {f"pkg/mod.py {ADD} 0": FANS_OUT, f"pkg/mod.py {ADD} 1": KILLS},
+        )
+        done, log = self.run_leg(
+            sys.executable,
+            str(capped),
+            str(runner),
+            "1024",
+            MUTANTS_PLAN=str(plan),
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(
+            done.stdout.endswith(
+                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 excluded\n"
+            ),
+            done.stdout,
+        )
+        self.assertEqual(log, judged(*FOUR[:2]))
+        self.assertEqual(self.counts(), "0/1\t2\t2\t0\t0\n")
 
 
 class Shards(Planted):
