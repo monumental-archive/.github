@@ -912,7 +912,7 @@ class Refusals(Planted):
             encoding="utf-8",
         )
         stub.chmod(0o755)
-        python3 = shutil.which("python3", path=self.env["PATH"]) or "python3"
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
         # ruff: ignore[subprocess-without-shell-equals-true]
         suite = subprocess.run(
             [python3, "-c", "import sys; print(sys.version)"],
@@ -953,8 +953,7 @@ class Refusals(Planted):
     def test_coverage_report_unread_reaches_nothing(self) -> None:
         """`coverage json` writes no report: the line map is empty, not a crash."""
         self.plant([ITEM_KILLED])
-        real = shutil.which("coverage", path=self.env["PATH"])
-        self.assertIsNotNone(real)
+        real = hermetic.tool("coverage", path=self.env["PATH"])
         stub = self.bins / "coverage"
         stub.write_text(
             f'#!/bin/sh\n[ "$1" = json ] && exit 0\nexec {real} "$@"\n',
