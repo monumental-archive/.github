@@ -297,6 +297,61 @@ class TheCacheAndTheLinks(HookFixture):
         self.assertEqual(self.git(tree, "status", "--porcelain").stdout, "")
         self.assertEqual(self.links(), self.linked(self.shas[0]))
 
+    def test_fifty_pairs_racing_on_the_links_all_succeed(self) -> None:
+        """Each pair finds both links missing or stale and replaces them (#1731).
+
+        Fifty pairs, so the race between two hooks replacing one link is
+        exercised, not sampled. Even pairs start with no links, odd ones
+        with links to the other pin's tree; every hook exits 0 and leaves
+        both links whole, with no temporary name beside them.
+        """
+        self.assertEqual(self.hook().returncode, 0)
+        stale = self.linked(self.shas[1])
+        conf = self.consumer / ".config" / "mise"
+        for pair in range(50):
+            for rel in self.linked(self.shas[0]):
+                (self.consumer / rel).unlink(missing_ok=True)
+                if pair % 2:
+                    (self.consumer / rel).symlink_to(stale[rel])
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                runs = list(pool.map(lambda _: self.hook(), range(2)))
+            for done in runs:
+                self.assertEqual((pair, done.returncode, done.stderr), (pair, 0, ""))
+            self.assertEqual(self.links(), self.linked(self.shas[0]), pair)
+            left = sorted(
+                p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()]
+            )
+            self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"], pair)
+
+    def test_a_killed_hooks_temporary_name_is_removed(self) -> None:
+        """A `<link>.<pid>` whose hook is gone is removed by the next run."""
+        self.assertEqual(self.hook().returncode, 0)
+        conf = self.consumer / ".config" / "mise"
+        sh = hermetic.tool("sh")
+        gone = run([sh, "-c", "echo $$"], self.tmp, self.env()).stdout.strip()
+        for rel in ("conf.d/belt.toml", "mise.lock"):
+            (conf / f"{rel}.{gone}").symlink_to(conf / rel)
+        done = self.hook()
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.links(), self.linked(self.shas[0]))
+        left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
+        self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"])
+
+    def test_a_sibling_whose_suffix_is_not_a_pid_is_left(self) -> None:
+        """Only `<link>.<digits>` is the hook's: `mise.lock.bak` stays."""
+        self.assertEqual(self.hook().returncode, 0)
+        conf = self.consumer / ".config" / "mise"
+        planted = ["belt.toml.bak", "belt.toml.12x", "mise.lock.bak", "mise.lock."]
+        for name in planted:
+            where = conf / "conf.d" if name.startswith("belt") else conf
+            (where / name).write_text("not the hook's\n", encoding="utf-8")
+        done = self.hook()
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.links(), self.linked(self.shas[0]))
+        left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
+        want = sorted(["belt.toml", "conf.d", "mise.lock", *planted])
+        self.assertEqual(left, want)
+
     def test_a_fetch_that_is_not_the_pin_is_refused(self) -> None:
         """The remote answers with another commit: red, nothing linked."""
         stubs = self.tmp / "stubs"
