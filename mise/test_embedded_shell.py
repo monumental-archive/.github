@@ -1085,7 +1085,6 @@ class TaskShellTask(unittest.TestCase):
             "ceiling, and security/task-shell-debt.txt does not list it",
             r.stderr,
         )
-        (root / "security").mkdir()
         r = run_task(root, "fix:task-shell")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(
