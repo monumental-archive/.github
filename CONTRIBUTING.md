@@ -142,30 +142,17 @@ own work and adds the task that runs it to its row.
 
 A helper's logic is tested in the process that runs the tests: its
 tests import it and call its functions, and `main(argv)` where the
-command line is the unit, so coverage, mutation and the type checker
-all see the call. Running the helper as a script stays, as one
-end-to-end row per helper that holds the script contract: it starts,
-reads its arguments and exits with the documented status, which only
-a real process can show.
+command line is the unit, so coverage and the type checker both see
+the call. Running the helper as a script stays, as one end-to-end row
+per helper that holds the script contract: it starts, reads its
+arguments and exits with the documented status, which only a real
+process can show.
 
-Why: mutmut runs a mutant only when the function's `__module__`
-equals the module in the mutant's name, and a script's functions are
-in `__main__`. Measured on mutmut 3.8.1, with `answer(n): return n +
-1` and the mutant `n - 1`:
-
-| Child | `MUTANT_UNDER_TEST` | Prints |
-| --- | --- | --- |
-| run as a script | unset | 2 |
-| run as a script | the mutant's own name | 2, the original |
-| run as a script | `__main__.` and the mutant's name | 0 |
-| imports the module | the mutant's own name | 0, the mutant |
-
-So a function reached only through a script never runs a mutant, and
-mutmut, which keeps its statistics in the test process, reports it as
-"no tests". `lint:in-process` holds the rule per function, following
-what each reached function names; the functions not yet reached are
-listed in `security/helper-import-debt.txt`, which only shrinks
-([#1673]).
+Why: a function reached only through a script in a child process is
+one coverage and the type checker cannot see. `lint:in-process` holds
+the rule per function, following what each reached function names;
+the functions not yet reached are listed in
+`security/helper-import-debt.txt`, which only shrinks ([#1673]).
 
 [#1673]: https://github.com/monumental-archive/.github/issues/1673
 
