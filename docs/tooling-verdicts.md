@@ -3835,10 +3835,11 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   hits, every one at 60% confidence and every one in a test file, 787
   of them `unittest` classes and `test_*` methods the framework calls,
   none in the 76 helpers. Over the 76 helpers alone, so a name only
-  tests call shows: 8 hits. Two were names only tests called,
-  `biome_config.declaration_problems` and `gate_tools.python_calls`
-  (21 lines), and #1831 removed them; the six left are test support
-  (`call_names.qualifier`, `hermetic.call_main`), fixture text three
+  tests call shows: 8 hits. Two were names only tests called, a
+  one-line wrapper over `biome_config.declaration` and
+  `gate_tools.python_calls` (21 lines), and #1831 removed them; the
+  six left are test support (`call_names.qualifier`,
+  `hermetic.call_main`), fixture text three
   test files share (`exit_trap.BASH_GUARD`), a field one test reads
   (`embedded_shell.Run.commented`) and framework overrides
   (`shortDescription`, `redirect_request`). Not a `lint:` task: it
