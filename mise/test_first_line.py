@@ -19,10 +19,10 @@ gate as `mise run test`.
 
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -40,8 +40,10 @@ def body() -> str:
         The bash the task runs.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)["tasks"]["lint:licence"]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks["lint:licence"], "lint:licence")
+    return decoded.as_str(task["run"], "lint:licence's run")
 
 
 class FirstLineOfALongListing(unittest.TestCase):
