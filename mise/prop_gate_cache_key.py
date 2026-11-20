@@ -33,15 +33,15 @@ VERSION = st.from_regex(r"20[0-9]{2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 PERIOD = gk.PERIOD_SECONDS
 
 
-def spelt(draw: st.DrawFn, tools: list[str]) -> str:
+def spelt(data: st.DataObject, tools: list[str]) -> str:
     """Write tools in any order with flags and whitespace among them.
 
     Returns:
         An install_args string.
 
     """
-    words = draw(st.permutations([*tools, *draw(st.lists(FLAG, max_size=3))]))
-    return "".join(draw(SPACE) + w for w in words) + draw(SPACE)
+    words = data.draw(st.permutations([*tools, *data.draw(st.lists(FLAG, max_size=3))]))
+    return "".join(data.draw(SPACE) + w for w in words) + data.draw(SPACE)
 
 
 class Install(unittest.TestCase):
@@ -52,8 +52,8 @@ class Install(unittest.TestCase):
         self, data: st.DataObject, tools: list[str]
     ) -> None:
         """Two spellings of the same tools, one digest."""
-        one = gk.install_digest(spelt(data.draw, tools))
-        two = gk.install_digest(spelt(data.draw, tools))
+        one = gk.install_digest(spelt(data, tools))
+        two = gk.install_digest(spelt(data, tools))
         self.assertEqual(one, two)
         self.assertEqual(not one, not tools)
 
@@ -65,12 +65,12 @@ class Install(unittest.TestCase):
         if extra in tools:
             return
         self.assertNotEqual(
-            gk.install_digest(spelt(data.draw, tools)),
-            gk.install_digest(spelt(data.draw, [*tools, extra])),
+            gk.install_digest(spelt(data, tools)),
+            gk.install_digest(spelt(data, [*tools, extra])),
         )
 
 
-ENV = st.fixed_dictionaries(
+ENV: st.SearchStrategy[dict[str, str]] = st.fixed_dictionaries(
     {"HOME": st.just("/home/runner")},
     optional={
         "ImageOS": st.sampled_from(["ubuntu24", "macos15"]),
@@ -86,7 +86,12 @@ class Names(unittest.TestCase):
 
     @given(ENV, VERSION, HEX, st.integers(0, 1000), st.lists(TOOL, max_size=3))
     def test_prefix_and_period(
-        self, env: dict, version: str, belt: str, period: int, tools: list[str]
+        self,
+        env: dict[str, str],
+        version: str,
+        belt: str,
+        period: int,
+        tools: list[str],
     ) -> None:
         """The prefix leads; the period's first and last second agree."""
         install = " ".join(tools)
@@ -103,7 +108,7 @@ class Names(unittest.TestCase):
         st.sampled_from(["version", "belt", "config", "install", "period"]),
     )
     def test_each_input_moves_the_key(
-        self, env: dict, version: str, belt: str, what: str
+        self, env: dict[str, str], version: str, belt: str, what: str
     ) -> None:
         """Change one input, a different key."""
         facts = gk.Facts(version, "linux-x64", 0.0, belt)

@@ -32,14 +32,36 @@ PART = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9_-]{0,12}", fullmatch=True)
 FOLD = st.sampled_from(["", "/", ".git", ".git/"])
 SPACE = st.sampled_from(["", " ", "\t", "\n"])
 
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=20),
-    lambda inner: (
-        st.lists(inner, max_size=4)
-        | st.dictionaries(st.text(max_size=10), inner, max_size=4)
-    ),
-    max_leaves=12,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=20)
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=4)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=10), inner, max_size=4
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+
+
+def dumped(value: object) -> str:
+    """Serialise a value as JSON.
+
+    Returns:
+        The document.
+
+    """
+    return json.dumps(value)
 
 
 def url(owner: str, repo: str) -> str:
@@ -52,8 +74,7 @@ def url(owner: str, repo: str) -> str:
     return f"https://github.com/{owner}/{repo}"
 
 
-@st.composite
-def spelling(draw: st.DrawFn) -> tuple[str, str]:
+def draw_spelling(draw: st.DrawFn) -> tuple[str, str]:
     """Draw a wearer and the wearer under the folds the comparison ignores.
 
     Returns:
@@ -69,8 +90,7 @@ def spelling(draw: st.DrawFn) -> tuple[str, str]:
     return wearer, draw(SPACE) + flipped + draw(FOLD) + draw(SPACE)
 
 
-@st.composite
-def stranger(draw: st.DrawFn) -> tuple[str, str]:
+def draw_stranger(draw: st.DrawFn) -> tuple[str, str]:
     """Draw a wearer and a URL naming another owner or repository.
 
     Returns:
@@ -89,6 +109,10 @@ def stranger(draw: st.DrawFn) -> tuple[str, str]:
     return url(owner, repo), named + draw(FOLD)
 
 
+spelling = st.composite(draw_spelling)
+stranger = st.composite(draw_stranger)
+
+
 class Invariance(unittest.TestCase):
     """The verdict follows the repository, not its spelling."""
 
@@ -104,14 +128,15 @@ class Invariance(unittest.TestCase):
         """A different owner or name, however spelt, is a finding."""
         wearer, named = drawn
         found = bo.finding(bo.Entry.of({"id": 7, "repo_url": named}), wearer)
-        self.assertIsNotNone(found)
+        if found is None:
+            self.fail("another repository's URL was not a finding")
         self.assertIn("project 7", found)
 
 
 class Refusal(unittest.TestCase):
     """Any answer from the issuer is judged, never a traceback."""
 
-    @given(st.one_of(JSON.map(json.dumps), st.text(max_size=80)), PART)
+    @given(st.one_of(JSON.map(dumped), st.text(max_size=80)), PART)
     @example('{"repo_url": 5}', "x")
     @example("[]", "x")
     def test_main_answers_any_stdin(self, stdin: str, repo: str) -> None:

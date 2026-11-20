@@ -26,16 +26,14 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import contextlib
 import io
-import json
 import unittest
 
 import coverage_js_runner as cj
+import decoded
+import task_walk as tw
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-# The walk the runner reads (#1608), loaded beside it by the runner.
-tw = cj.task_walk
 
 VERSION = st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 # One entry per lockfile dialect, for a package at a version.
@@ -57,8 +55,7 @@ PACKAGE = st.sampled_from([
 WORD = st.from_regex(r"[a-z][a-z0-9.=-]{0,8}", fullmatch=True)
 
 
-@st.composite
-def lockfile(draw: st.DrawFn) -> tuple[str, set[str]]:
+def draw_lockfile(draw: st.DrawFn) -> tuple[str, set[str]]:
     """Draw lockfile lines naming packages.
 
     Returns:
@@ -74,6 +71,9 @@ def lockfile(draw: st.DrawFn) -> tuple[str, set[str]]:
         if name in {"@vitest/coverage-v8", "@vitest/coverage-istanbul"}:
             expected.add(name.rsplit("-", 1)[-1])
     return "\n".join(lines) + "\n", expected
+
+
+lockfile = st.composite(draw_lockfile)
 
 
 class Providers(unittest.TestCase):
@@ -109,10 +109,9 @@ class LogicalLines(unittest.TestCase):
                 else:
                     pieces[-1] += " " + word
             script.extend(pieces)
-        self.assertEqual(
-            [" ".join(line.split()) for line in cj.logical_lines("\n".join(script))],
-            [" ".join(words) for words in commands],
-        )
+        read = [" ".join(line.split()) for line in cj.logical_lines("\n".join(script))]
+        written = [" ".join(words) for words in commands]
+        self.assertEqual(read, written)
 
 
 class ReadLine(unittest.TestCase):
@@ -139,6 +138,8 @@ class ReadLine(unittest.TestCase):
         line = " ".join([prefix, "vitest", *args])
         got, reason = cj.read_line(line)
         self.assertIsNone(got)
+        if reason is None:
+            self.fail("an unknown launcher was refused without a reason")
         self.assertIn("does not read", reason)
 
 
@@ -146,29 +147,44 @@ SCRIPT = st.one_of(
     st.text(max_size=40),
     st.sampled_from(["vitest run", "pnpm exec vitest --run x", "npx vitest watch"]),
 )
-REFERENCE = st.one_of(
+REFERENCE: st.SearchStrategy[object] = st.one_of(
     st.fixed_dictionaries({"task": WORD}),
     st.fixed_dictionaries({"tasks": st.lists(WORD, max_size=2)}),
 )
-TASK = st.fixed_dictionaries(
+TASK: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
     {"name": WORD},
     optional={
         "run": st.one_of(SCRIPT, st.lists(st.one_of(SCRIPT, REFERENCE), max_size=3)),
         "dir": st.sampled_from(["", ".", "web"]),
     },
 )
+# A task that runs another task, then vitest.
+REFERENCE_THEN_VITEST: list[dict[str, object]] = [
+    {"name": "test", "run": [{"task": "build"}, "vitest run"]}
+]
+
+
+def no_names() -> list[str]:
+    """Answer the walk's every-task question with no task.
+
+    Returns:
+        An empty list.
+
+    """
+    return []
 
 
 class VitestCommand(unittest.TestCase):
     """Any task stream: the command, or the refusal."""
 
     @given(st.lists(TASK, max_size=3))
-    @example([{"name": "test", "run": [{"task": "build"}, "vitest run"]}])
-    def test_any_stream_is_answered(self, tasks: list[dict]) -> None:
+    @example(REFERENCE_THEN_VITEST)
+    def test_any_stream_is_answered(self, tasks: list[dict[str, object]]) -> None:
         """0 with JSON on stdout, or 1 with the refusal on stderr."""
-        answers = {t["name"]: t for t in tasks}
+        answers = {decoded.as_str(t["name"], "name"): t for t in tasks}
+        root = decoded.as_str(tasks[0]["name"], "name") if tasks else "test"
         try:
-            walked = tw.walk(tasks[0]["name"] if tasks else "test", answers.get, list)
+            walked = tw.walk(root, answers.get, no_names)
         except tw.RefusedError as exc:
             self.assertIn("task '", str(exc))
             return
@@ -177,7 +193,9 @@ class VitestCommand(unittest.TestCase):
             status = cj.vitest_command("coverage:check", walked)
         self.assertIn(status, (0, 1))
         if status == 0:
-            self.assertEqual(json.loads(out.getvalue())["args"][0], "run")
+            printed = decoded.as_object(decoded.load_json(out.getvalue()), "stdout")
+            args = decoded.as_array(printed["args"], "args")
+            self.assertEqual(args[0], "run")
         else:
             self.assertIn("coverage:check: typescript:", err.getvalue())
 

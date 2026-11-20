@@ -45,19 +45,39 @@ SHELL_TEXT = st.text(alphabet="ab $=#'\"\\\n\t;&|(){}", max_size=200)
 # A filler word that is never a command prefix or an assignment, so a
 # line of them is a command that is not `mise`.
 WORD = st.from_regex(r"x[a-z]{0,6}", fullmatch=True)
-FILLER = st.builds(
-    lambda words, continued: " ".join(words) + (" \\" if continued and words else ""),
-    st.lists(WORD, max_size=4),
-    st.booleans(),
-)
+WORDS: st.SearchStrategy[list[str]] = st.lists(WORD, max_size=4)
+
+
+def filler(words: list[str], *, continued: bool) -> str:
+    """Join filler words, continued onto the next line when asked.
+
+    Returns:
+        The line.
+
+    """
+    return " ".join(words) + (" \\" if continued and words else "")
+
+
+FILLER = st.builds(filler, WORDS, continued=st.booleans())
 RUN = "mise run fix:x"
+# Two runs a continued line hides, or does not.
+HIDDEN_RUN: list[str] = ["xa \\", "xb", RUN]
+CONTINUED_RUN: list[str] = ["xa \\", RUN]
+
+
+def tera(pad: str, inner: str) -> str:
+    """Write a Tera statement line.
+
+    Returns:
+        The line.
+
+    """
+    return f"{pad}{{% {inner} %}}"
+
 
 # A Tera statement line, and lines of ordinary text around it.
-TERA = st.builds(
-    lambda pad, inner: f"{pad}{{% {inner} %}}",
-    st.sampled_from(["", "  ", "\t"]),
-    st.from_regex(r"[a-z ]{0,10}", fullmatch=True),
-)
+PAD: st.SearchStrategy[str] = st.sampled_from(["", "  ", "\t"])
+TERA = st.builds(tera, PAD, st.from_regex(r"[a-z ]{0,10}", fullmatch=True))
 LINE = st.one_of(
     TERA,
     st.text(alphabet="ab #{}%\t$", max_size=30),
@@ -75,7 +95,8 @@ class ScrubKeepsOffsets(unittest.TestCase):
         scrubbed = bs.scrub(source)
         self.assertEqual(len(scrubbed), len(source))
         for i, (got, was) in enumerate(zip(scrubbed, source, strict=True)):
-            self.assertIn(got, {was, " "})
+            kept_or_blank = {was, " "}
+            self.assertIn(got, kept_or_blank)
             if was == "\n" and got != was:
                 self.assertEqual(source[i - 1], "\\", f"newline {i} blanked unescaped")
 
@@ -86,8 +107,8 @@ class NestedRunsNamesTheLine(unittest.TestCase):
     @given(
         st.lists(st.one_of(FILLER, st.just(RUN)), max_size=12),
     )
-    @example(["xa \\", "xb", RUN])
-    @example(["xa \\", RUN])
+    @example(HIDDEN_RUN)
+    @example(CONTINUED_RUN)
     def test_exactly_the_executed_lines(self, lines: list[str]) -> None:
         """A run is executed unless the line before continues onto it."""
         source = "\n".join(lines) + "\n"
@@ -96,7 +117,8 @@ class NestedRunsNamesTheLine(unittest.TestCase):
             for i, line in enumerate(lines)
             if line == RUN and not (i and lines[i - 1].endswith("\\"))
         ]
-        self.assertEqual(list(bs.nested_runs(source)), expected)
+        found = list(bs.nested_runs(source))
+        self.assertEqual(found, expected)
 
 
 class ShellifyRoundTrip(unittest.TestCase):
@@ -115,17 +137,28 @@ class ShellifyRoundTrip(unittest.TestCase):
             self.assertEqual(back, "\n".join(source.splitlines()) + "\n")
 
 
-SCALAR = st.one_of(st.booleans(), st.integers(-9, 9), st.text(max_size=8))
-VALUE = st.recursive(
-    SCALAR,
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
-    ),
-    max_leaves=10,
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.booleans(), st.integers(-9, 9), st.text(max_size=8)
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or a table.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    tables: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | tables
+
+
+VALUE: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=10)
 KEY = st.sampled_from(["env", "tasks", "task_config", "tools", "x"])
-TASK = st.fixed_dictionaries(
+TASK: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
     {},
     optional={
         "run": st.one_of(VALUE, st.text(max_size=20)),
@@ -172,8 +205,7 @@ def quoted(text: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-@st.composite
-def config(draw: st.DrawFn) -> str:
+def draw_config(draw: st.DrawFn) -> str:
     """Write a mise config of any shape: top keys, task tables, `[[env]]`.
 
     Returns:
@@ -202,6 +234,9 @@ def config(draw: st.DrawFn) -> str:
             lines.append(f'[tasks."{name}"]')
             lines += [f"{k} = {toml(v)}" for k, v in task.items()]
     return "\n".join(lines) + "\n"
+
+
+config = st.composite(draw_config)
 
 
 class ReadAnyConfig(unittest.TestCase):
