@@ -1102,7 +1102,7 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
         )
 
     def test_install_line_carries_the_clang_driver_and_llvm(self) -> None:
-        """pgrx 0.20 builds with a clang driver and llvm-ar (#1847).
+        """A pgrx 0.20 build needs a clang driver and llvm-ar (#1847).
 
         Its bindgen step needs the `clang` and the `llvm-ar` of the
         `libclang` release it binds through. The packages are
