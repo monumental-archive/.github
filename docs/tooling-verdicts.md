@@ -43,7 +43,7 @@ honestly blocked on.
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Three more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), and `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
-| mypy (`pipx:` backend via aqua-backed uv) | Python type checking at its strictest (#1604), config delivered as `mise/mypy.ini`: `audit:python-types` while the canon conforms, then `lint:python-types` in the gate |
+| mypy (`pipx:` backend via aqua-backed uv) | Python type checking at its strictest (#1604), config delivered as `mise/mypy.ini`: `lint:python-types` in the gate |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
 | govulncheck (`go:` backend, repo-side pin) | Call-graph-aware Go advisory scan (`audit:go-vulns`, network — Monday cron) |
 | gomu (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
@@ -2104,15 +2104,14 @@ the types task adds it to `MYPYPATH` after the derived roots, and
 `hypothesis`, so a repository needs only
 `from typed_hypothesis import given`.
 
-**Staged, not advisory.** The canon held 10 874 findings over its 226
+**Staged, then gated.** The canon held 10 874 findings over its 226
 tracked files when the pin landed: 1719 in the helpers (`mise/` 1295,
 `release/` 335, the rest 89) and 9155 in their tests. A `ci` task
-would stop every merge until the last was fixed, so the task lands as
-`audit:python-types`, run by the canon's Monday audit and red there
-(`lint:audit-scheduled` refuses an audit task no workflow runs); the
-findings are run down one lane per directory, and the pull request
-that clears the last renames it `lint:python-types`, which `ci`
-collects, and drops the audit leg. `pipx:mypy` is the
+would have stopped every merge until the last was fixed, so the task
+landed as `audit:python-types`, run by the canon's Monday audit and
+red there; the findings were run down one lane per slice, and the
+pull request that cleared the last renamed it `lint:python-types`,
+which `ci` collects, and dropped the audit leg. `pipx:mypy` is the
 seventh `pipx:` exception; its five dependencies (`typing_extensions`,
 `mypy_extensions`, `pathspec`, `librt`, `ast-serialize`) are unhashed
 in `mise.lock`, held by uv under the `UV_*` floor, as Hypothesis's one
