@@ -10,6 +10,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.71.0](https://github.com/monumental-archive/.github/compare/v1.70.7...v1.71.0) - 2026-11-20
+
+### Added
+
+- read workflow yaml through one module on a pinned yq ([#1855](https://github.com/monumental-archive/.github/pull/1855))
+
+### Changed
+
+- remove the two helpers only tests call ([#1852](https://github.com/monumental-archive/.github/pull/1852))
+
+### Fixed
+
+- install the clang driver and llvm in pgrx builds ([#1856](https://github.com/monumental-archive/.github/pull/1856))
+- turn off ruff's two audit-prompt rules (#1838) ([#1859](https://github.com/monumental-archive/.github/pull/1859))
+- retire pg14 and hold pg-majors to the canon's mapping ([#1862](https://github.com/monumental-archive/.github/pull/1862))
+- read every run: value through the parser ([#1860](https://github.com/monumental-archive/.github/pull/1860))
+- read only steps' run values, every scalar as its text ([#1863](https://github.com/monumental-archive/.github/pull/1863))
+- key the cargo caches on the compiler that fills them ([#1866](https://github.com/monumental-archive/.github/pull/1866))
+
+### Documentation
+
+- describe the removed biome wrapper, not its name ([#1854](https://github.com/monumental-archive/.github/pull/1854))
+
+### Testing
+
+- delete the skipped server oracle for the upgrade guard ([#1851](https://github.com/monumental-archive/.github/pull/1851))
+
 ## [1.70.7](https://github.com/monumental-archive/.github/compare/v1.70.6...v1.70.7) - 2026-11-20
 
 ### Fixed
