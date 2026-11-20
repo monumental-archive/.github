@@ -26,14 +26,17 @@ from contextlib import redirect_stderr, redirect_stdout
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import coverage_floor as cf
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def record(
     floor: str,
-    band: str = "2",
+    band: str | None = "2",
     measured: str | None = "85.4",
     reset: str | None = None,
     derived: str | None = "v0.20.0",
@@ -91,8 +94,64 @@ class Tree:
             return None
         return self.path.read_text(encoding="utf-8")
 
+    def written(self) -> str:
+        """Read back a file the row expects to exist.
 
-def run(call: object, *args: object, **kwargs: object) -> tuple[int, str, str]:
+        Returns:
+            The file's contents.
+
+        Raises:
+            AssertionError: nothing was written.
+
+        """
+        text = self.text()
+        if text is None:
+            msg = f"{self.path} was not written"
+            raise AssertionError(msg)
+        return text
+
+
+# What a row expects of a clean parse or reading, named with its type.
+NO_PROBLEMS: list[str] = []
+NO_LEGS: list[tuple[str, Decimal]] = []
+
+
+def clean(text: str) -> tuple[cf.Record, list[str]]:
+    """Parse a floor file the row expects to read.
+
+    Returns:
+        The record and the problems `parse` found beside it.
+
+    Raises:
+        AssertionError: `parse` refused the file, naming its problems.
+
+    """
+    parsed, problems = cf.parse(text)
+    if parsed is None:
+        msg = f"the floor did not parse: {problems}"
+        raise AssertionError(msg)
+    return parsed, problems
+
+
+def separate(record: cf.Record) -> dict[str, tuple[Decimal, Decimal]]:
+    """Read a record's separate lines, which the row expects it to carry.
+
+    Returns:
+        Each separate leg's floor and measurement.
+
+    Raises:
+        AssertionError: the record carries no separate line.
+
+    """
+    if record.separate is None:
+        msg = "the record carries no separate line"
+        raise AssertionError(msg)
+    return record.separate
+
+
+def run[**P](
+    call: Callable[P, int], *args: P.args, **kwargs: P.kwargs
+) -> tuple[int, str, str]:
     """Call one of the script's entry points with its streams captured.
 
     Returns:
@@ -179,8 +238,8 @@ class TestParseAccepts(unittest.TestCase):
 
     def test_derived_record(self) -> None:
         """A floor equal to measured minus band is the derivation."""
-        parsed, problems = cf.parse(record("83.4"))
-        self.assertEqual(problems, [])
+        parsed, problems = clean(record("83.4"))
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("83.4"))
         self.assertEqual(parsed.measured, Decimal("85.4"))
         self.assertEqual(parsed.band, Decimal(2))
@@ -189,19 +248,19 @@ class TestParseAccepts(unittest.TestCase):
 
     def test_blank_lines_are_not_lines(self) -> None:
         """A blank line anywhere in the file reads as nothing (#1659)."""
-        parsed, problems = cf.parse("\n" + record("83.4").replace("\n", "\n\n"))
-        self.assertEqual(problems, [])
+        parsed, problems = clean("\n" + record("83.4").replace("\n", "\n\n"))
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("83.4"))
 
     def test_trailing_zeros_are_the_same_number(self) -> None:
         """Agreement is numeric, so 83.40 and 83.4 are one floor."""
-        parsed, problems = cf.parse(record("83.40"))
-        self.assertEqual(problems, [])
+        parsed, problems = clean(record("83.40"))
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("83.4"))
 
     def test_reset_is_a_record(self) -> None:
         """A conscious reset states a reason and no measurement."""
-        parsed, problems = cf.parse(
+        parsed, problems = clean(
             record(
                 "88",
                 measured=None,
@@ -209,7 +268,7 @@ class TestParseAccepts(unittest.TestCase):
                 derived=None,
             ),
         )
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal(88))
         self.assertIsNone(parsed.measured)
         self.assertEqual(parsed.reset, "pgrx members left the workspace")
@@ -221,14 +280,14 @@ class TestParseAccepts(unittest.TestCase):
         the band the file was derived under, and the next release rewrites
         it with the current one.
         """
-        parsed, problems = cf.parse(record("82.4", band="3"))
-        self.assertEqual(problems, [])
+        parsed, problems = clean(record("82.4", band="3"))
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.band, Decimal(3))
 
     def test_floor_clamps_at_zero(self) -> None:
         """A measurement below the band derives a floor of 0, not -0.5."""
-        parsed, problems = cf.parse(record("0", measured="1.5"))
-        self.assertEqual(problems, [])
+        parsed, problems = clean(record("0", measured="1.5"))
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal(0))
 
 
@@ -262,17 +321,19 @@ class TestLegs(unittest.TestCase):
     def test_reads_every_leg(self) -> None:
         """Each language the measurement printed comes back."""
         measured, problems = cf.legs("go 85.4\nrust 61.538\n")
-        self.assertEqual(problems, [])
-        self.assertEqual(
-            measured,
-            [("go", Decimal("85.4")), ("rust", Decimal("61.538"))],
-        )
+        self.assertEqual(problems, NO_PROBLEMS)
+        both: list[tuple[str, Decimal]] = [
+            ("go", Decimal("85.4")),
+            ("rust", Decimal("61.538")),
+        ]
+        self.assertEqual(measured, both)
 
     def test_blank_lines_are_not_legs(self) -> None:
         """Trailing newlines do not become a leg."""
         measured, problems = cf.legs("\ngo 85.4\n\n")
-        self.assertEqual(problems, [])
-        self.assertEqual(measured, [("go", Decimal("85.4"))])
+        self.assertEqual(problems, NO_PROBLEMS)
+        go: list[tuple[str, Decimal]] = [("go", Decimal("85.4"))]
+        self.assertEqual(measured, go)
 
     def test_malformed_lines_are_reported_not_skipped(self) -> None:
         """A line that is not a measurement refuses the whole derivation.
@@ -283,7 +344,7 @@ class TestLegs(unittest.TestCase):
         for line in ("go", "go 85.4 extra", "go high", "go 140"):
             with self.subTest(line):
                 measured, problems = cf.legs(line)
-                self.assertEqual(measured, [])
+                self.assertEqual(measured, NO_LEGS)
                 self.assertEqual(len(problems), 1)
                 self.assertIn("is not `<leg> <percent>`", problems[0])
 
@@ -294,8 +355,8 @@ class TestRender(unittest.TestCase):
     def test_render_round_trips(self) -> None:
         """The written file parses, and states the band it was cut with."""
         text = cf.render(Decimal("85.44"), "v1.52.0")
-        parsed, problems = cf.parse(text)
-        self.assertEqual(problems, [])
+        parsed, problems = clean(text)
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.measured, Decimal("85.4"))
         self.assertEqual(parsed.floor, Decimal("83.4"))
         self.assertEqual(parsed.band, cf.BAND)
@@ -350,11 +411,11 @@ class TestWriteRatchet(unittest.TestCase):
                 "v0.21.0",
                 adopt=False,
             )
-            parsed, problems = cf.parse(tree.text())
+            parsed, problems = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertEqual(err, "")
         self.assertIn("83.4 -> 84.8", out)
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("84.8"))
         self.assertEqual(parsed.measured, Decimal("86.8"))
         self.assertEqual(parsed.derived, "v0.21.0")
@@ -391,11 +452,11 @@ class TestWriteRatchet(unittest.TestCase):
                     status, out, err = run(
                         cf.write, tree.path, Decimal(figure), "v0.21.0", adopt=False
                     )
-                    after = tree.text()
-                    parsed, problems = cf.parse(after)
+                    after = tree.written()
+                    parsed, problems = clean(after)
                 self.assertEqual((0, ""), (status, err))
                 self.assertIn(f"floor 83.4 held (measured {figure}", out)
-                self.assertEqual([], problems)
+                self.assertEqual(NO_PROBLEMS, problems)
                 self.assertEqual(Decimal("83.4"), parsed.floor)
                 self.assertEqual(Decimal("85.4"), parsed.measured)
                 self.assertEqual("v0.20.0", parsed.derived)
@@ -410,7 +471,7 @@ class TestWriteRatchet(unittest.TestCase):
                 "v0.21.0",
                 adopt=False,
             )
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertEqual(err, "")
         self.assertEqual(parsed.floor, Decimal("83.4"))
@@ -453,7 +514,7 @@ class TestWriteRatchet(unittest.TestCase):
                 "v0.21.0",
                 adopt=False,
             )
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertIn("88 -> 88.0", out)
         self.assertEqual(parsed.floor, Decimal("88.0"))
@@ -466,8 +527,8 @@ class TestWriteRatchet(unittest.TestCase):
             status, out, err = run(
                 cf.derive, tree.path, "python 89.0\n", "v0.21.0", adopt=False
             )
-            parsed, problems = cf.parse(tree.text())
-        self.assertEqual((0, "", []), (status, err, problems))
+            parsed, problems = clean(tree.written())
+        self.assertEqual((0, "", NO_PROBLEMS), (status, err, problems))
         self.assertIn("floor 88 held", out)
         self.assertEqual(Decimal(88), parsed.floor)
         self.assertEqual("workspace split", parsed.reset)
@@ -479,8 +540,8 @@ class TestCap(unittest.TestCase):
 
     def test_a_derivation_stops_at_the_cap(self) -> None:
         """A measurement of 95.4 writes a floor of 90, not 93.4."""
-        parsed, problems = cf.parse(cf.render(Decimal("95.4"), "v1.71.0"))
-        self.assertEqual([], problems)
+        parsed, problems = clean(cf.render(Decimal("95.4"), "v1.71.0"))
+        self.assertEqual(NO_PROBLEMS, problems)
         self.assertEqual(Decimal(90), parsed.floor)
         self.assertEqual(Decimal("95.4"), parsed.measured)
 
@@ -506,8 +567,8 @@ class TestCap(unittest.TestCase):
             status, out, err = run(
                 cf.derive, tree.path, "python 94.2\n", "v1.71.0", adopt=False
             )
-            parsed, problems = cf.parse(tree.text())
-        self.assertEqual((0, "", []), (status, err, problems))
+            parsed, problems = clean(tree.written())
+        self.assertEqual((0, "", NO_PROBLEMS), (status, err, problems))
         self.assertIn("floor 90 -> 90", out)
         self.assertEqual(Decimal(90), parsed.floor)
         self.assertEqual(Decimal("94.2"), parsed.measured)
@@ -571,10 +632,10 @@ class TestWriteAdoption(unittest.TestCase):
                 "coverage:adopt",
                 adopt=True,
             )
-            parsed, problems = cf.parse(tree.text())
+            parsed, problems = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertIn("adopted", out)
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("83.4"))
 
     def test_release_refuses_to_repair_a_recordless_floor(self) -> None:
@@ -603,10 +664,10 @@ class TestWriteAdoption(unittest.TestCase):
                 "coverage:adopt",
                 adopt=True,
             )
-            parsed, problems = cf.parse(tree.text())
+            parsed, problems = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertIn("rewrote", out)
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("83.4"))
 
     def test_adopt_cannot_lower_a_floor_that_parses(self) -> None:
@@ -639,7 +700,7 @@ class TestDerive(unittest.TestCase):
                 "v0.21.0",
                 adopt=False,
             )
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertIn("measured 61.5", out)
         self.assertEqual(parsed.floor, Decimal("59.5"))
@@ -668,6 +729,10 @@ class TestDerive(unittest.TestCase):
 
 
 BRANCH = "# rust-branches measured: 72.4\nrust-branches 70.4\n"
+# BRANCH as the parser reads it: the floor, then the measurement.
+BRANCH_HELD: dict[str, tuple[Decimal, Decimal]] = {
+    "rust-branches": (Decimal("70.4"), Decimal("72.4"))
+}
 
 
 class TestSeparateLeg(unittest.TestCase):
@@ -678,12 +743,10 @@ class TestSeparateLeg(unittest.TestCase):
         text = cf.render(
             Decimal("85.44"), "coverage:adopt", {"rust-branches": Decimal("72.49")}
         )
-        parsed, problems = cf.parse(text)
-        self.assertEqual(problems, [])
+        parsed, problems = clean(text)
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertEqual(parsed.floor, Decimal("83.4"))
-        self.assertEqual(
-            parsed.separate, {"rust-branches": (Decimal("70.4"), Decimal("72.4"))}
-        )
+        self.assertEqual(parsed.separate, BRANCH_HELD)
 
     def test_the_main_floor_ignores_the_line(self) -> None:
         """coverage:check reads the main number, never the branch line."""
@@ -750,13 +813,11 @@ class TestSeparateLeg(unittest.TestCase):
             status, out, _ = run(
                 cf.derive, tree.path, "rust 86.0\n", "v1.2.0", adopt=False
             )
-            parsed, problems = cf.parse(tree.text())
+            parsed, problems = clean(tree.written())
         self.assertEqual(status, 0)
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, NO_PROBLEMS)
         self.assertIn("83.4 -> 84.0", out)
-        self.assertEqual(
-            parsed.separate, {"rust-branches": (Decimal("70.4"), Decimal("72.4"))}
-        )
+        self.assertEqual(parsed.separate, BRANCH_HELD)
 
     def test_the_line_is_not_in_the_minimum(self) -> None:
         """A lower branch figure does not drag the main floor down."""
@@ -768,10 +829,10 @@ class TestSeparateLeg(unittest.TestCase):
                 "coverage:adopt",
                 adopt=True,
             )
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertEqual(parsed.floor, Decimal("84.0"))
-        self.assertEqual(parsed.separate["rust-branches"][0], Decimal("59.0"))
+        self.assertEqual(separate(parsed)["rust-branches"][0], Decimal("59.0"))
 
     def test_the_line_never_falls(self) -> None:
         """Below its floor, neither line is rewritten."""
@@ -799,12 +860,10 @@ class TestSeparateLeg(unittest.TestCase):
                 "v1.2.0",
                 adopt=False,
             )
-            parsed, problems = cf.parse(tree.text())
-        self.assertEqual((0, "", []), (status, err, problems))
+            parsed, problems = clean(tree.written())
+        self.assertEqual((0, "", NO_PROBLEMS), (status, err, problems))
         self.assertEqual(Decimal("84.0"), parsed.floor)
-        self.assertEqual(
-            parsed.separate, {"rust-branches": (Decimal("70.4"), Decimal("72.4"))}
-        )
+        self.assertEqual(parsed.separate, BRANCH_HELD)
 
     def test_the_line_rises(self) -> None:
         """A higher branch figure raises the line."""
@@ -816,10 +875,10 @@ class TestSeparateLeg(unittest.TestCase):
                 "coverage:adopt",
                 adopt=True,
             )
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertIn("rust-branches 78.0 (measured 80.0)", out)
-        self.assertEqual(parsed.separate["rust-branches"][0], Decimal("78.0"))
+        self.assertEqual(separate(parsed)["rust-branches"][0], Decimal("78.0"))
 
 
 class TestMain(unittest.TestCase):
@@ -844,7 +903,7 @@ class TestMain(unittest.TestCase):
                 )
             finally:
                 sys.stdin = stdin
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual(status, 0)
         self.assertIn("83.4 -> 84.8", out)
         self.assertEqual(parsed.floor, Decimal("84.8"))
@@ -951,8 +1010,8 @@ class TestLegsRecord(unittest.TestCase):
                 "v1.2.0",
                 adopt=False,
             )
-            parsed, problems = cf.parse(tree.text())
-        self.assertEqual((0, []), (status, problems))
+            parsed, problems = clean(tree.written())
+        self.assertEqual((0, NO_PROBLEMS), (status, problems))
         self.assertEqual(("python", "python-branches"), parsed.legs)
 
     def test_a_derivation_that_drops_a_leg_fails_without_dropped(self) -> None:
@@ -980,7 +1039,7 @@ class TestLegsRecord(unittest.TestCase):
             status, _, err = run(
                 cf.derive, tree.path, "python 86.0\n", "v1.2.0", adopt=False
             )
-            parsed, _ = cf.parse(tree.text())
+            parsed, _ = clean(tree.written())
         self.assertEqual((0, ""), (status, err))
         self.assertEqual(("python",), parsed.legs)
 

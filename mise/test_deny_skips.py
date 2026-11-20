@@ -14,10 +14,10 @@ gate as `mise run test`.
 import contextlib
 import io
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import deny_skips as ds
 
 HERE = Path(__file__).resolve().parent
@@ -40,7 +40,7 @@ skip = [
 """
 
 
-def variants(text: str) -> list[tuple[str, dict]]:
+def variants(text: str) -> list[tuple[str, dict[str, object]]]:
     """Run the helper on a deny.toml.
 
     Returns:
@@ -59,14 +59,25 @@ def variants(text: str) -> list[tuple[str, dict]]:
         if status != 0:
             msg = f"deny_skips.py exited {status}"
             raise AssertionError(msg)
-        found = []
+        found: list[tuple[str, dict[str, object]]] = []
         for line in out.getvalue().splitlines():
             spec, variant = line.split("\t")
-            found.append((
-                spec,
-                tomllib.loads(Path(variant).read_text("utf-8"))["bans"],
-            ))
+            config = decoded.load_toml(Path(variant).read_text("utf-8"))
+            found.append((spec, decoded.as_object(config["bans"], "[bans]")))
     return found
+
+
+def crates(bans: dict[str, object], key: str) -> list[str]:
+    """Name the crate of each entry in one `[bans]` list.
+
+    Returns:
+        The `crate` of every entry under `key`, in order.
+
+    """
+    return [
+        decoded.as_str(decoded.as_object(entry, key)["crate"], f"{key} crate")
+        for entry in decoded.as_array(bans[key], key)
+    ]
 
 
 class OneEntry(unittest.TestCase):
@@ -75,20 +86,21 @@ class OneEntry(unittest.TestCase):
     def test_two_versions_of_one_crate_are_two_variants(self) -> None:
         """Each version's variant keeps the other version's skip."""
         got = variants(TWO_VERSIONS)
-        self.assertEqual(
-            [(spec, [i["crate"] for i in bans["skip"]]) for spec, bans in got],
-            [
-                ("windows-sys@0.48", ["windows-sys@0.52"]),
-                ("windows-sys@0.52", ["windows-sys@0.48"]),
-            ],
-        )
+        skipped = [(spec, crates(bans, "skip")) for spec, bans in got]
+        want: list[tuple[str, list[str]]] = [
+            ("windows-sys@0.48", ["windows-sys@0.52"]),
+            ("windows-sys@0.52", ["windows-sys@0.48"]),
+        ]
+        self.assertEqual(skipped, want)
 
     def test_a_deny_entry_for_the_crate_is_kept(self) -> None:
         """Only the skip goes; the deny entry stays."""
         [(spec, bans)] = variants(DENIED_TOO)
         self.assertEqual(spec, "openssl@0.10")
-        self.assertEqual(bans["skip"], [])
-        self.assertEqual([d["crate"] for d in bans["deny"]], ["openssl"])
+        none: list[object] = []
+        self.assertEqual(bans["skip"], none)
+        denied: list[str] = ["openssl"]
+        self.assertEqual(crates(bans, "deny"), denied)
 
 
 class Refusals(unittest.TestCase):

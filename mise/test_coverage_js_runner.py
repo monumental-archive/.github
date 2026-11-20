@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 import coverage_js_runner as cj
+import decoded
 import hermetic
 import task_walk as tw
 
@@ -39,13 +40,17 @@ class TaskReferences(unittest.TestCase):
         The reference is the walk's to follow (#1608); the script beside
         it is read.
         """
-        answers = {"test": {"run": [{"task": "build"}, "vitest run"]}, "build": {}}
+        answers: dict[str, object] = {
+            "test": {"run": [{"task": "build"}, "vitest run"]},
+            "build": {},
+        }
         walked = tw.walk("test", answers.get, list)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             status = cj.vitest_command("coverage:check", walked)
         self.assertEqual(status, 0, err.getvalue())
-        self.assertEqual(json.loads(out.getvalue()), {"dir": ".", "args": ["run"]})
+        want: dict[str, object] = {"dir": ".", "args": ["run"]}
+        self.assertEqual(decoded.load_json(out.getvalue()), want)
 
     def test_no_vitest_names_the_tasks_walked(self) -> None:
         """The refusal says where the leg looked (#1608 item 4)."""
@@ -77,7 +82,8 @@ class Readers(unittest.TestCase):
     def test_continued_lines_join_and_comments_drop(self) -> None:
         """A backslash joins the next line; a dangling one ends the script."""
         script = "vitest \\\n  run\n# a comment\n\nfoo \\"
-        self.assertEqual(["vitest    run", "foo"], cj.logical_lines(script))
+        lines: list[str] = ["vitest    run", "foo"]
+        self.assertEqual(lines, cj.logical_lines(script))
 
     def test_an_unbalanced_quote_is_refused_only_where_vitest_is(self) -> None:
         """The leg names a line it cannot read only if it runs vitest."""
@@ -93,9 +99,8 @@ class Readers(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             status = cj.vitest_command("coverage:check", walked)
         self.assertEqual(0, status)
-        self.assertEqual(
-            {"dir": ".", "args": ["run", "--silent"]}, json.loads(out.getvalue())
-        )
+        want: dict[str, object] = {"dir": ".", "args": ["run", "--silent"]}
+        self.assertEqual(want, decoded.load_json(out.getvalue()))
 
 
 class Main(unittest.TestCase):
@@ -139,7 +144,8 @@ class Main(unittest.TestCase):
 
     def test_vitest_declared_without_a_lockfile_entry_is_named(self) -> None:
         """Declared but not pinned: nothing the leg may run."""
-        manifest = json.dumps({"devDependencies": {"vitest": "4.1.12"}})
+        declared: dict[str, object] = {"devDependencies": {"vitest": "4.1.12"}}
+        manifest = json.dumps(declared)
         self.assertEqual(
             (0, "unsupported vitest-without-a-lockfile-entry\n", ""),
             self.main(["package.json"], {"package.json": manifest}),
@@ -147,7 +153,8 @@ class Main(unittest.TestCase):
 
     def test_another_runner_is_named(self) -> None:
         """A jest tree is named so the skip says what it skipped."""
-        manifest = json.dumps({"devDependencies": {"jest": "29"}})
+        declared: dict[str, object] = {"devDependencies": {"jest": "29"}}
+        manifest = json.dumps(declared)
         self.assertEqual(
             (0, "unsupported jest\n", ""),
             self.main(["package.json"], {"package.json": manifest}),
@@ -171,7 +178,7 @@ class VitestCommand(unittest.TestCase):
                 raise walked
             return walked
 
-        with mock.patch.object(cj.task_walk, "walk_mise", walk_mise):
+        with mock.patch.object(tw, "walk_mise", walk_mise):
             done = hermetic.call_main(
                 lambda: cj.main(["--vitest-command", "coverage:check", "test"])
             )
@@ -182,7 +189,8 @@ class VitestCommand(unittest.TestCase):
         walked = tw.Walk(("test",), (tw.Step("test", "web", "pnpm exec vitest run"),))
         status, out, err = self.call(walked)
         self.assertEqual((0, ""), (status, err))
-        self.assertEqual(json.loads(out), {"dir": "web", "args": ["run"]})
+        want: dict[str, object] = {"dir": "web", "args": ["run"]}
+        self.assertEqual(decoded.load_json(out), want)
 
     def test_a_walk_refused_is_named_under_the_leg(self) -> None:
         """The walk's refusal, with the leg's label, and exit 1."""
