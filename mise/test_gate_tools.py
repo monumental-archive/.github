@@ -548,7 +548,7 @@ def install(root: Path) -> set[str]:
         gate_tools.load_table(),
         tracked,
         gate_tools.caller_text(root, tracked),
-        gate_tools.caller_pins.pinned_names(root),
+        gate_tools.pinned_names(root),
     )
     return {k for k, why in reasons.items() if why.startswith("needed")}
 

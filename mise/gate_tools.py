@@ -95,6 +95,7 @@ _LEAD = (
 
 
 tool_name = caller_pins.tool_name
+pinned_names = caller_pins.pinned_names
 
 
 def strip_literals(text: str) -> str:
