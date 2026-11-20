@@ -178,11 +178,13 @@ jobs:
             --out-dir measured \
             --published published \
             --policy slsa/assert-policy.json || rc=$?
+          # No canon tree in this job: one printf, whose format is a literal
+          # command and a literal label; the exit is a %q argument (#1660).
           if [[ ${rc} -ne 0 && ${rc} -ne 1 && ${rc} -ne 4 ]]; then
-            echo "::error::stele level failed (exit ${rc}) — the board was not measured, so nothing here is asserted"
+            printf '::error::stele level failed: the board was not measured, nothing is asserted\n  exit: %q\n' "${rc}"
             exit "${rc}"
           fi
-          [[ ${rc} -eq 0 ]] || echo "::error::the board comparison is red (stele level exit ${rc}) — its findings are named above"
+          [[ ${rc} -eq 0 ]] || printf '::error::the board comparison is red: its findings are named above\n  exit: %q\n' "${rc}"
           echo "board=${rc}" >> "${GITHUB_ENV}"
       - name: Assert every levels branch still moves
         # A branch can agree with the measurement and still be dead:
@@ -211,11 +213,15 @@ jobs:
           bad=0
           if [[ -s missing.txt ]]; then
             absent=$(tr '\n' ' ' < missing.txt)
-            echo "::error::no levels branch in: ${absent}— the stub has never run there"
+            # No canon tree in this job: the command is a literal, and the
+            # outside text follows on a plain line, never at its start (#1660).
+            echo "::error::a repository has no levels branch — the stub has never run there"
+            printf '  missing: %q\n' "${absent}"
             bad=1
           fi
           if [[ -n ${stale} ]]; then
-            echo "::error::a levels branch has not moved in over ${STALE_AFTER_DAYS} days:${stale} — the stub stopped running"
+            echo "::error::a levels branch has not moved within the stale limit — the stub stopped running"
+            printf '  limit: %q days; stale:%q\n' "${STALE_AFTER_DAYS}" "${stale}"
             bad=1
           fi
           [[ ${board} -eq 0 ]] || bad=1

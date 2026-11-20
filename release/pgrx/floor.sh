@@ -11,6 +11,10 @@
 #
 #   floor.sh EXTDIR VERSION FLOOR_XY FLOOR_NUM
 set -euo pipefail
+# The canon's one writer of workflow commands (#1660): the copy the
+# container run mounts and names, or this tree's own on the runner.
+# shellcheck source=mise/workflow-command.sh
+. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
 extdir=$1
 version=$2
 xy=$3
@@ -28,7 +32,7 @@ for control in "${extdir}"/*.control; do
   for script in "${scripts[@]}"; do
     [[ -f ${script} ]] || continue
     if grep -qF "pgrx_floor" "${script}"; then
-      echo "::error::${script##*/} already uses the pgrx_floor tag"
+      org_error "${script##*/} already uses the pgrx_floor tag"
       exit 1
     fi
     {
@@ -37,5 +41,5 @@ for control in "${extdir}"/*.control; do
     } > "${script}.floor"
     mv "${script}.floor" "${script}"
   done
-  echo "::notice::${ext} ${version} was built against PostgreSQL ${xy}"
+  org_notice "${ext} ${version} was built against PostgreSQL ${xy}"
 done

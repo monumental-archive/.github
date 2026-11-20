@@ -1547,7 +1547,7 @@ class TagReleaseRefusals(unittest.TestCase):
             )
             result = self._run(repo)
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn(f"{tag} already exists; nothing to do", result.stdout)
+        self.assertIn(f"already minted, nothing to do: {tag}", result.stdout)
 
 
 # A stand-in for gitsign: git's x509 signing contract is the signature on

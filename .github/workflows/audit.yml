@@ -87,7 +87,10 @@ jobs:
             "0 7 * * 1" | dispatch:first) legs=first ;;
             "30 8 * * 1" | dispatch:second) legs=second ;;
             *)
-              echo "::error::audit: no group is declared for trigger '${SCHEDULE:-dispatch:${LEGS}}' — add it to the plan job"
+              # No canon tree in this job: the command is a literal, and the
+              # outside text follows on a plain line, never at its start (#1660).
+              echo "::error::audit: no group is declared for this trigger — add it to the plan job"
+              printf '  trigger: %q\n' "${SCHEDULE:-dispatch:${LEGS}}"
               exit 1
               ;;
           esac

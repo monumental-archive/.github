@@ -207,11 +207,13 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           # The toolchain is a caller build input like rust's — asserted,
           # never installed here; an unpinned install on a release leg is
           # a runner mutation.
           command -v go > /dev/null || {
-            echo "::error::go missing — pin go in this repository's mise config; it is the build input of the go-binary class"
+            org_error "go missing — pin go in this repository's mise config; it is the build input of the go-binary class"
             exit 1
           }
           # Native builds only: the leg's host must BE the target, or the
@@ -221,7 +223,7 @@ jobs:
           goarch=$(go env GOARCH)
           host="${goos}-${goarch}"
           if [[ ${host} != "${TARGET}" ]]; then
-            echo "::error::leg for ${TARGET} is running on ${host} — native hardware only"
+            org_error "leg for ${TARGET} is running on ${host} — native hardware only"
             exit 1
           fi
       - name: Test on the target
@@ -257,8 +259,10 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           if [[ ! -x ${UNTRUSTED_SMOKE} ]]; then
-            echo "::error::smoke-test ${UNTRUSTED_SMOKE} is not executable"
+            org_error "smoke-test ${UNTRUSTED_SMOKE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_SMOKE}" "${PWD}/staged" "${TARGET}"

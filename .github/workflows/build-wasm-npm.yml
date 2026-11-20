@@ -145,6 +145,8 @@ jobs:
       - name: Assert the caller pinned its build inputs
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           # Build inputs live in the caller's mise config, like its rust
           # toolchain. Nothing is installed ad hoc here: an unpinned tool in
           # a signing pipeline is the thing the whole toolbelt design
@@ -153,7 +155,7 @@ jobs:
             command -v "${tool}" > /dev/null || {
               emsg="${tool} not found — pin it in this repository's mise config; it is a build input of the"
               emsg+=" wasm-npm class"
-              echo "::error::${emsg}"
+              org_error "${emsg}"
               exit 1
             }
           done
@@ -164,16 +166,18 @@ jobs:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           meta=$(cargo metadata --no-deps --format-version 1 \
             --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
           manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
           versions=$(wc -l <<< "${manifest}")
           if [[ ${versions} -ne 1 ]]; then
-            echo "::error::workspace members disagree on version; canon is [workspace.package] inheritance"
+            org_error "workspace members disagree on version; canon is [workspace.package] inheritance"
             exit 1
           fi
           if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
-            echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+            org_error "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
       - name: Test
@@ -223,19 +227,8 @@ jobs:
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: |
-          set -euo pipefail
-          meta=$(cargo metadata --no-deps --format-version 1 \
-            --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
-          mp=$(realpath "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
-          mkdir -p plan
-          jq --arg mp "${mp}" \
-            '[.packages[] | select(.manifest_path == $mp) | .name]
-             | if length != 1 then error("crate-dir resolves to \(length) packages") else . end
-             | map({class: "wasm-npm", doc: ("sbom-npm-" + .),
-                    params: {cargoPackage: .}})' \
-            <<< "${meta}" > plan/plan.json
-          jq -r '.[] | "::notice::plans inventory \(.doc) for package \(.params.cargoPackage)"' plan/plan.json
+          PLAN_DOC_PREFIX: sbom-npm-
+        run: .org-canon/release/wasm-inventory-plan.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:

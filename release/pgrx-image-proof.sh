@@ -45,7 +45,10 @@ render() { # recipe -> <context>/<recipe>.Dockerfile
 }
 render copy
 docker buildx build --file "${context}/copy.Dockerfile" --load --tag "consumer-proof:pg${pg}" "${context}"
-docker run --rm -v "${docker_dir}:/proof:ro" "consumer-proof:pg${pg}" \
+# The canon's one writer of workflow commands (#1660), mounted and named.
+wc=(-v "${canon}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
+  -e ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh)
+docker run --rm -v "${docker_dir}:/proof:ro" "${wc[@]}" "consumer-proof:pg${pg}" \
   bash /proof/pgrx-copy-proof.sh "${ext}"
 if ((pg < 18)); then
   echo "pg${pg}: below 18, no extension_control_path; path proof not applicable"
@@ -54,6 +57,6 @@ if ((pg < 18)); then
 fi
 render path
 docker buildx build --file "${context}/path.Dockerfile" --load --tag "consumer-path-proof:pg${pg}" "${context}"
-docker run --rm --user postgres -v "${docker_dir}:/proof:ro" \
+docker run --rm --user postgres -v "${docker_dir}:/proof:ro" "${wc[@]}" \
   "consumer-path-proof:pg${pg}" bash /proof/pgrx-path-proof.sh
 org_done=1

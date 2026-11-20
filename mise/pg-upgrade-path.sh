@@ -59,6 +59,9 @@
 # is no published predecessor to strand. Only once a graph exists is
 # reachability enforced. A linter that cannot skip cannot be universal.
 set -euo pipefail
+# The canon's one writer of workflow commands (#1660), beside this file.
+# shellcheck source=mise/workflow-command.sh
+. "$(dirname "${BASH_SOURCE[0]}")/workflow-command.sh"
 
 controls=()
 # shellcheck disable=SC2312  # process substitution over tracked files: the
@@ -95,22 +98,26 @@ for control in "${controls[@]}"; do
   done < <(git ls-files "${sql_dir}/${name}--*--*.sql")
 
   if ((${#scripts[@]} == 0)); then
-    echo "lint:pg-upgrade-path: ${name} has no upgrade scripts; first publish has no predecessor to strand"
+    org_say "lint:pg-upgrade-path: ${name} has no upgrade scripts; first publish has no predecessor to strand"
     continue
   fi
 
   version=$(cargo pkgid --manifest-path "${crate_dir}/Cargo.toml" | sed 's/.*[@#]//')
   if [[ -z ${version} ]]; then
-    echo "::error::could not resolve the ${name} crate version from ${crate_dir}/Cargo.toml"
+    org_error "could not resolve the ${name} crate version from ${crate_dir}/Cargo.toml"
     exit 1
   fi
 
-  RECORD="${record}" \
+  RECORD="${record}" ORG_MISE_DIR="$(dirname "${BASH_SOURCE[0]}")" \
     python3 - "${name}" "${version}" "${sql_dir}" "${scripts[@]}" << 'PY'
 import collections
 import os
 import re
 import sys
+
+# The canon's one writer of workflow commands (#1660).
+sys.path.insert(0, os.environ["ORG_MISE_DIR"])
+import workflow_command
 
 name, version, sql_dir, *paths = sys.argv[1:]
 record_path = os.environ["RECORD"]
@@ -123,8 +130,8 @@ targets = set()
 for path in paths:
     match = pattern.match(os.path.basename(path))
     if not match:
-        print(f"::error::cannot parse upgrade script name: {os.path.basename(path)}")
-        print(f"::error::expected {name}--<from>--<to>.sql")
+        workflow_command.error(f"cannot parse upgrade script name: {os.path.basename(path)}")
+        workflow_command.error(f"expected {name}--<from>--<to>.sql")
         sys.exit(1)
     edges[match.group(1)].append(match.group(2))
     released.add(match.group(1))
@@ -185,9 +192,9 @@ def read_record(path):
 
     if problems:
         for problem in problems:
-            print(f"::error::{path} {problem}")
-        print(f"::error::{path} is derived state written by the release path;")
-        print("::error::regenerate it by re-running the Release PR, never by hand")
+            workflow_command.error(f"{path} {problem}")
+        workflow_command.error(f"{path} is derived state written by the release path;")
+        workflow_command.error("regenerate it by re-running the Release PR, never by hand")
         sys.exit(1)
     return by_extension, f"{derived}, observed {observed}"
 
@@ -229,14 +236,14 @@ stranded = sorted(v for v in owes_a_path if v != version and not reaches(v))
 # noise that buries the one line that carries new information.
 for accused in stranded:
     if installable is not None and accused in installable and accused not in released:
-        print(f"::error::{name} {accused} is a target nothing was derived from,")
-        print(f"::error::but a non-draft release carries its tarballs ({provenance})")
-        print("::error::— it published, so installations on it are stranded")
+        workflow_command.error(f"{name} {accused} is a target nothing was derived from,")
+        workflow_command.error(f"but a non-draft release carries its tarballs ({provenance})")
+        workflow_command.error("— it published, so installations on it are stranded")
 
 if stranded:
-    print(f"::error::no ALTER EXTENSION UPDATE path to {version} from: {' '.join(stranded)}")
-    print(f"::error::add {sql_dir}/{name}--<from>--<to>.sql to connect them")
-    print("::error::an empty file is correct when the SQL surface did not change")
+    workflow_command.error(f"no ALTER EXTENSION UPDATE path to {version} from: {' '.join(stranded)}")
+    workflow_command.error(f"add {sql_dir}/{name}--<from>--<to>.sql to connect them")
+    workflow_command.error("an empty file is correct when the SQL surface did not change")
     sys.exit(1)
 
 # The current version must itself be an endpoint of the graph. If it is
@@ -244,25 +251,25 @@ if stranded:
 # burned predecessor produced in #816: a Release PR that derived nothing
 # and would have stranded every installation.
 if version not in released | targets:
-    print(f"::error::{name} {version} is not an endpoint of the upgrade graph")
-    print(f"::error::this release derived no upgrade script, so nothing can reach {version}")
-    print(f"::error::expected {sql_dir}/{name}--<previous>--{version}.sql")
+    workflow_command.error(f"{name} {version} is not an endpoint of the upgrade graph")
+    workflow_command.error(f"this release derived no upgrade script, so nothing can reach {version}")
+    workflow_command.error(f"expected {sql_dir}/{name}--<previous>--{version}.sql")
     sys.exit(1)
 
 # Claim exactly what was checked. Without the record the check has seen
 # no evidence about publication at all, and saying "every published
 # version" would be the same sentence #825 was filed about.
 if installable is None:
-    print(f"::notice::every {name} version a later release was derived from")
-    print(f"::notice::reaches {version}; no {record_path} here, so whether a")
-    print("::notice::target-only version published was not checked")
+    workflow_command.notice(f"every {name} version a later release was derived from")
+    workflow_command.notice(f"reaches {version}; no {record_path} here, so whether a")
+    workflow_command.notice("target-only version published was not checked")
 else:
-    print(f"::notice::every installable {name} version reaches {version}")
-    print(f"::notice::installable set recorded {provenance}")
+    workflow_command.notice(f"every installable {name} version reaches {version}")
+    workflow_command.notice(f"installable set recorded {provenance}")
 for path in sorted(paths):
     print(f"ok  {os.path.basename(path)}")
 PY
   checked=$((checked + 1))
 done
 
-echo "lint:pg-upgrade-path: ${checked} extension(s) checked"
+org_say "lint:pg-upgrade-path: ${checked} extension(s) checked"

@@ -147,6 +147,11 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Resolve the canon tree (the ref the caller pinned)
+        # Before the base check, which writes through the canon's one
+        # writer of workflow commands (#1660).
+        uses: $/.github/actions/canon
+
       - name: Verify the base images are org-approved
         # Verify-before-instantiation (#117): the digest pin says which
         # bytes; this proves the org attested those bytes as the approved
@@ -169,6 +174,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           for ref in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
             repo="${ref%%@*}"
             repo="${repo%%:*}"
@@ -180,11 +187,8 @@ jobs:
               --signer-workflow monumental-archive/.github/.github/workflows/base-attest.yml \
               --deny-self-hosted-runners \
               > /dev/null
-            echo "::notice::approved base: ${ref}"
+            org_notice "approved base: ${ref}"
           done
-      - name: Resolve the canon tree (the ref the caller pinned)
-        uses: $/.github/actions/canon
-
       - name: Resolve the caller's build-input pins
         # rust, cargo-pgrx and cargo-auditable come from the caller's mise
         # config, like every build input, read by the canon's one reader
@@ -202,24 +206,7 @@ jobs:
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: |
-          set -euo pipefail
-          manifest=$(python3 -c '
-          import sys, tomllib
-          with open("'"${UNTRUSTED_CRATE_DIR}"'/Cargo.toml", "rb") as f:
-              t = tomllib.load(f)
-          v = t.get("package", {}).get("version")
-          if isinstance(v, dict):
-              # version.workspace = true
-              with open("Cargo.toml", "rb") as f:
-                  w = tomllib.load(f)
-              v = w["workspace"]["package"]["version"]
-          print(v)
-          ')
-          if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
-            echo "::error::tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
-            exit 1
-          fi
+        run: .org-canon/release/pgrx/tag-version.sh
       - name: Refuse a control file that strands existing installations
         # The backstop for a tag minted around the Release PR's derived
         # upgrade path: release/pgrx/previous_release.py, which reads the
@@ -244,22 +231,7 @@ jobs:
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: |
-          set -euo pipefail
-          epoch=$(git log -1 --pretty=%ct)
-          mkdir -p /tmp/out
-          pgrx=$(realpath .org-canon/release/pgrx)
-          docker run --rm \
-            --env PG --env RUST_VERSION --env PGRX_VERSION --env AUDITABLE_VERSION \
-            --env BUILD_IMAGE \
-            --env VERSION="${UNTRUSTED_VERSION}" \
-            --env CRATE_DIR="${UNTRUSTED_CRATE_DIR}" \
-            --env SOURCE_DATE_EPOCH="${epoch}" \
-            --volume "${PWD}:/src:ro" \
-            --volume "${pgrx}:/pgrx:ro" \
-            --volume /tmp/out:/out \
-            "${BUILD_IMAGE}" \
-            bash /pgrx/build-root.sh
+        run: .org-canon/release/pgrx/build-in-container.sh
       - name: Assert the glibc floor
         # readelf over the packaged library, against the mapping's floor
         # (release/pgrx/glibc-floor.sh).
@@ -273,6 +245,7 @@ jobs:
         run: |
           set -euo pipefail
           pgrx=$(realpath .org-canon/release/pgrx)
+          wc=$(realpath .org-canon/mise/workflow-command.sh)
           for image in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
             docker run --rm \
               --env PG \
@@ -280,6 +253,8 @@ jobs:
               --volume /tmp/out/pkgroot:/pkgroot:ro \
               --volume "${PWD}:/src:ro" \
               --volume "${pgrx}:/pgrx:ro" \
+              --volume "${wc}:/opt/org/workflow-command.sh:ro" \
+              --env ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh \
               "${image}" \
               bash /pgrx/smoke.sh
           done
@@ -298,22 +273,7 @@ jobs:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          prev=$("${ORG_PYTHON}" .org-canon/release/pgrx/previous_release.py fetch \
-            --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
-            --crate-dir "${UNTRUSTED_CRATE_DIR}" --pg "${PG}" --arch "${ARCH}" --tarball /tmp/prev.tar.gz --dest /tmp/prevroot)
-          [[ -n ${prev} ]] || exit 0
-          name=$(basename "${UNTRUSTED_CRATE_DIR}" | tr '-' '_')
-          pgrx=$(realpath .org-canon/release/pgrx)
-          docker run --rm \
-            --env PG --env NAME="${name}" \
-            --env PREV="${prev}" --env NEW="${UNTRUSTED_VERSION}" \
-            --volume /tmp/prevroot/pkgroot:/prev:ro \
-            --volume /tmp/out/pkgroot:/new:ro \
-            --volume "${pgrx}:/pgrx:ro" \
-            "${SMOKE_IMAGE}" bash /pgrx/upgrade.sh
-          echo "::notice::pg${PG}/${ARCH}: ${prev} -> ${UNTRUSTED_VERSION} upgrade executed"
+        run: .org-canon/release/pgrx/upgrade-previous.sh
       - name: Archive, normalised
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}

@@ -94,14 +94,16 @@ class EveryPartPassed(unittest.TestCase):
         done = self.verdict("success", "success", "success")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
-            done.stdout, "ci: plan, gate and every pgrx leg ([16, 17]) passed\n"
+            done.stdout, "ci: plan, gate and every pgrx leg (\\[16\\,\\ 17\\]) passed\n"
         )
 
     def test_no_legs_planned_and_none_ran(self) -> None:
         """A tree with no extension skips the legs, and that is green."""
         done = self.verdict("success", "success", "skipped", "[]")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, "ci: plan, gate and every pgrx leg ([]) passed\n")
+        self.assertEqual(
+            done.stdout, "ci: plan, gate and every pgrx leg (\\[\\]) passed\n"
+        )
 
     def test_planned_legs_that_were_skipped(self) -> None:
         """A skipped required leg must not count as passing."""
@@ -109,7 +111,8 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "::error::pgrx legs were skipped although [16, 17] were planned\n",
+            "::error::pgrx legs were skipped although majors were planned\n"
+            "  planned: \\[16\\,\\ 17\\]\n",
         )
 
     def test_a_failed_plan(self) -> None:
@@ -118,21 +121,30 @@ class EveryPartPassed(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "::error::plan: failure\n::error::gate: skipped\n"
-            "::error::pgrx legs were skipped although  were planned\n",
+            "::error::a job the gate needs did not succeed\n  job plan: failure\n"
+            "::error::a job the gate needs did not succeed\n  job gate: skipped\n"
+            "::error::pgrx legs were skipped although majors were planned\n"
+            "  planned: ''\n",
         )
 
     def test_a_cancelled_gate(self) -> None:
         """The gate's result is named."""
         done = self.verdict("success", "cancelled", "success")
         self.assertEqual(done.returncode, 1, done.stderr)
-        self.assertEqual(done.stdout, "::error::gate: cancelled\n")
+        self.assertEqual(
+            done.stdout,
+            "::error::a job the gate needs did not succeed\n  job gate: cancelled\n",
+        )
 
     def test_a_failed_leg(self) -> None:
         """A leg's failure is named."""
         done = self.verdict("success", "success", "failure")
         self.assertEqual(done.returncode, 1, done.stderr)
-        self.assertEqual(done.stdout, "::error::pgrx legs: failure\n")
+        self.assertEqual(
+            done.stdout,
+            "::error::a job the gate needs did not succeed\n"
+            "  job pgrx\\ legs: failure\n",
+        )
 
 
 if __name__ == "__main__":

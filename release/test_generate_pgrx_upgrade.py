@@ -981,7 +981,10 @@ def run_header_install(
         The completed process and the arguments apt-get received.
 
     """
-    block = "\n".join(header_install(SCRIPT.read_text()))
+    # Both sites source the canon's writer of workflow commands (#1660)
+    # before this block; the cut-out block is given it the same way.
+    writer = CANON / "mise" / "workflow-command.sh"
+    block = f'. "{writer}"\n' + "\n".join(header_install(SCRIPT.read_text()))
     with TemporaryDirectory() as d:
         tmp = Path(d)
         stubs = tmp / "bin"
@@ -1032,8 +1035,10 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
                 self.assertIn(HEADER_PIN, block)
                 self.assertIn(SERVER_UNCHANGED, block)
                 self.assertNotIn('"postgresql-server-dev-${PG}" ', text)
-        # The image the remedy names reaches each container.
-        for site in (SCRIPT, WORKFLOW):
+        # The image the remedy names reaches each container: the build
+        # leg's docker run is release/pgrx/build-in-container.sh (#1660).
+        container = CANON / "release" / "pgrx" / "build-in-container.sh"
+        for site in (SCRIPT, container):
             with self.subTest(env=site.name):
                 self.assertIn("--env BUILD_IMAGE", site.read_text())
 
@@ -1444,6 +1449,10 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
             (rows / "fresh").write_text(fresh, encoding="utf-8")
             (root / "work" / "snapshot.sql").write_text(
                 snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
+            )
+            # The writer the real run copies into /work (#1660).
+            (root / "work" / "workflow-command.sh").write_bytes(
+                (CANON / "mise" / "workflow-command.sh").read_bytes()
             )
             script = proof_sh(SCRIPT.read_text())
             # One pass, never a replace() per prefix: on Linux the scratch

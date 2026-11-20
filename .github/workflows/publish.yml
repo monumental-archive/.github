@@ -337,9 +337,11 @@ jobs:
           UNTRUSTED_BINARY_CRATE: ${{ inputs.binary-crate }}
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           if [[ ${GITHUB_REF} != refs/tags/v* ]]; then
-            echo "::error::publish runs on v* tags only, got ${GITHUB_REF}"
-            echo "::error::dispatching from a branch would attest a moving pointer"
+            org_error "publish runs on v* tags only, got ${GITHUB_REF}"
+            org_error "dispatching from a branch would attest a moving pointer"
             exit 1
           fi
           out=$(stele derive classes --policy .org-canon/slsa/assert-policy.json \
@@ -347,9 +349,9 @@ jobs:
           version="${GITHUB_REF#refs/tags/v}"
           printf 'version=%s\n%s\n' "${version}" "${out}" >> "${GITHUB_OUTPUT}"
           commas="${UNTRUSTED_CLASSES//[^,]/}"
-          echo "::notice::publishing $((${#commas} + 1)) class(es) at version ${version}"
+          org_notice "publishing $((${#commas} + 1)) class(es) at version ${version}"
           declared=$(sed -n 's/^classes=//p' <<< "${out}")
-          echo "::notice::the evidence declares ${declared}"
+          org_notice "the evidence declares ${declared}"
   # Every fact the image classes will assert — OCI annotations and config
   # labels — is resolved HERE, once, before anything is built, and the
   # builds consume the map without deriving anything. One resolution per

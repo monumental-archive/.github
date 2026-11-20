@@ -6,6 +6,10 @@
 # at /out. Root installs the headers, sets the floor, hands the tree to
 # the unprivileged postgres user and becomes it (/pgrx/build.sh).
 set -euo pipefail
+# The canon's one writer of workflow commands (#1660): the copy the
+# container run mounts and names, or this tree's own on the runner.
+# shellcheck source=mise/workflow-command.sh
+. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
 # The docker run line's environment.
 : "${PG:?}"
 : "${BUILD_IMAGE:?}"
@@ -22,7 +26,7 @@ if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; th
   msg="image ${BUILD_IMAGE} carries server ${server}; the apt repository"
   msg+=" no longer serves its headers — move the image pin in"
   msg+=" docker/pgrx-base-images.toml"
-  echo "::error::${msg}"
+  org_error "${msg}"
   exit 1
 fi
 apt-get install -y -qq --no-install-recommends \
@@ -30,7 +34,7 @@ apt-get install -y -qq --no-install-recommends \
   ca-certificates curl pkg-config libclang-dev git
 after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 [[ ${after} == "${server}" ]] || {
-  echo "::error::the build moved the server from ${server} to ${after}"
+  org_error "the build moved the server from ${server} to ${after}"
   exit 1
 }
 # The floor this build sets: the server it compiles against, up to its
@@ -38,7 +42,7 @@ after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 # form (180007).
 export FLOOR_XY="${server%%-*}"
 if [[ ! ${FLOOR_XY} =~ ^[0-9]+\.[0-9]+$ ]]; then
-  echo "::error::server ${server} does not start with a major.minor version"
+  org_error "server ${server} does not start with a major.minor version"
   exit 1
 fi
 export FLOOR_NUM=$((${FLOOR_XY%%.*} * 10000 + ${FLOOR_XY#*.}))
@@ -53,5 +57,5 @@ chown -R postgres:postgres /build /out \
   "$(/usr/bin/pg_config --pkglibdir)" \
   "$(/usr/bin/pg_config --sharedir)/extension"
 keep=PG,VERSION,CRATE_DIR,RUST_VERSION,PGRX_VERSION,AUDITABLE_VERSION,SOURCE_DATE_EPOCH
-keep+=,FLOOR_XY,FLOOR_NUM
+keep+=,FLOOR_XY,FLOOR_NUM,ORG_WORKFLOW_COMMAND
 exec su -w "${keep}" postgres -s /bin/bash /pgrx/build.sh

@@ -137,8 +137,9 @@ class LinkTheCanonTree(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
             done.stdout,
-            f"::error::resolved canon tree at '{root}' has no mise/config.toml"
-            " — not a canon tree\n",
+            "::error::the resolved canon tree has no mise/config.toml or"
+            " mise/workflow-command.sh — not a canon tree\n"
+            f"  resolved: {root}\n",
         )
         self.assertEqual(self.output.read_text(encoding="utf-8"), "")
         self.assertIsNone(self.linked())

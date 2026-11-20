@@ -151,9 +151,11 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           majors=$(.org-canon/mise/pgrx-plan.sh .org-canon)
           echo "majors=${majors}" >> "${GITHUB_OUTPUT}"
-          echo "::notice::pgrx legs planned: ${majors}"
+          org_notice "pgrx legs planned: ${majors}"
   # Everything the gate runs except the extension's own suite, which the
   # `pgrx` legs below run one major each. This was the job named `ci`;
   # that name now belongs to the final job, because `ci / ci` is the one
@@ -758,14 +760,16 @@ jobs:
             [[ ${result} != success ]] || continue
             if [[ ${name} == "pgrx legs" && ${result} == skipped ]]; then
               [[ ${MAJORS} != "[]" ]] || continue
-              echo "::error::pgrx legs were skipped although ${MAJORS} were planned"
+              # No canon tree in this job: one printf, whose format is a literal
+              # command and a literal label; the outside text is a %q argument (#1660).
+              printf '::error::pgrx legs were skipped although majors were planned\n  planned: %q\n' "${MAJORS}"
             else
-              echo "::error::${name}: ${result}"
+              printf '::error::a job the gate needs did not succeed\n  job %q: %q\n' "${name}" "${result}"
             fi
             status=1
           done
           [[ ${status} -eq 0 ]] || exit 1
-          echo "ci: plan, gate and every pgrx leg (${MAJORS}) passed"
+          printf 'ci: plan, gate and every pgrx leg (%q) passed\n' "${MAJORS}"
   # The badge feed, never the gate: uploads the coverage reports the
   # gate's own coverage:check wrote to Codecov, on pushes to main.
   # Separate job so the required check stays deterministic; skips clean
@@ -833,7 +837,7 @@ jobs:
               echo "::error::the gate's coverage-reports artifact holds no report"
               exit 1
             fi
-            echo "upload ${files}"
+            printf 'upload %q\n' "${files}"
           fi
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
       # fail_ci_if_error: TRUE, deliberately. The job is

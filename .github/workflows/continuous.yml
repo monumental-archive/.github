@@ -131,10 +131,14 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ${GITHUB_REF} == refs/tags/* ]]; then
-            echo "::error::continuous publishes from branches and schedules only, got ${GITHUB_REF}"
+            # No canon tree in this job: the command is a literal, and the
+            # outside text follows on a plain line, never at its start (#1660).
+            echo "::error::continuous publishes from branches and schedules only"
+            printf '  ref: %q\n' "${GITHUB_REF}"
             exit 1
           fi
-          echo "::notice::continuous publish from ${GITHUB_REF}"
+          echo "::notice::continuous publish"
+          printf '  ref: %q\n' "${GITHUB_REF}"
   # Same resolver, same rules as the versioned facts job in publish.yml —
   # the archetype difference is one flag: the continuous map simply never
   # contains `version`, because this stream has none. It runs no caller
@@ -316,20 +320,7 @@ jobs:
         # that will not parse cannot be judged. trivy stamps the
         # document name with the reference it was given, so the product
         # id IS the digest a consumer pulls — derived, never composed.
-        run: |
-          set -euo pipefail
-          image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          mkdir -p dist && subjects=""
-          for arch in amd64 arm64; do
-            digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
-            [[ ${digest} =~ ^sha256:[0-9a-f]{64}$ ]] \
-              || { echo "::error::no ${arch} digest to inventory; refusing to decide about a partial image" && exit 1; }
-            trivy image --config /dev/null --format spdx-json --output "dist/${arch}.spdx.json" "${image}@${digest}"
-            subjects="${subjects}${subjects:+,}$(jq -r '.name' "dist/${arch}.spdx.json")=dist/${arch}.spdx.json"
-          done
-          stele assert inventory dist/amd64.spdx.json dist/arm64.spdx.json
-          echo "subjects=${subjects}" >> "${GITHUB_OUTPUT}"
+        run: .org-canon/release/inventory-digests.sh
       - name: Derive this publish's VEX and gate on undecided advisories
         id: vex
         # The release path's leg, unchanged in policy and in tool
@@ -515,6 +506,8 @@ jobs:
         id: pulled
         run: |
           set -euo pipefail
+          # The canon's one writer of workflow commands (#1660).
+          . .org-canon/mise/workflow-command.sh
           # The same read `sbom` makes of the same artifact, and the
           # same refusal: a missing digest here means we are about to
           # decide about a partial image, which is the one thing this
@@ -525,7 +518,7 @@ jobs:
           for arch in amd64 arm64; do
             digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
             if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::no ${arch} digest at the commit point; refusing to sign about a partial image"
+              org_error "no ${arch} digest at the commit point; refusing to sign about a partial image"
               exit 1
             fi
             echo "${arch}=${digest}" >> "${GITHUB_OUTPUT}"
