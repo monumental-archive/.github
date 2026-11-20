@@ -44,7 +44,7 @@ makes: a skip, or a planted "tool missing". No test calls
 
 A test calls a helper's `main` in its own process here too (#1673):
 
-    done = hermetic.call_main(helper.main, ["--flag"], env=env, cwd=tree)
+    done = hermetic.call_main(lambda: helper.main(["--flag"]), env=env, cwd=tree)
 
 The environment, working directory and standard input a script row
 handed the child are this process's for the call, then restored, so
@@ -271,20 +271,22 @@ class Called:
 
 
 def call_main(
-    main: Callable[[list[str]], int],
-    argv: list[str],
+    run: Callable[[], int],
     *,
     env: dict[str, str] | None = None,
     cwd: Path | str | None = None,
     stdin: str = "",
 ) -> Called:
-    """Call a helper's `main(argv)` in this process, as a script row ran it.
+    """Call a helper's `main` in this process, as a script row ran it.
 
-    `env`, when given, IS the process environment for the call (the
-    variables a child would have had, built with `env()`); `cwd` the
-    working directory; `stdin` what the child would have read. Each is
-    restored afterwards. A `SystemExit` (argparse's usage error, or a
-    helper that exits) is the status, as it would be for a child.
+    `run` makes the call, written out in the test (`lambda:
+    helper.main([...])`), so the call is the test's own and
+    `lint:in-process` reads it there (#1673). `env`, when given, IS the
+    process environment for the call (the variables a child would have
+    had, built with `env()`); `cwd` the working directory; `stdin` what
+    the child would have read. Each is restored afterwards. A
+    `SystemExit` (argparse's usage error, or a helper that exits) is the
+    status, as it would be for a child.
 
     Returns:
         The status and what was written to each stream.
@@ -300,7 +302,7 @@ def call_main(
         stack.enter_context(contextlib.redirect_stdout(out))
         stack.enter_context(contextlib.redirect_stderr(err))
         try:
-            status = main(argv)
+            status = run()
         except SystemExit as exc:
             code = exc.code
             status = code if isinstance(code, int) else (0 if code is None else 1)

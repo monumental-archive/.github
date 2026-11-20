@@ -195,15 +195,14 @@ def check(
             check=True,
         ).stdout
         return hermetic.call_main(
-            lock_platforms.main,
-            [
+            lambda: lock_platforms.main([
                 "--defaults",
                 str(DEFAULTS),
                 "--config",
                 "mise.toml",
                 "--lock",
                 "mise.lock",
-            ],
+            ]),
             cwd=root,
             stdin=listing,
         )

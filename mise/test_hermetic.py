@@ -1007,7 +1007,10 @@ class CallMain(unittest.TestCase):
             where.mkdir()
             before = (dict(os.environ), Path.cwd(), sys.stdin)
             done = hermetic.call_main(
-                _echo_main, ["3"], env={"PLANTED": "yes"}, cwd=where, stdin="data"
+                lambda: _echo_main(["3"]),
+                env={"PLANTED": "yes"},
+                cwd=where,
+                stdin="data",
             )
             after = (dict(os.environ), Path.cwd(), sys.stdin)
         self.assertEqual(
@@ -1017,15 +1020,17 @@ class CallMain(unittest.TestCase):
 
     def test_a_system_exit_is_the_status(self) -> None:
         """An exit code, or a message, as a child's would be."""
-        self.assertEqual(4, hermetic.call_main(_echo_main, ["exit", "4"]).returncode)
-        refused = hermetic.call_main(_echo_main, ["refuse"])
+        self.assertEqual(
+            4, hermetic.call_main(lambda: _echo_main(["exit", "4"])).returncode
+        )
+        refused = hermetic.call_main(lambda: _echo_main(["refuse"]))
         self.assertEqual(1, refused.returncode)
         self.assertTrue(refused.stderr.endswith("refused by name\n"), refused.stderr)
 
     def test_no_env_leaves_the_environment_as_it_is(self) -> None:
         """Without `env`, the call sees this process's own variables."""
         with mock.patch.dict(os.environ, {"PLANTED": "kept"}):
-            done = hermetic.call_main(_echo_main, ["0"])
+            done = hermetic.call_main(lambda: _echo_main(["0"]))
         self.assertIn("env=kept", done.stdout)
 
 

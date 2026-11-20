@@ -187,7 +187,9 @@ class Escapes(unittest.TestCase):
             written(lambda: workflow_command.group("log\n::error::x")),
             "::group::log%0A::error::x\n",
         )
-        self.assertEqual(written(workflow_command.endgroup), "::endgroup::\n")
+        self.assertEqual(
+            written(lambda: workflow_command.endgroup(stream=None)), "::endgroup::\n"
+        )
 
     def test_the_stream_is_the_callers(self) -> None:
         """stream= takes the line, and stdout gets nothing."""

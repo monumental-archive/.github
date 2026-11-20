@@ -17,13 +17,16 @@ refuse looks precisely like success.
 
 import io
 import json
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr
 from pathlib import Path
 from typing import ClassVar
 
 import biome_config
+import hermetic
 
 BELT = Path(__file__).parent
 DOMAINS_FILE = BELT / "biome-domains.tsv"
@@ -669,19 +672,35 @@ class RunTest(unittest.TestCase):
             path.write_text(json.dumps(content), encoding="utf-8")
             paths.append(path)
         out = tree / "generated.json"
+        done = hermetic.call_main(
+            lambda: biome_config.main([
+                *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
+                *("--nursery", str(NURSERY_FILE), "--out", str(out)),
+                *("--declaration", str(declared)),
+            ]),
+            stdin="".join(f"{path}\n" for path in paths),
+        )
+        return done.returncode, done.stdout, done.stderr, out
 
-        class Args:
-            org = ORG_FILE
-            domains = DOMAINS_FILE
-            nursery = NURSERY_FILE
-
-        args = Args()
-        args.out = out
-        args.declaration = declared
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            status = biome_config.run(args, paths)
-        return status, stdout.getvalue(), stderr.getvalue(), out
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it reads its flags and stdin and writes."""
+        tree = Path(tempfile.mkdtemp())
+        out = tree / "generated.json"
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [
+                *(sys.executable, str(BELT / "biome_config.py")),
+                *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
+                *("--nursery", str(NURSERY_FILE), "--out", str(out)),
+                *("--declaration", str(tree / "biome.json")),
+            ],
+            env=hermetic.env(),
+            input="",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertTrue(out.is_file())
 
     def test_an_org_config_it_cannot_read_is_refused_by_name(self) -> None:
         """Not JSON, or a linter / rules / nursery not an object: named."""

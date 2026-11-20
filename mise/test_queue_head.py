@@ -190,7 +190,7 @@ def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.C
 
     """
     return hermetic.call_main(
-        queue_head.main, [], env=step_env(ref, base, group), cwd=cwd
+        lambda: queue_head.main([]), env=step_env(ref, base, group), cwd=cwd
     )
 
 
