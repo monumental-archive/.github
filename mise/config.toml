@@ -1986,8 +1986,8 @@ if [[ -n ${bad} ]]; then
   echo "  name it with underscores in place of the hyphens" >&2
   exit 1
 fi
-# shellcheck disable=SC2086  # the file list is newline-separated on purpose
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/python_roots.py" "${ORG_BELT_DIR}" ${files} > /dev/null || {
+IFS=$'\n' read -r -d '' -a args < <(printf '%s\0' "${files}")
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/python_roots.py" "${ORG_BELT_DIR}" "${args[@]}" > /dev/null || {
   echo "lint:python-module-names: rename one of each pair above so every module name is one file's" >&2
   exit 1
 }
