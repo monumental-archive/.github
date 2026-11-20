@@ -27,11 +27,11 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
-import json
 import re
 import unittest
 from pathlib import Path
 
+import decoded
 from subject_budget import JS_GROUP
 
 PRESET = Path(__file__).resolve().parent.parent / "default.json"
@@ -80,17 +80,17 @@ ICU_ONE = (
 )
 
 
-def preset() -> dict:
-    """Read default.json as Renovate would.
+def preset() -> dict[str, object]:
+    """Read default.json through the canon's one decoder (#1676).
 
     Returns:
         The parsed preset.
 
     """
-    return json.loads(PRESET.read_text(encoding="utf-8"))
+    return decoded.as_object(decoded.load_json(PRESET.read_bytes()), "default.json")
 
 
-def manager(dep: str) -> dict:
+def manager(dep: str) -> dict[str, object]:
     """Find the regex manager over mise.toml that names `dep`.
 
     Returns:
@@ -100,10 +100,11 @@ def manager(dep: str) -> dict:
         AssertionError: when the preset carries no such manager.
 
     """
-    for m in preset().get("customManagers", []):
-        if MISE_FILES in m.get("managerFilePatterns", []) and (
-            m.get("depNameTemplate") == dep
-        ):
+    managers = decoded.as_array(preset().get("customManagers", []), "customManagers")
+    for i, raw in enumerate(managers):
+        m = decoded.as_object(raw, f"customManagers[{i}]")
+        files = decoded.as_array(m.get("managerFilePatterns", []), "patterns")
+        if MISE_FILES in files and m.get("depNameTemplate") == dep:
             return m
     msg = f"default.json: no regex manager over mise.toml names {dep}"
     raise AssertionError(msg)
@@ -126,7 +127,9 @@ def compiled(pattern: str) -> re.Pattern[str]:
     return re.compile(JS_GROUP.sub("(?P<", pattern))
 
 
-def recursive(patterns: list[str], content: str, groups: dict) -> list[dict]:
+def recursive(
+    patterns: list[str], content: str, groups: dict[str, str]
+) -> list[dict[str, str]]:
     """Run matchStrings the way Renovate's `recursive` strategy does.
 
     Returns:
@@ -136,7 +139,7 @@ def recursive(patterns: list[str], content: str, groups: dict) -> list[dict]:
     if not patterns:
         return [groups]
     head, rest = compiled(patterns[0]), patterns[1:]
-    out: list[dict] = []
+    out: list[dict[str, str]] = []
     for match in head.finditer(content):
         taken = {k: v for k, v in match.groupdict().items() if v is not None}
         out.extend(recursive(rest, match.group(0), {**groups, **taken}))
@@ -151,7 +154,9 @@ def versions(dep: str, content: str) -> list[str]:
 
     """
     m = manager(dep)
-    return [g["currentValue"] for g in recursive(m["matchStrings"], content, {})]
+    raw = decoded.as_array(m["matchStrings"], "matchStrings")
+    patterns = [decoded.as_str(p, "matchStrings[]") for p in raw]
+    return [g["currentValue"] for g in recursive(patterns, content, {})]
 
 
 class Managers(unittest.TestCase):
@@ -191,7 +196,9 @@ class Managers(unittest.TestCase):
 
     def test_icu_tag_to_version(self) -> None:
         """ICU tags `release-79.1`; the lookup compares the bare version."""
-        template = compiled(manager(ICU)["extractVersionTemplate"])
+        template = compiled(
+            decoded.as_str(manager(ICU)["extractVersionTemplate"], "template")
+        )
         found = template.search("release-79.1")
         self.assertIsNotNone(found)
         self.assertEqual(found.group("version") if found else None, "79.1")
@@ -207,17 +214,19 @@ class Rules(unittest.TestCase):
     """Postgres moves as one set, each entry inside its own major."""
 
     @staticmethod
-    def rules(name: str) -> list[dict]:
+    def rules(name: str) -> list[dict[str, object]]:
         """Every packageRule that names `name` in matchPackageNames.
 
         Returns:
             The rules, in preset order.
 
         """
+        raw = decoded.as_array(preset()["packageRules"], "packageRules")
+        rules = [decoded.as_object(r, "packageRules[]") for r in raw]
         return [
             r
-            for r in preset()["packageRules"]
-            if name in r.get("matchPackageNames", [])
+            for r in rules
+            if name in decoded.as_array(r.get("matchPackageNames", []), "names")
         ]
 
     def test_postgres_grouped(self) -> None:
