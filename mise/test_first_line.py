@@ -61,11 +61,8 @@ class FirstLineOfALongListing(unittest.TestCase):
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
             # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
-            # ruff: ignore[subprocess-without-shell-equals-true]
-            listing = subprocess.run(
-                [GIT, "ls-files"], cwd=tree, env=env, capture_output=True, check=True
-            )
-            self.assertGreater(len(listing.stdout), 8 * 65536)
+            listing = "".join(f"{name}\n" for name in hermetic.tracked(tree))
+            self.assertGreater(len(listing.encode()), 8 * 65536)
             # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [BASH, "-euo", "pipefail", "-c", body()],

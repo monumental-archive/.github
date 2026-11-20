@@ -6,7 +6,8 @@ only if INHERITED or a named tool extension names it; a row's override
 always does. Its reader names the files a tree tracks, from a checkout
 or from a gitignored copy of the tree inside it (#1618). The law: no
 test file in the four discovery roots builds a fixture's environment by
-copying the caller's, or lists the canon's tree with `git ls-files`.
+copying the caller's, or asks git for a plain listing of what a tree
+tracks instead of calling hermetic.tracked (#1618).
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
@@ -433,76 +434,39 @@ def listed_test_files() -> list[str]:
     )
 
 
-def rooted_names(module: ast.Module) -> set[str]:
-    """Name every variable that is the canon's tree or a path in it.
-
-    A name is rooted when what is assigned to it reads `__file__` or
-    another rooted name: `HERE = Path(__file__).parent`, `CANON =
-    HERE.parent`, a row's `root = _HERE.parent`.
-
-    Returns:
-        The rooted names, at every scope.
-
-    """
-    assigned: list[tuple[set[str], ast.AST]] = []
-    for node in ast.walk(module):
-        if isinstance(node, ast.Assign):
-            targets = {
-                n.id
-                for t in node.targets
-                for n in ast.walk(t)
-                if isinstance(n, ast.Name)
-            }
-            assigned.append((targets, node.value))
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            assigned.append((
-                {n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)},
-                node.value,
-            ))
-    rooted = {"__file__"}
-    grew = True
-    while grew:
-        grew = False
-        for targets, value in assigned:
-            if (
-                targets - rooted
-                and {n.id for n in ast.walk(value) if isinstance(n, ast.Name)} & rooted
-            ):
-                rooted |= targets
-                grew = True
-    return rooted
+# What `ls-files` may carry and still be a plain listing of what a tree
+# tracks (#1618): `hermetic.tracked`'s own question. Any other option
+# asks git something else (`--others`, `--modified`, `--stage`, ...).
+PLAIN_LISTING = frozenset({"-z", "--full-name", "--"})
 
 
-def lists_the_tree(source: str) -> bool:
-    """Say whether a test file runs `git ls-files` in the canon's tree.
+def plain_listings(source: str) -> list[int]:
+    """Find every line where a test asks git for the files a tree tracks.
 
-    A call whose argument list holds `"ls-files"` lists the tree when
-    its `cwd=`, or the argument after `-C`, reads a rooted name. A
-    listing in a scratch repository the row built reads no rooted name
-    and is not judged.
+    The law asks what the listing is, not whose tree it is (#1618's
+    amendment): an argument list holding `ls-files` whose later words
+    are all pathspecs, `-z`, `--full-name` or `--` is a plain listing,
+    and a test makes it through `hermetic.tracked(root, ...)` whatever
+    the root: the canon, a parameter, a scratch repository. The list is
+    read wherever it is written: a process start, a name, the argument
+    of a file's own `git()` wrapper.
 
     Returns:
-        True when some call lists the canon's tree directly.
+        The line of each plain listing, sorted.
 
     """
-    module = ast.parse(source)
-    rooted = rooted_names(module)
-
-    def reads_rooted(node: ast.AST) -> bool:
-        return any(isinstance(n, ast.Name) and n.id in rooted for n in ast.walk(node))
-
-    for call in (n for n in ast.walk(module) if isinstance(n, ast.Call)):
-        for arg in call.args:
-            if not isinstance(arg, (ast.List, ast.Tuple)):
-                continue
-            words = [e.value if isinstance(e, ast.Constant) else None for e in arg.elts]
-            if "ls-files" not in words:
-                continue
-            where = [kw.value for kw in call.keywords if kw.arg == "cwd"]
-            where += [arg.elts[i + 1] for i, w in enumerate(words[:-1]) if w == "-C"]
-            if any(reads_rooted(w) for w in where):
-                return True
-    return False
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            continue
+        words = [e.value if isinstance(e, ast.Constant) else None for e in node.elts]
+        if "ls-files" not in words:
+            continue
+        after = words[words.index("ls-files") + 1 :]
+        options = [w for w in after if isinstance(w, str) and w.startswith("-")]
+        if all(w in PLAIN_LISTING for w in options):
+            found.add(node.lineno)
+    return sorted(found)
 
 
 def which_calls(source: str) -> list[int]:
@@ -971,29 +935,44 @@ class TheLaw(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(list[int](), which_calls(source))
 
-    def test_no_test_file_lists_the_canons_tree_directly(self) -> None:
-        """Every listing of the canon's own tree goes through tracked (#1618)."""
+    def test_no_test_file_asks_git_for_a_plain_listing(self) -> None:
+        """Every listing of what a tree tracks goes through tracked (#1618)."""
         offenders = [
-            path
+            f"{path}:{line}"
             for path in listed_test_files()
-            if lists_the_tree((CANON / path).read_text(encoding="utf-8"))
+            for line in plain_listings((CANON / path).read_text(encoding="utf-8"))
         ]
         self.assertEqual([], offenders)
 
-    def test_the_law_sees_each_way_a_test_lists_the_tree(self) -> None:
-        """Planted: `cwd=`, `-C` and a row-local root are found; a scratch is not."""
-        head = "HERE = Path(__file__).parent\nCANON = HERE.parent\n"
-        planted = {
-            "cwd": head + 'run([GIT, "ls-files"], cwd=CANON)\n',
-            "dash-C": head + 'run([GIT, "-C", str(CANON), "ls-files"])\n',
-            "local": head + "def f():\n    root = HERE.parent\n"
-            '    run([GIT, "ls-files", "*.py"], cwd=root)\n',
+    def test_each_plain_listing_is_refused_whatever_the_root(self) -> None:
+        """Planted: the parameter that leaked, cwd=, -C, a scratch tree, a wrapper."""
+        refused = {
+            "a parameter": (
+                "def judge(root):\n"
+                '    run([GIT, "-C", str(root), "ls-files", "--", "*.py"])\n'
+            ),
+            "cwd": 'run([GIT, "ls-files"], cwd=CANON)\n',
+            "-C": 'run([GIT, "-C", str(CANON), "ls-files", "-z", "*.sh"])\n',
+            "a scratch tree": 'tree = make()\nrun([GIT, "ls-files"], cwd=tree)\n',
+            "a wrapper": 'files = git(["ls-files"], linked, home)\n',
+            "a name": 'argv = (GIT, "ls-files", "--full-name")\nrun(argv)\n',
         }
-        for name, source in planted.items():
+        lines = {"a parameter": [2], "a scratch tree": [2]}
+        for name, source in refused.items():
             with self.subTest(name):
-                self.assertTrue(lists_the_tree(source))
-        scratch = head + 'tree = make()\nrun([GIT, "ls-files"], cwd=tree)\n'
-        self.assertFalse(lists_the_tree(scratch))
+                self.assertEqual(lines.get(name, [1]), plain_listings(source))
+        allowed = {
+            "another question": (
+                'run([GIT, "ls-files", "--others", "--modified",'
+                ' "--exclude-standard"])\n'
+            ),
+            "the index": 'run([GIT, "ls-files", "--stage", "a"])\n',
+            "tracked": 'hermetic.tracked(tree, "*.py")\n',
+            "text": 'X = "git ls-files"\n',
+        }
+        for name, source in allowed.items():
+            with self.subTest(name):
+                self.assertEqual(list[int](), plain_listings(source))
 
 
 if __name__ == "__main__":

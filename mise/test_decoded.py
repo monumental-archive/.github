@@ -22,7 +22,6 @@ gate as `mise run test`.
 
 import ast
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import unittest
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -33,7 +32,6 @@ import hermetic
 
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
-GIT = hermetic.tool("git")
 DEEP = 100_000
 # A raising reader: a decoded value and where it came from.
 Reader = Callable[[object, str], object]
@@ -205,14 +203,7 @@ def judge(root: Path) -> list[str]:
         listed file that no longer parses.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    listed = subprocess.run(
-        [GIT, "-C", str(root), "ls-files", "--", "*.py"],
-        capture_output=True,
-        text=True,
-        check=True,
-        env=hermetic.env(),
-    ).stdout.split()
+    listed = hermetic.tracked(root, "*.py")
     out: list[str] = []
     for path in listed:
         if path == LOADER:
