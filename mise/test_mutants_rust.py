@@ -571,11 +571,10 @@ class Pgrx(Planted):
         self.plant(package("ext", str(self.tree), default=["pg18"]))
         done, log = self.run_leg(PLANT_ICU_CHECK="1")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: ext at pg18: no ICU headers for it are pinned (above)", *RED],
-        )
-        self.assertEqual([c for c in log if c.startswith("cargo mutants")], [])
+        want = [f"{LABEL}: ext at pg18: no ICU headers for it are pinned (above)", *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
+        mutated = [c for c in log if c.startswith("cargo mutants")]
+        self.assertEqual(mutated, list[str]())
 
 
 class Shards(Planted):
