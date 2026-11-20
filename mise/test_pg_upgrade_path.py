@@ -54,6 +54,7 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
 import hermetic
 
@@ -188,8 +189,17 @@ class Tree:
         )
 
 
-@unittest.skipUnless(CARGO, "cargo resolves the crate version the guard reads")
-class TheOpenQuestion(unittest.TestCase):
+class NeedsCargo(unittest.TestCase):
+    """Rows the guard answers by resolving the crate version with cargo."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip the row where cargo is not on PATH."""
+        if not CARGO:
+            self.skipTest("cargo resolves the crate version the guard reads")
+
+
+class TheOpenQuestion(NeedsCargo):
     """A target-only version: burned dead end, or stranded installation."""
 
     def test_a_recorded_installable_target_only_version_reds(self) -> None:
@@ -257,8 +267,7 @@ class TheOpenQuestion(unittest.TestCase):
         self.assertIn("1.0.0", result.stdout)
 
 
-@unittest.skipUnless(CARGO, "cargo resolves the crate version the guard reads")
-class TheInterimPath(unittest.TestCase):
+class TheInterimPath(NeedsCargo):
     """No record: the question is open and the guard has to say so."""
 
     def test_no_record_states_the_question_instead_of_closing_it(self) -> None:
@@ -288,8 +297,7 @@ class TheInterimPath(unittest.TestCase):
         self.assertIn("if it did, installations on it are stranded", result.stdout)
 
 
-@unittest.skipUnless(CARGO, "cargo resolves the crate version the guard reads")
-class DerivedStateIsHeldToItsRecord(unittest.TestCase):
+class DerivedStateIsHeldToItsRecord(NeedsCargo):
     """A record that cannot be trusted reds; it is never quietly repaired."""
 
     def test_a_record_without_provenance_is_refused(self) -> None:
@@ -311,8 +319,7 @@ class DerivedStateIsHeldToItsRecord(unittest.TestCase):
         self.assertIn("is named twice", result.stdout)
 
 
-@unittest.skipUnless(CARGO, "cargo resolves the crate version the guard reads")
-class StillSkipsAndStillCatches(unittest.TestCase):
+class StillSkipsAndStillCatches(NeedsCargo):
     """The behaviour #825 must not have cost, in both directions."""
 
     def test_a_repo_with_no_control_file_skips_clean(self) -> None:

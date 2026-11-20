@@ -31,6 +31,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import decoded
 import hermetic
@@ -136,8 +137,8 @@ ADD = "core/ReplaceBinaryOperator_Add_Sub"
 NUM = "core/NumberReplacer"
 MUL = "core/ReplaceBinaryOperator_Mul_Add"
 # What each planted mutant does to the file.
-KILLS = {"replace": ["x + 1", "x - 1"]}
-SURVIVES = {"replace": ["return x + 1", "return (x + 1)"]}
+KILLS: dict[str, object] = {"replace": ["x + 1", "x - 1"]}
+SURVIVES: dict[str, object] = {"replace": ["return x + 1", "return (x + 1)"]}
 RED = [
     f"{LABEL}: red — kill each survivor with an assertion, or exclude it at its site",
     "  with '# pragma: no mutate -- <why the mutant is equivalent>'",
@@ -152,7 +153,7 @@ def work_item(path: str, operator: str, occurrence: int, line: int, name: str) -
         The JSON line.
 
     """
-    spec = {
+    spec: dict[str, object] = {
         "module_path": path,
         "operator_name": operator,
         "occurrence": occurrence,
@@ -161,10 +162,11 @@ def work_item(path: str, operator: str, occurrence: int, line: int, name: str) -
         "operator_args": {},
         "definition_name": name,
     }
-    return json.dumps([
+    item: list[object] = [
         {"job_id": f"{path}-{operator}-{occurrence}", "mutations": [spec]},
         None,
-    ])
+    ]
+    return json.dumps(item)
 
 
 def calls(*mutants: tuple[str, str, int]) -> list[str]:
@@ -263,6 +265,7 @@ def judged(*mutants: tuple[str, str, int]) -> list[str]:
 class Planted(unittest.TestCase):
     """A planted tree and a stand-in cosmic-ray; the rows are below."""
 
+    @override
     def setUp(self) -> None:
         """Plant a git tree and the stand-in."""
         self.tmp = Path(tempfile.mkdtemp())
@@ -303,7 +306,8 @@ class Planted(unittest.TestCase):
         self.track("pkg/test_mod.py", TEST.format(sleep=0, name="test_mod"))
         self.git("commit", "-q", "-m", "plant")
         self.dump.write_text("".join(f"{i}\n" for i in items), encoding="utf-8")
-        self.mutants.write_text(json.dumps(mutants or {}), encoding="utf-8")
+        chosen: dict[str, dict[str, object]] = mutants or {}
+        self.mutants.write_text(json.dumps(chosen), encoding="utf-8")
 
     def shared(
         self,
@@ -335,7 +339,8 @@ class Planted(unittest.TestCase):
         plan = self.tmp / "plan"
         plan.mkdir()
         (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
-        self.mutants.write_text(json.dumps(mutants or {}), encoding="utf-8")
+        chosen: dict[str, dict[str, object]] = mutants or {}
+        self.mutants.write_text(json.dumps(chosen), encoding="utf-8")
         return plan
 
     def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
@@ -438,7 +443,7 @@ class Adoption(Planted):
                 "",
             ),
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
         self.assertEqual(self.counts(), "0/1\tskipped\n")
 
     def test_cosmic_ray_missing_is_named(self) -> None:
@@ -507,7 +512,7 @@ class Verdicts(Planted):
         self.assertIn(
             f"{LABEL}: 1 mutants, 0 killed, 1 survived, 0 excluded\n", done.stdout
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
         self.assertEqual(done.stderr.splitlines(), RED)
 
     def test_abnormal_worker_is_never_judged(self) -> None:
@@ -565,7 +570,7 @@ class Exclusions(Planted):
             f"{LABEL}: pkg/mod.py:2: # pragma: no mutate with no reason"
             " — write it after ' -- '\n" + REASON + "\n",
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_block_form_is_red_by_name(self) -> None:
         """`block` (and `start`, `end`): only the line form exists."""
@@ -582,7 +587,7 @@ class Exclusions(Planted):
             f"{LABEL}: pkg/mod.py:2: # pragma: no mutate block — only the line"
             " form exists; mark each line\n" + REASON + "\n",
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_pragma_in_a_string_is_not_a_site(self) -> None:
         """A string that spells a pragma excludes nothing."""
@@ -649,7 +654,7 @@ class Safety(Planted):
             " refused:\n  pkg/mod.py\n"
             "  the leg mutates these files in place and restores them from git\n",
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
         self.assertEqual(
             (self.tree / "pkg" / "mod.py").read_text(encoding="utf-8"), edited
         )
@@ -699,13 +704,11 @@ class Safety(Planted):
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
         named = [line for line in done.stderr.splitlines() if line.startswith(LABEL)]
-        self.assertEqual(
-            named,
-            [
-                f"{LABEL}: pkg/test_a.py fails alone (exit 1) — nothing judged",
-                f"{LABEL}: pkg/test_b.py fails alone (exit 1) — nothing judged",
-            ],
-        )
+        want = [
+            f"{LABEL}: pkg/test_a.py fails alone (exit 1) — nothing judged",
+            f"{LABEL}: pkg/test_b.py fails alone (exit 1) — nothing judged",
+        ]
+        self.assertEqual(named, want)
         self.assertIn("AssertionError: planted", done.stderr)
         self.assertEqual(log, calls())
 
@@ -727,7 +730,8 @@ class Shards(Planted):
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertEqual(self.counts(), f"{shard}\t2\t2\t0\t0\n")
             logs.append(self.log.read_text(encoding="utf-8").splitlines())
-        self.assertEqual(logs, [judged(FOUR[0], FOUR[2]), judged(FOUR[1], FOUR[3])])
+        want = [judged(FOUR[0], FOUR[2]), judged(FOUR[1], FOUR[3])]
+        self.assertEqual(logs, want)
 
     def test_plan_step_then_a_shard_judges_from_it(self) -> None:
         """MUTANTS_SHARD=plan writes the plan and stops; a shard judges alone."""
@@ -740,7 +744,8 @@ class Shards(Planted):
         self.assertFalse((self.summary / "python.tsv").exists())
         done, log = self.run_leg(MUTANTS_SHARD="0/1", MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(log, [f"cosmic-ray mutate-and-test pkg/mod.py {ADD} 0"])
+        want = [f"cosmic-ray mutate-and-test pkg/mod.py {ADD} 0"]
+        self.assertEqual(log, want)
         self.assertEqual(self.counts(), "0/1\t1\t1\t0\t0\n")
 
     def test_shard_without_a_plan_is_red(self) -> None:
@@ -751,7 +756,7 @@ class Shards(Planted):
         done, log = self.run_leg(MUTANTS_SHARD="0/1", MUTANTS_PLAN=str(empty))
         self.assertEqual(done.returncode, 1)
         self.assertIn(f"{LABEL}: no plan to judge from in {empty}:", done.stderr)
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_bad_shard_is_red(self) -> None:
         """K must be below N."""
@@ -762,7 +767,7 @@ class Shards(Planted):
             done.stderr,
             f"{LABEL}: MUTANTS_SHARD='2/2' — expected k/N with 0 <= k < N, or plan\n",
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
 
 class Order(Planted):
@@ -793,10 +798,8 @@ class Order(Planted):
         # Sorted by operator, the survivor (NumberReplacer) is judged first
         # and ran both files, fast first; the killed mutant ran the fast
         # file alone.
-        self.assertEqual(
-            self.ran.read_text(encoding="utf-8").splitlines(),
-            ["test_b", "test_a", "test_b"],
-        )
+        want = ["test_b", "test_a", "test_b"]
+        self.assertEqual(self.ran.read_text(encoding="utf-8").splitlines(), want)
         self.assertIn(
             f"{LABEL}: survived: pkg/mod.py:2: {NUM} #0 (answer)", judged.stdout
         )
@@ -861,7 +864,7 @@ class Refusals(Planted):
 
     def test_dump_of_two_mutations_is_named(self) -> None:
         """A work item of two mutations is refused, at its own line."""
-        two = json.dumps([
+        item: list[object] = [
             {
                 "job_id": "j",
                 "mutations": [
@@ -870,7 +873,8 @@ class Refusals(Planted):
                 ],
             },
             None,
-        ])
+        ]
+        two = json.dumps(item)
         self.plant(["", two])
         done, log = self.plan_in_process()
         self.assertEqual(
@@ -965,7 +969,7 @@ class Refusals(Planted):
         plan = decoded.as_object(
             decoded.load_json((self.tmp / "plan" / "plan.json").read_bytes()), "plan"
         )
-        self.assertEqual(plan.get("lines"), {})
+        self.assertEqual(plan.get("lines"), dict[str, object]())
 
     def test_silent_cosmic_ray_is_never_judged(self) -> None:
         """cosmic-ray printing no result: red by name, with its exit status."""
@@ -991,7 +995,7 @@ class Refusals(Planted):
             done.stderr,
             f"{LABEL}: the plan is of {before}, but this checkout is {after}\n",
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_long_shard_says_how_far_it_is(self) -> None:
         """Every hundred mutants, one progress line."""
@@ -1005,15 +1009,14 @@ class Refusals(Planted):
         (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
         done, log = self.run_leg(MUTANTS_PLAN=str(plan))
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(), [f"{LABEL}: judged 100 of 100", *RED]
-        )
+        want = [f"{LABEL}: judged 100 of 100", *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
         self.assertTrue(
             done.stdout.endswith(
                 f"{LABEL}: 100 mutants, 0 killed, 100 survived, 0 excluded\n"
             )
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_report_without_a_summary_directory(self) -> None:
         """No MUTANTS_SUMMARY_DIR: the summary line, and no counts file."""
@@ -1081,11 +1084,12 @@ class Readers(unittest.TestCase):
 
     def test_test_command_is_filled_per_word(self) -> None:
         """`{test}`, `{dir}` and `{name}`, in the words shlex splits."""
+        filled = ["run", "a b", "test_c.py x", "a b/test_c.py"]
+        bare = ["t", "."]
         self.assertEqual(
-            helper.test_argv("run {dir} '{name} x' {test}", "a b/test_c.py"),
-            ["run", "a b", "test_c.py x", "a b/test_c.py"],
+            helper.test_argv("run {dir} '{name} x' {test}", "a b/test_c.py"), filled
         )
-        self.assertEqual(helper.test_argv("t {dir}", "test_c.py"), ["t", "."])
+        self.assertEqual(helper.test_argv("t {dir}", "test_c.py"), bare)
 
     def test_pragma_on_no_line_number_is_neither(self) -> None:
         """A record whose line is not a number is no site and no refusal."""
@@ -1101,13 +1105,14 @@ class Readers(unittest.TestCase):
 
     def test_plan_with_a_line_that_is_no_number_is_refused(self) -> None:
         """The line map's keys are line numbers, or the plan is refused."""
-        text = json.dumps({
+        document: dict[str, object] = {
             "head": "h",
             "command": "c",
             "mutants": [],
             "tests": [],
             "lines": {"a.py": {"x": [0]}},
-        })
+        }
+        text = json.dumps(document)
         with self.assertRaisesRegex(
             decoded.UndecodableError, r"^a\.py: line 'x' is not a number$"
         ):
@@ -1119,7 +1124,7 @@ class Readers(unittest.TestCase):
         self.assertEqual(helper.statement_of(spans, 3), 2)
         self.assertEqual(helper.statement_of(spans, 1), 1)
         self.assertEqual(helper.statement_of(spans, 9), 9)
-        self.assertEqual(helper.statement_lines("def (:\n"), [])
+        self.assertEqual(helper.statement_lines("def (:\n"), list[tuple[int, int]]())
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 
@@ -28,6 +29,7 @@ LABEL = "audit:mutants: rust"
 class Totals(unittest.TestCase):
     """Plant per-shard summaries and total them."""
 
+    @override
     def setUp(self) -> None:
         """Make an empty download directory."""
         self.dir = Path(tempfile.mkdtemp())
@@ -62,10 +64,10 @@ class Totals(unittest.TestCase):
         self.shard(3, "3/4\t0\t0\t0\t2")
         done = self.run_totals()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [f"{LABEL}: across 4 shards: 9 mutants, 9 killed, 0 survived, 2 excluded"],
-        )
+        want = [
+            f"{LABEL}: across 4 shards: 9 mutants, 9 killed, 0 survived, 2 excluded"
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
 
     def test_a_survivor_in_one_shard_reds_the_total(self) -> None:
         """The measure is one answer: any survivor anywhere is red."""
@@ -74,19 +76,12 @@ class Totals(unittest.TestCase):
         self.shard(3, "3/4\t3\t2\t1\t0")
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                (
-                    f"{LABEL}: across 4 shards:"
-                    " 12 mutants, 11 killed, 1 survived, 0 excluded"
-                )
-            ],
-        )
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: red — the survivors are named in their shards' logs"],
-        )
+        want = [
+            f"{LABEL}: across 4 shards: 12 mutants, 11 killed, 1 survived, 0 excluded"
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+        want = [f"{LABEL}: red — the survivors are named in their shards' logs"]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_missing_shard_is_red_by_name(self) -> None:
         """A shard that died writes nothing; its absence is named."""
@@ -94,10 +89,8 @@ class Totals(unittest.TestCase):
             self.shard(k, f"{k}/4\t3\t3\t0\t0")
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: shard 2/4 reported nothing — it died or judged nothing"],
-        )
+        want = [f"{LABEL}: shard 2/4 reported nothing — it died or judged nothing"]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_unadopted_everywhere_is_skipped(self) -> None:
         """Every shard skipped: one skip line, green."""
@@ -105,9 +98,8 @@ class Totals(unittest.TestCase):
             self.shard(k, f"{k}/4\tskipped")
         done = self.run_totals()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(), [f"{LABEL}: not adopted, skipped in all 4 shards"]
-        )
+        want = [f"{LABEL}: not adopted, skipped in all 4 shards"]
+        self.assertEqual(done.stdout.splitlines(), want)
 
     def test_shards_disagreeing_about_excluded_is_red(self) -> None:
         """Each shard reports the whole population's figure; it must agree."""
@@ -115,39 +107,33 @@ class Totals(unittest.TestCase):
         self.shard(1, "1/2\t3\t3\t0\t2")
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: shards disagree about excluded (1, 2)"],
-        )
+        want = [f"{LABEL}: shards disagree about excluded (1, 2)"]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_no_summary_at_all_is_red(self) -> None:
         """Nothing downloaded: every shard died, never a clean zero."""
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: no shard reported a summary"
-                    " — every shard died before its last line"
-                )
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: no shard reported a summary"
+                " — every shard died before its last line"
+            )
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_missing_directory_is_named_not_mute(self) -> None:
         """No artifact means no directory: the same named red, not a crash."""
         shutil.rmtree(self.dir)
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: no shard reported a summary"
-                    " — every shard died before its last line"
-                )
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: no shard reported a summary"
+                " — every shard died before its last line"
+            )
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_only_the_named_language_is_totalled(self) -> None:
         """One language per call: another leg's files are not read."""
@@ -156,26 +142,19 @@ class Totals(unittest.TestCase):
             self.shard(k, f"{k}/2\t5\t1\t4\t0", lang="go")
         done = self.run_totals()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                (
-                    f"{LABEL}: across 2 shards:"
-                    " 4 mutants, 4 killed, 0 survived, 0 excluded"
-                ),
-            ],
-        )
+        want = [
+            (f"{LABEL}: across 2 shards: 4 mutants, 4 killed, 0 survived, 0 excluded"),
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         other = self.run_totals("go")
         self.assertEqual(other.returncode, 1)
-        self.assertEqual(
-            other.stdout.splitlines(),
-            [
-                (
-                    "audit:mutants: go: across 2 shards:"
-                    " 10 mutants, 2 killed, 8 survived, 0 excluded"
-                ),
-            ],
-        )
+        want = [
+            (
+                "audit:mutants: go: across 2 shards:"
+                " 10 mutants, 2 killed, 8 survived, 0 excluded"
+            ),
+        ]
+        self.assertEqual(other.stdout.splitlines(), want)
 
     def test_language_is_required(self) -> None:
         """No language named: refused, never a total of everything."""

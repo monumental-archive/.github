@@ -32,6 +32,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import decoded
@@ -116,7 +117,9 @@ def clean_env() -> dict[str, str]:
     return hermetic.env()
 
 
-def package(name: str, root: str, *, default: list[str] | None = None) -> dict:
+def package(
+    name: str, root: str, *, default: list[str] | None = None
+) -> dict[str, object]:
     """Plant one workspace member as `cargo metadata` reports it.
 
     A `default` makes the member a pgrx extension declaring pg17 and pg18,
@@ -127,7 +130,7 @@ def package(name: str, root: str, *, default: list[str] | None = None) -> dict:
 
     """
     features: dict[str, list[str]] = {"default": []}
-    deps = []
+    deps: list[dict[str, str]] = []
     if default is not None:
         features = {
             "default": default,
@@ -148,7 +151,9 @@ def package(name: str, root: str, *, default: list[str] | None = None) -> dict:
     }
 
 
-def outcomes(total: int, caught: int, missed: int, timeout: int = 0) -> dict:
+def outcomes(
+    total: int, caught: int, missed: int, timeout: int = 0
+) -> dict[str, object]:
     """Plant the counts cargo-mutants 27.1.0 writes to outcomes.json.
 
     Returns:
@@ -171,6 +176,7 @@ def outcomes(total: int, caught: int, missed: int, timeout: int = 0) -> dict:
 class Planted(unittest.TestCase):
     """A planted tree, a stub PATH and a belt with stub provisioning."""
 
+    @override
     def setUp(self) -> None:
         """Plant a git tree, the stubs and the belt the leg reads."""
         self.tmp = Path(tempfile.mkdtemp())
@@ -228,10 +234,10 @@ class Planted(unittest.TestCase):
 
     def plant(
         self,
-        *packages: dict,
+        *packages: dict[str, object],
         config: str = "",
         listed: list[str] | None = None,
-        result: dict | None = None,
+        result: dict[str, object] | None = None,
         missed: list[str] | None = None,
         shard: list[str] | None = None,
     ) -> None:
@@ -239,14 +245,12 @@ class Planted(unittest.TestCase):
         self.track("Cargo.toml", "[workspace]\n")
         self.track(CONFIG, config)
         root = str(self.tree)
-        self.files["metadata.json"].write_text(
-            json.dumps({
-                "packages": list(packages),
-                "workspace_members": [p["id"] for p in packages],
-                "workspace_root": root,
-            }),
-            encoding="utf-8",
-        )
+        metadata: dict[str, object] = {
+            "packages": list(packages),
+            "workspace_members": [p["id"] for p in packages],
+            "workspace_root": root,
+        }
+        self.files["metadata.json"].write_text(json.dumps(metadata), encoding="utf-8")
         self.files["all"].write_text("\n".join(NAMES) + "\n", encoding="utf-8")
         chosen = NAMES if listed is None else listed
         self.files["listed"].write_text("\n".join(chosen) + "\n", encoding="utf-8")
@@ -301,10 +305,9 @@ class Adoption(Planted):
         self.track("Cargo.toml", "[workspace]\n")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(), [f"{LABEL}: no {CONFIG} tracked, skipped"]
-        )
-        self.assertEqual(log, [])
+        want = [f"{LABEL}: no {CONFIG} tracked, skipped"]
+        self.assertEqual(done.stdout.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
     def test_untracked_config_is_not_adoption(self) -> None:
         """A config on disk that git does not track adopts nothing."""
@@ -313,10 +316,9 @@ class Adoption(Planted):
         (self.tree / CONFIG).write_text("", encoding="utf-8")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(), [f"{LABEL}: no {CONFIG} tracked, skipped"]
-        )
-        self.assertEqual(log, [])
+        want = [f"{LABEL}: no {CONFIG} tracked, skipped"]
+        self.assertEqual(done.stdout.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
 
 class Verdict(Planted):
@@ -327,23 +329,19 @@ class Verdict(Planted):
         self.plant(package("alpha", str(self.tree)), result=outcomes(3, 3, 0))
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-                f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded",
-            ],
-        )
+        want = [
+            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
+            f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(done.stderr, "")
-        self.assertEqual(
-            self.calls(log),
-            [
-                METADATA,
-                "cargo mutants --list --no-config --package alpha",
-                "cargo mutants --list --package alpha",
-                "cargo mutants --output OUT --package alpha",
-            ],
-        )
+        want = [
+            METADATA,
+            "cargo mutants --list --no-config --package alpha",
+            "cargo mutants --list --package alpha",
+            "cargo mutants --output OUT --package alpha",
+        ]
+        self.assertEqual(self.calls(log), want)
 
     def test_one_survivor_is_red_with_file_and_line(self) -> None:
         """A survivor: red, printed as file:line:col and the mutation."""
@@ -354,14 +352,12 @@ class Verdict(Planted):
         )
         done, _ = self.run_leg(PLANT_STATUS="2")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-                f"{LABEL}: survived: {SURVIVOR}",
-                f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 excluded",
-            ],
-        )
+        want = [
+            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
+            f"{LABEL}: survived: {SURVIVOR}",
+            f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 excluded",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(done.stderr.splitlines(), RED)
 
     def test_excluded_survivor_with_reason_is_counted_excluded(self) -> None:
@@ -381,13 +377,11 @@ class Verdict(Planted):
         )
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
-                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
-            ],
-        )
+        want = [
+            f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
+            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
 
     def test_timeout_counts_as_killed(self) -> None:
         """Exit 3 (timeouts) is a result: a hung suite noticed the mutant."""
@@ -404,16 +398,14 @@ class Verdict(Planted):
         self.plant(package("alpha", str(self.tree)))
         done, _ = self.run_leg(PLANT_STATUS="4")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: workspace: cargo mutants exited 4"
-                    " — nothing judged (a red baseline is exit 4)"
-                ),
-                *RED,
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: workspace: cargo mutants exited 4"
+                " — nothing judged (a red baseline is exit 4)"
+            ),
+            *RED,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_an_outcomes_json_that_does_not_decode_is_red_by_name(self) -> None:
         """A document decoded's loader refuses is not judged, never a crash."""
@@ -423,10 +415,8 @@ class Verdict(Planted):
         )
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f'{LABEL}: workspace: outcomes.json: duplicate key "missed"', *RED],
-        )
+        want = [f'{LABEL}: workspace: outcomes.json: duplicate key "missed"', *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_a_count_outcomes_json_does_not_state_is_red_by_name(self) -> None:
         """No `timeout` in outcomes.json: not judged, never read as zero."""
@@ -435,10 +425,8 @@ class Verdict(Planted):
         self.plant(package("alpha", str(self.tree)), result=result)
         done, _ = self.run_leg(MUTANTS_SUMMARY_DIR=str(self.tmp / "summary"))
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: workspace: outcomes.json states no timeout", *RED],
-        )
+        want = [f"{LABEL}: workspace: outcomes.json states no timeout", *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
         self.assertIn(
             f"{LABEL}: 0 mutants, 0 killed, 0 survived, 0 excluded",
             done.stdout.splitlines(),
@@ -461,17 +449,15 @@ class Reasons(Planted):
         self.plant(package("alpha", str(self.tree)), config=config)
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: {CONFIG}:4: exclude_re entry"
-                    ' "replace answer -> u32" has no # reason line above it'
-                ),
-                REASON,
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            (
+                f"{LABEL}: {CONFIG}:4: exclude_re entry"
+                ' "replace answer -> u32" has no # reason line above it'
+            ),
+            REASON,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
     def test_exclude_globs_needs_a_reason_too(self) -> None:
         """A whole-file exclusion is an exclusion: the same rule."""
@@ -479,16 +465,14 @@ class Reasons(Planted):
         self.plant(package("alpha", str(self.tree)), config=config)
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: {CONFIG}:2: exclude_globs entry"
-                    ' "src/generated.rs" has no # reason line above it'
-                ),
-                REASON,
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: {CONFIG}:2: exclude_globs entry"
+                ' "src/generated.rs" has no # reason line above it'
+            ),
+            REASON,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_entry_on_the_opening_line_is_red(self) -> None:
         """`exclude_re = ["x"]` leaves nowhere to write the reason."""
@@ -496,16 +480,14 @@ class Reasons(Planted):
         self.plant(package("alpha", str(self.tree)), config=config)
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: {CONFIG}:2: exclude_re entry"
-                    " an entry on the opening line has no # reason line above it"
-                ),
-                REASON,
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: {CONFIG}:2: exclude_re entry"
+                " an entry on the opening line has no # reason line above it"
+            ),
+            REASON,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_mutants_skip_attribute_is_refused(self) -> None:
         """#[mutants::skip] is an exclusion with nowhere for the reason."""
@@ -513,18 +495,16 @@ class Reasons(Planted):
         self.track("alpha/src/lib.rs", "#[mutants::skip]\nfn f() {}\n")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: #[mutants::skip] in the tree:",
-                "  alpha/src/lib.rs:1:#[mutants::skip]",
-                (
-                    f"  record the site as an exclude_re entry in {CONFIG},"
-                    " under a # reason line"
-                ),
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            f"{LABEL}: #[mutants::skip] in the tree:",
+            "  alpha/src/lib.rs:1:#[mutants::skip]",
+            (
+                f"  record the site as an exclude_re entry in {CONFIG},"
+                " under a # reason line"
+            ),
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
 
 class Pgrx(Planted):
@@ -540,58 +520,51 @@ class Pgrx(Planted):
         )
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-                (
-                    f"{LABEL}: ext is a pgrx extension,"
-                    " mutated under its default major, pg18"
-                ),
-                f"{LABEL}: mutating ext-pg18 (3 mutants, 0 excluded)",
-                f"{LABEL}: 6 mutants, 6 killed, 0 survived, 0 excluded",
-            ],
-        )
-        self.assertEqual(
-            self.calls(log),
-            [
-                METADATA,
-                "cargo mutants --list --no-config --package alpha",
-                "cargo mutants --list --package alpha",
-                "cargo mutants --output OUT --package alpha",
-                "provision",
-                "cargo mutants --list --no-config --package ext --features pg_test",
-                "cargo mutants --list --package ext --features pg_test",
-                "cargo mutants --output OUT --package ext --features pg_test",
-            ],
-        )
+        want = [
+            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
+            (
+                f"{LABEL}: ext is a pgrx extension,"
+                " mutated under its default major, pg18"
+            ),
+            f"{LABEL}: mutating ext-pg18 (3 mutants, 0 excluded)",
+            f"{LABEL}: 6 mutants, 6 killed, 0 survived, 0 excluded",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+        want = [
+            METADATA,
+            "cargo mutants --list --no-config --package alpha",
+            "cargo mutants --list --package alpha",
+            "cargo mutants --output OUT --package alpha",
+            "provision",
+            "cargo mutants --list --no-config --package ext --features pg_test",
+            "cargo mutants --list --package ext --features pg_test",
+            "cargo mutants --output OUT --package ext --features pg_test",
+        ]
+        self.assertEqual(self.calls(log), want)
 
     def test_pgrx_crate_without_a_single_default_major_is_red(self) -> None:
         """No pgNN in `default`: red by name, never a guessed major."""
         self.plant(package("ext", str(self.tree), default=[]))
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: ext: a pgrx extension whose default features name"
-                    " no single pgNN — it is mutated under its default major"
-                ),
-                *RED,
-            ],
-        )
-        self.assertEqual([c for c in log if c.startswith("provision")], [])
+        want = [
+            (
+                f"{LABEL}: ext: a pgrx extension whose default features name"
+                " no single pgNN — it is mutated under its default major"
+            ),
+            *RED,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        provisioned = [c for c in log if c.startswith("provision")]
+        self.assertEqual(provisioned, list[str]())
 
     def test_failed_provisioning_is_red(self) -> None:
         """No Postgres: the extension is red, never skipped."""
         self.plant(package("ext", str(self.tree), default=["pg18"]))
         done, _ = self.run_leg(PLANT_PROVISION="1")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: ext at pg18: no Postgres could be provisioned", *RED],
-        )
+        want = [f"{LABEL}: ext at pg18: no Postgres could be provisioned", *RED]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_missing_icu_headers_are_red(self) -> None:
         """No ICU headers for the default major: red by name, never mutated."""
@@ -640,24 +613,20 @@ class Shards(Planted):
         )
         done, log = self.run_leg(PLANT_STATUS="2", **self.shard_env("1/4"))
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: mutating workspace, shard 1/4 (2 mutants, 0 excluded)",
-                f"{LABEL}: survived: {SURVIVOR}",
-                f"{LABEL}: shard 1/4: 2 mutants, 1 killed, 1 survived, 0 excluded",
-            ],
-        )
-        self.assertEqual(
-            self.calls(log),
-            [
-                METADATA,
-                "cargo mutants --list --no-config --package alpha",
-                "cargo mutants --list --package alpha",
-                "cargo mutants --list --shard 1/4 --package alpha",
-                "cargo mutants --output OUT --shard 1/4 --package alpha",
-            ],
-        )
+        want = [
+            f"{LABEL}: mutating workspace, shard 1/4 (2 mutants, 0 excluded)",
+            f"{LABEL}: survived: {SURVIVOR}",
+            f"{LABEL}: shard 1/4: 2 mutants, 1 killed, 1 survived, 0 excluded",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+        want = [
+            METADATA,
+            "cargo mutants --list --no-config --package alpha",
+            "cargo mutants --list --package alpha",
+            "cargo mutants --list --shard 1/4 --package alpha",
+            "cargo mutants --output OUT --shard 1/4 --package alpha",
+        ]
+        self.assertEqual(self.calls(log), want)
         self.assertEqual(self.summary(), "1/4\t2\t1\t1\t0\n")
 
     def test_empty_shard_is_green_by_name(self) -> None:
@@ -665,17 +634,15 @@ class Shards(Planted):
         self.plant(package("alpha", str(self.tree)), shard=[])
         done, log = self.run_leg(**self.shard_env("3/4"))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: mutating workspace, shard 3/4 (0 mutants, 0 excluded)",
-                (
-                    f"{LABEL}: workspace, shard 3/4:"
-                    " no mutants in this shard, nothing to run"
-                ),
-                f"{LABEL}: shard 3/4: 0 mutants, 0 killed, 0 survived, 0 excluded",
-            ],
-        )
+        want = [
+            f"{LABEL}: mutating workspace, shard 3/4 (0 mutants, 0 excluded)",
+            (
+                f"{LABEL}: workspace, shard 3/4:"
+                " no mutants in this shard, nothing to run"
+            ),
+            f"{LABEL}: shard 3/4: 0 mutants, 0 killed, 0 survived, 0 excluded",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertNotIn(
             "cargo mutants --output OUT --shard 3/4 --package alpha", self.calls(log)
         )
@@ -717,11 +684,9 @@ class Shards(Planted):
             with self.subTest(bad=bad):
                 done, log = self.run_leg(MUTANTS_SHARD=bad)
                 self.assertEqual(done.returncode, 1)
-                self.assertEqual(
-                    done.stderr.splitlines(),
-                    [f"{LABEL}: MUTANTS_SHARD='{bad}' is not k/n with k < n"],
-                )
-                self.assertEqual(log, [])
+                want = [f"{LABEL}: MUTANTS_SHARD='{bad}' is not k/n with k < n"]
+                self.assertEqual(done.stderr.splitlines(), want)
+                self.assertEqual(log, list[str]())
 
 
 class ReasonRule(unittest.TestCase):
@@ -738,30 +703,29 @@ class ReasonRule(unittest.TestCase):
             '  "delete log",\n'
             "]\n"
         )
-        self.assertEqual(helper.unexplained(text), [])
+        self.assertEqual(helper.unexplained(text), list[tuple[int, str, str]]())
 
     def test_an_entry_with_no_reason_is_named_with_its_line(self) -> None:
         """The second entry follows the first, not a comment."""
         text = 'exclude_re = [\n  # why\n  "one",\n  "two",\n]\n'
-        self.assertEqual(helper.unexplained(text), [(4, "exclude_re", '"two"')])
+        want = [(4, "exclude_re", '"two"')]
+        self.assertEqual(helper.unexplained(text), want)
 
     def test_an_entry_on_the_opening_line_has_nowhere_for_a_reason(self) -> None:
         """`key = ["x"]` is named as such, for either key."""
         text = 'exclude_globs = ["src/gen.rs"]\n'
-        self.assertEqual(
-            helper.unexplained(text),
-            [(1, "exclude_globs", "an entry on the opening line")],
-        )
+        want = [(1, "exclude_globs", "an entry on the opening line")]
+        self.assertEqual(helper.unexplained(text), want)
 
     def test_a_closing_bracket_on_the_entry_ends_the_list(self) -> None:
         """After `"x"]`, a quoted line is not an entry."""
         text = 'exclude_re = [\n  # why\n  "x"]\n"not = an entry"\n'
-        self.assertEqual(helper.unexplained(text), [])
+        self.assertEqual(helper.unexplained(text), list[tuple[int, str, str]]())
 
     def test_other_keys_are_not_read(self) -> None:
         """Only the two exclusion lists carry the rule."""
         text = 'additional_cargo_args = [\n  "--all-features",\n]\n'
-        self.assertEqual(helper.unexplained(text), [])
+        self.assertEqual(helper.unexplained(text), list[tuple[int, str, str]]())
 
 
 class Readers(unittest.TestCase):
@@ -840,9 +804,12 @@ class Readers(unittest.TestCase):
     def test_a_count_not_stated_is_named_never_zero(self) -> None:
         """Absent, null, a string or a bool is not a stated count."""
         counts = {"total_mutants": 6, "caught": None, "timeout": "2", "missed": True}
-        self.assertEqual(helper.missing_counts(counts), ["caught", "timeout", "missed"])
-        self.assertEqual(helper.missing_counts([]), list(helper.COUNTS))
-        self.assertEqual(helper.missing_counts(dict.fromkeys(helper.COUNTS, 0)), [])
+        want = ["caught", "timeout", "missed"]
+        self.assertEqual(helper.missing_counts(counts), want)
+        every = list(helper.COUNTS)
+        self.assertEqual(helper.missing_counts([]), every)
+        complete = dict.fromkeys(helper.COUNTS, 0)
+        self.assertEqual(helper.missing_counts(complete), list[str]())
 
     def test_red_is_a_survivor_or_a_run_that_judged_nothing(self) -> None:
         """Clean is neither."""
@@ -852,7 +819,8 @@ class Readers(unittest.TestCase):
 
     def test_only_0_2_and_3_are_judged(self) -> None:
         """4 is a red baseline; 1 is a failure to run."""
-        self.assertEqual(helper.JUDGED, frozenset({0, 2, 3}))
+        want = frozenset({0, 2, 3})
+        self.assertEqual(helper.JUDGED, want)
 
 
 if __name__ == "__main__":
