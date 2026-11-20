@@ -589,6 +589,16 @@ class Helper(unittest.TestCase):
         tree["mise.toml"] = '[tools]\ngo = "1.27.4"\n'
         self.assertNotIn("aqua:hadolint/hadolint", install(git_tree(tree)))
 
+    def test_the_canon_pins_no_tool_of_its_own(self) -> None:
+        """The canon's own mise.toml declares no [tools] (#1733).
+
+        A tool the canon's own config pinned is never disabled, so the
+        gate would install it for this repository alone; the belt pins
+        no language, and the canon pins none either.
+        """
+        config = tomllib.loads((CANON / "mise.toml").read_text("utf-8"))
+        self.assertEqual({}, config.get("tools", {}), "the canon's mise.toml pins")
+
     def test_the_disable_env(self) -> None:
         """The left-out keys, sorted, and their digest; nothing for none."""
         self.assertEqual("", gate_tools.disable_env([]))
