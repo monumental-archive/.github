@@ -23,15 +23,18 @@ import shlex
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-SHELL = CONFIG["task_config"]["shell"]
+CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+SHELL = decoded.as_str(
+    decoded.as_object(CONFIG["task_config"], "task_config")["shell"],
+    "task_config.shell",
+)
 # Each failure, then the line that must never run.
 BODIES = {
     "a failing command": "false\necho reached\n",

@@ -28,7 +28,7 @@ ENV_NAME = st.one_of(
     st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True),
 )
 VALUE = st.text(
-    st.characters(blacklist_characters="\x00", blacklist_categories=("Cs",)), max_size=8
+    st.characters(blacklist_characters="\x00", blacklist_categories=["Cs"]), max_size=8
 )
 OID = st.from_regex(r"[0-9a-f]{8}", fullmatch=True)
 REF = st.from_regex(r"refs/(heads|tags)/[a-z]{1,6}", fullmatch=True)
@@ -36,7 +36,7 @@ REFS = st.dictionaries(REF, OID, max_size=5)
 HASH = st.sampled_from(["absent", "aaaa", "bbbb"])
 
 
-def state(refs: dict[str, str], config: str) -> object:
+def state(refs: dict[str, str], config: str) -> gd.State:
     """Build a decoy state that differs only in refs and config.
 
     Returns:
@@ -61,9 +61,8 @@ class Scrubbed(unittest.TestCase):
         """GIT_* gone; the rest kept as they were."""
         with mock.patch.dict(os.environ, environ, clear=True):
             got = gd.scrubbed()
-        self.assertEqual(
-            got, {k: v for k, v in environ.items() if not k.startswith("GIT_")}
-        )
+        kept = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
+        self.assertEqual(got, kept)
 
 
 class Changes(unittest.TestCase):
@@ -75,7 +74,7 @@ class Changes(unittest.TestCase):
     ) -> None:
         """Equal states, empty list."""
         one = state(refs, config)
-        self.assertEqual(gd.changes(Path("/nonexistent"), one, one), [])
+        self.assertEqual(gd.changes(Path("/nonexistent"), one, one), list[str]())
 
     @given(REFS, REFS, HASH, HASH)
     def test_each_ref_and_config_change_named_once(

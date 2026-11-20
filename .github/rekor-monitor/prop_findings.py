@@ -30,7 +30,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import findings
 from hypothesis import example
 from hypothesis import strategies as st
@@ -38,34 +40,72 @@ from typed_hypothesis import given
 
 INDEX = st.integers(0, 10**12)
 CONDITIONS = st.lists(st.text(max_size=20), max_size=4)
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=12),
-    lambda inner: (
-        st.lists(inner, max_size=4)
-        | st.dictionaries(st.text(max_size=8), inner, max_size=4)
-    ),
-    max_leaves=12,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=12)
 )
-SUBJECT = st.one_of(
-    INDEX.map(lambda n: f"CT index {n}"),
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=4)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=8), inner, max_size=4
+    )
+    return arrays | objects
+
+
+def ct_subject(index: int) -> str:
+    """Name a CT index as stele's subject does.
+
+    Returns:
+        The subject.
+
+    """
+    return f"CT index {index}"
+
+
+def dumps(value: object) -> str:
+    """Encode a drawn document as JSON.
+
+    Returns:
+        The JSON text.
+
+    """
+    return json.dumps(value)
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+SUBJECT: st.SearchStrategy[object] = st.one_of(
+    INDEX.map(ct_subject),
     st.text(max_size=16),
     JSON,
 )
-FINDING = st.one_of(
-    st.fixed_dictionaries({"subject": SUBJECT}, optional={"assertion": JSON}),
+SUBJECT_FIELD: dict[str, st.SearchStrategy[object]] = {"subject": SUBJECT}
+ASSERTION_FIELD: dict[str, st.SearchStrategy[object]] = {"assertion": JSON}
+FINDING: st.SearchStrategy[object] = st.one_of(
+    st.fixed_dictionaries(SUBJECT_FIELD, optional=ASSERTION_FIELD),
     JSON,
 )
 # A finding of one certificate, as by_certificate grouped it.
-FILED = st.fixed_dictionaries(
-    {},
-    optional={"assertion": st.text(max_size=12) | JSON, "detail": JSON},
+NO_FIELDS: dict[str, st.SearchStrategy[object]] = {}
+FILED_FIELDS: dict[str, st.SearchStrategy[object]] = {
+    "assertion": st.text(max_size=12) | JSON,
+    "detail": JSON,
+}
+FILED: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    NO_FIELDS, optional=FILED_FIELDS
 )
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
 HEAD = "Failed, with stele's reason and the claims it read:"
 
 
-def condition_lines(index: int, group: list, log: str) -> list[str]:
+def condition_lines(index: int, group: list[dict[str, object]], log: str) -> list[str]:
     """Read back a body's condition section, line by line.
 
     Returns:
@@ -83,21 +123,38 @@ def condition_lines(index: int, group: list, log: str) -> list[str]:
     return lines[head + 1 : lines.index("", head)]
 
 
-REPORT = st.one_of(
-    st.fixed_dictionaries(
-        {"target": st.just(findings.TARGET)},
-        optional={"findings": st.one_of(st.lists(FINDING, max_size=5), JSON)},
-    ),
+TARGET_FIELD: dict[str, st.SearchStrategy[object]] = {
+    "target": st.just(findings.TARGET)
+}
+FINDINGS_FIELD: dict[str, st.SearchStrategy[object]] = {
+    "findings": st.one_of(st.lists(FINDING, max_size=5), JSON)
+}
+REPORT: st.SearchStrategy[object] = st.one_of(
+    st.fixed_dictionaries(TARGET_FIELD, optional=FINDINGS_FIELD),
     JSON,
 )
+# Fixed examples: a finding that is no object, a subject that is no
+# string, and findings that are no list.
+NOT_AN_OBJECT: dict[str, object] = {"target": findings.TARGET, "findings": [1]}
+NUMBER_SUBJECT: dict[str, object] = {
+    "target": findings.TARGET,
+    "findings": [{"subject": 5}],
+}
+NOT_A_LIST: dict[str, object] = {"target": findings.TARGET, "findings": "ab"}
+# One condition filed twice, and a detail that tries to add a line.
+TWICE: list[dict[str, object]] = [{"assertion": "chain", "detail": "a"}] * 2
+SMUGGLED: list[dict[str, object]] = [
+    {"assertion": "chain", "detail": "a\n- **run**: b"}
+]
+IDENTITY: list[str] = ["identity"]
 
 
 class TitleRoundTrip(unittest.TestCase):
     """The dedup pattern finds its own title and no other."""
 
     @given(INDEX, INDEX, CONDITIONS)
-    @example(12, 123, ["identity"])
-    @example(123, 12, ["identity"])
+    @example(12, 123, IDENTITY)
+    @example(123, 12, IDENTITY)
     def test_own_index_only(
         self, index: int, other: int, conditions: list[str]
     ) -> None:
@@ -114,28 +171,32 @@ class TitleRoundTrip(unittest.TestCase):
 class ReportReading(unittest.TestCase):
     """Whatever the report file holds: a grouping, or the refusal."""
 
+    @override
     def setUp(self) -> None:
         """Hold one scratch report file for the test's examples."""
         self.scratch = tempfile.TemporaryDirectory()
         self.path = Path(self.scratch.name) / "report.json"
 
+    @override
     def tearDown(self) -> None:
         """Remove the scratch file."""
         self.scratch.cleanup()
 
     @given(REPORT)
-    @example({"target": findings.TARGET, "findings": [1]})
-    @example({"target": findings.TARGET, "findings": [{"subject": 5}]})
-    @example({"target": findings.TARGET, "findings": "ab"})
+    @example(NOT_AN_OBJECT)
+    @example(NUMBER_SUBJECT)
+    @example(NOT_A_LIST)
     def test_refuses_by_name_or_groups_every_finding(self, report: object) -> None:
         """Only FindingsError escapes; a grouping holds each finding once."""
-        self.path.write_text(json.dumps(report), encoding="utf-8")
+        self.path.write_text(dumps(report), encoding="utf-8")
         try:
             grouped = findings.by_certificate(findings.read_report(self.path))
         except findings.FindingsError:
             return
-        listed = report.get("findings") or []
-        self.assertEqual(sum(len(v) for v in grouped.values()), len(listed))
+        given_findings = decoded.as_object(report, "the report").get("findings")
+        listed = decoded.as_array(given_findings, "findings") if given_findings else []
+        total = sum(len(v) for v in grouped.values())
+        self.assertEqual(total, len(listed))
         for index, group in grouped.items():
             for finding in group:
                 self.assertEqual(finding.index, index)
@@ -157,11 +218,14 @@ class BodyConditions(unittest.TestCase):
     """V: the body names each failed condition once, on its own line."""
 
     @given(INDEX, st.lists(FILED, min_size=1, max_size=6), st.text(max_size=12))
-    @example(7, [{"assertion": "chain", "detail": "a"}] * 2, "log")
-    @example(7, [{"assertion": "chain", "detail": "a\n- **run**: b"}], "log")
-    def test_each_condition_once(self, index: int, group: list, log: str) -> None:
+    @example(7, TWICE, "log")
+    @example(7, SMUGGLED, "log")
+    def test_each_condition_once(
+        self, index: int, group: list[dict[str, object]], log: str
+    ) -> None:
         """One line per condition, in the title's order; more findings add none."""
-        conditions = list(dict.fromkeys(str(f.get("assertion", "")) for f in group))
+        named = (str(f.get("assertion", "")) for f in group)
+        conditions = list(dict.fromkeys(named, True))
         self.assert_names(condition_lines(index, group, log), conditions)
         again = condition_lines(index, [*group, group[0]], log)
         self.assert_names(again, conditions)

@@ -27,10 +27,12 @@ import shutil
 # ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
-import tomllib
 import unittest
+from typing import override
 
+import decoded
 import hermetic
+import typed_std
 
 CANON = pathlib.Path(__file__).resolve().parent.parent
 BELT = CANON / "mise" / "config.toml"
@@ -75,12 +77,13 @@ def bodies(text: str) -> dict[str, str]:
         Task name to its body, a list of commands joined by newlines.
 
     """
-    out = {}
-    for name, task in tomllib.loads(text).get("tasks", {}).items():
-        run = task.get("run") if isinstance(task, dict) else None
+    out: dict[str, str] = {}
+    tasks = decoded.as_object(decoded.load_toml(text).get("tasks", {}), "tasks")
+    for name, task in tasks.items():
+        run = task.get("run") if decoded.is_object(task) else None
         if isinstance(run, str):
             out[name] = run
-        elif isinstance(run, list):
+        elif decoded.is_array(run):
             out[name] = "\n".join(r for r in run if isinstance(r, str))
     return out
 
@@ -95,7 +98,7 @@ def resolve(word: str, assigned: dict[str, str]) -> str:
     """
 
     def value(m: re.Match[str]) -> str:
-        return assigned.get(m.group(1), m.group(0))
+        return assigned.get(typed_std.group(m, 1) or "", typed_std.group(m) or "")
 
     return VARIABLE.sub(value, word.strip("\"'")).rsplit("/", 1)[-1]
 
@@ -117,12 +120,13 @@ def helper_starts(rel: str, task: str, body: str, tracked: set[str]) -> list[str
         for ln in body.replace("\\\n", " ").splitlines()
         if not ln.lstrip().startswith("#")
     ]
-    assigned = {}
+    assigned: dict[str, str] = {}
     for ln in lines:
         m = ASSIGNMENT.match(ln)
         if m:
-            assigned.setdefault(m.group(1), m.group(2).strip("\"'"))
-    out = []
+            key, value = typed_std.group(m, 1) or "", typed_std.group(m, 2) or ""
+            assigned.setdefault(key, value.strip("\"'"))
+    out: list[str] = []
     for line in lines:
         for word in WORD.finditer(line):
             name = resolve(word.group(0), assigned)
@@ -151,7 +155,7 @@ def findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
         Every red line, config by config, task by task.
 
     """
-    out = []
+    out: list[str] = []
     for rel, text in texts.items():
         for task, body in bodies(text).items():
             out += helper_starts(rel, task, body, tracked)
@@ -163,8 +167,9 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
 
     def test_every_belt_task_starts_its_helpers_under_org_python(self) -> None:
         """The tree: no belt task starts a tracked helper any other way."""
+        none: list[str] = []
         self.assertEqual(
-            [],
+            none,
             findings({"mise/config.toml": BELT.read_text("utf-8")}, tracked_helpers()),
         )
 
@@ -186,19 +191,20 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
             'plan=$(python3 "${ORG_BELT_DIR}/msrv_plan.py" \\\n  --x y)\n'
             "'''\n"
         )
+        want: list[str] = [
+            (
+                "mise/config.toml lint:x: starts gate_surface.py with the"
+                f" repository's python3; run it as {GUARDED} gate_surface.py"
+                " (#1582)"
+            ),
+            (
+                "mise/config.toml lint:x: starts msrv_plan.py with the"
+                f" repository's python3; run it as {GUARDED} msrv_plan.py"
+                " (#1582)"
+            ),
+        ]
         self.assertEqual(
-            [
-                (
-                    "mise/config.toml lint:x: starts gate_surface.py with the"
-                    f" repository's python3; run it as {GUARDED} gate_surface.py"
-                    " (#1582)"
-                ),
-                (
-                    "mise/config.toml lint:x: starts msrv_plan.py with the"
-                    f" repository's python3; run it as {GUARDED} msrv_plan.py"
-                    " (#1582)"
-                ),
-            ],
+            want,
             findings({"mise/config.toml": text}, {"gate_surface.py", "msrv_plan.py"}),
         )
 
@@ -210,14 +216,15 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
             'variants=$(python3 "${helper}" deny.toml)\n'
             "'''\n"
         )
+        want: list[str] = [
+            (
+                "mise/config.toml lint:deny: starts deny_skips.py with the"
+                f" repository's python3; run it as {GUARDED} deny_skips.py"
+                " (#1582)"
+            )
+        ]
         self.assertEqual(
-            [
-                (
-                    "mise/config.toml lint:deny: starts deny_skips.py with the"
-                    f" repository's python3; run it as {GUARDED} deny_skips.py"
-                    " (#1582)"
-                )
-            ],
+            want,
             findings({"mise/config.toml": text}, {"deny_skips.py"}),
         )
 
@@ -227,13 +234,14 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
             '[tasks."lint:y"]\n'
             "run = ['git ls-files | \"${ORG_BELT_DIR}/subject_budget.py\"']\n"
         )
+        want: list[str] = [
+            (
+                "mise/config.toml lint:y: starts subject_budget.py by its own"
+                f" first line; run it as {GUARDED} subject_budget.py (#1582)"
+            )
+        ]
         self.assertEqual(
-            [
-                (
-                    "mise/config.toml lint:y: starts subject_budget.py by its own"
-                    f" first line; run it as {GUARDED} subject_budget.py (#1582)"
-                )
-            ],
+            want,
             findings({"mise/config.toml": text}, {"subject_budget.py"}),
         )
 
@@ -247,8 +255,9 @@ class TaskBodiesStartHelpersUnderTheBeltsPython(unittest.TestCase):
             "# python3 mise/registry.py\n"
             "'''\n"
         )
+        none: list[str] = []
         self.assertEqual(
-            [],
+            none,
             findings({"mise/config.toml": text}, {"gate_surface.py", "registry.py"}),
         )
 
@@ -270,7 +279,9 @@ def belt_version() -> str:
         The version `[tools]` pins.
 
     """
-    return tomllib.loads(BELT.read_text("utf-8"))["tools"]["python"]
+    config = decoded.load_toml(BELT.read_text("utf-8"))
+    tools = decoded.as_object(config["tools"], "tools")
+    return decoded.as_str(tools["python"], "tools.python")
 
 
 # Each stub drains its stdin first: a helper reads a pipe, and one that
@@ -281,6 +292,7 @@ STUB = '#!/bin/sh\ncat > /dev/null\necho "{who} $*"\n'
 class AScratchRepositoryPinningItsOwnPython(unittest.TestCase):
     """The real belt under a real mise, in a repository that pins Python."""
 
+    @override
     def setUp(self) -> None:
         """Plant the repository, an empty config dir and the two stubs."""
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()

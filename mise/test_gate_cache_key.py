@@ -13,6 +13,7 @@ lockfile's digest to that key; the rows hold both halves.
 import hashlib
 import io
 import os
+import platform
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -186,10 +187,8 @@ def run(canon: Path) -> dict[str, str]:
         env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
         with (
             mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(gate_cache_key.platform, "system", return_value="Linux"),
-            mock.patch.object(
-                gate_cache_key.platform, "machine", return_value="x86_64"
-            ),
+            mock.patch.object(platform, "system", return_value="Linux"),
+            mock.patch.object(platform, "machine", return_value="x86_64"),
             redirect_stdout(io.StringIO()),
         ):
             code = gate_cache_key.main(["mise-v2", str(canon)], now=WHEN)
@@ -344,12 +343,8 @@ class InstallList(unittest.TestCase):
             env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
             with (
                 mock.patch.dict(os.environ, env, clear=True),
-                mock.patch.object(
-                    gate_cache_key.platform, "system", return_value="Linux"
-                ),
-                mock.patch.object(
-                    gate_cache_key.platform, "machine", return_value="x86_64"
-                ),
+                mock.patch.object(platform, "system", return_value="Linux"),
+                mock.patch.object(platform, "machine", return_value="x86_64"),
                 redirect_stdout(io.StringIO()),
             ):
                 argv = ["mise-pgrx-v1-pg18", str(tree), "--install", "jq rust@1"]
