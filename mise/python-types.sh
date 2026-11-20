@@ -49,19 +49,12 @@ running=$(mypy --version | awk '{ print $2 }')
   exit 1
 }
 
+# mypy reads the Hypothesis venv, where a property's imports resolve;
+# the belt's one check asks that it sits on the belt's Python (#1788).
 exe=$(command -v python3)
 if command -v hypothesis > /dev/null; then
-  on_path=$(command -v hypothesis)
-  entry=$("${ORG_PYTHON}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${on_path}")
-  exe="$(dirname "${entry}")/python"
+  exe=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis) || exit 1
 fi
-want=$(python3 -c 'import sys; print(sys.version)' 2> /dev/null) || want=""
-have=$("${exe}" -c 'import sys; print(sys.version)' 2> /dev/null) || have=""
-[[ -n ${have} && ${have} == "${want}" ]] || {
-  echo "${label}: mypy would read '${have:-no interpreter}' (${exe})" >&2
-  echo "  but the repository's python3 is '${want:-missing}' — reinstall the tool venv on the belt's python pin" >&2
-  exit 1
-}
 
 args=()
 while IFS= read -r f; do

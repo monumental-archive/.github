@@ -263,11 +263,13 @@ class Refusals(unittest.TestCase):
                 (bin_dir / name).chmod(0o755)
             done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=str(bin_dir))
         self.assertEqual(done.returncode, 1)
-        self.assertIn(
-            "test:python-properties: hypothesis runs on '3.0.0 (stub interpreter)'",
+        self.assertRegex(
             done.stderr,
+            r"\Atest:python-properties: hypothesis runs on '3\.0\.0 \(stub"
+            r" interpreter\)' but the suite's python3 is '3\.[^']+' — the tool"
+            r" venv must be built on the belt's python pin \(reinstall: mise"
+            r" install -f pipx:hypothesis\)\n\Z",
         )
-        self.assertIn("mise install -f pipx:hypothesis", done.stderr)
 
 
 class Properties(unittest.TestCase):
