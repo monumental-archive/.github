@@ -154,30 +154,20 @@ jobs:
             "any=\(.cells | length > 0)"
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
-          if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
-            mode=() none="no changed statements" list=$("${ORG_PYTHON}" .org-canon/mise/vex_one_per_merge.py --list "${BEFORE}..")
-          else
-            mode=(--unsigned-only --store "${REPO}") none="security/vex/ holds no decisions" list=$(git ls-files "${DECISIONS}")
-          fi
-          IFS=$'\n' read -r -d '' -a files <<< "${list}" || true
-          # Nothing to sign ends here: no output is `any` unset, which
-          # every consumer reads as false.
-          if [[ ${#files[@]} -eq 0 ]]; then
-            org_notice "${none}"
-            exit 0
-          fi
-          if [[ ${#mode[@]} -eq 0 && ${#files[@]} -ne 1 ]]; then
-            org_error "$(< "${ONE_PER_MERGE}")"
-            exit 1
-          fi
+          # The decisions to sign, as stele's arguments (mise/vex-decisions.sh,
+          # #1660); the stele call stays here, where the population-read law
+          # reads it (#1602).
+          .org-canon/mise/vex-decisions.sh > "${RUNNER_TEMP}/vex-args"
+          args=()
+          while IFS= read -r -d '' arg; do args+=("${arg}"); done < "${RUNNER_TEMP}/vex-args"
+          ((${#args[@]})) || exit 0
           rc=0
-          stele derive vex-subjects "${mode[@]}" "${files[@]/#/--decision=}" \
+          stele derive vex-subjects "${args[@]}" \
             --policy slsa/assert-policy.json --org "${OWNER}" --out plan.json || rc=$?
           # 1 is refusals, which the job below reddens; 4 is an unreadable
           # store; anything else is the tool failing.
-          if [[ ${rc} -eq 4 ]]; then
+          . .org-canon/mise/workflow-command.sh
+          if ((rc == 4)); then
             org_error "${UNREADABLE}"
             exit 4
           fi

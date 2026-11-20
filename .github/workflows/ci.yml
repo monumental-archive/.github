@@ -760,13 +760,11 @@ jobs:
             [[ ${result} != success ]] || continue
             if [[ ${name} == "pgrx legs" && ${result} == skipped ]]; then
               [[ ${MAJORS} != "[]" ]] || continue
-              # No canon tree in this job: the command is a literal, and the
-              # outside text follows on a plain line, never at its start (#1660).
-              echo "::error::pgrx legs were skipped although majors were planned"
-              printf '  planned: %q\n' "${MAJORS}"
+              # No canon tree in this job: one printf, whose format is a literal
+              # command and a literal label; the outside text is a %q argument (#1660).
+              printf '::error::pgrx legs were skipped although majors were planned\n  planned: %q\n' "${MAJORS}"
             else
-              echo "::error::a job the gate needs did not succeed"
-              printf '  job %q: %q\n' "${name}" "${result}"
+              printf '::error::a job the gate needs did not succeed\n  job %q: %q\n' "${name}" "${result}"
             fi
             status=1
           done

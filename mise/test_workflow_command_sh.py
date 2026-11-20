@@ -55,6 +55,8 @@ PRINTER = re.compile(
 )
 # Output that goes to a file, a pipe or a substitution is not the log.
 NOT_THE_LOG = re.compile(r""">>?\s*["$/\w]|\|\s*[\w$"]""")
+# A format line that is a literal workflow command.
+COMMAND_LINE = re.compile(r"::[A-Za-z][A-Za-z0-9_-]*(?:::| )")
 # A printf conversion, `%%` aside.
 CONVERSION = re.compile(r"%(?!%)[-+ #0-9.*]*[a-zA-Z]")
 
@@ -104,7 +106,11 @@ def expands(text: str, quote: str, *, fstring: bool) -> bool:
     if quote == '"':
         # `\(` is jq's interpolation, inside the jq program's own quotes.
         return "$" in text or "`" in text or "\\(" in text or (fstring and "{" in text)
-    return "\\(" in text or bool(re.search(r"%[sdq]", text))
+    # In single quotes the string is a printf format or a jq program,
+    # where `\\n` ends the command's own line: what follows it is the
+    # next line, which rule 2 reads (#1660).
+    own = text.split("\\n", 1)[0]
+    return "\\(" in own or bool(re.search(r"%[sdq]", own))
 
 
 def rule_one(line: str) -> bool:
@@ -143,21 +149,32 @@ def literal_format(rest: str) -> tuple[str, str] | None:
 def guarded_printf(rest: str) -> bool:
     """Say whether a printf's arguments carry outside text safely.
 
+    The format is read line by line (#1660). Each line begins with a
+    literal command whose message is literal (`::error::…`, no
+    conversion), or with a literal label (a character that is not
+    blank, `%`, `:` or `#`) followed by text whose conversions are all
+    `%q`. The runner trims leading whitespace, so a value first on a
+    line could open a command.
+
     Returns:
-        True when the format is a literal whose conversions are all
-        `%q` and which begins with a literal label: the runner trims
-        leading whitespace, so a value first on the line could open a
-        command.
+        True when the format holds no expansion and keeps that shape.
 
     """
     split = literal_format(rest)
     if split is None:
         return False
     fmt, _ = split
-    conversions = CONVERSION.findall(fmt)
-    if any(c[-1] != "q" for c in conversions):
-        return False
-    return not conversions or fmt.lstrip(" \t")[:1] not in {"", "%", ":", "#"}
+    for line in fmt.split("\\n"):
+        head = line.lstrip(" \t")
+        conversions = CONVERSION.findall(line)
+        if COMMAND_LINE.match(head):
+            if conversions:
+                return False
+        elif conversions and (
+            head[:1] in {"", "%", ":", "#"} or any(c[-1] != "q" for c in conversions)
+        ):
+            return False
+    return True
 
 
 def rule_two(line: str) -> bool:
@@ -384,11 +401,16 @@ class TheLaw(unittest.TestCase):
             "printf '%q\\n' \"${x}\"",
             "printf '  %q\\n' \"${x}\"",
             "printf '::%q\\n' \"${x}\"",
+            "printf '::error::x %q\\n' \"${x}\"",
+            "printf '::error::ok\\n%q\\n' \"${x}\"",
+            "printf '::error::ok\\n  ref: %s\\n' \"${x}\"",
             '[[ -n ${x} ]] || echo "${x}"',
             'echo "${refusals}" >&2',
         ]
         green = [
             "printf '  ref: %q\\n' \"${REF}\"",
+            "printf '::error::pgrx legs were skipped\\n  planned: %q\\n' \"${M}\"",
+            "[[ ${rc} -eq 0 ]] || printf '::error::red\\n  exit: %q\\n' \"${rc}\"",
             'printf \'  job %q: %q\\n\' "${name}" "${result}" >&2',
             'echo "  a literal"',
             'echo "${x}" >> "${GITHUB_OUTPUT}"',

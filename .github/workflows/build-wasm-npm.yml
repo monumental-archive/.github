@@ -227,26 +227,8 @@ jobs:
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: |
-          set -euo pipefail
-          meta=$(cargo metadata --no-deps --format-version 1 \
-            --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
-          mp=$(realpath "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
-          mkdir -p plan
-          jq --arg mp "${mp}" \
-            '[.packages[] | select(.manifest_path == $mp) | .name]
-             | if length != 1 then error("crate-dir resolves to \(length) packages") else . end
-             | map({class: "wasm-npm", doc: ("sbom-npm-" + .),
-                    params: {cargoPackage: .}})' \
-            <<< "${meta}" > plan/plan.json
-          # The canon's one writer of workflow commands (#1660). NUL-delimited,
-          # so a field's own newline stays inside its notice.
-          . .org-canon/mise/workflow-command.sh
-          jq -j '.[] | "plans inventory \(.doc) for package \(.params.cargoPackage)\u0000"' \
-            plan/plan.json > "${RUNNER_TEMP}/plan-notices"
-          while IFS= read -r -d '' planned; do
-            org_notice "${planned}"
-          done < "${RUNNER_TEMP}/plan-notices"
+          PLAN_DOC_PREFIX: sbom-npm-
+        run: .org-canon/release/wasm-inventory-plan.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:

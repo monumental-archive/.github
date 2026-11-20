@@ -18,6 +18,4 @@
 #
 # Generated from the tree by the lint's own counter
 # (mise/embedded_shell.py), never typed.
-.github/actions/source-attest/action.yml	Guard the identity and resolve the canon tree	35	# leaving (the source-attest action is deleted): #1362
 .github/actions/source-attest/action.yml	Emit the chain links and push the ledger	19	# leaving (the source-attest action is deleted): #1362
-.github/workflows/build-pgrx-extension.yml	Refuse a tag whose version disagrees with the manifests	16	# stele (derive bump --check --expect): monumental-archive/stele#455

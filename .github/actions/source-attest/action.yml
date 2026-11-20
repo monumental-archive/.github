@@ -78,47 +78,7 @@ runs:
       shell: bash
       env:
         SA_STAGE: ${{ inputs.stage }}
-      run: |
-        set -euo pipefail
-        # The canon's one writer of workflow commands (#1660), in this tree.
-        . "${GITHUB_ACTION_PATH}/../../../mise/workflow-command.sh"
-        case "${SA_STAGE}" in
-          claims | attest) ;;
-          *)
-            org_error "source-attest stage must be 'claims' or 'attest', got '${SA_STAGE}' (#240)"
-            exit 1
-            ;;
-        esac
-        # The action tree IS a canon tree: `uses:` fetched the whole
-        # repository at the caller's pin, the same single resolution the
-        # canon action relies on (#165).
-        root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
-        case "${root}" in
-          */_actions/monumental-archive/.github/*)
-            canon_ref="$(basename "${root}")"
-            ;;
-          *)
-            if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
-              emsg="source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
-              emsg+=" self-call"
-              org_error "${emsg}"
-              exit 1
-            fi
-            canon_ref="${GITHUB_SHA}"
-            ;;
-        esac
-        if [[ ! -f "${root}/slsa/verify-policy.json" ]]; then
-          org_error "resolved canon tree at '${root}' has no slsa/verify-policy.json"
-          exit 1
-        fi
-        work="${RUNNER_TEMP}/source-attest"
-        mkdir -p "${work}"
-        {
-          echo "SA_WORK=${work}"
-          echo "SA_CANON_ROOT=${root}"
-          echo "SA_CANON_REF=${canon_ref}"
-          echo "SA_ISSUER=https://token.actions.githubusercontent.com"
-        } >> "${GITHUB_ENV}"
+      run: '"${GITHUB_ACTION_PATH}/resolve.sh"'
     # cosign comes from the toolbelt, not from sigstore's installer
     # action: the belt pin carries per-platform checksums and provenance
     # verification (mise `locked_verify_provenance`), which is the org's

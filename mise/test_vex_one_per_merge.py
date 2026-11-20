@@ -348,24 +348,34 @@ class Workflow(unittest.TestCase):
         )
         start = workflow.index("        id: collect\n")
         step = workflow[start : workflow.index("\n  sign-vex:", start)]
+        # The listing moved into the step's script (#1660).
+        script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
+        self.assertIn(".org-canon/mise/vex-decisions.sh", step)
         self.assertIn(
-            '"${ORG_PYTHON}" .org-canon/mise/vex_one_per_merge.py --list "${BEFORE}.."',
-            step,
+            '"${ORG_PYTHON}" "${here}/vex_one_per_merge.py" --list "${BEFORE}.."',
+            script,
         )
         self.assertNotIn("git diff", step)
+        self.assertNotIn("git diff", script)
 
 
 class OneWording(unittest.TestCase):
     """The lint and vex-attest.yml print one sentence, from one file."""
 
     def test_the_workflow_reads_the_same_file(self) -> None:
-        """The workflow names the file and restates no sentence of its own."""
+        """The workflow names the file; its script prints it (#1660).
+
+        Neither restates the sentence of its own.
+        """
         workflow = (CANON / ".github/workflows/vex-attest.yml").read_text(
             encoding="utf-8"
         )
+        script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
         self.assertIn("ONE_PER_MERGE: .org-canon/mise/vex-one-per-merge.txt", workflow)
-        self.assertIn('org_error "$(< "${ONE_PER_MERGE}")"', workflow)
+        self.assertIn(".org-canon/mise/vex-decisions.sh", workflow)
+        self.assertIn('org_error "$(< "${ONE_PER_MERGE}")"', script)
         self.assertNotIn(SENTENCE, workflow)
+        self.assertNotIn(SENTENCE, script)
 
 
 if __name__ == "__main__":
