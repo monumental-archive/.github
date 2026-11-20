@@ -28,11 +28,15 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import subject_budget as sb
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # A path segment: never empty, never a slash or a glob character, and
 # rich in what a regex would misread if the pattern were not escaped.
@@ -40,8 +44,7 @@ SEGMENT = st.text(alphabet="abz09.-_@+()[]{}^$|\\", min_size=1, max_size=8)
 PATH = st.lists(SEGMENT, min_size=1, max_size=5)
 
 
-@st.composite
-def globbed(draw: st.DrawFn) -> tuple[str, str, bool]:
+def draw_globbed(draw: st.DrawFn) -> tuple[str, str, bool]:
     """Draw a path and a pattern made from it.
 
     Returns:
@@ -67,6 +70,9 @@ def globbed(draw: st.DrawFn) -> tuple[str, str, bool]:
     return "/".join(segments), "/".join(parts), double
 
 
+globbed = st.composite(draw_globbed)
+
+
 # A dependency name as the managers read them: backend prefixes,
 # scopes and paths, but no template braces.
 DEP = st.from_regex(r"[a-z][a-z0-9@/._:-]{0,30}", fullmatch=True)
@@ -79,6 +85,11 @@ TOKEN = st.sampled_from([
     "{{unknownField}}",
 ])
 FIELD = st.lists(st.one_of(LITERAL, TOKEN), max_size=5).map("".join)
+CONFIG: st.SearchStrategy[dict[str, str]] = st.fixed_dictionaries({
+    "semanticCommitType": LITERAL,
+    "semanticCommitScope": LITERAL,
+    **dict.fromkeys(sb.MESSAGE_FIELDS, FIELD),
+})
 
 
 class GlobMatches(unittest.TestCase):
@@ -109,17 +120,9 @@ class GlobMatches(unittest.TestCase):
 class Render(unittest.TestCase):
     """The widest subject a commit template can mint."""
 
-    @given(
-        st.fixed_dictionaries({
-            "semanticCommitType": LITERAL,
-            "semanticCommitScope": LITERAL,
-            **dict.fromkeys(sb.MESSAGE_FIELDS, FIELD),
-        }),
-        DEP,
-        st.integers(1, 40),
-    )
+    @given(CONFIG, DEP, st.integers(1, 40))
     def test_width_name_and_unmodelled(
-        self, config: dict, dep: str, width: int
+        self, config: dict[str, str], dep: str, width: int
     ) -> None:
         """Growth per column, the name where asked, unmodelled when left."""
         fields = [config[k] for k in sb.MESSAGE_FIELDS]
@@ -135,15 +138,26 @@ class Render(unittest.TestCase):
         self.assertTrue(narrow.endswith(sb.PR_TAIL))
 
 
-SCALAR = st.one_of(st.booleans(), st.integers(-9, 9), st.text(max_size=8))
-VALUE = st.recursive(
-    SCALAR,
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=8), inner, max_size=3)
-    ),
-    max_leaves=10,
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.booleans(), st.integers(-9, 9), st.text(max_size=8)
 )
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or a table.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    tables: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=8), inner, max_size=3
+    )
+    return arrays | tables
+
+
+VALUE: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=10)
 MANIFEST_KEY = st.sampled_from([
     "dependencies",
     "dev-dependencies",
@@ -172,13 +186,35 @@ def toml(value: object) -> str:
     return json.dumps(value)
 
 
-DOCUMENT = st.dictionaries(MANIFEST_KEY, VALUE, max_size=4)
-READERS = {
-    "Cargo.toml": "from_cargo",
-    "package.json": "from_npm",
-    "go.mod": "from_gomod",
-    ".github/workflows/ci.yml": "from_actions",
-    "mise.toml": "from_mise",
+def as_json(value: object) -> bytes:
+    """Write a value as a JSON document.
+
+    Returns:
+        Its UTF-8 bytes.
+
+    """
+    return json.dumps(value).encode()
+
+
+def as_toml(document: dict[str, object]) -> str:
+    """Write a document's top keys as TOML lines.
+
+    Returns:
+        The TOML text.
+
+    """
+    return "".join(f"{json.dumps(k)} = {toml(v)}\n" for k, v in document.items())
+
+
+DOCUMENT: st.SearchStrategy[dict[str, object]] = st.dictionaries(
+    MANIFEST_KEY, VALUE, max_size=4
+)
+READERS: dict[str, Callable[[list[Path], list[str]], list[sb.Dep]]] = {
+    "Cargo.toml": sb.from_cargo,
+    "package.json": sb.from_npm,
+    "go.mod": sb.from_gomod,
+    ".github/workflows/ci.yml": sb.from_actions,
+    "mise.toml": sb.from_mise,
 }
 
 
@@ -189,13 +225,9 @@ class Readers(unittest.TestCase):
         st.sampled_from(sorted(READERS)),
         st.one_of(
             st.binary(max_size=80),
-            DOCUMENT.map(lambda d: json.dumps(d).encode()),
-            DOCUMENT.map(
-                lambda d: "".join(
-                    f"{json.dumps(k)} = {toml(v)}\n" for k, v in d.items()
-                )
-            ).map(str.encode),
-            VALUE.map(lambda v: json.dumps(v).encode()),
+            DOCUMENT.map(as_json),
+            DOCUMENT.map(as_toml).map(str.encode),
+            VALUE.map(as_json),
         ),
     )
     @example("mise.toml", b'"tools"={""=false}')
@@ -206,7 +238,7 @@ class Readers(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             report: list[str] = []
-            deps = getattr(sb, READERS[name])([path], report)
+            deps = READERS[name]([path], report)
         self.assertIsInstance(deps, list)
         for line in report:
             self.assertTrue(line.startswith(str(path)), line)
