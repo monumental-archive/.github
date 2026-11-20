@@ -14,6 +14,7 @@ gate as `mise run test`.
 """
 
 import ast
+import functools
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -421,15 +422,36 @@ class Environments:
         return out
 
 
+@functools.cache
+def source() -> Path:
+    """Name the repository's source once per run (#1726).
+
+    Returns:
+        `hermetic.source(CANON)`: the checkout, never mutmut's copy.
+
+    """
+    return hermetic.source(CANON)
+
+
+def source_text(path: str) -> str:
+    """Read a tracked file as its author wrote it (#1726).
+
+    Returns:
+        The text under `source()`, never mutmut's rewritten copy.
+
+    """
+    return (source() / path).read_text(encoding="utf-8")
+
+
 def listed_test_files() -> list[str]:
     """Name every test file in the four discovery roots.
 
     Returns:
-        Their paths, relative to the canon.
+        Their paths, relative to the repository's source.
 
     """
     return hermetic.tracked(
-        CANON,
+        source(),
         *(f"{r}/test_*.py" for r in ROOTS),
         *(f"{r}/prop_*.py" for r in ROOTS),
     )
@@ -940,7 +962,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in copies((CANON / path).read_text(encoding="utf-8"))
+            for line in copies(source_text(path))
         ]
         self.assertEqual([], offenders)
 
@@ -950,9 +972,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in Environments(
-                (CANON / path).read_text(encoding="utf-8")
-            ).built_by_hand()
+            for line in Environments(source_text(path)).built_by_hand()
         ]
         self.assertEqual([], offenders)
 
@@ -1126,7 +1146,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in which_calls((CANON / path).read_text(encoding="utf-8"))
+            for line in which_calls(source_text(path))
         ]
         self.assertEqual(list[str](), offenders)
 
@@ -1185,7 +1205,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in plants_from_tree((CANON / path).read_text(encoding="utf-8"))
+            for line in plants_from_tree(source_text(path))
         ]
         self.assertEqual(list[str](), offenders)
 
@@ -1251,7 +1271,7 @@ class TheLaw(unittest.TestCase):
         offenders = [
             f"{path}:{line}"
             for path in listed_test_files()
-            for line in plain_listings((CANON / path).read_text(encoding="utf-8"))
+            for line in plain_listings(source_text(path))
         ]
         self.assertEqual([], offenders)
 

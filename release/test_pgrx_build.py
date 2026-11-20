@@ -680,7 +680,8 @@ class NoSiteAsksForTheLatestRelease(unittest.TestCase):
 
     def test_no_untagged_release_view(self) -> None:
         """Every `gh release view` in release/ names the release it reads."""
-        tracked = hermetic.tracked(CANON, "release")
+        root = hermetic.source(CANON)
+        tracked = hermetic.tracked(root, "release")
         found = []
         for path in tracked:
             name = Path(path).name
@@ -688,7 +689,7 @@ class NoSiteAsksForTheLatestRelease(unittest.TestCase):
                 continue
             if path in self.NOT_A_PREDECESSOR:
                 continue
-            text = (CANON / path).read_text(encoding="utf-8", errors="replace")
+            text = (root / path).read_text(encoding="utf-8", errors="replace")
             found += [
                 f"{path}:{text.count(chr(10), 0, hit.start()) + 1}"
                 for hit in self.UNTAGGED.finditer(text)

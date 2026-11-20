@@ -89,12 +89,13 @@ class TheLaw(unittest.TestCase):
 
     def test_no_tracked_file_loads_another_by_path(self) -> None:
         """Every helper is imported by name, in tests and helpers alike."""
-        self.assertEqual([], offenders(CANON))
+        self.assertEqual([], offenders(hermetic.source(CANON)))
 
     def test_the_excepted_file_still_loads(self) -> None:
         """An exception that no longer applies is removed, not kept."""
+        root = hermetic.source(CANON)
         for path in EXCEPTED:
-            text = (CANON / path).read_text(encoding="utf-8")
+            text = (root / path).read_text(encoding="utf-8")
             self.assertTrue(loads(text), f"{path} no longer loads by path")
 
     def test_each_loader_is_found(self) -> None:
