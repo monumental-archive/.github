@@ -51,6 +51,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import call_names
 import decoded
+import embedded_shell
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -311,7 +312,7 @@ def steps(job: list[str]) -> list[dict[str, str]]:
         if indent == STEP:
             section = key
         name = key if indent == STEP else f"{section}.{key}"
-        if value in {"|", "|-", ">", ">-"}:
+        if re.fullmatch(embedded_shell.BLOCK_HEADER, value):
             out[-1][name], block, depth = "", name, indent
         else:
             out[-1][name] = value + "\n" if key == "run" else value
@@ -1788,6 +1789,82 @@ class BeltPython(unittest.TestCase):
 JOB_TOKENS = ("github.token", "secrets.GITHUB_TOKEN")
 STELE_VERB = re.compile(r"(?<![\w/.:-])stele\s+[a-z]")
 ORG_FLAG = re.compile(r"(?<![\w-])--org\b")
+
+
+class StepHeaders(unittest.TestCase):
+    """A block header is read by one grammar, embedded_shell's (#1837)."""
+
+    def test_each_header_form_opens_a_block(self) -> None:
+        """Every chomping and indentation form, commented or not."""
+        for header in (
+            "|",
+            "|-",
+            "|+",
+            ">",
+            ">-",
+            ">2",
+            "|2-",
+            "|-2",
+            "| # note",
+            ">- # note",
+        ):
+            with self.subTest(header=header):
+                job = [
+                    "      - name: s",
+                    f"        run: {header}",
+                    "          a: b",
+                    "          echo x",
+                ]
+                want: list[dict[str, str]] = [{"name": "s", "run": "a: b\necho x\n"}]
+                self.assertEqual(want, steps(job))
+
+    def test_an_input_header_opens_a_block(self) -> None:
+        """`with:` `script: | # note` is read as its body too."""
+        job = [
+            "      - name: s",
+            "        with:",
+            "          script: | # note",
+            "            a: b",
+            "            echo x",
+        ]
+        want: list[dict[str, str]] = [
+            {"name": "s", "with": "", "with.script": "a: b\necho x\n"}
+        ]
+        self.assertEqual(want, steps(job))
+
+    def test_a_value_that_is_not_a_header_is_one_line(self) -> None:
+        """A pipe and a comment inside a command are not a header."""
+        job = ["      - name: s", "        run: echo a | cat # note"]
+        want: list[dict[str, str]] = [{"name": "s", "run": "echo a | cat # note\n"}]
+        self.assertEqual(want, steps(job))
+
+    def test_the_commented_header_in_the_tree_is_read(self) -> None:
+        """source-attest's `run: | # zizmor: ...` step is read whole."""
+        text = (CANON / ".github/actions/source-attest/action.yml").read_text("utf-8")
+        found = [
+            s
+            for s in steps(action_job(text))
+            if s.get("name") == "Install the belt's cosign and stele"
+        ]
+        self.assertEqual(1, len(found))
+        self.assertIn("set -euo pipefail", found[0]["run"])
+
+    def test_a_start_under_a_commented_header_is_named(self) -> None:
+        """Planted: a helper started in a commented-header body is red."""
+        text = (
+            "name: x\nruns:\n  using: composite\n  steps:\n"
+            "    - name: Derive\n      shell: bash\n"
+            "      run: | # zizmor: ignore[github-env]\n"
+            '        python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
+        )
+        self.assertEqual(
+            strings(
+                ".github/actions/x/action.yml runs: step 'Derive' starts"
+                " derive.py with the runner's python3; run it as"
+                ' "${ORG_PYTHON}" derive.py (#1543)'
+            ),
+            interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"}),
+        )
 
 
 def env_token(lines: list[str], indent: int) -> str | None:
