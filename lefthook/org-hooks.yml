@@ -115,7 +115,8 @@ pre-push:
 # is replaced in one step (#1731): made beside it as `<link>.<pid>` and
 # renamed over it with `mv -f`, so a hook running at the same time sees
 # the old link or the new one, never neither and never an error. A
-# temporary name whose hook is no longer running is removed. A line
+# temporary name whose hook is no longer running is removed; a sibling
+# whose suffix is not all digits is not the hook's and is left. A line
 # is printed only when a link changes. No pin (the canon, whose tree is
 # its belt) does nothing.
 #
@@ -152,7 +153,8 @@ post-checkout:
         dir="${top}/.config/mise"; mkdir -p "${dir}/conf.d" || exit 1; changed=0;
         for pair in "conf.d/belt.toml:config.toml" "mise.lock:mise.lock"; do
         link="${dir}/${pair%%:*}"; want="${tree}/mise/${pair#*:}";
-        for old in "${link}".*; do p="${old##*.}";
+        for old in "${link}".*; do p="${old#"${link}".}";
+        case "${p}" in ""|*[!0-9]*) continue ;; esac;
         kill -0 "${p}" 2>/dev/null || rm -f "${old}"; done;
         cur="$(readlink "${link}" 2>/dev/null)" || cur="";
         if [ "${cur}" != "${want}" ]; then new="${link}.$$";

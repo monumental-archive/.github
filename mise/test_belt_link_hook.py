@@ -337,6 +337,21 @@ class TheCacheAndTheLinks(HookFixture):
         left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
         self.assertEqual(left, ["belt.toml", "conf.d", "mise.lock"])
 
+    def test_a_sibling_whose_suffix_is_not_a_pid_is_left(self) -> None:
+        """Only `<link>.<digits>` is the hook's: `mise.lock.bak` stays."""
+        self.assertEqual(self.hook().returncode, 0)
+        conf = self.consumer / ".config" / "mise"
+        planted = ["belt.toml.bak", "belt.toml.12x", "mise.lock.bak", "mise.lock."]
+        for name in planted:
+            where = conf / "conf.d" if name.startswith("belt") else conf
+            (where / name).write_text("not the hook's\n", encoding="utf-8")
+        done = self.hook()
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertEqual(self.links(), self.linked(self.shas[0]))
+        left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
+        want = sorted(["belt.toml", "conf.d", "mise.lock", *planted])
+        self.assertEqual(left, want)
+
     def test_a_fetch_that_is_not_the_pin_is_refused(self) -> None:
         """The remote answers with another commit: red, nothing linked."""
         stubs = self.tmp / "stubs"
