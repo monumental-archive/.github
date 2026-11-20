@@ -45,10 +45,12 @@ org_pgrx_darwin_flags() { # correct the SDK the prebuilt pg_config names
   }
   export BINDGEN_EXTRA_CLANG_ARGS="-isysroot ${sdk} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
   export CFLAGS="-isysroot ${sdk} ${CFLAGS:-}"
-  org_pgrx_darwin_icu
+  # ICU's headers are NOT added here (#1774): they are per Postgres
+  # major, so each call site adds them for the one major it builds, with
+  # org_pgrx_darwin_icu, below.
 }
 
-org_pgrx_darwin_icu() { # put ICU's headers where the prebuilt Postgres expects them
+org_pgrx_darwin_icu() { # usage: org_pgrx_darwin_icu <Postgres major>, in the subshell that builds it
   # THE SECOND THING THE BUILD MACHINE LEFT BEHIND, and it only started
   # to matter at pgrx 0.19.3. The prebuilt macOS Postgres is configured
   # --with-icu and records
@@ -72,61 +74,163 @@ org_pgrx_darwin_icu() { # put ICU's headers where the prebuilt Postgres expects 
   # build with — in the belt this would cost every repository 121M for
   # headers one class of crate reads.
   #
-  # WHICH ICU IS DERIVED, never declared: the major is read out of each
+  # WHICH ICU IS DERIVED, never declared: the major is read out of the
   # pinned Postgres's own `pg_config --cppflags`, so the pin is checked
   # against what the server was actually built with. A header set from a
   # different major would bind against declarations the shipped dylibs
   # do not have, and nothing downstream would say so.
-  local listing paths path pg_config flags major needed="" icu version where
+  #
+  # ONE POSTGRES MAJOR AT A TIME (#1774). ICU renames its symbols per
+  # major, so no one header set serves Postgres builds that name two —
+  # and a repository that holds one Postgres major back across a release
+  # where upstream's ICU moved has exactly that. Every cargo call that
+  # compiles the extension names one Postgres major, so each runs this
+  # for that major in a subshell with the cargo call: the include path is
+  # that major's own, and it never reaches the next. One pin per ICU
+  # major, and a mixed set is a supported state.
+  #
+  # A Postgres that names no ICU exports nothing, and so does any kernel
+  # but Darwin.
+  local kernel icu where rc=0
+  kernel=$(uname -s)
+  [[ ${kernel} == "Darwin" ]] || return 0
+  icu=$(org_pgrx_darwin_icu_of "$1") || return 1
+  [[ -n ${icu} ]] || return 0
+  where=$(org_pgrx_darwin_icu_headers "${icu}" "$1") || rc=$?
+  [[ ${rc} -ne 3 ]] || org_pgrx_darwin_icu_pin "${icu}" >&2
+  [[ ${rc} -eq 0 ]] || return 1
+  local include="-I${where}/source/common -I${where}/source/i18n"
+  export BINDGEN_EXTRA_CLANG_ARGS="${include} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
+  export CFLAGS="${include} ${CFLAGS:-}"
+}
+
+org_pgrx_darwin_icu_check() { # usage: org_pgrx_darwin_icu_check <Postgres majors, comma-separated>
+  # Before anything compiles, every major the task will build: one red,
+  # naming each ICU major that has no headers pinned and the pin to add,
+  # rather than a red per major found one compile at a time. The per-call
+  # org_pgrx_darwin_icu still refuses on its own, so this is a shortcut,
+  # never the only guard.
+  local kernel major icu rc failed=0 seen="" missing=()
+  kernel=$(uname -s)
+  [[ ${kernel} == "Darwin" ]] || return 0
+  for major in ${1//,/ }; do
+    # lint:msrv hands its plan's `name:major` pairs; the name is not read.
+    major="${major##*:}"
+    icu=$(org_pgrx_darwin_icu_of "${major}") || return 1
+    [[ -n ${icu} ]] || continue
+    if [[ " ${seen} " == *" ${icu} "* ]]; then
+      continue
+    fi
+    seen="${seen} ${icu}"
+    rc=0
+    org_pgrx_darwin_icu_headers "${icu}" "${major}" > /dev/null || rc=$?
+    [[ ${rc} -ne 3 ]] || missing+=("${icu}")
+    [[ ${rc} -eq 0 ]] || failed=1
+  done
+  [[ ${#missing[@]} -eq 0 ]] || org_pgrx_darwin_icu_pin "${missing[@]}" >&2
+  return "${failed}"
+}
+
+org_pgrx_darwin_prepare() { # usage: org_pgrx_darwin_prepare <Postgres majors, comma-separated>
+  # What a task does on a Mac before it compiles anything, in one call:
+  # the SDK correction, which holds for every major, and the ICU check
+  # over every major the task will build. Neither does anything on any
+  # other kernel.
+  org_pgrx_darwin_flags || return 1
+  org_pgrx_darwin_icu_check "$1"
+}
+
+org_pgrx_with_icu() { # usage: org_pgrx_with_icu <Postgres major, or empty> <command…>
+  # One command that compiles the extension, run in a subshell holding
+  # that major's ICU headers (#1774): the include path is the major's own
+  # and ends with the command, so the next major starts from the caller's
+  # flags. Empty: a command that compiles no Postgres, run as it is.
+  local major="$1"
+  shift
+  (
+    [[ -z ${major} ]] || org_pgrx_darwin_icu "${major}" || exit 1
+    "$@"
+  )
+}
+
+org_pgrx_darwin_icu_of() { # usage: org_pgrx_darwin_icu_of <Postgres major>; prints its ICU major
+  # Read out of the pinned Postgres of that major: ACTIVE entries only,
+  # the rule pgrx_postgres.py states — `mise ls` reports everything
+  # installed on the machine, and a copy somebody installed by hand is
+  # not a pin. Prints nothing when that Postgres names no ICU, or when
+  # no Postgres of that major is pinned, which pgrx_postgres.py reds in
+  # its own words.
+  local listing paths path pg_config flags
   listing=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  # ACTIVE entries only, the rule pgrx_postgres.py states: `mise ls`
-  # reports everything installed on the machine, and a copy somebody
-  # installed by hand is not a pin — it passes here and is absent in CI.
-  paths=$(jq -r '.[] | select(.active and .installed) | .install_path' <<< "${listing}") || return 1
+  paths=$(jq -r --arg major "$1" '.[] | select(.active and .installed)
+    | select(((.version // "") | split(".")[0]) == $major) | .install_path' <<< "${listing}") || return 1
   while read -r path; do
     [[ -n ${path} ]] || continue
     for pg_config in "${path}"/bin/pg_config "${path}"/*/bin/pg_config; do
       [[ -x ${pg_config} ]] || continue
       flags=$("${pg_config}" --cppflags) || return 1
-      [[ ${flags} =~ icu4c@([0-9]+) ]] || continue
-      major="${BASH_REMATCH[1]}"
-      [[ " ${needed} " == *" ${major} "* ]] || needed="${needed} ${major}"
+      if [[ ${flags} =~ icu4c@([0-9]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+      fi
+      return 0
     done
   done <<< "${paths}"
-  # No pinned Postgres names an ICU: nothing was built against one, or no
-  # Postgres is pinned yet and pgrx_postgres.py will say so in its own
-  # words. Either way there is nothing here to correct.
-  needed="${needed# }"
-  [[ -n ${needed} ]] || return 0
-  if [[ ${needed} == *" "* ]]; then
-    echo "pgrx-env: the pinned Postgres builds were compiled against different ICU majors (${needed})" >&2
-    echo "  one include path cannot serve them all — pin Postgres builds that share one" >&2
-    return 1
-  fi
-  icu=$(mise ls "github:unicode-org/icu" --json) || return 1
-  version=$(jq -r '[.[] | select(.active and .installed)] | last | .version // empty' <<< "${icu}") || return 1
-  where=$(jq -r '[.[] | select(.active and .installed)] | last | .install_path // empty' <<< "${icu}") || return 1
+}
+
+org_pgrx_darwin_icu_headers() { # usage: org_pgrx_darwin_icu_headers <ICU major> <Postgres major>
+  # Prints the install path of the pinned ICU of that major, its headers
+  # checked. Red otherwise with the reason, and status 3 when the remedy
+  # is a pin to add, which the caller prints for every missing major at
+  # once (org_pgrx_darwin_icu_pin).
+  local listing pinned version where
+  listing=$(mise ls "github:unicode-org/icu" --json) || return 1
+  pinned=$(jq -r '[.[] | select(.active and .installed) | .version] | join(" ")' <<< "${listing}") || return 1
+  version=$(jq -r --arg major "$1" '[.[] | select(.active and .installed)
+    | select(((.version // "") | split(".")[0]) == $major)] | last | .version // empty' <<< "${listing}") || return 1
+  where=$(jq -r --arg major "$1" '[.[] | select(.active and .installed)
+    | select(((.version // "") | split(".")[0]) == $major)] | last | .install_path // empty' <<< "${listing}") || return 1
   if [[ -z ${version} || -z ${where} ]]; then
-    echo "pgrx-env: the pinned Postgres was built against ICU ${needed} and ships no headers —" >&2
-    echo "  pgrx binds every Postgres header from 0.19.3, so the build needs them. Pin them" >&2
-    echo "  beside the Postgres in mise.toml (macOS only; the Linux runner has libicu-dev):" >&2
-    echo '  "github:unicode-org/icu" = { version = "<major>.<minor>", version_prefix = "release-",' >&2
-    echo '    asset_pattern = "icu4c-*-sources.tgz", os = ["macos"] }' >&2
-    return 1
-  fi
-  if [[ ${version%%.*} != "${needed}" ]]; then
-    echo "pgrx-env: mise.toml pins ICU ${version}; the pinned Postgres was built against ICU ${needed}" >&2
-    echo "  the headers must be the major the shipped dylibs are — pin a ${needed}.x release" >&2
-    return 1
+    if [[ -z ${pinned} ]]; then
+      echo "pgrx-env: pg$2 was built against ICU $1, and mise.toml pins no ICU headers —" >&2
+      echo "  the prebuilt Postgres ships none, and pgrx binds every Postgres header from 0.19.3" >&2
+    else
+      echo "pgrx-env: pg$2 was built against ICU $1; mise.toml pins ICU ${pinned} and no $1.x —" >&2
+      echo "  the headers must be the major the shipped dylibs are, one pin per ICU major" >&2
+    fi
+    return 3
   fi
   if [[ ! -f ${where}/source/common/unicode/utypes.h || ! -f ${where}/source/i18n/unicode/ucol.h ]]; then
-    echo "pgrx-env: ${where} carries no ICU headers under source/common and source/i18n" >&2
+    echo "pgrx-env: ICU ${version} at ${where} carries no headers under source/common and source/i18n" >&2
     echo "  the pin must be ICU's SOURCE archive (asset_pattern = \"icu4c-*-sources.tgz\")" >&2
     return 1
   fi
-  local include="-I${where}/source/common -I${where}/source/i18n"
-  export BINDGEN_EXTRA_CLANG_ARGS="${include} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
-  export CFLAGS="${include} ${CFLAGS:-}"
+  echo "${where}"
+}
+
+org_pgrx_darwin_icu_pin() { # usage: org_pgrx_darwin_icu_pin <ICU majors to add…>
+  # The pin to write, whole: what mise.toml pins already and the majors
+  # to add. One ICU major is the single-table form; more is the array
+  # form, one table per ICU major, which mise installs side by side.
+  local listing pinned version major entries=()
+  local keys='version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz", os = ["macos"]'
+  listing=$(mise ls "github:unicode-org/icu" --json) || return 1
+  pinned=$(jq -r '.[] | select(.active and .installed) | .version' <<< "${listing}") || return 1
+  while read -r version; do
+    [[ -z ${version} ]] || entries+=("${version}")
+  done <<< "${pinned}"
+  for major in "$@"; do
+    entries+=("${major}.<minor>")
+  done
+  echo "  pin them beside the Postgres in mise.toml (macOS only; the Linux runner has libicu-dev):"
+  if [[ ${#entries[@]} -eq 1 ]]; then
+    echo "  \"github:unicode-org/icu\" = { version = \"${entries[0]}\", ${keys} }"
+    return 0
+  fi
+  echo '  "github:unicode-org/icu" = ['
+  for version in "${entries[@]}"; do
+    echo "    { version = \"${version}\", ${keys} },"
+  done
+  echo "  ]"
 }
 
 org_pgrx_init() { # usage: org_pgrx_init < records from pgrx_postgres.py

@@ -26,6 +26,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
@@ -63,6 +64,16 @@ case "$*" in
 esac
 """
 CARGO_MUTANTS_STUB = "#!/usr/bin/env bash\nexit 99\n"
+# The real org_pgrx_with_icu, read out of pgrx-env.sh rather than
+# written again here: its subshell is the property the rows rely on.
+WITH_ICU = re.search(
+    r"^org_pgrx_with_icu\(\) \{.*?^\}\n",
+    (BELT / "pgrx-env.sh").read_text(encoding="utf-8"),
+    re.MULTILINE | re.DOTALL,
+)
+if WITH_ICU is None:
+    msg = "org_pgrx_with_icu is gone from pgrx-env.sh"
+    raise LookupError(msg)
 PGRX_ENV_STUB = """
 org_pgrx_provision() {
   {
@@ -72,7 +83,11 @@ org_pgrx_provision() {
   } >> "${PLANT_LOG}"
   return "${PLANT_PROVISION:-0}"
 }
-"""
+# The per-major ICU headers (#1774): the check answers PLANT_ICU_CHECK,
+# and the headers are a mark the stub cargo could show.
+org_pgrx_darwin_icu_check() { return "${PLANT_ICU_CHECK:-0}"; }
+org_pgrx_darwin_icu() { export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1"; }
+""" + WITH_ICU.group(0)
 
 SURVIVOR = "src/lib.rs:12:5: replace answer -> u32 with 0"
 NAMES = [
@@ -577,6 +592,17 @@ class Pgrx(Planted):
             done.stderr.splitlines(),
             [f"{LABEL}: ext at pg18: no Postgres could be provisioned", *RED],
         )
+
+    def test_missing_icu_headers_are_red(self) -> None:
+        """No ICU headers for the default major: red by name, never mutated."""
+        self.plant(package("ext", str(self.tree), default=["pg18"]))
+        done, log = self.run_leg(PLANT_ICU_CHECK="1")
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(),
+            [f"{LABEL}: ext at pg18: no ICU headers for it are pinned (above)", *RED],
+        )
+        self.assertEqual([c for c in log if c.startswith("cargo mutants")], [])
 
 
 class Shards(Planted):

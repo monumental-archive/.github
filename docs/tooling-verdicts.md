@@ -64,7 +64,7 @@ honestly blocked on.
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv_plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 | `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx_postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
-| `github:unicode-org/icu` (repo-side, macOS only, TOFU checksum) | ICU's headers for building a pgrx extension on a Mac: the prebuilt Postgres is configured `--with-icu` and ships the dylibs without the headers, and pgrx binds every Postgres header from 0.19.3. `mise/pgrx-env.sh` adds them to the build and holds the pin to the ICU major each pinned Postgres was built against |
+| `github:unicode-org/icu` (repo-side, macOS only, TOFU checksum) | ICU's headers for building a pgrx extension on a Mac: the prebuilt Postgres is configured `--with-icu` and ships the dylibs without the headers, and pgrx binds every Postgres header from 0.19.3. `mise/pgrx-env.sh` adds them per Postgres major, and holds one release per ICU major the pinned Postgres builds name: the single-table form for one, the array form for more (#1774) |
 | a canon-written check, no tool (`mise/vendored.sh`, bash) | Every tracked file under any `vendor/` directory pinned byte for byte to an upstream commit (`lint:vendored`), against the `PINNED.toml` beside it — the other half of every `:!vendor/**` in the belt |
 
 **clippy, and the three things standing it up settled** (#445). The
@@ -474,10 +474,35 @@ header directories, and the extension links against nothing of ICU's —
 the server that loads it carries its own.
 
 Which ICU is derived, not declared. `pgrx-env.sh` reads the major out of
-each pinned Postgres's own `pg_config --cppflags` and reds if the pin is
-missing, is a different major, or is not the source archive; headers
-from another major would bind declarations the shipped dylibs do not
-have, and nothing downstream would say so. Only ACTIVE mise entries
+each pinned Postgres's own `pg_config --cppflags` and reds if no pin of
+that major exists, naming the line to add, or if the pin is not the
+source archive; headers from another major would bind declarations the
+shipped dylibs do not have, and nothing downstream would say so.
+
+One release per ICU major the pinned Postgres builds name (#1774). ICU
+renames its symbols per major, so a repository that holds one Postgres
+major back across a release where upstream's ICU moved needs two sets of
+headers, and one include path cannot serve both. It does not have to:
+every cargo call that compiles the extension names one Postgres major,
+so each adds that major's headers in a subshell with that one call, and
+no major's include path reaches the next. One ICU major is the
+single-table pin; more is the array form, one table per major, which
+mise installs side by side:
+
+```toml
+"github:unicode-org/icu" = [
+  { version = "78.3", version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz", os = ["macos"] },
+  { version = "79.1", version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz", os = ["macos"] },
+]
+```
+
+A mixed set is a supported state. Every task checks each major it will
+build before anything compiles, and reds once, naming every ICU major
+with no headers pinned and the whole pin to write. The accepted cost,
+the owner's decision on #1774: an ICU major new to a repository is seen
+only on a Mac, so a Postgres bump that brings one is green on the runner
+and red on the first Mac run, by name, with the pin line to add. No
+macOS job is in the gate for it. Only ACTIVE mise entries
 count, on both sides — a copy installed by hand is not a pin, and the
 first draft of this check passed on exactly that. The preset disables
 major updates for the package for the same reason: an ICU major moves
