@@ -35,6 +35,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 
@@ -86,12 +87,14 @@ def write(cwd: Path, name: str) -> None:
     (cwd / name).write_text(f"{name}\n", encoding="utf-8")
 
 
-@unittest.skipIf(LEFTHOOK is None or GIT is None, "lefthook (or git) not on PATH")
 class PrePushGate(unittest.TestCase):
     """Every push runs the gate exactly once; none is skipped."""
 
+    @override
     def setUp(self) -> None:
         """Build the canon remote, a seeded consumer remote and a clone."""
+        if LEFTHOOK is None or GIT is None:
+            self.skipTest("lefthook (or git) not on PATH")
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name).resolve()

@@ -34,6 +34,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 
@@ -61,6 +62,7 @@ OLD = 946684800  # 2000-01-01, far from any timestamp a row writes
 class InitCase(unittest.TestCase):
     """A row with a stub cargo and its own PGRX_HOME."""
 
+    @override
     def setUp(self) -> None:
         """Lay out the stand-ins and an empty PGRX_HOME location."""
         tmp = tempfile.TemporaryDirectory()
@@ -141,8 +143,11 @@ class OneInitAtATime(InitCase):
         """
         tasks = [self.init(), self.init()]
         results = [self.finish(t) for t in tasks]
-        self.assertEqual([0, 0], [code for code, _ in results], results)
-        self.assertEqual(["start", "end", "start", "end"], self.log(), results)
+        codes = [code for code, _ in results]
+        both_clean = [0, 0]
+        self.assertEqual(both_clean, codes, results)
+        want = ["start", "end", "start", "end"]
+        self.assertEqual(want, self.log(), results)
 
     def test_a_killed_holder_does_not_strand_the_next_init(self) -> None:
         """A holder killed mid-init takes the lock with it.
@@ -161,7 +166,8 @@ class OneInitAtATime(InitCase):
         code, err = self.finish(self.init(STUB_HOLD="0"))
         self.assertEqual(0, code, err)
         self.assertLess(time.monotonic() - started, 20, err)
-        self.assertEqual(["start", "start", "end"], self.log())
+        want = ["start", "start", "end"]
+        self.assertEqual(want, self.log())
 
 
 class UnchangedConfigKeepsItsTime(InitCase):
@@ -184,6 +190,8 @@ class UnchangedConfigKeepsItsTime(InitCase):
         """Run one init whose cargo writes `new` and wait for it."""
         task = self.init(NEW_CONFIG=new)
         code = task.wait(timeout=60)
+        if task.stdout is None or task.stderr is None:
+            self.fail("init was started without its pipes")
         err = task.stderr.read()
         task.stdout.close()
         task.stderr.close()
@@ -292,6 +300,7 @@ def entry(version: str, where: Path) -> dict[str, object]:
 class IcuCase(unittest.TestCase):
     """A Mac with planted Postgres and ICU pins, and nothing else."""
 
+    @override
     def setUp(self) -> None:
         """Lay out the stand-ins; each row plants its own pins."""
         tmp = tempfile.TemporaryDirectory()
@@ -426,6 +435,7 @@ class IcuCase(unittest.TestCase):
 class MixedIcuSet(IcuCase):
     """Two Postgres majors built against two ICU majors (#1774)."""
 
+    @override
     def setUp(self) -> None:
         """Pin pg17 built against ICU 78 and pg18 built against ICU 79."""
         super().setUp()
@@ -440,12 +450,13 @@ class MixedIcuSet(IcuCase):
         self.icu({"78.3": True, "79.1": True})
         done = self.per_major(17, 18)
         self.assertEqual(0, done.returncode, done.stderr)
+        want = [
+            self.exported(17, "78.3"),
+            self.exported(18, "79.1"),
+            "parent|parent-b|parent-c",
+        ]
         self.assertEqual(
-            [
-                self.exported(17, "78.3"),
-                self.exported(18, "79.1"),
-                "parent|parent-b|parent-c",
-            ],
+            want,
             done.stdout.splitlines(),
         )
         self.assertEqual("", done.stderr)
@@ -480,18 +491,19 @@ class MixedIcuSet(IcuCase):
         """One red before any compile, naming every ICU major to add."""
         checked = self.check("17,18")
         self.assertEqual(1, checked.returncode, checked.stderr)
+        want = [
+            none_pinned(17, 78),
+            NO_PIN,
+            none_pinned(18, 79),
+            NO_PIN,
+            PIN_HEAD,
+            '  "github:unicode-org/icu" = [',
+            f'    {{ version = "78.<minor>", {KEYS} }},',
+            f'    {{ version = "79.<minor>", {KEYS} }},',
+            "  ]",
+        ]
         self.assertEqual(
-            [
-                none_pinned(17, 78),
-                NO_PIN,
-                none_pinned(18, 79),
-                NO_PIN,
-                PIN_HEAD,
-                '  "github:unicode-org/icu" = [',
-                f'    {{ version = "78.<minor>", {KEYS} }},',
-                f'    {{ version = "79.<minor>", {KEYS} }},',
-                "  ]",
-            ],
+            want,
             checked.stderr.splitlines(),
         )
 
@@ -499,6 +511,7 @@ class MixedIcuSet(IcuCase):
 class OneIcuMajor(IcuCase):
     """One Postgres major, one ICU pin: the case before #1774, unchanged."""
 
+    @override
     def setUp(self) -> None:
         """Pin pg18 built against ICU 78."""
         super().setUp()
@@ -509,8 +522,9 @@ class OneIcuMajor(IcuCase):
         self.icu({"78.3": True})
         done = self.per_major(18)
         self.assertEqual(0, done.returncode, done.stderr)
+        want = [self.exported(18, "78.3"), "parent|parent-b|parent-c"]
         self.assertEqual(
-            [self.exported(18, "78.3"), "parent|parent-b|parent-c"],
+            want,
             done.stdout.splitlines(),
         )
         checked = self.check("18")
@@ -520,13 +534,14 @@ class OneIcuMajor(IcuCase):
         """Remedy one: nothing pinned, so the one-table form to add."""
         checked = self.check("18")
         self.assertEqual(1, checked.returncode, checked.stderr)
+        want = [
+            none_pinned(18, 78),
+            NO_PIN,
+            PIN_HEAD,
+            f'  "github:unicode-org/icu" = {{ version = "78.<minor>", {KEYS} }}',
+        ]
         self.assertEqual(
-            [
-                none_pinned(18, 78),
-                NO_PIN,
-                PIN_HEAD,
-                f'  "github:unicode-org/icu" = {{ version = "78.<minor>", {KEYS} }}',
-            ],
+            want,
             checked.stderr.splitlines(),
         )
 
@@ -535,16 +550,17 @@ class OneIcuMajor(IcuCase):
         self.icu({"79.1": True})
         checked = self.check("18")
         self.assertEqual(1, checked.returncode, checked.stderr)
+        want = [
+            other_pinned(18, 78, "79.1"),
+            WRONG_MAJOR,
+            PIN_HEAD,
+            '  "github:unicode-org/icu" = [',
+            f'    {{ version = "79.1", {KEYS} }},',
+            f'    {{ version = "78.<minor>", {KEYS} }},',
+            "  ]",
+        ]
         self.assertEqual(
-            [
-                other_pinned(18, 78, "79.1"),
-                WRONG_MAJOR,
-                PIN_HEAD,
-                '  "github:unicode-org/icu" = [',
-                f'    {{ version = "79.1", {KEYS} }},',
-                f'    {{ version = "78.<minor>", {KEYS} }},',
-                "  ]",
-            ],
+            want,
             checked.stderr.splitlines(),
         )
 
@@ -578,9 +594,8 @@ class OneIcuMajor(IcuCase):
             PLANT_KERNEL="Linux",
         )
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            ["pg18|parent-b|parent-c", "check 0"], done.stdout.splitlines()
-        )
+        want = ["pg18|parent-b|parent-c", "check 0"]
+        self.assertEqual(want, done.stdout.splitlines())
         self.assertEqual("", done.stderr)
         self.assertFalse((self.root / "mise.log").exists())
 
@@ -591,8 +606,9 @@ class OneIcuMajor(IcuCase):
             'org_pgrx_darwin_flags\necho "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
         )
         self.assertEqual(0, done.returncode, done.stderr)
+        want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]
         self.assertEqual(
-            ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"],
+            want,
             done.stdout.splitlines(),
         )
 
@@ -605,8 +621,9 @@ class NoIcuNamed(IcuCase):
         self.postgres({"18.1.0": LINUX_FLAGS})
         done = self.per_major(18)
         self.assertEqual(0, done.returncode, done.stderr)
+        want = ["pg18|parent-b|parent-c", "parent|parent-b|parent-c"]
         self.assertEqual(
-            ["pg18|parent-b|parent-c", "parent|parent-b|parent-c"],
+            want,
             done.stdout.splitlines(),
         )
         checked = self.check("18")
@@ -616,6 +633,7 @@ class NoIcuNamed(IcuCase):
 class WithIcu(IcuCase):
     """org_pgrx_with_icu: one command, its major's headers, then gone."""
 
+    @override
     def setUp(self) -> None:
         """Pin pg17 and pg18 against ICU 78 and 79, both pinned."""
         super().setUp()
@@ -632,13 +650,14 @@ class WithIcu(IcuCase):
             'echo "parent|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
         )
         self.assertEqual(0, done.returncode, done.stderr)
+        want = [
+            self.exported(17, "78.3"),
+            self.exported(18, "79.1"),
+            "plain|parent-b|parent-c",
+            "parent|parent-b|parent-c",
+        ]
         self.assertEqual(
-            [
-                self.exported(17, "78.3"),
-                self.exported(18, "79.1"),
-                "plain|parent-b|parent-c",
-                "parent|parent-b|parent-c",
-            ],
+            want,
             done.stdout.splitlines(),
         )
 
@@ -664,8 +683,9 @@ class WithIcu(IcuCase):
             'echo "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
         )
         self.assertEqual(0, done.returncode, done.stderr)
+        want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]
         self.assertEqual(
-            ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"],
+            want,
             done.stdout.splitlines(),
         )
         self.icu({"79.1": True})
@@ -816,8 +836,9 @@ class NoLeak(unittest.TestCase):
             if CALL.search(site_text(task))
         )
         config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
-        self.assertEqual(3, len(CALL.findall(config)))
-        self.assertEqual(set(SITES), found)
+        self.assertEqual(3, len(list(CALL.finditer(config))))
+        sites = set(SITES)
+        self.assertEqual(sites, found)
 
 
 if __name__ == "__main__":

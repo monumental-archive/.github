@@ -25,10 +25,10 @@ gate as `mise run test`, which `ci` collects.
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -37,9 +37,23 @@ BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 PYTHON = hermetic.tool("python3")
 
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-GATE = CONFIG["tasks"]["test:python-properties"]["run"]
-AUDIT = CONFIG["tasks"]["audit:python-properties"]["run"]
+CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+TASKS = decoded.as_object(CONFIG["tasks"], "the belt's [tasks]")
+
+
+def task_run(name: str) -> str:
+    """Read one belt task's run string.
+
+    Returns:
+        The task body.
+
+    """
+    task = decoded.as_object(TASKS[name], name)
+    return decoded.as_str(task["run"], f"{name}'s run")
+
+
+GATE = task_run("test:python-properties")
+AUDIT = task_run("audit:python-properties")
 
 HOLDS = """\
 import unittest

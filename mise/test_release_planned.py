@@ -19,10 +19,11 @@ gate as `mise run test`, which `ci` collects.
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -44,8 +45,10 @@ def body() -> str:
         The task body with any `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"][NAME]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks[NAME], NAME)
+    run = decoded.as_str(task["run"], "the task's run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)
@@ -117,12 +120,14 @@ class History:
         )
 
 
-@unittest.skipIf(GIT is None or BASH is None, "git (or bash) not on PATH")
 class ReleasePlanned(unittest.TestCase):
     """Green where planned, red with both commits and the count, else skip."""
 
+    @override
     def setUp(self) -> None:
         """Build a history with one commit on the default branch."""
+        if GIT is None or BASH is None:
+            self.skipTest("git (or bash) not on PATH")
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.repo = History(Path(tmp.name).resolve())
@@ -149,8 +154,7 @@ class ReleasePlanned(unittest.TestCase):
 
     def test_a_release_three_commits_past_its_plan_is_red(self) -> None:
         """Three pull requests landed ahead of it in the queue: red, by count."""
-        for n in range(3):
-            parent = self.repo.commit(f"fix: queued ahead {n}")
+        parent = [self.repo.commit(f"fix: queued ahead {n}") for n in range(3)][-1]
         self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned}\n")
         self.assert_red(
             f"{NAME}: the release was planned at {self.planned}"
