@@ -36,19 +36,20 @@ YQ = shutil.which("yq") or "yq"
 # composite action's step, in block or flow style, under a quoted key
 # or through an alias. A step is a mapping two below a `steps` key, so
 # `defaults: run:` (a mapping, not a command) and an action input named
-# `run` under `with:` are left out (#1861). GitHub runs a scalar as the
-# text written, so one YAML reads as a boolean or a number (`run: true`,
-# `run: 1.10`) is read through to_string, which keeps that text, after
-# its style is read (to_string marks it double-quoted); only a scalar
-# is, since to_string on an alias gives `*name`.
+# `run` under `with:` are left out (#1861). The text is the value with
+# its aliases resolved (explode) and read through to_string, so a value
+# YAML reads as a boolean or a number (`run: true`, `run: 1.10`, or an
+# alias of one) is the text written, as GitHub runs it; a null (`run:`,
+# `run: ~`) is no command, and its text is empty. `style` and `kind`
+# are the node as written, read before the text.
 RUNS = """[.. | select(tag == "!!map" and has("run"))
   | select((path | length) >= 2) | select((path | .[-2]) == "steps")
   | select((.run | kind) == "scalar" or (.run | kind) == "alias")
-  | {"line": (.run | line), "style": (.run | style), "run": .run,
+  | {"line": (.run | line), "style": (.run | style),
      "kind": (.run | kind), "shell": .shell, "name": .name,
-     "path": (path | join("/"))}
-  | with(select(.kind == "scalar" and (.run | tag) != "!!str");
-      .run |= to_string)]"""
+     "path": (path | join("/")),
+     "run": (.run | explode(.)
+       | if tag == "!!null" then "" else to_string end)}]"""
 
 
 @dataclass(frozen=True)

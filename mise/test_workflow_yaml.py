@@ -358,6 +358,39 @@ class Runs(Fixture):
         }
         self.assertEqual(want, found)
 
+    def read_steps(self, steps: str) -> list[tuple[str, bool]]:
+        """Read a job of the given step lines through runs().
+
+        Returns:
+            Each record's text and whether it is an alias.
+
+        """
+        path = self.dir / "steps.yml"
+        path.write_text(f"jobs:\n  j:\n    steps:\n{steps}", encoding="utf-8")
+        return [(r.text, r.alias) for r in workflow_yaml.runs(path)]
+
+    def test_an_alias_of_a_non_string_is_its_anchors_text(self) -> None:
+        """`run: *a` of `run: &a true` is `true`, as the anchor is (#1861)."""
+        found = self.read_steps(
+            "      - run: &a true\n      - run: *a\n"
+            "      - run: &b 1.10\n      - run: *b\n"
+        )
+        want: list[tuple[str, bool]] = [
+            ("true", False),
+            ("true", True),
+            ("1.10", False),
+            ("1.10", True),
+        ]
+        self.assertEqual(want, found)
+
+    def test_a_null_run_is_no_command(self) -> None:
+        """`run: ~`, `run: null` and a bare `run:` are empty text (#1861)."""
+        found = self.read_steps(
+            "      - run: ~\n      - run: null\n      - run:\n        name: bare\n"
+        )
+        want: list[tuple[str, bool]] = [("", False), ("", False), ("", False)]
+        self.assertEqual(want, found)
+
     def test_an_action_run_is_placed(self) -> None:
         """A composite action's step is read with its shell."""
         want = [
