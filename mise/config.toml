@@ -3157,9 +3157,10 @@ if [[ -n ${blanket} ]]; then
 fi
 # Members that cannot build on a gate runner are declared, never implied:
 # reading `default-members` instead would let a repo drop a crate from
-# linting by editing an unrelated field. CLIPPY_EXCLUDE is the
-# COVERAGE_EXCLUDE pattern ([env] in the repo's mise.toml), written down
-# where a reviewer sees it.
+# linting by editing an unrelated field. CLIPPY_EXCLUDE ([env] in the
+# repo's mise.toml) is written down where a reviewer sees it. (Its
+# coverage twin, COVERAGE_EXCLUDE, is removed, #1653: the coverage leg
+# measures the repo's own test command, which says what it leaves out.)
 #
 # CLIPPY_FEATURES lets a repo whose features are mutually exclusive say
 # so; everything else gets --all-features, because an unlinted feature is
