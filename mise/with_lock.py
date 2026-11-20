@@ -25,10 +25,6 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 TIMED_OUT = 75  # EX_TEMPFAIL
 POLL = 0.1
@@ -63,14 +59,13 @@ class Args(argparse.Namespace):
     lockfile: str
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Run the command under the lock.
 
     Returns:
         The command's exit status, 75 on a timeout, 2 on bad usage.
 
     """
-    argv = list(sys.argv[1:] if argv is None else argv)
     if "--" not in argv:
         print(
             "with-lock: usage: with_lock.py <lockfile> -- <command…>", file=sys.stderr
@@ -101,4 +96,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -931,8 +931,13 @@ class Args(argparse.Namespace):
     task_ceiling: str | None
 
 
-def main() -> None:
-    """Entry point: check every file named on the command line."""
+def main(argv: list[str]) -> int:
+    """Entry point: check every file named on the command line.
+
+    Returns:
+        The process exit status.
+
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("files", nargs="*")
     ap.add_argument("--no-format", action="store_true")
@@ -948,12 +953,12 @@ def main() -> None:
         metavar="DEBT",
         help="hold mise task bodies to the line ceiling, net of this debt file",
     )
-    args = ap.parse_args(namespace=Args())
+    args = ap.parse_args(argv, namespace=Args())
 
     if args.ceiling:
-        sys.exit(ceiling(args.files, Path(args.ceiling), write=args.write))
+        return ceiling(args.files, Path(args.ceiling), write=args.write)
     if args.task_ceiling:
-        sys.exit(task_ceiling(args.files, Path(args.task_ceiling), write=args.write))
+        return task_ceiling(args.files, Path(args.task_ceiling), write=args.write)
 
     # shellcheck only WARNS on an unreadable --rcfile and then lints at its
     # own defaults, exit 0 — so a belt that did not arrive would read as a
@@ -963,12 +968,12 @@ def main() -> None:
             f"embedded-shell: the org shellcheck config is missing at {ORG_RCFILE}",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
 
     if args.write:
         total = sum(rewrite(Path(f)) for f in args.files)
         print(f"embedded-shell: reformatted {total} run: block(s)")
-        return
+        return 0
 
     findings: list[str] = []
     for f in args.files:
@@ -981,9 +986,10 @@ def main() -> None:
             "the same bar the belt applies to standalone scripts",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
     print("embedded-shell: every run: block is shfmt-clean and shellcheck-clean")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

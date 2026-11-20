@@ -35,6 +35,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
+import gate_stub_fix
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -126,8 +127,53 @@ def lint(workflow: str) -> subprocess.CompletedProcess[str]:
         return run(BODY, Path(tmp))
 
 
-def fixed(workflow: str) -> tuple[subprocess.CompletedProcess[str], str]:
-    """Run fix:gate-stub against one planted gate caller.
+def canon_name() -> str:
+    """Ask identity.sh, the identity file's one reader, for owner/repo.
+
+    Returns:
+        The canon's name, as fix:gate-stub's body passes it.
+
+    """
+    script = (
+        f'. "{BELT}/identity.sh"; echo "$(org_identity owner)/$(org_identity repo)"'
+    )
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [BASH, "-euo", "pipefail", "-c", script],
+        env=hermetic.env(ORG_CANON_DIR=str(CANON)),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+CANON_NAME = canon_name()
+
+
+def fixed(workflow: str) -> tuple[hermetic.Called, str]:
+    """Call the fixer in-process on one planted gate caller (#1697).
+
+    fix:gate-stub's body hands the helper the canon's name and the
+    tree's workflows; the row hands it the same, from the same tree.
+
+    Returns:
+        The status and both streams, and the caller's text after it ran.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        flows = Path(tmp) / ".github" / "workflows"
+        flows.mkdir(parents=True)
+        caller = flows / "gate.yml"
+        caller.write_text(workflow, encoding="utf-8")
+        done = hermetic.call_main(
+            gate_stub_fix.main,
+            [CANON_NAME, ".github/workflows/gate.yml"],
+            cwd=tmp,
+        )
+        return done, caller.read_text(encoding="utf-8")
+
+
+def started(workflow: str) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Start the helper as a process on one caller: the script contract.
 
     Returns:
         The finished process and the caller's text after it ran.
@@ -138,7 +184,17 @@ def fixed(workflow: str) -> tuple[subprocess.CompletedProcess[str], str]:
         flows.mkdir(parents=True)
         caller = flows / "gate.yml"
         caller.write_text(workflow, encoding="utf-8")
-        done = run(FIX_BODY, Path(tmp))
+        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [
+                *(sys.executable, str(BELT / "gate_stub_fix.py")),
+                *(CANON_NAME, ".github/workflows/gate.yml"),
+            ],
+            cwd=tmp,
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         return done, caller.read_text(encoding="utf-8")
 
 
@@ -266,6 +322,29 @@ class Fix(unittest.TestCase):
         )
         self.assertEqual(after, STUB)
         self.assertEqual(lint(after).returncode, 0)
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it rewrites the caller and exits 0."""
+        done, after = started(planted(GROUP, PRE_1617_GROUP))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "fix:gate-stub: rewrote the concurrency lines in"
+            " .github/workflows/gate.yml\nfix:gate-stub: ok\n",
+        )
+        self.assertEqual(after, STUB)
+
+    def test_the_task_body_hands_the_helper_the_canon(self) -> None:
+        """fix:gate-stub's body names the canon from identity.sh and fixes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            flows = Path(tmp) / ".github" / "workflows"
+            flows.mkdir(parents=True)
+            caller = flows / "gate.yml"
+            caller.write_text(planted(GROUP, PRE_1617_GROUP), encoding="utf-8")
+            done = run(FIX_BODY, Path(tmp))
+            after = caller.read_text(encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(after, STUB)
 
     def test_the_pre_1617_stub_is_rewritten_and_then_passes(self) -> None:
         """The stub every repository carries today becomes the canon's."""

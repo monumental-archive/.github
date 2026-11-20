@@ -17,6 +17,7 @@ import ast
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -973,6 +974,59 @@ class TheLaw(unittest.TestCase):
         for name, source in allowed.items():
             with self.subTest(name):
                 self.assertEqual(list[int](), plain_listings(source))
+
+
+def _echo_main(argv: list[str]) -> int:
+    """Stand for a helper's main: read every input a child would have.
+
+    Returns:
+        The status the row asks for, as argv's first word.
+
+    Raises:
+        SystemExit: when the row asks the stand-in to exit.
+
+    """
+    print(
+        f"cwd={Path.cwd().name} env={os.environ.get('PLANTED')} in={sys.stdin.read()}"
+    )
+    print("to stderr", file=sys.stderr)
+    if argv[:1] == ["exit"]:
+        raise SystemExit(int(argv[1]))
+    if argv[:1] == ["refuse"]:
+        sys.exit("refused by name")
+    return int(argv[0])
+
+
+class CallMain(unittest.TestCase):
+    """`call_main` hands a helper what a child had, then restores it."""
+
+    def test_inputs_reach_the_call_and_are_restored(self) -> None:
+        """Environment, working directory and stdin, each put back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            where = Path(tmp) / "tree"
+            where.mkdir()
+            before = (dict(os.environ), Path.cwd(), sys.stdin)
+            done = hermetic.call_main(
+                _echo_main, ["3"], env={"PLANTED": "yes"}, cwd=where, stdin="data"
+            )
+            after = (dict(os.environ), Path.cwd(), sys.stdin)
+        self.assertEqual(
+            hermetic.Called(3, "cwd=tree env=yes in=data\n", "to stderr\n"), done
+        )
+        self.assertEqual(before, after)
+
+    def test_a_system_exit_is_the_status(self) -> None:
+        """An exit code, or a message, as a child's would be."""
+        self.assertEqual(4, hermetic.call_main(_echo_main, ["exit", "4"]).returncode)
+        refused = hermetic.call_main(_echo_main, ["refuse"])
+        self.assertEqual(1, refused.returncode)
+        self.assertTrue(refused.stderr.endswith("refused by name\n"), refused.stderr)
+
+    def test_no_env_leaves_the_environment_as_it_is(self) -> None:
+        """Without `env`, the call sees this process's own variables."""
+        with mock.patch.dict(os.environ, {"PLANTED": "kept"}):
+            done = hermetic.call_main(_echo_main, ["0"])
+        self.assertIn("env=kept", done.stdout)
 
 
 if __name__ == "__main__":

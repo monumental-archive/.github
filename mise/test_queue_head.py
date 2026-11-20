@@ -32,6 +32,7 @@ import tempfile
 import unittest
 
 import hermetic
+import queue_head
 
 HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "queue_head.py"
@@ -164,10 +165,39 @@ class Repos:
         return git(self.checkout, "commit-tree", tree, "-p", base, "-m", "squash")
 
 
-def run_helper(
+def step_env(ref: str, base: str, group: str) -> dict[str, str]:
+    """Build the environment the gate step hands the helper.
+
+    Returns:
+        The environment.
+
+    """
+    env = scrubbed()
+    env.update({
+        "ORG_QUEUE_REF": ref,
+        "ORG_QUEUE_BASE": base,
+        "ORG_QUEUE_GROUP": group,
+        "ORG_QUEUE_TOKEN": "not-a-real-token",
+    })
+    return env
+
+
+def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.Called:
+    """Call the helper in-process in a checkout, as the step runs it (#1697).
+
+    Returns:
+        The status and both streams.
+
+    """
+    return hermetic.call_main(
+        queue_head.main, [], env=step_env(ref, base, group), cwd=cwd
+    )
+
+
+def start_helper(
     cwd: pathlib.Path, ref: str, base: str, group: str
 ) -> subprocess.CompletedProcess[str]:
-    """Run the helper in a checkout as the step does.
+    """Start the helper as a process, as the step does.
 
     Returns:
         The run.
@@ -199,13 +229,19 @@ class QueueHead(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
 
-    def refused(self, done: subprocess.CompletedProcess[str], message: str) -> None:
+    def refused(
+        self, done: hermetic.Called | subprocess.CompletedProcess[str], message: str
+    ) -> None:
         """Assert the step is red with exactly this message."""
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(done.stdout, f"::error::queue-head: {message}\n")
 
     def passed(
-        self, done: subprocess.CompletedProcess[str], group: str, head: str, base: str
+        self,
+        done: hermetic.Called | subprocess.CompletedProcess[str],
+        group: str,
+        head: str,
+        base: str,
     ) -> None:
         """Assert the step is green and names the group, head and base."""
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
@@ -250,6 +286,16 @@ class QueueHead(unittest.TestCase):
             f" {repos.base} is {want}. Re-queue it, and the group is built from the"
             " real head",
         )
+
+    def test_the_script_contract(self) -> None:
+        """Started as a process, it reads the step's variables and exits 0."""
+        repos, _, current = self.moved()
+        repos.clone()
+        group = repos.squash(repos.base, current)
+        done = start_helper(
+            repos.checkout, queue_ref(NUMBER, repos.base), repos.base, group
+        )
+        self.passed(done, group, current, repos.base)
 
     def test_a_group_built_from_the_current_head_passes(self) -> None:
         """A squash of the head the pull request holds is green."""

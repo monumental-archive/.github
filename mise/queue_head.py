@@ -201,13 +201,14 @@ def check(base: str, group: str, number: str, head: str) -> str:
     return want
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     """Verify the merge group against its pull request's current head.
 
     Returns:
         The step's exit status.
 
     """
+    del argv  # the step reads its environment, not arguments
     env = os.environ
     try:
         number = number_of(env.get("ORG_QUEUE_REF", ""))
@@ -226,4 +227,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
