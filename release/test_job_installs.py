@@ -36,11 +36,13 @@ import ast
 import io
 import re
 import shlex
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import tokenize
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import caller_pins
@@ -53,6 +55,9 @@ import call_names
 import decoded
 import embedded_shell
 import hermetic
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
@@ -395,40 +400,190 @@ def installs(job: list[str]) -> tuple[list[str], list[str], list[str]]:
     return keys, needed, optional
 
 
-def code(text: str) -> str:
-    """Reduce shell to the lines that can call a tool.
+# The commands whose arguments the shell prints (#1785).
+PRINTS = frozenset({"echo", "printf"})
+# The expansion operators whose word is a message the shell prints.
+UNSET_OPS = frozenset({":?", "?"})
+# The nodes inside a printed span the shell still runs.
+RUNS = frozenset({"CmdSubst", "ProcSubst"})
+# One parse per distinct text: `code()` is cached on its argument. A
+# dict, not functools.cache, whose signature is `Callable[..., _T]`,
+# an Any expression the belt's mypy refuses.
+REDUCED: dict[str, str] = {}
 
-    Comment lines go, and so does prose a reader would mistake for a
-    call: a line that only prints (`echo`, `printf`), a line that only
-    assigns a double-quoted literal (the `emsg+=` remedy lines), and the
-    message of a `${NAME:?message}` or `${NAME?message}` expansion, which
-    the shell prints and never runs (#1782). A message holding a command
-    substitution stays, because the shell runs that.
+
+def code(text: str) -> str:
+    """Reduce shell to the text that can call a tool (#1785).
+
+    What is prose is read from shfmt's syntax tree, never guessed by
+    line: a print's arguments (`echo`, `printf`), a value assigned
+    only quoted parts (the `emsg+=` remedy lines), and the message of
+    a `${NAME:?message}` or `${NAME?message}` expansion (#1782) go to
+    spaces, every newline kept. A command or process substitution
+    inside any of them stays: the shell runs it. Comment lines go too.
 
     Returns:
         The text that remains.
 
+    Raises:
+        ValueError: shfmt cannot parse the text; its message, never
+            a fallback guess.
+
     """
-    text = re.sub(r"(\$\{\w+:?\?)([^}\n]*)\}", unset_message, text)
-    kept = [
-        ln
-        for ln in text.splitlines()
-        if not re.match(r"\s*(#|echo\b|printf\b|[\w]+\+?=\")", ln)
-    ]
-    return "\n".join(kept)
+    if text in REDUCED:
+        return REDUCED[text]
+    source = text.encode("utf-8")
+    parsed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [hermetic.tool("shfmt"), "--to-json"],
+        input=source,
+        capture_output=True,
+        check=False,
+        env=hermetic.env(),
+    )
+    if parsed.returncode:
+        why = parsed.stderr.decode("utf-8", "replace").strip()
+        msg = f"shfmt cannot parse the text: {why}"
+        raise ValueError(msg)
+    out = bytearray(source)
+    for start, end in prose(decoded.load_json(parsed.stdout)):
+        for at in range(start, end):
+            if out[at] != ord("\n"):
+                out[at] = ord(" ")
+    REDUCED[text] = uncommented(out.decode("utf-8"))
+    return REDUCED[text]
 
 
-def unset_message(found: re.Match[str]) -> str:
-    """Blank one `${NAME:?message}`'s message unless the shell runs it.
+def uncommented(text: str) -> str:
+    """Drop the comment lines of a text, shell or a whole job's YAML.
 
     Returns:
-        The expansion with its message gone, or as it was when the
-        message holds `$(` or a backtick.
+        Every line that does not open with `#`.
 
     """
-    if "$(" in found.group(2) or "`" in found.group(2):
-        return found.group(0)
-    return f"{found.group(1)}}}"
+    return "\n".join(ln for ln in text.splitlines() if not re.match(r"\s*#", ln))
+
+
+def offsets(node: object, where: str) -> tuple[int, int]:
+    """Read one shfmt node's byte span.
+
+    Returns:
+        Its start and end offsets.
+
+    """
+    found = decoded.as_object(node, where)
+    start = decoded.as_object(found.get("Pos"), f"{where}.Pos")
+    end = decoded.as_object(found.get("End"), f"{where}.End")
+    return (
+        decoded.as_int(start.get("Offset"), f"{where}.Pos.Offset"),
+        decoded.as_int(end.get("Offset"), f"{where}.End.Offset"),
+    )
+
+
+def literal(word: object) -> str | None:
+    """Read a word made of one literal part.
+
+    Returns:
+        The literal, or None for any other word.
+
+    """
+    if not decoded.is_object(word):
+        return None
+    parts = word.get("Parts")
+    if not decoded.is_array(parts) or len(parts) != 1:
+        return None
+    part = parts[0]
+    if not decoded.is_object(part) or part.get("Type") != "Lit":
+        return None
+    value = part.get("Value")
+    return value if isinstance(value, str) else None
+
+
+def quoted(word: object) -> bool:
+    """Say whether a word is made only of quoted parts.
+
+    Returns:
+        True for a word of `"..."` and `'...'` parts and nothing else.
+
+    """
+    if not decoded.is_object(word):
+        return False
+    parts = word.get("Parts")
+    return (
+        decoded.is_array(parts)
+        and bool(parts)
+        and all(
+            decoded.is_object(p) and p.get("Type") in {"DblQuoted", "SglQuoted"}
+            for p in parts
+        )
+    )
+
+
+def printed(node: dict[str, object]) -> list[object]:
+    """Name the words of one node the shell prints and never runs.
+
+    Returns:
+        A print's arguments, an assignment's all-quoted value, an
+        unset expansion's message; none for any other node.
+
+    """
+    kind = node.get("Type")
+    words: list[object] = []
+    if kind == "CallExpr":
+        args = node.get("Args")
+        if decoded.is_array(args) and args and literal(args[0]) in PRINTS:
+            words += args[1:]
+    assigns = node.get("Assigns") if kind == "CallExpr" else None
+    if kind == "DeclClause":
+        assigns = node.get("Args")
+    if decoded.is_array(assigns):
+        for assign in assigns:
+            if decoded.is_object(assign) and quoted(assign.get("Value")):
+                words.append(assign.get("Value"))
+    exp = node.get("Exp") if kind == "ParamExp" else None
+    if decoded.is_object(exp) and exp.get("Op") in UNSET_OPS and "Word" in exp:
+        words.append(exp.get("Word"))
+    return words
+
+
+def runs(node: object) -> Iterator[tuple[int, int]]:
+    """Find the span of each outermost substitution under a node.
+
+    Yields:
+        The spans, in the tree's order.
+
+    """
+    if decoded.is_array(node):
+        for item in node:
+            yield from runs(item)
+    elif decoded.is_object(node):
+        if node.get("Type") in RUNS:
+            yield offsets(node, str(node.get("Type")))
+            return
+        for value in node.values():
+            yield from runs(value)
+
+
+def prose(node: object) -> Iterator[tuple[int, int]]:
+    """Find every byte span of a shfmt tree the shell prints, not runs.
+
+    Yields:
+        The spans to blank, each printed word less its substitutions.
+
+    """
+    if decoded.is_array(node):
+        for item in node:
+            yield from prose(item)
+        return
+    if not decoded.is_object(node):
+        return
+    for word in printed(node):
+        start, end = offsets(word, "a printed word")
+        for left, right in runs(word):
+            yield start, left
+            start = right
+        yield start, end
+    for value in node.values():
+        yield from prose(value)
 
 
 def constants(tree: ast.Module) -> dict[str, str]:
@@ -667,7 +822,7 @@ def carries_belt(workflow: str, job: list[str]) -> bool:
 
     """
     text = (WORKFLOWS / workflow).read_text("utf-8")
-    return "MISE_GLOBAL_CONFIG_FILE" in code("\n".join(job)) or (
+    return "MISE_GLOBAL_CONFIG_FILE" in uncommented("\n".join(job)) or (
         "workflow_call:" not in text
     )
 
@@ -723,7 +878,7 @@ def auto_installs(workflow: str, job_id: str, job: list[str]) -> list[str]:
 
     """
     text = "\n".join(job)
-    if not re.search(r"(?<![\w-])mise\s+run\b", code(text)):
+    if not re.search(r"(?<![\w-])mise\s+run\b", uncommented(text)):
         return []
     if re.search(r'^\s+MISE_TASK_RUN_AUTO_INSTALL: "false"$', text, re.MULTILINE):
         return []
@@ -1075,7 +1230,7 @@ def measures(workflow: str, job_id: str, job: list[str]) -> list[str]:
         f"{workflow} {job_id}: installs tools with jdx/mise-action"
         for _ in mise_steps(job)
     ]
-    text = code("\n".join(job))
+    text = uncommented("\n".join(job))
     if "caller_pins.py" in text:
         found.append(f"{workflow} {job_id}: installs the caller's build inputs")
     if re.search(r"(?<![\w-])mise\s+run\b", text):
@@ -1408,6 +1563,93 @@ class UnsetMessages(unittest.TestCase):
             with self.subTest(sub=sub):
                 helper = f': "${{V:?{sub}}}"\n'
                 self.assertEqual(UNSET_RED, planted_shell(helper))
+
+
+class ProseFromTheParser(unittest.TestCase):
+    """What is prose in shell is read from shfmt's tree (#1785).
+
+    The call rows are the shapes the line regex dropped whole; the
+    prose rows are the remedy lines it existed to drop.
+    """
+
+    def test_a_call_beside_prose_is_named(self) -> None:
+        """A quoted substitution and a pipe out of a print are calls."""
+        for helper in (
+            'x="$(lefthook version)"\n',
+            'x="`lefthook version`"\n',
+            'echo "$(lefthook version)"\n',
+            "echo ok | lefthook version\n",
+        ):
+            with self.subTest(helper=helper):
+                self.assertEqual(UNSET_RED, planted_shell(helper))
+
+    def test_a_remedy_line_names_nothing(self) -> None:
+        """A quoted literal assigned or printed is prose."""
+        for helper in (
+            'emsg+="run lefthook install"\n',
+            'echo "run lefthook install"\n',
+        ):
+            with self.subTest(helper=helper):
+                self.assertEqual(strings(), planted_shell(helper))
+
+    def test_the_jq_calls_on_assignment_lines_are_read(self) -> None:
+        """The two `jq` calls the line regex dropped are seen."""
+        for rel in ("mise/roster-reconcile.sh", "release/inventory-digests.sh"):
+            with self.subTest(rel=rel):
+                text = (CANON / rel).read_text("utf-8")
+                self.assertTrue(word("jq", code(text)), rel)
+
+    def test_each_span_is_blanked_or_kept(self) -> None:
+        """One row per branch: what goes to spaces, what stays."""
+        rows = [
+            # A print's arguments go; its command word stays.
+            ('echo "run: typos --fix"', "echo" + " " * 19),
+            ("printf '%s' x", "printf" + " " * 7),
+            # A substitution inside a blanked span stays: the shell runs it.
+            ('echo "a $(taplo fmt) b"', "echo    $(taplo fmt)   "),
+            ('printf "%s" <(taplo fmt)', "printf      <(taplo fmt)"),
+            # A command after a print's pipe is its own call.
+            ("echo x | sed s/x/y/", "echo   | sed s/x/y/"),
+            # Not a print: the first word is not the literal.
+            ('"echo" lefthook', '"echo" lefthook'),
+            # A value made only of quoted parts goes, double or single.
+            ('emsg+="run lefthook install"', "emsg+=                      "),
+            ("x='lefthook'", "x=          "),
+            ("x=\"a\"'b'", "x=      "),
+            ('local y="lefthook"', "local y=          "),
+            # ... keeping its substitution, backquoted or not.
+            ('x="$(jq -r .x)" || exit 1', "x= $(jq -r .x)  || exit 1"),
+            ('x="`jq`"', "x= `jq` "),
+            # A value with an unquoted part stays whole.
+            ('x=a"lefthook"', 'x=a"lefthook"'),
+            ("x=$(jq)", "x=$(jq)"),
+            # An unset expansion's message goes, `:?` or `?`.
+            (': "${V:?run: lefthook}"', ': "${V:?             }"'),
+            (': "${V?run: lefthook}"', ': "${V?             }"'),
+            ('x="${V:?$(taplo fmt)}"', "x=      $(taplo fmt)  "),
+            # Any other operator's word is code.
+            (': "${V:-lefthook}"', ': "${V:-lefthook}"'),
+            # A comment line goes; a heredoc body stays.
+            ("# lefthook\nls", "ls"),
+            ("cat <<EOF\nlefthook\nEOF", "cat <<EOF\nlefthook\nEOF"),
+            # Every newline a span holds is kept.
+            ('echo "a\nb" x', "echo   \n    "),
+        ]
+        for text, want in rows:
+            with self.subTest(text=text):
+                self.assertEqual(want, code(text))
+
+    def test_text_shfmt_refuses_is_named(self) -> None:
+        """No fallback: a parse error is a ValueError naming shfmt's message."""
+        with self.assertRaisesRegex(
+            ValueError, r"^shfmt cannot parse the text: 1:1: `if` must be followed"
+        ):
+            code("if then\n")
+
+    def test_a_job_is_only_uncommented(self) -> None:
+        """A whole job's YAML loses its comment lines and nothing else."""
+        job = '  # lefthook\n  run: echo "x"\n  x: ${{ y }}'
+        self.assertEqual('  run: echo "x"\n  x: ${{ y }}', uncommented(job))
 
 
 class ArgvCalls(unittest.TestCase):
