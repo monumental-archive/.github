@@ -1035,8 +1035,10 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
                 self.assertIn(HEADER_PIN, block)
                 self.assertIn(SERVER_UNCHANGED, block)
                 self.assertNotIn('"postgresql-server-dev-${PG}" ', text)
-        # The image the remedy names reaches each container.
-        for site in (SCRIPT, WORKFLOW):
+        # The image the remedy names reaches each container: the build
+        # leg's docker run is release/pgrx/build-in-container.sh (#1660).
+        container = CANON / "release" / "pgrx" / "build-in-container.sh"
+        for site in (SCRIPT, container):
             with self.subTest(env=site.name):
                 self.assertIn("--env BUILD_IMAGE", site.read_text())
 

@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 HERE = Path(__file__).resolve().parent
@@ -262,7 +263,7 @@ class WasmPlan(Script):
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
-            json.loads((self.work / "plan" / "plan.json").read_text("utf-8")),
+            decoded.load_json((self.work / "plan" / "plan.json").read_text("utf-8")),
             [
                 {
                     "class": "wasm-npm",

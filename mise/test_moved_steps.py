@@ -18,7 +18,6 @@ stdlib `unittest`, matching the rest of mise/; run through the gate as
 """
 
 import os
-import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
@@ -33,15 +32,17 @@ GIT = hermetic.tool("git")
 ONE_PER_MERGE = (HERE / "vex-one-per-merge.txt").read_text("utf-8").strip()
 
 
-def run(script: Path, cwd: Path, **env: str) -> subprocess.CompletedProcess[str]:
-    """Run a script by its path.
+def run(
+    script: Path, cwd: Path, *args: str, **env: str
+) -> subprocess.CompletedProcess[str]:
+    """Run a script by its path, with its arguments.
 
     Returns:
         The finished process.
 
     """
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [BASH, str(script)],
+        [BASH, str(script), *args],
         cwd=cwd,
         env=hermetic.env(**env),
         stdin=subprocess.DEVNULL,
@@ -91,15 +92,18 @@ class VexDecisions(unittest.TestCase):
         self.git("commit", "-q", "--allow-empty", "-m", "decide")
 
     def decisions(self, **env: str) -> subprocess.CompletedProcess[str]:
-        """Ask the script for this run's decisions.
+        """Ask the script for this run's decisions, written to self.out.
 
         Returns:
             The finished process.
 
         """
+        self.out = self.tree.parent / f"{self.tree.name}-args"
+        self.addCleanup(self.out.unlink, missing_ok=True)
         return run(
             self.SCRIPT,
             self.tree,
+            str(self.out),
             REPO="o/r",
             DECISIONS="security/vex/*.openvex.json",
             ONE_PER_MERGE=str(HERE / "vex-one-per-merge.txt"),
@@ -110,9 +114,9 @@ class VexDecisions(unittest.TestCase):
         """The state mode, then one --decision= per tracked file."""
         self.decide("a", "b")
         done = self.decisions()
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((done.returncode, done.stdout), (0, ""), done.stderr)
         self.assertEqual(
-            done.stdout.split("\0"),
+            self.out.read_text("utf-8").split("\0"),
             [
                 "--unsigned-only",
                 "--store",
@@ -124,11 +128,14 @@ class VexDecisions(unittest.TestCase):
         )
 
     def test_nothing_to_sign_is_a_notice_and_no_arguments(self) -> None:
-        """No decisions: the notice on stderr, nothing on stdout, exit 0."""
+        """No decisions: the notice, no arguments written, exit 0."""
         self.git("commit", "-q", "--allow-empty", "-m", "empty")
         done = self.decisions()
-        self.assertEqual((done.returncode, done.stdout), (0, ""))
-        self.assertEqual(done.stderr, "::notice::security/vex/ holds no decisions\n")
+        self.assertEqual(
+            (done.returncode, done.stdout),
+            (0, "::notice::security/vex/ holds no decisions\n"),
+        )
+        self.assertEqual(self.out.read_text("utf-8"), "")
 
     def fake_list(self, *paths: str) -> str:
         """Write a stand-in for ORG_PYTHON that lists the changed decisions.
@@ -151,8 +158,10 @@ class VexDecisions(unittest.TestCase):
         done = self.decisions(
             BEFORE=before, ORG_PYTHON=self.fake_list("security/vex/a.openvex.json")
         )
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, "--decision=security/vex/a.openvex.json\0")
+        self.assertEqual((done.returncode, done.stdout), (0, ""), done.stderr)
+        self.assertEqual(
+            self.out.read_text("utf-8"), "--decision=security/vex/a.openvex.json\0"
+        )
 
     def test_a_push_of_two_decisions_is_refused_by_name(self) -> None:
         """The one sentence lint:vex-one-per-merge prints, as an error."""
@@ -164,28 +173,23 @@ class VexDecisions(unittest.TestCase):
                 "security/vex/a.openvex.json", "security/vex/b.openvex.json"
             ),
         )
-        self.assertEqual((done.returncode, done.stdout), (1, ""))
-        self.assertTrue(done.stderr.startswith("::error::"), done.stderr)
-        self.assertIn(ONE_PER_MERGE.split("\n", 1)[0][:40], done.stderr)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertTrue(done.stdout.startswith("::error::"), done.stdout)
+        self.assertIn(ONE_PER_MERGE.split("\n", 1)[0][:40], done.stdout)
+        self.assertEqual(self.out.read_text("utf-8"), "")
 
 
 def plant(root: Path, *, policy: bool = True) -> Path:
-    """Plant the script, the writer and the policy in a canon tree.
+    """Plant a canon tree with the action, the writer and the policy.
 
     Returns:
         The script's path in the tree.
 
     """
-    action = root / ".github" / "actions" / "source-attest"
-    action.mkdir(parents=True)
-    script = action / "resolve.sh"
-    shutil.copy2(CANON / ".github" / "actions" / "source-attest" / "resolve.sh", script)
-    (root / "mise").mkdir()
-    shutil.copy2(HERE / "workflow-command.sh", root / "mise" / "workflow-command.sh")
-    if policy:
-        (root / "slsa").mkdir()
-        (root / "slsa" / "verify-policy.json").write_text("{}", "utf-8")
-    return script
+    hermetic.canon(root, ".github/actions/source-attest", "slsa/verify-policy.json")
+    if not policy:
+        (root / "slsa" / "verify-policy.json").unlink()
+    return root / ".github" / "actions" / "source-attest" / "resolve.sh"
 
 
 class SourceAttestResolve(unittest.TestCase):

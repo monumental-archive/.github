@@ -10,16 +10,20 @@
 # unusable before-sha, is a STATE: every tracked decision, and stele
 # asks the store which it already holds (#596).
 #
-# Inputs: BEFORE, REPO, DECISIONS, ONE_PER_MERGE, ORG_PYTHON. Prints
-# stele's arguments NUL-terminated (the mode, then one --decision= per
-# file); prints nothing after a notice when there is nothing to sign;
-# refuses, exit 1, a push that changed more than one decision.
+# Usage: vex-decisions.sh OUT. Inputs: BEFORE, REPO, DECISIONS,
+# ONE_PER_MERGE, ORG_PYTHON. Writes stele's arguments to OUT,
+# NUL-terminated (the mode, then one --decision= per file), a file and
+# not stdout, which is the log; leaves OUT empty after a notice when
+# there is nothing to sign; refuses, exit 1, a push that changed more
+# than one decision.
 set -euo pipefail
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 : "${REPO:?}"
 : "${DECISIONS:?}"
 : "${ONE_PER_MERGE:?}"
-: "${ORG_PYTHON:?}"
+out="${1:?usage: vex-decisions.sh OUT, the file the arguments for stele are written to}"
 here="$(dirname "${BASH_SOURCE[0]}")"
+: > "${out}"
 # The canon's one writer of workflow commands (#1660), beside this file.
 # shellcheck source=mise/workflow-command.sh
 . "${here}/workflow-command.sh"
@@ -37,14 +41,14 @@ done <<< "${list}"
 # Nothing to sign ends here, with nothing printed: no output is `any`
 # unset, which every consumer reads as false.
 if ((${#files[@]} == 0)); then
-  org_notice "${none}" >&2
+  org_notice "${none}"
   exit 0
 fi
 if ((${#mode[@]} == 0 && ${#files[@]} != 1)); then
-  org_error "$(< "${ONE_PER_MERGE}")" >&2
+  org_error "$(< "${ONE_PER_MERGE}")"
   exit 1
 fi
 # `${mode[@]+…}`: an empty array under set -u is unbound on bash 3.2.
 for arg in ${mode[@]+"${mode[@]}"} "${files[@]/#/--decision=}"; do
-  printf '%s\0' "${arg}"
+  printf '%s\0' "${arg}" >> "${out}"
 done

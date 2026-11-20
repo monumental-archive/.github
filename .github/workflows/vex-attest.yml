@@ -157,7 +157,7 @@ jobs:
           # The decisions to sign, as stele's arguments (mise/vex-decisions.sh,
           # #1660); the stele call stays here, where the population-read law
           # reads it (#1602).
-          .org-canon/mise/vex-decisions.sh > "${RUNNER_TEMP}/vex-args"
+          .org-canon/mise/vex-decisions.sh "${RUNNER_TEMP}/vex-args"
           args=()
           while IFS= read -r -d '' arg; do args+=("${arg}"); done < "${RUNNER_TEMP}/vex-args"
           ((${#args[@]})) || exit 0

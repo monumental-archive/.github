@@ -14,7 +14,7 @@
 # UNTRUSTED_VERSION, UNTRUSTED_CRATE_DIR, PG, ARCH, SMOKE_IMAGE, and the
 # GH_TOKEN previous_release.py's gh reads.
 set -euo pipefail
-: "${ORG_PYTHON:?}"
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 : "${GITHUB_REPOSITORY:?}"
 : "${UNTRUSTED_VERSION:?}"
 : "${UNTRUSTED_CRATE_DIR:?}"
