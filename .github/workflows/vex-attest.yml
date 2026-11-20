@@ -58,6 +58,11 @@ jobs:
   plan:
     name: Resolve the decisions to sign and their subjects
     runs-on: ubuntu-26.04
+    # Environment-scoped like the audit legs: the App's key lives only in
+    # the `audit` environment and is issued only to a job that declares
+    # it; without this the mint is handed an empty string (#1602). The
+    # signing legs below do not declare it and never see the key.
+    environment: audit
     permissions:
       contents: read
       attestations: read # the recovery loop reads the store to find its work
