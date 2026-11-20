@@ -34,9 +34,19 @@ from typed_hypothesis import given
 # A GitHub owner and repository name (GitHub drops a `.git` ending
 # from a repository's name, so none is drawn).
 OWNER = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9-]{0,10}", fullmatch=True)
-NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(
-    lambda n: n not in {".", ".."} and not n.endswith(".git")
-)
+
+
+def a_name(name: str) -> bool:
+    """Say whether GitHub would keep the name as drawn.
+
+    Returns:
+        True for a name that is not a dot entry and has no `.git` ending.
+
+    """
+    return name not in {".", ".."} and not name.endswith(".git")
+
+
+NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(a_name)
 CALLER = st.builds("{}/{}".format, OWNER, NAME)
 VERSION = "1.2.3"
 NEAR_MISS = st.sampled_from([
@@ -51,23 +61,42 @@ NEAR_MISS = st.sampled_from([
     "https://github.com/{}.git.git",
     " https://github.com/{}",
 ])
-SCALAR = (
-    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text()
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.none(), st.booleans(), st.integers(), st.floats(allow_nan=False), st.text()
 )
-JSON = st.recursive(
-    SCALAR,
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=6), inner, max_size=3)
-    ),
-    max_leaves=12,
-)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+
+
+def dumped(value: object) -> str:
+    """Write a value as JSON text.
+
+    Returns:
+        The text.
+
+    """
+    return json.dumps(value)
 
 
 SHAPE = st.sampled_from(["string", "table"])
 
 
-def placed(url: str, shape: str) -> dict:
+def placed(url: str, shape: str) -> dict[str, object]:
     """Write a repository field the two ways package.json takes it.
 
     Returns:
@@ -78,7 +107,7 @@ def placed(url: str, shape: str) -> dict:
     return {"name": "pkg", "version": VERSION, "repository": repo}
 
 
-def verdict(manifest: dict, caller: str) -> str | None:
+def verdict(manifest: dict[str, object], caller: str) -> str | None:
     """Run the repository and version check.
 
     Returns:
@@ -166,21 +195,23 @@ def run_step(package_json: str) -> tuple[int, str]:
     return code, out.getvalue()
 
 
+# A package.json shaped like one, with any value where a field goes.
+THE_VERSION: st.SearchStrategy[object] = st.just(VERSION)
+THE_CALLER: st.SearchStrategy[object] = st.just("https://github.com/o/r")
+PACKAGE_JSON: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {},
+    optional={
+        "name": JSON,
+        "version": THE_VERSION | JSON,
+        "repository": THE_CALLER | JSON,
+    },
+)
+
+
 class AnyPackageJson(unittest.TestCase):
     """R: any package.json is packed or refused by name."""
 
-    @given(
-        st.fixed_dictionaries(
-            {},
-            optional={
-                "name": JSON,
-                "version": st.just(VERSION) | JSON,
-                "repository": st.just("https://github.com/o/r") | JSON,
-            },
-        ).map(json.dumps)
-        | JSON.map(json.dumps)
-        | st.text()
-    )
+    @given(PACKAGE_JSON.map(dumped) | JSON.map(dumped) | st.text())
     @example("[]")
     @example("{")
     @example('{"repository": "\\n"}')
