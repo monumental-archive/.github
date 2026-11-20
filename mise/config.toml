@@ -2277,6 +2277,29 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   --task-ceiling security/task-shell-debt.txt --write ${files}
 '''
 
+[tasks."lint:in-process"]
+description = "Every helper function is reached in-process from a test, or listed as debt that only shrinks"
+dir = "{{cwd}}"
+# A helper's logic is tested in the process that runs the tests (#1673).
+# mutmut runs a mutant only in the module it was named for, never in a
+# script's `__main__`, so a function reached only by running its helper
+# as a script is one mutation cannot judge, and coverage and the type
+# checker cannot see it either. mise/in_process.py reads the syntax trees
+# of every tracked .py outside vendor/, naming no directory, and says what
+# reaches a function; the unreached are listed in
+# security/helper-import-debt.txt, which only shrinks. Red on an
+# unreached function not listed, and on a stale entry. Tracked files
+# only; a repository with no Python helper tracked skips clean.
+run = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/in_process.py"'
+
+[tasks."fix:in-process"]
+description = "Generate the helper import debt file, or remove its stale entries"
+dir = "{{cwd}}"
+# The write-mode sibling of lint:in-process (#1673), in fix:task-shell's
+# shape: with no debt file it generates one listing every unreached
+# function, and with one it only removes stale entries; it never adds.
+run = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/in_process.py" --write'
+
 [tasks."lint:belt-current"]
 description = "This machine's mise is as current as CI's, and its belt is the one the gate stub pins (#1686)"
 dir = "{{cwd}}"

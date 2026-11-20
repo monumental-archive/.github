@@ -2572,13 +2572,22 @@ runner):
   writes a start-up hook (`mutants_python.py hook`, owner's ruling on
   item 3): a temporary `sitecustomize` on `PYTHONPATH` that APPENDS
   mutmut's own site directory, derived from the installed tool, the
-  way the coverage leg reaches its children. Children then run the
-  mutated copy, and the active mutant too, since the selecting
-  variable is inherited. mutmut still chooses a mutant's tests from
-  calls recorded in the test process, so a function reached only in
-  a child comes out "no tests". The leg names it as a survivor, and
-  the issue's permitted response is applied per function from that
-  real list.
+  way the coverage leg reaches its children, so a child no longer
+  dies. What a child can do under a mutant was measured on #1673
+  (mutmut 3.8.1, `answer(n): return n + 1`, mutant `n - 1`): a child
+  that IMPORTS the helper's module runs the mutant (prints 0); a
+  child that runs it AS A SCRIPT prints the original (2), since
+  mutmut runs a mutant only when the function's `__module__` equals
+  the module in the mutant's name, and a script's functions are in
+  `__main__`. mutmut also chooses a mutant's tests from calls
+  recorded in the test process, so a function reached only in a
+  child comes out "no tests" either way. That is debt, not a judged
+  mutant: a helper's logic is tested in-process (CONTRIBUTING.md),
+  `lint:in-process` holds it per function, and the functions not yet
+  reached are listed in `security/helper-import-debt.txt`, 164 of 697
+  when the law landed. Rewriting the child's mutant name and writing
+  its statistics back were rejected there: both reach into mutmut's
+  internals.
 - **A child's configuration (#1542), measured.** In the statistics
   pass every mutated function reads mutmut's configuration, which
   mutmut loads lazily from the CURRENT directory; a child a test
@@ -2595,9 +2604,7 @@ runner):
   code pays anyway. Every Python child of the statistics pass pays
   it once.
 
-*Reopen:* mutmut gaining sharding (shard the Python job like Rust's),
-or recording calls in child processes (the subprocess-only helpers
-become measurable).
+*Reopen:* mutmut gaining sharding (shard the Python job like Rust's).
 
 **StrykerJS as `audit:mutants`' TypeScript leg** (#1358, under the
 testing standard of #1336; the shape is the other legs'). The measure
