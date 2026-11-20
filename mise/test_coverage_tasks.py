@@ -34,6 +34,7 @@ from typing import TypedDict, Unpack, override
 
 import decoded
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -849,21 +850,19 @@ class TaskReferenceRows(CoverageTaskCase):
 
 
 def upload_step() -> str:
-    """Read the upload job's "List the reports" run block from ci.yml.
+    """Read the upload job's "List the reports" `run:` value from ci.yml.
 
     Returns:
-        The block, dedented, as the runner's bash receives it.
+        The value, as the runner's bash receives it.
 
     """
-    lines = (CANON / ".github/workflows/ci.yml").read_text("utf-8").splitlines()
-    at = lines.index("      - name: List the reports")
-    at = lines.index("        run: |", at) + 1
-    body = []
-    for line in lines[at:]:
-        if line.strip() and not line.startswith(" " * 10):
-            break
-        body.append(line[10:])
-    return "\n".join(body) + "\n"
+    ci = workflow_yaml.document(CANON / ".github/workflows/ci.yml")
+    (run,) = [
+        s["run"]
+        for s in workflow_yaml.steps(workflow_yaml.jobs(ci)["coverage-upload"])
+        if s.get("name") == "List the reports"
+    ]
+    return decoded.as_str(run, "run")
 
 
 def run_upload_step(

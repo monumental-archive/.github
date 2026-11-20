@@ -36,6 +36,7 @@ from pathlib import Path
 
 import hermetic
 import typed_std
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parents[1]
 WRITER = CANON / "mise" / "workflow-command.sh"
@@ -218,8 +219,27 @@ def grouped(unit: list[tuple[int, str]]) -> set[int]:
     return inside
 
 
+def run_units(path: Path) -> list[list[tuple[int, str]]]:
+    """Read every `run:` value of a workflow or an action, as rule 2's units.
+
+    Each value is the text bash receives, read by workflow_yaml (#1840),
+    so a flow, quoted or one-line `run:` is a unit as a block is. A
+    block's lines are numbered from the line after its header; a folded
+    block is numbered from its first line.
+
+    Returns:
+        Each value's numbered lines.
+
+    """
+    out = []
+    for run in workflow_yaml.runs(path):
+        first = run.line + 1 if run.style in {"literal", "folded"} else run.line
+        out.append([(first + i, ln) for i, ln in enumerate(run.text.split("\n"))])
+    return out
+
+
 def units(path: Path, text: str) -> list[list[tuple[int, str]]]:
-    """Split a file into the units rule 2 reads: steps, tasks or a script.
+    """Split a file into the units rule 2 reads: tasks or a script.
 
     Returns:
         Each unit's numbered lines.
@@ -227,17 +247,6 @@ def units(path: Path, text: str) -> list[list[tuple[int, str]]]:
     """
     lines = list(enumerate(text.split("\n"), 1))
     out: list[list[tuple[int, str]]] = []
-    if path.suffix in {".yml", ".yaml"}:
-        for i, (_, line) in enumerate(lines):
-            if re.match(r"^\s+run: [|>]", line):
-                depth = len(line) - len(line.lstrip())
-                body = []
-                for n, inner in lines[i + 1 :]:
-                    if inner.strip() and len(inner) - len(inner.lstrip()) <= depth:
-                        break
-                    body.append((n, inner))
-                out.append(body)
-        return out
     if path.suffix == ".toml":
         current: list[tuple[int, str]] = []
         for n, line in lines:
@@ -278,7 +287,8 @@ def findings(root: Path) -> list[str]:
     out: list[str] = []
     for rel in held_files(root):
         text = (root / rel).read_text(encoding="utf-8")
-        for unit in units(rel, text):
+        yaml = rel.suffix in {".yml", ".yaml"}
+        for unit in run_units(root / rel) if yaml else units(rel, text):
             code = [(n, ln) for n, ln in unit if not ln.lstrip().startswith("#")]
             prints = any(PRINTS.search(ln) for _, ln in code)
             to_a_file = grouped(code)

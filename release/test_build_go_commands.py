@@ -34,6 +34,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import build_go_commands
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -119,15 +120,21 @@ def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
         )
 
 
-def step(name: str) -> str:
-    """Cut one step's text out of the shipped workflow.
+def step(name: str) -> dict[str, object]:
+    """Read one step of the shipped workflow by its name.
 
     Returns:
-        From its `- name:` line to the next step's.
+        The step, as workflow_yaml reads it.
 
     """
-    text = WORKFLOW.read_text("utf-8")
-    return text.split(f"      - name: {name}\n")[1].split("      - name:")[0]
+    document = workflow_yaml.document(WORKFLOW)
+    (found,) = [
+        s
+        for job in workflow_yaml.jobs(document).values()
+        for s in workflow_yaml.steps(job)
+        if s.get("name") == name
+    ]
+    return found
 
 
 class BuildStepIsTheHelper(unittest.TestCase):
@@ -135,17 +142,15 @@ class BuildStepIsTheHelper(unittest.TestCase):
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The run: is the call alone, by the recorded tree."""
-        body = step("Build every command")
-        self.assertIn(
-            '        run: |\n          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/'
-            'build_go_commands.py"\n',
+        body = step("Build every command")["run"]
+        self.assertEqual(
+            '"${ORG_PYTHON}" "${ORG_CANON_TREE}/release/build_go_commands.py"\n',
             body,
         )
-        self.assertNotIn("go build", body)
 
     def test_the_pins_step_records_the_tree_before_unlinking(self) -> None:
         """ORG_CANON_TREE is written, then the link goes."""
-        body = step("Read the caller's pinned build inputs")
+        body = str(step("Read the caller's pinned build inputs")["run"])
         record = body.index('echo "ORG_CANON_TREE=${tree}" >> "${GITHUB_ENV}"')
         self.assertLess(body.index("tree=$(realpath .org-canon)"), record)
         self.assertLess(record, body.index("rm -- .org-canon"))

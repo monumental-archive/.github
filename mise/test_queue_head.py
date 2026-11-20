@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import gzip
 import pathlib
-import re
 import shutil
 
 # ruff: ignore[suspicious-subprocess-import]
@@ -32,8 +31,10 @@ import tempfile
 import unittest
 from typing import override
 
+import decoded
 import hermetic
 import queue_head
+import workflow_yaml
 
 HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "queue_head.py"
@@ -494,52 +495,38 @@ class QueueHead(unittest.TestCase):
         self.passed(done, group, current, moved_base)
 
 
-def gate_steps() -> list[str]:
-    """Return the gate job's steps in ci.yml, each as its text.
-
-    Returns:
-        The steps, in order.
-
-    """
-    lines = CI.read_text(encoding="utf-8").splitlines()
-    start = lines.index("  gate:")
-    end = next(
-        i for i in range(start + 1, len(lines)) if re.match(r"^  [\w-]+:$", lines[i])
-    )
-    steps: list[list[str]] = []
-    for line in lines[start:end]:
-        if line.startswith("      - "):
-            steps.append([line])
-        elif steps and (line.startswith("        ") or not line.strip()):
-            steps[-1].append(line)
-    return ["\n".join(step).rstrip() for step in steps]
-
-
 class Workflow(unittest.TestCase):
     """The step exists in the gate job, on merge_group only, as one line."""
 
     def test_the_step_runs_on_merge_group_only_as_one_line(self) -> None:
         """One gate step calls the helper; its `if:` and `run:` are held."""
-        steps = [s for s in gate_steps() if "queue_head.py" in s]
-        self.assertEqual(len(steps), 1, steps)
-        step = steps[0]
+        gate = workflow_yaml.jobs(workflow_yaml.document(CI))["gate"]
+        found = [
+            (i, s)
+            for i, s in enumerate(workflow_yaml.steps(gate))
+            if "queue_head.py" in str(s.get("run", ""))
+        ]
+        self.assertEqual(len(found), 1, found)
+        ((at, step),) = found
         # Once per run: the gate's lint leg (#1740).
-        self.assertIn(
-            "        if: ${{ matrix.leg == 'lint'"
-            " && github.event_name == 'merge_group' }}\n",
-            step + "\n",
+        self.assertEqual(
+            "${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}",
+            step.get("if"),
         )
-        runs = [line for line in step.splitlines() if line.startswith("        run:")]
-        # Under the belt's Python (#1543).
-        want = ["        run: '\"${ORG_PYTHON}\" .org-canon/mise/queue_head.py'"]
-        self.assertEqual(runs, want, step)
+        # Under the belt's Python (#1543), written on one line.
+        (run,) = [
+            r for r in workflow_yaml.runs(CI) if r.path == f"jobs/gate/steps/{at}"
+        ]
+        self.assertEqual('"${ORG_PYTHON}" .org-canon/mise/queue_head.py', run.text)
+        self.assertEqual("single", run.style)
+        env = decoded.as_object(step["env"], "env")
         for key, value in (
             ("ORG_QUEUE_BASE", "github.event.merge_group.base_sha"),
             ("ORG_QUEUE_GROUP", "github.event.merge_group.head_sha"),
             ("ORG_QUEUE_REF", "github.event.merge_group.head_ref"),
             ("ORG_QUEUE_TOKEN", "github.token"),
         ):
-            self.assertIn(f"          {key}: ${{{{ {value} }}}}\n", step + "\n")
+            self.assertEqual(f"${{{{ {value} }}}}", env[key])
 
 
 if __name__ == "__main__":

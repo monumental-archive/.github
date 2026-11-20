@@ -34,6 +34,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import check_go_stamps
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -173,15 +174,21 @@ def run_helper(
         return Run(result.returncode, result.stdout, result.stderr, head)
 
 
-def step(name: str) -> str:
-    """Cut one step's text out of the shipped workflow.
+def step(name: str) -> dict[str, object]:
+    """Read one step of the shipped workflow by its name.
 
     Returns:
-        From its `- name:` line to the next step's.
+        The step, as workflow_yaml reads it.
 
     """
-    text = WORKFLOW.read_text("utf-8")
-    return text.split(f"      - name: {name}\n")[1].split("      - name:")[0]
+    document = workflow_yaml.document(WORKFLOW)
+    (found,) = [
+        s
+        for job in workflow_yaml.jobs(document).values()
+        for s in workflow_yaml.steps(job)
+        if s.get("name") == name
+    ]
+    return found
 
 
 class StampStepIsTheHelper(unittest.TestCase):
@@ -189,14 +196,10 @@ class StampStepIsTheHelper(unittest.TestCase):
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The run: is the call alone, by the recorded tree."""
-        body = step("Refuse a binary whose stamp is not the released commit")
-        self.assertIn(
-            "        run: |\n"
-            '          "${ORG_PYTHON}"'
-            ' "${ORG_CANON_TREE}/release/check_go_stamps.py"\n',
-            body,
+        body = step("Refuse a binary whose stamp is not the released commit")["run"]
+        self.assertEqual(
+            '"${ORG_PYTHON}" "${ORG_CANON_TREE}/release/check_go_stamps.py"\n', body
         )
-        self.assertNotIn("go version", body)
 
 
 class Passes(unittest.TestCase):

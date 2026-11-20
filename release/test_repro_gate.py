@@ -34,7 +34,9 @@ from tempfile import TemporaryDirectory
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "publish.yml"
@@ -55,23 +57,31 @@ exit "${STUB_EXIT:-0}"
 """
 
 
-def step_body() -> str:
-    """Cut the step's `run:` block out of the shipped workflow.
+def step() -> dict[str, object]:
+    """Read the step out of the shipped workflow.
 
     Returns:
-        The block, dedented, as the runner hands it to bash.
+        The step, as workflow_yaml reads it.
 
     """
-    lines = WORKFLOW.read_text("utf-8").splitlines()
-    step = lines.index(f"      - name: {STEP}")
-    run = next(i for i in range(step, len(lines)) if lines[i].strip() == "run: |")
-    indent = len(lines[run]) - len(lines[run].lstrip()) + 2
-    body = []
-    for line in lines[run + 1 :]:
-        if line.strip() and len(line) - len(line.lstrip()) < indent:
-            break
-        body.append(line[indent:])
-    return "\n".join(body) + "\n"
+    document = workflow_yaml.document(WORKFLOW)
+    (found,) = [
+        s
+        for job in workflow_yaml.jobs(document).values()
+        for s in workflow_yaml.steps(job)
+        if s.get("name") == STEP
+    ]
+    return found
+
+
+def step_body() -> str:
+    """Read the step's `run:` value.
+
+    Returns:
+        The text the runner hands to bash.
+
+    """
+    return decoded.as_str(step()["run"], "run")
 
 
 @dataclass
@@ -293,8 +303,7 @@ class Rehearsal(unittest.TestCase):
 
     def test_the_workflow_empties_the_registry_values_on_a_dry_run(self) -> None:
         """Every digest directory is named only when the run pushed."""
-        text = WORKFLOW.read_text("utf-8")
-        step = text.split(f"      - name: {STEP}\n")[1].split("        run: |")[0]
+        env = decoded.as_object(step()["env"], "env")
         for var, path in (
             ("oci_image", "oci"),
             ("oci_image_crate", "oci"),
@@ -302,10 +311,9 @@ class Rehearsal(unittest.TestCase):
         ):
             for side, suffix in (("FIRST", "a"), ("REBUILD", "b")):
                 with self.subTest(var=f"{side}_{var}"):
-                    self.assertIn(
-                        f"{side}_{var}: ${{{{ !inputs.dry-run && "
-                        f"'{path}-{suffix}' || '' }}}}\n",
-                        step,
+                    self.assertEqual(
+                        f"${{{{ !inputs.dry-run && '{path}-{suffix}' || '' }}}}",
+                        env[f"{side}_{var}"],
                     )
 
 

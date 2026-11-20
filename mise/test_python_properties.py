@@ -30,6 +30,7 @@ from pathlib import Path
 
 import decoded
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -618,29 +619,6 @@ class FanOut(unittest.TestCase):
         self.assertEqual(seeds[0], seeds[1])
 
 
-def job_block(workflow: str, job: str) -> str:
-    """Cut one job's lines out of a workflow, by its key's indentation.
-
-    Returns:
-        The job's text, from its key to the next job's.
-
-    """
-    text = (CANON / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
-    lines = text.splitlines()
-    start = lines.index(f"  {job}:")
-    end = next(
-        (
-            i
-            for i in range(start + 1, len(lines))
-            if lines[i].startswith("  ")
-            and not lines[i].startswith("   ")
-            and lines[i].rstrip().endswith(":")
-        ),
-        len(lines),
-    )
-    return "\n".join(lines[start:end])
-
-
 class WorkflowShape(unittest.TestCase):
     """Both property jobs are bounded, sharded and share one seed (#1631)."""
 
@@ -652,13 +630,22 @@ class WorkflowShape(unittest.TestCase):
         }
         for workflow, seed in seeds.items():
             with self.subTest(workflow=workflow):
-                job = job_block(workflow, "python-properties")
-                self.assertRegex(job, r"\n    timeout-minutes: [0-9]+\n")
-                self.assertIn(
-                    "shard:\n" + "".join(f"          - {k}\n" for k in range(8)), job
-                )
-                self.assertIn("ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8", job)
-                self.assertIn(f"ORG_PROPERTY_SEED: ${{{{ {seed} }}}}", job)
+                path = CANON / ".github" / "workflows" / workflow
+                job = workflow_yaml.jobs(workflow_yaml.document(path))[
+                    "python-properties"
+                ]
+                self.assertIsInstance(job.get("timeout-minutes"), int)
+                strategy = decoded.as_object(job["strategy"], "strategy")
+                matrix = decoded.as_object(strategy["matrix"], "matrix")
+                shards: list[object] = list(range(8))
+                self.assertEqual(shards, matrix["shard"])
+                env = {
+                    k: v
+                    for scope in (job, *workflow_yaml.steps(job))
+                    for k, v in decoded.as_object(scope.get("env") or {}, "env").items()
+                }
+                self.assertEqual("${{ matrix.shard }}/8", env["ORG_PROPERTY_SHARD"])
+                self.assertEqual(f"${{{{ {seed} }}}}", env["ORG_PROPERTY_SEED"])
 
 
 if __name__ == "__main__":

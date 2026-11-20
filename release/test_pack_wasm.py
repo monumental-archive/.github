@@ -32,6 +32,7 @@ from tempfile import TemporaryDirectory
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
@@ -162,12 +163,15 @@ class PackStepIsTheHelper(unittest.TestCase):
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """The step's run: is the helper call alone."""
-        text = WORKFLOW.read_text("utf-8")
-        step = text.split("- name: Pack and hash the exact bytes that will publish")[1]
-        step = step.split("      - name:")[0]
-        # Under the belt's Python (#1543).
-        self.assertIn(f"        run: '\"${{ORG_PYTHON}}\" {HELPER}'\n", step)
-        self.assertNotIn("run: |", step)
+        document = workflow_yaml.document(WORKFLOW)
+        (step,) = [
+            s
+            for job in workflow_yaml.jobs(document).values()
+            for s in workflow_yaml.steps(job)
+            if s.get("name") == "Pack and hash the exact bytes that will publish"
+        ]
+        # Under the belt's Python (#1543), on one line.
+        self.assertEqual(f'"${{ORG_PYTHON}}" {HELPER}', step["run"])
 
 
 class Packs(unittest.TestCase):
