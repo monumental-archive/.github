@@ -302,7 +302,7 @@ class Zizmor(Planted):
             self.args.read_text("utf-8").splitlines(),
             [
                 "--offline",
-                "--persona=pedantic",
+                "--persona=auditor",
                 ".github/actions/y/action.yaml",
                 ".github/workflows/ci.yml",
                 "action.yml",
@@ -319,6 +319,56 @@ class Zizmor(Planted):
             (0, "lint:zizmor: no workflows or actions, skipped\n"),
         )
         self.assertFalse(self.args.exists())
+
+
+def deploy(environment: str) -> str:
+    """Render a workflow whose one job reads a secret.
+
+    `environment` is the job's `environment:` line, or "" for none.
+
+    Returns:
+        The YAML text; the secret is read on line 14 without one.
+
+    """
+    return (
+        "name: deploy\non: push\npermissions: {}\n"
+        "concurrency:\n  group: deploy\n  cancel-in-progress: false\n"
+        "jobs:\n  deploy:\n    name: deploy\n"
+        f"{environment}"
+        "    runs-on: ubuntu-24.04\n    steps:\n      - name: use the key\n"
+        "        env:\n          KEY: ${{ secrets.DEPLOY_KEY }}\n"
+        '        run: test -n "${KEY}"\n'
+    )
+
+
+class ZizmorPersona(Planted):
+    """lint:zizmor's verdict, from the real zizmor at the belt's pin (#1719).
+
+    Pedantic suppresses secrets-outside-env, so before #1719 the first
+    row was green: a job handed an environment's secret with no
+    `environment:` gets an empty string, and only Monday's audit said so.
+    """
+
+    def test_a_secret_read_outside_an_environment_is_red(self) -> None:
+        """The auditor persona names the audit and the line."""
+        self.plant({".github/workflows/deploy.yml": deploy("")})
+        done = self.run_task("lint:zizmor")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn(
+            "warning[secrets-outside-env]: secrets referenced without a"
+            " dedicated environment",
+            done.stdout,
+        )
+        self.assertIn(".github/workflows/deploy.yml:14:", done.stdout)
+
+    def test_the_same_job_in_an_environment_is_green(self) -> None:
+        """The control row: one `environment:` line, nothing else changed."""
+        self.plant({
+            ".github/workflows/deploy.yml": deploy("    environment: production\n")
+        })
+        done = self.run_task("lint:zizmor")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("No findings to report.", done.stdout)
 
 
 class ShellEmbedded(Planted):

@@ -771,6 +771,17 @@ reaching it — zizmor rates its own confidence Low for that reason.
 Removing the write means teaching `chain.sh` and `emit.sh` to resolve
 cosign themselves, which is larger than the scope change that found it.
 
+**zizmor runs at the auditor persona in the gate** (#1719). The gate
+ran `pedantic` and the weekly audit `auditor`, though
+`secrets-outside-env`, which only the auditor persona runs, reads
+nothing but the workflow file. #1602's job drew an `audit`-environment
+secret with no `environment:`, merged green, ran with an empty string,
+and was found by the Monday audit. Measured on zizmor 1.32.0 at
+`619d2bb`, `--offline --persona=auditor` over every action file: "No
+findings to report (57 ignored)", the same count as `pedantic`, so no
+ignore was added. The gate and `audit:actions` now share the persona
+and differ only by the audits that need the API.
+
 **A defect class this standup found in the belt itself, now closed.**
 mise ran task bodies without `set -e`, so a task whose failure signal is
 a tool's exit status silently passed if anything followed that tool.
