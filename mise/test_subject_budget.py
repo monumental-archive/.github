@@ -21,15 +21,19 @@ import json
 import os
 import re
 import sys
-import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import decoded
 import subject_budget as sb
+import typed_std
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # What Renovate appends to an advisory subject, and what default.json
 # writes out explicitly since #667. Eleven columns.
@@ -38,15 +42,23 @@ SUFFIX = "[SECURITY]"
 # A minimal preset in the shape default.json now has: all five message
 # fields explicit plus the advisory suffix, so nothing here depends on
 # a Renovate default.
-PRESET = {
+MESSAGE: dict[str, str] = {
     "commitMessageAction": "update",
     "commitMessageTopic": "{{depName}}",
     "commitMessageExtra": "to {{newValue}}",
     "semanticCommitType": "chore",
     "semanticCommitScope": "deps",
+}
+PRESET: dict[str, object] = {
+    **MESSAGE,
     "packageRules": [],
     "vulnerabilityAlerts": {"commitMessageSuffix": SUFFIX},
 }
+
+# What a row expects when nothing overruns or nothing is read, typed so
+# the comparison states the element type it is checking.
+NO_FINDINGS: list[sb.Finding] = []
+NO_DEPS: list[sb.Dep] = []
 
 
 def dep(name: str, current: str = "v1.0.0", manager: str = "mise") -> sb.Dep:
@@ -59,7 +71,7 @@ def dep(name: str, current: str = "v1.0.0", manager: str = "mise") -> sb.Dep:
     return sb.Dep(name, current, manager, "fixture")
 
 
-def preset(**overrides: object) -> dict:
+def preset(**overrides: object) -> dict[str, object]:
     """Copy the baseline preset with fields or rules replaced.
 
     Returns:
@@ -70,10 +82,10 @@ def preset(**overrides: object) -> dict:
 
 
 def owned(
-    source: dict,
-    repo_rules: list | None = None,
+    source: dict[str, object],
+    repo_rules: Sequence[object] | None = None,
     suffix: str = "",
-    repo_top: dict | None = None,
+    repo_top: dict[str, object] | None = None,
 ) -> sb.Template:
     """Gather a Template the way main() does, from a test's three parts.
 
@@ -86,11 +98,11 @@ def owned(
         The three sources as one value.
 
     """
-    repo = {**(repo_top or {}), "packageRules": repo_rules or []}
+    repo: dict[str, object] = {**(repo_top or {}), "packageRules": repo_rules or []}
     return sb.Template(sb.decode_config(source), sb.decode_config(repo), suffix)
 
 
-def rule_of(doc: dict) -> sb.Rule:
+def rule_of(doc: object) -> sb.Rule:
     """Decode one packageRule the way a config's rules are decoded.
 
     Returns:
@@ -100,7 +112,7 @@ def rule_of(doc: dict) -> sb.Rule:
     return sb.decode_rule(doc, "packageRules[0]")
 
 
-def template(**overrides: object) -> dict:
+def template(**overrides: str) -> dict[str, str]:
     """Build a resolved template, ordinary shape unless told otherwise.
 
     `render()` composes six fields and reads every one of them, so a
@@ -112,7 +124,7 @@ def template(**overrides: object) -> dict:
 
     """
     return {
-        **{k: PRESET[k] for k in sb.MESSAGE_CONFIG},
+        **{k: MESSAGE[k] for k in sb.MESSAGE_CONFIG},
         "commitMessageSuffix": "",
         **overrides,
     }
@@ -139,7 +151,7 @@ class ResolutionCase(unittest.TestCase):
     answer — the assertion is part of what each row proves.
     """
 
-    def sole(self, source: sb.Template, row: sb.Dep) -> dict:
+    def sole(self, source: sb.Template, row: sb.Dep) -> dict[str, str]:
         """Resolve a dependency, asserting the resolution is unambiguous.
 
         Returns:
@@ -237,10 +249,9 @@ class TestSelects(unittest.TestCase):
             {"matchDepNames": ["monumental-archive/**"]},
             {"matchDepNames": ["github:monumental-archive/**"]},
         ]
-        self.assertEqual(
-            [sb.selects(rule_of(rule), stele) for rule in rules],
-            [True, False, True],
-        )
+        got: list[bool | None] = [sb.selects(rule_of(rule), stele) for rule in rules]
+        want: list[bool | None] = [True, False, True]
+        self.assertEqual(got, want)
 
     def test_file_names_selects_on_the_declaring_file(self) -> None:
         """Selection by path reads the origin every walk already records."""
@@ -250,10 +261,9 @@ class TestSelects(unittest.TestCase):
             {"matchFileNames": ["docker/**"]},
             {"matchFileNames": ["mise/config.toml"]},
         ]
-        self.assertEqual(
-            [sb.selects(rule_of(rule), row) for rule in rules],
-            [True, True, False],
-        )
+        got: list[bool | None] = [sb.selects(rule_of(rule), row) for rule in rules]
+        want: list[bool | None] = [True, True, False]
+        self.assertEqual(got, want)
 
     def test_an_unmodellable_matcher_is_unresolved_not_dropped(self) -> None:
         """None is the third answer, and it is not False (#724).
@@ -286,10 +296,9 @@ class TestSelects(unittest.TestCase):
             sb.Dep("rumdl", "0.2.53", "mise", "mise.toml"),
             sb.Dep("rumdl", "0.2.53", "aqua", "mise/config.toml"),
         ]
-        self.assertEqual(
-            [sb.selects(rule_of(rule), row) for row in rows],
-            [True, False, False, False],
-        )
+        got: list[bool | None] = [sb.selects(rule_of(rule), row) for row in rows]
+        want: list[bool | None] = [True, False, False, False]
+        self.assertEqual(got, want)
 
 
 class TestEffective(ResolutionCase):
@@ -298,10 +307,8 @@ class TestEffective(ResolutionCase):
     def test_reads_all_five_from_the_top_level(self) -> None:
         """With no rules, every field comes from the preset as written."""
         config = self.sole(owned(preset()), dep("ruff"))
-        self.assertEqual(
-            config,
-            {k: PRESET[k] for k in sb.MESSAGE_CONFIG},
-        )
+        want: dict[str, object] = {k: PRESET[k] for k in sb.MESSAGE_CONFIG}
+        self.assertEqual(config, want)
 
     def test_later_rule_wins_per_field(self) -> None:
         """Two rules touching one dependency resolve in declared order."""
@@ -452,13 +459,13 @@ class TestRepoRules(ResolutionCase):
         """Plant and measure, both directions, through the real judge."""
         row = [dep("ruff", "v1.0.0")]
         limit = width_of("ruff", "v1.0.0")
-        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), NO_FINDINGS)
         widen = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "ruff-x"}]
         findings = sb.judge(row, owned(PRESET, widen), limit, [])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].width, limit + 2)
         narrow = [{"matchPackageNames": ["ruff"], "commitMessageTopic": "rf"}]
-        self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), NO_FINDINGS)
 
 
 class TestRepoTopLevel(ResolutionCase):
@@ -533,10 +540,9 @@ class TestRepoTopLevel(ResolutionCase):
             dep("ruff"),
         )
         self.assertEqual(len(configs), 2)
-        self.assertEqual(
-            {c["semanticCommitType"] for c in configs},
-            {"refactor"},
-        )
+        types: set[str] = {c["semanticCommitType"] for c in configs}
+        want: set[str] = {"refactor"}
+        self.assertEqual(types, want)
 
     def test_a_repo_top_level_field_cannot_satisfy_the_absent_field_error(
         self,
@@ -567,13 +573,13 @@ class TestRepoTopLevel(ResolutionCase):
         """
         row = [dep("ruff", "v1.0.0")]
         limit = width_of("ruff", "v1.0.0")
-        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), NO_FINDINGS)
         widen = owned(PRESET, repo_top={"semanticCommitType": "refactor"})
         findings = sb.judge(row, widen, limit, [])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].width, limit + len("refactor") - len("chore"))
         narrow = owned(PRESET, repo_top={"semanticCommitType": "fix"})
-        self.assertEqual(sb.judge(row, narrow, limit, []), [])
+        self.assertEqual(sb.judge(row, narrow, limit, []), NO_FINDINGS)
 
 
 class TestNarrowMatchers(ResolutionCase):
@@ -628,7 +634,7 @@ class TestNarrowMatchers(ResolutionCase):
         """Plant and measure, both directions, per #650."""
         row = [sb.Dep("postgres", "18.1", "custom.regex", "docker/images.toml")]
         limit = width_of("postgres", "18.1")
-        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET), limit, []), NO_FINDINGS)
         widen = [
             {
                 "matchFileNames": ["docker/images.toml"],
@@ -644,7 +650,9 @@ class TestNarrowMatchers(ResolutionCase):
                 "commitMessageTopic": "postgres-x",
             },
         ]
-        self.assertEqual(sb.judge(row, owned(PRESET, elsewhere), limit, []), [])
+        self.assertEqual(
+            sb.judge(row, owned(PRESET, elsewhere), limit, []), NO_FINDINGS
+        )
 
 
 class TestUnmodellableMatchers(unittest.TestCase):
@@ -660,10 +668,9 @@ class TestUnmodellableMatchers(unittest.TestCase):
         """Two resolutions, the unapplied one first."""
         repo = [{"matchUpdateTypes": ["major"], "commitMessageTopic": "wide-topic"}]
         configs = sb.effective(owned(preset(), repo), dep("ruff"))
-        self.assertEqual(
-            [c["commitMessageTopic"] for c in configs],
-            ["{{depName}}", "wide-topic"],
-        )
+        topics: list[str] = [c["commitMessageTopic"] for c in configs]
+        want: list[str] = ["{{depName}}", "wide-topic"]
+        self.assertEqual(topics, want)
 
     def test_a_rule_setting_no_message_field_never_forks(self) -> None:
         """default.json's live case, and why the org forks nothing today.
@@ -686,7 +693,9 @@ class TestUnmodellableMatchers(unittest.TestCase):
             },
         ]
         configs = sb.effective(owned(preset(), repo), dep("ruff", manager="mise"))
-        self.assertEqual([c["commitMessageTopic"] for c in configs], ["{{depName}}"])
+        topics: list[str] = [c["commitMessageTopic"] for c in configs]
+        want: list[str] = ["{{depName}}"]
+        self.assertEqual(topics, want)
 
     def test_forks_onto_the_same_value_reconverge(self) -> None:
         """A fork that lands where another did is one resolution."""
@@ -695,10 +704,9 @@ class TestUnmodellableMatchers(unittest.TestCase):
             {"matchUpdateTypes": ["minor"], "commitMessageTopic": "same"},
         ]
         configs = sb.effective(owned(preset(), repo), dep("ruff"))
-        self.assertEqual(
-            [c["commitMessageTopic"] for c in configs],
-            ["{{depName}}", "same"],
-        )
+        topics: list[str] = [c["commitMessageTopic"] for c in configs]
+        want: list[str] = ["{{depName}}", "same"]
+        self.assertEqual(topics, want)
 
     def test_the_widening_resolution_is_the_one_charged(self) -> None:
         """A rule that MIGHT widen is measured as though it does."""
@@ -719,7 +727,7 @@ class TestUnmodellableMatchers(unittest.TestCase):
         row = [dep("ruff", "v1.0.0")]
         limit = width_of("ruff", "v1.0.0")
         narrow = [{"matchUpdateTypes": ["major"], "commitMessageTopic": "rf"}]
-        self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET, narrow), limit, []), NO_FINDINGS)
         findings = sb.judge(row, owned(PRESET, narrow), limit - 1, [])
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].width, limit)
@@ -774,7 +782,7 @@ class TestRender(unittest.TestCase):
         config = template(commitMessageTopic="{{depName}} {{newMajor}}")
         _, unmodelled = sb.render(config, "ruff", 6)
         self.assertIsNotNone(unmodelled)
-        self.assertIn("newMajor", unmodelled)
+        self.assertIn("newMajor", unmodelled or "")
 
     def test_suffix_uses_the_pinned_worst_case(self) -> None:
         """The rendered suffix is as wide as the pinned digit count."""
@@ -789,7 +797,9 @@ class TestJudge(unittest.TestCase):
         """A subject of exactly `limit` columns is not over budget."""
         name = "n" * 20
         limit = width_of(name, "v1.0.0")
-        self.assertEqual(sb.judge([dep(name, "v1.0.0")], owned(PRESET), limit, []), [])
+        self.assertEqual(
+            sb.judge([dep(name, "v1.0.0")], owned(PRESET), limit, []), NO_FINDINGS
+        )
 
     def test_one_column_over_fails(self) -> None:
         """One column past the ceiling is a finding, reported with it."""
@@ -810,7 +820,9 @@ class TestJudge(unittest.TestCase):
         pseudo = "v0.0.0-20241213102144-19d51d7fe467"
         self.assertRegex(pseudo, sb.PSEUDO_VERSION)
         limit = len(sb.render(template(), "x", len(pseudo))[0])
-        self.assertEqual(sb.judge([dep("x", pseudo)], owned(PRESET), limit, []), [])
+        self.assertEqual(
+            sb.judge([dep("x", pseudo)], owned(PRESET), limit, []), NO_FINDINGS
+        )
 
     def test_a_name_is_judged_once(self) -> None:
         """Two managers declaring one name produce one finding, not two."""
@@ -847,7 +859,9 @@ class TestAdvisorySubject(unittest.TestCase):
         Renovate merges that block child over parent, so a repo that
         writes its own suffix is not modelled at the preset's.
         """
-        repo = {"vulnerabilityAlerts": {"commitMessageSuffix": "[CVE]"}}
+        repo: dict[str, object] = {
+            "vulnerabilityAlerts": {"commitMessageSuffix": "[CVE]"},
+        }
         self.assertEqual(
             sb.advisory_suffix(sb.decode_config(PRESET), sb.decode_config(repo)),
             "[CVE]",
@@ -855,7 +869,7 @@ class TestAdvisorySubject(unittest.TestCase):
 
     def test_a_repo_block_without_the_field_falls_to_the_preset(self) -> None:
         """A partly declared block does not erase the preset's value."""
-        repo = {"vulnerabilityAlerts": {"enabled": True}}
+        repo: dict[str, object] = {"vulnerabilityAlerts": {"enabled": True}}
         self.assertEqual(
             sb.advisory_suffix(sb.decode_config(PRESET), sb.decode_config(repo)),
             SUFFIX,
@@ -911,7 +925,9 @@ class TestAdvisorySubject(unittest.TestCase):
         findings = sb.judge(row, owned(PRESET, suffix=SUFFIX), charged - 1, [])
         self.assertEqual(findings[0].width, charged)
         self.assertEqual(findings[0].subject, advisory)
-        self.assertEqual(sb.judge(row, owned(PRESET, suffix=SUFFIX), charged, []), [])
+        self.assertEqual(
+            sb.judge(row, owned(PRESET, suffix=SUFFIX), charged, []), NO_FINDINGS
+        )
 
     def test_the_advisory_charge_is_one_column_over_the_ordinary(
         self,
@@ -970,7 +986,9 @@ class TestAdvisorySubject(unittest.TestCase):
             ],
         )
         row = [dep(name, pseudo, manager="gomod")]
-        self.assertEqual(sb.judge(row, owned(config, suffix=SUFFIX), 72, []), [])
+        self.assertEqual(
+            sb.judge(row, owned(config, suffix=SUFFIX), 72, []), NO_FINDINGS
+        )
         charged = sb.judge(row, owned(config, suffix=SUFFIX), 0, [])[0]
         self.assertGreater(charged.width + len(sb.PR_TAIL), 72)
 
@@ -982,7 +1000,7 @@ class TestAdvisorySubject(unittest.TestCase):
         row = [dep(name, "1.0.0")]
         ordinary, _ = sb.render(template(), name, len("1.0.0") + sb.VERSION_GROWTH)
         self.assertLessEqual(len(ordinary), 72)
-        self.assertEqual(sb.judge(row, owned(PRESET), 72, []), [])
+        self.assertEqual(sb.judge(row, owned(PRESET), 72, []), NO_FINDINGS)
         findings = sb.judge(row, owned(PRESET, suffix=SUFFIX), 72, [])
         self.assertEqual(len(findings), 1)
         self.assertIn(SUFFIX, findings[0].subject)
@@ -991,7 +1009,9 @@ class TestAdvisorySubject(unittest.TestCase):
                 {"matchPackageNames": [name], "commitMessageTopic": "n" * 29},
             ],
         )
-        self.assertEqual(sb.judge(row, owned(shorter, suffix=SUFFIX), 72, []), [])
+        self.assertEqual(
+            sb.judge(row, owned(shorter, suffix=SUFFIX), 72, []), NO_FINDINGS
+        )
 
 
 class TestConfigRefusals(unittest.TestCase):
@@ -1002,7 +1022,7 @@ class TestConfigRefusals(unittest.TestCase):
     traceback (#1677).
     """
 
-    ROWS = (
+    ROWS: tuple[tuple[dict[str, object], str], ...] = (
         ({"packageRules": {}}, "packageRules is not a list"),
         ({"packageRules": ["x"]}, "packageRules[0] is not an object"),
         (
@@ -1069,7 +1089,8 @@ class TestConfigRefusals(unittest.TestCase):
             path.write_text("[]", encoding="utf-8")
             config = sb.read_config(path, report)
         self.assertEqual(config, sb.Renovate({}, (), None, ()))
-        self.assertEqual(report, [f"{path}: not a JSON object"])
+        want: list[str] = [f"{path}: not a JSON object"]
+        self.assertEqual(report, want)
 
 
 class TestCeiling(unittest.TestCase):
@@ -1082,13 +1103,15 @@ class TestCeiling(unittest.TestCase):
                 "subject_length = 61\n",
                 encoding="utf-8",
             )
-            with mock.patch.dict(sb.os.environ, {"ORG_BELT_DIR": tmp}):
+            env: dict[str, str] = {"ORG_BELT_DIR": tmp}
+            with mock.patch.dict(os.environ, env):
                 self.assertEqual(sb.ceiling(), 61)
 
     def test_unset_belt_dir_is_a_hard_error(self) -> None:
         """No belt means no ceiling; the task must not invent one."""
+        env: dict[str, str] = {"ORG_BELT_DIR": ""}
         with (
-            mock.patch.dict(sb.os.environ, {"ORG_BELT_DIR": ""}),
+            mock.patch.dict(os.environ, env),
             self.assertRaises(
                 SystemExit,
             ),
@@ -1097,15 +1120,13 @@ class TestCeiling(unittest.TestCase):
 
     def test_absent_committed_toml_is_a_hard_error(self) -> None:
         """A belt without the delivered config fails rather than defaults."""
-        with (
-            TemporaryDirectory() as tmp,
-            mock.patch.dict(
-                sb.os.environ,
-                {"ORG_BELT_DIR": tmp},
-            ),
-            self.assertRaises(SystemExit),
-        ):
-            sb.ceiling()
+        with TemporaryDirectory() as tmp:
+            env: dict[str, str] = {"ORG_BELT_DIR": tmp}
+            with (
+                mock.patch.dict(os.environ, env),
+                self.assertRaises(SystemExit),
+            ):
+                sb.ceiling()
 
     def test_a_ceiling_of_the_wrong_shape_is_refused_by_name(self) -> None:
         """Unparsable, absent or not an integer: the task stops, named."""
@@ -1118,9 +1139,10 @@ class TestCeiling(unittest.TestCase):
             with TemporaryDirectory() as tmp:
                 config = Path(tmp) / "committed.toml"
                 config.write_text(text, encoding="utf-8")
+                env: dict[str, str] = {"ORG_BELT_DIR": tmp}
                 with (
                     self.subTest(text=text),
-                    mock.patch.dict(sb.os.environ, {"ORG_BELT_DIR": tmp}),
+                    mock.patch.dict(os.environ, env),
                     self.assertRaises(SystemExit) as caught,
                 ):
                     sb.ceiling()
@@ -1131,7 +1153,7 @@ class TestCeiling(unittest.TestCase):
     def test_the_canon_ceiling_is_what_the_org_ships(self) -> None:
         """The delivered file parses and carries a subject_length."""
         shipped = Path(__file__).with_name("committed.toml")
-        parsed = tomllib.loads(shipped.read_text(encoding="utf-8"))
+        parsed = decoded.load_toml(shipped.read_text(encoding="utf-8"))
         self.assertIsInstance(parsed["subject_length"], int)
 
 
@@ -1159,7 +1181,9 @@ class TestWalks(unittest.TestCase):
                 encoding="utf-8",
             )
             found = sb.from_gomod([path], [])
-        self.assertEqual([d.name for d in found], ["github.com/direct/one"])
+        names: list[str] = [d.name for d in found]
+        want: list[str] = ["github.com/direct/one"]
+        self.assertEqual(names, want)
         self.assertEqual(found[0].manager, "gomod")
 
     def test_a_sha_pinned_action_is_measured_at_the_short_digest(self) -> None:
@@ -1191,7 +1215,7 @@ class TestWalks(unittest.TestCase):
                 "    uses: docker://alpine:3\n",
                 encoding="utf-8",
             )
-            self.assertEqual(sb.from_actions([path], []), [])
+            self.assertEqual(sb.from_actions([path], []), NO_DEPS)
 
     def test_cargo_skips_path_and_workspace_entries(self) -> None:
         """Neither resolves against a registry, so neither is bumped."""
@@ -1205,7 +1229,9 @@ class TestWalks(unittest.TestCase):
                 encoding="utf-8",
             )
             found = sb.from_cargo([path], [])
-        self.assertEqual([d.name for d in found], ["serde"])
+        names: list[str] = [d.name for d in found]
+        want: list[str] = ["serde"]
+        self.assertEqual(names, want)
 
     def test_a_custom_manager_runs_its_javascript_regex(self) -> None:
         """`(?<name>)` must be translated before Python will compile it."""
@@ -1269,13 +1295,13 @@ class TestWalks(unittest.TestCase):
                 [path],
                 report,
             )
-        self.assertEqual(found, [])
+        self.assertEqual(found, NO_DEPS)
         self.assertTrue(any("renovate.json" in line for line in report))
 
     def test_an_unreadable_file_is_reported_not_raised(self) -> None:
         """A walk records what it could not read and carries on."""
         report: list[str] = []
-        self.assertEqual(sb.from_gomod([Path("/nonexistent/go.mod")], report), [])
+        self.assertEqual(sb.from_gomod([Path("/nonexistent/go.mod")], report), NO_DEPS)
         self.assertTrue(report)
 
 
@@ -1309,20 +1335,20 @@ class TestMainGuards(unittest.TestCase):
             out, err = io.StringIO(), io.StringIO()
             env = {"ORG_BELT_DIR": str(belt), "ORG_CANON_DIR": str(root)}
             with (
-                mock.patch.dict(sb.os.environ, env),
+                mock.patch.dict(os.environ, env),
                 mock.patch.object(
-                    sb.sys,
+                    sys,
                     "stdin",
                     io.StringIO(listing),
                 ),
-                mock.patch.object(sb.Path, "cwd", return_value=root),
+                mock.patch.object(Path, "cwd", return_value=root),
             ):
-                sb.os.chdir(root)
+                os.chdir(root)
                 try:
                     with redirect_stdout(out), redirect_stderr(err):
                         status = sb.main()
                 finally:
-                    sb.os.chdir(cwd)
+                    os.chdir(cwd)
             return status, out.getvalue(), err.getvalue()
 
     def test_every_row_leaves_the_directory_where_it_started(self) -> None:
@@ -1403,14 +1429,17 @@ class TestMainGuards(unittest.TestCase):
             "matchPackageNames": ["monumental-archive/.github"],
             "commitMessageTopic": "canon",
         }
+        doc: dict[str, object] = {
+            **PRESET,
+            "customManagers": [manager],
+            "packageRules": [short],
+        }
         status, out, _ = self._run(
             {
                 "renovate.json": (
                     '{"extends":["github>monumental-archive/.github#v1.46.0"]}\n'
                 ),
-                "default.json": json.dumps(
-                    {**PRESET, "customManagers": [manager], "packageRules": [short]},
-                ),
+                "default.json": json.dumps(doc),
             },
         )
         self.assertEqual(status, 0)
@@ -1467,9 +1496,8 @@ class TestMainGuards(unittest.TestCase):
             "matchPackageNames": [name],
             "commitMessageTopic": "n" * 29,
         }
-        status, out, _ = self._run(
-            {**tree, "default.json": json.dumps({**PRESET, "packageRules": [short]})},
-        )
+        doc: dict[str, object] = {**PRESET, "packageRules": [short]}
+        status, out, _ = self._run({**tree, "default.json": json.dumps(doc)})
         self.assertEqual(status, 0)
         self.assertIn("fits 72 columns", out)
 
@@ -1487,9 +1515,10 @@ class TestMainGuards(unittest.TestCase):
             "matchStrings": ['"[0-9]+" = "postgres:(?<currentValue>[a-z0-9.-]+)"'],
             "depNameTemplate": "postgres",
         }
+        doc: dict[str, object] = {**PRESET, "customManagers": [manager]}
         tree = {
             "renovate.json": "{}\n",
-            "default.json": json.dumps({**PRESET, "customManagers": [manager]}),
+            "default.json": json.dumps(doc),
             "docker/images.toml": '"18" = "postgres:18.1-bookworm"\n',
         }
         status, out, _ = self._run(tree)
@@ -1597,13 +1626,13 @@ def scaffold_pins(text: str) -> dict[str, object]:
         if not match:
             continue
         body = [line.lstrip("# ")]
-        if match.group(2).strip() == "[":
+        if (typed_std.group(match, 2) or "").strip() == "[":
             while i < len(lines) and lines[i].lstrip("# ").strip() != "]":
                 body.append(lines[i].lstrip("#").strip())
                 i += 1
             body.append("]")
             i += 1
-        pins.update(tomllib.loads("\n".join(body)))
+        pins.update(decoded.load_toml("\n".join(body)))
     return pins
 
 
@@ -1621,34 +1650,38 @@ class TestScaffoldKeysFitTheBudget(unittest.TestCase):
 
     def test_the_reader_finds_the_recommended_keys(self) -> None:
         """No pins read would pass the budget row below vacuously."""
-        self.assertEqual(
-            [
-                "rust",
-                "github:rust-secure-code/cargo-auditable",
-                "cargo:cargo-fuzz",
-                "go",
-                "go:golang.org/x/vuln/cmd/govulncheck",
-            ],
-            list(self.PINS),
-        )
+        want: list[str] = [
+            "rust",
+            "github:rust-secure-code/cargo-auditable",
+            "cargo:cargo-fuzz",
+            "go",
+            "go:golang.org/x/vuln/cmd/govulncheck",
+        ]
+        keys: list[str] = list(self.PINS)
+        self.assertEqual(want, keys)
 
     def test_every_key_fits_under_the_delivered_preset(self) -> None:
         """The real default.json and the real ceiling, advisory included."""
-        preset = json.loads((CANON / "default.json").read_text(encoding="utf-8"))
-        limit = tomllib.loads(
-            (CANON / "mise" / "committed.toml").read_text(encoding="utf-8"),
-        )["subject_length"]
+        preset = decoded.as_object(
+            decoded.load_json((CANON / "default.json").read_text(encoding="utf-8")),
+            "default.json",
+        )
+        limit = decoded.as_int(
+            decoded.load_toml(
+                (CANON / "mise" / "committed.toml").read_text(encoding="utf-8"),
+            )["subject_length"],
+            "subject_length",
+        )
         deps = [
             sb.Dep(key, sb.widest_version(spec), "mise", "scaffold/mise.toml")
             for key, spec in self.PINS.items()
         ]
-        decoded, repo = sb.decode_config(preset), sb.decode_config({})
-        template = sb.Template(decoded, repo, sb.advisory_suffix(decoded, repo))
+        delivered, repo = sb.decode_config(preset), sb.decode_config({})
+        template = sb.Template(delivered, repo, sb.advisory_suffix(delivered, repo))
         findings = sb.judge(deps, template, limit, [])
-        self.assertEqual(
-            [],
-            [f"{f.dep.name}: {f.width} cols, {f.subject}" for f in findings],
-        )
+        over = [f"{f.dep.name}: {f.width} cols, {f.subject}" for f in findings]
+        none: list[str] = []
+        self.assertEqual(none, over)
 
 
 class WrongShapedManifests(unittest.TestCase):
@@ -1685,7 +1718,7 @@ class WrongShapedManifests(unittest.TestCase):
                 path = Path(scratch) / name
                 path.write_bytes(data)
                 report: list[str] = []
-                self.assertEqual(readers[name]([path], report), [])
+                self.assertEqual(readers[name]([path], report), NO_DEPS)
                 self.assertEqual(len(report), 1, report)
                 self.assertIn(said, report[0])
                 self.assertTrue(report[0].startswith(str(path)))
