@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """verdict.py, one row per outcome of a leg (#1339).
 
-Each row runs the helper as the leg's last step does, as a process, and
-asserts the colour and the message. The reports are stele v0.24.0's own
+Each row calls the helper's `main` in this process with the leg's last
+step's arguments (#1673, #1699): mutation, coverage and the type checker
+see the call. One row, the script row, starts it as the workflow does,
+as a process, and holds the script contract. Each asserts the colour
+and the message. The reports are stele v0.24.0's own
 (testdata/SOURCE.md): a run that judged to the head (PASS, exit 0) and a
 run whose budget ended before its first chunk was done (CANNOT_JUDGE,
 exit 4, nothing judged). A row that needs a shape no live run produced
@@ -12,11 +15,18 @@ edits a copy in code and says which field.
 from __future__ import annotations
 
 import json
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - the helper is run as the workflow runs it
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - the script row runs the helper as the workflow does
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
+
+import hermetic
+import verdict
 
 HERE = Path(__file__).resolve().parent
 HELPER = HERE / "verdict.py"
@@ -78,22 +88,17 @@ class Verdict(unittest.TestCase):
 
     def run_helper(
         self, code: str, doc: dict | None, saved: str = "true"
-    ) -> subprocess.CompletedProcess[str]:
-        """Write the report (None: stele wrote none) and run the helper.
+    ) -> hermetic.Called:
+        """Write the report (None: stele wrote none) and call the helper.
 
         Returns:
-            The finished process.
+            Its exit status and output.
 
         """
         text = json.dumps(doc) if doc is not None else ""
         self.report.write_text(text, encoding="utf-8")
-        argv = [
-            sys.executable, str(HELPER), "--exit-code", code,
-            "--report", str(self.report), "--saved", saved,
-        ]  # fmt: skip
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
-            argv, capture_output=True, text=True, check=False
-        )
+        argv = ["--exit-code", code, "--report", str(self.report), "--saved", saved]
+        return hermetic.call_main(lambda: verdict.main(argv))
 
     def test_judged_to_the_head(self) -> None:
         """Exit 0, saved: green."""
@@ -201,7 +206,11 @@ class Verdict(unittest.TestCase):
         )
 
     def test_report_nested_past_the_parser(self) -> None:
-        """JSON nested past the parser's depth: red by name, no traceback."""
+        """JSON nested past the parser's depth: red by name, no traceback.
+
+        The script row (#1673): the helper started as the leg starts it,
+        reading its arguments and exiting with the documented status.
+        """
         self.report.write_bytes(b"[" * 100_000)
         argv = [
             sys.executable, str(HELPER), "--exit-code", "0",
@@ -234,16 +243,11 @@ class Verdict(unittest.TestCase):
             "a key appears twice": f'{{"target": {target}, "target": {target}}}',
             "a number JSON does not have": f'{{"target": {target}, "findings": [NaN]}}',
         }
+        argv = ["--exit-code", "0", "--report", str(self.report), "--saved", "true"]
         for why, text in rows.items():
             with self.subTest(why=why):
                 self.report.write_text(text, encoding="utf-8")
-                argv = [
-                    sys.executable, str(HELPER), "--exit-code", "0",
-                    "--report", str(self.report), "--saved", "true",
-                ]  # fmt: skip
-                proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
-                    argv, capture_output=True, text=True, check=False
-                )
+                proc = hermetic.call_main(lambda: verdict.main(argv))
                 self.assertEqual(proc.returncode, 1, proc.stderr)
                 self.assertEqual(proc.stderr, "")
                 self.assertEqual(

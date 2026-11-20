@@ -3,8 +3,10 @@
 
 The stub records every argv it is called with and answers `issue list`
 from the row's canned listing (or fails, for the read-failure row).
-Each row runs the helper as the workflow's alert job does, as a process,
-and asserts the exact arguments gh received, the colour and the message.
+Each row calls the helper's `main` in this process with the alert job's
+arguments, the row's environment in place for the call (#1673, #1699),
+and asserts the exact arguments gh received, the colour and the message;
+one row, the script row, starts it as the alert job does.
 
 The checkpoints are stele v0.24.0's own files, captured from
 ctfe.sigstore.dev/2022 on 2026-11-17 (testdata/SOURCE.md): one at the
@@ -16,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - the helper is run as the workflow runs it
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - the script row runs the helper as the workflow does
 import sys
 import tempfile
 import unittest
@@ -27,6 +29,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
 import hermetic
+import standing_issue as standing
 
 HERE = Path(__file__).resolve().parent
 HELPER = HERE / "standing_issue.py"
@@ -123,28 +126,53 @@ class Rows(unittest.TestCase):
         """Write a checkpoint where the helper reads it."""
         path.write_text(json.dumps(doc), encoding="utf-8")
 
+    def arguments(self, kept: str) -> list[str]:
+        """Build the alert job's command line.
+
+        Returns:
+            The arguments after the program name.
+
+        """
+        return [
+            "--start", str(self.start), "--start-kept", kept,
+            "--checkpoint", str(self.end), "--legs", "success", "--run-url", RUN,
+        ]  # fmt: skip
+
     def run_helper(
         self,
         listing: list[dict] | None = None,
         kept: str = "true",
         **env: str,
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the helper as the alert job does.
+    ) -> hermetic.Called:
+        """Call the helper's main in this process, as the alert job runs it.
+
+        The process's environment is the row's for the call (the stub gh
+        first on PATH, the repository, the stub's own variables).
 
         Returns:
-            The finished process.
+            Its exit status and output, captured.
 
         """
         full = {**self.env, **env}
         if listing is not None:
             full["STUB_LIST"] = json.dumps(listing)
-        argv = [
-            sys.executable, str(HELPER), "--start", str(self.start),
-            "--start-kept", kept, "--checkpoint", str(self.end),
-            "--legs", "success", "--run-url", RUN,
-        ]  # fmt: skip
+        argv = self.arguments(kept)
+        return hermetic.call_main(lambda: standing.main(argv), env=full)
+
+    def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
+        """Start the helper as the alert job does.
+
+        Returns:
+            The finished process.
+
+        """
+        argv = [sys.executable, str(HELPER), *self.arguments("true")]
         return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
-            argv, env=full, capture_output=True, text=True, check=False
+            argv,
+            env={**self.env, "STUB_LIST": "[]", **env},
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     def gh_calls(self) -> list[list[str]]:
@@ -350,8 +378,12 @@ class StandingIssue(Rows):
         self.assertIn("- Runs behind since it opened: 1\n", text)
 
     def test_no_repository(self) -> None:
-        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called."""
-        proc = self.run_helper([], GITHUB_REPOSITORY="")
+        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called.
+
+        The script row (#1673): the helper started as the alert job starts
+        it, reading its arguments and exiting with the documented status.
+        """
+        proc = self.run_script(GITHUB_REPOSITORY="")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), [])
         self.assertEqual(

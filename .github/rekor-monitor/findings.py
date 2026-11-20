@@ -308,7 +308,7 @@ def file_all(repo: str, report: Report, run_url: str) -> list[str]:
     return done
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """File the report's findings.
 
     Returns:
@@ -335,4 +335,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

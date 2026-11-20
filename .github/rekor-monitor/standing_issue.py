@@ -380,7 +380,7 @@ def keep(repo: str, standing: str | None, end: Checkpoint, run: Run) -> str:
     return "nothing to keep"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Judge one run and keep the standing issue.
 
     Returns:
@@ -418,4 +418,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
