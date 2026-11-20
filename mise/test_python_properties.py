@@ -451,7 +451,9 @@ class WorkflowShape(unittest.TestCase):
             with self.subTest(workflow=workflow):
                 job = job_block(workflow, "python-properties")
                 self.assertRegex(job, r"\n    timeout-minutes: [0-9]+\n")
-                self.assertIn("shard: [0, 1, 2, 3, 4, 5, 6, 7]", job)
+                self.assertIn(
+                    "shard:\n" + "".join(f"          - {k}\n" for k in range(8)), job
+                )
                 self.assertIn("ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8", job)
                 self.assertIn(f"ORG_PROPERTY_SEED: ${{{{ {seed} }}}}", job)
 
